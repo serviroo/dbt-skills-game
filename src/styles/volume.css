@@ -1,0 +1,359 @@
+/* Speaker control: the Lantern window material at popover size (lantern-window.css), the skip button's quiet frame
+   (cutscene.css .ui-skip) for the cutscene speaker. */
+
+.vol {
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.vol--cutscene {
+  position: fixed;
+  top: calc(14px + var(--safe-top));
+  left: calc(14px + env(safe-area-inset-left, 0px));
+  z-index: 60;
+}
+.vol--top {
+  position: relative;
+  flex: none;
+}
+
+/* ---- speaker button ---- */
+.vol-btn {
+  position: relative;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.vol-btn .vol-ic {
+  display: block;
+  overflow: visible;
+}
+.vol--cutscene .vol-btn {
+  width: 30px;
+  height: 30px;
+  color: rgba(196, 221, 243, 0.7);
+  background: rgba(5, 17, 31, 0.5);
+  border: 1px solid rgba(125, 150, 197, 0.35);
+  transition:
+    color 140ms ease-out,
+    border-color 140ms ease-out;
+}
+.vol--cutscene .vol-btn::after {
+  content: '';
+  position: absolute;
+  inset: -9px;
+}
+.vol--cutscene .vol-ic {
+  width: 18px;
+  height: 18px;
+}
+.vol--cutscene .vol-btn:hover,
+.vol--cutscene .vol-btn:focus-visible,
+.vol--cutscene.is-open .vol-btn {
+  color: var(--ice);
+  border-color: rgba(168, 221, 255, 0.8);
+  outline: none;
+}
+.vol--cutscene .vol-btn:focus-visible {
+  box-shadow: 0 0 0 1px #a8dcff;
+}
+.vol--top .vol-btn {
+  width: 44px;
+  height: 44px;
+  color: #c5dcf2;
+  background: none;
+  border: 0;
+}
+.vol--top .vol-ic {
+  width: 22px;
+  height: 22px;
+}
+.vol--top .vol-btn:focus-visible {
+  outline: 1px solid #a8dcff;
+  outline-offset: -4px;
+}
+.vol--top.is-open .vol-btn,
+.vol--top .vol-btn:hover {
+  color: var(--ice);
+}
+.vol-btn.is-silent {
+  color: rgba(147, 171, 200, 0.75);
+}
+
+/* ---- popover: a small Lantern window ---- */
+.vol-pop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 61;
+  box-sizing: border-box;
+  width: min(260px, calc(100vw - 28px));
+  padding: 16px 18px 14px;
+  background: var(--plate);
+  border: 1.5px solid;
+  border-color: var(--hair-lit) var(--hair-shade) var(--hair-shade) var(--hair-lit);
+  -webkit-backdrop-filter: blur(5px) saturate(1.1);
+  backdrop-filter: blur(5px) saturate(1.1);
+  color: var(--body);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(4px);
+  transition:
+    opacity 140ms ease-out,
+    transform 140ms ease-out,
+    visibility 0s linear 140ms;
+}
+.vol.is-open .vol-pop {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition:
+    opacity 140ms ease-out,
+    transform 140ms ease-out,
+    visibility 0s;
+}
+.vol--still .vol-pop,
+.is-still .vol-pop {
+  transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vol-pop {
+    transform: none;
+  }
+}
+.vol-frame,
+.vol-frame i {
+  position: absolute;
+  pointer-events: none;
+}
+.vol-frame {
+  inset: 0;
+}
+.vol-scan {
+  inset: 0;
+  background: repeating-linear-gradient(180deg, rgba(196, 221, 243, 0.034) 0 1px, transparent 1px 3px);
+}
+.vol-inset {
+  inset: 6px;
+  border: 1px solid rgba(82, 88, 103, 0.5);
+}
+.vol-c {
+  width: 10px;
+  height: 10px;
+  border: 0 solid rgba(160, 205, 235, 0.75);
+}
+.vol-c.tl {
+  top: 3px;
+  left: 3px;
+  border-top-width: 1.5px;
+  border-left-width: 1.5px;
+}
+.vol-c.tr {
+  top: 3px;
+  right: 3px;
+  border-top-width: 1.5px;
+  border-right-width: 1.5px;
+}
+.vol-c.bl {
+  bottom: 3px;
+  left: 3px;
+  border-bottom-width: 1.5px;
+  border-left-width: 1.5px;
+}
+.vol-c.br {
+  bottom: 3px;
+  right: 3px;
+  border-bottom-width: 1.5px;
+  border-right-width: 1.5px;
+}
+.vol-head {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  margin: 0 0 6px;
+}
+.vol-title {
+  display: grid;
+  place-items: center;
+  min-height: 26px;
+  padding: 0 16px 0 calc(16px + 0.14em);
+  border: 1px solid var(--rule);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--title);
+  white-space: nowrap;
+  text-shadow:
+    0 0 1px rgba(232, 254, 255, 0.95),
+    0 0 6px rgba(89, 172, 217, 0.85),
+    0 0 16px rgba(62, 128, 170, 0.6);
+  background:
+    radial-gradient(120% 140% at 50% 50%, rgba(53, 119, 163, 0.32), transparent 70%),
+    rgba(4, 18, 32, 0.6);
+}
+
+/* ---- sliders ---- */
+.vol-sl {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  font-family: var(--font-ui);
+}
+.vol-row {
+  display: grid;
+}
+.vol-row-h {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: -8px;
+}
+.vol-l {
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  color: var(--body);
+}
+.vol-v {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: var(--dim);
+}
+.vol-range {
+  --fill: 100%;
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 44px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  touch-action: pan-y;
+  -webkit-tap-highlight-color: transparent;
+}
+.vol-range:focus {
+  outline: none;
+}
+.vol-range::-webkit-slider-runnable-track {
+  height: 2px;
+  border: 0;
+  background: linear-gradient(90deg, #a8dcff 0 var(--fill), rgba(168, 220, 255, 0.25) var(--fill) 100%);
+}
+.vol-range::-moz-range-track {
+  height: 2px;
+  border: 0;
+  background: linear-gradient(90deg, #a8dcff 0 var(--fill), rgba(168, 220, 255, 0.25) var(--fill) 100%);
+}
+.vol-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  margin-top: -6px;
+  border: 1.5px solid #a8dcff;
+  border-radius: 0;
+  background: #071424;
+  box-shadow: 0 0 6px rgba(79, 184, 255, 0.55);
+  transform: rotate(45deg) scale(0.86);
+}
+.vol-range::-moz-range-thumb {
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid #a8dcff;
+  border-radius: 0;
+  background: #071424;
+  box-shadow: 0 0 6px rgba(79, 184, 255, 0.55);
+  transform: rotate(45deg) scale(0.86);
+}
+.vol-range:focus-visible::-webkit-slider-thumb {
+  background: #a8dcff;
+  box-shadow:
+    0 0 0 1px rgba(5, 17, 31, 0.9),
+    0 0 10px rgba(79, 184, 255, 0.85);
+}
+.vol-range:focus-visible::-moz-range-thumb {
+  background: #a8dcff;
+}
+.vol-sl.is-muted .vol-row {
+  opacity: 0.45;
+}
+.vol-mute {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin: 6px 0 0;
+  padding: 0 12px;
+  font: 500 13px/1 var(--font-ui);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--body);
+  background: rgba(4, 18, 32, 0.6);
+  border: 1px solid var(--rule);
+  border-radius: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition:
+    color 140ms ease-out,
+    border-color 140ms ease-out;
+}
+.vol-mute:hover,
+.vol-mute:focus-visible {
+  color: var(--ice);
+  border-color: rgba(168, 221, 255, 0.8);
+  outline: none;
+}
+.vol-mute:focus-visible {
+  box-shadow: 0 0 0 1px #a8dcff;
+}
+.vol-mute[aria-pressed='true'] {
+  color: var(--title);
+  border-color: rgba(168, 221, 255, 0.6);
+  text-shadow: 0 0 8px rgba(79, 184, 255, 0.7);
+}
+
+/* inline in the companion's Settings */
+.vol-sl:not(.vol-sl--compact) .vol-l {
+  font-size: 17px;
+  letter-spacing: 0.01em;
+  color: var(--t-title, var(--title));
+}
+.vol-sl:not(.vol-sl--compact) .vol-v {
+  font-size: 14.5px;
+  color: var(--t-dim, var(--dim));
+}
+.vol-sl:not(.vol-sl--compact) .vol-mute {
+  margin-top: 8px;
+}
+.dq-setting--vol {
+  padding-top: 4px;
+}
+
+/* companion top bar: speaker beside Safe Zone, still reachable while a Lantern window is up */
+.dq-top-end {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+.dq.is-windowed header.dq-top > .dq-top-end {
+  opacity: 1;
+}
+.dq.is-windowed header.dq-top .dq-top-end > .vol {
+  pointer-events: auto;
+}

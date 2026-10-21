@@ -1,0 +1,206 @@
+/* care-a: loadout cards, Self-Heal, Lie Low dim, Flavour Tier List, opt-in apology check, Safe Zone lights-up. */
+
+/* ---------- loadout intro ---------- */
+.ca-loadtag {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 2px 0 6px;
+  font: 400 14px/1.4 var(--font-ui);
+  color: #b9d3e6;
+}
+.ca-loadtag-k {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #89cf9d;
+}
+.ca-art {
+  display: flex;
+  justify-content: center;
+  margin: 2px auto 4px;
+  max-width: 220px;
+}
+.ca-art svg {
+  width: 100%;
+  height: auto;
+  max-height: 132px;
+  overflow: visible;
+  filter: drop-shadow(0 0 10px rgba(79, 184, 255, 0.22)) drop-shadow(0 0 22px rgba(123, 63, 228, 0.16));
+}
+.ca-art--mittens svg {
+  filter: drop-shadow(0 0 12px rgba(201, 164, 92, 0.18)) drop-shadow(0 0 18px rgba(79, 184, 255, 0.18));
+}
+.ca-art--heal svg {
+  filter: drop-shadow(0 0 12px rgba(137, 207, 157, 0.28));
+}
+
+/* ---------- quiet end (Not this time) ---------- */
+.ca-quietend {
+  margin: 8px 0 12px;
+  color: #cfe0f1;
+}
+
+/* ---------- Self-Heal ring ---------- */
+.ca-hold--heal {
+  color: #dff6e6;
+}
+.ca-hold--heal .dq-hold-t {
+  color: #dff6e6;
+}
+.ca-hold--heal:focus-visible {
+  outline-color: #89cf9d;
+}
+.ca-hold--heal::after {
+  content: '';
+  position: absolute;
+  inset: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(137, 207, 157, 0.7);
+  opacity: 0;
+  pointer-events: none;
+}
+.ca-hold--heal.ca-healed::after {
+  animation: ca-heal-ring 1.4s cubic-bezier(0.16, 1, 0.3, 1) 1;
+}
+@keyframes ca-heal-ring {
+  0% {
+    opacity: 0.9;
+    transform: scale(0.86);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.22);
+  }
+}
+
+/* ---------- Lie Low: the screen dims with their ---------- */
+.dq-skill::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  background: rgba(2, 3, 8, 0.62);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 1.6s ease;
+}
+.dq-skill.is-dim::after {
+  opacity: 1;
+}
+.is-still .dq-skill::after {
+  transition-duration: 0.2s;
+}
+
+/* ---------- Flavour Tier List ---------- */
+.ca-tiers .dq-check-t {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ca-tier .dq-seg-b {
+  min-width: 48px;
+  min-height: 44px;
+  font-family: 'Bodoni Moda', serif;
+  font-size: 18px;
+  letter-spacing: 0;
+}
+.ca-tier .dq-seg-b:nth-child(1)[aria-checked='true'] {
+  border-color: rgba(201, 164, 92, 0.85);
+  background: rgba(201, 164, 92, 0.2);
+  color: #f3dfb2;
+}
+.ca-tier .dq-seg-b:nth-child(2)[aria-checked='true'] {
+  border-color: rgba(137, 207, 157, 0.8);
+  background: rgba(137, 207, 157, 0.18);
+  color: #dff6e6;
+}
+
+/* ---------- FAST: the apology check only runs when the player asks ---------- */
+.ca-hl-ask {
+  white-space: normal;
+  text-align: left;
+  min-height: 44px;
+}
+
+/* ---------- Safe Zone: lights up beside the dim default ---------- */
+.dq-sz-foot {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+.dq-sz-foot .dq-sz-talk {
+  padding: 0 8px;
+}
+.ca-sz-light {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 0 11px;
+  white-space: nowrap;
+  border: 1px solid rgba(160, 200, 235, 0.32);
+  border-radius: 22px;
+  background: rgba(10, 22, 38, 0.6);
+  font: 500 14px/1.2 var(--font-ui);
+  letter-spacing: 0.04em;
+  color: #cfe0f1;
+  cursor: pointer;
+}
+.ca-sz-light:focus-visible {
+  outline: 2px solid #4fb8ff;
+  outline-offset: 2px;
+}
+.ca-sz-light-ic {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid #cfe0f1;
+  box-shadow: inset -5px -2px 0 0 rgba(207, 224, 241, 0.75);
+}
+.ca-sz-light[aria-pressed='true'] .ca-sz-light-ic {
+  background: #f3e6c4;
+  border-color: #f3e6c4;
+  box-shadow: 0 0 10px rgba(243, 230, 196, 0.6);
+}
+
+.dq.ca-szlit .dq-vignette {
+  background: radial-gradient(120% 85% at 50% 30%, rgba(176, 206, 236, 0.34), rgba(96, 130, 170, 0.28) 55%, rgba(60, 86, 120, 0.24));
+  transition: background 0.6s ease;
+}
+.dq.ca-szlit .dq-top::after {
+  --vig: radial-gradient(120% 85vh at 50% 30vh, rgba(176, 206, 236, 0.34), rgba(96, 130, 170, 0.28) 55%, rgba(60, 86, 120, 0.24));
+}
+@supports (height: 1dvh) {
+  .dq.ca-szlit .dq-top::after {
+    --vig: radial-gradient(120% 85dvh at 50% 30dvh, rgba(176, 206, 236, 0.34), rgba(96, 130, 170, 0.28) 55%, rgba(60, 86, 120, 0.24));
+  }
+}
+.dq-safezone.is-lit > .dq-sz {
+  position: relative;
+  z-index: 1;
+  background: linear-gradient(180deg, rgba(52, 80, 114, 0.95), rgba(42, 66, 96, 0.95));
+  border-color: rgba(200, 228, 250, 0.55);
+}
+.dq-safezone.is-lit .dq-sz .dq-text,
+.dq-safezone.is-lit .dq-sz-stop,
+.dq-safezone.is-lit .dq-sz .dq-small {
+  color: #f2f8ff;
+}
+.dq-safezone.is-lit .dq-sz-t {
+  color: #ffffff;
+}
+.dq-safezone.is-lit .dq-sz-foot {
+  background: linear-gradient(0deg, rgba(48, 72, 102, 0.97) 60%, rgba(48, 72, 102, 0));
+}
+.dq-safezone.is-lit .dq-sz-talk {
+  color: #ffffff;
+}
+.dq-safezone.is-lit .ca-sz-light {
+  background: rgba(70, 100, 136, 0.8);
+  border-color: rgba(220, 238, 252, 0.6);
+  color: #ffffff;
+}

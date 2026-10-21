@@ -1,0 +1,22 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# env and secrets
+.env
+.env.*
+!.env.example
+.dev.vars*
+*.pem
+*.key
+
+# hosting tool state
+.wrangler/
+wrangler.toml
+.vercel/
+.netlify/
+
+# test output
+artifacts/
+qa/out/
