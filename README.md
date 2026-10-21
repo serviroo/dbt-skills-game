@@ -1,6 +1,6 @@
 # The System: a DBT skills game
 
-A small, calm game for practising DBT (Dialectical Behavior Therapy) skills, styled like a "System" from a
+A small, calm game for practicing DBT (Dialectical Behavior Therapy) skills, styled like a "System" from a
 leveling anime. It opens with a short 3D intro cutscene, then becomes a quiet daily companion you can install on your
 phone's Home Screen.
 
