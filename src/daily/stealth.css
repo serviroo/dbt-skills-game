@@ -1,0 +1,945 @@
+/* ---------- Stealth room (the Rest room as Jin-woo's Stealth skill) ----------
+   Every ambient motion is a CSS transform or opacity animation, so the room runs on the compositor.
+   JS only flips classes now and then (blep, sprawl, cup, shark) and runs the slime while it is poked. */
+.dq-rest.dq-stealth {
+  min-height: 0;
+  padding-bottom: 32px;
+  --gold: #c9a45c;
+  --gold-hi: #f2deac;
+}
+.dq-st-head {
+  margin-top: 14px;
+}
+.dq-st-kicker {
+  margin: 0 0 6px;
+  font: 500 12px/1.2 var(--font-ui);
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--blue);
+  text-shadow: var(--glow-s);
+}
+.dq-st-sub {
+  margin-top: 8px !important;
+  color: var(--t-body);
+}
+
+/* title: first time a System unlock plate, after that a quiet gold chip */
+.dq-st-title {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 12px 0 0;
+  padding: 7px 14px 8px;
+  border: 1px solid rgba(201, 164, 92, 0.42);
+  border-radius: 2px;
+  background: linear-gradient(180deg, rgba(201, 164, 92, 0.11), rgba(201, 164, 92, 0.03));
+}
+.dq-st-title-k {
+  font: 500 12px/1 var(--font-ui);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+.dq-st-title-n {
+  font: 600 16px/1.1 var(--font-display);
+  color: var(--gold-hi);
+}
+.dq-st-unlock {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  width: min(100%, 380px);
+  margin: 14px auto 0;
+  padding: 13px 14px 14px;
+  border: 1px solid rgba(201, 164, 92, 0.55);
+  background: linear-gradient(180deg, rgba(40, 31, 14, 0.55), rgba(8, 12, 22, 0.86));
+  box-shadow:
+    0 0 26px rgba(201, 164, 92, 0.16),
+    inset 0 0 18px rgba(201, 164, 92, 0.07);
+  animation: dq-st-unlock 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.45s both;
+}
+.dq-st-unlock::before,
+.dq-st-unlock::after {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--gold-hi);
+  opacity: 0.8;
+}
+.dq-st-unlock::before {
+  left: -4px;
+  top: -4px;
+  border-right: 0;
+  border-bottom: 0;
+}
+.dq-st-unlock::after {
+  right: -4px;
+  bottom: -4px;
+  border-left: 0;
+  border-top: 0;
+}
+.dq-st-unlock-k {
+  font: 500 12px/1.2 var(--font-ui);
+  letter-spacing: 0.24em;
+  color: #e3c98a;
+}
+.dq-st-unlock-n {
+  font: 600 clamp(21px, 6.6vw, 27px)/1.1 var(--font-display);
+  color: var(--gold-hi);
+  text-shadow: 0 0 14px rgba(201, 164, 92, 0.42);
+}
+.dq-st-unlock-l {
+  font-size: 15px;
+  color: var(--t-body);
+}
+@keyframes dq-st-unlock {
+  from {
+    opacity: 0;
+    clip-path: inset(0 50% 0 50%);
+  }
+  40% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    clip-path: inset(-12px -12px -12px -12px);
+  }
+}
+
+/* stage */
+.dq-st-stage {
+  position: relative;
+  width: 100%;
+  height: 440px;
+  margin-top: 6px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+}
+.dq-st-stage::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 22px;
+  background: linear-gradient(180deg, rgba(79, 184, 255, 0.07), transparent);
+  pointer-events: none;
+}
+.dq-st-glow {
+  position: absolute;
+  left: 50%;
+  top: 160px;
+  width: 330px;
+  height: 330px;
+  margin: -165px 0 0 -165px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(79, 184, 255, 0.17), rgba(31, 109, 243, 0.06) 55%, transparent);
+  pointer-events: none;
+  animation: dq-st-breath 10s infinite;
+  will-change: transform, opacity;
+}
+@keyframes dq-st-breath {
+  0% {
+    opacity: 0.35;
+    transform: scale(0.85);
+    animation-timing-function: cubic-bezier(0.37, 0, 0.63, 1);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1.15);
+    animation-timing-function: cubic-bezier(0.37, 0, 0.63, 1);
+  }
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+}
+@keyframes dq-st-breath-still {
+  0% {
+    opacity: 0.35;
+    animation-timing-function: cubic-bezier(0.37, 0, 0.63, 1);
+  }
+  40% {
+    opacity: 1;
+    animation-timing-function: cubic-bezier(0.37, 0, 0.63, 1);
+  }
+  100% {
+    opacity: 0.35;
+  }
+}
+.dq-st-sea {
+  position: absolute;
+  left: 50%;
+  top: 160px;
+  margin: -95px 0 0 -63px;
+  animation: dq-st-float 26s ease-in-out infinite;
+  will-change: transform;
+}
+.dq-st-sea svg {
+  display: block;
+}
+@keyframes dq-st-float {
+  0%,
+  100% {
+    transform: translateY(-6px) rotate(-2.2deg);
+  }
+  25% {
+    transform: translateY(7px) rotate(0.4deg);
+  }
+  50% {
+    transform: translateY(-6px) rotate(2.4deg);
+  }
+  75% {
+    transform: translateY(7px) rotate(-0.6deg);
+  }
+}
+
+/* breathing words: run only while shown; JS lines them up with the glow when they turn on */
+.dq-st-word {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 22px;
+  height: 20px;
+  margin: 0;
+  opacity: 0;
+  transition: opacity 0.6s;
+  font-size: 14px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: #9fc6ea;
+}
+.is-words .dq-st-word {
+  opacity: 1;
+}
+.dq-st-word span {
+  position: absolute;
+  left: 0;
+  right: 0;
+  opacity: 0;
+  animation-play-state: paused !important;
+}
+.is-words .dq-st-word span {
+  animation-play-state: running !important;
+}
+.dq-st-in {
+  animation: dq-st-in 10s infinite;
+}
+.dq-st-out {
+  animation: dq-st-out 10s infinite;
+}
+@keyframes dq-st-in {
+  0% {
+    opacity: 0;
+  }
+  4%,
+  36% {
+    opacity: 1;
+  }
+  40%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes dq-st-out {
+  0%,
+  40% {
+    opacity: 0;
+  }
+  44%,
+  96% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* floor and the land-shark */
+.dq-st-floor {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 18px;
+  height: 52px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.dq-st-floor::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(79, 184, 255, 0.42) 18%, rgba(123, 160, 255, 0.42) 82%, transparent);
+}
+.dq-st-shark {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+}
+.dq-st-shark.is-swim {
+  visibility: visible;
+  animation: dq-st-cross 11s linear forwards;
+  will-change: transform;
+}
+.dq-st-shark.is-swim.is-rtl {
+  animation-name: dq-st-cross-rtl;
+}
+@keyframes dq-st-cross {
+  from {
+    transform: translateX(-70px);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes dq-st-cross-rtl {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(-70px);
+  }
+}
+.dq-st-shark-dir {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 60px;
+  height: 52px;
+}
+.is-rtl .dq-st-shark-dir {
+  transform: scaleX(-1);
+}
+.dq-st-fin,
+.dq-st-tail,
+.dq-st-wake {
+  position: absolute;
+  bottom: 0;
+  display: block;
+}
+.dq-st-fin {
+  left: 0;
+  width: 60px;
+  height: 44px;
+  transform: translateY(48px);
+}
+.dq-st-fin svg,
+.dq-st-tail svg {
+  display: block;
+}
+.dq-st-tail {
+  left: -44px;
+  width: 40px;
+  height: 36px;
+  transform: translateY(40px);
+}
+.dq-st-wake {
+  left: -100px;
+  width: 112px;
+  height: 1.5px;
+  background: linear-gradient(90deg, transparent, rgba(150, 215, 255, 0.95));
+  box-shadow: 0 0 8px rgba(79, 184, 255, 0.7);
+  opacity: 0;
+}
+.is-swim .dq-st-fin {
+  animation: dq-st-fin 11s ease-in-out forwards;
+}
+.is-swim .dq-st-tail {
+  animation: dq-st-tailflick 11s ease-in-out forwards;
+}
+.is-swim .dq-st-wake {
+  animation: dq-st-wake 11s linear forwards;
+}
+@keyframes dq-st-fin {
+  0% {
+    transform: translateY(48px);
+  }
+  9% {
+    transform: translateY(1px);
+  }
+  30% {
+    transform: translateY(4px);
+  }
+  50% {
+    transform: translateY(1px);
+  }
+  70% {
+    transform: translateY(4px);
+  }
+  82% {
+    transform: translateY(1px);
+  }
+  90%,
+  100% {
+    transform: translateY(48px);
+  }
+}
+@keyframes dq-st-tailflick {
+  0%,
+  84% {
+    transform: translateY(40px);
+  }
+  90% {
+    transform: translateY(2px) rotate(-8deg);
+  }
+  93% {
+    transform: translateY(4px) rotate(6deg);
+  }
+  98%,
+  100% {
+    transform: translateY(40px);
+  }
+}
+@keyframes dq-st-wake {
+  0%,
+  6% {
+    opacity: 0;
+  }
+  14%,
+  82% {
+    opacity: 0.85;
+  }
+  92%,
+  100% {
+    opacity: 0;
+  }
+}
+/* two small bubbles where it dives */
+.dq-st-pop {
+  position: absolute;
+  bottom: 2px;
+  left: 22px;
+  width: 7px;
+  height: 7px;
+  border: 1px solid rgba(190, 228, 255, 0.85);
+  border-radius: 50%;
+  opacity: 0;
+}
+.dq-st-pop1 {
+  left: 34px;
+  width: 5px;
+  height: 5px;
+}
+.is-swim .dq-st-pop {
+  animation: dq-st-pop 11s ease-out forwards;
+}
+.is-swim .dq-st-pop1 {
+  animation-delay: 0.25s;
+}
+@keyframes dq-st-pop {
+  0%,
+  89% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+  92% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-30px);
+  }
+}
+
+/* the cat, its cup and its plate */
+.dq-st-cat {
+  position: absolute;
+  left: 50%;
+  bottom: 54px;
+  width: 250px;
+  margin-left: -125px;
+}
+.dq-st-cat svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  opacity: 0.94;
+}
+.lc-body,
+.lc-head,
+.lc-paws,
+.lc-tail,
+.lc-arm {
+  transform-box: view-box;
+}
+.lc-body,
+.lc-head,
+.lc-paws,
+.lc-tail {
+  transition: transform 5.5s cubic-bezier(0.45, 0, 0.25, 1);
+}
+.lc-body {
+  transform-origin: 72px 79px;
+}
+.lc-head {
+  transform-origin: 37px 66px;
+}
+.is-sprawl .lc-body {
+  transform: scale(1.15, 0.9);
+}
+.is-sprawl .lc-head {
+  transform: translate(-6px, 4px) rotate(-7deg);
+}
+.is-sprawl .lc-paws {
+  transform: translate(-13px, 1px);
+}
+.is-sprawl .lc-tail {
+  transform: translate(10px, 4px);
+}
+.lc-tongue {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: 50% 0;
+  transform: scaleY(0.2);
+  transition:
+    opacity 0.1s,
+    transform 0.16s;
+}
+.is-blep .lc-tongue {
+  opacity: 1;
+  transform: none;
+}
+.lc-peek {
+  opacity: 0;
+}
+.lc-arm {
+  opacity: 0;
+  transform: translate(30px, 0);
+}
+.lc-cup {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+}
+.is-nudge .lc-arm {
+  animation: dq-st-arm 6.2s both;
+}
+.is-nudge .lc-cup {
+  animation: dq-st-cup 6.2s both;
+}
+.is-nudge .lc-peek {
+  animation: dq-st-peek 6.2s both;
+}
+.is-nudge .lc-shut {
+  animation: dq-st-shut 6.2s both;
+}
+@keyframes dq-st-arm {
+  0% {
+    opacity: 0;
+    transform: translate(30px, 0);
+  }
+  5% {
+    opacity: 1;
+  }
+  20% {
+    transform: translate(0, 0);
+    animation-timing-function: ease-in-out;
+  }
+  40%,
+  56% {
+    transform: translate(-10px, 0);
+    animation-timing-function: ease-in-out;
+  }
+  64% {
+    transform: translate(-24px, -13px);
+  }
+  72% {
+    transform: translate(-40px, -3px);
+    animation-timing-function: ease-in-out;
+  }
+  88% {
+    transform: translate(-30px, -3px);
+  }
+  94% {
+    opacity: 1;
+    transform: translate(-30px, -13px);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(30px, -2px);
+  }
+}
+@keyframes dq-st-cup {
+  0%,
+  20% {
+    transform: translateX(0);
+    animation-timing-function: ease-in-out;
+  }
+  40% {
+    transform: translateX(-10px);
+  }
+  45% {
+    transform: translateX(-10px) rotate(-6deg);
+  }
+  50% {
+    transform: translateX(-10px) rotate(3deg);
+  }
+  55% {
+    transform: translateX(-10px) rotate(-1.5deg);
+  }
+  60%,
+  72% {
+    transform: translateX(-10px) rotate(0);
+    animation-timing-function: ease-in-out;
+  }
+  88%,
+  100% {
+    transform: translateX(0);
+  }
+}
+@keyframes dq-st-peek {
+  0%,
+  42% {
+    opacity: 0;
+  }
+  45%,
+  66% {
+    opacity: 1;
+  }
+  69%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes dq-st-shut {
+  0%,
+  42% {
+    opacity: 1;
+  }
+  45%,
+  66% {
+    opacity: 0;
+  }
+  69%,
+  100% {
+    opacity: 1;
+  }
+}
+
+/* aquarium */
+.dq-st-tank {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  visibility: hidden;
+  background: linear-gradient(180deg, rgba(40, 130, 200, 0.11), rgba(20, 70, 140, 0.04) 55%, transparent 85%);
+  transition:
+    opacity 1.4s ease,
+    visibility 0s linear 1.4s;
+  pointer-events: none;
+}
+.is-aquarium .dq-st-tank {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 1.4s ease;
+}
+.dq-st-tank,
+.dq-st-tank * {
+  animation-play-state: paused !important;
+}
+.is-aquarium .dq-st-tank,
+.is-aquarium .dq-st-tank * {
+  animation-play-state: running !important;
+}
+.dq-st-caustic {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 200%;
+  height: 130px;
+  border-top: 1px solid rgba(160, 220, 255, 0.22);
+  background:
+    radial-gradient(ellipse 34px 7px at 22px 14px, rgba(160, 220, 255, 0.13), transparent 70%),
+    radial-gradient(ellipse 22px 5px at 64px 34px, rgba(160, 220, 255, 0.09), transparent 70%);
+  background-size: 96px 52px;
+  -webkit-mask-image: linear-gradient(180deg, #000, transparent);
+  mask-image: linear-gradient(180deg, #000, transparent);
+  animation: dq-st-drift 90s linear infinite;
+  will-change: transform;
+}
+@keyframes dq-st-drift {
+  to {
+    transform: translateX(-50%);
+  }
+}
+.dq-st-fish {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  animation: dq-st-swimby 66s ease-in-out infinite;
+  will-change: transform;
+}
+.dq-st-fish svg {
+  display: block;
+}
+.dq-st-fish-in {
+  width: 48px;
+}
+.dq-st-fish0 {
+  top: 17%;
+  animation-delay: -22s;
+}
+.dq-st-fish1 {
+  top: 47%;
+  animation-duration: 84s;
+  animation-direction: reverse;
+  animation-delay: -61s;
+}
+.dq-st-fish1 svg {
+  transform: scaleX(-1);
+}
+.dq-st-fish2 {
+  top: 62%;
+  animation-duration: 56s;
+  animation-delay: -6s;
+}
+.dq-st-fish2 .dq-st-fish-in {
+  transform: scale(0.72);
+}
+/* one animation per fish: a slow glide in pulses, drifting up and down a little */
+@keyframes dq-st-swimby {
+  0% {
+    transform: translate(-60px, 0);
+  }
+  20% {
+    transform: translate(calc(20% - 48px), -7px);
+  }
+  40% {
+    transform: translate(calc(40% - 36px), 5px);
+  }
+  60% {
+    transform: translate(calc(60% - 24px), -6px);
+  }
+  80% {
+    transform: translate(calc(80% - 12px), 6px);
+  }
+  100% {
+    transform: translate(100%, 0);
+  }
+}
+.dq-st-weed {
+  position: absolute;
+  bottom: 18px;
+  transform-origin: 50% 100%;
+  animation: dq-st-sway 7s ease-in-out infinite;
+  will-change: transform;
+}
+.dq-st-weed svg {
+  display: block;
+}
+.dq-st-weed0 {
+  left: 9%;
+}
+.dq-st-weed1 {
+  left: 14%;
+  animation-duration: 8.6s;
+  animation-delay: -3s;
+}
+.dq-st-weed2 {
+  right: 10%;
+  animation-duration: 9.4s;
+  animation-delay: -5s;
+}
+@keyframes dq-st-sway {
+  0%,
+  100% {
+    transform: rotate(-4deg);
+  }
+  50% {
+    transform: rotate(4deg);
+  }
+}
+
+/* modes and the line under the stage */
+.dq-st-modes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+.dq-st-mode {
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px 15px;
+  font-size: 15.5px;
+}
+.dq-st-mode-ic {
+  display: inline-flex;
+  color: var(--accent);
+}
+.dq-st-mode-ic svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+.dq-st-mode[aria-pressed='true'] .dq-st-mode-ic {
+  color: var(--mint);
+}
+.dq-st-line {
+  margin-top: 14px !important;
+  color: var(--t-dim);
+  font-style: italic;
+}
+
+/* bubble bath slime */
+.dq-st-bath {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  margin-top: 30px;
+  padding: 16px 14px 14px;
+  border: 1px solid rgba(125, 150, 197, 0.26);
+  background: linear-gradient(180deg, rgba(14, 32, 56, 0.38), rgba(8, 20, 36, 0.12));
+}
+.dq-st-bath::before,
+.dq-st-bath::after {
+  content: '';
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid rgba(165, 208, 238, 0.6);
+  pointer-events: none;
+}
+.dq-st-bath::before {
+  left: -1px;
+  top: -1px;
+  border-right: 0;
+  border-bottom: 0;
+}
+.dq-st-bath::after {
+  right: -1px;
+  bottom: -1px;
+  border-left: 0;
+  border-top: 0;
+}
+.dq-slime {
+  display: block;
+  width: 100%;
+  max-width: 360px;
+  margin: 4px auto 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  filter: drop-shadow(0 0 16px rgba(137, 207, 157, 0.16));
+}
+.dq-slime svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.dq-slime:focus-visible {
+  outline: 1px solid var(--blue);
+  outline-offset: 4px;
+}
+.dq-st-bath-l {
+  margin-top: 4px !important;
+  font-size: 14.5px;
+  color: var(--t-dim);
+}
+
+/* still: daily.css stops every animation; nothing travels or sways here, but the breath keeps fading
+   (opacity only, as the Rest room always did) so the glow and Breathing words still pace a breath */
+.dq.is-still .dq-st-glow {
+  animation: dq-st-breath-still 10s infinite !important;
+}
+.dq.is-still .dq-st-word .dq-st-in {
+  animation: dq-st-in 10s infinite !important;
+}
+.dq.is-still .dq-st-word .dq-st-out {
+  animation: dq-st-out 10s infinite !important;
+}
+.is-still .dq-st-fish {
+  transform: translateX(22%);
+}
+.is-still .dq-st-fish1 {
+  transform: translateX(68%);
+}
+.is-still .dq-st-fish2 {
+  transform: translateX(40%);
+}
+.is-still .dq-st-shark,
+.is-still .lc-arm {
+  display: none;
+}
+
+@media (min-width: 760px) {
+  .dq-st-stage {
+    height: 500px;
+  }
+  .dq-st-glow,
+  .dq-st-sea {
+    top: 190px;
+  }
+  .dq-st-glow {
+    width: 430px;
+    height: 430px;
+    margin: -215px 0 0 -215px;
+  }
+  .dq-st-sea {
+    margin: -112px 0 0 -75px;
+  }
+  .dq-st-sea svg {
+    width: 150px;
+    height: 225px;
+  }
+  .dq-st-cat {
+    width: 300px;
+    margin-left: -150px;
+    bottom: 50px;
+  }
+  .dq-st-floor {
+    height: 58px;
+  }
+  .dq-st-bath {
+    max-width: 460px;
+  }
+  .dq-slime {
+    max-width: 400px;
+  }
+}
+
+/* wide screens: the bubble bath sits beside the room instead of below the fold */
+@media (min-width: 1100px) {
+  .dq-rest.dq-stealth {
+    display: grid;
+    max-width: 1080px;
+    grid-template-columns: minmax(0, 1fr) 380px;
+    grid-template-areas: 'head head' 'title title' 'stage bath' 'modes bath' 'line bath';
+    grid-template-rows: auto auto auto auto 1fr;
+    column-gap: 36px;
+    justify-items: center;
+  }
+  .dq-st-head {
+    grid-area: head;
+  }
+  .dq-stealth > .dq-st-title,
+  .dq-stealth > .dq-st-unlock {
+    grid-area: title;
+  }
+  .dq-st-stage {
+    grid-area: stage;
+  }
+  .dq-st-modes {
+    grid-area: modes;
+  }
+  .dq-st-line {
+    grid-area: line;
+  }
+  .dq-st-bath {
+    grid-area: bath;
+    align-self: center;
+    margin-top: 0;
+  }
+}

@@ -1,0 +1,64 @@
+@font-face {
+  font-family: 'Jost';
+  src: url('/fonts/jost.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: 'Jost';
+  src: url('/fonts/jost-italic.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: block;
+}
+@font-face {
+  font-family: 'Bodoni Moda';
+  src: url('/fonts/bodoni-moda.woff2') format('woff2');
+  font-weight: 400 900;
+  font-style: normal;
+  font-display: block;
+}
+
+:root {
+  /* pinned palette */
+  --void: #07080f;
+  --system: #4fb8ff;
+  --violet: #7b3fe4; /* glow only */
+  --gold: #c9a45c;
+  --ice: #e6f1ff;
+
+  /* System window material, measured from the anime (reference/system-window, window-sequence) */
+  --plate: rgba(5, 17, 31, 0.93);
+  --plate-solid: #071424;
+  --hair-lit: #7d96c5;
+  --hair-shade: #364257;
+  --rule: #3e6485;
+  --title: #e5fefe;
+  --body: #c4ddf3;
+  --dim: #7f97b8;
+  --bar-edge: #1c43a5;
+  --bar-body: #1f6df3;
+  --bar-mid: #49abff;
+  --bar-inner: #54f3ff;
+  --bar-core: #a4f8ff;
+
+  /* her accent: mint from her own channel art, used only for things that are hers */
+  --mint: #89cf9d;
+  --seahorse: #c1b3fc;
+
+  --font-ui: 'Jost', system-ui, sans-serif;
+  --font-display: 'Bodoni Moda', 'Didot', serif;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-open: cubic-bezier(0.2, 0.9, 0.3, 1.15);
+  --ease-io: cubic-bezier(0.65, 0, 0.35, 1);
+
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+::selection {
+  background: rgba(79, 184, 255, 0.35);
+  color: var(--ice);
+}

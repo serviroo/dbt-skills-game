@@ -1,0 +1,419 @@
+/* Comfort-first check-in, Give me a moment, quiet opening and the daily gift chest. */
+
+/* ---------- Home: the top strip ---------- */
+.dq-col--g:has(> .dq-gift.is-hidden) {
+  display: none;
+}
+.dq-lobby {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: -6px 0 -4px;
+}
+.dq-chest,
+.dq-momentbtn {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.dq-chest {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  min-width: 0;
+  padding: 2px 12px 2px 4px;
+  text-align: left;
+  border-radius: 2px;
+}
+.dq-chest-art {
+  position: relative;
+  flex: none;
+  width: 46px;
+  height: 40px;
+}
+.dq-chest-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  filter: drop-shadow(0 0 5px rgba(201, 164, 92, 0.28));
+}
+.dq-chest-glow {
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+.dq-chest-lid {
+  transform-box: view-box;
+  transform-origin: 8px 19.5px;
+  transition: transform 0.55s cubic-bezier(0.34, 1.4, 0.5, 1);
+}
+.dq-chest-lock {
+  transition: opacity 0.3s ease;
+}
+.dq-chest:not(.is-open):not(.is-opening) .dq-chest-shine {
+  animation: dq-chest-shine 7s ease-in-out 1.5s 4;
+}
+.dq-chest-spark {
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0;
+}
+.dq-chest:not(.is-open):not(.is-opening) .dq-chest-spark {
+  opacity: 0.5;
+  animation: dq-chest-spark 7s ease-in-out 1.5s 4;
+}
+@keyframes dq-chest-spark {
+  0%,
+  74%,
+  100% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  84% {
+    opacity: 0.95;
+    transform: scale(1);
+  }
+}
+@keyframes dq-chest-shine {
+  0%,
+  70%,
+  100% {
+    stroke-opacity: 0.25;
+  }
+  82% {
+    stroke-opacity: 0.95;
+  }
+}
+.dq-chest.is-opening .dq-chest-lid,
+.dq-chest.is-open .dq-chest-lid {
+  transform: translate(0, -4px) rotate(-16deg);
+}
+.dq-chest.is-opening .dq-chest-glow,
+.dq-chest.is-open .dq-chest-glow {
+  opacity: 1;
+}
+.dq-chest.is-open .dq-chest-glow {
+  opacity: 0.55;
+}
+.dq-chest.is-opening .dq-chest-lock,
+.dq-chest.is-open .dq-chest-lock {
+  opacity: 0;
+}
+.dq-chest-txt {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+.dq-chest-t {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #e3c991;
+}
+.dq-chest-s {
+  font-size: 13px;
+  color: var(--t-faint);
+}
+.dq-chest:hover .dq-chest-t {
+  color: #f1dcaa;
+}
+.dq-chest:focus-visible,
+.dq-momentbtn:focus-visible {
+  outline: 2px solid rgba(124, 200, 255, 0.7);
+  outline-offset: 2px;
+}
+
+.dq-momentbtn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 14px 0 12px;
+  border: 1px solid rgba(137, 190, 230, 0.26);
+  border-radius: 22px;
+  background: rgba(8, 18, 34, 0.42);
+  color: #c3d9ee;
+  font-size: 14.5px;
+  font-weight: 400;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  transition:
+    border-color 0.2s,
+    background 0.2s;
+}
+.dq-momentbtn:hover {
+  border-color: rgba(170, 215, 250, 0.6);
+  background: rgba(14, 32, 56, 0.66);
+}
+.dq-momentbtn-ring {
+  position: relative;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.3px solid rgba(169, 220, 255, 0.85);
+  box-shadow: 0 0 8px rgba(79, 184, 255, 0.35);
+  animation: dq-mo-breath 10s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+@keyframes dq-mo-breath {
+  0% {
+    transform: scale(0.62);
+    opacity: 0.6;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.62);
+    opacity: 0.6;
+  }
+}
+.dq-lobby {
+  gap: 8px;
+}
+.dq-chest {
+  gap: 8px;
+  padding-right: 6px;
+}
+.dq-chest-t {
+  letter-spacing: 0.12em;
+}
+.dq-momentbtn {
+  gap: 8px;
+  padding: 0 13px 0 11px;
+}
+@media (min-width: 360px) {
+  .dq-chest-t,
+  .dq-chest-s {
+    white-space: nowrap;
+  }
+}
+@media (max-width: 359px) {
+  .dq-chest-s {
+    display: none;
+  }
+  .dq-chest {
+    padding-right: 4px;
+  }
+  .dq-momentbtn {
+    padding: 0 12px 0 10px;
+    font-size: 14px;
+  }
+}
+@media (min-width: 760px) {
+  .dq-hub {
+    grid-template-areas: 't t' 'a b' 'a g' 'c l' 'm l' 'm .';
+  }
+  .dq-col--t {
+    grid-area: t;
+  }
+  .dq-lobby {
+    margin: -14px 0 -10px;
+  }
+}
+@media (min-width: 1180px) {
+  .dq-hub {
+    grid-template-areas: none;
+  }
+  .dq-col--t {
+    grid-area: auto;
+    grid-column: 1 / -1;
+  }
+  .dq-lobby {
+    margin: -18px 0 -18px;
+  }
+}
+
+/* ---------- check-in in her words ---------- */
+.dq-feels .dq-opt {
+  padding-left: 14px;
+  padding-right: 14px;
+}
+.dq-after {
+  flex-direction: column;
+  gap: 2px;
+  font-size: 17px;
+}
+.dq-after span:last-child {
+  color: var(--mint);
+}
+
+/* ---------- comfort first (after a heavy check-in) ---------- */
+.dq-ease {
+  --chrome: calc(112px + var(--safe-top) + var(--safe-bottom));
+  position: relative;
+  max-width: 520px;
+  min-height: calc(100dvh - var(--chrome));
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 8px 0 24px;
+}
+.dq-ease-glow {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: min(560px, 130vw);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(closest-side, rgba(123, 63, 228, 0.16), rgba(79, 184, 255, 0.07) 52%, transparent);
+  pointer-events: none;
+}
+.dq-ease-panel {
+  --pad: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+}
+.dq-ease-sea {
+  position: absolute;
+  right: 14px;
+  top: 12px;
+  width: 72px;
+  opacity: 0.55;
+  pointer-events: none;
+}
+.dq-ease-sea svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.dq-ease-t {
+  margin-top: 26px !important;
+  padding-right: 64px;
+  font-size: 27px;
+  font-weight: 300;
+  line-height: 1.25;
+  letter-spacing: 0.005em;
+  color: var(--t-title);
+}
+.dq-ease-t:focus {
+  outline: none;
+}
+.dq-ease-s {
+  margin-top: 10px !important;
+  font-size: 17px;
+  line-height: 1.5;
+  color: var(--t-body);
+}
+.dq-ease-acts {
+  margin-top: 26px;
+}
+.dq-ease-safe {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  margin-top: 10px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 14.5px;
+  letter-spacing: 0.04em;
+  color: var(--t-dim);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.dq-ease-safe:hover {
+  color: #d8ecfb;
+}
+.dq-ease-safe-ic {
+  display: grid;
+  width: 18px;
+  height: 18px;
+}
+
+/* ---------- Give me a moment ---------- */
+.dq[data-screen='moment'] .dq-vignette,
+.dq[data-screen='ease'] .dq-vignette {
+  background: radial-gradient(120% 90% at 50% 40%, rgba(4, 6, 12, 0.3), rgba(2, 3, 8, 0.8));
+  transition: background 0.8s ease;
+}
+.dq-moment {
+  --chrome: calc(106px + var(--safe-top) + var(--safe-bottom));
+  position: relative;
+  max-width: 560px;
+  min-height: calc(100dvh - var(--chrome));
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.dq-mo-stage {
+  position: relative;
+  width: min(300px, 74vw, 42dvh);
+  aspect-ratio: 1;
+  margin-top: max(16px, 7dvh);
+}
+.dq-mo-halo {
+  position: absolute;
+  inset: -24%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(123, 63, 228, 0.13), rgba(79, 184, 255, 0.05) 55%, transparent);
+  pointer-events: none;
+}
+.dq-mo-svg {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.dq-mo-line {
+  min-height: 3.2em;
+  max-width: 22em;
+  margin: 28px 12px 0 !important;
+  font-size: 21px;
+  font-weight: 300;
+  line-height: 1.45;
+  letter-spacing: 0.01em;
+  color: #d6e8f8;
+  opacity: 0;
+}
+.dq-mo-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 420px;
+  margin-top: auto;
+  padding-top: 18px;
+}
+.dq-mo-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+.dq-mo-hum {
+  flex: 1;
+  border-bottom: 0;
+  justify-content: flex-start;
+}
+.dq-mo-hum .dq-setting-t {
+  font-size: 14.5px;
+  color: var(--t-dim);
+}
+.dq-mo-done {
+  flex: none;
+}
+.dq-mo-next {
+  width: 100%;
+}

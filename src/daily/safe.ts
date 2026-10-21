@@ -1,0 +1,267 @@
+/**
+ * Safe Zone: body first (breathing, squeeze and release, then optional cool air), then STOP, then her own lists, then
+ * people and services. No XP, toasts, glows or sound effects in here. One calm link to people on every screen, and a
+ * lights-up toggle beside the dim default.
+ */
+import { animate } from '../ui/anim';
+import { RESOURCES, SAFE } from '../content/dbt';
+import type { App, Route, ScreenOut } from './app';
+import { icon } from './art';
+import { uid } from './store';
+import { btn, chip, field, h, p, panel, typo } from './ui';
+import { breathRing, pmrView, timerView, type Ctx } from './widgets';
+
+const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.userAgent));
+
+export function smsHref(num: string, body?: string) {
+  if (!body) return `sms:${num}`;
+  return isIOS() ? `sms:${num}&body=${encodeURIComponent(body)}` : `sms:${num}?body=${encodeURIComponent(body)}`;
+}
+export const telHref = (num: string) => `tel:${num.replace(/[^\d+]/g, '')}`;
+
+type At = 'start' | 'breathe' | 'cold' | 'squeeze' | 'check' | 'stop' | 'reasons' | 'people' | 'comfort' | 'talk' | 'close';
+const FLOW: At[] = ['start', 'breathe', 'squeeze', 'cold', 'check', 'stop', 'reasons', 'comfort', 'people', 'talk', 'close'];
+const lightKey = (key: string) => `${key}.safeLight`;
+const readLight = (key: string) => {
+  try {
+    return localStorage.getItem(lightKey(key)) === 'up';
+  } catch {
+    return false;
+  }
+};
+
+export function safeScreen(app: App, route: Route): ScreenOut {
+  const r = route as Extract<Route, { name: 'safe' }>;
+  const st = app.store;
+  // credited silently, shown on the next System visit
+  if (!st.state.events.some((e) => e.k === 'safe' && e.day === st.today())) {
+    st.add('safe', 20, { stat: 'stamina' });
+    st.state.flags.safeCredit = true;
+    st.touch('safeCredit');
+    st.save();
+  }
+  const ctx: Ctx = { sound: (c) => app.sound(c), reduced: () => app.reduced() };
+  const stops: (() => void)[] = [];
+  let higher = false;
+  let danger = false;
+  const body = h('div', { class: 'dq-sz-body' });
+  const talkLink = h('button', { type: 'button', class: 'dq-sz-talk', onclick: () => show('talk') }, h('span', { html: icon('phone') }), h('span', { text: 'Talk to someone now' }));
+  const box = panel({ title: 'Safe Zone', ic: icon('safe'), cls: 'dq-sz' }, body);
+  let lit = readLight(st.key);
+  const lightBtn = h('button', { type: 'button', class: 'ca-sz-light', 'aria-pressed': String(lit), title: SAFE.light.hint }, h('span', { class: 'ca-sz-light-ic', 'aria-hidden': 'true' }), h('span', { class: 'ca-sz-light-t' }));
+  const applyLight = () => {
+    el.classList.toggle('is-lit', lit);
+    app.root.classList.toggle('ca-szlit', lit);
+    lightBtn.setAttribute('aria-pressed', String(lit));
+    lightBtn.querySelector('.ca-sz-light-t')!.textContent = lit ? SAFE.light.down : SAFE.light.up;
+  };
+  lightBtn.addEventListener('click', () => {
+    lit = !lit;
+    try {
+      localStorage.setItem(lightKey(st.key), lit ? 'up' : 'dim');
+    } catch {
+      /* stays for this visit only */
+    }
+    applyLight();
+  });
+  const el = h('div', { class: 'dq-safezone' }, h('h1', { class: 'dq-sr', text: 'Safe Zone' }), box, h('div', { class: 'dq-sz-foot' }, talkLink, lightBtn));
+  applyLight();
+
+  const nextOf = (at: At) => FLOW[Math.min(FLOW.length - 1, FLOW.indexOf(at) + 1)];
+  const clear = () => stops.splice(0).forEach((f) => f());
+  const swap = (at: At, ...kids: (Node | null)[]) => {
+    body.replaceChildren(...kids.filter((k): k is Node => !!k));
+    talkLink.classList.toggle('is-hidden', at === 'talk');
+    talkLink.classList.toggle('is-strong', higher && at !== 'talk');
+    animate(body, [{ opacity: 0 }, { opacity: 1 }], { duration: app.reduced() ? 160 : 520, easing: 'ease-out' });
+    const f = body.querySelector<HTMLElement>('[data-focus]');
+    f?.setAttribute('tabindex', '-1');
+    f?.focus({ preventScroll: true });
+    app.root.scrollTo({ top: 0 });
+  };
+  const h3 = (t: string) => h('h2', { class: 'dq-sz-t', 'data-focus': '', text: typo(t) });
+  const nextBtn = (at: At, label = 'Next', kind: 'primary' | 'quiet' = 'primary') => btn(label, () => show(nextOf(at)), { kind });
+
+  const listScreen = (at: 'reasons' | 'comfort', title: string, text: string | null, empty: string) => {
+    const items = st.state.lists[at];
+    const list = h('ul', { class: 'dq-sz-list' }, items.map((i) => h('li', { text: typo(i.text) })));
+    const f = field('Add one', { placeholder: at === 'reasons' ? SAFE.reasons.add : 'Something that helps, even a little', hideLabel: true });
+    const add = h('div', { class: 'dq-addrow is-hidden' }, f.el, btn('Save', () => {
+      const v = f.input.value.trim();
+      if (!v) return f.input.focus();
+      st.state.lists[at].push({ id: uid(), text: v.slice(0, 200), at: st.now() });
+      st.save();
+      show(at);
+    }, { kind: 'quiet' }));
+    return swap(
+      at,
+      h3(title),
+      text ? p(text, 'dq-text') : null,
+      items.length ? list : p(empty, 'dq-text dq-sz-empty'),
+      add,
+      h('div', { class: 'dq-actions dq-actions--stack' }, nextBtn(at), btn('Add one', () => {
+        add.classList.remove('is-hidden');
+        f.input.focus();
+      }, { kind: 'quiet', ic: 'plus' })),
+    );
+  };
+
+  function show(at: At) {
+    clear();
+    switch (at) {
+      case 'start':
+        return swap(
+          at,
+          h('div', { class: 'dq-sz-hello' }, SAFE.intro.map((l, i) => h(i ? 'p' : 'h2', { class: i ? 'dq-text' : 'dq-sz-t', 'data-focus': i ? null : '', text: typo(l) }))),
+          h(
+            'div',
+            { class: 'dq-actions dq-actions--stack' },
+            btn('Give me a moment', () => app.go({ name: 'moment' }), { kind: 'primary' }),
+            btn('Calm my body first', () => show('breathe'), { kind: 'quiet' }),
+            btn('I need a person now', () => show('talk'), { kind: 'quiet' }),
+            btn('I might not be safe', () => {
+              danger = true;
+              show('talk');
+            }, { kind: 'quiet' }),
+          ),
+        );
+      case 'breathe': {
+        const ring = breathRing(ctx, { inhale: 4, exhale: 6, rounds: 6 });
+        stops.push(ring.stop);
+        return swap(at, h3(SAFE.breathe.title), p(SAFE.breathe.text, 'dq-text'), ring.el, h('div', { class: 'dq-actions dq-actions--center' }, nextBtn(at, 'Next', 'quiet')));
+      }
+      case 'cold': {
+        const skip = btn("Can't right now", () => show(nextOf(at)), { kind: 'quiet' });
+        const tv = timerView(ctx, { seconds: 30, visual: 'cold', start: 'Start 30 seconds', extra: [skip], onDone: () => show(nextOf(at)) });
+        stops.push(tv.stop);
+        return swap(at, h3(SAFE.cold.title), p(SAFE.cold.text, 'dq-text'), p(SAFE.cold.small, 'dq-small'), tv.el);
+      }
+      case 'squeeze': {
+        const nb = nextBtn(at, 'Next', 'quiet');
+        const v = pmrView(ctx, { rounds: 3, onDone: () => nb.classList.replace('dq-btn--quiet', 'dq-btn--primary') });
+        stops.push(v.stop);
+        return swap(at, h3(SAFE.squeeze.title), p(SAFE.squeeze.text, 'dq-text'), v.el, h('div', { class: 'dq-actions dq-actions--center' }, nb));
+      }
+      case 'check':
+        return swap(
+          at,
+          h3(SAFE.check),
+          h(
+            'div',
+            { class: 'dq-opts dq-opts--stack' },
+            chip('A little lower', () => show('stop')),
+            chip('About the same', () => show('stop')),
+            chip('Higher', () => {
+              higher = true;
+              show('talk');
+            }),
+          ),
+        );
+      case 'stop': {
+        let k = 0;
+        const lines = SAFE.stop.map(([b, t]) => h('li', { class: 'dq-sz-stop is-hidden' }, h('b', { text: b }), ' ', h('span', { text: typo(t) })));
+        const more = btn('Next line', () => {
+          if (k < lines.length) {
+            lines[k].classList.remove('is-hidden');
+            animate(lines[k], [{ opacity: 0 }, { opacity: 1 }], { duration: app.reduced() ? 120 : 600 });
+            k++;
+          }
+          if (k >= lines.length) {
+            more.remove();
+            nb.classList.replace('dq-btn--quiet', 'dq-btn--primary');
+          }
+        }, { kind: 'primary' });
+        const nb = nextBtn(at, 'Next', 'quiet');
+        lines[0].classList.remove('is-hidden');
+        k = 1;
+        return swap(at, h3('Stop. Step back. Notice. Next step.'), h('ol', { class: 'dq-sz-stops' }, lines), h('div', { class: 'dq-actions dq-actions--stack' }, more, nb));
+      }
+      case 'reasons':
+        return listScreen('reasons', SAFE.reasons.title, SAFE.reasons.text, SAFE.reasons.empty);
+      case 'comfort':
+        return listScreen('comfort', SAFE.comfort.title, SAFE.comfort.text, SAFE.comfort.empty);
+      case 'people': {
+        const ppl = st.state.lists.people;
+        const list = h(
+          'ul',
+          { class: 'dq-people' },
+          ppl.map((x) =>
+            h(
+              'li',
+              { class: 'dq-person' },
+              h('span', { class: 'dq-person-n', text: x.name }),
+              x.phone
+                ? h('span', { class: 'dq-person-acts' }, h('a', { class: 'dq-btn dq-btn--quiet', href: telHref(x.phone), html: `<span class="dq-btn-ic">${icon('phone')}</span><span>Call</span>` }), h('a', { class: 'dq-btn dq-btn--quiet', href: smsHref(x.phone.replace(/[^\d+]/g, '')), html: `<span class="dq-btn-ic">${icon('text')}</span><span>Text</span>` }))
+                : null,
+            ),
+          ),
+        );
+        const n = field('Name', { placeholder: 'Name', autocomplete: 'off' });
+        const ph = field('Number', { placeholder: 'Phone number', type: 'tel', inputmode: 'tel' });
+        const add = h('div', { class: 'dq-person-add is-hidden' }, n.el, ph.el, h('div', { class: 'dq-actions' }, btn('Save', () => {
+          const name = n.input.value.trim();
+          if (!name) return n.input.focus();
+          st.state.lists.people.push({ id: uid(), name: name.slice(0, 80), phone: ph.input.value.trim().slice(0, 40), at: st.now() });
+          st.save();
+          show('people');
+        }, { kind: 'quiet' })));
+        return swap(
+          at,
+          h3(SAFE.people.title),
+          p(SAFE.people.text, 'dq-text'),
+          ppl.length ? list : p(SAFE.people.empty, 'dq-text dq-sz-empty'),
+          add,
+          h('div', { class: 'dq-actions dq-actions--stack' }, nextBtn(at), btn('Add a person', () => {
+            add.classList.remove('is-hidden');
+            n.input.focus();
+          }, { kind: 'quiet', ic: 'plus' })),
+        );
+      }
+      case 'talk': {
+        const rows = RESOURCES.map((res) =>
+          h(
+            'li',
+            { class: `dq-res ${danger && res.name === 'Emergency' ? 'is-first' : ''}` },
+            h('div', { class: 'dq-res-n', text: res.name }),
+            h('p', { class: 'dq-res-how', text: typo(res.how) }),
+            h(
+              'div',
+              { class: 'dq-res-acts' },
+              res.links.map((l) =>
+                h('a', { class: 'dq-btn dq-btn--quiet dq-res-a', href: l.href.startsWith('sms:') ? smsHref(l.href.slice(4), (l as { body?: string }).body) : l.href, html: `<span class="dq-btn-ic">${icon(l.href.startsWith('tel:') ? 'phone' : 'text')}</span><span>${l.label}</span>` }),
+              ),
+            ),
+          ),
+        );
+        if (danger) rows.sort((a, b) => Number(b.classList.contains('is-first')) - Number(a.classList.contains('is-first')));
+        return swap(
+          at,
+          h3(SAFE.talk.title),
+          danger ? p(SAFE.talk.danger, 'dq-text dq-sz-danger') : null,
+          p(SAFE.talk.text, 'dq-text'),
+          h('ul', { class: 'dq-res-list' }, rows),
+          h('p', { class: 'dq-small' }, 'Outside the US: ', h('a', { href: 'https://findahelpline.com', target: '_blank', rel: 'noopener noreferrer', class: 'dq-a', text: 'findahelpline.com' }), ' lists free lines in many countries.'),
+          h('div', { class: 'dq-actions dq-actions--stack' }, nextBtn(at, 'Next', 'quiet'), btn('Back to breathing', () => show('breathe'), { kind: 'quiet' })),
+        );
+      }
+      case 'close':
+        return swap(
+          at,
+          h('div', { class: 'dq-sz-hello' }, h('h2', { class: 'dq-sz-t', 'data-focus': '', text: typo(SAFE.close[0]) }), p(SAFE.close[1], 'dq-text')),
+          h('div', { class: 'dq-actions dq-actions--stack' }, btn('Stay a little longer', () => show('breathe'), { kind: 'quiet' }), btn('Back to the System', () => app.go({ name: 'hub' }), { kind: 'primary' })),
+        );
+    }
+  }
+
+  return {
+    el,
+    title: 'Safe Zone',
+    mode: 'safe',
+    bubbles: [1.2, 0.45],
+    leave: () => {
+      clear();
+      app.root.classList.remove('ca-szlit');
+    },
+    after: () => show((r.at as At) ?? 'start'),
+  };
+}
