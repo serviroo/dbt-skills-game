@@ -892,7 +892,7 @@ export function settingsScreen(app: App): ScreenOut {
         p(ABOUT.what, 'dq-text'),
         p(ABOUT.device, 'dq-text'),
         showTherapist ? p(ABOUT.therapist, 'dq-text dq-quietline') : null,
-        p(`Crisis lines in the Safe Zone were checked on ${CRISIS_CHECKED} against each service's own site.`, 'dq-small'),
+        p(`Crisis lines in the Safe Zone were checked on ${CRISIS_CHECKED} against each service's own site or an official government page.`, 'dq-small'),
       ),
     ),
   );
