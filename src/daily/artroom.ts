@@ -5,7 +5,6 @@
 import { animate } from '../ui/anim';
 import { ALLY_NAMES, ART, ART_PROMPTS } from '../content/daily-lines';
 import { playerName } from '../core/you';
-import { TAB_KEY } from '../core/stored-names';
 import type { App, Route, ScreenOut } from './app';
 import { icon } from './art';
 import { artStore, revOf, type Draft, type DrawingMeta, type DrawingRec } from './artstore';
@@ -18,19 +17,6 @@ const store = (app: App) => artStore(app.store.key);
 const KEPT_APART = 'A newer copy of this drawing arrived, so this one was kept as its own page.';
 const pageHead = (title: string, sub?: string) => h('header', { class: 'dq-pagehead' }, h('h1', { class: 'dq-h1', 'data-focus': '', text: title }), sub ? p(sub, 'dq-text dq-pagesub') : null);
 
-let tabId = '';
-/** Every draft belongs to the tab drawing it, so two open tabs never write over (or save away) each other's strokes. */
-function thisTab() {
-  if (!tabId) {
-    try {
-      tabId = sessionStorage.getItem(TAB_KEY) || '';
-      if (!tabId) sessionStorage.setItem(TAB_KEY, (tabId = uid()));
-    } catch {
-      tabId ||= uid();
-    }
-  }
-  return tabId;
-}
 /** A draft untouched this long was left by an earlier session (iOS can hand a relaunched app a new tab id). */
 const ORPHAN_MS = 120e3;
 
@@ -192,9 +178,13 @@ export function artScreen(app: App): ScreenOut {
     ),
     h('section', { class: 'dq-art-pages', 'aria-labelledby': 'dq-pages-h' }, h('h2', { class: 'dq-sec-h', id: 'dq-pages-h' }, h('span', { text: ART.pages })), gallery, note),
   );
-  void (async () => {
+  let refresh = 0;
+  const render = async () => {
+    const turn = ++refresh;
     const [list, drafts] = await Promise.all([as.list(), as.drafts()]);
+    if (turn !== refresh) return;
     if (!as.persistent) note.classList.remove('is-hidden');
+    draftBox.classList.add('is-hidden');
     const d = drafts[0];
     if (d) {
       draftBox.classList.remove('is-hidden');
@@ -228,8 +218,10 @@ export function artScreen(app: App): ScreenOut {
         ),
       ),
     );
-  })();
-  return { el, title: ART.title, mode: 'sub', bubbles: [1.6, 0.6] };
+  };
+  const off = as.onRemove(() => void render());
+  void render();
+  return { el, title: ART.title, mode: 'sub', bubbles: [1.6, 0.6], leave: () => { refresh++; off(); } };
 }
 
 function entryArt(kind: Paper) {
@@ -251,8 +243,8 @@ export function drawScreen(app: App, route: Route): ScreenOut {
   const r = route as Extract<Route, { name: 'draw' }>;
   const kind: Paper = r.kind === 'ally' ? 'ally' : 'today';
   const as = store(app);
-  const tab = thisTab();
-  const own = (id?: string | null) => (id ? `edit:${id}:${tab}` : `${kind}:${tab}`);
+  const tab = as.claimTab();
+  const own = (id?: string | null) => (id ? `edit:${id}:${tab.id}` : `${kind}:${tab.id}`);
   let key = own(r.id);
   let saving = false;
   let recId = r.id ?? null;
@@ -262,6 +254,8 @@ export function drawScreen(app: App, route: Route): ScreenOut {
   let prompt: string | null = kind === 'today' ? todayPrompt(app) : null;
   let dirty = false;
   let draftTimer = 0;
+  let left = false;
+  let loading = true;
   const offs: (() => void)[] = [];
 
   const msg = h('div', { class: 'dq-tools-msg', 'aria-live': 'polite' });
@@ -271,6 +265,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     if (draftTimer) clearTimeout(draftTimer);
     draftTimer = 0;
     if (!dirty) return;
+    if (!key.endsWith(`:${tab.id}`)) key = own(recId);
     if (!pad.strokes.length && !recId) return void as.dropDraft(key);
     void as.putDraft({ key, kind, editId: recId ?? undefined, bases: recId ? bases : undefined, prompt, strokes: pad.strokes, t: Date.now() });
   };
@@ -278,6 +273,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     kind,
     still: () => app.reduced(),
     onChange: () => {
+      if (!loading) dirty = true;
       sync();
       if (draftTimer) clearTimeout(draftTimer);
       draftTimer = window.setTimeout(flushDraft, 500);
@@ -291,6 +287,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
   app.ink = pad;
   pad.el.setAttribute('role', 'img');
   pad.el.setAttribute('aria-label', kind === 'ally' ? 'Drawing page for a shadow ally' : 'Drawing page');
+  pad.el.inert = true;
 
   // prompt / hint
   const promptText = h('span', { class: 'dq-prompt-t' });
@@ -380,6 +377,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
   );
 
   const persist = async (name?: string) => {
+    if (!key.endsWith(`:${tab.id}`)) key = own(recId);
     const now = app.store.now();
     const first = !recId;
     const id = recId ?? uid();
@@ -397,13 +395,19 @@ export function drawScreen(app: App, route: Route): ScreenOut {
       strokes: pad.strokes.map((s) => ({ i: s.i, w: s.w, p: s.p })),
     };
     const res = await as.put(first ? next : { ...next, bases: bases ?? [], after: rec?.updated });
+    if (recId !== id) {
+      dirty = true;
+      flushDraft();
+      return null;
+    }
     const saved: DrawingRec = { ...next, id: res.id, updated: res.updated };
     rec = saved;
     recId = res.id;
     const failed = res.stored === 'failed';
     bases = failed && res.id === id ? [...(bases ?? []), res.rev].slice(-8) : [res.rev];
     const copied = res.id !== id;
-    const oldKey = key;
+    const oldKey = key.endsWith(`:${tab.id}`) ? key : own(first ? undefined : id);
+    key = oldKey;
     if (copied) key = own(res.id);
     if (failed) {
       dirty = true;
@@ -426,7 +430,9 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     if (!pad.strokes.length || saving) return;
     if (kind === 'ally') return nameSheet();
     saving = true;
-    const { first, xp, rec: saved, copied, failed } = await persist().finally(() => (saving = false));
+    const result = await persist().finally(() => (saving = false));
+    if (!result) return;
+    const { first, xp, rec: saved, copied, failed } = result;
     void prepImage(saved);
     const imgB = btn('Save image', async () => say(savedText(await saveImage(saved))), { kind: 'link' });
     say(h('span', { class: 'dq-tools-saved', text: typo(copied ? KEPT_APART : first ? ART.saved : ART.savedAgain) }), xp ? h('span', { class: 'dq-xp', text: '+10 XP' }) : null, imgB, btn('Art room', () => app.go({ name: 'art' }), { kind: 'link' }));
@@ -444,7 +450,9 @@ export function drawScreen(app: App, route: Route): ScreenOut {
       const name = f.input.value.trim().slice(0, 24);
       sheet.classList.add('is-hidden');
       saving = true;
-      const { xp, rec: saved, copied, failed } = await persist(name || undefined).finally(() => (saving = false));
+      const result = await persist(name || undefined).finally(() => (saving = false));
+      if (!result) return;
+      const { xp, rec: saved, copied, failed } = result;
       void prepImage(saved);
       rise(saved, xp);
       const notes = [copied ? KEPT_APART : null, failed ? ART.noStore : null].filter((t): t is string => !!t);
@@ -554,23 +562,41 @@ export function drawScreen(app: App, route: Route): ScreenOut {
   document.addEventListener('visibilitychange', vis);
   window.addEventListener('pagehide', flushDraft);
   offs.push(() => window.removeEventListener('keydown', key$), () => document.removeEventListener('visibilitychange', vis), () => window.removeEventListener('pagehide', flushDraft));
+  offs.push(as.onRemove((id) => {
+    if (recId !== id) return;
+    recId = null;
+    rec = null;
+    bases = undefined;
+    if (dirty || pad.drawing) {
+      dirty = true;
+      flushDraft();
+      say(p(ART.draft, 'dq-small'));
+    } else {
+      loading = true;
+      pad.load([]);
+      loading = false;
+      say(p('That page is no longer here. This is a fresh one.', 'dq-small'));
+    }
+  }));
 
   void (async () => {
-    // a draft picked up here goes on under its own key: it is never copied or removed to resume it
+    await tab.ready;
+    if (left) return;
+    key = own(r.id);
     let draft: Draft | null = null;
     if (r.draft) {
       draft = await as.getDraft(r.draft);
-      if (draft) key = r.draft;
+      if (draft?.key.endsWith(`:${tab.id}`)) key = draft.key;
     }
     if (!draft) draft = await as.getDraft(key);
     if (!draft && !r.draft) {
       // this tab's other draft of the same page (a page first saved from a fresh screen), else one an earlier session
       // left; a younger draft may belong to a tab that is still open, so it only waits in the Art room
       const same = (await as.drafts()).filter((d) => (r.id ? d.editId === r.id : d.kind === kind && !d.editId));
-      const found = same.find((d) => d.key.endsWith(`:${tab}`)) ?? same.find((d) => !(Date.now() - d.t < ORPHAN_MS));
+      const found = same.find((d) => d.key.endsWith(`:${tab.id}`)) ?? same.find((d) => !(Date.now() - d.t < ORPHAN_MS));
       if (found) {
         draft = found;
-        key = found.key;
+        if (found.key.endsWith(`:${tab.id}`)) key = found.key;
       }
     }
     const id = r.id ?? draft?.editId;
@@ -589,6 +615,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
         renderPrompt();
       }
     }
+    if (left) return;
     if (draft) {
       if (draft.prompt !== undefined && kind === 'today') {
         prompt = draft.prompt;
@@ -596,7 +623,10 @@ export function drawScreen(app: App, route: Route): ScreenOut {
       }
       pad.load(draft.strokes as Stroke[]);
       dirty = true;
+      flushDraft();
     } else if (rec) pad.load(rec.strokes);
+    loading = false;
+    pad.el.inert = false;
     if (pad.strokes.length) hint.classList.add('is-gone');
     if (!as.persistent) say(p(ART.noStore, 'dq-small'));
   })();
@@ -612,6 +642,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
       layout();
     },
     leave: () => {
+      left = true;
       sheet.remove();
       riseEl.remove();
       flushDraft();
@@ -628,11 +659,18 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
   const id = (route as Extract<Route, { name: 'piece' }>).id;
   const as = store(app);
   const body = h('div', { class: 'dq-piece-body' });
+  let removed = false;
+  const missing = () => body.replaceChildren(p('That page is no longer here.', 'dq-text dq-empty'), h('div', { class: 'dq-actions' }, btn('Art room', () => app.go({ name: 'art' }), { kind: 'quiet' })));
+  const off = as.onRemove((gone) => {
+    if (gone !== id) return;
+    removed = true;
+    missing();
+  });
   const el = h('div', { class: 'dq-page dq-piece' }, h('h1', { class: 'dq-sr', 'data-focus': '', text: 'Your page' }), body);
   void (async () => {
     const rec = await as.get(id);
-    if (!rec) {
-      body.replaceChildren(p('That page is no longer here.', 'dq-text dq-empty'), h('div', { class: 'dq-actions' }, btn('Art room', () => app.go({ name: 'art' }), { kind: 'quiet' })));
+    if (!rec || removed) {
+      missing();
       return;
     }
     const dpr = Math.min(2, devicePixelRatio || 1);
@@ -678,5 +716,5 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
       ),
     );
   })();
-  return { el, title: 'Your page', mode: 'sub', bubbles: [1.6, 0.6] };
+  return { el, title: 'Your page', mode: 'sub', bubbles: [1.6, 0.6], leave: () => { removed = true; off(); } };
 }
