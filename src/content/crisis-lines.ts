@@ -1,6 +1,7 @@
 /**
- * Crisis lines by country, checked 2026-10-23 against each service's own site (or the government's page for emergency
- * numbers). A number that couldn't be confirmed from a primary source is left out.
+ * Crisis lines by country, checked 2026-10-23 against each service's own site, or an official government page where
+ * that was the source that could be read (emergency numbers, Ireland's 50808 on the HSE, India's 181). A number that
+ * couldn't be confirmed from one of those is left out, and so is a cost or name the source didn't state.
  */
 export type RegionId = 'us' | 'ca' | 'uk' | 'ie' | 'au' | 'nz' | 'in' | 'elsewhere';
 
@@ -26,7 +27,7 @@ export const REGIONS: Region[] = [
     lines: [
       { name: '988 Suicide & Crisis Lifeline', how: 'Call or text 988. Free, confidential, 24/7.', links: [{ label: 'Call 988', href: 'tel:988' }, { label: 'Text 988', href: 'sms:988' }] },
       { name: 'Crisis Text Line', how: 'Text HOME to 741741. Free, 24/7.', links: [{ label: 'Text HOME to 741741', href: 'sms:741741', body: 'HOME' }] },
-      { name: 'National Domestic Violence Hotline', how: 'For anyone feeling unsafe with someone. Call 1-800-799-7233, or text START to 88788.', links: [{ label: 'Call', href: 'tel:18007997233' }, { label: 'Text START', href: 'sms:88788', body: 'START' }] },
+      { name: 'National Domestic Violence Hotline', how: 'For anyone feeling unsafe with someone. Call 1-800-799-7233, or text START to 88788. Free, 24/7.', links: [{ label: 'Call', href: 'tel:18007997233' }, { label: 'Text START', href: 'sms:88788', body: 'START' }] },
     ],
   },
   {
@@ -34,7 +35,7 @@ export const REGIONS: Region[] = [
     name: 'Canada',
     emergency: ['911'],
     lines: [
-      { name: '9-8-8 Suicide Crisis Helpline', how: 'Call or text 988, any time, in English or French. Calls are free. Your carrier may charge for texts.', links: [{ label: 'Call 988', href: 'tel:988' }, { label: 'Text 988', href: 'sms:988' }] },
+      { name: '9-8-8: Suicide Crisis Helpline', how: "Call or text 988, any time, in English or French. Calls are toll-free. Your carrier's usual text rates may apply.", links: [{ label: 'Call 988', href: 'tel:988' }, { label: 'Text 988', href: 'sms:988' }] },
     ],
   },
   {
@@ -70,7 +71,7 @@ export const REGIONS: Region[] = [
     name: 'New Zealand',
     emergency: ['111'],
     lines: [
-      { name: '1737, Need to talk?', how: 'Call or text 1737. Free, 24/7.', links: [{ label: 'Call 1737', href: 'tel:1737' }, { label: 'Text 1737', href: 'sms:1737' }] },
+      { name: '1737', how: 'Call or text 1737. Free, 24/7.', links: [{ label: 'Call 1737', href: 'tel:1737' }, { label: 'Text 1737', href: 'sms:1737' }] },
       { name: "Women's Refuge", how: 'Family violence crisisline. Call 0800 733 843, free, 24 hours.', links: [{ label: 'Call', href: 'tel:0800733843' }] },
     ],
   },
@@ -79,14 +80,12 @@ export const REGIONS: Region[] = [
     name: 'India',
     emergency: ['112'],
     lines: [
-      { name: 'Tele-MANAS', how: 'Mental health support from the Ministry of Health. Call 14416 or 1-800-891-4416, 24/7.', links: [{ label: 'Call 14416', href: 'tel:14416' }] },
-      { name: 'Women Helpline', how: 'Call 181. Toll-free, 24 hours.', links: [{ label: 'Call 181', href: 'tel:181' }] },
+      { name: 'Tele-MANAS', how: 'Mental health support from the Ministry of Health. Call 14416, toll-free, 24/7.', links: [{ label: 'Call 14416', href: 'tel:14416' }] },
+      { name: 'Women Helpline', how: 'For women. Call 181, toll-free, 24 hours.', links: [{ label: 'Call 181', href: 'tel:181' }] },
     ],
   },
   { id: 'elsewhere', name: 'Somewhere else', emergency: [], lines: [] },
 ];
-
-export const REGION_IDS = REGIONS.map((r) => r.id);
 
 const BY_COUNTRY: Record<string, RegionId> = { US: 'us', CA: 'ca', GB: 'uk', UK: 'uk', IE: 'ie', AU: 'au', NZ: 'nz', IN: 'in' };
 
