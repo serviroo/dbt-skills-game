@@ -33,7 +33,7 @@ export async function startPreview(dir, { from = 4173, tries = 500, timeoutMs = 
     const url = `http://127.0.0.1:${port}/`;
     const t0 = Date.now();
     while (!gone() && Date.now() - t0 < timeoutMs) {
-      if (log.includes(`127.0.0.1:${port}`)) {
+      if (log.replace(/\x1b\[[0-9;]*m/g, '').includes(`127.0.0.1:${port}`)) {
         try {
           const response = await fetch(new URL(probe, url), { signal: AbortSignal.timeout(2000) });
           if (!response.ok) throw new Error(`preview answered HTTP ${response.status}`);

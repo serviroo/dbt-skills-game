@@ -559,7 +559,7 @@ export const checks = {
     for (const mode of [[], ['--update']]) {
       const tmp = fs.mkdtempSync(path.join(scratchDir(), 'tmp-'));
       const p2 = await freePort();
-      const v = await run(['scripts/pwa-verify.mjs', '--browser=chromium', `--dist=${base}`, `--out=${path.join(scratchDir(), 'pv')}`, `--port=${p2}`, ...mode], { env: { PLAYWRIGHT_BROWSERS_PATH: none, TMPDIR: tmp }, timeoutMs: 30000 });
+      const v = await run(['scripts/pwa-verify.mjs', '--browser=chromium', `--dist=${base}`, `--out=${path.join(scratchDir(), 'pv')}`, `--port=${p2}`, ...mode], { env: { PLAYWRIGHT_BROWSERS_PATH: none, TMPDIR: tmp, FORCE_COLOR: '1', NO_COLOR: undefined }, timeoutMs: 30000 });
       fs.writeFileSync(path.join(out, `pwa-verify-no-browser${mode.join('')}.log`), v.out);
       expect(!v.timedOut && !v.leaked, `pwa-verify ${mode.join(' ')} hung or left a process (timed out ${v.timedOut}, leaked ${v.leaked})`);
       expect(v.code === 1, `pwa-verify ${mode.join(' ')} exited ${v.code} when the browser could not start`);
