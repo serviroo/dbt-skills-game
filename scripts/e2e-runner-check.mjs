@@ -77,12 +77,13 @@ export const scenarios = {
     const { page } = await h.open({ 'dbt.app.v1': h.SEEN });
     h.expect(await page.title() === 'The Lantern', 'app did not load');
     await h.shot(page, '${name}-clean');
+    return { kept: [h.flags.probe] };
   },
 };
 `, { flag: 'wx' });
   const selected = await run('scenario-from-other-cwd', [`--scenario=${name}-clean`, '--probe=a=b']);
   assert.equal(selected.code, 0);
-  assert.deepEqual(selected.report.scenarios.map((s) => [s.name, s.file, s.ok]), [[`${name}-clean`, name, true]]);
+  assert.deepEqual(selected.report.scenarios.map((s) => [s.name, s.file, s.ok, s.result]), [[`${name}-clean`, name, true, { kept: ['a=b'] }]]);
   const failed = await run('failure-and-continuation', [`--file=${name}`, '--probe=a=b']);
   assert.notEqual(failed.code, 0);
   assert(failed.report.scenarios.some((s) => s.name === `${name}-fail` && !s.ok && /deliberate runner failure/.test(s.error)));

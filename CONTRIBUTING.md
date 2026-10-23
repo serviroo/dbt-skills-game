@@ -103,6 +103,19 @@ nothing scrolls or sticks out sideways, every button, link and field takes taps 
 text is at least 16 px. Screens in its `ENFORCED` list fail the run. Every other screen passes and prints its problems
 as a todo list, also kept in `report.json`. Once a screen fits, add it to `ENFORCED`.
 
+### Screen reader names
+
+`node scripts/e2e.mjs --file=a11y-names` opens every companion screen at 390x844 and reads names from the browser's
+own accessibility tree. It checks that every button, link, field and switch a screen reader can reach has a name, every
+picture is either named or hidden from screen readers (`aria-hidden="true"`, or `alt=""` on an `img`), no id is used
+twice, every `aria-labelledby` and `aria-describedby` points at an element that exists, and nothing a player can reach
+with Tab is hidden from screen readers. As in the layout check, screens in its `ENFORCED` list fail the run and the
+rest print a todo list. `a11y-names-planted` adds one of each problem to Home, plus look-alikes that are fine, and
+fails unless the check reports exactly the problems.
+
+To fix a screen, give each control a short, accurate name that says what it does. Hide only pictures that are purely
+decorative. Never hide a control or a picture a player needs just to pass the check.
+
 Run one file with `node scripts/e2e.mjs --file=<name>`, or one scenario with `--scenario=<scenario name>`. The browser
 renders with SwiftShader by default so local runs match CI. Add `--gpu` to render on this machine's GPU instead, or
 `--headed` to watch it.
@@ -112,6 +125,20 @@ real command. It creates temporary scenario files and removes them when it finis
 
 The intro is 3D, so for a real-GPU run on another machine, start a Playwright launch server there and pass
 `--ws=<its endpoint> --host=<this machine's address>`, so the dev server is reachable from that browser.
+
+### Skill check
+
+`node scripts/e2e.mjs --file=skill-check` checks every skill in `SKILLS`. On a returning save at 390x844 it opens each
+one from the Skills list and taps the first option on every screen until the skill's own end screen. Moving on to
+another skill, the Safe Zone or Home first counts as a problem. That walk must take at most 12 taps and credit the
+skill once, and its timers must stay skippable while they run. Then it opens the skill again for each screen of the
+walk, walks back to that screen and taps "Leave this skill". Each time it must go straight to Home with no confirm
+and still credit the skill. It also reads each skill's copy from `src/content/dbt.ts`: no em dashes, no diagnosis
+words, no set phrases DESIGN.md rules out (unsafe wording, "less fortunate", abandonment cues, body, food or weight
+numbers), no hard-coded "Player", timers of 20 to 90 seconds, and a caution plus a "breathe instead" option on
+cold-water or hard-exercise steps. Skills in its `ENFORCED` list fail the run. Every other skill's problems print as a
+todo list, also kept in `report.json`. Once a skill passes, add it to `ENFORCED`. Add `--skills=<id>,<id>` to check
+only those skills; an id that doesn't exist fails the run.
 
 ## Static hosting
 
