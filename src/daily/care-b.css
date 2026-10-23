@@ -345,6 +345,7 @@
 .dq-moment {
   --chrome: calc(106px + var(--safe-top) + var(--safe-bottom));
   position: relative;
+  container-type: inline-size;
   max-width: 560px;
   min-height: calc(100dvh - var(--chrome));
   margin: 0 auto;
@@ -361,7 +362,11 @@
 }
 .dq-mo-halo {
   position: absolute;
-  inset: -24%;
+  top: 50%;
+  left: 50%;
+  width: min(148%, 100cqi);
+  aspect-ratio: 1;
+  translate: -50% -50%;
   border-radius: 50%;
   background: radial-gradient(closest-side, rgba(123, 63, 228, 0.13), rgba(79, 184, 255, 0.05) 55%, transparent);
   pointer-events: none;
