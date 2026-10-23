@@ -4,6 +4,12 @@
  */
 
 
+export const CRYSTAL_COPY = {
+  incomplete: "This Save Crystal is incomplete. Some {items} couldn't be read. Keep your other backups and try again after reopening the app.",
+  choicesUnsaved: "Some choices couldn't be saved on this device. Keep the Save Crystal file.",
+  storySkipped: "Some story pages or cards couldn't be added. Keep the Save Crystal file.",
+};
+
 /** One per visit day, in order. A gap never skips ahead or piles up; the next line simply arrives. */
 export const DAILY_GIFTS: string[] = [
   'Login reward: one ordinary day, fully yours.',

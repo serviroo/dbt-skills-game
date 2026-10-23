@@ -1,5 +1,5 @@
 import { LOADOUT, LOADOUT_COPY, MODULES, MODULE_ORDER, RESOURCES_CHECKED, SKILL, SKILLS } from '../content/dbt';
-import { ABOUT } from '../content/daily-lines';
+import { ABOUT, CRYSTAL_COPY } from '../content/daily-lines';
 import type { App, ScreenOut } from './app';
 import { glyph, icon, mothSVG } from './art';
 import { skillCard } from './hub';
@@ -16,6 +16,7 @@ import { Slime } from './bubbles';
 import { inventorySection, rosterSection, brambleNap } from './roster';
 import { wardrobePanel } from './wardrobe';
 import { DEFAULT_COMPANION, DEFAULT_NAME } from '../core/you';
+import { exportPreferences, restorePreferences } from './crystal';
 
 const pageHead = (title: string, sub?: string) => h('header', { class: 'dq-pagehead' }, h('h1', { class: 'dq-h1', 'data-focus': '', text: title }), sub ? p(sub, 'dq-text dq-pagesub') : null);
 
@@ -476,7 +477,10 @@ export function diaryScreen(app: App): ScreenOut {
   let range = 7;
   const pre = h('pre', { class: 'dq-pre' });
   const status = h('span', { class: 'dq-hint', 'aria-live': 'polite' });
-  const refresh = () => (pre.textContent = diaryText(st, range));
+  const refresh = () => {
+    keep();
+    return (pre.textContent = diaryText(st, range));
+  };
   refresh();
   const exportPanel = panel(
     { title: 'Export', ic: icon('export'), cls: 'dq-export' },
@@ -485,13 +489,13 @@ export function diaryScreen(app: App): ScreenOut {
       range = Number(v ?? 7);
       refresh();
     }, { labels: ['7 days', '14 days', '30 days'], cls: 'dq-seg--range' })),
-    h('details', { class: 'dq-details' }, h('summary', { text: 'Preview' }), pre),
+    h('details', { class: 'dq-details', ontoggle: refresh }, h('summary', { text: 'Preview' }), pre),
     h(
       'div',
       { class: 'dq-actions' },
-      btn('Copy text', async () => (status.textContent = (await copyText(diaryText(st, range))) ? 'Copied.' : 'Open the preview and select the text.'), { kind: 'quiet', ic: 'copy' }),
+      btn('Copy text', async () => (status.textContent = (await copyText(refresh())) ? 'Copied.' : 'Open the preview and select the text.'), { kind: 'quiet', ic: 'copy' }),
       btn('Share or save', async () => {
-        const r = await shareOrSave(diaryText(st, range), `diary-card-${today}.txt`, 'text/plain');
+        const r = await shareOrSave(refresh(), `diary-card-${today}.txt`, 'text/plain');
         status.textContent = r === 'saved' ? 'Saved as a text file.' : r === 'shared' ? 'Shared.' : '';
       }, { kind: 'quiet', ic: 'export' }),
       status,
@@ -718,6 +722,10 @@ export function settingsScreen(app: App): ScreenOut {
     }
     if (!data) return "That file doesn't look like a Save Crystal from this app. Nothing changed.";
     const { saving } = st.merge(data);
+    const choicesSaved = restorePreferences((raw as { preferences?: unknown }).preferences, st, app.opts.volume);
+    app.applyMotion();
+    app.applySound();
+    el.querySelectorAll('[aria-label="Motion"] [role="radio"]').forEach((b, i) => b.setAttribute('aria-checked', String(['system', 'reduce', 'full'][i] === s.settings.motion)));
     app.shown = null;
     const rawArt = (raw as { art?: unknown }).art;
     let art: Awaited<ReturnType<ReturnType<typeof artStore>['importAll']>> | null = null;
@@ -729,11 +737,11 @@ export function settingsScreen(app: App): ScreenOut {
         artFailed = true;
       }
     }
-    const rawStories = (raw as { stories?: { stories?: unknown; chapters?: unknown } | null }).stories;
+    const rawStories = (raw as { stories?: { stories?: unknown; chapters?: unknown; cards?: unknown } | null }).stories;
     let tales: Awaited<ReturnType<ReturnType<typeof storyStore>['importAll']>> | null = null;
     let talesFailed = false;
     const some = (x: unknown) => Array.isArray(x) && x.length > 0;
-    if (rawStories && typeof rawStories === 'object' && (some(rawStories.stories) || some(rawStories.chapters))) {
+    if (rawStories && typeof rawStories === 'object' && (some(rawStories.stories) || some(rawStories.chapters) || rawStories.cards && typeof rawStories.cards === 'object')) {
       try {
         tales = await storyStore(st.key).importAll(rawStories);
       } catch {
@@ -746,7 +754,7 @@ export function settingsScreen(app: App): ScreenOut {
     const parts = [
       !saving
         ? `Restored for this visit. This device isn't saving right now, so keep the Save Crystal file.${counts ? ` Drawings: ${counts}.` : ''}${told ? ` Stories: ${told}.` : ''}`
-        : artFailed || talesFailed
+        : artFailed || talesFailed || art?.skipped || tales?.skipped
           ? 'Restored your progress and lists.'
           : `Restored. Everything in the file was added${too}. Nothing was removed.`,
     ];
@@ -755,7 +763,8 @@ export function settingsScreen(app: App): ScreenOut {
     if (art?.unsaved) parts.push('Some drawings are here for this visit only; keep the Save Crystal file.');
     if (tales?.unsaved) parts.push('Some stories are here for this visit only; keep the Save Crystal file.');
     if (art?.skipped) parts.push("A few drawings in the file couldn't be read and were left out.");
-    if (tales?.skipped) parts.push("A few story pages in the file couldn't be read and were left out.");
+    if (tales?.skipped) parts.push(CRYSTAL_COPY.storySkipped);
+    if (!choicesSaved) parts.push(CRYSTAL_COPY.choicesUnsaved);
     return parts.join(' ');
   };
   file.addEventListener('change', async () => {
@@ -854,12 +863,14 @@ export function settingsScreen(app: App): ScreenOut {
           'div',
           { class: 'dq-actions' },
           btn('Save Crystal', async () => {
+            app.opts.volume?.flush();
             const art = await artStore(st.key).exportAll();
-            const { stories, chapters, incomplete } = await storyStore(st.key).exportAll();
-            const r = await shareOrSave(st.exportJSON({ art: art.records, stories: { stories, chapters } }), `save-crystal-${st.today()}.json`, 'application/json');
-            const missing = [art.incomplete ? 'drawings' : '', incomplete ? 'stories' : ''].filter(Boolean).join(' and ');
+            const { stories, chapters, cards, incomplete } = await storyStore(st.key).exportAll();
+            const choices = exportPreferences(st.key);
+            const missing = [art.incomplete ? 'drawings' : '', incomplete ? 'stories' : '', choices.incomplete ? 'choices' : ''].filter(Boolean).join(' and ');
+            const r = await shareOrSave(st.exportJSON({ art: art.records, stories: { stories, chapters, cards }, preferences: choices.preferences, incomplete: !!missing }), `save-crystal-${st.today()}.json`, 'application/json');
             const done = r === 'saved' ? 'Saved' : r === 'shared' ? 'Shared' : '';
-            status.textContent = done && missing ? `${done}, but your ${missing} couldn't be read just now, so they aren't in this file. Close and reopen the app, then make another Save Crystal.` : r === 'saved' ? 'Save Crystal downloaded.' : r === 'shared' ? 'Save Crystal shared.' : '';
+            status.textContent = done && missing ? `${done}. ${CRYSTAL_COPY.incomplete.replace('{items}', missing)}` : r === 'saved' ? 'Save Crystal downloaded.' : r === 'shared' ? 'Save Crystal shared.' : '';
           }, { kind: 'quiet', ic: 'export' }),
           btn('Restore', () => file.click(), { kind: 'quiet', ic: 'import' }),
           btn('Diary card text', () => app.go({ name: 'diary' }), { kind: 'link' }),

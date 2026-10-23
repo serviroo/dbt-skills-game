@@ -9,6 +9,7 @@ import { ACCENT_IDS, CARD_BACK_IDS, PLATE_IDS, SHADOW_IDS, THEME_IDS, TITLE_IDS,
 import { YOU_KEY, cleanName, readYou, writeYou } from '../core/you';
 
 export const SCHEMA = 1;
+const CRYSTAL_SCHEMA = 2;
 export const DEFAULT_KEY = 'dbt.lantern.v1';
 export const APP_ID = 'the-quiet-lantern';
 export const ROW_CAP = { emotions: 24, urges: 16 } as const;
@@ -108,7 +109,7 @@ const LIST_KEYS = ['comfort', 'activities', 'reasons', 'people'] as const;
 const DAY_FLAGS = ['giftDay', 'cardDay', 'greetDay', 'checkinDay'] as const;
 const GONE_CAP = 1000;
 /** Top-level fields this build reads (and the ones only a Save Crystal carries); any other is kept as it was stored. */
-const KNOWN = new Set(['v', 'created', 'events', 'diary', 'lists', 'maps', 'lines', 'settings', 'flags', 'gone', 'setAt', 'profile', 'app', 'exported', 'art', 'stories']);
+const KNOWN = new Set(['v', 'created', 'events', 'diary', 'lists', 'maps', 'lines', 'settings', 'flags', 'gone', 'setAt', 'profile', 'app', 'exported', 'art', 'stories', 'preferences', 'incomplete']);
 export interface State {
   v: number;
   created: number;
@@ -336,7 +337,7 @@ export function normalize(raw: unknown): State | null {
   if (!isObj(raw)) return null;
   if (raw.v !== undefined && typeof raw.v !== 'number') return null;
   const v = typeof raw.v === 'number' ? raw.v : 0;
-  if (v > SCHEMA) return null;
+  if (v > SCHEMA && (raw.app !== APP_ID || v > CRYSTAL_SCHEMA)) return null;
   if (!Array.isArray(raw.events)) return null;
   if (raw.app !== undefined && raw.app !== APP_ID) return null;
   const base = freshState(num(raw.created) ?? Date.now());
@@ -871,7 +872,7 @@ export class Store {
    * shadow's name come from the file only where this device has no change time for that choice (the player never set it here),
    * so a new device gets them back; one the player made here, a cleared name included, always wins. A choice taken from the
    * file takes the file's change time too, never later than this device's now (now when the file has none), so another
-   * open copy doesn't see it as older than its own default. Sound and motion stay as they are on this device, and the
+   * open copy doesn't see it as older than its own default. Explicit sound and motion choices stay on this device, and the
    * file's removals are not applied.
    */
   merge(other: State) {
@@ -906,8 +907,9 @@ export class Store {
     addRows('urgeRows', rowsOf('urges', other.settings.urgeRows), ROW_CAP.urges);
     const now = this.now();
     const blank = freshState(0);
-    for (const k of PROFILE_SET_KEYS) {
+    for (const k of ['sound', 'motion', ...PROFILE_SET_KEYS] as SetKey[]) {
       if (own(this.state.setAt, k)) continue;
+      if ((k === 'sound' || k === 'motion') && getSet(this.state, k) !== getSet(blank, k)) continue;
       const ov = getSet(other, k);
       const ft = own(other.setAt, k) ? other.setAt[k] : undefined;
       const timed = typeof ft === 'number' && ft > 0;
@@ -922,6 +924,6 @@ export class Store {
   /** The Save Crystal, from what is stored now. extra carries what lives outside this state (drawings from IndexedDB). */
   exportJSON(extra: Record<string, unknown> = {}) {
     this.sync();
-    return JSON.stringify({ app: APP_ID, exported: new Date(this.now()).toISOString(), ...stored(this.state), ...extra });
+    return JSON.stringify({ app: APP_ID, exported: new Date(this.now()).toISOString(), ...stored(this.state), v: CRYSTAL_SCHEMA, ...extra });
   }
 }
