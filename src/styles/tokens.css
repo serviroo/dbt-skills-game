@@ -3,21 +3,21 @@
   src: url('/fonts/jost.woff2') format('woff2');
   font-weight: 100 900;
   font-style: normal;
-  font-display: block;
+  font-display: swap;
 }
 @font-face {
   font-family: 'Jost';
   src: url('/fonts/jost-italic.woff2') format('woff2');
   font-weight: 100 900;
   font-style: italic;
-  font-display: block;
+  font-display: swap;
 }
 @font-face {
   font-family: 'Bodoni Moda';
   src: url('/fonts/bodoni-moda.woff2') format('woff2');
   font-weight: 400 900;
   font-style: normal;
-  font-display: block;
+  font-display: swap;
 }
 
 :root {

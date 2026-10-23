@@ -29,11 +29,8 @@ async function boot() {
     bindClock(() => s.time);
     s.onUpdate(() => tickUI());
   } else useRealClock();
-  await Promise.race([
-    Promise.all(['16px Jost', 'italic 16px Jost', '700 16px "Bodoni Moda"'].map((f) => document.fonts.load(f))),
-    new Promise((r) => setTimeout(r, 2500)),
-  ]);
-  await document.fonts.ready;
+  const fonts = ['16px Jost', 'italic 16px Jost', '700 16px "Bodoni Moda"'].map((f) => document.fonts.load(f));
+  await Promise.race([Promise.allSettled([...fonts, document.fonts.ready]), new Promise((r) => setTimeout(r, 2500))]);
   if (stage && params.lab && labs[params.lab]) {
     const m = await labs[params.lab]();
     await (m.lab ?? m.characterLab ?? m.windowLab)?.(stage);

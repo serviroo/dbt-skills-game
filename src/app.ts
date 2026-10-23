@@ -1,11 +1,11 @@
 import type { Stage } from './core/stage';
 import { params } from './core/params';
 import { endCard, letterView, namePrompt, rewardCards, showTitle, uiSounds } from './ui/cutscene-ui';
-import { windowSounds, type WindowKind } from './ui/lantern-window';
+import { lanternMessage, windowSounds, type WindowKind } from './ui/lantern-window';
 import { useRealClock } from './ui/anim';
 import type { AudioLike } from './cutscene/director';
 import { loggingAudio } from './cutscene/audio-log';
-import { INTRO, REWARDS } from './content/intro';
+import { INTRO, NEW_VERSION, REWARDS } from './content/intro';
 import type { VolumeCtrl } from './audio/prefs';
 import { volumeButton, type VolumeButton } from './ui/volume';
 import { readYou } from './core/you';
@@ -141,16 +141,27 @@ function mountCutsceneVolume(audio: AppAudio | null) {
   document.getElementById('ui')!.append(cutsceneVol);
 }
 
+async function closingCards(audio: AppAudio | null) {
+  audio?.music?.to('reward', 1.5);
+  await rewardCards(REWARDS);
+  await letterView();
+  audio?.music?.to('end', 2);
+  return endCard();
+}
+
+async function offerReload(err: unknown): Promise<never> {
+  console.warn('[app] a file for this version is gone, offering a reload', err);
+  await lanternMessage({ kind: 'info', icon: 'info', title: NEW_VERSION.title, html: NEW_VERSION.html, actions: [{ label: NEW_VERSION.action, value: 'reload' }] });
+  location.reload();
+  return new Promise<never>(() => undefined);
+}
+
 /** No WebGL on this device: the title, rewards, letter and end card are DOM only, so the player still gets every word. */
 async function playWithoutStage(audio: AppAudio | null, state: AppState) {
   mountCutsceneVolume(audio);
   await showTitle(() => audio?.unlock?.());
   await askNames();
-  audio?.music?.to('reward', 1.5);
-  await rewardCards(REWARDS);
-  await letterView();
-  audio?.music?.to('end', 2);
-  const choice = await endCard();
+  const choice = await closingCards(audio);
   state.seenCutscene = true;
   save(state);
   if (choice === 'replay') {
@@ -164,8 +175,18 @@ async function playIntro(stage: Stage, audio: AppAudio | null, state: AppState) 
   mountCutsceneVolume(audio);
   await showTitle(() => audio?.unlock?.());
   await askNames();
-  const { playCutscene } = await import('./cutscene/director');
-  const choice = await playCutscene(stage, audio ?? undefined, { skippable: state.seenCutscene });
+  const { playCutscene } = await import('./cutscene/director').catch(offerReload);
+  let choice: 'replay' | 'enter';
+  try {
+    choice = await playCutscene(stage, audio ?? undefined, { skippable: state.seenCutscene });
+  } catch (err) {
+    console.warn('[intro] the scene failed, finishing without it', err);
+    useRealClock();
+    stage.stop();
+    stage.canvas.style.opacity = '0';
+    document.getElementById('ui')!.querySelectorAll('.ov, .lb, .ui-skip, .sw-layer').forEach((n) => n.remove());
+    choice = await closingCards(audio);
+  }
   state.seenCutscene = true;
   save(state);
   if (choice === 'replay') {
@@ -188,7 +209,7 @@ async function enterDaily(stage: Stage | null, audio: AppAudio | null, state: Ap
   cutsceneVol = null;
   const k = Object.keys(dailyMods)[0];
   if (!k) return;
-  const m = (await dailyMods[k]()) as { mountDaily: (r: HTMLElement, o: unknown) => { unmount(): void; settled: Promise<void>; route(): string } };
+  const m = (await dailyMods[k]().catch(offerReload)) as { mountDaily:(r: HTMLElement, o: unknown) => { unmount(): void; settled: Promise<void>; route(): string } };
   const daily = m.mountDaily(root, {
     onReplay: () => {
       state.seenCutscene = true;

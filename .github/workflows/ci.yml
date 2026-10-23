@@ -28,7 +28,7 @@ jobs:
           node-version: 20.x
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium webkit
+      - run: npx playwright install --with-deps chromium webkit firefox
       - run: npx tsc --noEmit -p .
       - name: Stored ids
         run: npm run check:ids
@@ -43,6 +43,8 @@ jobs:
         run: node scripts/e2e.mjs
       - name: E2E runner contract
         run: node scripts/e2e-runner-check.mjs
+      - name: PWA failure paths and Firefox storage
+        run: node scripts/e2e/me-93-pwa-resilience.e2e.mjs
       - uses: actions/upload-artifact@v7
         if: always()
         with:
