@@ -168,6 +168,10 @@ export const COWRITER_NEXT = {
     'Don’t look at me like that,” {who} said, smiling.',
     'That’s not what happened,” {who} said quietly.',
     'Okay. Okay,” {who} said. “Let’s go.”',
+    'Did you hear that?” came a whisper.',
+    'I mean it.”',
+    'Not yet. Not like this.”',
+    'We can’t stay here.” Nobody argued.',
   ],
   speechMid: [
     'and I mean it,” {who} said.',
@@ -176,6 +180,10 @@ export const COWRITER_NEXT = {
     'or maybe I do,” {who} said.',
     'because nobody ever told me,” said {who2}.',
     'and that scares me a little,” {who} said.',
+    'and I mean it.”',
+    'but I want to find out.”',
+    'or maybe I do.”',
+    'if that’s okay.”',
   ],
   talk: [
     '“Did you hear that?” {who} asked.',

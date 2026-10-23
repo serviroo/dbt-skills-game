@@ -320,6 +320,42 @@ export const scenarios = {
     return got[0];
   },
 
+  async 'cowriter-speech-without-names'(h) {
+    const L = await lines(h);
+    const s = await openCtx(h);
+    const { page } = s;
+    await newStory(h, page);
+    const out = {};
+    for (const [key, text, set] of [
+      ['open', 'The old house was quiet.\n"We should go, ', L.COWRITER_NEXT.speechMid],
+      ['closed', 'The old house was quiet.\n"We should go. ', L.COWRITER_NEXT.speech],
+    ]) {
+      await write(page, 'The Old House', text);
+      await caretAt(page, text.length);
+      const cards = await ask(h, page, 'continue');
+      h.expect(cards.length === 3 && cards.every((c) => fits(c, set)), `${key} quote with no names: not three lines that finish the speech: ` + JSON.stringify(cards));
+      h.expect(!cards.some((c) => /\{|\}|undefined/.test(c)), `${key} quote with no names: a card has an unfilled slot: ` + JSON.stringify(cards));
+      out[key] = cards;
+    }
+    onlyOwnGets(h, s, 'speech without names');
+    h.expect(!s.errors.length, 'Page errors: ' + s.errors.join(' | '));
+    return out;
+  },
+
+  async 'cowriter-polish-keeps-line-breaks'(h) {
+    const s = await openCtx(h);
+    const { page } = s;
+    await newStory(h, page);
+    const messy = 'we walked home\nhome was dark';
+    await write(page, 'Home', messy);
+    await caretAt(page, 0, messy.length);
+    const pol = await ask(h, page, 'polish');
+    h.expect(pol[0] === 'We walked home\nhome was dark', 'Polish merged two lines that end and start with the same word: ' + JSON.stringify(pol));
+    onlyOwnGets(h, s, 'polish line breaks');
+    h.expect(!s.errors.length, 'Page errors: ' + s.errors.join(' | '));
+    return { pol };
+  },
+
   async 'cowriter-panel-sizes'(h) {
     const sizes = [
       { width: 390, height: 844 },

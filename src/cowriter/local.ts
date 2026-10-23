@@ -174,7 +174,7 @@ function tidy(selection: string, before: string) {
     .replace(/([,;:])(?=\p{L})/gu, '$1 ')
     .replace(/(\p{Ll}[.!?])(?=\p{Lu})/gu, '$1 ');
   for (let i = 0; i < 3; i++) {
-    const next = s.replace(/(?<![\p{L}\p{N}])(\p{L}+)(\s+)\1(?![\p{L}\p{N}])/giu, (m, w: string) => (KEEP_DOUBLE.has(w.toLowerCase()) ? m : w));
+    const next = s.replace(/(?<![\p{L}\p{N}])(\p{L}+)([ \t]+)\1(?![\p{L}\p{N}])/giu, (m, w: string) => (KEEP_DOUBLE.has(w.toLowerCase()) ? m : w));
     if (next === s) break;
     s = next;
   }
