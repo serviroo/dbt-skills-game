@@ -5,6 +5,7 @@
  */
 import { canvasBlob, INKS, PAGE, renderDrawing, type Paper, type Stroke } from './ink';
 import { connectionLost, uid, validDay } from './store';
+import { ART_DB, BESIDE } from '../core/stored-names';
 
 export interface DrawingMeta {
   id: string;
@@ -153,10 +154,10 @@ export class ArtStore {
     return new Promise((resolve) => {
       try {
         if (typeof indexedDB === 'undefined') throw new Error('no idb');
-        const open = indexedDB.open(this.name, 1);
+        const open = indexedDB.open(this.name, ART_DB.version);
         open.onupgradeneeded = () => {
           const db = open.result;
-          for (const s of ['meta', 'strokes', 'thumbs', 'drafts']) if (!db.objectStoreNames.contains(s)) db.createObjectStore(s);
+          for (const s of ART_DB.stores) if (!db.objectStoreNames.contains(s)) db.createObjectStore(s);
         };
         open.onsuccess = () => {
           const db = open.result;
@@ -706,6 +707,6 @@ const stores = new Map<string, ArtStore>();
 /** One store per storage key, so the lab never touches the real drawings. */
 export function artStore(key: string) {
   let s = stores.get(key);
-  if (!s) stores.set(key, (s = new ArtStore(`${key}.art`)));
+  if (!s) stores.set(key, (s = new ArtStore(`${key}${BESIDE.art}`)));
   return s;
 }

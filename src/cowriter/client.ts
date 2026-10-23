@@ -2,6 +2,8 @@
  * The co-writer's only door to the network. Loaded with import() on the first Ask, never before.
  * Sends one request per Ask with the capped fields of the contract and nothing else; no analytics, no logging.
  */
+import { COWRITER_KEY } from '../core/stored-names';
+
 export type CowriteMode = 'continue' | 'whatif' | 'polish' | 'questions';
 export interface CowriteTurn {
   role: 'me' | 'cowriter';
@@ -26,7 +28,6 @@ export type CowriteRes =
   | { kind: 'toolong' };
 
 export const CAPS = { title: 120, before: 4000, selection: 2000, after: 600, notes: 1500, steer: 240, history: 4, turn: 600 } as const;
-const KEY = 'dbt.cowriter.v1';
 const TIMEOUT_MS = 90000;
 const MODES: CowriteMode[] = ['continue', 'whatif', 'polish', 'questions'];
 
@@ -62,7 +63,7 @@ interface Cred {
 }
 function readCred(): Partial<Cred> {
   try {
-    const v = JSON.parse(localStorage.getItem(KEY) ?? 'null');
+    const v = JSON.parse(localStorage.getItem(COWRITER_KEY) ?? 'null');
     if (v && typeof v === 'object') return { install: str(v.install) || undefined, key: str(v.key) || undefined };
   } catch {
     /* unreadable: start over */
@@ -71,7 +72,7 @@ function readCred(): Partial<Cred> {
 }
 function writeCred(c: Cred) {
   try {
-    localStorage.setItem(KEY, JSON.stringify(c));
+    localStorage.setItem(COWRITER_KEY, JSON.stringify(c));
   } catch {
     /* this session still has it in memory */
   }

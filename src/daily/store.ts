@@ -6,16 +6,18 @@
 import { MODULES, ROTATION, SKILL, type StatId } from '../content/dbt';
 import { DAILY_GIFTS, WARDEN_XP, RANK_XP, RANKS, STAT_BASE, TODAY_LINES, type DayLine } from '../content/daily-lines';
 import { ACCENT_IDS, CARD_BACK_IDS, PLATE_IDS, SHADOW_IDS, THEME_IDS, TITLE_IDS, type AccentId, type CardBackId, type PlateId, type ShadowId, type ThemeId, type TitleId } from '../content/roster-lines';
-import { YOU_KEY, cleanName, readYou, writeYou } from '../core/you';
+import { cleanName, readYou, writeYou } from '../core/you';
+import { APP_ID, BESIDE, SAVE_KEY, YOU_KEY } from '../core/stored-names';
 
 export const SCHEMA = 1;
-export const DEFAULT_KEY = 'dbt.lantern.v1';
-export const APP_ID = 'the-quiet-lantern';
 export const ROW_CAP = { emotions: 24, urges: 16 } as const;
 const DAY_TURN_HOURS = 6;
 
 export type EvKind = 'visit' | 'skill' | 'checkin' | 'diary' | 'safe' | 'rest' | 'card' | 'feedback' | 'art' | 'line' | 'story';
-const EV_KINDS: EvKind[] = ['visit', 'skill', 'checkin', 'diary', 'safe', 'rest', 'card', 'feedback', 'art', 'line', 'story'];
+export const EV_KINDS: EvKind[] = ['visit', 'skill', 'checkin', 'diary', 'safe', 'rest', 'card', 'feedback', 'art', 'line', 'story'];
+export const EV_DATA = { checkin: ['feel', 'level'], feedback: ['answer'], art: ['kind'], rest: ['title', 'quiet'], line: ['id'] } as const satisfies Partial<Record<EvKind, readonly string[]>>;
+type EvData<K extends EvKind> = Partial<Record<K extends keyof typeof EV_DATA ? (typeof EV_DATA)[K][number] : never, string | number | boolean | null>>;
+export const MOTIONS = ['system', 'reduce', 'full'] as const;
 export interface Ev {
   id: string;
   t: number;
@@ -68,7 +70,7 @@ export interface LineEntry {
 }
 export interface Settings {
   sound: boolean;
-  motion: 'system' | 'reduce' | 'full';
+  motion: (typeof MOTIONS)[number];
   emotionRows: string[];
   urgeRows: string[];
   theme: ThemeId;
@@ -246,6 +248,7 @@ function putSet(s: State, k: SetKey, v: SetVal) {
 function canon(s: State) {
   const set = (l: object[]) => l.map(flat).sort();
   return JSON.stringify([
+    s.created,
     LIST_KEYS.map((k) => set(s.lists[k])),
     set(s.maps),
     Object.entries(s.gone).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
@@ -439,7 +442,7 @@ export function normalize(raw: unknown): State | null {
   if (isObj(raw.settings)) {
     const s = raw.settings;
     if (typeof s.sound === 'boolean') base.settings.sound = s.sound;
-    if (s.motion === 'system' || s.motion === 'reduce' || s.motion === 'full') base.settings.motion = s.motion;
+    base.settings.motion = oneOf(s.motion, MOTIONS, base.settings.motion);
     if (Array.isArray(s.emotionRows)) base.settings.emotionRows = s.emotionRows.map((r) => str(r, 60)).filter(Boolean).slice(0, ROW_CAP.emotions);
     if (Array.isArray(s.urgeRows)) base.settings.urgeRows = s.urgeRows.map((r) => str(r, 60)).filter(Boolean).slice(0, ROW_CAP.urges);
   }
@@ -483,7 +486,7 @@ export class Store {
   private lastRaw: string | null = null;
 
   constructor(
-    readonly key = DEFAULT_KEY,
+    readonly key = SAVE_KEY,
     readonly clock: () => number = () => Date.now(),
     initial?: State,
   ) {
@@ -584,7 +587,7 @@ export class Store {
    * this store took a name from it (and needs a save).
    */
   private mirrorYou() {
-    if (this.key !== DEFAULT_KEY) return false;
+    if (this.key !== SAVE_KEY) return false;
     const s = this.state.settings, at = this.state.setAt;
     const m = readYou();
     let took = false, behind = !m;
@@ -625,7 +628,7 @@ export class Store {
 
   private keepCopy(raw: string) {
     try {
-      localStorage.setItem(`${this.key}.unreadable.${Date.now()}`, raw);
+      localStorage.setItem(`${this.key}${BESIDE.unreadable}.${Date.now()}`, raw);
       return true;
     } catch {
       return false;
@@ -699,6 +702,7 @@ export class Store {
 
   /** What only ever grows: events by id, diary per field, the newer line per day, raised flags, the later day flags. */
   private absorbProgress(other: State) {
+    this.state.created = Math.min(this.state.created, other.created);
     if (this.addById(this.state.events, other.events)) this.state.events.sort((a, b) => a.t - b.t);
     this.mergeDiary(other.diary);
     const lines = new Map(this.state.lines.map((l) => [l.day, l]));
@@ -765,8 +769,8 @@ export class Store {
   }
 
   /** The only way progress changes. xp is clamped to >= 0. */
-  add(k: EvKind, xp: number, extra: Partial<Ev> = {}) {
-    const ev: Ev = { id: uid(), t: this.now(), day: this.today(), k, xp: Math.max(0, Math.round(xp)), ...extra };
+  add<K extends EvKind>(k: K, xp: number, extra: Omit<Partial<Ev>, 'data'> & { data?: EvData<K> } = {}) {
+    const ev: Ev = { id: uid(), t: this.now(), day: this.today(), k, xp: Math.max(0, Math.round(xp)), ...(extra as Partial<Ev>) };
     ev.xp = Math.max(0, ev.xp);
     this.state.events.push(ev);
     this.save();

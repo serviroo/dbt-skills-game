@@ -26,7 +26,7 @@ for (const [w, h, dsf] of [[375, 800, Number(process.env.DSF ?? 1)], [1440, 900,
   await page.click('.pwa-hint .sw-btn');
   const r = await page.evaluate(() => window.__hint);
   await page.waitForTimeout(600);
-  const left = await page.evaluate(() => ({ hint: !!document.querySelector('.pwa-hint'), stored: localStorage.getItem('system.pwa.installHint') }));
+  const left = await page.evaluate(() => ({ hint: !!document.querySelector('.pwa-hint'), stored: localStorage.getItem('dbt.install-hint.v1') }));
   await page.screenshot({ path: `${outDir}/hint-${w}-after.png` });
   console.log(`${w}x${h}`, JSON.stringify({ resolved: r, ...left }), errs.length ? 'errors: ' + errs.slice(0, 5).join(' | ') : 'no errors');
   await page.close();

@@ -4,6 +4,7 @@
  */
 import { animate } from '../ui/anim';
 import type { CowriteReq, CowriteRes, CowriteTurn } from '../cowriter/client';
+import { CARE_KEY } from '../core/stored-names';
 import type { App, Route, ScreenOut } from './app';
 import { icon } from './art';
 import { dayDiff, dayKey } from './store';
@@ -40,7 +41,6 @@ export const STORY = {
 };
 export const MODE_LABEL: Record<CardMode, string> = { continue: 'Keep going', whatif: 'What if', polish: 'Help with this bit', questions: 'Ask me questions' };
 const MODES: CardMode[] = ['continue', 'whatif', 'polish', 'questions'];
-const CARE_FLAG = 'dbt.story.care';
 const UNDO_CAP = 200;
 /** Care shows at most once per page life even when sessionStorage can't keep the flag. */
 let cared = false;
@@ -1032,13 +1032,13 @@ export function writeScreen(app: App, route: Route): ScreenOut {
   const care = () => {
     if (cared) return;
     try {
-      if (sessionStorage.getItem(CARE_FLAG)) return;
+      if (sessionStorage.getItem(CARE_KEY)) return;
     } catch {
       /* private mode: the page's own flag keeps it to once */
     }
     cared = true;
     try {
-      sessionStorage.setItem(CARE_FLAG, '1');
+      sessionStorage.setItem(CARE_KEY, '1');
     } catch {
       /* private mode: still show it this once */
     }

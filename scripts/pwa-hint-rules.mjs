@@ -6,7 +6,7 @@ const iphone = devices['iPhone 15'];
 const safariUA = iphone.userAgent;
 const cases = [
   { name: 'iPhone Safari, first visit', ua: safariUA, expect: true },
-  { name: 'iPhone Safari, already dismissed', ua: safariUA, pre: () => localStorage.setItem('system.pwa.installHint', 'dismissed'), expect: false },
+  { name: 'iPhone Safari, already dismissed', ua: safariUA, pre: () => localStorage.setItem('dbt.install-hint.v1', 'dismissed'), expect: false },
   { name: 'iPhone Safari, Home Screen app', ua: safariUA, init: () => Object.defineProperty(navigator, 'standalone', { get: () => true }), expect: false },
   { name: 'iPhone Safari, storage blocked', ua: safariUA, init: () => Object.defineProperty(window, 'localStorage', { get() { throw new Error('blocked'); } }), expect: false },
   { name: 'iPhone Chrome', ua: safariUA.replace('Version/', 'CriOS/124.0 Version/'), expect: false },

@@ -16,8 +16,7 @@ import type { Route } from '../daily/app';
 import { SKILLS } from '../content/dbt';
 import { TODAY_LINES } from '../content/daily-lines';
 import { addDays, dayKey, freshState, rankFor, type Ev, type State } from '../daily/store';
-
-const KEY = 'dbt.lantern.lab';
+import { BESIDE, LAB_SAVE_KEY } from '../core/stored-names';
 
 function seedState(kind: string, now: number): State {
   const s = freshState(now - 40 * 86400e3);
@@ -27,7 +26,7 @@ function seedState(kind: string, now: number): State {
   const statOf = (id: string) => ({ mind: 'sense', dt: 'stamina', er: 'intelligence', ie: 'agility' } as const)[SKILLS.find((k) => k.id === id)!.module];
   if (kind === 'demo' || kind === 'full') {
     const days = kind === 'full' ? 120 : 14;
-    const order = ['wise-mind', 'tipp', 'name-emotion', 'self-soothe', 'self-validation', 'stop', 'sense-up', 'abc-please', 'willing-hands', 'give', 'mana-tide', 'accepts', 'clear-sight', 'check-facts', 'improve', 'validation', 'opposite-action', 'urge-surf', 'fast', 'pros-cons', 'radical-acceptance', 'dear-man'];
+    const order = ['wise-mind', 'tipp', 'name-emotion', 'self-soothe', 'self-validation', 'stop', 'sense-up', 'abc-please', 'willing-hands', 'give', 'current-emotion', 'accepts', 'clear-sight', 'check-facts', 'improve', 'validation', 'opposite-action', 'urge-surf', 'fast', 'pros-cons', 'radical-acceptance', 'dear-man'];
     for (let i = days; i >= 1; i--) {
       if (kind === 'demo' && (i === 9 || i === 10)) continue;
       const d = addDays(today, -i);
@@ -106,14 +105,14 @@ export function lab(stage: Stage) {
   const seed = q.get('seed') ?? '';
   let initialState: State | undefined;
   if (!q.has('keep')) {
-    localStorage.removeItem(KEY);
-    for (const db of [`${KEY}.art`, `${KEY}.story`])
+    localStorage.removeItem(LAB_SAVE_KEY);
+    for (const db of [`${LAB_SAVE_KEY}${BESIDE.art}`, `${LAB_SAVE_KEY}${BESIDE.story}`])
       try {
         indexedDB.deleteDatabase(db);
       } catch {
         /* no IndexedDB here */
       }
-    for (const k of Object.keys(localStorage)) if (k.startsWith(`${KEY}.story`)) localStorage.removeItem(k);
+    for (const k of Object.keys(localStorage)) if (k.startsWith(`${LAB_SAVE_KEY}${BESIDE.story}`)) localStorage.removeItem(k);
     initialState = seed ? seedState(seed, now()) : undefined;
     if (initialState && q.has('nogreet')) {
       initialState.flags.greetDay = dayKey(now());
@@ -133,7 +132,7 @@ export function lab(stage: Stage) {
       (window as unknown as { __replayed: number }).__replayed = ((window as unknown as { __replayed?: number }).__replayed ?? 0) + 1;
     },
     sound: audio,
-    storageKey: KEY,
+    storageKey: LAB_SAVE_KEY,
     now,
     initialState,
   });

@@ -2,9 +2,10 @@
  * The player's own name and their companion's name. The companion's store keeps them (so they travel in a Save Crystal
  * and merge across open copies); this small mirror lets the intro use them before that store loads.
  */
+import { YOU_KEY } from './stored-names';
+
 export const DEFAULT_NAME = 'Player';
 export const DEFAULT_COMPANION = 'Moth';
-export const YOU_KEY = 'dbt.you.v1';
 
 export interface You {
   /** '' = not chosen, the default shows */

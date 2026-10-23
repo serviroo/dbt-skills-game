@@ -3,10 +3,10 @@
  * the engine with a short ramp, persists it, and follows a second tab through the storage event.
  */
 import type { AudioEngine, UserLevels } from './engine';
+import { AUDIO_KEY } from '../core/stored-names';
 
 export type AudioLevels = UserLevels;
 
-export const PREFS_KEY = 'dbt.audio.v1';
 const DEFAULTS: AudioLevels = { master: 1, music: 1, sfx: 1, muted: false };
 
 const unit = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1);
@@ -25,7 +25,7 @@ export function parsePrefs(raw: string | null): AudioLevels {
 
 export function loadPrefs(): AudioLevels & { fresh: boolean } {
   try {
-    const raw = localStorage.getItem(PREFS_KEY);
+    const raw = localStorage.getItem(AUDIO_KEY);
     return { ...parsePrefs(raw), fresh: raw == null };
   } catch {
     return { ...DEFAULTS, fresh: true };
@@ -34,7 +34,7 @@ export function loadPrefs(): AudioLevels & { fresh: boolean } {
 
 export function savePrefs(p: AudioLevels) {
   try {
-    localStorage.setItem(PREFS_KEY, JSON.stringify({ v: 1, master: unit(p.master), music: unit(p.music), sfx: unit(p.sfx), muted: p.muted === true }));
+    localStorage.setItem(AUDIO_KEY, JSON.stringify({ v: 1, master: unit(p.master), music: unit(p.music), sfx: unit(p.sfx), muted: p.muted === true }));
   } catch {
     /* storage blocked or full: the levels still hold for this visit */
   }
@@ -86,7 +86,7 @@ export function createVolume(engine: AudioEngine | null, opts: { fresh: boolean;
     window.addEventListener('pagehide', flush);
     document.addEventListener('visibilitychange', () => document.hidden && flush());
     window.addEventListener('storage', (e) => {
-      if (e.key !== PREFS_KEY && e.key !== null) return;
+      if (e.key !== AUDIO_KEY && e.key !== null) return;
       if (e.key === null && e.storageArea !== localStorage) return;
       if (timer) {
         clearTimeout(timer);

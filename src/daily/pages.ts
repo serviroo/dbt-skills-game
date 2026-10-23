@@ -16,6 +16,7 @@ import { Slime } from './bubbles';
 import { inventorySection, rosterSection, brambleNap } from './roster';
 import { wardrobePanel } from './wardrobe';
 import { DEFAULT_COMPANION, DEFAULT_NAME } from '../core/you';
+import { BESIDE } from '../core/stored-names';
 
 const pageHead = (title: string, sub?: string) => h('header', { class: 'dq-pagehead' }, h('h1', { class: 'dq-h1', 'data-focus': '', text: title }), sub ? p(sub, 'dq-text dq-pagesub') : null);
 
@@ -27,7 +28,7 @@ export const lurkerUnlocked = (st: Store) => st.state.events.some((e) => e.k ===
 /** Room look only (aquarium, breathing words). Kept beside the save, never part of it. */
 function stealthPrefs(key: string) {
   try {
-    const raw = JSON.parse(localStorage.getItem(`${key}:stealth`) ?? 'null') as { aquarium?: unknown; words?: unknown } | null;
+    const raw = JSON.parse(localStorage.getItem(`${key}${BESIDE.stealth}`) ?? 'null') as { aquarium?: unknown; words?: unknown } | null;
     return { aquarium: raw?.aquarium === true, words: raw?.words === true };
   } catch {
     return { aquarium: false, words: false };
@@ -35,7 +36,7 @@ function stealthPrefs(key: string) {
 }
 function saveStealthPrefs(key: string, prefs: { aquarium: boolean; words: boolean }) {
   try {
-    localStorage.setItem(`${key}:stealth`, JSON.stringify(prefs));
+    localStorage.setItem(`${key}${BESIDE.stealth}`, JSON.stringify(prefs));
   } catch {
     /* the room still works; the look resets next visit */
   }
