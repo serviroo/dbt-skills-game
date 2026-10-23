@@ -360,24 +360,37 @@ export const scenarios = {
         const cards = Object.values(actual.stories.cards ?? {}).flat();
         h.expect(cards.some((c) => c.id === 'local-card') && cards.some((c) => c.id === 'incoming-card'), 'A failed card import hid saved cards from a later readable backup: ' + JSON.stringify(cards));
         h.expect(actual.incomplete === false, 'Recovered readable card storage still reports an incomplete backup.');
-        await page.evaluate(async () => {
-          const { storyStore } = await import('/src/daily/storystore.ts');
-          const ss = storyStore(window.__daily.store.key);
-          const { chapters } = await ss.exportAll();
-          const id = chapters.find((c) => c.kind === 'page').id;
-          const transaction = IDBDatabase.prototype.transaction;
-          IDBDatabase.prototype.transaction = function (stores, mode, ...rest) {
-            if (this.name.endsWith('.story') && mode === 'readwrite') throw new DOMException('Temporary storage failure', 'QuotaExceededError');
-            return transaction.call(this, stores, mode, ...rest);
-          };
-          try { await ss.putCards(id, []); } finally { IDBDatabase.prototype.transaction = transaction; }
-        });
-        const cleared = await crystal(h, page, 'explicitly-cleared-cards-' + blockRead);
-        h.expect(Object.values(cleared.stories.cards).flat().length === 0, 'Recovery brought back cards after an explicit local clear.');
-        const empty = { ...raw, stories: { stories: [], chapters: [], cards: Object.fromEntries(Object.keys(raw.stories.cards).map((id) => [id, []])) } };
-        await restore(page, empty);
-        const retried = await crystal(h, page, 'cleared-cards-after-restore-' + blockRead);
-        h.expect(Object.values(retried.stories.cards).flat().length === 0, 'Another restore brought back cards after an explicit failed-write clear.');
+        for (const replacement of [[], [{ id: 'replacement-card', mode: 'polish', text: 'A deliberate replacement.', t: 30 }]]) {
+          await page.evaluate(async ({ replacement, blockRead }) => {
+            const { storyStore } = await import('/src/daily/storystore.ts');
+            const ss = storyStore(window.__daily.store.key);
+            const { chapters } = await ss.exportAll();
+            const id = chapters.find((c) => c.kind === 'page').id;
+            await ss.putCards(id, [{ id: 'discarded-card', mode: 'polish', text: 'A card deliberately removed.', t: 10 }]);
+            const transaction = IDBDatabase.prototype.transaction;
+            IDBDatabase.prototype.transaction = function (stores, mode, ...rest) {
+              const names = typeof stores === 'string' ? [stores] : [...stores];
+              if (this.name.endsWith('.story') && names.length === 1 && names[0] === 'cards' && (mode === 'readwrite' || blockRead)) throw new DOMException('Temporary storage failure', mode === 'readwrite' ? 'QuotaExceededError' : 'SecurityError');
+              return transaction.call(this, stores, mode, ...rest);
+            };
+            window.restoreCardStorage = () => { IDBDatabase.prototype.transaction = transaction; };
+            await ss.putCards(id, replacement);
+          }, { replacement, blockRead });
+          try { await restore(page, raw); }
+          finally { await page.evaluate(() => window.restoreCardStorage()); }
+          const expectedIds = ['incoming-card', ...replacement.map((c) => c.id)].sort();
+          const visible = await page.evaluate(async (id) => {
+            const { storyStore } = await import('/src/daily/storystore.ts');
+            return (await storyStore(window.__daily.store.key).cards(id)).map((c) => c.id).sort();
+          }, Object.keys(raw.stories.cards)[0]);
+          h.expect(JSON.stringify(visible) === JSON.stringify(expectedIds), 'Recovered reads resurrected discarded cards after a pending replacement and failed import: ' + JSON.stringify(visible));
+          const cleared = await crystal(h, page, 'explicit-card-edit-' + blockRead + '-' + replacement.length);
+          h.expect(JSON.stringify(Object.values(cleared.stories.cards).flat().map((c) => c.id).sort()) === JSON.stringify(expectedIds), 'Backup resurrected discarded cards after a pending replacement and failed import.');
+          const empty = { ...raw, stories: { stories: [], chapters: [], cards: Object.fromEntries(Object.keys(raw.stories.cards).map((id) => [id, []])) } };
+          await restore(page, empty);
+          const retried = await crystal(h, page, 'card-edit-after-restore-' + blockRead + '-' + replacement.length);
+          h.expect(JSON.stringify(Object.values(retried.stories.cards).flat().map((c) => c.id).sort()) === JSON.stringify(expectedIds), 'A successful retry resurrected discarded cards after a pending replacement and failed import.');
+        }
       } finally { await ctx.close(); }
     }
   },

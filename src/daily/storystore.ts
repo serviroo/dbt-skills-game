@@ -1132,9 +1132,10 @@ export class StoryStore {
           out.skipped += r.v.skipped + r.v.pendingSkipped;
           wrote = true;
         } else {
+          const explicitPending = this.mem.cards.has(id) && !this.cardImports.has(id);
           const merged = mergeCards(await this.cards(id), list);
           this.mem.cards.set(id, merged.cards);
-          this.cardImports.add(id);
+          if (!explicitPending) this.cardImports.add(id);
           out.skipped += merged.skipped;
           out.unsaved++;
         }
