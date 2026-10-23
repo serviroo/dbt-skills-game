@@ -124,7 +124,7 @@ async function collect() {
       accent: [...roster.ACCENT_IDS],
       'card-back': [...roster.CARD_BACK_IDS],
       plate: [...roster.PLATE_IDS],
-      region: [...crisis.REGION_IDS],
+      region: crisis.REGIONS.map((r) => r.id),
       motion: [...store.MOTIONS],
       'art-paper': Object.keys(ink.PAGE),
       'chapter-kind': [...story.CHAPTER_KINDS],
