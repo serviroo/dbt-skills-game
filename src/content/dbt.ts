@@ -130,6 +130,15 @@ function tierLine(a: Answers) {
   if (rows.length) return 'Sorted and filed. No S-tier today. Tough crowd.';
   return 'Tasted, if not sorted. That still counts.';
 }
+const said = (a: Answers, k: string, fb = '') => {
+  const v = s(a, k).trim().replace(/[\s.!?]+$/, '') || fb;
+  return v.charAt(0).toUpperCase() + v.slice(1);
+};
+const THOUGHT_PICS: Record<string, string> = {
+  clouds: 'Each thought is a cloud. Watch it drift in, cross the sky and drift out.',
+  cars: 'Each thought is a car going past. Watch it come and go. No need to get in.',
+  leaves: 'Each thought sits on a leaf. Watch the stream carry it away.',
+};
 
 export const SKILLS: Skill[] = [
   // ---------------- Mindfulness (Sense) ----------------
@@ -181,6 +190,89 @@ export const SKILLS: Skill[] = [
       { kind: 'input', key: 'fact', text: 'Now say the same thing as facts and feelings. "I said the wrong thing and I feel embarrassed" instead of "I\'m an idiot."', placeholder: 'Fact version (optional)', skip: 'Said it in my head' },
       { kind: 'choice', key: 'body', text: 'Read the fact version once. Notice your body.', options: o('A bit lighter', 'Same', 'Not sure') },
       { kind: 'say', text: 'If you catch yourself judging, no need to judge the judging. Notice it and return to the facts.', cta: 'Done', go: 'end' },
+    ],
+  },
+  {
+    id: 'one-mindfully',
+    sl: 'Single Target',
+    real: 'One-Mindfully',
+    module: 'mind',
+    minutes: '2 min',
+    card: 'One thing at a time. When your mind wanders off, bring it back.',
+    steps: [
+      { kind: 'intro', text: "Being pulled in ten directions is tiring. Minds do that, and it isn't your fault. For the next minute, you only do one thing." },
+      { kind: 'choice', key: 'one', text: 'Pick one small thing to give all your attention to.', small: 'Close other tabs and let messages wait, if you can.', options: o('Wash one cup', 'Fold a few clothes', 'Draw a little doodle', 'Just breathe'), other: 'My own' },
+      { kind: 'timer', seconds: 60, visual: 'ring', extend: 30, text: (a) => `${said(a, 'one', 'This one thing')}. Only this. Your mind will wander. When it does, notice where it went and come back. Again and again.` },
+      { kind: 'choice', key: 'drift', text: 'How often did your mind wander off?', options: ['Hardly', 'A few times', 'A lot', 'Lost count'].map((label) => ({ label, reply: 'Wandering is normal. Coming back is the skill, and you did it.' })) },
+      { kind: 'say', text: 'Try it once more today with something ordinary. When you walk, only walk. When you listen, only listen. One thing, then the next.', cta: 'Done', go: 'end' },
+    ],
+  },
+  {
+    id: 'effectively',
+    sl: 'Play the Map',
+    real: 'Effectively',
+    module: 'mind',
+    minutes: '2 min',
+    card: "Do what works in the situation you're in, not the one you wish you were in.",
+    steps: [
+      { kind: 'intro', text: "It's frustrating when being right doesn't fix anything. That feeling makes sense. Here you look for what works in the situation you're actually in." },
+      {
+        kind: 'choice',
+        key: 'what',
+        text: "Is there a situation where you're stuck between being right and getting what you need?",
+        options: [{ label: 'Something small' }, { label: 'Something big' }, { label: 'Nothing right now', reply: "Then picture a small one, like a queue that won't move when you're in a hurry." }],
+      },
+      { kind: 'input', key: 'goal', text: 'What do you actually want out of it? Not who wins. The outcome.', placeholder: 'What I want (optional)', fills: ['To be heard', 'To get it sorted', 'To keep the peace', 'To feel okay about myself'], skip: 'Keep it in my head' },
+      {
+        kind: 'choice',
+        key: 'way',
+        text: "What's getting in the way?",
+        options: [
+          ...['Wanting to be right', 'Wanting to win', 'Wanting to get even', 'It should be different'].map((label) => ({ label, reply: 'That makes sense. You can feel it and still set it down for now.' })),
+          { label: 'Nothing much', reply: 'Clear road, then.' },
+        ],
+      },
+      {
+        kind: 'choice',
+        key: 'move',
+        text: "Every situation has its own rules, fair or not. Working with them usually gets you further than fighting them. What's one move that would help, even a little?",
+        small: 'If someone is hurting you, getting safe is always the move that works.',
+        options: o('Ask plainly for what I need', 'Wait until I feel calmer', 'Follow the rule this once', 'Let this one go'),
+        other: 'My own move',
+      },
+      { kind: 'say', text: (a) => `${a.move ? `"${said(a, 'move')}." ` : ''}You picked your goal over the fight. That's the skill.`, cta: 'Done', go: 'end' },
+    ],
+  },
+  {
+    id: 'mindful-thoughts',
+    sl: 'Spectator Mode',
+    real: 'Mindfulness of Current Thoughts',
+    module: 'mind',
+    minutes: '2 min',
+    card: "Watch your thoughts go by. You don't have to chase them or obey them.",
+    steps: [
+      { kind: 'intro', text: "A busy or loud head is hard to be in. That's real. For a minute, you don't have to fix your thoughts or believe them. Only watch them go by." },
+      { kind: 'choice', key: 'pic', text: 'Pick a picture for your thoughts.', options: [{ label: 'Clouds crossing the sky', value: 'clouds' }, { label: 'Cars on a quiet road', value: 'cars' }, { label: 'Leaves on a stream', value: 'leaves' }] },
+      { kind: 'say', text: 'When a thought shows up, give it a plain label. "A worry." "A plan." "A memory." Then let it move on. No need to push it away or follow it.', cta: 'Ready' },
+      { kind: 'timer', seconds: 60, visual: 'tide', extend: 30, text: (a) => `${THOUGHT_PICS[s(a, 'pic', 'clouds')] ?? THOUGHT_PICS.clouds} If you get pulled into one, that's normal. Step back and watch again.` },
+      { kind: 'say', text: "Thoughts are only thoughts. They aren't facts, and they aren't orders. You can notice one without doing what it says." },
+      {
+        kind: 'choice',
+        key: 'loud',
+        text: 'How loud are your thoughts now?',
+        options: [
+          { label: 'Quieter', reply: 'You let some go by.', go: 'close' },
+          { label: 'About the same', reply: "That's okay. Watching was the practice, not the quiet.", go: 'close' },
+          { label: 'Louder', go: 'louder' },
+        ],
+      },
+      { id: 'close', kind: 'say', text: 'Next time a thought grabs you, try putting "I\'m having the thought that..." in front of it. It makes a little space.', cta: 'Done', go: 'end' },
+      {
+        id: 'louder',
+        kind: 'say',
+        text: "Thanks for being honest. Some thoughts are loud and heavy, and you don't have to sit with them alone. The Safe Zone is one tap away if you want it.",
+        options: [{ label: 'Safe Zone', go: 'safe' }, { label: 'Done', go: 'end' }],
+      },
     ],
   },
 
@@ -1027,7 +1119,7 @@ SKILL['self-heal'] = SKILL['self-validation'];
 /** The loadout, in the order the cards are dealt. */
 export const LOADOUT = SKILLS.filter((k) => k.loadout).map((k) => k.id);
 
-/** 30-day rotation, advanced by visit day (never by calendar day). Distress tolerance early, practised while calm. */
+/** Daily rotation, advanced by visit day (never by calendar day). Distress tolerance early, practised while calm. */
 export interface Quest {
   skill: string;
   /** start at this step id (after the intro) */
@@ -1066,6 +1158,9 @@ export const ROTATION: Quest[] = [
   { skill: 'volume-down' },
   { skill: 'self-soothe', special: 'comfort', label: 'Add one thing to your Comfort inventory' },
   { skill: 'wise-mind', special: 'free', label: 'Free choice' },
+  { skill: 'one-mindfully' },
+  { skill: 'effectively' },
+  { skill: 'mindful-thoughts' },
 ];
 
 /**

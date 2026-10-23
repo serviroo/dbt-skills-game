@@ -10,9 +10,9 @@ back after a long break is always fine.
 ## What's inside
 
 - Daily skill: one small DBT skill a day, from all four modules (mindfulness, distress tolerance, emotion
-  regulation, interpersonal effectiveness). Wise Mind, STOP, TIPP, ACCEPTS, self-soothe, radical acceptance,
-  check the facts, opposite action, DEAR MAN, GIVE, FAST and more. Each one is a short guided walk-through that
-  takes a minute or two.
+  regulation, interpersonal effectiveness). Wise Mind, one-mindfully, effectively, mindfulness of current
+  thoughts, STOP, TIPP, ACCEPTS, self-soothe, radical acceptance, check the facts, opposite action, DEAR MAN, GIVE,
+  FAST and more. Each one is a short guided walk-through that takes a minute or two.
 - Safe Zone: a calm path for hard moments, one tap from every screen. No XP, sounds or glows in there, and a link
   to crisis lines on every screen.
 - Give me a moment: a one-tap check-in when you just need to breathe.
