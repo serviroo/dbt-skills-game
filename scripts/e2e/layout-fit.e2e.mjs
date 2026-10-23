@@ -40,13 +40,16 @@ export const SCREENS = {
   shadows: { route: { name: 'shadows' }, skip: ['.w2-roster'] },
 };
 
-export async function boot(h, viewport) {
+/** Opens Home on the full save. `o.edit(save)` changes the save first; `o.media` is emulated from the reload on. */
+export async function boot(h, viewport, o = {}) {
   const now = Date.now();
   const save = fullSave(now);
+  o.edit?.(save);
   const you = JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: save.created, companionAt: save.created });
   const { ctx, page, errors } = await h.open({ [h.SAVE]: JSON.stringify(save), [h.YOU]: you, 'dbt.app.v1': h.SEEN }, '?mute', viewport);
   await home(page);
   await seedStores(page, h.SAVE, now);
+  if (o.media) await page.emulateMedia(o.media);
   await page.reload();
   await home(page);
   return { ctx, page, errors };

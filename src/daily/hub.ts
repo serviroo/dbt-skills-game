@@ -1,4 +1,5 @@
 import { animate } from '../ui/anim';
+import { WINDOW } from '../motion/tokens';
 import { FEELINGS, isHeavy, MODULES, MODULE_ORDER, SKILL, STRENGTH_FEELINGS, suggestFor, type Feeling } from '../content/dbt';
 import { CHECKIN, RANKS } from '../content/daily-lines';
 import type { App, ScreenOut } from './app';
@@ -98,7 +99,7 @@ function statusPanel(app: App) {
         onclick: (e: Event) => {
           const open = el.classList.toggle('is-open');
           (e.currentTarget as HTMLElement).setAttribute('aria-expanded', String(open));
-          if (open) animate(stats, app.reduced() ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'translateY(-6px)' }, { opacity: 1, transform: 'none' }], { duration: 220, easing: 'cubic-bezier(.16,1,.3,1)' });
+          if (open) animate(stats, app.reduced() ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'translateY(-6px)' }, { opacity: 1, transform: 'none' }], { duration: app.reduced() ? WINDOW.reducedFadeMs : 220, easing: 'cubic-bezier(.16,1,.3,1)' });
         },
       },
       h('span', { text: 'Stats' }),
@@ -160,7 +161,7 @@ function questSection(app: App) {
     card.classList.add('is-open');
     card.setAttribute('aria-label', `Today's skill card: ${cardName}. Open it.`);
     if (app.reduced()) {
-      animate(front, [{ opacity: 0 }, { opacity: 1 }], { duration: 400 });
+      animate(front, [{ opacity: 0 }, { opacity: 1 }], { duration: WINDOW.reducedFadeMs });
     } else {
       animate(inner, [{ transform: 'rotateY(0deg)' }, { transform: 'rotateY(180deg)' }], { duration: 900, easing: 'cubic-bezier(.3,.05,.15,1)' });
       animate(front.querySelector('.dq-sheen')!, [{ transform: 'translateX(-120%) skewX(-18deg)', opacity: 0 }, { opacity: 0.9, offset: 0.4 }, { transform: 'translateX(140%) skewX(-18deg)', opacity: 0 }], {
@@ -170,9 +171,9 @@ function questSection(app: App) {
       });
     }
     foil?.play();
-    await wait(app.reduced() ? 0.3 : 0.9);
+    await wait(app.reduced() ? 0 : 0.9);
     acts.classList.remove('is-hidden');
-    animate(acts, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 380, easing: 'cubic-bezier(.16,1,.3,1)' });
+    animate(acts, app.reduced() ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: app.reduced() ? WINDOW.reducedFadeMs : 380, easing: 'cubic-bezier(.16,1,.3,1)' });
     note.textContent = isNew ? typo(`Shadow acquired: ${SKILL[isSkillId(q.skill) ? q.skill : 'wise-mind'].sl}. It joins your collection.`) : typo('Already in your collection. Good to see it again.');
     if (q.special) note.textContent = '';
   };
@@ -321,7 +322,7 @@ function lobby(app: App, giftLine: HTMLElement) {
     } finally {
       busy = false;
       sync();
-      if (first && !giftLine.classList.contains('is-hidden')) animate(giftLine, [{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }], { duration: app.reduced() ? 150 : 600, easing: 'cubic-bezier(.16,1,.3,1)' });
+      if (first && !giftLine.classList.contains('is-hidden')) animate(giftLine, app.reduced() ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }], { duration: app.reduced() ? WINDOW.reducedFadeMs : 600, easing: 'cubic-bezier(.16,1,.3,1)' });
     }
   });
   sync();

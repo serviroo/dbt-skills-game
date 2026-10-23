@@ -1,6 +1,7 @@
 import { companionName, playerName } from '../core/you';
 import { params } from '../core/params';
 import { animate } from '../ui/anim';
+import { WINDOW } from '../motion/tokens';
 import { DISMISSED, dismissWindows, LanternWindow, lanternLayer, windowSounds, type WindowSpec } from '../ui/lantern-window';
 import { revealRank } from '../ui/rank-reveal';
 import { isHeavy, MODULE_ORDER, MODULES, type Next, type StatId } from '../content/dbt';
@@ -341,7 +342,7 @@ export class App {
     if (dens !== this.bubbles.density || bright !== this.bubbles.brightness) this.bubbles.set(dens, bright);
     if (!o.quiet) {
       animate(out.el, this.reduced() ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], {
-        duration: this.reduced() ? 200 : 300,
+        duration: this.reduced() ? WINDOW.reducedFadeMs : 300,
         easing: 'cubic-bezier(.16,1,.3,1)',
       });
     }
