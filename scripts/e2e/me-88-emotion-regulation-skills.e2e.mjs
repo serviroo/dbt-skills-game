@@ -358,13 +358,13 @@ export const scenarios = {
   },
 
   async 'skills-er-old-save'(h) {
-    const old = returning(20, [['skill', 20, { stat: 'intelligence', skill: 'check-facts' }], ['skill', 20, { stat: 'stamina', skill: 'a-skill-from-a-newer-build' }], ['card', 0, { skill: 'mana-tide' }]]);
+    const old = returning(20, [['skill', 20, { stat: 'intelligence', skill: 'check-facts' }], ['skill', 20, { stat: 'stamina', skill: 'a-skill-from-a-newer-build' }], ['card', 0, { skill: 'current-emotion' }]]);
     const { ctx, page, errors } = await h.open(seedFor(h, old), '?mute', PHONE);
     await home(h, page);
     await page.locator('.dq-tile', { has: page.locator('.dq-tile-t', { hasText: /^Shadows$/ }) }).click();
     await page.locator('.dq-shadows').waitFor({ timeout: 10000 });
     const owned = norm(await page.locator('.dq-shadows').textContent());
-    h.expect(owned.includes('True Sight') && owned.includes('Mana Tide'), 'old save lost its collection');
+    h.expect(owned.includes('True Sight') && owned.includes('Ebb and Flow'), 'old save lost its collection');
     for (const { sl } of Object.values(NEW)) h.expect(!owned.includes(sl), `${sl} is in the collection before it was ever opened`);
     await h.shot(page, 'er-old-save-01-shadows-before');
     await page.getByRole('button', { name: 'All skills' }).click();
