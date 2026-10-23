@@ -174,6 +174,7 @@ export class ArtStore {
         open.onblocked = () => fail(false);
       } catch {
         this.persistent = false;
+        this.unreadable = true;
         resolve(null);
       }
     });
