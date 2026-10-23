@@ -70,9 +70,10 @@ function fullSave(now) {
       title: last(ids.title),
       playerName: 'Kit',
       companion: 'Lumen',
+      region: last(ids.region),
       names,
       titlesSeen: [...ids.title],
-      setAt: { theme: t0, accent: t0, cardBack: t0, plate: t0, title: t0, playerName: t0, companion: t0, ...Object.fromEntries(ids.shadow.map((id) => [`name:${id}`, t0])) },
+      setAt: { theme: t0, accent: t0, cardBack: t0, plate: t0, title: t0, playerName: t0, companion: t0, region: t0, ...Object.fromEntries(ids.shadow.map((id) => [`name:${id}`, t0])) },
     },
   };
 }
@@ -199,14 +200,14 @@ async function shadowCounts(page, reachHub, url) {
 
 function content(c) {
   const byId = (l) => Object.fromEntries((l ?? []).map((x) => [x.id, x]));
-  const { theme, accent, cardBack, plate, title, playerName, companion, names, titlesSeen } = c.profile ?? {};
+  const { theme, accent, cardBack, plate, title, playerName, companion, region, names, titlesSeen } = c.profile ?? {};
   return {
     events: byId(c.events),
     diary: c.diary,
     lists: Object.fromEntries(Object.entries(c.lists ?? {}).map(([k, l]) => [k, byId(l)])),
     maps: byId(c.maps),
     lines: c.lines,
-    profile: { theme, accent, cardBack, plate, title, playerName, companion, names, titlesSeen: [...(titlesSeen ?? [])].sort() },
+    profile: { theme, accent, cardBack, plate, title, playerName, companion, region, names, titlesSeen: [...(titlesSeen ?? [])].sort() },
     art: byId((c.art ?? []).map(({ updated, rev, from, ...r }) => r)),
     stories: byId((c.stories?.stories ?? []).map(({ updated, rev, ...s }) => s)),
     chapters: byId((c.stories?.chapters ?? []).map((x) => ({ id: x.id, story: x.story, kind: x.kind, title: x.title, text: x.text }))),
@@ -229,7 +230,7 @@ export const scenarios = {
     expect(kept?.v === save.v, 'the save was not kept: ' + JSON.stringify(kept)?.slice(0, 200));
     const keptIds = new Set(kept.events.map((e) => e.id));
     expect(save.events.every((e) => keptIds.has(e.id)), 'events went missing on load');
-    for (const k of ['theme', 'accent', 'cardBack', 'plate', 'title', 'playerName', 'companion']) expect(kept.profile[k] === save.profile[k], `profile.${k} reset to ${kept.profile[k]}`);
+    for (const k of ['theme', 'accent', 'cardBack', 'plate', 'title', 'playerName', 'companion', 'region']) expect(kept.profile[k] === save.profile[k], `profile.${k} reset to ${kept.profile[k]}`);
     expect(same(kept.profile.names, save.profile.names), 'a shadow name was dropped: ' + JSON.stringify(kept.profile.names));
     expect(ids.title.every((x) => kept.profile.titlesSeen.includes(x)), 'a title was dropped: ' + kept.profile.titlesSeen);
     expect(kept.settings.motion === 'reduce' && kept.settings.sound === false, 'sound or motion reset');
