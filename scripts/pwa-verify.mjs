@@ -19,6 +19,14 @@ const mount = sub ? `/${sub}/` : '/';
 const browsers = flags.browser === 'both' || !flags.browser ? ['chromium', 'webkit'] : [flags.browser];
 fs.mkdirSync(out, { recursive: true });
 
+const swTemplate = fs.readFileSync(path.join(root, 'src/pwa/sw-template.js'), 'utf8');
+const swName = (k) => {
+  const name = swTemplate.match(new RegExp(`^const ${k} = '([^']+)';`, 'm'))?.[1];
+  if (!name) throw new Error(`src/pwa/sw-template.js has no ${k} cache name`);
+  return name;
+};
+const PREFIX = swName('PREFIX');
+const META = swName('META');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const swInfo = (dir) => {
   const src = fs.readFileSync(path.join(dir, 'sw.js'), 'utf8');
@@ -62,26 +70,26 @@ const INIT = () => {
 };
 const ready = (page, ms = 30000) => page.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: ms });
 const cacheState = (page) =>
-  page.evaluate(async () => {
+  page.evaluate(async (metaName) => {
     const names = await caches.keys();
     const out = {};
     for (const n of names) out[n] = (await (await caches.open(n)).keys()).length;
-    const meta = names.includes('system-meta') ? await caches.open('system-meta') : null;
+    const meta = names.includes(metaName) ? await caches.open(metaName) : null;
     const cur = meta ? await (await meta.match('current'))?.text() : null;
     const prev = meta ? await (await meta.match('previous'))?.text() : null;
     return { caches: out, current: cur, previous: prev, controlled: !!navigator.serviceWorker.controller };
-  });
+  }, META);
 // page.waitForFunction does not await async predicates, so poll from Node
 async function waitInstalled(page, version, count, timeout = 90000) {
   const t0 = Date.now();
   for (;;) {
-    const ok = await page.evaluate(async ([v, n]) => {
-      const name = 'system-v' + v;
-      if (!(await caches.has(name)) || !(await caches.has('system-meta'))) return false;
+    const ok = await page.evaluate(async ([v, n, prefix, metaName]) => {
+      const name = prefix + v;
+      if (!(await caches.has(name)) || !(await caches.has(metaName))) return false;
       const k = await (await caches.open(name)).keys();
-      const cur = await (await (await caches.open('system-meta')).match('current'))?.text();
+      const cur = await (await (await caches.open(metaName)).match('current'))?.text();
       return k.length >= n && cur === name && !!navigator.serviceWorker.controller;
-    }, [version, count]);
+    }, [version, count, PREFIX, META]);
     if (ok) return Date.now() - t0;
     if (Date.now() - t0 > timeout) throw new Error(`service worker ${version} not installed after ${timeout} ms`);
     await sleep(250);
@@ -298,7 +306,7 @@ async function updateRun(name, launcher) {
       victim: bad.victim,
       hostAnswersMissingFileWith: victimStatus,
       updateCall: updateResult,
-      brokenCacheCreated: Object.keys(afterBad.caches).includes('system-v' + bad.version),
+      brokenCacheCreated: Object.keys(afterBad.caches).includes(PREFIX + bad.version),
       stillCurrent: afterBad.current,
       reloadShows: await page.evaluate(() => document.querySelector('meta[name=x-build]')?.content ?? 'v1'),
     };
@@ -335,7 +343,7 @@ async function updateRun(name, launcher) {
     srv = await serve(v3.dir, port);
     await page.evaluate(() => navigator.serviceWorker.getRegistration().then((r) => r.update()));
     await waitInstalled(page, v3.version, v3.assets.length + 1);
-    report.steps.v3Installed = { expectKept: [`system-v${v2.version}`, `system-v${v3.version}`], expectDeleted: `system-v${v1.version}`, ...(await cacheState(page)) };
+    report.steps.v3Installed = { expectKept: [PREFIX + v2.version, PREFIX + v3.version], expectDeleted: PREFIX + v1.version, ...(await cacheState(page)) };
 
     const idOnly = path.join(scratch, 'build-id-only');
     fs.cpSync(v3.dir, idOnly, { recursive: true });
