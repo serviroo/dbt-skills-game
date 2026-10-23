@@ -4,7 +4,8 @@
  * lights-up toggle beside the dim default.
  */
 import { animate } from '../ui/anim';
-import { RESOURCES, SAFE } from '../content/dbt';
+import { SAFE } from '../content/dbt';
+import { REGIONS, regionById, regionFromLocale, type CrisisLine } from '../content/crisis-lines';
 import type { App, Route, ScreenOut } from './app';
 import { icon } from './art';
 import { uid } from './store';
@@ -18,6 +19,24 @@ export function smsHref(num: string, body?: string) {
   return isIOS() ? `sms:${num}&body=${encodeURIComponent(body)}` : `sms:${num}?body=${encodeURIComponent(body)}`;
 }
 export const telHref = (num: string) => `tel:${num.replace(/[^\d+]/g, '')}`;
+
+/** The country whose lines show: the player's choice, else the device language's country, else "Somewhere else". */
+export const regionOf = (app: App) => regionById(app.store.state.settings.region || regionFromLocale(navigator.languages ?? [navigator.language]));
+
+/** One native picker, so changing country is a single tap and never covers the call buttons. */
+export function regionPicker(app: App, picked?: () => void, text = { label: SAFE.talk.country, hint: SAFE.talk.countryHint }) {
+  const id = `dq-region-${uid()}`;
+  const select = h('select', { id, class: 'dq-input dq-select' }, REGIONS.map((r) => h('option', { value: r.id, text: r.name })));
+  select.value = regionOf(app).id;
+  select.addEventListener('change', () => {
+    const st = app.store;
+    st.state.settings.region = regionById(select.value).id;
+    st.touch('region');
+    st.save();
+    picked?.();
+  });
+  return h('div', { class: 'dq-setting dq-setting--col dq-region' }, h('label', { for: id, class: 'dq-setting-l' }, h('span', { class: 'dq-setting-t', text: text.label }), h('span', { class: 'dq-setting-h', text: text.hint })), select);
+}
 
 type At = 'start' | 'breathe' | 'cold' | 'squeeze' | 'check' | 'stop' | 'reasons' | 'people' | 'comfort' | 'talk' | 'close';
 const FLOW: At[] = ['start', 'breathe', 'squeeze', 'cold', 'check', 'stop', 'reasons', 'comfort', 'people', 'talk', 'close'];
@@ -218,29 +237,35 @@ export function safeScreen(app: App, route: Route): ScreenOut {
         );
       }
       case 'talk': {
-        const rows = RESOURCES.map((res) =>
+        const region = regionOf(app);
+        const row = (line: CrisisLine, first = false) =>
           h(
             'li',
-            { class: `dq-res ${danger && res.name === 'Emergency' ? 'is-first' : ''}` },
-            h('div', { class: 'dq-res-n', text: res.name }),
-            h('p', { class: 'dq-res-how', text: typo(res.how) }),
+            { class: `dq-res ${first ? 'is-first' : ''}` },
+            h('div', { class: 'dq-res-n', text: line.name }),
+            h('p', { class: 'dq-res-how', text: typo(line.how) }),
             h(
               'div',
               { class: 'dq-res-acts' },
-              res.links.map((l) =>
-                h('a', { class: 'dq-btn dq-btn--quiet dq-res-a', href: l.href.startsWith('sms:') ? smsHref(l.href.slice(4), (l as { body?: string }).body) : l.href, html: `<span class="dq-btn-ic">${icon(l.href.startsWith('tel:') ? 'phone' : 'text')}</span><span>${l.label}</span>` }),
+              line.links.map((l) =>
+                h('a', { class: 'dq-btn dq-btn--quiet dq-res-a', href: l.href.startsWith('sms:') ? smsHref(l.href.slice(4), l.body) : telHref(l.href.slice(4)), html: `<span class="dq-btn-ic">${icon(l.href.startsWith('tel:') ? 'phone' : 'text')}</span><span>${l.label}</span>` }),
               ),
             ),
-          ),
-        );
-        if (danger) rows.sort((a, b) => Number(b.classList.contains('is-first')) - Number(a.classList.contains('is-first')));
+          );
+        const rows = region.lines.map((line) => row(line));
+        if (region.emergency.length) {
+          const sos = row({ name: 'Emergency', how: SAFE.talk.emergency, links: region.emergency.map((n) => ({ label: `Call ${n}`, href: `tel:${n}` })) }, danger);
+          rows.splice(danger ? 0 : Math.min(2, rows.length), 0, sos);
+        }
+        const dangerText = region.emergency.length ? SAFE.talk.danger.replace('{num}', region.emergency.join(' or ')) : SAFE.talk.dangerElsewhere;
         return swap(
           at,
           h3(SAFE.talk.title),
-          danger ? p(SAFE.talk.danger, 'dq-text dq-sz-danger') : null,
+          danger || !region.emergency.length ? p(dangerText, `dq-text ${danger ? 'dq-sz-danger' : ''}`) : null,
           p(SAFE.talk.text, 'dq-text'),
-          h('ul', { class: 'dq-res-list' }, rows),
-          h('p', { class: 'dq-small' }, 'Outside the US: ', h('a', { href: 'https://findahelpline.com', target: '_blank', rel: 'noopener noreferrer', class: 'dq-a', text: 'findahelpline.com' }), ' lists free lines in many countries.'),
+          rows.length ? h('ul', { class: 'dq-res-list' }, rows) : null,
+          h('p', { class: 'dq-small' }, h('a', { href: 'https://findahelpline.com', target: '_blank', rel: 'noopener noreferrer', class: 'dq-a', text: 'findahelpline.com' }), ` ${SAFE.talk.elsewhere}`),
+          regionPicker(app, () => show('talk')),
           h('div', { class: 'dq-actions dq-actions--stack' }, nextBtn(at, 'Next', 'quiet'), btn('Back to breathing', () => show('breathe'), { kind: 'quiet' })),
         );
       }

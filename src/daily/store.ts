@@ -6,6 +6,7 @@
 import { MODULES, ROTATION, SKILL, type StatId } from '../content/dbt';
 import { DAILY_GIFTS, WARDEN_XP, RANK_XP, RANKS, STAT_BASE, TODAY_LINES, type DayLine } from '../content/daily-lines';
 import { ACCENT_IDS, CARD_BACK_IDS, PLATE_IDS, SHADOW_IDS, THEME_IDS, TITLE_IDS, type AccentId, type CardBackId, type PlateId, type ShadowId, type ThemeId, type TitleId } from '../content/roster-lines';
+import { REGION_IDS, type RegionId } from '../content/crisis-lines';
 import { YOU_KEY, cleanName, readYou, writeYou } from '../core/you';
 
 export const SCHEMA = 1;
@@ -82,6 +83,8 @@ export interface Settings {
   companion: string;
   /** Their names for the roster shadows (each its own choice, 'name:<id>' in setAt). No entry = no name. */
   names: Partial<Record<ShadowId, string>>;
+  /** The country whose crisis lines the Safe Zone shows ('' = follow the device language). */
+  region: RegionId | '';
 }
 export interface Flags {
   rankSeen: number;
@@ -97,11 +100,11 @@ export interface Flags {
 }
 /** Choices one copy can change and another must take whole: the later change wins. */
 export type NameKey = `name:${ShadowId}`;
-export type SetKey = 'sound' | 'motion' | 'emotionRows' | 'urgeRows' | 'safeCredit' | 'theme' | 'accent' | 'cardBack' | 'plate' | 'title' | 'playerName' | 'companion' | NameKey;
+export type SetKey = 'sound' | 'motion' | 'emotionRows' | 'urgeRows' | 'safeCredit' | 'region' | 'theme' | 'accent' | 'cardBack' | 'plate' | 'title' | 'playerName' | 'companion' | NameKey;
 /** The choices round 9 stores in settings and setAt. */
 const BASE_SET_KEYS: SetKey[] = ['sound', 'motion', 'emotionRows', 'urgeRows', 'safeCredit'];
 /** Wave 2 choices. Stored in the top-level profile (with titlesSeen), which a round 9 copy keeps whole instead of dropping. */
-const PROFILE_SET_KEYS: SetKey[] = ['theme', 'accent', 'cardBack', 'plate', 'title', 'playerName', 'companion', ...SHADOW_IDS.map((id): NameKey => `name:${id}`)];
+const PROFILE_SET_KEYS: SetKey[] = ['region', 'theme', 'accent', 'cardBack', 'plate', 'title', 'playerName', 'companion', ...SHADOW_IDS.map((id): NameKey => `name:${id}`)];
 const SET_KEYS: SetKey[] = [...BASE_SET_KEYS, ...PROFILE_SET_KEYS];
 export { cleanName };
 const LIST_KEYS = ['comfort', 'activities', 'reasons', 'people'] as const;
@@ -147,6 +150,7 @@ export function freshState(now = Date.now()): State {
       playerName: '',
       companion: '',
       names: {},
+      region: '',
     },
     flags: { rankSeen: 0, wardenSeen: false, giftDay: '', cardDay: '', greetDay: '', safeCredit: false, therapistLineShown: false, checkinDay: '', titlesSeen: [] },
     gone: {},
@@ -186,12 +190,12 @@ const setOwn = (g: Record<string, number>, id: string, t: number) => putOwn(g, i
 const extrasOf = (s: object) => Object.entries(s).filter(([k]) => !KNOWN.has(k)).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
 /** What is written to this device and into a Save Crystal: the wave 2 fields move out of settings, flags and setAt into profile. */
 function stored(s: State) {
-  const { theme, accent, cardBack, plate, title, playerName, companion, names, ...settings } = s.settings;
+  const { theme, accent, cardBack, plate, title, playerName, companion, names, region, ...settings } = s.settings;
   const { titlesSeen, ...flags } = s.flags;
   const setAt: Record<string, number> = {};
   const profileAt: Record<string, number> = {};
   for (const [k, t] of Object.entries(s.setAt)) if (typeof t === 'number') ((PROFILE_SET_KEYS as string[]).includes(k) ? profileAt : setAt)[k] = t;
-  return { ...s, settings, flags, setAt, profile: { theme, accent, cardBack, plate, title, playerName, companion, names, titlesSeen, setAt: profileAt } };
+  return { ...s, settings, flags, setAt, profile: { theme, accent, cardBack, plate, title, playerName, companion, names, region, titlesSeen, setAt: profileAt } };
 }
 /** Each id once, the first kept. */
 function firstById<T extends { id: string }>(list: T[]) {
@@ -413,6 +417,7 @@ export function normalize(raw: unknown): State | null {
     base.settings.title = oneOf<TitleId | ''>(pf.title, TITLE_IDS, '');
     base.settings.playerName = cleanName(pf.playerName);
     base.settings.companion = cleanName(pf.companion);
+    base.settings.region = oneOf<RegionId | ''>(pf.region, REGION_IDS, '');
     if (isObj(pf.names))
       for (const id of SHADOW_IDS) {
         const n = own(pf.names, id) ? cleanName(pf.names[id]) : '';
