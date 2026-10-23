@@ -144,6 +144,9 @@ export class ArtStore {
   private deleted = new Set<string>();
   /** Versions this copy saw land on disk (id + identity). A version in memory that is not here never reached disk. */
   private landed = new Set<string>();
+  /** The newest draft write per key; an older one finishing later must not put its draft back in memory. */
+  private draftTurns = new Map<string, number>();
+  private draftTurn = 0;
 
   constructor(readonly name: string) {
     if (typeof BroadcastChannel !== 'undefined') {
@@ -540,6 +543,8 @@ export class ArtStore {
   }
 
   async putDraft(d: Draft) {
+    const turn = ++this.draftTurn;
+    this.draftTurns.set(d.key, turn);
     this.mem.drafts.set(d.key, d);
     await this.tx(['drafts', 'meta'], 'readwrite', async (t) => {
       if (d.editId) {
@@ -551,10 +556,11 @@ export class ArtStore {
     }, () => {
       if (d.editId && this.deleted.has(d.editId)) d = detached(d);
     });
-    this.mem.drafts.set(d.key, d);
+    if (this.draftTurns.get(d.key) === turn) this.mem.drafts.set(d.key, d);
   }
 
   async dropDraft(key: string) {
+    this.draftTurns.set(key, ++this.draftTurn);
     this.mem.drafts.delete(key);
     await this.tx(['drafts'], 'readwrite', async (t) => void t.objectStore('drafts').delete(key), () => undefined);
   }

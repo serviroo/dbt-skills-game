@@ -76,7 +76,91 @@ async function crystal(h, page, name) {
   return JSON.parse(fs.readFileSync(file, 'utf8')).art;
 }
 
-async function savedPair(h, edit) {
+const KEPT_APART = 'A newer copy of this drawing arrived, so this one was kept as its own page.';
+const NO_STORE = /^This browser isn.t keeping drawings right now\. Save to Photos keeps a copy\.$/;
+const stored = (page) => page.evaluate(async () => (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).exportAll());
+
+/**
+ * Holds this tab's next save before it reaches the disk, as a slow thumbnail or disk would. `late` also holds the
+ * removal message until the save's write is open on the disk and keeps that write open until told; `fail` makes it fail.
+ */
+async function holdSave(page, mode) {
+  await page.evaluate(async (mode) => {
+    const s = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+    const hold = (window.__hold = { open: mode === 'late', heard: [] });
+    hold.gate = new Promise((r) => (hold.release = r));
+    const { write, tx, channel } = s;
+    const hear = channel.onmessage;
+    s.write = async function (rec, force) {
+      if (!force || hold.used) return write.call(this, rec, force);
+      hold.used = hold.waiting = true;
+      await hold.gate;
+      const res = await write.call(this, rec, force);
+      hold.done = true;
+      return res;
+    };
+    s.tx = function (stores, txMode, fn, fallback) {
+      if (!hold.waiting || hold.txd || txMode !== 'readwrite' || !stores.includes('strokes')) return tx.call(this, stores, txMode, fn, fallback);
+      hold.txd = true;
+      if (mode === 'fail') return tx.call(this, stores, txMode, () => Promise.reject(new DOMException('The disk is full.', 'QuotaExceededError')), fallback);
+      return tx.call(this, stores, txMode, (t) => {
+        const spin = () => hold.open && (t.objectStore('thumbs').get('').onsuccess = spin);
+        spin();
+        return fn(t).then((v) => ((hold.wrote = true), v));
+      }, fallback);
+    };
+    if (mode === 'late') channel.onmessage = (e) => (e.data?.type === 'removed' && !hold.hearing ? hold.heard.push(e) : hear(e));
+    hold.deliver = () => {
+      hold.hearing = true;
+      hold.heard.splice(0).forEach(hear);
+    };
+  }, mode);
+}
+
+/** A saves the open page while B removes it; the removal commits before A's save reaches the disk. */
+async function racedSave(h, edit, mode) {
+  let kept;
+  const pair = await savedPair(h, edit, async (a) => {
+    kept = await strokes(a);
+    await holdSave(a, mode);
+    await a.getByRole('button', { name: 'Save', exact: true }).click();
+    await a.waitForFunction(() => window.__hold.waiting);
+  });
+  const { a, b, id } = pair;
+  await a.evaluate(() => window.__hold.release());
+  if (mode === 'late') {
+    await a.waitForFunction(() => window.__hold.wrote);
+    await a.evaluate(() => window.__hold.deliver());
+    await h.sleep(300);
+    await a.evaluate(() => (window.__hold.open = false));
+  }
+  await a.waitForFunction(() => window.__hold.done);
+  await h.sleep(700);
+  const name = `delete-during-save-${mode ?? (edit === true ? 'edit' : edit)}`;
+  const [aPages, bPages, aDrafts, bDrafts] = [(await stored(a)).records, (await stored(b)).records, await drafts(a), await drafts(b)];
+  const view = { kept: same(await strokes(a), kept), keptApart: await a.getByText(KEPT_APART, { exact: true }).count(), noStore: await a.getByText(NO_STORE).count() };
+  await evidence(h, a, name + '-a', { id, view, pages: aPages.map((r) => r.id) });
+  await evidence(h, b, name + '-b', { id, pages: bPages.map((r) => r.id) });
+  const crystalPages = await crystal(h, a, name + '-crystal');
+  const copies = (pages, ds) => pages.filter((r) => same(r.strokes, kept)).length + ds.filter((d) => same(d.strokes, kept)).length;
+  for (const [where, pages] of [['this tab', aPages], ['the other tab', bPages], ["this tab's Save Crystal", crystalPages]]) {
+    h.expect(!pages.some((r) => r.id === id), `the removed page came back in ${where}`);
+  }
+  return { ...pair, kept, view, aPages, bPages, aDrafts, bDrafts, crystalPages, copies };
+}
+
+/** The save kept the strokes as their own page: one copy everywhere, confirmed, still open in the editor. */
+async function keptOnce(h, edit, mode) {
+  const { ctx, view, aPages, bPages, aDrafts, bDrafts, crystalPages, copies } = await racedSave(h, edit, mode);
+  h.expect(view.keptApart === 1, 'the save kept the strokes as their own page but showed no confirmation');
+  h.expect(view.kept, 'the editor dropped the strokes it just saved');
+  h.expect(copies(aPages, aDrafts) === 1, `this tab holds ${copies(aPages, aDrafts)} copies of the strokes across saved pages and drafts`);
+  h.expect(copies(bPages, bDrafts) === 1, `the other tab holds ${copies(bPages, bDrafts)} copies of the strokes across saved pages and drafts`);
+  h.expect(copies(crystalPages, []) === 1, "this tab's Save Crystal does not hold the saved copy exactly once");
+  await ctx.close();
+}
+
+async function savedPair(h, edit, before) {
   const { ctx, page: a, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute&reduced&nopost&msaa=0&dpr=1');
   await art(h, a);
   await draw(a);
@@ -110,6 +194,7 @@ async function savedPair(h, edit) {
     }
   }
   await h.shot(a, edit ? 'delete-before-edit' : 'delete-before-gallery');
+  if (before) await before(a);
   await b.getByRole('button', { name: 'Remove', exact: true }).click();
   await b.locator('.dq-piece-confirm').getByRole('button', { name: 'Remove', exact: true }).click();
   await b.locator('.dq-artroom').waitFor();
@@ -236,6 +321,31 @@ export const scenarios = {
     await evidence(h, a, 'delete-after-saved-piece', { id });
     h.expect(await a.getByText('That page is no longer here.', { exact: true }).count(), 'the open saved page did not show the deletion');
     h.expect(!await a.locator('.dq-piece-art').count(), 'the deleted saved page is still displayed');
+    await ctx.close();
+  },
+
+  async 'art-delete-during-save-keeps-one-copy'(h) {
+    await keptOnce(h, true);
+  },
+
+  async 'art-delete-during-unchanged-save-keeps-one-copy'(h) {
+    await keptOnce(h, 'clean');
+  },
+
+  async 'art-delete-heard-mid-write-keeps-one-copy'(h) {
+    await keptOnce(h, true, 'late');
+  },
+
+  async 'art-delete-during-failed-save-keeps-one-draft'(h) {
+    const { ctx, kept, view, aPages, bPages, aDrafts, bDrafts, crystalPages } = await racedSave(h, true, 'fail');
+    const [page] = aPages;
+    const ds = aDrafts.filter((d) => same(d.strokes, kept));
+    h.expect(view.noStore === 1, 'a save the disk refused did not say this browser is not keeping drawings');
+    h.expect(view.kept, 'the editor dropped the strokes it could not store');
+    h.expect(aPages.length === 1 && same(page.strokes, kept), 'the copy this tab keeps in memory is missing');
+    h.expect(ds.length === 1 && ds[0].editId === page.id, 'the strokes are not one draft of the page kept in memory');
+    h.expect(!bPages.length && bDrafts.filter((d) => same(d.strokes, kept)).length === 1, 'the other tab does not see the strokes as one draft');
+    h.expect(crystalPages.filter((r) => same(r.strokes, kept)).length === 1, "this tab's Save Crystal does not hold the kept copy exactly once");
     await ctx.close();
   },
 
