@@ -3,7 +3,7 @@
  * Progress comes from an append-only event log: XP, stats, rank and the card collection are derived from it,
  * and no code path writes a negative amount or removes an event.
  */
-import { MODULES, ROTATION, SKILL, type StatId } from '../content/dbt';
+import { MODULES, ROTATION, SKILL, type Quest, type StatId } from '../content/dbt';
 import { DAILY_GIFTS, WARDEN_XP, RANK_XP, RANKS, STAT_BASE, TODAY_LINES, type DayLine } from '../content/daily-lines';
 import { ACCENT_IDS, CARD_BACK_IDS, PLATE_IDS, SHADOW_IDS, THEME_IDS, TITLE_IDS, type AccentId, type CardBackId, type PlateId, type ShadowId, type ThemeId, type TitleId } from '../content/roster-lines';
 import { cleanName, readYou, writeYou } from '../core/you';
@@ -13,10 +13,12 @@ export const SCHEMA = 1;
 const CRYSTAL_SCHEMA = 2;
 export const ROW_CAP = { emotions: 24, urges: 16 } as const;
 const DAY_TURN_HOURS = 6;
+/** Cards in the rotation before card events recorded their slot: older card events were dealt from these. */
+const OLD_ROTATION = 30;
 
 export type EvKind = 'visit' | 'skill' | 'checkin' | 'diary' | 'safe' | 'rest' | 'card' | 'feedback' | 'art' | 'line' | 'story';
 export const EV_KINDS: EvKind[] = ['visit', 'skill', 'checkin', 'diary', 'safe', 'rest', 'card', 'feedback', 'art', 'line', 'story'];
-export const EV_DATA = { checkin: ['feel', 'level'], feedback: ['answer'], art: ['kind'], rest: ['title', 'quiet'], line: ['id'] } as const satisfies Partial<Record<EvKind, readonly string[]>>;
+export const EV_DATA = { checkin: ['feel', 'level'], feedback: ['answer'], art: ['kind'], rest: ['title', 'quiet'], line: ['id'], card: ['slot', 'special'] } as const satisfies Partial<Record<EvKind, readonly string[]>>;
 type EvData<K extends EvKind> = Partial<Record<K extends keyof typeof EV_DATA ? (typeof EV_DATA)[K][number] : never, string | number | boolean | null>>;
 export const MOTIONS = ['system', 'reduce', 'full'] as const;
 export interface Ev {
@@ -825,8 +827,26 @@ export class Store {
   giftLine() {
     return DAILY_GIFTS[this.visitIndex() % DAILY_GIFTS.length];
   }
-  quest() {
-    return ROTATION[this.visitIndex() % ROTATION.length];
+  /**
+   * Today's card. Once revealed it stays the card today's card event recorded (its rotation slot), so an update that
+   * grows or reorders ROTATION can't swap it. A card event without a slot matches by skill (no skill meant a special
+   * card) around where the old rotation dealt it. The nearest match wins.
+   */
+  quest(): Quest & { slot: number } {
+    const n = ROTATION.length;
+    const vi = this.visitIndex();
+    const today = this.today();
+    const ev = this.state.events.find((e) => e.k === 'card' && e.day === today);
+    let slot = vi % n;
+    if (ev) {
+      const { slot: at, special } = ev.data ?? {};
+      const fits = (q: Quest) => (ev.skill === undefined ? !!q.special && (typeof special !== 'string' || q.special === special) : !q.special && q.skill === ev.skill);
+      const near = typeof at === 'number' && Number.isInteger(at) && at >= 0 && at < n ? at : vi % Math.min(n, OLD_ROTATION);
+      const ring = (i: number) => Math.min(Math.abs(i - near), n - Math.abs(i - near));
+      const match = ROTATION.flatMap((q, i) => (fits(q) ? [i] : [])).sort((a, b) => ring(a) - ring(b))[0];
+      if (match !== undefined) slot = match;
+    }
+    return { ...ROTATION[slot], slot };
   }
 
   /** Today's picked line, if any. */

@@ -363,6 +363,7 @@
   max-width: 36em;
 }
 .dq-text--step {
+  overflow-wrap: anywhere;
   font-size: 18.5px;
   line-height: 1.6;
   color: #c9dcef;
@@ -1522,6 +1523,7 @@ textarea.dq-input {
 
 /* ---------- skill runner ---------- */
 .dq-skill {
+  overflow-wrap: anywhere;
   max-width: 640px;
   margin: 6px auto 0;
 }

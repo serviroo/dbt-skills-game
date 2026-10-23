@@ -130,6 +130,46 @@ function tierLine(a: Answers) {
   if (rows.length) return 'Sorted and filed. No S-tier today. Tough crowd.';
   return 'Tasted, if not sorted. That still counts.';
 }
+const said = (a: Answers, k: string, fb = '') => {
+  const v = s(a, k).trim().replace(/[\s.!?]+$/, '') || fb;
+  return v.charAt(0).toUpperCase() + v.slice(1);
+};
+const THOUGHT_PICS: Record<string, string> = {
+  clouds: 'Each thought is a cloud. Watch it drift in, cross the sky and drift out.',
+  cars: 'Each thought is a car going past. Watch it come and go. No need to get in.',
+  leaves: 'Each thought sits on a leaf. Watch the stream carry it away.',
+};
+
+const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+const fullStop = (t: string) => (/[.!?]$/.test(t) ? t : `${t}.`);
+
+const GOALS: Record<string, string[]> = {
+  'Being kind': ['Do one kind thing a week', 'Be a bit kinder to myself', 'Help out with something'],
+  'Making things': ['Finish one small project', 'Make something each week', 'Learn a new technique'],
+  Learning: ['Read one book', 'Start a free course or guide', 'Learn the basics of something new'],
+  'Fun and play': ['Try a new game', 'Plan one fun day', 'Pick up an old hobby'],
+  Connection: ['Message someone more often', 'Join a club or a server', 'Plan a hangout'],
+  'Looking after me': ['Get outside more', 'Wind down earlier at night', 'Make my space cosier'],
+  'Doing good work': ['Get on top of one task', 'Finish something I put off', 'Learn one thing for work or school'],
+  Adventure: ['Visit somewhere new nearby', "Try something I've never done", 'Take a new route somewhere'],
+};
+function questLog(a: Answers) {
+  const goal = s(a, 'goal');
+  const first = s(a, 'first');
+  return `**What matters:** ${fullStop(cap(s(a, 'value', 'Something that matters to you')))} ${goal ? `**Goal:** ${fullStop(cap(goal))} ` : ''}**First step:** ${first ? fullStop(cap(first)) : "Pick one when you're ready."}`;
+}
+
+const MYTHS: Record<string, string> = {
+  "I shouldn't feel this way": "There's no right way to feel. Two people can feel different things about the same moment, and both make sense.",
+  "Feeling bad means I'm weak": "Hard feelings come with being a person. They aren't weakness, and saying them out loud takes strength.",
+  'This feeling is stupid': 'Every feeling makes sense somewhere. Even an awkward one is usually pointing at something that matters to you.',
+  "If they disapprove, I shouldn't feel it": "Your feelings are yours. Someone else not getting them doesn't make them wrong.",
+  'Painful feelings should be ignored': "Painful feelings carry information. You don't have to act on them, and you don't have to pretend they aren't there.",
+  "Big feelings mean I'm out of control": 'You can feel a lot and still choose what you do next. That part is what skills are for.',
+};
+const ruleOf = (a: Answers) => s(a, 'myth', 'An old rule').trim();
+const patchOf = (a: Answers) => (Object.hasOwn(MYTHS, ruleOf(a)) ? MYTHS[ruleOf(a)] : undefined) ?? "Feelings aren't rules or verdicts. Every one makes sense somewhere, and you still get to choose what you do next.";
+const bothAnd = (a: Answers) => s(a, 'pair', "I'm doing my best, but I want to do better.").trim().replace(/,?\s+but\s+/i, ', and ');
 
 export const SKILLS: Skill[] = [
   // ---------------- Mindfulness (Sense) ----------------
@@ -181,6 +221,89 @@ export const SKILLS: Skill[] = [
       { kind: 'input', key: 'fact', text: 'Now say the same thing as facts and feelings. "I said the wrong thing and I feel embarrassed" instead of "I\'m an idiot."', placeholder: 'Fact version (optional)', skip: 'Said it in my head' },
       { kind: 'choice', key: 'body', text: 'Read the fact version once. Notice your body.', options: o('A bit lighter', 'Same', 'Not sure') },
       { kind: 'say', text: 'If you catch yourself judging, no need to judge the judging. Notice it and return to the facts.', cta: 'Done', go: 'end' },
+    ],
+  },
+  {
+    id: 'one-mindfully',
+    sl: 'Single Target',
+    real: 'One-Mindfully',
+    module: 'mind',
+    minutes: '2 min',
+    card: 'One thing at a time. When your mind wanders off, bring it back.',
+    steps: [
+      { kind: 'intro', text: "Being pulled in ten directions is tiring. Minds do that, and it isn't your fault. For the next minute, you only do one thing." },
+      { kind: 'choice', key: 'one', text: 'Pick one small thing to give all your attention to.', small: 'Close other tabs and let messages wait, if you can.', options: o('Wash one cup', 'Fold a few clothes', 'Draw a little doodle', 'Just breathe'), other: 'My own' },
+      { kind: 'timer', seconds: 60, visual: 'ring', extend: 30, text: (a) => `${said(a, 'one', 'This one thing')}. Only this. Your mind will wander. When it does, notice where it went and come back. Again and again.` },
+      { kind: 'choice', key: 'drift', text: 'How often did your mind wander off?', options: ['Hardly', 'A few times', 'A lot', 'Lost count'].map((label) => ({ label, reply: 'Wandering is normal. Coming back is the skill, and you did it.' })) },
+      { kind: 'say', text: 'Try it once more today with something ordinary. When you walk, only walk. When you listen, only listen. One thing, then the next.', cta: 'Done', go: 'end' },
+    ],
+  },
+  {
+    id: 'effectively',
+    sl: 'Play the Map',
+    real: 'Effectively',
+    module: 'mind',
+    minutes: '2 min',
+    card: "Do what works in the situation you're in, not the one you wish you were in.",
+    steps: [
+      { kind: 'intro', text: "It's frustrating when being right doesn't fix anything. That feeling makes sense. Here you look for what works in the situation you're actually in." },
+      {
+        kind: 'choice',
+        key: 'what',
+        text: "Is there a situation where you're stuck between being right and getting what you need?",
+        options: [{ label: 'Something small' }, { label: 'Something big' }, { label: 'Nothing right now', reply: "Then picture a small one, like a queue that won't move when you're in a hurry." }],
+      },
+      { kind: 'input', key: 'goal', text: 'What do you actually want out of it? Not who wins. The outcome.', placeholder: 'What I want (optional)', fills: ['To be heard', 'To get it sorted', 'To keep the peace', 'To feel okay about myself'], skip: 'Keep it in my head' },
+      {
+        kind: 'choice',
+        key: 'way',
+        text: "What's getting in the way?",
+        options: [
+          ...['Wanting to be right', 'Wanting to win', 'Wanting to get even', 'It should be different'].map((label) => ({ label, reply: 'That makes sense. You can feel it and still set it down for now.' })),
+          { label: 'Nothing much', reply: 'Clear road, then.' },
+        ],
+      },
+      {
+        kind: 'choice',
+        key: 'move',
+        text: "Every situation has its own rules, fair or not. Working with them usually gets you further than fighting them. What's one move that would help, even a little?",
+        small: 'If someone is hurting you, getting safe is always the move that works.',
+        options: o('Ask plainly for what I need', 'Wait until I feel calmer', 'Follow the rule this once', 'Let this one go'),
+        other: 'My own move',
+      },
+      { kind: 'say', text: (a) => `${a.move ? `"${said(a, 'move')}." ` : ''}You picked your goal over the fight. That's the skill.`, cta: 'Done', go: 'end' },
+    ],
+  },
+  {
+    id: 'mindful-thoughts',
+    sl: 'Spectator Mode',
+    real: 'Mindfulness of Current Thoughts',
+    module: 'mind',
+    minutes: '2 min',
+    card: "Watch your thoughts go by. You don't have to chase them or obey them.",
+    steps: [
+      { kind: 'intro', text: "A busy or loud head is hard to be in. That's real. For a minute, you don't have to fix your thoughts or believe them. Only watch them go by." },
+      { kind: 'choice', key: 'pic', text: 'Pick a picture for your thoughts.', options: [{ label: 'Clouds crossing the sky', value: 'clouds' }, { label: 'Cars on a quiet road', value: 'cars' }, { label: 'Leaves on a stream', value: 'leaves' }] },
+      { kind: 'say', text: 'When a thought shows up, give it a plain label. "A worry." "A plan." "A memory." Then let it move on. No need to push it away or follow it.', cta: 'Ready' },
+      { kind: 'timer', seconds: 60, visual: 'tide', extend: 30, text: (a) => `${THOUGHT_PICS[s(a, 'pic', 'clouds')] ?? THOUGHT_PICS.clouds} If you get pulled into one, that's normal. Step back and watch again.` },
+      { kind: 'say', text: "Thoughts are only thoughts. They aren't facts, and they aren't orders. You can notice one without doing what it says." },
+      {
+        kind: 'choice',
+        key: 'loud',
+        text: 'How loud are your thoughts now?',
+        options: [
+          { label: 'Quieter', reply: 'You let some go by.', go: 'close' },
+          { label: 'About the same', reply: "That's okay. Watching was the practice, not the quiet.", go: 'close' },
+          { label: 'Louder', go: 'louder' },
+        ],
+      },
+      { id: 'close', kind: 'say', text: 'Next time a thought grabs you, try putting "I\'m having the thought that..." in front of it. It makes a little space.', cta: 'Done', go: 'end' },
+      {
+        id: 'louder',
+        kind: 'say',
+        text: "Thanks for telling me. Some thoughts are loud and heavy, and you don't have to sit with them alone. The Safe Zone is one tap away if you want it.",
+        options: [{ label: 'Safe Zone', go: 'safe' }, { label: 'Done', go: 'end' }],
+      },
     ],
   },
 
@@ -500,6 +623,91 @@ export const SKILLS: Skill[] = [
       },
     ],
   },
+  {
+    id: 'turning-the-mind',
+    sl: 'Crossroads',
+    real: 'Turning the Mind',
+    module: 'dt',
+    minutes: '2 min',
+    card: 'Caught fighting something that already happened? Turn toward accepting it, again.',
+    steps: [
+      {
+        kind: 'intro',
+        text: "Still fighting something that already happened? That makes sense. It hurt, and part of you wants it undone. Accepting isn't one and done. You choose it, then you choose it again.",
+        small: "Accepting isn't approving. It never means staying somewhere unsafe.",
+      },
+      { kind: 'choice', key: 'fight', multi: true, text: '**Notice the fight.** Is any of this here right now? No need to stop it. Only notice.', options: o('"Why me?"', '"This shouldn\'t be happening"', 'Bitterness', 'Wishing it away', 'Something else') },
+      { kind: 'hold', seconds: 4, label: 'Hold to turn', done: 'Turned.', text: "**Turn.** Picture a fork in the road. One way keeps fighting what's real. The other accepts it, even if you hate it. Turn toward that one, only for now." },
+      { kind: 'choice', key: 'sign', other: 'My own', text: "**Plan for next time.** The fight usually comes back. That's normal. What will tell you it's back?", options: o('A "why me" thought', 'A tight jaw or fists', 'Replaying it in my head', 'Feeling bitter') },
+      { kind: 'breath', inhale: 4, exhale: 6, rounds: 3, words: ['notice', 'turn'], text: '**Turn again.** Breathe in and notice the fight. Breathe out and turn.' },
+      { kind: 'choice', key: 'after', text: 'Every turn counts, even a small one. How is it now?', options: [{ label: 'A bit lighter', go: 'done' }, { label: 'About the same', go: 'same' }, { label: "It's a lot", go: 'lot' }] },
+      { id: 'done', kind: 'say', text: 'You turned your mind. When the fight comes back, you know the move: notice it, then turn again.', cta: 'Done', go: 'end' },
+      { id: 'same', kind: 'say', text: 'Thanks for trying it. Sometimes it takes a lot of turns before anything shifts. Each one still counts.', cta: 'Done', go: 'end' },
+      {
+        id: 'lot',
+        kind: 'say',
+        text: 'Thanks for being honest. Then only a little today. Some things take a lot of turning. The Safe Zone is one tap away if you want it.',
+        options: [{ label: 'Safe Zone', go: 'safe' }, { label: 'Done', go: 'end' }],
+      },
+    ],
+  },
+  {
+    id: 'body-scan',
+    sl: 'Quiet Scan',
+    real: 'Body Scan',
+    module: 'dt',
+    minutes: '2 min',
+    card: 'Move your attention slowly from your feet to your head. Only noticing.',
+    steps: [
+      { kind: 'intro', text: "Wound up, or a bit far away from yourself? That's hard, and it makes sense after a rough stretch. A slow scan can bring you back, one part at a time." },
+      { kind: 'say', text: "Sit or lie down, whichever is easier. Close your eyes, or rest them on one spot. Skip any part that doesn't feel okay. If it gets to be too much, open your eyes and look around the room.", cta: 'Ready' },
+      { kind: 'timer', seconds: 30, extend: 15, visual: 'glow', title: 'Feet and legs', text: 'Notice your feet. Warm, cool, heavy, tingly, or nothing much. Then slowly up your legs. No need to change anything.' },
+      { kind: 'timer', seconds: 30, extend: 15, visual: 'glow', title: 'Back, hands and shoulders', text: 'Notice where your back meets the chair or the bed. Then your hands, up your arms, to your shoulders. Tight is okay. Only notice.' },
+      { kind: 'timer', seconds: 30, extend: 15, visual: 'glow', title: 'Face and head', text: 'Your jaw, your cheeks, around your eyes, the top of your head. If something wants to soften, let it.' },
+      { kind: 'choice', key: 'after', text: 'Now your whole body at once, for one breath. How does it feel?', options: [{ label: 'A bit calmer', go: 'done' }, { label: 'About the same', go: 'same' }, { label: 'Harder', go: 'hard' }] },
+      { id: 'done', kind: 'say', text: 'You checked in with yourself, feet to head. That was care.', cta: 'Done', go: 'end' },
+      { id: 'same', kind: 'say', text: "Thanks for trying it. Noticing is the whole skill, and you did it. It doesn't have to feel different yet.", cta: 'Done', go: 'end' },
+      {
+        id: 'hard',
+        kind: 'say',
+        text: "Thanks for being honest. Some days, paying attention to your body is a lot. That's okay. Noticing what's around you might fit better.",
+        options: [{ label: 'Sense Up', go: 'skill:sense-up@sight' }, { label: 'Safe Zone', go: 'safe' }, { label: 'Done', go: 'end' }],
+      },
+    ],
+  },
+  {
+    id: 'alternate-rebellion',
+    sl: 'Off-Script',
+    real: 'Alternate Rebellion',
+    module: 'dt',
+    minutes: '1 min',
+    card: 'Want to break the rules? Break a harmless one, on purpose.',
+    steps: [
+      { kind: 'intro', text: "Sick of rules, plans and being careful? That urge to break out is real, and it makes sense. You can honour it in a way that doesn't hurt you or your goals." },
+      { kind: 'choice', key: 'against', other: 'My own', text: 'What are you pushing against today? Any answer makes sense.', options: o('Being told what to do', 'Being bored', 'Always being careful', 'Everything, honestly', 'Not sure') },
+      {
+        id: 'pick',
+        kind: 'choice',
+        key: 'rebel',
+        other: 'My own',
+        text: 'Pick a harmless rebellion. Small is fine.',
+        options: o('Wear something mismatched on purpose', 'Take a totally different route', "Blast a song you'd never admit to liking", 'Write a rant, then delete it', 'Rearrange one corner of your room', 'Sit somewhere you never sit'),
+      },
+      {
+        kind: 'choice',
+        key: 'check',
+        text: (a) => `${s(a, 'rebel', 'Your rebellion').replace(/[.!?\s]+$/, '')}. Quick check: could it hurt you, anyone else, or something you care about?`,
+        options: [{ label: "No, it's harmless", go: 'go' }, { label: 'Maybe', go: 'swap' }],
+      },
+      {
+        id: 'swap',
+        kind: 'say',
+        text: 'Good catch. Pick a gentler one. The best rebellions still feel good tomorrow.',
+        options: [{ label: 'Pick again', go: 'pick' }, { label: 'Done', go: 'end' }],
+      },
+      { id: 'go', kind: 'say', text: 'Go do it. Small, harmless and on purpose still counts as breaking out.', cta: 'Done', go: 'end' },
+    ],
+  },
 
   // ---------------- Emotion Regulation (Intelligence) ----------------
   {
@@ -594,8 +802,8 @@ export const SKILLS: Skill[] = [
       {
         id: 'fits',
         kind: 'say',
-        text: 'Then it fits. Your feeling is giving you real information, and it makes sense. Next could be some comfort, a DEAR MAN, or nothing at all.',
-        options: [{ label: 'Self-Soothe', go: 'skill:self-soothe' }, { label: 'DEAR MAN', go: 'skill:dear-man' }, { label: 'Done', go: 'end' }],
+        text: 'Then it fits. Your feeling is giving you real information, and it makes sense. Next could be some comfort, working on the problem, a DEAR MAN, or nothing at all.',
+        options: [{ label: 'Self-Soothe', go: 'skill:self-soothe' }, { label: 'Problem Solving', go: 'skill:problem-solving' }, { label: 'DEAR MAN', go: 'skill:dear-man' }, { label: 'Done', go: 'end' }],
       },
       {
         id: 'partly',
@@ -650,8 +858,8 @@ export const SKILLS: Skill[] = [
       {
         id: 'fits',
         kind: 'say',
-        text: "Then this isn't the skill for now. Your feeling makes sense. Want to plan what to say instead?",
-        options: [{ label: 'DEAR MAN', go: 'skill:dear-man' }, { label: 'Done', go: 'end' }],
+        text: "Then this isn't the skill for now. Your feeling makes sense. Want to work on the problem, or plan what to say?",
+        options: [{ label: 'Problem Solving', go: 'skill:problem-solving' }, { label: 'DEAR MAN', go: 'skill:dear-man' }, { label: 'Done', go: 'end' }],
       },
       {
         id: 'opp',
@@ -731,6 +939,108 @@ export const SKILLS: Skill[] = [
         text: 'Thanks for being honest. Big feelings are allowed. The Safe Zone is one tap away if you want it.',
         options: [{ label: 'Safe Zone', go: 'safe' }, { label: 'Done', go: 'end' }],
       },
+    ],
+  },
+  {
+    id: 'problem-solving',
+    sl: 'Keysmith',
+    real: 'Problem Solving',
+    module: 'er',
+    minutes: '3 min',
+    card: 'The feeling fits, so work on the problem. One small step at a time.',
+    steps: [
+      { kind: 'intro', text: "Something real is in the way, and it makes sense that it's getting to you. When a feeling fits the facts, the problem is the thing to work on. One small piece at a time." },
+      {
+        kind: 'say',
+        text: 'This one needs a little thinking room. Heavy right now? Comfort comes first. The problem will keep.',
+        options: [{ label: 'Calm or mild. Go on' }, { label: 'Heavy right now', go: 'heavy' }],
+      },
+      { kind: 'input', key: 'problem', text: "What's the problem? Stick to the facts, what a camera would see. Keep it vague if you like.", placeholder: 'The problem (optional)', skip: 'Keep it in my head' },
+      { kind: 'input', key: 'goal', text: 'What would need to change for this to feel okay? Keep it small and doable. "Have a plan for Friday" beats "fix everything".', placeholder: 'My goal (optional)', skip: 'Skip' },
+      { id: 'ideas', kind: 'input', key: 'ideas', lines: 3, text: 'Brainstorm. Every idea counts, even the odd ones. No judging yet. More ideas give you more to choose from.', fills: ['Ask for help', 'Do a smaller piece', 'Look it up', 'Wait a day', 'Say no to something', 'Try a different time'], placeholder: 'Ideas (optional)', skip: 'Thought of some' },
+      {
+        kind: 'choice',
+        key: 'pick',
+        text: "Pick the idea most likely to get you there. Torn between two? Go with the one that's easier to start.",
+        options: [{ label: 'Got one' }, { label: 'Torn between two', reply: 'Start with the easier one. You can switch later.' }, { label: 'None of them fit', go: 'stuck' }],
+      },
+      { kind: 'input', key: 'first', text: "What's the first step? Small enough to do today, or even right now.", fills: ['Write it down', 'Look one thing up', 'Send one message', 'Five minutes on it'], placeholder: 'First step (optional)', skip: 'Skip' },
+      { kind: 'choice', key: 'try', text: "Try it, then see how it went. If it doesn't fit, nothing's lost. Come back and try another idea.", options: [{ label: 'Trying it now', go: 'end' }, { label: 'Later', go: 'end' }, { label: 'Only planning', go: 'end' }] },
+      {
+        id: 'stuck',
+        kind: 'say',
+        text: "That happens. Some problems need more ideas, more information or a night's sleep. Coming back to it later counts as a step.",
+        options: [{ label: 'More ideas', go: 'ideas' }, { label: 'Done for now', go: 'end' }],
+      },
+      {
+        id: 'heavy',
+        kind: 'say',
+        text: 'Then the problem waits. Heavy feelings get comfort first. No reason needed.',
+        options: [{ label: 'Something soothing', go: 'skill:self-soothe' }, { label: 'Safe Zone', go: 'safe' }, { label: 'Done', go: 'end:quiet' }],
+      },
+    ],
+  },
+  {
+    id: 'long-term-positives',
+    sl: 'Main Quest',
+    real: 'Long-Term Positives',
+    module: 'er',
+    minutes: '2 min',
+    card: 'Pick something that matters to you and take one small step toward it.',
+    steps: [
+      { kind: 'intro', text: 'If life has felt like all chores lately, that makes sense. A nice moment helps today. This one is about the longer term: one small step toward something you care about.' },
+      {
+        kind: 'choice',
+        key: 'value',
+        grid: true,
+        text: 'Pick one thing that matters to you. Not what should matter. What does.',
+        small: 'Not sure? Pick the one that feels closest. You can change it any time.',
+        options: o(...Object.keys(GOALS)),
+        other: 'My own',
+      },
+      {
+        kind: 'choice',
+        key: 'goal',
+        text: (a) => `${cap(s(a, 'value', 'Something'))} matters to you. What's one goal that fits, something that could happen in the next month or so?`,
+        options: (a) => o(...((Object.hasOwn(GOALS, s(a, 'value')) ? GOALS[s(a, 'value')] : undefined) ?? ['One small project', 'More time for it each week', 'Try something new with it'])),
+        other: 'My own goal',
+      },
+      { kind: 'input', key: 'first', text: "Break it down. What's one small first step? So small it's almost too easy.", fills: ['Look something up', 'Write it down', 'Send one message', 'Ten minutes on it'], placeholder: 'First step (optional)', skip: 'Skip' },
+      { kind: 'say', title: '[Quest log updated]', text: (a) => questLog(a) },
+      { kind: 'choice', key: 'when', text: 'Small steps toward what matters add up. If a step starts to feel like too much, make it smaller. Smaller still counts. When will you try it?', options: [{ label: 'Today', go: 'end' }, { label: 'This week', go: 'end' }, { label: 'Only planning', go: 'end' }] },
+    ],
+  },
+  {
+    id: 'emotion-myths',
+    sl: 'Patch Notes',
+    real: 'Myths About Emotions',
+    module: 'er',
+    minutes: '2 min',
+    card: 'Old rules about feelings, patched with something truer.',
+    steps: [
+      { kind: 'intro', text: 'Feelings are hard enough on their own. Then old rules about them pile on top, like "I shouldn\'t feel this way." Let\'s look at one and try a kinder thought.' },
+      { kind: 'choice', key: 'myth', text: 'Which old rule has been loudest lately?', options: o(...Object.keys(MYTHS)), other: 'A different one' },
+      {
+        kind: 'timer',
+        title: '[Patch notes]',
+        seconds: 20,
+        extend: 20,
+        visual: 'glow',
+        text: (a) => `**Old rule:** "${fullStop(cap(ruleOf(a)))}" **Another way to see it:** ${patchOf(a)}`,
+        small: 'Read it slowly while the ring runs.',
+      },
+      {
+        kind: 'choice',
+        key: 'land',
+        text: 'How does that thought sit?',
+        options: [
+          { label: 'Rings true', reply: 'Good. Keep it handy.' },
+          { label: 'Partly', reply: 'Partly is a start. Old rules take a while to update.' },
+          { label: "Doesn't fit", reply: "Thanks for being honest. You don't have to agree with it. Reading it still counts." },
+        ],
+      },
+      { kind: 'input', key: 'mine', text: 'Want to put it in your own words? Something to tell yourself next time the old rule shows up.', placeholder: 'My version (optional)', skip: 'Skip' },
+      { kind: 'say', text: "Feelings aren't right or wrong. They're information, and you get to decide what to do with them.", cta: 'Done', go: 'end' },
     ],
   },
 
@@ -854,6 +1164,124 @@ export const SKILLS: Skill[] = [
       },
       { kind: 'hold', tone: 'heal', seconds: 5, label: 'Hold to heal', done: 'Self-heal landed.', text: (a) => healLine(a) },
       { kind: 'say', title: '[HEAL]', text: 'Self-heal landed. It counts.', cta: 'Done', go: 'end' },
+    ],
+  },
+  {
+    id: 'clarifying-priorities',
+    sl: 'Priority Call',
+    real: 'Clarifying Priorities',
+    module: 'ie',
+    minutes: '2 min',
+    card: 'The result, the relationship or your self-respect. Pick which one leads this time.',
+    steps: [
+      { kind: 'intro', text: "Hard talks pull you three ways at once, so it makes sense if this one feels tangled. Let's find which pull matters most this time." },
+      { kind: 'input', key: 'talk', text: "Think of one talk that's coming up, or one that keeps replaying in your head. Only you will see this.", placeholder: 'The talk (optional)', skip: 'Keep it in my head' },
+      { kind: 'choice', key: 'want', title: 'The result', text: 'What do you want to walk away with?', options: o('A yes to something I asked for', 'My no respected', 'My point taken seriously', 'Not sure yet') },
+      { kind: 'choice', key: 'bond', title: 'The relationship', text: 'How do you want things to be between you afterwards?', options: o('As close as before', 'Calm and okay', 'It matters less this time', 'Not sure yet') },
+      { kind: 'choice', key: 'self', title: 'Your self-respect', text: 'How do you want to feel about yourself afterwards?', options: o('Honest', 'Fair to both of us', 'Steady, not small', 'Not sure yet') },
+      {
+        id: 'main',
+        kind: 'choice',
+        key: 'main',
+        text: 'All three count. Only one gets to lead this time. Which one?',
+        small: 'It can change from one talk to the next, even with the same person.',
+        options: [
+          { label: 'The result', go: 'result' },
+          { label: 'The relationship', go: 'bond-first' },
+          { label: 'My self-respect', go: 'self-first' },
+          { label: "Can't pick one", go: 'tie' },
+        ],
+      },
+      { id: 'result', kind: 'say', text: 'Then the result leads. Ask clearly, or say no clearly. Kindness and self-respect still come along, one step behind.', options: [{ label: 'Plan it with DEAR MAN', go: 'skill:dear-man' }, { label: 'Done', go: 'end' }] },
+      { id: 'bond-first', kind: 'say', text: "Then the relationship leads. Keep things warm while you talk. You might push a little less today. That's your call to make.", options: [{ label: 'Practise GIVE', go: 'skill:give' }, { label: 'Done', go: 'end' }] },
+      { id: 'self-first', kind: 'say', text: "Then your self-respect leads. Stay true to what you value, even if you don't get the yes.", options: [{ label: 'Practise FAST', go: 'skill:fast' }, { label: 'Done', go: 'end' }] },
+      {
+        id: 'tie',
+        kind: 'say',
+        text: "That's okay. Try this: which one would hurt most to lose? That one leads. Still a tie? Pick one for now. You can always change it.",
+        options: [{ label: 'The result', go: 'result' }, { label: 'The relationship', go: 'bond-first' }, { label: 'My self-respect', go: 'self-first' }, { label: 'Done for now', go: 'end' }],
+      },
+    ],
+  },
+  {
+    id: 'dialectics',
+    sl: 'Split Screen',
+    real: 'Dialectics: Both-And',
+    module: 'ie',
+    minutes: '90 s',
+    card: 'Two things can be true at once. Swap "but" for "and".',
+    steps: [
+      { kind: 'intro', text: "Torn between two sides? That's a tiring place to be. When things are hard, the mind wants one answer: all good or all bad. Most of the time, both sides hold some truth." },
+      {
+        kind: 'choice',
+        key: 'pair',
+        text: "Two things that feel like they can't both be true. Pick the one that sounds most like you.",
+        options: o("I'm doing my best, but I want to do better.", "I care about them, but I'm upset with them.", 'I want things to change, but change is scary.', 'I need help, but I want to do it myself.'),
+        other: 'Write my own',
+      },
+      {
+        kind: 'timer',
+        seconds: 20,
+        visual: 'glow',
+        title: 'But becomes and',
+        big: (a) => bothAnd(a),
+        text: (a) => (bothAnd(a) === s(a, 'pair', '').trim() ? 'Say it again with an "and" in the middle. Both halves get to stay.' : 'Read it slowly. Both halves get to stay.'),
+      },
+      {
+        kind: 'choice',
+        key: 'land',
+        text: 'How does the "and" version sit with you?',
+        options: [{ label: 'A bit lighter' }, { label: 'Strange, and true' }, { label: 'Same as before', reply: 'That makes sense. It often takes a few tries.' }, { label: 'Not sure', reply: 'Not sure is fine.' }],
+      },
+      {
+        kind: 'choice',
+        key: 'spot',
+        text: 'Words like "always", "never" and "ruined" squeeze out the other side too. Which line leaves room for both?',
+        options: [{ label: '"Everything is ruined."', go: 'room' }, { label: '"This went badly, and parts of it can still be fixed."', go: 'room' }, { label: '"Nothing ever works out."', go: 'room' }],
+      },
+      { id: 'room', kind: 'say', text: 'The middle one. It\'s honest about the hard part and still leaves room for the rest. Next time you catch a "but", an "always" or a "never", try an "and".', cta: 'Done', go: 'end' },
+    ],
+  },
+  {
+    id: 'mindfulness-of-others',
+    sl: 'Co-op Mode',
+    real: 'Mindfulness of Others',
+    module: 'ie',
+    minutes: '2 min',
+    card: 'Be with someone more fully. Notice, stay curious, guess less.',
+    steps: [
+      { kind: 'intro', text: "Being around people can take a lot out of you. Your mind keeps a running commentary: what they think of you, what to say next. That's normal. This helps you be with them a bit more and judge a bit less." },
+      {
+        kind: 'choice',
+        key: 'who',
+        text: "Think of someone you'll see or talk to soon. Someone easy is best for practice.",
+        small: "If being around someone doesn't feel safe, leave them out of this. Your safety comes first.",
+        options: o('A friend', 'Family', 'A teammate', 'Someone at work or school', 'Not sure yet'),
+      },
+      {
+        kind: 'timer',
+        title: 'Observe',
+        seconds: 30,
+        start: 'Start 30 s',
+        visual: 'glow',
+        extend: 30,
+        text: "Next time you're with them, give them your full attention. For now, picture them: their face, their voice, what they're into lately. If a judgment pops up, let it drift past and come back to them.",
+      },
+      {
+        kind: 'choice',
+        key: 'fact',
+        title: 'Describe',
+        text: 'Stick to what you can see and hear. Which one is a fact?',
+        options: [{ label: 'They checked their phone twice.', go: 'guess' }, { label: "They don't want to be here.", go: 'guess' }, { label: 'Not sure', go: 'guess' }],
+      },
+      { id: 'guess', kind: 'say', text: "The first one. A camera could catch it. The second is a guess about what's going on inside them. Guesses can be wrong, so hold them loosely. If it matters, you can ask." },
+      { kind: 'say', title: 'Participate', text: 'When you\'re together, join in all the way. Go with the flow of the chat or the game. Less planning your next line, more being there.' },
+      {
+        kind: 'choice',
+        key: 'try',
+        text: 'Which one will you try next time?',
+        options: [{ label: 'Full attention', go: 'end' }, { label: 'Facts, not guesses', go: 'end' }, { label: 'Join in all the way', go: 'end' }, { label: 'Not sure yet', go: 'end' }],
+      },
     ],
   },
   {
@@ -1025,7 +1453,7 @@ export const SKILL = Object.fromEntries(SKILLS.map((k) => [k.id, k])) as Record<
 /** The loadout, in the order the cards are dealt. */
 export const LOADOUT = SKILLS.filter((k) => k.loadout).map((k) => k.id);
 
-/** 30-day rotation, advanced by visit day (never by calendar day). Distress tolerance early, practised while calm. */
+/** Daily rotation, advanced by visit day (never by calendar day). Distress tolerance early, practised while calm. */
 export interface Quest {
   skill: string;
   /** start at this step id (after the intro) */
@@ -1064,6 +1492,18 @@ export const ROTATION: Quest[] = [
   { skill: 'volume-down' },
   { skill: 'self-soothe', special: 'comfort', label: 'Add one thing to your Comfort inventory' },
   { skill: 'wise-mind', special: 'free', label: 'Free choice' },
+  { skill: 'one-mindfully' },
+  { skill: 'effectively' },
+  { skill: 'mindful-thoughts' },
+  { skill: 'emotion-myths' },
+  { skill: 'long-term-positives' },
+  { skill: 'problem-solving' },
+  { skill: 'turning-the-mind' },
+  { skill: 'body-scan' },
+  { skill: 'alternate-rebellion' },
+  { skill: 'clarifying-priorities' },
+  { skill: 'dialectics' },
+  { skill: 'mindfulness-of-others' },
 ];
 
 /**
