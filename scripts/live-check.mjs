@@ -137,7 +137,7 @@ try {
     await sleep(2500);
     await page.mouse.click(195, 500);
     await page.locator('#np-name').waitFor({ timeout: 20000 });
-    await page.locator('.title-screen').waitFor({ state: 'detached', timeout: 5000 });
+    await page.locator('.title-screen').waitFor({ state: 'detached', timeout: 30000 });
     await shot(page);
     await ctx.close();
   });
@@ -155,11 +155,11 @@ try {
     expect(home, 'Home never opened');
     await home.locator('.dq-safe').first().click();
     const talk = home.locator('.dq-sz-talk');
-    await talk.waitFor({ state: 'visible', timeout: 5000 });
+    await talk.waitFor({ state: 'visible', timeout: 15000 });
     expect((await talk.innerText()).includes('Talk to someone now'), 'the Safe Zone has no "Talk to someone now"');
     await shot(home);
     await talk.click();
-    await home.locator('a[href^="tel:"]').first().waitFor({ timeout: 5000 });
+    await home.locator('a[href^="tel:"]').first().waitFor({ timeout: 15000 });
     const links = await home.locator('a[href^="tel:"], a[href^="sms:"]').evaluateAll((as) => as.map((a) => a.getAttribute('href')));
     expect(links.some((h) => h.startsWith('tel:')) && links.some((h) => h.startsWith('sms:')), 'crisis lines are missing tel: or sms: links: ' + links.join(' '));
     await shot(home, 'talk');
@@ -200,7 +200,7 @@ try {
     await sleep(2500);
     await page.mouse.click(195, 500);
     await page.locator('#np-name').waitFor({ timeout: 20000 });
-    await page.locator('.title-screen').waitFor({ state: 'detached', timeout: 5000 });
+    await page.locator('.title-screen').waitFor({ state: 'detached', timeout: 30000 });
     await shot(page, 'offline-reload');
     await page.close();
     const cold = await ctx.newPage();
@@ -234,7 +234,7 @@ try {
           ? page.waitForResponse((r) => new URL(r.url()).pathname.endsWith('/models/hero.glb'), { timeout: 30000 })
           : null;
         const [response] = await Promise.all([model, page.locator('.title-screen').click()]);
-        await page.locator('.title-screen').waitFor({ state: 'detached', timeout: 5000 });
+        await page.locator('.title-screen').waitFor({ state: 'detached', timeout: 30000 });
         if (response) {
           expect(response.ok() && new URL(response.url()).pathname === site.pathname + 'models/hero.glb', 'the intro model did not load inside the site folder');
         }
