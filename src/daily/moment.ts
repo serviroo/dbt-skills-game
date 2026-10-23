@@ -68,7 +68,7 @@ export function easeScreen(app: App, route: Route): ScreenOut {
 
 // ---------------- Give me a moment ----------------
 /** A low, soft two-note hum that swells a little with the breath. Off by default; made only after the player turns it on. */
-function lowHum() {
+function lowHum(scale: number) {
   type AC = typeof AudioContext;
   const Ctor: AC | undefined = window.AudioContext ?? (window as unknown as { webkitAudioContext?: AC }).webkitAudioContext;
   if (!Ctor) return null;
@@ -79,13 +79,16 @@ function lowHum() {
     return null;
   }
   void ctx.resume?.();
-  const master = ctx.createGain();
-  master.gain.value = 0;
+  // two gains in a row, one writer each: the breath slowly swells `breath`, the player's volume glides `vol`
+  const breath = ctx.createGain();
+  breath.gain.value = 0;
+  const vol = ctx.createGain();
+  vol.gain.value = scale;
   const lp = ctx.createBiquadFilter();
   lp.type = 'lowpass';
   lp.frequency.value = 360;
   lp.Q.value = 0.4;
-  lp.connect(master).connect(ctx.destination);
+  lp.connect(breath).connect(vol).connect(ctx.destination);
   const oscs = [
     [98, 'sine', 0.6],
     [98.6, 'sine', 0.35],
@@ -101,18 +104,23 @@ function lowHum() {
     o.start();
     return o;
   });
-  master.gain.setTargetAtTime(0.05, ctx.currentTime, 0.8);
+  breath.gain.setTargetAtTime(0.05, ctx.currentTime, 0.8);
   let dead = false;
   return {
+    setScale(s: number) {
+      if (dead) return;
+      // the glide the engine gives Master, Music and Effects (setUser: ramp 0.08 s, tau = ramp / 4), so no click
+      vol.gain.setTargetAtTime(s, ctx.currentTime, 0.02);
+    },
     breathe(s: number) {
       if (dead) return;
-      master.gain.setTargetAtTime(0.035 + s * 0.03, ctx.currentTime, 0.25);
+      breath.gain.setTargetAtTime(0.035 + s * 0.03, ctx.currentTime, 0.25);
       lp.frequency.setTargetAtTime(300 + s * 140, ctx.currentTime, 0.3);
     },
     stop() {
       if (dead) return;
       dead = true;
-      master.gain.setTargetAtTime(0, ctx.currentTime, 0.25);
+      breath.gain.setTargetAtTime(0, ctx.currentTime, 0.25);
       setTimeout(() => {
         oscs.forEach((o) => o.stop());
         void ctx.close();
@@ -157,8 +165,13 @@ export function momentScreen(app: App, route: Route): ScreenOut {
     goNext(app, { to: 'skill', id, entry });
   }, { kind: 'quiet', cls: 'dq-mo-next is-hidden' }) : null;
   let hum: ReturnType<typeof lowHum> = null;
+  const humScale = () => {
+    const l = app.opts.volume?.get();
+    return l ? (l.muted ? 0 : l.master * l.sfx) : (st.state.settings.sound ? 1 : 0);
+  };
+  const offVolume = app.opts.volume?.subscribe(() => hum?.setScale(humScale()));
   const humToggle = toggle('Low hum', false, (on) => {
-    if (on) hum = lowHum();
+    if (on) hum = lowHum(humScale());
     else {
       hum?.stop();
       hum = null;
@@ -218,6 +231,7 @@ export function momentScreen(app: App, route: Route): ScreenOut {
     bubbles: [0.6, 0.3],
     leave: () => {
       stop();
+      offVolume?.();
       hum?.stop();
       hum = null;
     },
