@@ -27,12 +27,59 @@ name.
 npm ci
 npx tsc --noEmit -p .
 npm run build
+node scripts/pwa-verify.mjs --check
+node scripts/pwa-verify.mjs --update --check
+node scripts/pwa-csp-sweep.mjs --check
 node scripts/e2e.mjs
+node scripts/e2e-runner-check.mjs
 ```
 
-`scripts/e2e.mjs` starts its own dev server, walks the first-run name prompt, the Settings fields and a Save Crystal
-round trip, and saves screenshots to `artifacts/e2e/`. For anything visual, also look at it in a browser at phone
-width (390 and 320 px) with motion on and off.
+The PWA checks test the build in `dist/`. `pwa-verify` runs in both Chromium and WebKit; on a machine where WebKit
+can't run, add `--browser=chromium`.
 
-The intro is 3D, so run the browser on a machine with a real GPU when you can: start a Playwright launch server there
-and pass `--ws=<its endpoint> --host=<this machine's address>`, so the dev server is reachable from that browser.
+`scripts/e2e.mjs` starts its own dev server and a Playwright Chromium, runs every scenario in `scripts/e2e/*.e2e.mjs`
+and saves screenshots and `report.json` to `artifacts/e2e/<time>/`. It exits non-zero if any scenario fails. CI runs
+the same checks on every pull request. For anything visual, also look at it in a browser at phone width (390 and
+320 px) with motion on and off.
+
+### E2E scenarios
+
+Each file in `scripts/e2e/` named `<name>.e2e.mjs` exports its scenarios:
+
+```js
+export const scenarios = {
+  async 'my-feature-saves'({ open, reachHub, expect, ls, SAVE, SEEN }) {
+    const { ctx, page, errors } = await open({ 'dbt.app.v1': SEEN });
+    await reachHub(page);
+    expect(JSON.parse(await ls(page, SAVE)), 'nothing saved');
+    expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+};
+```
+
+Scenario names must be unique across all files. If two match, the runner stops before it starts anything. Files run in
+name order, and each file's scenarios run in the order they are written. Every scenario gets the same `h` object from
+`scripts/e2e/harness.mjs`:
+
+- `open(seed?, query = '?mute', viewport = 390x844)`: a fresh browser profile with `seed` written to localStorage
+  first. Returns `{ ctx, page, errors }`; close `ctx` when done.
+- `reachHub(page)`, `openSettings(page)`: tap through to Home or the Settings screen.
+- `shot(page, name)`: a screenshot in the run's folder (`out`). Start the name with your file's name.
+- `ls(page, key)`, `youOf(page)`, `deepFind(obj, key)`, `deepDrop(obj, keys)`, `expect(cond, msg)`, `sleep(ms)`.
+- `SAVE`, `YOU`, `SEEN`: the save key, the names key and an app state that skips the intro.
+- `browser`, `server.url`, `flags`, and `shared`, an object scenarios can use to pass results to later ones.
+- `out`, the run's artifact folder; `renderer`, the WebGL renderer; `stop()`, which closes the browser and server.
+
+The runner closes any remaining browser profiles after each scenario, including failures. A scenario should also
+work on its own: create any fixture it needs when an earlier scenario has not run.
+
+Run one file with `node scripts/e2e.mjs --file=<name>`, or one scenario with `--scenario=<scenario name>`. The browser
+renders with SwiftShader by default so local runs match CI. Add `--gpu` to render on this machine's GPU instead, or
+`--headed` to watch it.
+
+`node scripts/e2e-runner-check.mjs` checks file selection, duplicate names, failure reports and cleanup through the
+real command. It creates temporary scenario files and removes them when it finishes.
+
+The intro is 3D, so for a real-GPU run on another machine, start a Playwright launch server there and pass
+`--ws=<its endpoint> --host=<this machine's address>`, so the dev server is reachable from that browser.

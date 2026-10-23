@@ -1,5 +1,5 @@
 // Loads every lab and the app from a built dist under its real CSP and lists any policy violations.
-// node scripts/pwa-csp-sweep.mjs [--dist=dist] [--seconds=6] [--shots=<dir under the project>]
+// node scripts/pwa-csp-sweep.mjs [--dist=dist] [--seconds=6] [--shots=<dir under the project>] [--check]
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -45,3 +45,8 @@ try {
   srv.kill('SIGTERM');
 }
 console.log(JSON.stringify(results, null, 2));
+const bad = Object.entries(results).filter(([, r]) => r.csp.length || r.errors.length).map(([q]) => q);
+if (flags.check && bad.length) {
+  console.error('PROBLEM on ' + bad.join(', '));
+  process.exitCode = 1;
+}
