@@ -280,7 +280,7 @@ export const scenarios = {
     const y = await exportCrystal(b.page, openSettings, path.join(out, 'me91-crystal-y.json'));
     await storedNamesOk(b.page, SAVE, expect);
     const cy = content(y);
-    expect(y.settings.sound === fresh.settings.sound && y.settings.motion === fresh.settings.motion, 'restore changed device sound or motion');
+    expect(y.settings.sound === x.settings.sound && y.settings.motion === x.settings.motion, 'restore onto a fresh device did not bring back sound and motion');
     expect(save.events.every((e) => same(cx.events[e.id], e)), 'the first export changed an event field');
     expect(same(x.gone, save.gone) && Object.entries(save.setAt).every(([k, v]) => x.setAt[k] === v), 'the first export lost removal or setting times');
     expect(x.flags.safeCredit === save.flags.safeCredit && x.setAt.safeCredit === save.setAt.safeCredit, 'visiting the Safe Zone changed its credit choice');
