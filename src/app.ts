@@ -9,19 +9,19 @@ import { INTRO, REWARDS } from './content/intro';
 import type { VolumeCtrl } from './audio/prefs';
 import { volumeButton, type VolumeButton } from './ui/volume';
 import { readYou } from './core/you';
+import { APP_KEY } from './core/stored-names';
 
 const dailyMods = import.meta.glob('./daily/index.ts');
 const pwaMods = import.meta.glob('./pwa/register.ts');
 const hintMods = import.meta.glob('./pwa/install-hint.ts');
 const artMods = import.meta.glob('./daily/art.ts');
 
-const KEY = 'dbt.app.v1';
 interface AppState {
   seenCutscene: boolean;
 }
 function load(): AppState {
   try {
-    const raw = JSON.parse(localStorage.getItem(KEY) || '{}');
+    const raw = JSON.parse(localStorage.getItem(APP_KEY) || '{}');
     return { seenCutscene: raw && raw.seenCutscene === true };
   } catch {
     return { seenCutscene: false };
@@ -29,7 +29,7 @@ function load(): AppState {
 }
 function save(s: AppState) {
   try {
-    localStorage.setItem(KEY, JSON.stringify(s));
+    localStorage.setItem(APP_KEY, JSON.stringify(s));
   } catch {
     /* storage blocked: the intro still plays, it just shows again next time */
   }

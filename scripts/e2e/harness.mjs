@@ -107,10 +107,11 @@ export async function startHarness(flags = {}) {
   }
   /** Taps through any Lantern window the companion opens on arrival (the first-visit welcome), then waits for Home. */
   async function reachHub(page) {
-    for (let i = 0; i < 40; i++) {
-      const win = await page.locator('.dq-sw').count();
-      if (!win && (await page.locator('.dq-tile').first().isVisible().catch(() => false))) return;
-      await page.mouse.click(195, 700);
+    for (const end = Date.now() + 60000; Date.now() < end; ) {
+      const win = await page.evaluate(() => [...document.querySelectorAll('.dq-sw')].filter((w) => !w.closest('.pwa-hint-layer')).length);
+      const home = await page.locator('.dq-tile').first().isVisible().catch(() => false);
+      if (!win && home) return;
+      if (await page.locator('.dq-scrim.is-on').count()) await page.mouse.click(195, 700);
       await sleep(400);
     }
     await shot(page, 'fail-no-home');

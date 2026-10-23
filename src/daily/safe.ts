@@ -5,6 +5,7 @@
  */
 import { animate } from '../ui/anim';
 import { RESOURCES, SAFE } from '../content/dbt';
+import { BESIDE } from '../core/stored-names';
 import type { App, Route, ScreenOut } from './app';
 import { icon } from './art';
 import { uid } from './store';
@@ -21,7 +22,7 @@ export const telHref = (num: string) => `tel:${num.replace(/[^\d+]/g, '')}`;
 
 type At = 'start' | 'breathe' | 'cold' | 'squeeze' | 'check' | 'stop' | 'reasons' | 'people' | 'comfort' | 'talk' | 'close';
 const FLOW: At[] = ['start', 'breathe', 'squeeze', 'cold', 'check', 'stop', 'reasons', 'comfort', 'people', 'talk', 'close'];
-const lightKey = (key: string) => `${key}.safeLight`;
+const lightKey = (key: string) => `${key}${BESIDE.safeLight}`;
 const readLight = (key: string) => {
   try {
     return localStorage.getItem(lightKey(key)) === 'up';

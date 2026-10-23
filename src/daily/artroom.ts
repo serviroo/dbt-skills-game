@@ -5,6 +5,7 @@
 import { animate } from '../ui/anim';
 import { ALLY_NAMES, ART, ART_PROMPTS } from '../content/daily-lines';
 import { playerName } from '../core/you';
+import { TAB_KEY } from '../core/stored-names';
 import type { App, Route, ScreenOut } from './app';
 import { icon } from './art';
 import { artStore, revOf, type Draft, type DrawingMeta, type DrawingRec } from './artstore';
@@ -22,8 +23,8 @@ let tabId = '';
 function thisTab() {
   if (!tabId) {
     try {
-      tabId = sessionStorage.getItem('dbt.tab') || '';
-      if (!tabId) sessionStorage.setItem('dbt.tab', (tabId = uid()));
+      tabId = sessionStorage.getItem(TAB_KEY) || '';
+      if (!tabId) sessionStorage.setItem(TAB_KEY, (tabId = uid()));
     } catch {
       tabId ||= uid();
     }

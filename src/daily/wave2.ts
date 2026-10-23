@@ -28,7 +28,7 @@ export function earnedTitles(st: Store): { id: TitleId; t: number }[] {
       if (e.data?.quiet === true) mark('default-skin-day', e.t);
     }
     if (e.k === 'skill' && e.skill === 'leave-lobby') mark('left-the-lobby', e.t);
-    if (e.k === 'skill' && (e.skill === 'self-validation' || e.skill === 'self-heal')) mark('self-healer', e.t);
+    if (e.k === 'skill' && e.skill === 'self-validation') mark('self-healer', e.t);
   }
   return [...at.entries()].map(([id, t]) => ({ id, t })).sort((a, b) => a.t - b.t || (a.id < b.id ? -1 : 1));
 }

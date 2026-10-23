@@ -63,7 +63,7 @@ const cacheState = (page) =>
     const names = await caches.keys();
     const out = {};
     for (const n of names) out[n] = (await (await caches.open(n)).keys()).length;
-    const meta = names.includes('system-meta') ? await caches.open('system-meta') : null;
+    const meta = names.includes('dbt.precache-meta') ? await caches.open('dbt.precache-meta') : null;
     const cur = meta ? await (await meta.match('current'))?.text() : null;
     const prev = meta ? await (await meta.match('previous'))?.text() : null;
     return { caches: out, current: cur, previous: prev, controlled: !!navigator.serviceWorker.controller };
@@ -73,10 +73,10 @@ async function waitInstalled(page, version, count, timeout = 90000) {
   const t0 = Date.now();
   for (;;) {
     const ok = await page.evaluate(async ([v, n]) => {
-      const name = 'system-v' + v;
-      if (!(await caches.has(name)) || !(await caches.has('system-meta'))) return false;
+      const name = 'dbt.precache.' + v;
+      if (!(await caches.has(name)) || !(await caches.has('dbt.precache-meta'))) return false;
       const k = await (await caches.open(name)).keys();
-      const cur = await (await (await caches.open('system-meta')).match('current'))?.text();
+      const cur = await (await (await caches.open('dbt.precache-meta')).match('current'))?.text();
       return k.length >= n && cur === name && !!navigator.serviceWorker.controller;
     }, [version, count]);
     if (ok) return Date.now() - t0;
@@ -294,7 +294,7 @@ async function updateRun(name, launcher) {
       victim: bad.victim,
       hostAnswersMissingFileWith: victimStatus,
       updateCall: updateResult,
-      brokenCacheCreated: Object.keys(afterBad.caches).includes('system-v' + bad.version),
+      brokenCacheCreated: Object.keys(afterBad.caches).includes('dbt.precache.' + bad.version),
       stillCurrent: afterBad.current,
       reloadShows: await page.evaluate(() => document.querySelector('meta[name=x-build]')?.content ?? 'v1'),
     };
@@ -331,7 +331,7 @@ async function updateRun(name, launcher) {
     srv = await serve(v3.dir, port);
     await page.evaluate(() => navigator.serviceWorker.getRegistration().then((r) => r.update()));
     await waitInstalled(page, v3.version, v3.assets.length + 1);
-    report.steps.v3Installed = { expectKept: [`system-v${v2.version}`, `system-v${v3.version}`], expectDeleted: `system-v${v1.version}`, ...(await cacheState(page)) };
+    report.steps.v3Installed = { expectKept: [`dbt.precache.${v2.version}`, `dbt.precache.${v3.version}`], expectDeleted: `dbt.precache.${v1.version}`, ...(await cacheState(page)) };
   } finally {
     await browser.close();
     if (srv) await srv.stop();

@@ -1,9 +1,9 @@
 /* The Lantern: offline service worker. scripts/sw-build.mjs prepends VERSION and ASSETS at build time. */
 /* global VERSION, ASSETS */
 
-const PREFIX = 'system-v';
+const PREFIX = 'dbt.precache.';
 const CACHE = PREFIX + VERSION;
-const META = 'system-meta';
+const META = 'dbt.precache-meta';
 const SCOPE = self.registration.scope;
 const SHELL = new URL('./', SCOPE).href;
 const abs = (path) => new URL(path, SCOPE).href;

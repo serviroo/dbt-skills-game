@@ -532,7 +532,7 @@ export const SKILLS: Skill[] = [
         title: '[Appraisal complete]',
         text: (a) => appraisal(a),
         options: [
-          { label: 'Let it be', go: 'skill:mana-tide' },
+          { label: 'Let it be', go: 'skill:current-emotion' },
           { label: 'Check the facts', go: 'skill:check-facts' },
           { label: 'Something soothing', go: 'skill:self-soothe' },
           { label: 'Done', go: 'end' },
@@ -544,7 +544,7 @@ export const SKILLS: Skill[] = [
         title: '[Appraisal complete]',
         text: (a) => appraisal(a),
         options: [
-          { label: 'Let it be', go: 'skill:mana-tide' },
+          { label: 'Let it be', go: 'skill:current-emotion' },
           { label: 'Absurd Scroll', go: 'skill:absurd-scroll' },
           { label: 'Something soothing', go: 'skill:self-soothe' },
           { label: 'Done', go: 'end' },
@@ -558,7 +558,7 @@ export const SKILLS: Skill[] = [
         options: [
           { label: 'Something soothing', go: 'skill:self-soothe' },
           { label: 'Self-Heal', go: 'skill:self-validation' },
-          { label: 'Let it be', go: 'skill:mana-tide' },
+          { label: 'Let it be', go: 'skill:current-emotion' },
           { label: 'Done', go: 'end' },
         ],
       },
@@ -711,8 +711,8 @@ export const SKILLS: Skill[] = [
     ],
   },
   {
-    id: 'mana-tide',
-    sl: 'Mana Tide',
+    id: 'current-emotion',
+    sl: 'Ebb and Flow',
     real: 'Mindfulness of Current Emotion',
     module: 'er',
     minutes: '2 min',
@@ -1022,8 +1022,6 @@ export const SKILLS: Skill[] = [
 ];
 
 export const SKILL = Object.fromEntries(SKILLS.map((k) => [k.id, k])) as Record<string, Skill>;
-/** Self-Heal kept the Self-Validation id, so everything the player earned with it stays in place. */
-SKILL['self-heal'] = SKILL['self-validation'];
 /** The loadout, in the order the cards are dealt. */
 export const LOADOUT = SKILLS.filter((k) => k.loadout).map((k) => k.id);
 
@@ -1046,7 +1044,7 @@ export const ROTATION: Quest[] = [
   { skill: 'abc-please', entry: 'a', label: 'A: accumulate positives' },
   { skill: 'willing-hands' },
   { skill: 'give' },
-  { skill: 'mana-tide' },
+  { skill: 'current-emotion' },
   { skill: 'accepts' },
   { skill: 'clear-sight' },
   { skill: 'check-facts' },
@@ -1074,14 +1072,12 @@ export const ROTATION: Quest[] = [
  */
 export const FEELINGS = ['Calm', 'Okay', 'Tired', 'Anxious', 'Sad', 'Hurt', 'Heated', 'Numb', 'Kaboom', 'Social battery: empty', 'Not sure / a mix'] as const;
 export type Feeling = (typeof FEELINGS)[number];
-/** Answers stored before Kaboom replaced it still route the same way. */
-type AnyFeeling = Feeling | 'A lot';
 
 /** Answers where the optional 1-10 means something; anything at 7+ goes comfort-first. */
 export const STRENGTH_FEELINGS: readonly Feeling[] = ['Tired', 'Anxious', 'Heated', 'Numb', 'Not sure / a mix'];
-const ALWAYS_HEAVY: readonly string[] = ['Sad', 'Hurt', 'Kaboom', 'A lot'];
+const ALWAYS_HEAVY: readonly string[] = ['Sad', 'Hurt', 'Kaboom'];
 
-/** Heavy = the comfort-only screen comes first: Sad, Hurt, Kaboom (and the old "A lot"), or any strength 7-10. */
+/** Heavy = the comfort-only screen comes first: Sad, Hurt, Kaboom, or any strength 7-10. */
 export function isHeavy(feel: string, level: number | null) {
   return ALWAYS_HEAVY.includes(feel) || (level !== null && level >= 7 && STRENGTH_FEELINGS.includes(feel as Feeling));
 }
@@ -1101,7 +1097,7 @@ const sk = (id: string, entry?: string): Next => ({ to: 'skill', id, entry });
 /** Their own-tool cards (another set of skills) when present; the classic skill otherwise. */
 const own = (id: string, fallback: Next): Next => (SKILL[id] ? sk(id) : fallback);
 
-export function suggestFor(feel: AnyFeeling, level: number | null, todaySkill: string): Suggestion {
+export function suggestFor(feel: Feeling, level: number | null, todaySkill: string): Suggestion {
   const heavy = isHeavy(feel, level);
   switch (feel) {
     case 'Calm':
@@ -1138,7 +1134,6 @@ export function suggestFor(feel: AnyFeeling, level: number | null, todaySkill: s
     case 'Numb':
       return { heavy, next: sk('sense-up', 'touch'), why: 'Small, real sensations. One at a time.' };
     case 'Kaboom':
-    case 'A lot':
       return { heavy: true, next: sk('tipp', 'paced'), why: 'A quiet minute first. Slow breathing after, if you like.' };
   }
 }

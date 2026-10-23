@@ -11,6 +11,7 @@
  */
 import type { App } from './app';
 import { connectionLost, uid, validDay } from './store';
+import { BESIDE, STORY_DB } from '../core/stored-names';
 
 export type CardMode = 'continue' | 'whatif' | 'polish' | 'questions';
 export interface Story {
@@ -26,7 +27,7 @@ export interface Story {
 export interface Chapter {
   id: string;
   story: string;
-  kind: 'page' | 'notes';
+  kind: (typeof CHAPTER_KINDS)[number];
   title: string;
   text: string;
   updated: number;
@@ -53,7 +54,8 @@ export interface Live {
 }
 
 export const STORY_CAP = { title: 120, chapterTitle: 80, text: 400000, stories: 500, chapters: 300, cards: 12, card: 1200 } as const;
-const MODES: CardMode[] = ['continue', 'whatif', 'polish', 'questions'];
+export const CARD_MODES: CardMode[] = ['continue', 'whatif', 'polish', 'questions'];
+export const CHAPTER_KINDS = ['page', 'notes'] as const;
 const ID = /^[A-Za-z0-9~._-]{1,40}$/;
 const KEPT = ' (kept copy)';
 const MAX_STAMP = 8.64e15;
@@ -88,7 +90,7 @@ const LOAD = (() => {
   return `${uid()}${Math.random().toString(36).slice(2, 10)}`;
 })();
 
-function cleanStory(x: unknown): Story | null {
+export function cleanStory(x: unknown): Story | null {
   if (!isObj(x) || !validId(x.id)) return null;
   const updated = stampOf(x.updated, stampOf(x.created));
   const notes = validId(x.notes) ? x.notes : '';
@@ -105,14 +107,15 @@ function cleanStory(x: unknown): Story | null {
   return s;
 }
 
-function cleanChapter(x: unknown): Chapter | null {
-  if (!isObj(x) || !validId(x.id) || !validId(x.story) || (x.kind !== 'page' && x.kind !== 'notes') || typeof x.text !== 'string') return null;
+export function cleanChapter(x: unknown): Chapter | null {
+  if (!isObj(x) || !validId(x.id) || !validId(x.story) || !CHAPTER_KINDS.includes(x.kind as Chapter['kind']) || typeof x.text !== 'string') return null;
+  const kind = x.kind as Chapter['kind'];
   const updated = stampOf(x.updated);
-  return { id: x.id, story: x.story, kind: x.kind, title: chapterTitle(x.title, x.kind), text: x.text.slice(0, STORY_CAP.text), updated, rev: revOf(x.rev, updated) };
+  return { id: x.id, story: x.story, kind, title: chapterTitle(x.title, kind), text: x.text.slice(0, STORY_CAP.text), updated, rev: revOf(x.rev, updated) };
 }
 
-function cleanCard(x: unknown): Card | null {
-  if (!isObj(x) || !MODES.includes(x.mode as CardMode) || typeof x.text !== 'string') return null;
+export function cleanCard(x: unknown): Card | null {
+  if (!isObj(x) || !CARD_MODES.includes(x.mode as CardMode) || typeof x.text !== 'string') return null;
   const c: Card = { id: validId(x.id) ? x.id : uid(), mode: x.mode as CardMode, text: x.text.slice(0, STORY_CAP.card), t: stampOf(x.t) };
   const s = x.sel;
   if (isObj(s) && fin(s.start) && fin(s.end) && typeof s.text === 'string') c.sel = { start: Math.max(0, s.start), end: Math.max(0, s.end), text: s.text.slice(0, STORY_CAP.card) };
@@ -186,12 +189,13 @@ export class StoryStore {
     return new Promise((resolve) => {
       try {
         if (typeof indexedDB === 'undefined') throw new Error('no idb');
-        const open = indexedDB.open(this.name, 1);
+        const open = indexedDB.open(this.name, STORY_DB.version);
         open.onupgradeneeded = () => {
           const db = open.result;
-          if (!db.objectStoreNames.contains('stories')) db.createObjectStore('stories', { keyPath: 'id' });
-          if (!db.objectStoreNames.contains('chapters')) db.createObjectStore('chapters', { keyPath: 'id' }).createIndex('story', 'story');
-          for (const s of ['cards', 'days']) if (!db.objectStoreNames.contains(s)) db.createObjectStore(s);
+          const [stories, chapters, ...plain] = STORY_DB.stores;
+          if (!db.objectStoreNames.contains(stories)) db.createObjectStore(stories, { keyPath: 'id' });
+          if (!db.objectStoreNames.contains(chapters)) db.createObjectStore(chapters, { keyPath: 'id' }).createIndex(STORY_DB.chapterIndex, 'story');
+          for (const s of plain) if (!db.objectStoreNames.contains(s)) db.createObjectStore(s);
         };
         open.onsuccess = () => {
           const db = open.result;
@@ -694,9 +698,9 @@ export class StoryStore {
     return `${this.liveKey}.${LOAD}.${chapterId}`;
   }
   private isLiveKey(k: string) {
-    return k === this.liveKey || k.startsWith(`${this.liveKey}.`);
+    return k.startsWith(`${this.liveKey}.`);
   }
-  /** Every mirror slot of this store: this build's, and the two kinds older builds kept (`<liveKey>`, `<liveKey>.<tab id>`). */
+  /** Every mirror slot of this store, from any page load. */
   private liveKeys(): string[] {
     const keys: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
@@ -736,7 +740,7 @@ export class StoryStore {
     return this.readLive(this.myLive(chapterId), chapterId);
   }
 
-  /** Every mirror of the chapter, from any page load or older build (this load's first), each with its key. */
+  /** Every mirror of the chapter, from any page load (this load's first), each with its key. */
   lives(chapterId: string): (Live & { key: string })[] {
     let keys: string[];
     try {
@@ -745,7 +749,7 @@ export class StoryStore {
       return [];
     }
     const mine = this.myLive(chapterId);
-    keys.sort((a, b) => (a === mine ? -1 : b === mine ? 1 : a === this.liveKey ? -1 : b === this.liveKey ? 1 : 0));
+    keys.sort((a, b) => (a === mine ? -1 : b === mine ? 1 : 0));
     const out: (Live & { key: string })[] = [];
     for (const k of keys) {
       const l = this.readLive(k, chapterId);
@@ -1028,7 +1032,7 @@ const stores = new Map<string, StoryStore>();
 /** One store per storage key, so the lab never touches their real stories. */
 export function storyStore(key: string) {
   let s = stores.get(key);
-  if (!s) stores.set(key, (s = new StoryStore(`${key}.story`, `${key}.story.live`)));
+  if (!s) stores.set(key, (s = new StoryStore(`${key}${BESIDE.story}`, `${key}${BESIDE.storyLive}`)));
   return s;
 }
 
