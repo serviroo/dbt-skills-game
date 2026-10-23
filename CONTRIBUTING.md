@@ -103,6 +103,19 @@ nothing scrolls or sticks out sideways, every button, link and field takes taps 
 text is at least 16 px. Screens in its `ENFORCED` list fail the run. Every other screen passes and prints its problems
 as a todo list, also kept in `report.json`. Once a screen fits, add it to `ENFORCED`.
 
+### Screen reader names
+
+`node scripts/e2e.mjs --file=a11y-names` opens every companion screen at 390x844 and reads names from the browser's
+own accessibility tree. It checks that every button, link, field and switch a screen reader can reach has a name, every
+picture is either named or hidden from screen readers (`aria-hidden="true"`, or `alt=""` on an `img`), no id is used
+twice, every `aria-labelledby` and `aria-describedby` points at an element that exists, and nothing a player can reach
+with Tab is hidden from screen readers. As in the layout check, screens in its `ENFORCED` list fail the run and the
+rest print a todo list. `a11y-names-planted` adds one of each problem to Home, plus look-alikes that are fine, and
+fails unless the check reports exactly the problems.
+
+To fix a screen, give each control a short, accurate name that says what it does. Hide only pictures that are purely
+decorative. Never hide a control or a picture a player needs just to pass the check.
+
 Run one file with `node scripts/e2e.mjs --file=<name>`, or one scenario with `--scenario=<scenario name>`. The browser
 renders with SwiftShader by default so local runs match CI. Add `--gpu` to render on this machine's GPU instead, or
 `--headed` to watch it.
