@@ -221,6 +221,49 @@ try {
   });
   await installed?.close();
 
+  await check('story-ask', async (shot) => {
+    const ctx = await profile({ sw: false, seed: { 'dbt.you.v1': YOU, 'dbt.app.v1': SEEN } });
+    const page = await ctx.newPage();
+    const sent = [];
+    page.on('request', (r) => (r.method() !== 'GET' || new URL(r.url()).pathname.includes('/api/')) && sent.push(`${r.method()} ${r.url()}`));
+    await page.goto(new URL('?mute', site).href);
+    await reachHome(page);
+    await page.locator('.dq-tile--story').click();
+    await page.locator('.st-shelf > *').first().waitFor({ timeout: 15000 });
+    await page.locator('.st-shelfpage button:visible', { hasText: 'New story' }).first().click();
+    const ta = page.getByRole('textbox', { name: /^Page,/ });
+    await ta.waitFor({ timeout: 15000 });
+    await page.locator('.st-write .st-title').fill('The Night Garden');
+    const story = 'Mira found the brass key under the garden gate. She showed it to Tobin, who only shrugged.';
+    await ta.fill(story);
+    // Ask runs on the device: with the network gone, every mode still answers
+    await ctx.setOffline(true);
+    const got = {};
+    for (const [mode, from, to] of [['questions', story.length], ['whatif', story.length], ['continue', story.length], ['polish', 0, story.indexOf('.') + 1]]) {
+      await ta.evaluate((el, [s, e]) => {
+        el.focus();
+        el.setSelectionRange(s, e);
+        el.dispatchEvent(new Event('select'));
+      }, [from, to ?? from]);
+      const wide = await page.evaluate(() => matchMedia('(min-width: 1100px)').matches);
+      if (!wide && !(await page.locator('.st-cw.is-open').count())) await page.locator('.st-cwbtn').click();
+      await page.locator(`.st-cw .st-mode--${mode}`).click();
+      const prev = await page.locator('.st-cards > .st-batch:first-child .st-card').first().getAttribute('data-id', { timeout: 500 }).catch(() => null);
+      await page.locator('.st-cw .st-ask').click();
+      await page.waitForFunction((p) => {
+        const id = document.querySelector('.st-cards > .st-batch:first-child .st-card')?.getAttribute('data-id');
+        return id && id !== p;
+      }, prev, { timeout: 15000 });
+      got[mode] = await page.locator('.st-cards > .st-batch:first-child .st-card .st-card-t').allTextContents();
+      expect(got[mode].length > 0 && got[mode].every((t) => t.trim()), `Ask (${mode}) came back without ideas`);
+      if (mode === 'continue') await shot(page);
+      await page.keyboard.press('Escape');
+    }
+    expect(!sent.length, 'Ask sent requests: ' + sent.join(' '));
+    await ctx.close();
+    return got;
+  });
+
   await check('query-routes', async (shot) => {
     const ctx = await profile({ sw: false, seed: { 'dbt.you.v1': YOU, 'dbt.app.v1': SEEN } });
     const routes = {};
