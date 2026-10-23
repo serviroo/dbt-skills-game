@@ -19,11 +19,11 @@ const SIZES = [
 const MIN_TAP = 44;
 const MIN_TEXT = 16;
 const PAGE = ['.dq-top', '#dq-main'];
-const SKIP = ['.dq-safe', '.dq-safezone', '.pwa-hint-layer', '.dq-panel:has(input[type=file])'];
+export const SKIP = ['.dq-safe', '.dq-safezone', '.pwa-hint-layer', '.dq-panel:has(input[type=file])'];
 // one skill walked from its intro to the thanks at the end
 const WALK = 'check-facts';
 
-const SCREENS = {
+export const SCREENS = {
   home: { route: { name: 'hub' } },
   skill: { route: { name: 'skill', id: WALK }, walk: true },
   library: { route: { name: 'library' } },
@@ -39,13 +39,16 @@ const SCREENS = {
   shadows: { route: { name: 'shadows' }, skip: ['.w2-roster'] },
 };
 
-async function boot(h, viewport) {
+/** Opens Home on the full save. `o.edit(save)` changes the save first; `o.media` is emulated from the reload on. */
+export async function boot(h, viewport, o = {}) {
   const now = Date.now();
   const save = fullSave(now);
+  o.edit?.(save);
   const you = JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: save.created, companionAt: save.created });
   const { ctx, page, errors } = await h.open({ [h.SAVE]: JSON.stringify(save), [h.YOU]: you, 'dbt.app.v1': h.SEEN }, '?mute', viewport);
   await home(page);
   await seedStores(page, h.SAVE, now);
+  if (o.media) await page.emulateMedia(o.media);
   await page.reload();
   await home(page);
   return { ctx, page, errors };
@@ -54,7 +57,7 @@ async function boot(h, viewport) {
 const home = (page) => page.waitForFunction(() => window.__daily?.route.name === 'hub' && !!document.querySelector('.dq-tile') && !document.querySelector('.dq-sw'), null, { timeout: 30000 });
 
 /** Waits until the screen stops changing: no DOM changes for 400 ms (at most 4 s), then no finite animation running. */
-const settle = (page) =>
+export const settle = (page) =>
   page.evaluate(async () => {
     await new Promise((done) => {
       let quiet;
@@ -174,7 +177,7 @@ const audit = (page, scope, skip) =>
   );
 
 /** Taps the way forward on the current skill step: Done when it is offered, else the main button, else the first one in the step. */
-const forward = (page) =>
+export const forward = (page) =>
   page.evaluate(() => {
     const body = document.querySelector('.dq-step-body');
     const vis = (b) => b.checkVisibility({ checkVisibilityCSS: true }) && !b.disabled;
