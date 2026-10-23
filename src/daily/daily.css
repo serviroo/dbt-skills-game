@@ -3592,7 +3592,7 @@ textarea.dq-input {
 .dq-save {
   min-width: 112px;
 }
-@media (max-width: 359px) {
+@media (max-width: 388px) {
   .dq-tools-pick {
     flex-wrap: wrap;
     row-gap: 4px;

@@ -33,7 +33,7 @@ export const SCREENS = {
   'night-watch': { route: { name: 'shadows' }, scope: ['.w2-roster'] },
   wardrobe: { route: { name: 'settings' }, scope: ['.w2-wardrobe-p'] },
   art: { route: { name: 'art' } },
-  draw: { route: { name: 'draw', kind: 'today' }, sizes: [{ width: 568, height: 320 }], shown: '.dq-swatch-n' },
+  draw: { route: { name: 'draw', kind: 'today' }, sizes: [{ width: 568, height: 320 }, { width: 360, height: 740 }, { width: 375, height: 667 }], shown: '.dq-swatch-n' },
   stories: { route: { name: 'stories' } },
   write: { route: { name: 'write', id: 'tale-1' } },
   settings: { route: { name: 'settings' }, skip: ['.w2-wardrobe-p'] },
