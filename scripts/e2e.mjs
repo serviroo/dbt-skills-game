@@ -11,7 +11,7 @@ import { startHarness } from './e2e/harness.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.join(root, 'scripts/e2e');
-const flags = Object.fromEntries(process.argv.slice(2).filter((a) => a.startsWith('--')).map((a) => { const [k, v = 'true'] = a.slice(2).split('='); return [k, v]; }));
+const flags = Object.fromEntries(process.argv.slice(2).filter((a) => a.startsWith('--')).map((a) => { const [k, ...v] = a.slice(2).split('='); return [k, v.length ? v.join('=') : 'true']; }));
 
 const all = [];
 const fileOf = new Map();
@@ -31,15 +31,27 @@ if (flags.scenario && !fileOf.has(flags.scenario)) throw new Error('no scenario 
 const pick = all.filter((s) => (!flags.file || s.file === flags.file) && (!flags.scenario || s.name === flags.scenario));
 if (!pick.length) throw new Error(`scenario ${flags.scenario} is not in ${flags.file}.e2e.mjs`);
 
-const h = await startHarness(flags);
-for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => h.stop().finally(() => process.exit(130)));
-const report = { url: h.server.url, browser: flags.ws ? 'remote ' + flags.ws : 'local', scenarios: [], renderer: h.renderer };
+let h;
+let report;
+let interrupted = false;
+const onSignal = () => {
+  interrupted = true;
+  if (h) void h.stop().catch((e) => console.error(e));
+};
+for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, onSignal);
 let failed = 0;
 try {
+  h = await startHarness(flags);
+  report = { url: h.server.url, browser: flags.ws ? 'remote ' + flags.ws : 'local', scenarios: [], renderer: h.renderer };
   for (const { name, file, run } of pick) {
+    if (interrupted) break;
     const t = Date.now();
     try {
-      await run(h);
+      try {
+        await run(h);
+      } finally {
+        await Promise.all(h.browser.contexts().map((ctx) => ctx.close()));
+      }
       report.scenarios.push({ name, file, ok: true, ms: Date.now() - t });
       console.log(`ok   ${name} (${Date.now() - t} ms)`);
     } catch (e) {
@@ -49,8 +61,15 @@ try {
     }
   }
 } finally {
-  fs.writeFileSync(path.join(h.out, 'report.json'), JSON.stringify(report, null, 2));
-  await h.stop();
+  try {
+    if (report) fs.writeFileSync(path.join(h.out, 'report.json'), JSON.stringify(report, null, 2));
+  } finally {
+    try {
+      await h?.stop();
+    } finally {
+      for (const sig of ['SIGINT', 'SIGTERM']) process.removeListener(sig, onSignal);
+    }
+  }
 }
-console.log(`${pick.length - failed}/${pick.length} passed, artifacts in ${path.relative(root, h.out)}`);
-process.exit(failed ? 1 : 0);
+console.log(`${report.scenarios.filter((s) => s.ok).length}/${pick.length} passed, artifacts in ${path.relative(root, h.out)}`);
+process.exitCode = interrupted ? 130 : failed ? 1 : 0;

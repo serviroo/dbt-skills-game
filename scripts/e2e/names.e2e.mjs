@@ -3,6 +3,20 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+async function saveCrystal({ open, openSettings, out, shared, expect, deepFind, YOU, SEEN }) {
+  if (shared.crystal) return shared.crystal;
+  const { ctx, page, errors } = await open({ [YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: Date.now() - 1000, companionAt: Date.now() - 1000 }), 'dbt.app.v1': SEEN });
+  await openSettings(page);
+  const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 15000 }), page.getByRole('button', { name: 'Save Crystal' }).click()]);
+  const file = path.join(out, 'save-crystal.json');
+  await dl.saveAs(file);
+  expect(deepFind(JSON.parse(fs.readFileSync(file, 'utf8')), 'playerName').includes('Kit'), 'the Save Crystal has no player name');
+  expect(!errors.length, errors.join('\n'));
+  await ctx.close();
+  shared.crystal = file;
+  return file;
+}
+
 export const scenarios = {
   /** first run: the prompt appears after the title, the chosen names are stored and used in the intro */
   async 'first-run'({ open, sleep, shot, youOf, expect, out, shared }) {
@@ -84,15 +98,9 @@ export const scenarios = {
   },
 
   /** a Save Crystal carries the names to a device that never chose any */
-  async 'save-crystal'({ open, shot, youOf, deepFind, expect, openSettings, out, shared, YOU, SEEN }) {
-    const { ctx, page, errors } = await open({ [YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: Date.now() - 1000, companionAt: Date.now() - 1000 }), 'dbt.app.v1': SEEN });
-    await openSettings(page);
-    const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 15000 }), page.getByRole('button', { name: 'Save Crystal' }).click()]);
-    const file = path.join(out, 'save-crystal.json');
-    await dl.saveAs(file);
-    shared.crystal = file;
-    expect(deepFind(JSON.parse(fs.readFileSync(file, 'utf8')), 'playerName').includes('Kit'), 'the Save Crystal has no player name');
-    await ctx.close();
+  async 'save-crystal'(h) {
+    const { open, shot, youOf, expect, openSettings, SEEN } = h;
+    const file = await saveCrystal(h);
 
     const fresh = await open({ 'dbt.app.v1': SEEN });
     await openSettings(fresh.page);
@@ -103,14 +111,14 @@ export const scenarios = {
     const mirror = await youOf(fresh.page);
     expect(mirror?.name === 'Kit' && mirror?.companion === 'Lumen', 'restore did not update the mirror: ' + JSON.stringify(mirror));
     await shot(fresh.page, '06-restored-names');
-    expect(!errors.length && !fresh.errors.length, [...errors, ...fresh.errors].join('\n'));
+    expect(!fresh.errors.length, fresh.errors.join('\n'));
     await fresh.ctx.close();
   },
 
   /** skipping the prompt (both names never chosen) must not beat names restored from an older Save Crystal */
-  async 'skip-then-restore'({ open, youOf, expect, openSettings, out, shared, YOU, SEEN }) {
-    const file = shared.crystal ?? path.join(out, 'save-crystal.json');
-    if (!fs.existsSync(file)) throw new Error('run save-crystal first');
+  async 'skip-then-restore'(h) {
+    const { open, youOf, expect, openSettings, YOU, SEEN } = h;
+    const file = await saveCrystal(h);
     const { ctx, page, errors } = await open({ [YOU]: JSON.stringify({ name: '', companion: '', nameAt: 0, companionAt: 0 }), 'dbt.app.v1': SEEN });
     await openSettings(page);
     await page.locator('input[type=file]').setInputFiles(file);

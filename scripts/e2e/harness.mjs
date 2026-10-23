@@ -24,21 +24,28 @@ async function serve(host) {
     let log = '';
     child.stdout.on('data', (d) => (log += d));
     child.stderr.on('data', (d) => (log += d));
-    const gone = () => child.exitCode !== null || child.signalCode !== null;
-    const stop = () => new Promise((res) => { if (gone()) return res(); child.once('exit', res); child.kill('SIGTERM'); });
+    let spawnError;
+    child.once('error', (e) => { spawnError = e; });
+    const gone = () => spawnError || child.exitCode !== null || child.signalCode !== null;
+    const stop = () => new Promise((res) => {
+      if (gone()) return res();
+      const timer = setTimeout(() => child.kill('SIGKILL'), 5000);
+      child.once('exit', () => { clearTimeout(timer); res(); });
+      child.kill('SIGTERM');
+    });
     const url = `http://${host}:${port}`;
     for (let i = 0; i < 200 && !gone(); i++) {
       // "ready in" is printed only after this Vite bound the port, so the answer below can't come from another server
       if (/ready in/.test(log.replace(/\x1b\[[0-9;]*m/g, ''))) {
         try {
-          if ((await fetch(url + '/')).ok) return { url, stop };
+          if ((await fetch(url + '/', { signal: AbortSignal.timeout(2000) })).ok) return { url, stop };
         } catch {}
       }
       await sleep(150);
     }
     if (gone() && /already in use/i.test(log)) continue;
     await stop();
-    throw new Error('dev server did not start:\n' + log);
+    throw new Error('dev server did not start:\n' + (spawnError?.message ?? log));
   }
   throw new Error('no free port for the dev server');
 }
@@ -125,8 +132,11 @@ export async function startHarness(flags = {}) {
 
   let stopping;
   const stop = () => (stopping ??= (async () => {
-    await browser.close().catch(() => {});
-    await server.stop();
+    try {
+      await browser.close();
+    } finally {
+      await server.stop();
+    }
   })());
 
   return { browser, server, out, flags, shared: {}, renderer, open, shot, ls, youOf, deepFind, deepDrop, expect, sleep, reachHub, openSettings, SAVE, YOU, SEEN, stop };

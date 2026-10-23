@@ -31,6 +31,7 @@ node scripts/pwa-verify.mjs --check
 node scripts/pwa-verify.mjs --update --check
 node scripts/pwa-csp-sweep.mjs --check
 node scripts/e2e.mjs
+node scripts/e2e-runner-check.mjs
 ```
 
 The PWA checks test the build in `dist/`. `pwa-verify` runs in both Chromium and WebKit; on a machine where WebKit
@@ -47,7 +48,6 @@ Each file in `scripts/e2e/` named `<name>.e2e.mjs` exports its scenarios:
 
 ```js
 export const scenarios = {
-  /** what the player does and what must hold */
   async 'my-feature-saves'({ open, reachHub, expect, ls, SAVE, SEEN }) {
     const { ctx, page, errors } = await open({ 'dbt.app.v1': SEEN });
     await reachHub(page);
@@ -69,10 +69,17 @@ name order, and each file's scenarios run in the order they are written. Every s
 - `ls(page, key)`, `youOf(page)`, `deepFind(obj, key)`, `deepDrop(obj, keys)`, `expect(cond, msg)`, `sleep(ms)`.
 - `SAVE`, `YOU`, `SEEN`: the save key, the names key and an app state that skips the intro.
 - `browser`, `server.url`, `flags`, and `shared`, an object scenarios can use to pass results to later ones.
+- `out`, the run's artifact folder; `renderer`, the WebGL renderer; `stop()`, which closes the browser and server.
+
+The runner closes any remaining browser profiles after each scenario, including failures. A scenario should also
+work on its own: create any fixture it needs when an earlier scenario has not run.
 
 Run one file with `node scripts/e2e.mjs --file=<name>`, or one scenario with `--scenario=<scenario name>`. The browser
 renders with SwiftShader by default so local runs match CI. Add `--gpu` to render on this machine's GPU instead, or
 `--headed` to watch it.
+
+`node scripts/e2e-runner-check.mjs` checks file selection, duplicate names, failure reports and cleanup through the
+real command. It creates temporary scenario files and removes them when it finishes.
 
 The intro is 3D, so for a real-GPU run on another machine, start a Playwright launch server there and pass
 `--ws=<its endpoint> --host=<this machine's address>`, so the dev server is reachable from that browser.

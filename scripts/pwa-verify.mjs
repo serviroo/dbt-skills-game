@@ -321,9 +321,10 @@ async function updateRun(name, launcher) {
     }, v2.renamed.old);
     report.steps.v2Installed = { oldChunkOnServer: gone, pageStillOn: still.build, controllerChanges: still.controllerChanges, onUpdateReadyFired: still.onUpdateReadyFired, oldPageLazyChunk: lazy, ...(await cacheState(page)) };
 
+    const nextLaunchErrorStart = b.errors.length;
     await page.reload();
     await ready(page);
-    report.steps.nextLaunch = { build: await page.evaluate(() => document.querySelector('meta[name=x-build]')?.content ?? 'v1'), errors: b.errors.slice(0, 5) };
+    report.steps.nextLaunch = { build: await page.evaluate(() => document.querySelector('meta[name=x-build]')?.content ?? 'v1'), errors: b.errors.slice(nextLaunchErrorStart, nextLaunchErrorStart + 5) };
     await page.screenshot({ path: `${out}/${name}-5-after-update.png` });
 
     await ctx.setOffline(false);
@@ -367,6 +368,7 @@ function problems(r) {
       ...none('offline reload', [...s.offlineReload.failed, ...s.offlineReload.errors, ...s.offlineReload.csp]),
       ...none('offline cold launch', [...s.offlineCold.failed, ...s.offlineCold.errors, ...s.offlineCold.notFromSW]),
       ...none('offline lazy chunk', [...s.offlineLazyChunk.failed, ...s.offlineLazyChunk.errors]),
+      ...(s.offlineLazyChunk.chunks.some((c) => /\/window-[^\s]+\.js 200 sw$/.test(c)) ? [] : ['offline window chunk was not served by the service worker']),
     ];
   }
   const v2 = s.v2Installed;
