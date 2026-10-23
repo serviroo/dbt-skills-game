@@ -18,7 +18,7 @@
     "skill": ["wise-mind","sense-up","clear-sight","stop","tipp","accepts","self-soothe","improve","pros-cons","radical-acceptance","willing-hands","urge-surf","name-emotion","check-facts","opposite-action","abc-please","current-emotion","dear-man","give","fast","validation","self-validation","leave-lobby","volume-down","supplies","cool-air","warm-hands","absurd-scroll","flavour-tier","queue-up","lie-low","one-mindfully","effectively","mindful-thoughts"],
     "stat": ["sense","stamina","intelligence","agility"],
     "event-kind": ["visit","skill","checkin","diary","safe","rest","card","feedback","art","line","story"],
-    "event-data": ["checkin.feel","checkin.level","feedback.answer","art.kind","rest.title","rest.quiet","line.id"],
+    "event-data": ["checkin.feel","checkin.level","feedback.answer","art.kind","rest.title","rest.quiet","line.id","card.slot","card.special"],
     "feeling": ["Calm","Okay","Tired","Anxious","Sad","Hurt","Heated","Numb","Kaboom","Social battery: empty","Not sure / a mix"],
     "feedback-answer": ["Yes","A little","Not this time","Skip"],
     "line": ["l01","l02","l03","l04","l05","l06","l07","l08","l09","l10","l11","l12","l13","l14","l15","m01","m02","m03","m04","m05","m06","m07","m08","m09","m10","m11","m12","m13","m14","m15","u01","u02","u03","u04","u05","u06","u07","u08","u09","u10","u11","u12","u13","u14","u15"],
