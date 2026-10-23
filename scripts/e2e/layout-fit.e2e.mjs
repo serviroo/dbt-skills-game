@@ -173,12 +173,13 @@ const audit = (page, scope, skip) =>
     { scope, skip, MIN_TAP, MIN_TEXT },
   );
 
-/** Taps the way forward on the current skill step: the main button, else the first one in the step. */
+/** Taps the way forward on the current skill step: Done when it is offered, else the main button, else the first one in the step. */
 const forward = (page) =>
   page.evaluate(() => {
     const body = document.querySelector('.dq-step-body');
     const vis = (b) => b.checkVisibility({ checkVisibilityCSS: true }) && !b.disabled;
-    const pick = [...body.querySelectorAll('.dq-actions .dq-btn--primary')].find(vis) ?? [...body.querySelectorAll('.dq-actions button, .dq-opts button')].find(vis);
+    const all = [...body.querySelectorAll('.dq-actions button, .dq-opts button')].filter(vis);
+    const pick = all.find((b) => b.textContent.trim() === 'Done') ?? [...body.querySelectorAll('.dq-actions .dq-btn--primary')].find(vis) ?? all[0];
     if (!pick) return false;
     pick.click();
     return true;
@@ -197,7 +198,7 @@ function scenario(id, spec) {
       const skip = [...SKIP, ...(spec.skip ?? [])];
       const views = [];
       if (spec.walk) {
-        for (let step = 1; step <= 25 && (await page.evaluate(() => window.__daily.route.name)) === 'skill'; step++) {
+        for (let step = 1; step <= 25 && (await page.evaluate((id) => window.__daily.route.name === 'skill' && window.__daily.route.id === id, spec.route.id)); step++) {
           views.push({ at: `step ${step}`, found: await audit(page, scope, skip) });
           if (step === 1) await h.shot(page, `layout-fit-${id}-${size}`);
           const before = await page.evaluate(() => document.querySelector('.dq-step-body')?.innerHTML);
