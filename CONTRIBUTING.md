@@ -30,9 +30,43 @@ npm run build
 node scripts/e2e.mjs
 ```
 
-`scripts/e2e.mjs` starts its own dev server, walks the first-run name prompt, the Settings fields and a Save Crystal
-round trip, and saves screenshots to `artifacts/e2e/`. For anything visual, also look at it in a browser at phone
-width (390 and 320 px) with motion on and off.
+`scripts/e2e.mjs` starts its own dev server and a Playwright Chromium, runs every scenario in `scripts/e2e/*.e2e.mjs`
+and saves screenshots and `report.json` to `artifacts/e2e/<time>/`. It exits non-zero if any scenario fails. CI runs
+the same checks on every pull request. For anything visual, also look at it in a browser at phone width (390 and
+320 px) with motion on and off.
 
-The intro is 3D, so run the browser on a machine with a real GPU when you can: start a Playwright launch server there
-and pass `--ws=<its endpoint> --host=<this machine's address>`, so the dev server is reachable from that browser.
+### E2E scenarios
+
+Each file in `scripts/e2e/` named `<name>.e2e.mjs` exports its scenarios:
+
+```js
+export const scenarios = {
+  /** what the player does and what must hold */
+  async 'my-feature-saves'({ open, reachHub, expect, ls, SAVE, SEEN }) {
+    const { ctx, page, errors } = await open({ 'dbt.app.v1': SEEN });
+    await reachHub(page);
+    expect(JSON.parse(await ls(page, SAVE)), 'nothing saved');
+    expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+};
+```
+
+Scenario names must be unique across all files. If two match, the runner stops before it starts anything. Files run in
+name order, and each file's scenarios run in the order they are written. Every scenario gets the same `h` object from
+`scripts/e2e/harness.mjs`:
+
+- `open(seed?, query = '?mute', viewport = 390x844)`: a fresh browser profile with `seed` written to localStorage
+  first. Returns `{ ctx, page, errors }`; close `ctx` when done.
+- `reachHub(page)`, `openSettings(page)`: tap through to Home or the Settings screen.
+- `shot(page, name)`: a screenshot in the run's folder (`out`). Start the name with your file's name.
+- `ls(page, key)`, `youOf(page)`, `deepFind(obj, key)`, `deepDrop(obj, keys)`, `expect(cond, msg)`, `sleep(ms)`.
+- `SAVE`, `YOU`, `SEEN`: the save key, the names key and an app state that skips the intro.
+- `browser`, `server.url`, `flags`, and `shared`, an object scenarios can use to pass results to later ones.
+
+Run one file with `node scripts/e2e.mjs --file=<name>`, or one scenario with `--scenario=<scenario name>`. The browser
+renders with SwiftShader by default so local runs match CI. Add `--gpu` to render on this machine's GPU instead, or
+`--headed` to watch it.
+
+The intro is 3D, so for a real-GPU run on another machine, start a Playwright launch server there and pass
+`--ws=<its endpoint> --host=<this machine's address>`, so the dev server is reachable from that browser.
