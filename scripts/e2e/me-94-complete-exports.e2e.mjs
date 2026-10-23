@@ -677,26 +677,46 @@ export const scenarios = {
   },
 
   async 'crystal-runtime-audio-choice'(h) {
-    const { ctx, page } = await h.open(seed(h), '');
-    try {
-      await ready(page);
-      await page.evaluate(() => {
-        const set = Storage.prototype.setItem;
-        Storage.prototype.setItem = function (key, ...args) {
-          if (key === 'dbt.audio.v1') throw new DOMException('Storage full', 'QuotaExceededError');
-          return set.call(this, key, ...args);
-        };
-        try { window.__daily.opts.volume.set({ master: .2, music: .3, sfx: .4, muted: true }); }
-        finally { Storage.prototype.setItem = set; }
-      });
-      const raw = JSON.parse(fs.readFileSync(fixture, 'utf8'));
-      raw.settings.sound = true;
-      raw.preferences = { audio: { v: 1, master: .9, music: .8, sfx: .7, muted: false } };
-      await restore(page, raw);
-      assert.deepEqual(await page.evaluate(() => window.__daily.opts.volume.get()), { master: .2, music: .3, sfx: .4, muted: true });
-      const stored = JSON.parse(await h.ls(page, 'dbt.audio.v1'));
-      assert.deepEqual(stored, { v: 1, master: .2, music: .3, sfx: .4, muted: true });
-    } finally { await ctx.close(); }
+    const stale = { v: 1, master: .8, music: .7, sfx: .6, muted: false };
+    const results = [];
+    for (const stored of [stale, null]) for (const muted of [true, false]) for (const sourceAudio of [true, false]) for (const blockedRestore of [false, true]) {
+      const destination = stored ? { ...stored, muted: !muted } : null;
+      const { ctx, page } = await h.open(seed(h, destination ? { 'dbt.audio.v1': JSON.stringify(destination) } : {}), '');
+      const expected = { master: .2, music: .3, sfx: .4, muted };
+      try {
+        await ready(page);
+        await page.evaluate(({ expected, blockedRestore }) => {
+          const set = Storage.prototype.setItem;
+          Storage.prototype.setItem = function (key, ...args) {
+            if (key === 'dbt.audio.v1') throw new DOMException('Storage full', 'QuotaExceededError');
+            return set.call(this, key, ...args);
+          };
+          window.restoreAudioStorage = () => { Storage.prototype.setItem = set; };
+          window.__daily.opts.volume.set(expected);
+          if (!blockedRestore) window.restoreAudioStorage();
+        }, { expected, blockedRestore });
+        const raw = JSON.parse(fs.readFileSync(fixture, 'utf8'));
+        raw.settings.sound = true;
+        if (sourceAudio) raw.preferences = { audio: { v: 1, master: .9, music: .8, sfx: .7, muted: false } };
+        await restore(page, raw);
+        assert.deepEqual(await page.evaluate(() => window.__daily.opts.volume.get()), expected);
+        const status = await page.locator('.dq-settings .dq-hint[aria-live]').textContent();
+        if (blockedRestore) {
+          h.expect(/choices couldn't be saved/.test(status), 'Restore hid an unsaved live choice when no backup field changed.');
+          assert.deepEqual(JSON.parse(await h.ls(page, 'dbt.audio.v1')), destination);
+          await page.evaluate(() => window.restoreAudioStorage());
+          await restore(page, raw);
+        }
+        const persisted = JSON.parse(await h.ls(page, 'dbt.audio.v1'));
+        assert.deepEqual(persisted, { v: 1, ...expected }, 'Restore left a retained live choice only in memory.');
+        await page.reload();
+        await ready(page);
+        const reloaded = await page.evaluate(() => window.__daily.opts.volume.get());
+        assert.deepEqual(reloaded, expected, 'A reload reverted a choice after Restore reported success.');
+        results.push({ destination, muted, sourceAudio, blockedRestore, expected, persisted, reloaded, status });
+      } finally { await ctx.close(); }
+    }
+    fs.writeFileSync(path.join(h.out, 'audio-choice-recovery.json'), JSON.stringify(results, null, 2));
   },
 
   async 'crystal-live-audio-export'(h) {

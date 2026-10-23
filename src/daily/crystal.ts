@@ -52,7 +52,7 @@ export function restorePreferences(raw: unknown, store: Store, volume?: VolumeCt
       if (typeof destination.muted !== 'boolean') { levels.muted ||= audio.muted; changed = true; }
     }
     if (!audio && typeof destination.muted !== 'boolean' && !store.state.settings.sound) { levels.muted = true; changed = true; }
-    if (changed) {
+    if (changed || volume) {
       const expected = volume ? volume.restore(levels) : levels;
       if (!volume) savePrefs(levels);
       const stored = parsePrefs(localStorage.getItem(PREFS_KEY));
