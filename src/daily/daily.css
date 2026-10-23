@@ -3347,7 +3347,7 @@ textarea.dq-input {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  min-height: 36px;
+  min-height: 44px;
   padding: 0 8px;
   font: inherit;
   font-size: 13.5px;
@@ -3470,6 +3470,7 @@ textarea.dq-input {
 .dq-size,
 .dq-tool {
   position: relative;
+  flex: none;
   display: grid;
   place-items: center;
   width: 44px;
@@ -3481,9 +3482,6 @@ textarea.dq-input {
   background: none;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-}
-.dq-size {
-  width: 38px;
 }
 .dq-swatch-dot {
   width: 24px;
@@ -3574,6 +3572,19 @@ textarea.dq-input {
 }
 .dq-save {
   min-width: 112px;
+}
+@media (max-width: 359px) {
+  .dq-tools-pick {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+  .dq-sizes {
+    padding-left: 0;
+    border-left: 0;
+  }
+  .dq-save {
+    min-width: 96px;
+  }
 }
 .dq-tools-confirm {
   flex-wrap: wrap;
@@ -3886,6 +3897,40 @@ textarea.dq-input {
   }
   .dq-piece-side {
     padding-top: 12px;
+  }
+}
+@media (min-width: 760px) and (max-height: 500px) {
+  .dq-tools {
+    gap: 8px;
+    padding: 10px 12px;
+  }
+  .dq-tools-pick {
+    gap: 6px;
+  }
+  .dq-inks {
+    flex-direction: row;
+    justify-content: center;
+  }
+  .dq-swatch {
+    width: 44px;
+    grid-template-columns: none;
+    justify-items: center;
+    padding: 0;
+  }
+  .dq-swatch-n {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    clip-path: inset(50%);
+  }
+  .dq-swatch[aria-checked='true'] {
+    background: none;
+  }
+  .dq-sizes {
+    padding-top: 6px;
+  }
+  .dq-tools-acts {
+    padding-top: 8px;
   }
 }
 @media (min-width: 1180px) {
