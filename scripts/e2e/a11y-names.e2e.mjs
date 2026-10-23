@@ -6,6 +6,7 @@
 //            presentation) nor named
 //   id       an id that more than one element on the page uses
 //   ref      aria-labelledby or aria-describedby naming an id that no element has
+//   hidden   a control a player can tab to that aria-hidden keeps from screen readers
 // Controls and images count when they are rendered, even see-through, since a screen reader still reads them. The
 // Safe Zone, the Save Crystal panel and the install hint are left out, as in layout-fit. Screens in ENFORCED fail the
 // run; every other screen passes and lists its problems on stdout and under `result` in report.json, as the todo list.
@@ -44,14 +45,16 @@ async function audit(page, cdp, scope, skip) {
           }
         }
       }
-      return { found, items: probe.map((el) => ({ kind: el.matches(CONTROLS) ? 'name' : 'image', what: name(el) })) };
+      const tabbable = (el) => el.tabIndex >= 0 && !el.disabled && !el.closest('[inert]');
+      return { found, items: probe.map((el) => ({ kind: el.matches(CONTROLS) ? 'name' : 'image', what: name(el), tabbable: el.matches(CONTROLS) && tabbable(el) })) };
     },
     { scope, skip, CONTROLS },
   );
-  for (const [i, { kind, what }] of items.entries()) {
+  for (const [i, { kind, what, tabbable }] of items.entries()) {
     const { result } = await cdp.send('Runtime.evaluate', { expression: `window.__a11yProbe[${i}]`, objectGroup: 'a11y' });
     const { nodes } = await cdp.send('Accessibility.getPartialAXTree', { objectId: result.objectId, fetchRelatives: false });
     const [node] = nodes;
+    if (node.ignored && tabbable && node.ignoredReasons?.some((r) => r.name.startsWith('ariaHidden'))) found.push({ kind: 'hidden', what, detail: 'aria-hidden but reachable with Tab' });
     if (node.ignored || String(node.name?.value ?? '').trim()) continue;
     found.push({ kind, what, detail: `${node.role?.value ?? 'no role'} with no name` });
   }
@@ -118,7 +121,8 @@ const PLANTED = `
   <img class="a11y-plant" width="20" height="20">
   <span id="a11y-twin"></span><span id="a11y-twin"></span>
   <p class="a11y-plant" aria-describedby="a11y-gone">Hint</p>
-  <div aria-hidden="true"><button class="a11y-decoy"></button><svg class="a11y-decoy" width="20" height="20"><circle cx="10" cy="10" r="8"/></svg></div>
+  <div aria-hidden="true"><button class="a11y-plant">Go</button></div>
+  <div aria-hidden="true"><button class="a11y-decoy" tabindex="-1"></button><svg class="a11y-decoy" width="20" height="20"><circle cx="10" cy="10" r="8"/></svg></div>
   <img class="a11y-decoy" alt="" width="20" height="20">
   <svg class="a11y-decoy" width="20" height="20"><title>Moon</title><circle cx="10" cy="10" r="8"/></svg>
   <button class="a11y-decoy" aria-label="Close"></button>
@@ -132,7 +136,7 @@ async function planted(h) {
   await settle(page);
   await page.evaluate((html) => document.getElementById('dq-main').insertAdjacentHTML('beforeend', `<div>${html}</div>`), PLANTED);
   const found = (await audit(page, cdp, PAGE, SKIP)).map((f) => `${f.kind} ${f.what}`).filter((f) => /a11y-/.test(f)).sort();
-  const want = ['id #a11y-twin', 'image img.a11y-plant', 'image svg.a11y-plant', 'name button.a11y-plant', 'name div.a11y-plant', 'name input.a11y-plant[type=checkbox]', 'ref p.a11y-plant "Hint"'];
+  const want = ['hidden button.a11y-plant "Go"', 'id #a11y-twin', 'image img.a11y-plant', 'image svg.a11y-plant', 'name button.a11y-plant', 'name div.a11y-plant', 'name input.a11y-plant[type=checkbox]', 'ref p.a11y-plant "Hint"'];
   h.expect(!errors.length, errors.join('\n'));
   await ctx.close();
   h.expect(JSON.stringify(found) === JSON.stringify(want), `the check reported:\n  ${found.join('\n  ')}\ninstead of:\n  ${want.join('\n  ')}`);
