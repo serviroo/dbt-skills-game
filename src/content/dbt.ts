@@ -130,6 +130,7 @@ function tierLine(a: Answers) {
   if (rows.length) return 'Sorted and filed. No S-tier today. Tough crowd.';
   return 'Tasted, if not sorted. That still counts.';
 }
+const bothAnd = (a: Answers) => s(a, 'pair', "I'm doing my best, but I want to do better.").trim().replace(/,?\s+but\s+/i, ', and ');
 
 export const SKILLS: Skill[] = [
   // ---------------- Mindfulness (Sense) ----------------
@@ -857,6 +858,124 @@ export const SKILLS: Skill[] = [
     ],
   },
   {
+    id: 'clarifying-priorities',
+    sl: 'Priority Call',
+    real: 'Clarifying Priorities',
+    module: 'ie',
+    minutes: '2 min',
+    card: 'The result, the relationship or your self-respect. Pick which one leads this time.',
+    steps: [
+      { kind: 'intro', text: "Hard talks pull you three ways at once, so it makes sense if this one feels tangled. Let's find which pull matters most this time." },
+      { kind: 'input', key: 'talk', text: "Think of one talk that's coming up, or one that keeps replaying in your head. Only you will see this.", placeholder: 'The talk (optional)', skip: 'Keep it in my head' },
+      { kind: 'choice', key: 'want', title: 'The result', text: 'What do you want to walk away with?', options: o('A yes to something I asked for', 'My no respected', 'My point taken seriously', 'Not sure yet') },
+      { kind: 'choice', key: 'bond', title: 'The relationship', text: 'How do you want things to be between you afterwards?', options: o('As close as before', 'Calm and okay', 'It matters less this time', 'Not sure yet') },
+      { kind: 'choice', key: 'self', title: 'Your self-respect', text: 'How do you want to feel about yourself afterwards?', options: o('Honest', 'Fair to both of us', 'Steady, not small', 'Not sure yet') },
+      {
+        id: 'main',
+        kind: 'choice',
+        key: 'main',
+        text: 'All three count. Only one gets to lead this time. Which one?',
+        small: 'It can change from one talk to the next, even with the same person.',
+        options: [
+          { label: 'The result', go: 'result' },
+          { label: 'The relationship', go: 'bond-first' },
+          { label: 'My self-respect', go: 'self-first' },
+          { label: "Can't pick one", go: 'tie' },
+        ],
+      },
+      { id: 'result', kind: 'say', text: 'Then the result leads. Ask clearly, or say no clearly. Kindness and self-respect still come along, one step behind.', options: [{ label: 'Plan it with DEAR MAN', go: 'skill:dear-man' }, { label: 'Done', go: 'end' }] },
+      { id: 'bond-first', kind: 'say', text: "Then the relationship leads. Keep things warm while you talk. You might push a little less today. That's your call to make.", options: [{ label: 'Practise GIVE', go: 'skill:give' }, { label: 'Done', go: 'end' }] },
+      { id: 'self-first', kind: 'say', text: "Then your self-respect leads. Stay true to what you value, even if you don't get the yes.", options: [{ label: 'Practise FAST', go: 'skill:fast' }, { label: 'Done', go: 'end' }] },
+      {
+        id: 'tie',
+        kind: 'say',
+        text: "That's okay. Try this: which one would hurt most to lose? That one leads. Still a tie? Pick one for now. You can always change it.",
+        options: [{ label: 'The result', go: 'result' }, { label: 'The relationship', go: 'bond-first' }, { label: 'My self-respect', go: 'self-first' }, { label: 'Done for now', go: 'end' }],
+      },
+    ],
+  },
+  {
+    id: 'dialectics',
+    sl: 'Split Screen',
+    real: 'Dialectics: Both-And',
+    module: 'ie',
+    minutes: '90 s',
+    card: 'Two things can be true at once. Swap "but" for "and".',
+    steps: [
+      { kind: 'intro', text: "Torn between two sides? That's a tiring place to be. When things are hard, the mind wants one answer: all good or all bad. Most of the time, both sides hold some truth." },
+      {
+        kind: 'choice',
+        key: 'pair',
+        text: "Two things that feel like they can't both be true. Pick the one that sounds most like you.",
+        options: o("I'm doing my best, but I want to do better.", "I care about them, but I'm upset with them.", 'I want things to change, but change is scary.', 'I need help, but I want to do it myself.'),
+        other: 'Write my own',
+      },
+      {
+        kind: 'timer',
+        seconds: 20,
+        visual: 'glow',
+        title: 'But becomes and',
+        big: (a) => bothAnd(a),
+        text: (a) => (bothAnd(a) === s(a, 'pair', '').trim() ? 'Say it again with an "and" in the middle. Both halves get to stay.' : 'Read it slowly. Both halves get to stay.'),
+      },
+      {
+        kind: 'choice',
+        key: 'land',
+        text: 'How does the "and" version sit with you?',
+        options: [{ label: 'A bit lighter' }, { label: 'Strange, and true' }, { label: 'Same as before', reply: 'That makes sense. It often takes a few tries.' }, { label: 'Not sure', reply: 'Not sure is fine.' }],
+      },
+      {
+        kind: 'choice',
+        key: 'spot',
+        text: 'Words like "always", "never" and "ruined" squeeze out the other side too. Which line leaves room for both?',
+        options: [{ label: '"Everything is ruined."', go: 'room' }, { label: '"This went badly, and parts of it can still be fixed."', go: 'room' }, { label: '"Nothing ever works out."', go: 'room' }],
+      },
+      { id: 'room', kind: 'say', text: 'The middle one. It\'s honest about the hard part and still leaves room for the rest. Next time you catch a "but", an "always" or a "never", try an "and".', cta: 'Done', go: 'end' },
+    ],
+  },
+  {
+    id: 'mindfulness-of-others',
+    sl: 'Co-op Mode',
+    real: 'Mindfulness of Others',
+    module: 'ie',
+    minutes: '2 min',
+    card: 'Be with someone more fully. Notice, stay curious, guess less.',
+    steps: [
+      { kind: 'intro', text: "Being around people can take a lot out of you. Your mind keeps a running commentary: what they think of you, what to say next. That's normal. This helps you be with them a bit more and judge a bit less." },
+      {
+        kind: 'choice',
+        key: 'who',
+        text: "Think of someone you'll see or talk to soon. Someone easy is best for practice.",
+        small: "If being around someone doesn't feel safe, leave them out of this. Your safety comes first.",
+        options: o('A friend', 'Family', 'A teammate', 'Someone at work or school', 'Not sure yet'),
+      },
+      {
+        kind: 'timer',
+        title: 'Observe',
+        seconds: 30,
+        start: 'Start 30 s',
+        visual: 'glow',
+        extend: 30,
+        text: "Next time you're with them, give them your full attention. For now, picture them: their face, their voice, what they're into lately. If a judgment pops up, let it drift past and come back to them.",
+      },
+      {
+        kind: 'choice',
+        key: 'fact',
+        title: 'Describe',
+        text: 'Stick to what you can see and hear. Which one is a fact?',
+        options: [{ label: 'They checked their phone twice.', go: 'guess' }, { label: "They don't want to be here.", go: 'guess' }, { label: 'Not sure', go: 'guess' }],
+      },
+      { id: 'guess', kind: 'say', text: "The first one. A camera could catch it. The second is a guess about what's going on inside them. Guesses can be wrong, so hold them loosely. If it matters, you can ask." },
+      { kind: 'say', title: 'Participate', text: 'When you\'re together, join in all the way. Go with the flow of the chat or the game. Less planning your next line, more being there.' },
+      {
+        kind: 'choice',
+        key: 'try',
+        text: 'Which one will you try next time?',
+        options: [{ label: 'Full attention', go: 'end' }, { label: 'Facts, not guesses', go: 'end' }, { label: 'Join in all the way', go: 'end' }, { label: 'Not sure yet', go: 'end' }],
+      },
+    ],
+  },
+  {
     id: 'leave-lobby',
     sl: 'Leave the Lobby',
     real: 'STOP',
@@ -1066,6 +1185,9 @@ export const ROTATION: Quest[] = [
   { skill: 'volume-down' },
   { skill: 'self-soothe', special: 'comfort', label: 'Add one thing to your Comfort inventory' },
   { skill: 'wise-mind', special: 'free', label: 'Free choice' },
+  { skill: 'clarifying-priorities' },
+  { skill: 'dialectics' },
+  { skill: 'mindfulness-of-others' },
 ];
 
 /**
