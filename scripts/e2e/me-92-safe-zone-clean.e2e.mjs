@@ -528,6 +528,31 @@ export const scenarios = {
 
   // Measured at the speakers, where the score, its reverb, beds and effects all end up. Silent means a peak below
   // 2^-15 (one step of 16-bit audio) and RMS below 1e-5 (-100 dBFS).
+  'safe-zone-silences-effect-echo': async (h) => {
+    const prefs = JSON.stringify({ v: 1, master: 0.8, music: 0, sfx: 1, muted: false });
+    const { ctx, page, errors } = await boot(h, { save: returning(), init: tapOutput, live: true, extra: { [AUDIO]: prefs } });
+    const c = step();
+    try {
+      await h.sleep(3000);
+      const before = await probe(page);
+      await page.evaluate(() => ['reward_chime', 'chest_burst', 'soft_chime'].forEach((cue) => window.__daily.sound(cue)));
+      await h.sleep(250);
+      const ringing = await outputLevel(page);
+      await enterSafe(h, page, 'echo', before);
+      const entered = (await outputLevel(page)).t;
+      await h.sleep(3000);
+      const inside = await listen(h, page, 3);
+      c.ok(ringing.rms > 1e-3, `echo: the effects never reached the speakers (${fmt([ringing])})`);
+      c.ok(inside[0].t - entered > 2.8, `echo: listened only ${(inside[0].t - entered).toFixed(1)} s after entry`);
+      c.ok(inside.every((x) => x.rms < 1e-5), `echo: the echo of effects played just before entry still reaches the speakers in the Safe Zone (${fmt(inside)})`);
+      c.ok(!errors.length, `echo: page errors: ${errors.join(' | ')}`);
+      console.log(`echo: ringing ${fmt([ringing])} | inside ${fmt(inside)}`);
+      c.end();
+    } finally {
+      await ctx.close();
+    }
+  },
+
   'safe-zone-silences-score-and-reverb': async (h) => {
     const prefs = JSON.stringify({ v: 1, master: 0.8, music: 0.6, sfx: 0.7, muted: false });
     const { ctx, page, errors } = await boot(h, { save: returning(), init: tapOutput, live: true, extra: { [AUDIO]: prefs } });
