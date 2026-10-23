@@ -27,8 +27,14 @@ name.
 npm ci
 npx tsc --noEmit -p .
 npm run build
+node scripts/pwa-verify.mjs --check
+node scripts/pwa-verify.mjs --update --check
+node scripts/pwa-csp-sweep.mjs --check
 node scripts/e2e.mjs
 ```
+
+The PWA checks test the build in `dist/`. `pwa-verify` runs in both Chromium and WebKit; on a machine where WebKit
+can't run, add `--browser=chromium`.
 
 `scripts/e2e.mjs` starts its own dev server and a Playwright Chromium, runs every scenario in `scripts/e2e/*.e2e.mjs`
 and saves screenshots and `report.json` to `artifacts/e2e/<time>/`. It exits non-zero if any scenario fails. CI runs

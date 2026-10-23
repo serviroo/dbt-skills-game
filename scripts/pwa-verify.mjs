@@ -1,6 +1,7 @@
 // End-to-end proof that the built app installs its service worker, boots offline, and updates quietly.
-// node scripts/pwa-verify.mjs [--dist=dist] [--path=<app subpath>] [--video] [--browser=chromium|webkit|both] [--out=qa/out/pwa/verify] [--update]
+// node scripts/pwa-verify.mjs [--dist=dist] [--path=<app subpath>] [--video] [--browser=chromium|webkit|both] [--out=qa/out/pwa/verify] [--update] [--check]
 // Starts its own `vite preview` on a free port (4173 and up) and stops only that process.
+// --check exits 1 if the report shows a problem.
 import { chromium, webkit } from 'playwright';
 import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -350,3 +351,35 @@ const file = `${out}/${flags.update ? 'update' : 'offline'}-report.json`;
 fs.writeFileSync(file, JSON.stringify(results, null, 2));
 console.log(JSON.stringify(results, null, 2));
 console.log('report:', path.relative(root, file));
+
+function problems(r) {
+  if (r.error) return [r.error.split('\n')[0]];
+  const s = r.steps;
+  const none = (label, list) => (list?.length ? [`${label}: ${list.slice(0, 3).join(' | ')}`] : []);
+  if (!flags.update) {
+    return [
+      ...none('online errors', s.online.errors),
+      ...none('online CSP', s.online.csp),
+      ...none('manifest', [...s.manifest.problems, ...s.manifest.splashMissing, ...[s.manifest.chromium?.manifestErrors ?? [], s.manifest.chromium?.installabilityErrors ?? []].flat().map((e) => e.message ?? e.errorId ?? e.error)]),
+      ...(s.offlineReload.serverGone ? [] : ['server still answered while offline']),
+      ...(s.offlineReload.allFromSW ? [] : [`offline reload left the service worker: ${s.offlineReload.notFromSW.slice(0, 3).join(' ')}`]),
+      ...(s.offlineReload.fonts.jost && s.offlineReload.fonts.jostItalic && s.offlineReload.fonts.bodoni ? [] : ['fonts missing offline: ' + JSON.stringify(s.offlineReload.fonts)]),
+      ...none('offline reload', [...s.offlineReload.failed, ...s.offlineReload.errors, ...s.offlineReload.csp]),
+      ...none('offline cold launch', [...s.offlineCold.failed, ...s.offlineCold.errors, ...s.offlineCold.notFromSW]),
+      ...none('offline lazy chunk', [...s.offlineLazyChunk.failed, ...s.offlineLazyChunk.errors]),
+    ];
+  }
+  const v2 = s.v2Installed;
+  return [
+    ...(s.brokenDeploy.brokenCacheCreated || s.brokenDeploy.stillCurrent !== s.v1.current || s.brokenDeploy.reloadShows !== 'v1' ? ['a broken deploy replaced the working version: ' + JSON.stringify(s.brokenDeploy)] : []),
+    ...(v2.pageStillOn !== 'v1' || !v2.onUpdateReadyFired || v2.oldPageLazyChunk !== 'loaded' || v2.current === s.v1.current ? ['update did not install quietly: ' + JSON.stringify(v2)] : []),
+    ...(s.nextLaunch.build !== 'v2' ? [`next launch shows ${s.nextLaunch.build}, want v2`] : []),
+    ...none('next launch errors', s.nextLaunch.errors),
+    ...(s.v3Installed.expectKept.every((c) => c in s.v3Installed.caches) && !(s.v3Installed.expectDeleted in s.v3Installed.caches) ? [] : ['old caches not rotated: ' + Object.keys(s.v3Installed.caches).join(' ')]),
+  ];
+}
+if (flags.check) {
+  const bad = results.flatMap((r) => problems(r).map((p) => `${r.browser}: ${p}`));
+  for (const p of bad) console.error('PROBLEM ' + p);
+  if (bad.length) process.exitCode = 1;
+}
