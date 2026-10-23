@@ -1074,7 +1074,7 @@ export const SKILLS: Skill[] = [
     steps: [
       { kind: 'intro', text: 'For when the relationship matters most. Keep the connection while you talk.' },
       { kind: 'say', title: 'G. Gentle', text: 'No attacks, threats or put-downs, even when it\'s hard. A "no" can be tolerated.' },
-      { kind: 'say', title: 'I. Interested', text: 'Listen to their side. Let them finish. Be patient if they need time.' },
+      { kind: 'say', title: 'I. Interested', text: 'Listen to their side. Let them finish. Give them time if they need it.' },
       { kind: 'input', key: 'v', title: 'V. Validate', text: 'Show you get how they see it. "I can see this is hard for you, and..."', placeholder: 'My validating line (optional)', skip: 'Skip' },
       { kind: 'say', title: 'E. Easy manner', text: 'A little lightness. Soft, not stiff. A small smile helps.' },
       { kind: 'choice', key: 'first', text: 'Which one will you try first?', options: [{ label: 'Gentle', go: 'end' }, { label: 'Interested', go: 'end' }, { label: 'Validate', go: 'end' }, { label: 'Easy manner', go: 'end' }] },

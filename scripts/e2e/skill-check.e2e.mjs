@@ -18,6 +18,7 @@ const ENFORCED = new Set([
   'dialectics', 'mindfulness-of-others', 'leave-lobby', 'volume-down', 'supplies', 'cool-air', 'warm-hands',
   'absurd-scroll', 'flavour-tier', 'queue-up', 'lie-low',
   'abc-please',
+  'give',
 ]);
 const MAX_TAPS = 12;
 const WORKERS = 3;
