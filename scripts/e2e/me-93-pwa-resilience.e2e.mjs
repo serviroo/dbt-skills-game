@@ -143,6 +143,7 @@ const update = (page) =>
 function run(args, { env = {}, timeoutMs = 240000 } = {}) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, args, { cwd: root, env: { ...process.env, ...env }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const closed = new Promise((resolve) => child.once('close', resolve));
     let out = '';
     child.stdout.on('data', (d) => (out += d));
     child.stderr.on('data', (d) => (out += d));
@@ -157,7 +158,11 @@ function run(args, { env = {}, timeoutMs = 240000 } = {}) {
 
       for (let i = 0; i < 30 && alive(); i++) await new Promise((r) => setTimeout(r, 100));
       const leaked = alive();
-      if (leaked) process.kill(-child.pid, 'SIGKILL');
+      if (leaked) { try { process.kill(-child.pid, 'SIGKILL'); } catch {} }
+      let drainTimer;
+      const drained = await Promise.race([closed.then(() => true), new Promise((resolve) => { drainTimer = setTimeout(() => resolve(false), 2000); })]);
+      clearTimeout(drainTimer);
+      if (!drained) timedOut = true;
       resolve({ code, timedOut, leaked, out });
     });
   });
@@ -507,6 +512,27 @@ export const scenarios = {
 };
 
 export const checks = {
+  async 'pwa-script-output-drains-on-exit'({ expect, out }) {
+    const results = [];
+    for (const hold of [false, true]) {
+      const late = "setTimeout(() => { process.stdout.write('late-stdout\\n'); process.stderr.write('late-stderr\\n'); }, 150);" + (hold ? 'setInterval(() => {}, 1000);' : '');
+      const program = "const { spawn } = require('node:child_process'); const child = spawn(process.execPath, ['-e', " + JSON.stringify(late) + "], { detached: true, stdio: ['ignore', process.stdout, process.stderr] }); console.log('pipe-owner ' + child.pid); child.unref();";
+      const t0 = Date.now();
+      const result = await run(['-e', program], { timeoutMs: 5000 });
+      const pid = Number(result.out.match(/pipe-owner (\d+)/)?.[1]);
+      try {
+        expect(Number.isInteger(pid) && pid > 0, 'the pipe fixture did not report its child');
+        results.push({ hold, ...result, ms: Date.now() - t0 });
+        fs.writeFileSync(path.join(out, 'pwa-script-output-drain.json'), JSON.stringify(results, null, 2));
+        expect(result.code === 0 && !result.leaked && result.timedOut === hold, 'the pipe fixture did not finish with the expected bounded result');
+        expect(result.out.includes('late-stdout') && result.out.includes('late-stderr'), 'the driver lost output written after the parent exited');
+        expect(Date.now() - t0 < 8000, 'the pipe drain was unbounded');
+      } finally {
+        if (pid > 0) { try { process.kill(-pid, 'SIGKILL'); } catch {} }
+      }
+    }
+  },
+
   async 'pwa-fixture-keeps-files-contained'({ shared, expect, out }) {
     const base = await build(shared);
     const outside = path.join(scratchDir(), 'outside.txt');
