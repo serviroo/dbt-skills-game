@@ -423,7 +423,7 @@ export function normalize(raw: unknown): State | null {
     base.settings.title = oneOf<TitleId | ''>(pf.title, TITLE_IDS, '');
     base.settings.playerName = cleanName(pf.playerName);
     base.settings.companion = cleanName(pf.companion);
-    base.settings.region = typeof pf.region === 'string' && /^[a-z]{2,16}$/.test(pf.region) ? pf.region : '';
+    base.settings.region = typeof pf.region === 'string' && pf.region.length <= 24 && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(pf.region) ? pf.region : '';
     if (isObj(pf.names))
       for (const id of SHADOW_IDS) {
         const n = own(pf.names, id) ? cleanName(pf.names[id]) : '';
