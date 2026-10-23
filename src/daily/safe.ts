@@ -34,13 +34,6 @@ const readLight = (key: string) => {
 export function safeScreen(app: App, route: Route): ScreenOut {
   const r = route as Extract<Route, { name: 'safe' }>;
   const st = app.store;
-  // credited silently, shown on the next Lantern visit
-  if (!st.state.events.some((e) => e.k === 'safe' && e.day === st.today())) {
-    st.add('safe', 20, { stat: 'stamina' });
-    st.state.flags.safeCredit = true;
-    st.touch('safeCredit');
-    st.save();
-  }
   const ctx: Ctx = { sound: (c) => app.sound(c), reduced: () => app.reduced() };
   const stops: (() => void)[] = [];
   let higher = false;
@@ -258,7 +251,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     el,
     title: 'Safe Zone',
     mode: 'safe',
-    bubbles: [1.2, 0.45],
+    bubbles: [0, 0],
     leave: () => {
       clear();
       app.root.classList.remove('ca-szlit');

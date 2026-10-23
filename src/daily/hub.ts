@@ -317,7 +317,7 @@ function lobby(app: App, giftLine: HTMLElement) {
       await wait(app.reduced() ? 0.05 : 0.55);
     }
     try {
-      await app.openGift();
+      if (chest.isConnected) await app.openGift();
     } finally {
       busy = false;
       sync();

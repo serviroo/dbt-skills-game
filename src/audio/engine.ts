@@ -91,6 +91,7 @@ export class AudioEngine {
   private musUser: GainNode;
   private musRoomIn: GainNode;
   private musHallIn: GainNode;
+  private safeQuiet: GainNode[];
   private userMaster = 1;
   private bedBus: GainNode;
   private hushBeds: GainNode;
@@ -179,8 +180,9 @@ export class AudioEngine {
     this.musUser = level(musLevel);
     this.musRoomIn = level(musLevel);
     this.musHallIn = level(musLevel);
+    this.safeQuiet = [C.createGain(), C.createGain(), C.createGain(), C.createGain()];
     this.sfx = C.createGain();
-    this.sfx.connect(this.sfxUser).connect(pre);
+    this.sfx.connect(this.safeQuiet[3]).connect(this.sfxUser).connect(pre);
 
     const room = C.createConvolver();
     room.normalize = false;
@@ -190,8 +192,8 @@ export class AudioEngine {
     hall.buffer = makeIR(C, this.seedN + 2, { rt60: 3.2, length: 3.6, preDelay: 0.024, damp0: 12000, damp1: 2000, early: 0.07, onset: 0.03 });
     this.hushRoom = C.createGain();
     this.hushHall = C.createGain();
-    room.connect(this.hushRoom).connect(pre);
-    hall.connect(this.hushHall).connect(pre);
+    room.connect(this.hushRoom).connect(this.safeQuiet[1]).connect(pre);
+    hall.connect(this.hushHall).connect(this.safeQuiet[2]).connect(pre);
     this.sfxRoomIn.connect(room);
     this.sfxHallIn.connect(hall);
     this.musRoomIn.connect(room);
@@ -223,7 +225,7 @@ export class AudioEngine {
     this.shelf = shelf;
     this.uiDuck = C.createGain();
     this.focus = C.createGain();
-    musicIn.connect(mlp).connect(shelf).connect(air).connect(mlevel).connect(this.uiDuck).connect(this.focus).connect(this.hushMusic).connect(this.musUser).connect(this.duckG);
+    musicIn.connect(mlp).connect(shelf).connect(air).connect(mlevel).connect(this.uiDuck).connect(this.focus).connect(this.hushMusic).connect(this.safeQuiet[0]).connect(this.musUser).connect(this.duckG);
 
     this.lib = {
       ctx: C,
@@ -374,9 +376,9 @@ export class AudioEngine {
     for (const g of [this.sfxUser, this.bedUser, this.sfxRoomIn, this.sfxHallIn]) g.gain.setTargetAtTime(s, t, tau);
   }
 
-  /** Current output gains (QA): master after scene level and mute, and the Music / Effects levels. */
+  /** Current output gains (QA): master after scene level and mute, the Music / Effects levels, and the score's quiet level. */
   get levels() {
-    return { master: this.volume.gain.value, music: this.musUser.gain.value, sfx: this.sfxUser.gain.value };
+    return { master: this.volume.gain.value, music: this.musUser.gain.value, sfx: this.sfxUser.gain.value, score: this.safeQuiet[0].gain.value };
   }
 
   /** QA: the Effects bus or the score's input, to feed a test tone through the real graph. */
@@ -531,6 +533,14 @@ export class AudioEngine {
     }
     this.hushV?.stop(at, 0.02);
     this.hushV = null;
+  }
+
+  /** Fades the score, effects and the shared room and hall echo out (on) or back in, as the Safe Zone does. Music, Effects and Master levels are left alone. */
+  quiet(on: boolean, sec: number, at = this.ctx.currentTime) {
+    for (const g of this.safeQuiet) {
+      g.gain.cancelScheduledValues(at);
+      g.gain.setTargetAtTime(on ? 0 : 1, at, Math.max(0.003, sec / 4));
+    }
   }
 
   /** Duck beds + score together (e.g. -3 dB as the gate dims for the first window). */

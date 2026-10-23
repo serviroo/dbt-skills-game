@@ -1,5 +1,5 @@
 import './install-hint.css';
-import { LanternWindow, windowSounds } from '../ui/lantern-window';
+import { DISMISSED, LanternWindow, windowSounds } from '../ui/lantern-window';
 import { animate, el, finished, uiNow, wait } from '../ui/anim';
 import { params } from '../core/params';
 import { INSTALL_HINT_KEY } from '../core/stored-names';
@@ -59,9 +59,10 @@ let active = false;
 /**
  * A one-time, quiet note that the Lantern can live on their Home Screen. Only in iOS Safari outside the installed app,
  * only until the player dismisses it once, and never when storage can't remember that. Resolves true once the player dismissed it,
- * false when it wasn't shown. Call it at a calm moment (end card, companion home), never during the cutscene.
+ * false when it wasn't shown or something else took it down. Call it at a calm moment (end card, companion home), never during
+ * the cutscene. `still` is asked again when the delay is over: false means the moment has passed and it stays away.
  */
-export async function maybeShowInstallHint(opts: { delay?: number; force?: boolean } = {}): Promise<boolean> {
+export async function maybeShowInstallHint(opts: { delay?: number; force?: boolean; still?: () => boolean } = {}): Promise<boolean> {
   if (active) return false;
   if (!opts.force) {
     if (!isIOSSafari() || isStandalone()) return false;
@@ -69,16 +70,17 @@ export async function maybeShowInstallHint(opts: { delay?: number; force?: boole
   }
   active = true;
   try {
-    return await show(opts.delay ?? 0);
+    return await show(opts.delay ?? 0, opts.still);
   } finally {
     active = false;
   }
 }
 
-async function show(delay: number) {
+async function show(delay: number, still?: () => boolean) {
   const live = await clockRuns();
   const pause = live ? wait : realWait;
   if (delay) await pause(delay);
+  if (still && !still()) return false;
 
   let layer = document.querySelector<HTMLDivElement>('.pwa-hint-layer');
   if (!layer) {
@@ -113,8 +115,9 @@ async function show(delay: number) {
     if (e.key === 'Escape') (win.root.querySelector('.sw-btn') as HTMLButtonElement | null)?.click();
   };
   window.addEventListener('keydown', onKey);
-  await answered;
+  const answer = await answered;
   window.removeEventListener('keydown', onKey);
+  if (answer === DISMISSED) return false;
   remember();
   const closing = win.close();
   if (live) {
