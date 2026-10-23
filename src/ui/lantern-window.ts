@@ -30,6 +30,14 @@ export interface WindowSpec {
 /** Sound hook, wired by the audio module. */
 export const windowSounds: { open?: (kind: WindowKind) => void; close?: () => void; tap?: () => void } = {};
 
+export const DISMISSED = 'dismissed';
+
+const live = new Set<LanternWindow>();
+
+export function dismissWindows() {
+  for (const w of [...live]) w.dismiss();
+}
+
 const ICONS: Record<string, string> = {
   alert: `<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="16.5" fill="none" stroke="#d2f4ff" stroke-width="2.6"/><path d="M20 10.5v12.5" stroke="#d2f4ff" stroke-width="3.2" stroke-linecap="round"/><circle cx="20" cy="29" r="2.1" fill="#d2f4ff"/></svg>`,
   quest: `<svg viewBox="0 0 40 40"><rect x="8" y="6" width="24" height="28" rx="2" fill="none" stroke="#d2f4ff" stroke-width="2.4"/><path d="M13 14h14M13 20h14M13 26h8" stroke="#d2f4ff" stroke-width="2.4" stroke-linecap="round"/></svg>`,
@@ -225,6 +233,7 @@ export class LanternWindow {
   private offSkip: (() => void) | null = null;
   private reduced = params.reduced;
   private resolveTap: ((v: string) => void) | null = null;
+  private gone = false;
   readonly spec: WindowSpec;
 
   constructor(readonly layer: HTMLElement, spec: WindowSpec) {
@@ -295,6 +304,7 @@ export class LanternWindow {
     this.next = next;
     root.style.visibility = 'hidden';
     layer.append(root);
+    live.add(this);
   }
 
   private startPlasma() {
@@ -328,6 +338,7 @@ export class LanternWindow {
   /** Measured open: a full-width line, stepped height 23 / 61 / 61 / 100 % in 33 ms steps, a 3-frame glitch on the
    * frame, then the Lantern types: title per character, body per word (per line when long). A tap completes it. */
   async open() {
+    if (this.gone) return;
     const kind = this.spec.kind ?? 'notification';
     this.reduced = params.reduced || this.root.classList.contains('dq-sw--still');
     this.root.style.visibility = 'visible';
@@ -339,6 +350,7 @@ export class LanternWindow {
       this.spec.reveal?.(ctx);
       for (const r of rolls) r.oldN.style.opacity = '0';
       await finished(animate(this.root, [{ opacity: 0 }, { opacity: 1 }], { duration: W.reducedFadeMs, easing: css(EASE.outCubic) }));
+      if (this.gone) return;
       if (this.spec.tapToContinue) this.next.style.opacity = '0.85';
       this.spec.onCue?.('typed');
       return;
@@ -474,6 +486,7 @@ export class LanternWindow {
 
   /** Resolves with an action value, or 'tap' on any tap when tapToContinue; or 'timeout'. */
   waitForInput(timeoutSec = 0): Promise<string> {
+    if (this.gone) return Promise.resolve(DISMISSED);
     return new Promise((resolve) => {
       let done = false;
       const finish = (v: string) => {
@@ -512,6 +525,7 @@ export class LanternWindow {
 
   /** Measured close: one frame at scale .85 with a soft wash, 167 ms collapse to a bright bar, the bar fades. */
   async close() {
+    if (this.gone) return;
     this.skipTyping();
     windowSounds.close?.();
     const h = this.plate.offsetHeight;
@@ -535,9 +549,19 @@ export class LanternWindow {
     this.destroy();
   }
 
+  dismiss() {
+    const answer = this.resolveTap;
+    this.destroy();
+    answer?.(DISMISSED);
+  }
+
   destroy() {
+    live.delete(this);
+    this.gone = true;
     this.offSkip?.();
     this.typing = false;
+    this.skipRes?.();
+    this.typeAnims.forEach((a) => a.cancel());
     this.plasmaAnims.forEach((a) => a.cancel());
     this.root.remove();
   }

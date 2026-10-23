@@ -96,6 +96,12 @@ export const RANK = {
   pipLightMs: 200,
 } as const;
 
+export const SCORE = {
+  inSec: 3,
+  safeOutSec: 1.5,
+  safeBackSec: 3,
+} as const;
+
 export const GATE = {
   /** cutscene seconds from the start of beat 1 (measured, pacing f0052-f0084) */
   plateFadeAtSec: 1.7,

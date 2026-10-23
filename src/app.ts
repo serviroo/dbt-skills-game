@@ -10,6 +10,7 @@ import type { VolumeCtrl } from './audio/prefs';
 import { volumeButton, type VolumeButton } from './ui/volume';
 import { readYou } from './core/you';
 import { APP_KEY } from './core/stored-names';
+import { SCORE } from './motion/tokens';
 
 const dailyMods = import.meta.glob('./daily/index.ts');
 const pwaMods = import.meta.glob('./pwa/register.ts');
@@ -202,7 +203,7 @@ async function enterDaily(stage: Stage | null, audio: AppAudio | null, state: Ap
   if (stage) stage.canvas.style.opacity = '0';
   audio?.engine?.setSession('ambient');
   audio?.engine?.setVolume(0.6);
-  audio?.music?.to('calm', 3);
+  audio?.music?.to('calm', SCORE.inSec);
   const root = document.getElementById('ui')!;
   root.querySelectorAll('.ov, .lb, .ui-skip').forEach((n) => n.remove());
   cutsceneVol?.dispose();
@@ -216,14 +217,21 @@ async function enterDaily(stage: Stage | null, audio: AppAudio | null, state: Ap
       save(state);
       location.search = '?cutscene=1';
     },
-    sound: audio ? { play: (c: string) => audio.play(c), setMuted: (m: boolean) => audio.engine?.setMuted(m) } : undefined,
+    sound: audio
+      ? {
+          play: (c: string) => audio.play(c),
+          setMuted: (m: boolean) => audio.engine?.setMuted(m),
+          quiet: (on: boolean) => audio.engine?.quiet(on, on ? SCORE.safeOutSec : SCORE.safeBackSec),
+        }
+      : undefined,
     volume: audio?.volume,
   });
+  const onHome = () => daily.route() === 'hub';
   const hk = Object.keys(hintMods)[0];
   if (hk)
     void daily.settled
-      .then(() => (daily.route() === 'hub' ? hintMods[hk]() : null))
-      .then((m: any) => m?.maybeShowInstallHint?.({ delay: 1.5 }))
+      .then(() => (onHome() ? hintMods[hk]() : null))
+      .then((m: any) => m?.maybeShowInstallHint?.({ delay: 1.5, still: onHome }))
       .catch(() => undefined);
 }
 

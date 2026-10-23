@@ -282,9 +282,9 @@ export const scenarios = {
     const cy = content(y);
     expect(y.settings.sound === fresh.settings.sound && y.settings.motion === fresh.settings.motion, 'restore changed device sound or motion');
     expect(save.events.every((e) => same(cx.events[e.id], e)), 'the first export changed an event field');
-    expect(same(x.gone, save.gone) && Object.entries(save.setAt).filter(([k]) => k !== 'safeCredit').every(([k, v]) => x.setAt[k] === v), 'the first export lost removal or setting times');
-    expect(x.flags.safeCredit === true && x.setAt.safeCredit > save.setAt.safeCredit, 'leaving Safe Zone did not record its existing credit choice');
-    expect(Object.entries(save.flags).filter(([k]) => k !== 'safeCredit').every(([k, v]) => x.flags[k] === v), 'the first export changed flags');
+    expect(same(x.gone, save.gone) && Object.entries(save.setAt).every(([k, v]) => x.setAt[k] === v), 'the first export lost removal or setting times');
+    expect(x.flags.safeCredit === save.flags.safeCredit && x.setAt.safeCredit === save.setAt.safeCredit, 'visiting the Safe Zone changed its credit choice');
+    expect(Object.entries(save.flags).every(([k, v]) => x.flags[k] === v), 'the first export changed flags');
     expect(Object.entries(x.flags).filter(([k]) => !k.endsWith('Day') && k !== 'safeCredit').every(([k, v]) => y.flags[k] === v), 'restore lost progress flags');
     expect(y.flags.safeCredit === fresh.flags.safeCredit, 'restore changed device Safe Zone credit preference');
     expect(y.created === x.created, 'restore lost the first visit time');

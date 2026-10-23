@@ -96,7 +96,7 @@ ${s.extra ? `<path d="${s.extra}" fill="none" stroke="#9fd2f5" stroke-opacity=".
 /** The hidden "awaken": a few small shadows rise from the bottom edge for about a second. None under reduced motion. */
 export function awakenRise(app: App) {
   if (app.reduced()) return null;
-  const layer = h('div', { class: 'w2-rise', 'aria-hidden': 'true' });
+  const layer = h('div', { class: 'w2-rise', 'aria-hidden': 'true', 'data-fx': '' });
   const xs = [14, 31, 50, 69, 86];
   const ids: ShadowId[] = ['anvil', 'sable', 'harrow', 'sable', 'anvil'];
   xs.forEach((x, i) => {
@@ -120,7 +120,7 @@ export function awakenRise(app: App) {
 export function vesperLap(app: App) {
   if (app.reduced() || !hasShadow(app.store, 'vesper')) return;
   const host = document.getElementById('ui') ?? document.body;
-  const k = h('div', { class: 'w2-vesper', 'aria-hidden': 'true', html: shadowSVG('vesper', { size: 70 }) });
+  const k = h('div', { class: 'w2-vesper', 'aria-hidden': 'true', 'data-fx': '', html: shadowSVG('vesper', { size: 70 }) });
   host.append(k);
   const a = animate(
     k,
