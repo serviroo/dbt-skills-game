@@ -110,7 +110,7 @@ export async function startHarness(flags = {}) {
     for (let i = 0; i < 40; i++) {
       const win = await page.locator('.dq-sw').count();
       if (!win && (await page.locator('.dq-tile').first().isVisible().catch(() => false))) return;
-      await page.mouse.click(195, 700);
+      if (win) await page.locator('.dq-sw').last().click({ timeout: 1000 }).catch(() => {});
       await sleep(400);
     }
     await shot(page, 'fail-no-home');

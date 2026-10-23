@@ -16,6 +16,7 @@ export async function startPreview(dir, { from = 4173, tries = 500, timeoutMs = 
     if (!(await portFree(port))) continue;
     const child = spawn(process.execPath, [path.join(root, 'node_modules/vite/bin/vite.js'), 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort', '--outDir', dir], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
     live.add(child);
+    const closed = new Promise((resolve) => child.once('close', resolve));
     let log = '';
     child.stdout.on('data', (d) => (log += d));
     child.stderr.on('data', (d) => (log += d));
@@ -25,9 +26,9 @@ export async function startPreview(dir, { from = 4173, tries = 500, timeoutMs = 
     child.once('exit', () => live.delete(child));
     const stop = () =>
       new Promise((res) => {
-        if (gone()) return res();
+        if (gone()) return closed.then(res);
         const timer = setTimeout(() => child.kill('SIGKILL'), 5000);
-        child.once('exit', () => { clearTimeout(timer); res(); });
+        closed.then(() => { clearTimeout(timer); res(); });
         child.kill('SIGTERM');
       });
     const url = `http://127.0.0.1:${port}/`;

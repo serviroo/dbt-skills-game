@@ -378,7 +378,7 @@ function problems(r) {
   return [
     ...none('update errors', [...r.errors, ...r.failed, ...r.csp]),
     ...(s.brokenDeploy.brokenCacheCreated || s.brokenDeploy.stillCurrent !== s.v1.current || s.brokenDeploy.reloadShows !== 'v1' ? ['a broken deploy replaced the working version: ' + JSON.stringify(s.brokenDeploy)] : []),
-    ...(v2.pageStillOn !== 'v1' || !v2.onUpdateReadyFired || v2.oldPageLazyChunk !== 'loaded' || v2.current === s.v1.current ? ['update did not install quietly: ' + JSON.stringify(v2)] : []),
+    ...(v2.pageStillOn !== 'v1' || v2.onUpdateReadyFired !== true || v2.oldPageLazyChunk !== 'loaded' || v2.current === s.v1.current ? ['update did not install quietly: ' + JSON.stringify(v2)] : []),
     ...(s.nextLaunch.build !== 'v2' ? [`next launch shows ${s.nextLaunch.build}, want v2`] : []),
     ...none('next launch errors', s.nextLaunch.errors),
     ...(s.v3Installed.expectKept.every((c) => c in s.v3Installed.caches) ? [] : ['a version that should stay was deleted at v3: ' + Object.keys(s.v3Installed.caches).join(' ')]),

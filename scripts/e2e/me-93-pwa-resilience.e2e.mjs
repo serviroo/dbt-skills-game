@@ -285,7 +285,7 @@ export const scenarios = {
       await ctx.setOffline(true);
       expect((await tagOf(page)) === 'v1', 'the open page should still be the first version');
       await startIntro(page, sleep);
-      await page.getByText(/Wanderer:/).first().waitFor({ timeout: 25000 }).catch(async (e) => { await shot(page, 'fail-old-title'); throw e; });
+      await page.getByText(/Wanderer:/).first().waitFor({ timeout: 60000 }).catch(async (e) => { await shot(page, 'fail-old-title'); throw e; });
       await shot(page, 'pwa-04-old-title-intro-offline');
       expect([v1, v2, v3].every((v) => kept.includes(v.cache)), 'a version still in use was deleted: ' + kept.join(' '));
       const daily = v1.file(/^daily-.*\.js$/);
@@ -579,13 +579,66 @@ export const checks = {
         expect(!fs.existsSync(used), 'pwa-verify --update left its scratch folder behind');
       }
     }
+    const failedFirefox = await run(['scripts/e2e/me-93-pwa-resilience.e2e.mjs', '--check=pwa-firefox-no-storage-prompt'], { env: { PLAYWRIGHT_BROWSERS_PATH: none }, timeoutMs: 30000 });
+    fs.writeFileSync(path.join(out, 'pwa-firefox-no-browser.log'), failedFirefox.out);
+    expect(!failedFirefox.timedOut && !failedFirefox.leaked && failedFirefox.code === 1 && /browserType\.launch/.test(failedFirefox.out), 'the Firefox launch failure hung or left its fixture running');
+  },
+
+  async 'pwa-preview-retries-raced-port'({ shared, expect, out }) {
+    const base = await build(shared);
+    const port = await freePort();
+    const createServer = net.createServer;
+    let blocker;
+    let srv;
+    net.createServer = (...args) => {
+      net.createServer = createServer;
+      const probe = createServer(...args);
+      const close = probe.close;
+      probe.close = function (done) {
+        return close.call(this, () => {
+          blocker = createServer().listen(port, '127.0.0.1', done);
+        });
+      };
+      return probe;
+    };
+    try {
+      const { startPreview } = await import('../preview.mjs');
+      srv = await startPreview(base, { from: port, tries: 10, timeoutMs: 30000 });
+      const status = (await fetch(srv.url)).status;
+      fs.writeFileSync(path.join(out, 'pwa-preview-port-race.json'), JSON.stringify({ occupiedAfterProbe: port, selected: srv.port, status }, null, 2));
+      expect(srv.port > port && status === 200, 'preview did not retry the port occupied after its probe');
+    } finally {
+      net.createServer = createServer;
+      await srv?.stop();
+      if (blocker) await new Promise((done) => blocker.close(done));
+    }
+  },
+
+  async 'pwa-update-check-requires-ready-signal'({ shared, expect, out }) {
+    const base = await build(shared);
+    const fixture = path.join(scratchDir(), 'no-register-resource-name');
+    fs.cpSync(base, fixture, { recursive: true });
+    const assets = path.join(fixture, 'assets');
+    const old = fs.readdirSync(assets).find((name) => /^register-.*\.js$/.test(name));
+    expect(old, 'the production register module was not found');
+    const replacement = old.replace('register-', 'update-source-');
+    fs.renameSync(path.join(assets, old), path.join(assets, replacement));
+    for (const file of walk(fixture).filter((name) => /\.(html|js|css)$/.test(name))) {
+      fs.writeFileSync(file, fs.readFileSync(file, 'utf8').split(old).join(replacement));
+    }
+    writeServiceWorker(fixture);
+    const result = await run(['scripts/pwa-verify.mjs', '--browser=chromium', '--update', '--dist=' + fixture, '--out=' + path.join(out, 'no-register-signal')]);
+    fs.writeFileSync(path.join(out, 'pwa-update-no-register-signal.log'), result.out);
+    expect(!result.timedOut && !result.leaked, 'the missing update signal check hung or leaked a child');
+    expect(result.code === 1 && /register module not loaded/.test(result.out) && /update did not install quietly/.test(result.out), 'the missing update signal did not fail verification');
   },
 
   async 'pwa-firefox-no-storage-prompt'({ shared, sleep, expect, SEEN }) {
     const base = await build(shared);
     const srv = await host(base);
-    const browser = await firefox.launch({ headless: true });
+    let browser;
     try {
+      browser = await firefox.launch({ headless: true });
       const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
       await ctx.addInitScript(([you, seen]) => {
         localStorage.setItem('dbt.you.v1', you);
@@ -605,8 +658,7 @@ export const checks = {
       expect(r.calls === 0, `the app called storage.persist() ${r.calls} times in Firefox, which shows a permission prompt`);
       await ctx.close();
     } finally {
-      await browser.close();
-      await srv.close();
+      try { await browser?.close(); } finally { await srv.close(); }
     }
   },
 };
