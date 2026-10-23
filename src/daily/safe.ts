@@ -35,6 +35,14 @@ export function regionPicker(app: App, picked?: () => void, text = { label: SAFE
     st.save();
     picked?.();
   });
+  // a country picked in another open copy (the later change wins): this picker and its lines follow it
+  const off = app.store.onChange(() => {
+    if (!select.isConnected) return void off();
+    const now = regionOf(app).id;
+    if (now === select.value) return;
+    select.value = now;
+    picked?.();
+  });
   return h('div', { class: 'dq-setting dq-setting--col dq-region' }, h('label', { for: id, class: 'dq-setting-l' }, h('span', { class: 'dq-setting-t', text: text.label }), h('span', { class: 'dq-setting-h', text: text.hint })), select);
 }
 
