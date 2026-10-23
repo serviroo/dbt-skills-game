@@ -9,7 +9,7 @@
 // and lists its problems on stdout and under `result` in report.json, as the todo list.
 import { fullSave, seedStores } from './me-91-final-save-ids.e2e.mjs';
 
-const ENFORCED = ['library', 'skill', 'home'];
+const ENFORCED = ['library', 'skill', 'home', 'diary', 'night-watch', 'wardrobe', 'art', 'stories', 'moment'];
 
 const SIZES = [
   { width: 390, height: 844 },
@@ -18,10 +18,10 @@ const SIZES = [
 ];
 const MIN_TAP = 44;
 const MIN_TEXT = 16;
-const PAGE = ['.dq-top', '#dq-main'];
+export const PAGE = ['.dq-top', '#dq-main'];
 export const SKIP = ['.dq-safe', '.dq-safezone', '.pwa-hint-layer', '.dq-panel:has(input[type=file])'];
 // one skill walked from its intro to the thanks at the end
-const WALK = 'check-facts';
+export const WALK = 'check-facts';
 
 export const SCREENS = {
   home: { route: { name: 'hub' } },
