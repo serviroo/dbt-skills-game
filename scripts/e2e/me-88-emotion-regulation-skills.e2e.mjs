@@ -1,8 +1,3 @@
-// The emotion regulation pack: Keysmith (Problem Solving), Main Quest (Long-Term Positives) and Patch Notes (Myths About
-// Emotions). Each is opened from the library and walked to the end at 390 and 320 px wide, every screen is screenshotted
-// and checked (copy rules, overflow, timers), and the save must show the credit. Also: muted with reduced motion, an old
-// save from before these ids, the daily rotation, and the links into Problem Solving from Check the Facts and Opposite Action.
-
 const NEW = {
   'problem-solving': { sl: 'Keysmith', real: 'Problem Solving' },
   'long-term-positives': { sl: 'Main Quest', real: 'Long-Term Positives' },
@@ -11,6 +6,7 @@ const NEW = {
 const BANNED = [/\{(name|companion)\}/, /\b(disorders?|diagnos\w*|symptoms?|patients?|illness\w*|treatments?|relapse\w*)\b/i, /game over/i, /you died/i, /\u2014/];
 const PHONE = { width: 390, height: 844 };
 const SMALL = { width: 320, height: 568 };
+const LANDSCAPE = { width: 844, height: 390 };
 
 const norm = (t) => t.replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/\s+/g, ' ').trim();
 
@@ -41,7 +37,6 @@ async function progress(h, page, id) {
     xp: ev.reduce((a, e) => a + e.xp, 0),
     intelligence: ev.filter((e) => e.stat === 'intelligence').length,
     uses: ev.filter((e) => e.k === 'skill' && e.skill === id).length,
-    skills: ev.filter((e) => e.k === 'skill').length,
   };
 }
 
@@ -63,6 +58,8 @@ async function openFromLibrary(h, page, id) {
   h.expect((await row.count()) === 1, `${NEW[id].sl} is not listed once under Emotion Regulation`);
   h.expect(norm(await row.locator('.dq-librow-r').textContent()) === NEW[id].real, `${NEW[id].sl} does not show its DBT name`);
   await row.click();
+  const durations = await page.evaluate(async (id) => (await import('/src/content/dbt.ts')).SKILL[id].steps.filter((s) => s.kind === 'timer').map((s) => typeof s.seconds === 'function' ? s.seconds({}) : s.seconds), id);
+  h.expect(durations.every((n) => n >= 20 && n <= 90), `${id}: timer duration outside 20-90 seconds`);
   await page.locator('.dq-skill .dq-intro-name').waitFor({ timeout: 10000 });
   h.expect(norm(await page.locator('.dq-skill .dq-intro-name').textContent()) === NEW[id].sl, `opened the wrong skill for ${id}`);
 }
@@ -94,16 +91,22 @@ async function checkScreen(h, page, name, see) {
   });
   h.expect(!over.length, `${name}: overflow at ${page.viewportSize().width} px: ${over.slice(0, 5).join('; ')}`);
   if (await page.locator('.dq-step-body .dq-timer').count()) {
-    const secs = Number(await page.locator('.dq-timer-num').innerText());
-    h.expect(secs >= 18 && secs <= 90, `${name}: timer outside 20-90 s (${secs})`);
+    const clock = await page.locator('.dq-timer-num').innerText();
+    h.expect(clock === 'Done' || Number(clock) >= 0 && Number(clock) <= 90, `${name}: invalid timer display (${clock})`);
     const skip = page.locator('.dq-step-body .dq-actions button', { hasText: /^Next$/ });
     h.expect(await skip.isVisible(), `${name}: timer screen has no visible skip`);
     await skip.scrollIntoViewIfNeeded();
-    const box = await skip.boundingBox();
-    const vp = page.viewportSize();
-    h.expect(box && box.x >= 0 && box.x + box.width <= vp.width && box.y >= 0 && box.y + box.height <= vp.height + 1, `${name}: the skip control can't be reached on screen`);
+    await skip.evaluate((el) => {
+      const rect = el.getBoundingClientRect();
+      if (rect.top < 0 || rect.bottom > innerHeight) el.scrollIntoView({ block: 'center', behavior: 'instant' });
+    });
+    await page.waitForFunction(() => {
+      const button = [...document.querySelectorAll('.dq-step-body .dq-actions button')].find((el) => el.textContent === 'Next');
+      const r = button?.getBoundingClientRect();
+      return r && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight + 1;
+    }, null, { timeout: 3000 });
   }
-  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.evaluate(() => { document.querySelector('.dq').scrollTop = 0; });
   await h.shot(page, name);
 }
 
@@ -117,6 +120,16 @@ async function act(page, step) {
   if (kind === 'chip') {
     await tap(page, a);
     return tap(page, b ?? 'Next');
+  }
+  if (kind === 'extend') {
+    const before = await page.locator('.dq-timer-num').evaluate((el) => ({ left: Number(el.textContent), at: performance.now() }));
+    await tap(page, '+20 s');
+    await page.waitForFunction((b) => {
+      const left = Number(document.querySelector('.dq-timer-num')?.textContent);
+      const added = left + (performance.now() - b.at) / 1000 - b.left;
+      return added >= 18 && added <= 22;
+    }, before, { timeout: 5000 });
+    return;
   }
   if (kind === 'other') {
     await tap(page, a);
@@ -159,7 +172,7 @@ const PATHS = {
         { see: 'Brainstorm', do: ['chip', 'Do a smaller piece'] },
         { see: 'most likely to get you there', do: ['tap', 'Torn between two'] },
         { see: 'Start with the easier one', do: ['chip', 'Write it down'] },
-        { see: 'try the next key', do: ['tap', 'Trying it now'] },
+        { see: 'try another idea', do: ['tap', 'Trying it now'] },
       ],
     },
     {
@@ -171,7 +184,7 @@ const PATHS = {
         { do: ['tap', 'Skip'] },
         { do: ['tap', 'Thought of some'] },
         { do: ['tap', 'None of them fit'] },
-        { see: 'Some locks need more ideas', do: ['tap', 'More ideas'] },
+        { see: 'Some problems need more ideas', do: ['tap', 'More ideas'] },
         { see: 'Brainstorm', do: ['tap', 'Thought of some'] },
         { do: ['tap', 'Got one'] },
         { see: 'first step', do: ['tap', 'Skip'] },
@@ -196,7 +209,7 @@ const PATHS = {
         { see: 'Not what should matter', do: ['tap', 'Looking after me'] },
         { see: 'Looking after me matters to you', do: ['tap', 'Wind down earlier at night'] },
         { see: 'Break it down', do: ['chip', 'Write it down'] },
-        { see: 'Main quest: Looking after me. Goal: Wind down earlier at night. First step: Write it down', do: ['tap', 'Next'] },
+        { see: 'What matters: Looking after me. Goal: Wind down earlier at night. First step: Write it down', do: ['tap', 'Next'] },
         { see: 'Smaller still counts', do: ['tap', 'This week'] },
       ],
     },
@@ -219,7 +232,7 @@ const PATHS = {
         { see: 'Feelings are hard enough on their own', do: ['tap', 'Begin'] },
         { see: 'loudest lately', do: ['tap', "I shouldn't feel this way"] },
         { see: "There's no right way to feel", do: ['tap', 'Next'] },
-        { see: 'How does the patch sit?', do: ['tap', 'Not yet'] },
+        { see: 'How does that thought sit?', do: ['tap', "Doesn't fit"] },
         { see: 'Reading it still counts', do: ['type', 'Feelings can just be here.'] },
         { see: "Feelings aren't right or wrong", do: ['tap', 'Done'] },
       ],
@@ -229,8 +242,8 @@ const PATHS = {
       steps: [
         { do: ['tap', 'Begin'] },
         { do: ['other', 'A different one', 'Crying means I lost'] },
-        { see: 'Old rule: "Crying means I lost." Patched: Feelings aren\'t rules or verdicts', do: ['tap', '+20 s'] },
-        { see: 'Read the patch slowly', do: ['tap', 'Next'] },
+        { see: 'Old rule: "Crying means I lost." Another way to see it: Feelings aren\'t rules or verdicts', do: ['extend'] },
+        { see: 'Read it slowly', do: ['tap', 'Next'] },
         { do: ['tap', 'Rings true'] },
         { do: ['tap', 'Skip'] },
         { do: ['tap', 'Done'] },
@@ -245,6 +258,7 @@ async function playAll(h, id, viewport, tag) {
   for (const path of PATHS[id]) {
     const before = await progress(h, page, id);
     await openFromLibrary(h, page, id);
+    h.expect(await page.getByRole('button', { name: 'Safe Zone, help right now', exact: true }).isVisible(), 'Safe Zone is not one tap away');
     await walk(h, page, `${tag}-${path.name}`, path.steps, { quiet: path.quiet });
     const after = await progress(h, page, id);
     h.expect(after.uses === before.uses + 1 && after.xp === before.xp + 20 && after.intelligence === before.intelligence + 1, `${tag}-${path.name}: not credited once: ${JSON.stringify({ before, after })}`);
@@ -268,8 +282,63 @@ export const scenarios = {
   'skills-er-long-term-positives-320': (h) => playAll(h, 'long-term-positives', SMALL, 'er-ltp-320'),
   'skills-er-emotion-myths-390': (h) => playAll(h, 'emotion-myths', PHONE, 'er-em-390'),
   'skills-er-emotion-myths-320': (h) => playAll(h, 'emotion-myths', SMALL, 'er-em-320'),
+  async 'skills-er-landscape'(h) {
+    for (const id of Object.keys(NEW)) await playAll(h, id, LANDSCAPE, `er-landscape-${id}`);
+  },
 
-  /** muted and with reduced motion, each skill still plays to the end and is credited */
+  async 'skills-er-comfort-exits'(h) {
+    const { ctx, page, errors } = await h.open(seedFor(h, returning(12)), '?mute', PHONE);
+    try {
+      await library(h, page);
+      for (const exit of ['Something soothing', 'Safe Zone']) {
+        const before = await progress(h, page, 'problem-solving');
+        await openFromLibrary(h, page, 'problem-solving');
+        for (const label of ['Begin', 'Heavy right now', exit]) await tap(page, label);
+        if (exit === 'Something soothing') {
+          await page.locator('.dq-intro-real', { hasText: /^Self-Soothe$/ }).waitFor();
+          await page.getByRole('button', { name: 'Leave this skill' }).click();
+        } else {
+          await page.getByRole('button', { name: 'Talk to someone now', exact: true }).waitFor();
+          h.expect(!(await page.locator('.dq-gain').count()), 'Safe Zone showed a reward');
+          await page.getByRole('button', { name: 'Leave', exact: true }).click();
+        }
+        h.expect((await progress(h, page, 'problem-solving')).uses === before.uses + 1, exit + ': practice credit was lost');
+        await library(h, page);
+      }
+      h.expect(!errors.length, errors.join('\n'));
+    } finally { await ctx.close(); }
+  },
+
+  async 'skills-er-custom-values'(h) {
+    const { ctx, page, errors } = await h.open(seedFor(h, returning(12)), '?mute', SMALL);
+    try {
+      await library(h, page);
+      for (const value of ['constructor', '__proto__', 'toString', 'A'.repeat(160)]) {
+        await openFromLibrary(h, page, 'long-term-positives');
+        await walk(h, page, 'er-own-value-' + value.slice(0, 12), [
+          { do: ['tap', 'Begin'] },
+          { do: ['other', 'My own', value] },
+          { see: 'One small project', do: ['tap', 'One small project'] },
+          { do: ['tap', 'Skip'] },
+          { see: "First step: Pick one when you're ready.", do: ['tap', 'Next'] },
+          { do: ['tap', 'Only planning'] },
+        ]);
+        await tap(page, 'Another skill');
+        await openFromLibrary(h, page, 'emotion-myths');
+        await walk(h, page, 'er-own-myth-' + value.slice(0, 12), [
+          { do: ['tap', 'Begin'] },
+          { do: ['other', 'A different one', value] },
+          { see: "Feelings aren't rules or verdicts", do: ['tap', 'Next'] },
+          { do: ['tap', 'Partly'] },
+          { do: ['tap', 'Skip'] },
+          { do: ['tap', 'Done'] },
+        ]);
+        await tap(page, 'Another skill');
+      }
+      h.expect(!errors.length, errors.join('\n'));
+    } finally { await ctx.close(); }
+  },
+
   async 'skills-er-mute-reduced'(h) {
     const { ctx, page, errors } = await h.open(seedFor(h, returning(12)), '?mute', PHONE);
     await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -288,7 +357,6 @@ export const scenarios = {
     await ctx.close();
   },
 
-  /** a save from before these skills existed loads, shows them as new, and takes them into Shadows and the diary card */
   async 'skills-er-old-save'(h) {
     const old = returning(20, [['skill', 20, { stat: 'intelligence', skill: 'check-facts' }], ['skill', 20, { stat: 'stamina', skill: 'a-skill-from-a-newer-build' }], ['card', 0, { skill: 'mana-tide' }]]);
     const { ctx, page, errors } = await h.open(seedFor(h, old), '?mute', PHONE);
@@ -329,14 +397,13 @@ export const scenarios = {
     await ctx.close();
   },
 
-  /** the new skills are in the daily rotation: on their visit day the card shows them as new, and loading credits nothing */
   async 'skills-er-rotation'(h) {
     const probe = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', PHONE);
     const rotation = await probe.page.evaluate(async () => (await import('/src/content/dbt.ts')).ROTATION.map((q) => (q.special ? '' : q.skill)));
     await probe.ctx.close();
     const days = Object.keys(NEW).map((id) => [id, rotation.indexOf(id)]);
     for (const [id, i] of days) h.expect(i >= 0, `${id} is not in the rotation`);
-    days.push(['wrap', 31]);
+    days.push(['wrap', rotation.length]);
     for (const [id, prior] of days) {
       const { ctx, page, errors } = await h.open(seedFor(h, returning(prior)), '?mute', PHONE);
       await home(h, page);
@@ -358,7 +425,6 @@ export const scenarios = {
     }
   },
 
-  /** when the feeling fits the facts, Check the Facts and Opposite Action both lead to Problem Solving */
   async 'skills-er-links'(h) {
     const { ctx, page, errors } = await h.open(seedFor(h, returning(12)), '?mute', PHONE);
     await library(h, page);

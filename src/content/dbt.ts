@@ -147,7 +147,7 @@ const GOALS: Record<string, string[]> = {
 function questLog(a: Answers) {
   const goal = s(a, 'goal');
   const first = s(a, 'first');
-  return `**Main quest:** ${fullStop(cap(s(a, 'value', 'Something that matters to you')))} ${goal ? `**Goal:** ${fullStop(cap(goal))} ` : ''}**First step:** ${first ? fullStop(cap(first)) : "Pick one when you're ready."}`;
+  return `**What matters:** ${fullStop(cap(s(a, 'value', 'Something that matters to you')))} ${goal ? `**Goal:** ${fullStop(cap(goal))} ` : ''}**First step:** ${first ? fullStop(cap(first)) : "Pick one when you're ready."}`;
 }
 
 const MYTHS: Record<string, string> = {
@@ -159,7 +159,7 @@ const MYTHS: Record<string, string> = {
   "Big feelings mean I'm out of control": 'You can feel a lot and still choose what you do next. That part is what skills are for.',
 };
 const ruleOf = (a: Answers) => s(a, 'myth', 'An old rule').trim();
-const patchOf = (a: Answers) => MYTHS[ruleOf(a)] ?? "Feelings aren't rules or verdicts. Every one makes sense somewhere, and you still get to choose what you do next.";
+const patchOf = (a: Answers) => (Object.hasOwn(MYTHS, ruleOf(a)) ? MYTHS[ruleOf(a)] : undefined) ?? "Feelings aren't rules or verdicts. Every one makes sense somewhere, and you still get to choose what you do next.";
 
 export const SKILLS: Skill[] = [
   // ---------------- Mindfulness (Sense) ----------------
@@ -779,7 +779,7 @@ export const SKILLS: Skill[] = [
       },
       { kind: 'input', key: 'problem', text: "What's the problem? Stick to the facts, what a camera would see. Keep it vague if you like.", placeholder: 'The problem (optional)', skip: 'Keep it in my head' },
       { kind: 'input', key: 'goal', text: 'What would need to change for this to feel okay? Keep it small and doable. "Have a plan for Friday" beats "fix everything".', placeholder: 'My goal (optional)', skip: 'Skip' },
-      { id: 'ideas', kind: 'input', key: 'ideas', lines: 3, text: 'Brainstorm. Every idea counts, even the odd ones. No judging yet. More ideas, more keys to try.', fills: ['Ask for help', 'Do a smaller piece', 'Look it up', 'Wait a day', 'Say no to something', 'Try a different time'], placeholder: 'Ideas (optional)', skip: 'Thought of some' },
+      { id: 'ideas', kind: 'input', key: 'ideas', lines: 3, text: 'Brainstorm. Every idea counts, even the odd ones. No judging yet. More ideas give you more to choose from.', fills: ['Ask for help', 'Do a smaller piece', 'Look it up', 'Wait a day', 'Say no to something', 'Try a different time'], placeholder: 'Ideas (optional)', skip: 'Thought of some' },
       {
         kind: 'choice',
         key: 'pick',
@@ -787,11 +787,11 @@ export const SKILLS: Skill[] = [
         options: [{ label: 'Got one' }, { label: 'Torn between two', reply: 'Start with the easier one. You can switch later.' }, { label: 'None of them fit', go: 'stuck' }],
       },
       { kind: 'input', key: 'first', text: "What's the first step? Small enough to do today, or even right now.", fills: ['Write it down', 'Look one thing up', 'Send one message', 'Five minutes on it'], placeholder: 'First step (optional)', skip: 'Skip' },
-      { kind: 'choice', key: 'try', text: "Try it, then see how it went. If it doesn't fit, nothing's lost. Come back and try the next key.", options: [{ label: 'Trying it now', go: 'end' }, { label: 'Later', go: 'end' }, { label: 'Only planning', go: 'end' }] },
+      { kind: 'choice', key: 'try', text: "Try it, then see how it went. If it doesn't fit, nothing's lost. Come back and try another idea.", options: [{ label: 'Trying it now', go: 'end' }, { label: 'Later', go: 'end' }, { label: 'Only planning', go: 'end' }] },
       {
         id: 'stuck',
         kind: 'say',
-        text: "That happens. Some locks need more ideas, more information or a night's sleep. Coming back to it later counts as a step.",
+        text: "That happens. Some problems need more ideas, more information or a night's sleep. Coming back to it later counts as a step.",
         options: [{ label: 'More ideas', go: 'ideas' }, { label: 'Done for now', go: 'end' }],
       },
       {
@@ -810,7 +810,7 @@ export const SKILLS: Skill[] = [
     minutes: '2 min',
     card: 'Pick something that matters to you and take one small step toward it.',
     steps: [
-      { kind: 'intro', text: 'If life has felt like all chores lately, that makes sense. A nice moment helps today. This one plays the long game: one small step toward something you care about.' },
+      { kind: 'intro', text: 'If life has felt like all chores lately, that makes sense. A nice moment helps today. This one is about the longer term: one small step toward something you care about.' },
       {
         kind: 'choice',
         key: 'value',
@@ -824,7 +824,7 @@ export const SKILLS: Skill[] = [
         kind: 'choice',
         key: 'goal',
         text: (a) => `${cap(s(a, 'value', 'Something'))} matters to you. What's one goal that fits, something that could happen in the next month or so?`,
-        options: (a) => o(...(GOALS[s(a, 'value')] ?? ['One small project', 'More time for it each week', 'Try something new with it'])),
+        options: (a) => o(...((Object.hasOwn(GOALS, s(a, 'value')) ? GOALS[s(a, 'value')] : undefined) ?? ['One small project', 'More time for it each week', 'Try something new with it'])),
         other: 'My own goal',
       },
       { kind: 'input', key: 'first', text: "Break it down. What's one small first step? So small it's almost too easy.", fills: ['Look something up', 'Write it down', 'Send one message', 'Ten minutes on it'], placeholder: 'First step (optional)', skip: 'Skip' },
@@ -840,7 +840,7 @@ export const SKILLS: Skill[] = [
     minutes: '2 min',
     card: 'Old rules about feelings, patched with something truer.',
     steps: [
-      { kind: 'intro', text: 'Feelings are hard enough on their own. Then old rules about them pile on top, like "I shouldn\'t feel this way." Let\'s catch one and patch it.' },
+      { kind: 'intro', text: 'Feelings are hard enough on their own. Then old rules about them pile on top, like "I shouldn\'t feel this way." Let\'s look at one and try a kinder thought.' },
       { kind: 'choice', key: 'myth', text: 'Which old rule has been loudest lately?', options: o(...Object.keys(MYTHS)), other: 'A different one' },
       {
         kind: 'timer',
@@ -848,20 +848,20 @@ export const SKILLS: Skill[] = [
         seconds: 20,
         extend: 20,
         visual: 'glow',
-        text: (a) => `**Old rule:** "${fullStop(cap(ruleOf(a)))}" **Patched:** ${patchOf(a)}`,
-        small: 'Read the patch slowly while the ring runs.',
+        text: (a) => `**Old rule:** "${fullStop(cap(ruleOf(a)))}" **Another way to see it:** ${patchOf(a)}`,
+        small: 'Read it slowly while the ring runs.',
       },
       {
         kind: 'choice',
         key: 'land',
-        text: 'How does the patch sit?',
+        text: 'How does that thought sit?',
         options: [
           { label: 'Rings true', reply: 'Good. Keep it handy.' },
           { label: 'Partly', reply: 'Partly is a start. Old rules take a while to update.' },
-          { label: 'Not yet', reply: "That's okay. Old rules take a while to update. Reading it still counts." },
+          { label: "Doesn't fit", reply: "Thanks for being honest. You don't have to agree with it. Reading it still counts." },
         ],
       },
-      { kind: 'input', key: 'mine', text: 'Want to put the patch in your own words? Something to tell yourself next time the old rule shows up.', placeholder: 'My version (optional)', skip: 'Skip' },
+      { kind: 'input', key: 'mine', text: 'Want to put it in your own words? Something to tell yourself next time the old rule shows up.', placeholder: 'My version (optional)', skip: 'Skip' },
       { kind: 'say', text: "Feelings aren't right or wrong. They're information, and you get to decide what to do with them.", cta: 'Done', go: 'end' },
     ],
   },
