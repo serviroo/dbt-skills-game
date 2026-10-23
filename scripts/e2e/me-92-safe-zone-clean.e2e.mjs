@@ -17,7 +17,7 @@ function returning(xp = 0) {
   return JSON.stringify({ v: 1, created: t, events, flags: { greetDay: day } });
 }
 
-async function boot(h, { save, viewport = TALL, reduced = false, ua, extra = {}, init } = {}) {
+async function boot(h, { save, viewport = TALL, reduced = false, ua, extra = {}, init, live = false } = {}) {
   const ctx = await h.browser.newContext({ viewport, deviceScaleFactor: 2, serviceWorkers: 'block', reducedMotion: reduced ? 'reduce' : 'no-preference', locale: 'en-US', ...(ua ? { userAgent: ua } : {}) });
   if (init) await ctx.addInitScript(init);
   const seed = { [h.YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: Date.now() - 1000, companionAt: Date.now() - 1000 }), 'dbt.app.v1': h.SEEN, ...(save ? { [h.SAVE]: save } : {}), ...extra };
@@ -32,11 +32,24 @@ async function boot(h, { save, viewport = TALL, reduced = false, ua, extra = {},
   page.on('console', (m) => m.type() === 'error' && !/WebGL|GPU stall|AudioContext/i.test(m.text()) && errors.push('console: ' + m.text().slice(0, 300)));
   await page.goto(h.server.url + '/');
   await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
-  await page.evaluate(() => {
+  await page.evaluate((live) => {
     const a = window.__daily;
     window.__cues = [];
-    if (a.opts.sound) a.opts.sound.play = (c) => window.__cues.push([a.route.name, c]);
-  });
+    window.__tries = [];
+    const play = a.opts.sound?.play;
+    if (play)
+      a.opts.sound.play = (c) => {
+        window.__cues.push([a.route.name, c]);
+        if (live) play(c);
+      };
+    if (live) {
+      const sound = a.sound.bind(a);
+      a.sound = (c) => {
+        window.__tries.push([a.route.name, c]);
+        sound(c);
+      };
+    }
+  }, live);
   return { ctx, page, errors };
 }
 
@@ -80,23 +93,56 @@ const probe = (page) =>
 const tapOutput = () => {
   const connect = AudioNode.prototype.connect;
   window.__taps = [];
+  window.__starts = [];
   AudioNode.prototype.connect = function (dest, ...rest) {
     const out = connect.call(this, dest, ...rest);
     if (dest instanceof AudioDestinationNode) {
       const a = this.context.createAnalyser();
-      a.fftSize = 4096;
+      a.fftSize = 32768;
       connect.call(this, a);
-      window.__taps.push(a);
+      window.__taps.push({ a, from: this.constructor.name });
     }
     return out;
   };
+  for (const P of [AudioScheduledSourceNode.prototype, AudioBufferSourceNode.prototype]) {
+    const start = P.start;
+    P.start = function (...args) {
+      window.__starts.push(Math.max(args[0] ?? 0, this.context.currentTime));
+      return start.apply(this, args);
+    };
+  }
 };
-const outputRms = (page) =>
-  page.evaluate(() => Math.max(0, ...window.__taps.map((a) => {
-    const x = new Float32Array(a.fftSize);
-    a.getFloatTimeDomainData(x);
-    return Math.sqrt(x.reduce((n, v) => n + v * v, 0) / x.length);
-  })));
+const outputLevel = (page) =>
+  page.evaluate(() => {
+    let rms = 0;
+    let peak = 0;
+    for (const { a } of window.__taps) {
+      const x = new Float32Array(a.fftSize);
+      a.getFloatTimeDomainData(x);
+      let sum = 0;
+      for (const v of x) {
+        sum += v * v;
+        peak = Math.max(peak, Math.abs(v));
+      }
+      rms = Math.max(rms, Math.sqrt(sum / x.length));
+    }
+    const c = window.__taps[0]?.a.context;
+    return { rms, peak, t: c?.currentTime ?? 0, span: (window.__taps[0]?.a.fftSize ?? 0) / (c?.sampleRate ?? 1), state: c?.state, from: window.__taps.map((x) => x.from) };
+  });
+async function listen(h, page, n) {
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    out.push(await outputLevel(page));
+    await h.sleep(650);
+  }
+  return out;
+}
+const fmt = (xs) => xs.map((x) => `${x.rms.toExponential(1)}/${x.peak.toExponential(1)}`).join(' ');
+const userGains = (page) =>
+  page.evaluate(() => {
+    const g = window.__dbtVolume.gains();
+    return JSON.stringify([g.master, g.music, g.sfx].map((v) => +v.toFixed(4)));
+  });
 const scoreLevel = (page) => page.evaluate(() => window.__dbtVolume?.gains().score);
 async function scoreReaches(h, page, ok, ms) {
   for (let t = 0; t < ms; t += 150) {
@@ -477,26 +523,41 @@ export const scenarios = {
     }
   },
 
+  // Measured at the speakers, where the score, its reverb, beds and effects all end up. Silent means a peak below
+  // 2^-15 (one step of 16-bit audio) and RMS below 1e-5 (-100 dBFS).
   'safe-zone-silences-score-and-reverb': async (h) => {
-    const { ctx, page, errors } = await boot(h, { save: returning(), init: tapOutput });
+    const prefs = JSON.stringify({ v: 1, master: 0.8, music: 0.6, sfx: 0.7, muted: false });
+    const { ctx, page, errors } = await boot(h, { save: returning(), init: tapOutput, live: true, extra: { [AUDIO]: prefs } });
+    const c = step();
     try {
       await h.sleep(3000);
-      const home = await outputRms(page);
-      h.expect(home > 1e-3, `output: no score reached the speakers on Home to compare with (RMS ${home})`);
+      const home = await listen(h, page, 3);
+      c.ok(home[0].from.length && home[0].from.every((n) => n === 'GainNode') && home.every((x) => x.state === 'running'), `output: the speaker tap is on ${home[0].from} (${home[0].state}), not a running GainNode`);
+      c.ok(Math.max(...home.map((x) => x.rms)) > 1e-3, `output: no score reached the speakers on Home to compare with (${fmt(home)})`);
+      const gains = await userGains(page);
       const before = await probe(page);
       await enterSafe(h, page, 'output', before);
-      await h.sleep(8000);
-      const inside = [];
-      for (let i = 0; i < 8; i++) {
-        inside.push(await outputRms(page));
-        await h.sleep(400);
-      }
-      h.expect(Math.max(...inside) < 1e-4, `output: the score or its reverb still reaches the speakers in the Safe Zone (RMS ${inside.map((v) => v.toExponential(1)).join(' ')})`);
+      const entered = (await outputLevel(page)).t;
+      await page.getByRole('button', { name: 'Calm my body first', exact: true }).click({ timeout: 3000 });
+      await h.sleep(9000);
+      const inside = await listen(h, page, 14);
+      const from = inside[0].t - inside[0].span;
+      const to = inside.at(-1).t;
+      const notes = await page.evaluate(([a, b]) => window.__starts.filter((t) => t >= a && t <= b).length, [from, to]);
+      const tries = await page.evaluate(() => window.__tries.filter(([r]) => r === 'safe').length);
+      c.ok(inside[0].t - entered > 8.5 && to - from > 9 && inside.every((x) => x.state === 'running'), `output: listened ${(from - entered).toFixed(1)} to ${(to - entered).toFixed(1)} s after entry, not 9+ s of running audio past the fade`);
+      c.ok(notes > 0, 'output: no notes were scheduled while listening, so silence proves nothing');
+      c.ok(tries > 0, 'output: the breathing ring asked for no sound, so effects were not exercised');
+      c.ok(inside.every((x) => x.rms < 1e-5 && x.peak < 2 ** -15), `output: sound reaches the speakers in the Safe Zone over ${notes} scheduled notes (RMS/peak ${fmt(inside)})`);
+      c.ok((await userGains(page)) === gains, `output: the Safe Zone changed their Master/Music/Effects gains ${gains} -> ${await userGains(page)}`);
       await leaveSafe(h, page, 'output', before);
       await h.sleep(4000);
-      const back = await outputRms(page);
-      h.expect(back > 1e-3, `output: the score did not come back after leaving (RMS ${back})`);
-      h.expect(!errors.length, `output: page errors: ${errors.join(' | ')}`);
+      const back = await listen(h, page, 3);
+      c.ok(Math.max(...back.map((x) => x.rms)) > 1e-3, `output: the score did not come back after leaving (${fmt(back)})`);
+      c.ok((await userGains(page)) === gains, `output: leaving changed their Master/Music/Effects gains ${gains} -> ${await userGains(page)}`);
+      c.ok(!errors.length, `output: page errors: ${errors.join(' | ')}`);
+      console.log(`output: home ${fmt(home)} | inside ${fmt(inside)} over ${notes} notes, ${tries} sound requests | back ${fmt(back)}`);
+      c.end();
     } finally {
       await ctx.close();
     }
