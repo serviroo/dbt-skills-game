@@ -371,10 +371,10 @@ export class ArtStore {
     let prev: number | undefined;
     let decided = false;
     let same = false;
-    const decide = (disk: DrawingMeta | undefined): 'copy' | 'write' => {
+    const decide = (disk: DrawingMeta | undefined, read = true): 'copy' | 'write' => {
       decided = true;
       const seen = [disk, this.mem.meta.get(rec.id)].filter((m): m is DrawingMeta => !!m);
-      const missing = !disk && (!seen.length || this.deleted.has(rec.id) || seen.some((m) => this.landed.has(landKey(m.id, revOf(m)))));
+      const missing = !disk && (read ? !seen.length || this.deleted.has(rec.id) || seen.some((m) => this.landed.has(landKey(m.id, revOf(m)))) : this.deleted.has(rec.id));
       if (rec.bases !== undefined && (missing || seen.some((m) => !rec.bases!.includes(revOf(m))))) {
         id = this.copyId(rec.id);
         return 'copy';
@@ -436,7 +436,7 @@ export class ArtStore {
         }),
       () => 'failed' as const,
     );
-    if (force && stored === 'failed' && !decided) decide(undefined);
+    if (force && stored === 'failed' && !decided) decide(undefined, false);
     const meta = metaOf({ ...rec, id, updated: stamp, rev, from });
     const own = force && id !== rec.id ? this.mem.meta.get(rec.id) : undefined;
     if (own && rec.bases?.includes(revOf(own))) {
