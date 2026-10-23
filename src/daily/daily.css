@@ -3366,7 +3366,7 @@ textarea.dq-input {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  min-height: 36px;
+  min-height: 44px;
   padding: 0 8px;
   font: inherit;
   font-size: 13.5px;
@@ -3489,6 +3489,7 @@ textarea.dq-input {
 .dq-size,
 .dq-tool {
   position: relative;
+  flex: none;
   display: grid;
   place-items: center;
   width: 44px;
@@ -3500,9 +3501,6 @@ textarea.dq-input {
   background: none;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-}
-.dq-size {
-  width: 38px;
 }
 .dq-swatch-dot {
   width: 24px;
@@ -3594,6 +3592,19 @@ textarea.dq-input {
 .dq-save {
   min-width: 112px;
 }
+@media (max-width: 388px) {
+  .dq-tools-pick {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+  .dq-sizes {
+    padding-left: 0;
+    border-left: 0;
+  }
+  .dq-save {
+    min-width: 96px;
+  }
+}
 .dq-tools-confirm {
   flex-wrap: wrap;
   gap: 8px 10px;
@@ -3601,7 +3612,7 @@ textarea.dq-input {
 }
 .dq-confirm-t {
   flex: 1 1 100%;
-  font-size: 15px;
+  font-size: 16px;
   color: #cfe3f5;
 }
 .dq-tools-msg {
@@ -3905,6 +3916,96 @@ textarea.dq-input {
   }
   .dq-piece-side {
     padding-top: 12px;
+  }
+}
+@media (orientation: landscape) and (max-height: 500px) {
+  .dq-draw-main {
+    flex-direction: row;
+    align-items: stretch;
+    justify-content: center;
+    gap: 16px;
+  }
+  .dq-tools {
+    flex: none;
+    display: grid;
+    grid-template-columns: 280px 96px;
+    align-items: start;
+    align-self: center;
+    gap: 6px 10px;
+    width: auto;
+    padding: 8px 10px;
+    background: linear-gradient(180deg, var(--plate-a), var(--plate-b));
+    border: 1px solid;
+    border-color: var(--hl) var(--hs) var(--hs) var(--hl);
+  }
+  .dq-tools-pick {
+    grid-area: 1 / 1;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+  .dq-inks {
+    flex-direction: row;
+    justify-content: space-between;
+  }
+  .dq-swatch {
+    width: 56px;
+    height: auto;
+    min-height: 44px;
+    grid-template-columns: none;
+    align-content: start;
+    justify-items: center;
+    gap: 3px;
+    padding: 4px 0;
+  }
+  .dq-swatch-n {
+    position: static;
+    width: auto;
+    height: auto;
+    clip-path: none;
+    white-space: normal;
+    font-size: 13px;
+    line-height: 1.15;
+    text-align: center;
+    color: var(--t-body);
+  }
+  .dq-swatch[aria-checked='true'] {
+    background: none;
+  }
+  .dq-swatch[aria-checked='true'] .dq-swatch-n {
+    color: var(--t-title);
+  }
+  .dq-sizes {
+    padding: 6px 0 0;
+    border-left: 0;
+    border-top: 1px solid rgba(125, 150, 197, 0.3);
+  }
+  .dq-size {
+    flex: 1;
+  }
+  .dq-tools-acts {
+    grid-area: 1 / 2;
+    flex-wrap: wrap;
+    padding: 0;
+    border: 0;
+  }
+  .dq-tools-confirm {
+    grid-area: 2 / 1 / auto / -1;
+    flex-wrap: nowrap;
+  }
+  .dq-confirm-t {
+    flex: 1 1 0;
+  }
+  .dq-tools-msg {
+    grid-column: 1 / -1;
+  }
+  .dq-tools-gap {
+    flex-basis: 100%;
+    height: 0;
+  }
+  .dq-save {
+    width: 100%;
+    min-width: 0;
   }
 }
 @media (min-width: 1180px) {

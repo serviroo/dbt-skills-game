@@ -5,11 +5,12 @@
 //               inside a box that clips or scrolls them don't count)
 //   tap         a button, link or input smaller than 44x44 px whose taps don't land on it across a 44x44 px area
 //   text        body text under 16 px: any visible run of four or more words, and the text in every field
+//   hidden      on a phone held sideways, a label the screen lists under `shown` is visually hidden
 // The Safe Zone and the Save Crystal panel are left out. Screens in ENFORCED fail the run; every other screen passes
 // and lists its problems on stdout and under `result` in report.json, as the todo list.
 import { fullSave, seedStores } from './me-91-final-save-ids.e2e.mjs';
 
-const ENFORCED = ['library', 'skill', 'home', 'diary', 'night-watch', 'wardrobe', 'art', 'stories', 'moment'];
+const ENFORCED = ['library', 'draw', 'skill', 'home', 'diary', 'night-watch', 'wardrobe', 'art', 'stories', 'moment', 'write'];
 
 const SIZES = [
   { width: 390, height: 844 },
@@ -32,7 +33,7 @@ export const SCREENS = {
   'night-watch': { route: { name: 'shadows' }, scope: ['.w2-roster'] },
   wardrobe: { route: { name: 'settings' }, scope: ['.w2-wardrobe-p'] },
   art: { route: { name: 'art' } },
-  draw: { route: { name: 'draw', kind: 'today' } },
+  draw: { route: { name: 'draw', kind: 'today' }, sizes: [{ width: 568, height: 320 }, { width: 360, height: 740 }, { width: 375, height: 667 }], shown: '.dq-swatch-n' },
   stories: { route: { name: 'stories' } },
   write: { route: { name: 'write', id: 'tale-1' } },
   settings: { route: { name: 'settings' }, skip: ['.w2-wardrobe-p'] },
@@ -191,7 +192,7 @@ export const forward = (page) =>
 function scenario(id, spec) {
   return async (h) => {
     const problems = [];
-    for (const vp of SIZES) {
+    for (const vp of [...SIZES, ...(spec.sizes ?? [])]) {
       const size = `${vp.width}x${vp.height}`;
       const { ctx, page, errors } = await boot(h, vp);
       await page.evaluate((r) => window.__daily.go(r), spec.route);
@@ -215,6 +216,10 @@ function scenario(id, spec) {
         if (spec.scope) await page.evaluate((s) => document.querySelector(s)?.scrollIntoView({ block: 'start', behavior: 'instant' }), spec.scope[0]);
         h.expect(await page.evaluate((s) => s.some((x) => document.querySelector(x)), scope), `${id} ${size}: nothing on screen matches ${scope.join(', ')}`);
         views.push({ at: '', found: await audit(page, scope, skip) });
+        if (spec.shown && vp.width > vp.height) {
+          const hidden = await page.evaluate((s) => [...document.querySelectorAll(s)].filter((e) => { const r = e.getBoundingClientRect(); return !e.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) || r.width < 4 || r.height < 4 || getComputedStyle(e).clipPath !== 'none'; }).map((e) => e.textContent.trim()), spec.shown);
+          views[0].found.push(...hidden.map((t) => ({ kind: 'hidden', what: `"${t}"`, detail: spec.shown })));
+        }
         await h.shot(page, `layout-fit-${id}-${size}`);
       }
       h.expect(!errors.length, `${id} ${size}: ${errors.join('\n')}`);
