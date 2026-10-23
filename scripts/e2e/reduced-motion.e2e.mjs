@@ -18,7 +18,7 @@
 import fs from 'node:fs';
 import { boot, forward, SCREENS, settle, SKIP } from './layout-fit.e2e.mjs';
 
-const ENFORCED = ['night-watch', 'wardrobe'];
+const ENFORCED = Object.keys(SCREENS);
 
 const tokens = fs.readFileSync(new URL('../../src/motion/tokens.ts', import.meta.url), 'utf8');
 const token = (k) => Number(new RegExp(`\\b${k}:\\s*(\\d+)`).exec(tokens)?.[1]);
@@ -48,15 +48,21 @@ const ACT = {
       await page.locator('.dq-card').click({ force: true });
       await page.locator('.dq-quest-acts:not(.is-hidden)').waitFor({ timeout: 5000 });
       await page.locator('.dq-stats-toggle').click();
-      await page.locator('.dq-chest').click();
       const win = page.locator('.sw-layer .dq-sw');
-      await win.waitFor({ timeout: 5000 });
       // with motion on, the first tap finishes the typing and the next one closes the window
-      for (let i = 0; i < 3 && (await win.count()); i++) {
-        await win.click({ force: true });
-        await win.waitFor({ state: 'detached', timeout: 2000 }).catch(() => {});
+      for (let opening = 0; opening < 2; opening++) {
+        await page.locator('.dq-chest').click();
+        await win.waitFor({ timeout: 5000 });
+        for (let i = 0; i < 3 && (await win.count()); i++) {
+          await win.click({ force: true });
+          await win.waitFor({ state: 'detached', timeout: 2000 }).catch(() => {});
+        }
+        await win.waitFor({ state: 'detached', timeout: 5000 });
+        await page.locator('.dq-gift:not(.is-hidden)').waitFor();
       }
-      await win.waitFor({ state: 'detached', timeout: 5000 });
+      await page.locator('.dq-stats-toggle[aria-expanded=true]').click();
+      await page.locator('.dq-stats-toggle[aria-expanded=false]').click();
+      await page.locator('.dq-stats-toggle[aria-expanded=true]').waitFor();
     },
   },
   skill: {
@@ -185,7 +191,8 @@ function scenario(id, spec) {
         save.settings.motion = motion;
         act?.edit?.(save);
       };
-      const { ctx, page, errors } = await boot(h, PHONE, { edit, media });
+      const viewport = { width: Number(h.flags.width ?? PHONE.width), height: Number(h.flags.height ?? PHONE.height) };
+      const { ctx, page, errors } = await boot(h, viewport, { edit, media });
       const reduced = await page.evaluate(() => window.__daily.reduced() && document.querySelector('.dq').classList.contains('is-still'));
       h.expect(reduced === still, `${id} ${mode}: reduced motion is ${still ? 'not ' : ''}in effect`);
       if (still) await watch(page);
@@ -194,7 +201,9 @@ function scenario(id, spec) {
       await settle(page);
       if (spec.scope) h.expect(await page.locator(spec.scope.join(', ')).count(), `${id} ${mode}: nothing on screen matches ${spec.scope.join(', ')}`);
       if (act) await act.run(page);
+      const ring = id === 'moment' ? await page.locator('.dq-mo-svg').innerHTML() : null;
       await page.waitForTimeout(SAMPLE_MS);
+      if (ring && still) h.expect((await page.locator('.dq-mo-svg').innerHTML()) === ring, `${mode}: the reduced-motion ring keeps changing`);
       const skip = [...SKIP, ...(spec.skip ?? [])];
       const now = await shown(page, spec.scope ?? null, skip);
       const found = [];
@@ -206,6 +215,7 @@ function scenario(id, spec) {
       await h.shot(page, `reduced-motion-${id}-${mode}`);
       h.expect(!errors.length, `${id} ${mode}: ${errors.join('\n')}`);
       await ctx.close();
+      if (page.video()) await page.video().saveAs(`${h.out}/reduced-motion-${id}-${mode}.webm`);
       const seen = new Set();
       for (const f of found) {
         const key = `${f.kind} ${f.what} ${f.detail}`;
@@ -221,4 +231,25 @@ function scenario(id, spec) {
   };
 }
 
-export const scenarios = Object.fromEntries(Object.entries(SCREENS).map(([id, spec]) => [`reduced-motion-${id}`, scenario(id, spec)]));
+export const scenarios = {
+  ...Object.fromEntries(Object.entries(SCREENS).map(([id, spec]) => [`reduced-motion-${id}`, scenario(id, spec)])),
+  async 'reduced-motion-moment-follow-up'(h) {
+    for (const [mode, { motion, media, still }] of Object.entries(MODES)) {
+      const { ctx, page, errors } = await boot(h, PHONE, { edit: (save) => (save.settings.motion = motion), media });
+      if (still) await watch(page);
+      await page.evaluate(() => window.__daily.go({ name: 'moment', then: 'wise-mind' }));
+      await page.locator('.dq-mo-next:not(.is-hidden)').waitFor({ timeout: 60000 });
+      await page.waitForTimeout(SAMPLE_MS);
+      const problems = still ? await verdict(page, null, SKIP) : [];
+      await h.shot(page, `reduced-motion-moment-follow-up-${mode}`);
+      const oldLine = await page.locator('.dq-mo-line').elementHandle();
+      await page.locator('.dq-mo-next').click();
+      await page.waitForFunction(() => window.__daily.route.name === 'skill' && window.__daily.route.id === 'wise-mind');
+      h.expect(await oldLine.evaluate((el) => el.getAnimations().length === 0), `${mode}: text fades survived leaving the moment`);
+      await ctx.close();
+      if (page.video()) await page.video().saveAs(`${h.out}/reduced-motion-moment-follow-up-${mode}.webm`);
+      h.expect(!errors.length, `${mode}: ${errors.join('\n')}`);
+      h.expect(!problems.length, `${mode}: ${JSON.stringify(problems)}`);
+    }
+  },
+};
