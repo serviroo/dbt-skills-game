@@ -469,7 +469,7 @@ export const SKILLS: Skill[] = [
             }) as Record<string, string[]>)[s(a, 'sense', 'Touch')],
           ),
       },
-      { kind: 'timer', seconds: 120, start: 'Start 2 min', visual: 'glow', text: 'Take a minute or two with it. Slowly. Let it be the only thing.', options: [{ label: "I'm doing it" }] },
+      { kind: 'timer', seconds: 90, extend: 30, start: 'Start 90 s', visual: 'glow', text: 'Take a minute or two with it. Slowly. Let it be the only thing.', options: [{ label: "I'm doing it" }] },
       { kind: 'save', effect: 'saveSoothe', text: "Want to save this to your Comfort kit? It'll show up in the Safe Zone too.", yes: 'Save', no: 'No thanks' },
       { kind: 'say', text: 'That was care. It counts.', cta: 'Done', go: 'end' },
     ],
