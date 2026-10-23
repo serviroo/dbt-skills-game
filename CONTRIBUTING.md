@@ -93,7 +93,8 @@ name order, and each file's scenarios run in the order they are written. Every s
 - `out`, the run's artifact folder; `renderer`, the WebGL renderer; `stop()`, which closes the browser and server.
 
 The runner closes any remaining browser profiles after each scenario, including failures. A scenario should also
-work on its own: create any fixture it needs when an earlier scenario has not run.
+work on its own: create any fixture it needs when an earlier scenario has not run. Whatever a scenario returns is kept
+as its `result` in `report.json`.
 
 Run one file with `node scripts/e2e.mjs --file=<name>`, or one scenario with `--scenario=<scenario name>`. The browser
 renders with SwiftShader by default so local runs match CI. Add `--gpu` to render on this machine's GPU instead, or
@@ -104,6 +105,17 @@ real command. It creates temporary scenario files and removes them when it finis
 
 The intro is 3D, so for a real-GPU run on another machine, start a Playwright launch server there and pass
 `--ws=<its endpoint> --host=<this machine's address>`, so the dev server is reachable from that browser.
+
+### Skill check
+
+`node scripts/e2e.mjs --file=skill-check` checks every skill in `SKILLS`. On a returning save at 390x844 it opens each
+one from the Skills list and taps the first option on every screen until the skill ends. That walk must take at most
+12 taps and credit the skill once. "Leave this skill" must work on every screen with no confirm. Timers must stay
+skippable while they run, and leaving on screen one must still credit the skill. It also reads each skill's copy
+from `src/content/dbt.ts`: no em dashes, no diagnosis words or unsafe phrases from DESIGN.md, no hard-coded "Player",
+timers of 20 to 90 seconds, and a caution plus a "breathe instead" option on cold-water or hard-exercise steps. Skills
+in its `ENFORCED` list fail the run. Every other skill's problems print as a todo list, also kept in `report.json`.
+Once a skill passes, add it to `ENFORCED`. Add `--skills=<id>,<id>` to check only those skills.
 
 ## Static hosting
 

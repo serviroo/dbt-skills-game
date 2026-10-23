@@ -71,12 +71,13 @@ try {
     if (interrupted) break;
     const t = Date.now();
     try {
+      let result;
       try {
-        await run(h);
+        result = await run(h);
       } finally {
         await Promise.all(h.browser.contexts().map((ctx) => ctx.close()));
       }
-      report.scenarios.push({ name, file, ok: true, ms: Date.now() - t });
+      report.scenarios.push({ name, file, ok: true, ms: Date.now() - t, ...(result !== undefined && { result }) });
       console.log(`ok   ${name} (${Date.now() - t} ms)`);
     } catch (e) {
       failed++;
