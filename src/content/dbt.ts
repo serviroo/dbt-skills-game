@@ -183,7 +183,7 @@ export const SKILLS: Skill[] = [
     steps: [
       { kind: 'intro', text: "Part of you feels everything. Part of you thinks everything through. There's a quiet place where the two meet. Let's visit it." },
       { kind: 'breath', text: 'Breathe in and think "wise". Breathe out and think "mind".', inhale: 4, exhale: 6, rounds: 4, words: ['wise', 'mind'] },
-      { kind: 'timer', visual: 'drift', seconds: 15, text: 'Picture a small flat stone drifting down through clear water. Slowly. Settling on soft sand. Let your attention settle with it.' },
+      { kind: 'timer', visual: 'drift', seconds: 20, text: 'Picture a small flat stone drifting down through clear water. Slowly. Settling on soft sand. Let your attention settle with it.' },
       { id: 'ask', kind: 'input', key: 'question', text: 'Want to ask Wise Mind something? Ask on the in-breath. Listen on the out-breath. No need to force an answer.', placeholder: 'My question (optional)', skip: 'Skip' },
       { kind: 'say', text: "Whatever came up, or didn't, is okay. Sometimes the answer shows up later.", cta: 'Done', go: 'end' },
     ],
