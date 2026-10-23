@@ -1,0 +1,131 @@
+{
+  "app": "the-quiet-lantern",
+  "exported": "2026-10-23T02:19:21.874Z",
+  "v": 1,
+  "created": 1792721961711,
+  "events": [
+    {
+      "id": "export-visit",
+      "t": 1,
+      "day": "2026-10-23",
+      "k": "visit",
+      "xp": 10
+    }
+  ],
+  "diary": {
+    "2026-01-02": {
+      "day": "2026-01-02",
+      "emotions": {
+        "Joy": 3
+      },
+      "urges": {},
+      "note": "A quiet afternoon.",
+      "updatedAt": 3
+    }
+  },
+  "lists": {
+    "comfort": [
+      {
+        "id": "comfort-one",
+        "text": "A soft blanket",
+        "at": 3
+      }
+    ],
+    "activities": [],
+    "reasons": [],
+    "people": []
+  },
+  "maps": [
+    {
+      "id": "map-one",
+      "t": 3,
+      "urge": "Pause",
+      "p1": "Rest",
+      "c1": "Time",
+      "p2": "Walk",
+      "c2": "Energy",
+      "choice": "Rest"
+    }
+  ],
+  "lines": [],
+  "settings": {
+    "sound": false,
+    "motion": "reduce",
+    "emotionRows": [
+      "Sadness",
+      "Fear or anxiety",
+      "Anger",
+      "Shame",
+      "Joy"
+    ],
+    "urgeRows": [
+      "Urge to give up on today"
+    ]
+  },
+  "flags": {
+    "rankSeen": 0,
+    "wardenSeen": false,
+    "giftDay": "",
+    "cardDay": "",
+    "greetDay": "2026-10-23",
+    "safeCredit": false,
+    "therapistLineShown": true,
+    "checkinDay": ""
+  },
+  "gone": {},
+  "setAt": {
+    "sound": 1792721961752,
+    "motion": 1792721961752
+  },
+  "profile": {
+    "theme": "classic",
+    "accent": "blue",
+    "cardBack": "ring",
+    "plate": "plain",
+    "title": "",
+    "playerName": "Kit",
+    "companion": "Lumen",
+    "names": {},
+    "titlesSeen": [],
+    "setAt": {
+      "playerName": 1792721961752,
+      "companion": 1792721961752
+    }
+  },
+  "art": [],
+  "stories": {
+    "stories": [
+      {
+        "id": "mvkcdank1vqahp",
+        "title": "Saved choices",
+        "created": 1792721961776,
+        "updated": 1792721961779,
+        "rev": "mvkcdank6jmrqs",
+        "chapters": [
+          "mvkcdank2h2j9u"
+        ],
+        "notes": "mvkcdank47zvxw"
+      }
+    ],
+    "chapters": [
+      {
+        "id": "mvkcdank2h2j9u",
+        "story": "mvkcdank1vqahp",
+        "kind": "page",
+        "title": "Chapter 1",
+        "text": "A chapter to keep.",
+        "updated": 1792721961779,
+        "rev": "mvkcdann7mcvk8"
+      },
+      {
+        "id": "mvkcdank47zvxw",
+        "story": "mvkcdank1vqahp",
+        "kind": "notes",
+        "title": "Notes",
+        "text": "",
+        "updated": 1792721961776,
+        "rev": "mvkcdank5bh51t"
+      }
+    ]
+  }
+}

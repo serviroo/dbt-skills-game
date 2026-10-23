@@ -122,6 +122,23 @@ export function cleanCard(x: unknown): Card | null {
   return c;
 }
 
+function mergeCards(local: Card[], incoming: unknown[]) {
+  const merged = new Map<string, Card>();
+  for (const card of local) {
+    const had = merged.get(card.id);
+    if (!had || card.t > had.t) merged.set(card.id, card);
+  }
+  let skipped = Math.max(0, incoming.length - LISTED);
+  for (const value of incoming.slice(0, LISTED)) {
+    const card = cleanCard(value);
+    if (!card) { skipped++; continue; }
+    const had = merged.get(card.id);
+    if (!had && merged.size >= STORY_CAP.cards) { skipped++; continue; }
+    if (!had || card.t > had.t) merged.set(card.id, card);
+  }
+  return { cards: [...merged.values()], skipped };
+}
+
 function req<T>(r: IDBRequest) {
   return new Promise<T>((ok, bad) => {
     r.onsuccess = () => ok(r.result as T);
@@ -149,6 +166,7 @@ export class StoryStore {
   private readFails = 0;
   private lost = new WeakSet<IDBDatabase>();
   private mem = { stories: new Map<string, Story>(), chapters: new Map<string, Chapter>(), cards: new Map<string, Card[]>(), days: new Set<string>() };
+  private cardImports = new Set<string>();
   /** For a chapter kept only in memory: the revisions it was saved over (a stored one in this set is its own past). */
   private memBases = new Map<string, Set<string>>();
   /** The last stored version of each story this copy read, so a failed write still has the story to add to. */
@@ -212,6 +230,7 @@ export class StoryStore {
         open.onblocked = () => fail(false);
       } catch {
         this.persistent = false;
+        this.unreadable = true;
         resolve(null);
       }
     });
@@ -657,14 +676,17 @@ export class StoryStore {
 
   async cards(chapterId: string): Promise<Card[]> {
     const m = this.mem.cards.get(chapterId);
-    if (m) return m.map((c) => ({ ...c, ...(c.sel ? { sel: { ...c.sel } } : {}) }));
+    if (m && !this.cardImports.has(chapterId)) return m.map((c) => ({ ...c, ...(c.sel ? { sel: { ...c.sel } } : {}) }));
     const r = await this.tx(['cards'], 'readonly', (t) => req<unknown>(t.objectStore('cards').get(chapterId)));
-    return Array.isArray(r?.v) ? r.v.map(cleanCard).filter((c): c is Card => !!c) : [];
+    const disk = Array.isArray(r?.v) ? r.v.map(cleanCard).filter((c): c is Card => !!c) : [];
+    const list = m ? mergeCards(disk, m).cards : disk;
+    return list.map((c) => ({ ...c, ...(c.sel ? { sel: { ...c.sel } } : {}) }));
   }
 
   /** Keeps at most 12 (the newest by time when there are more), in the order given. */
   async putCards(chapterId: string, cards: Card[]) {
     if (!validId(chapterId)) return;
+    this.cardImports.delete(chapterId);
     let list = (Array.isArray(cards) ? cards : []).map(cleanCard).filter((c): c is Card => !!c);
     if (list.length > STORY_CAP.cards) {
       const keep = new Set([...list].sort((a, b) => b.t - a.t).slice(0, STORY_CAP.cards));
@@ -718,6 +740,7 @@ export class StoryStore {
       if (!isObj(x) || !validId(x.chapter) || (chapterId !== undefined && x.chapter !== chapterId) || typeof x.text !== 'string') return null;
       return { chapter: x.chapter, text: x.text.slice(0, STORY_CAP.text), bases: (Array.isArray(x.bases) ? x.bases : []).filter(validId), t: fin(x.t) ? x.t : 0 };
     } catch {
+      this.readFails++;
       return null;
     }
   }
@@ -730,7 +753,7 @@ export class StoryStore {
         if (l) out.set(l.chapter, [...(out.get(l.chapter) ?? []), { ...l, key }]);
       }
     } catch {
-      /* no storage to read */
+      this.readFails++;
     }
     return out;
   }
@@ -829,14 +852,34 @@ export class StoryStore {
    * Every story and chapter, removed ones included, read fresh. Where this copy holds a version in memory that differs
    * from the stored one and isn't built on it, both go out: the newer under its id, the other as a "(kept copy)".
    */
-  async exportAll(): Promise<{ stories: Story[]; chapters: Chapter[]; incomplete: boolean }> {
+  async exportAll(): Promise<{ stories: Story[]; chapters: Chapter[]; cards: Record<string, Card[]>; incomplete: boolean }> {
     this.drop();
     const fails = this.readFails;
-    const r = await this.tx(['stories', 'chapters'], 'readonly', (t) => Promise.all([req<Story[]>(t.objectStore('stories').getAll()), req<Chapter[]>(t.objectStore('chapters').getAll())]));
-    const incomplete = this.readFails > fails;
-    const [ds, dc] = r?.v ?? [[], []];
+    const r = await this.tx(['stories', 'chapters', 'cards'], 'readonly', (t) => Promise.all([
+      req<Story[]>(t.objectStore('stories').getAll()),
+      req<Chapter[]>(t.objectStore('chapters').getAll()),
+      req<IDBValidKey[]>(t.objectStore('cards').getAllKeys()),
+      req<unknown[]>(t.objectStore('cards').getAll()),
+    ]));
+    const [ds, dc, cardKeys, cardValues] = r?.v ?? [[], [], [], []];
+    const cards = new Map<string, Card[]>();
+    let cardIncomplete = false;
+    cardKeys.forEach((k, i) => {
+      const value = cardValues[i];
+      if (!validId(k) || !Array.isArray(value)) { cardIncomplete = true; return; }
+      const merged = mergeCards([], value);
+      cards.set(k, merged.cards);
+      cardIncomplete ||= merged.skipped > 0;
+    });
+    for (const [k, v] of this.mem.cards) {
+      if (this.cardImports.has(k)) {
+        const merged = mergeCards(cards.get(k) ?? [], v);
+        cards.set(k, merged.cards);
+        cardIncomplete ||= merged.skipped > 0;
+      } else cards.set(k, v);
+    }
     const chapters = new Map(dc.map((c) => [c.id, c]));
-    const after = new Map<string, string>();
+    const after = new Map<string, string[]>();
     for (const m of this.mem.chapters.values()) {
       const d = chapters.get(m.id);
       if (!d || d.rev === m.rev) {
@@ -849,23 +892,67 @@ export class StoryStore {
       const kid = `${m.id.split('~')[0].slice(0, 26)}~x${low.rev.replace(/[^A-Za-z0-9]/g, '').slice(0, 10)}`;
       if (chapters.has(kid)) continue;
       chapters.set(kid, { ...low, id: kid, kind: 'page', title: keptTitle(low.title) });
-      after.set(m.id, kid);
+      after.set(m.id, [kid]);
     }
     const stories = new Map(ds.map((s) => [s.id, s]));
     for (const m of this.mem.stories.values()) stories.set(m.id, this.join(stories.get(m.id), m)!);
-    for (const [orig, kid] of after) {
+    for (const [id, lives] of this.liveIndex()) {
+      let original = chapters.get(id);
+      const orphan = !original;
+      if (!original) {
+        const existing = [...stories.values()];
+        const parent = existing.find((s) => s.notes === id || s.chapters.includes(id)) ?? (stories.size >= STORY_CAP.stories ? existing.find((s) => !s.removed) ?? existing[0] : undefined);
+        const base = `${id.slice(0, 30)}~live`;
+        let sid = base, n = 0;
+        while (stories.has(sid)) sid = `${base}~${++n}`;
+        let notes = `${id.slice(0, 28)}~notes`;
+        n = 0;
+        while (chapters.has(notes)) notes = `${id.slice(0, 28)}~notes~${++n}`;
+        const updated = stampOf(Math.max(...lives.map((l) => l.t)));
+        if (parent) {
+          sid = parent.id;
+          stories.set(sid, { ...parent, chapters: parent.notes === id || parent.chapters.includes(id) ? [...parent.chapters] : [...parent.chapters, id], removed: undefined, updated: Math.max(parent.updated, updated), rev: uid() });
+        } else {
+          stories.set(sid, { id: sid, title: 'Kept story', created: updated, updated, rev: uid(), chapters: [id], notes });
+          chapters.set(notes, { id: notes, story: sid, kind: 'notes', title: 'Notes', text: '', updated, rev: uid() });
+        }
+        const kind = parent?.notes === id ? 'notes' : 'page';
+        original = { id, story: sid, kind, title: kind === 'notes' ? 'Notes' : 'Chapter', text: '', updated, rev: uid() };
+        chapters.set(id, original);
+      }
+      const texts = new Set([original.text, ...(after.get(id) ?? []).map((kid) => chapters.get(kid)!.text)]);
+      let recovered = false;
+      for (const l of [...lives].sort((a, b) => b.t - a.t || a.key.localeCompare(b.key))) {
+        if (texts.has(l.text)) continue;
+        texts.add(l.text);
+        const updated = stampOf(Math.max(l.t, original.updated + 1));
+        const rev = `live~${updated.toString(36)}`;
+        if (!recovered && (l.bases.includes(original.rev) || orphan)) {
+          chapters.set(id, { ...original, text: l.text, updated, rev });
+          recovered = true;
+        } else {
+          const base = `${id.slice(0, 20)}~live${updated.toString(36)}`;
+          let kid = base, n = 0;
+          while (chapters.has(kid)) kid = `${base.slice(0, 34)}~${++n}`;
+          chapters.set(kid, { ...original, id: kid, kind: 'page', title: keptTitle(original.title), text: l.text, updated, rev });
+          after.set(id, [...(after.get(id) ?? []), kid]);
+        }
+      }
+    }
+    for (const [orig, kids] of after) {
       const sid = chapters.get(orig)?.story;
       const s = sid ? stories.get(sid) : undefined;
       if (!s) continue;
       const list = [...s.chapters];
       const at = list.indexOf(orig);
-      list.splice(at >= 0 ? at + 1 : list.length, 0, kid);
+      list.splice(at >= 0 ? at + 1 : list.length, 0, ...kids);
       stories.set(s.id, { ...s, chapters: list });
     }
     return {
       stories: [...stories.values()].map((s) => ({ ...s, chapters: [...s.chapters] })).sort((a, b) => a.created - b.created || (a.id < b.id ? -1 : 1)),
       chapters: [...chapters.values()].map((c) => ({ ...c })).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
-      incomplete,
+      cards: Object.fromEntries(cards),
+      incomplete: this.readFails > fails || cardIncomplete,
     };
   }
 
@@ -983,10 +1070,11 @@ export class StoryStore {
           }
           if (fs && fs.updated > local.updated) {
             if (fs.title !== local.title) changed = true;
-            if (!!fs.removed !== !!local.removed) changed = true;
             next.title = fs.title;
-            if (fs.removed) next.removed = fs.removed;
-            else delete next.removed;
+            if (local.removed && !fs.removed) {
+              changed = true;
+              delete next.removed;
+            }
             next.updated = fs.updated;
           }
         }
@@ -1022,6 +1110,42 @@ export class StoryStore {
         }
       }
       if (!r || this.mem.stories.has(sid) || [...this.mem.chapters.values()].some((m) => m.story === sid)) out.unsaved++;
+    }
+    if (isObj(raw.cards)) {
+      const entries = Object.entries(raw.cards);
+      out.skipped += Math.max(0, entries.length - maxCh);
+      for (const [id, list] of entries.slice(0, maxCh)) {
+        if (!validId(id) || !Array.isArray(list)) {
+          out.skipped++;
+          continue;
+        }
+        const r = await this.tx(['cards'], 'readwrite', async (t) => {
+          const store = t.objectStore('cards');
+          const disk = await req<unknown>(store.get(id));
+          const local = Array.isArray(disk) ? disk.map(cleanCard).filter((c): c is Card => !!c) : [];
+          const memory = this.mem.cards.get(id);
+          const pending = memory && !this.cardImports.has(id) ? { cards: memory, skipped: 0 } : mergeCards(local, memory ?? []);
+          const merged = mergeCards(pending.cards, list);
+          store.put(merged.cards, id);
+          return { ...merged, pendingSkipped: pending.skipped };
+        });
+        if (r) {
+          if (r.v.pendingSkipped) out.unsaved++;
+          else {
+            this.mem.cards.delete(id);
+            this.cardImports.delete(id);
+          }
+          out.skipped += r.v.skipped + r.v.pendingSkipped;
+          wrote = true;
+        } else {
+          const explicitPending = this.mem.cards.has(id) && !this.cardImports.has(id);
+          const merged = mergeCards(await this.cards(id), list);
+          this.mem.cards.set(id, merged.cards);
+          if (!explicitPending) this.cardImports.add(id);
+          out.skipped += merged.skipped;
+          out.unsaved++;
+        }
+      }
     }
     this.changed(wrote);
     return out;

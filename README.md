@@ -21,7 +21,8 @@ back after a long break is always fine.
   you can change both any time in Settings. Pick an accent colour in the Wardrobe.
 - The Night Watch, ranks and titles: small rewards that grow as you use things. Nothing is ever taken away.
 - Art room and Story Room: draw or write whatever you like. It all stays on your device.
-- Save Crystal: a backup file you can keep and restore later.
+- Save Crystal: a backup of your progress, stories, saved drawings and choices. Restore keeps choices you already made
+  on this device, including mute. If something could not be read, the file and the app say the backup is incomplete.
 
 ## How the practice works
 
