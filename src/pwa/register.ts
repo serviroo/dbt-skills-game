@@ -6,7 +6,7 @@ let updateReady = false;
 
 /**
  * Installs the offline service worker (built app only; skipped in dev, ?lab and ?capture).
- * A new version installs quietly in the background and shows on the next launch; nothing asks them to update.
+ * A new version installs quietly in the background and shows on the next launch.
  */
 export function registerSW(): void {
   if (import.meta.env.DEV || params.lab || params.capture) return;

@@ -121,3 +121,9 @@ export const NAME_PROMPT = {
   go: 'Continue',
   skip: 'Skip',
 };
+
+export const NEW_VERSION = {
+  title: 'Notification',
+  html: `<p>[A new version of the Lantern is ready.]</p><p class="sys">Reload to keep going.</p>`,
+  action: 'Reload',
+};

@@ -1,13 +1,15 @@
 // End-to-end proof that the built app installs its service worker, boots offline, and updates quietly.
-// node scripts/pwa-verify.mjs [--dist=dist] [--path=<app subpath>] [--video] [--browser=chromium|webkit|both] [--out=qa/out/pwa/verify] [--update] [--check]
-// Starts its own `vite preview` on a free port (4173 and up) and stops only that process.
-// --check exits 1 if the report shows a problem.
+// node scripts/pwa-verify.mjs [--dist=dist] [--path=<app subpath>] [--video] [--browser=chromium|webkit|both] [--out=qa/out/pwa/verify] [--update] [--port=4173]
+// Starts its own `vite preview` on the first free port from --port and stops only that process, also on failure.
+// --update builds its extra versions in a scratch folder under the system temp dir (TMPDIR) and deletes it after.
+// Exits 1 if the report shows any problem or a browser can't start. (--check, which older callers pass, changes nothing.)
 import { chromium, webkit } from 'playwright';
-import { spawn, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
-import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { startPreview } from './preview.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const flags = Object.fromEntries(process.argv.slice(2).filter((a) => a.startsWith('--')).map((a) => { const [k, v = 'true'] = a.slice(2).split('='); return [k, v]; }));
@@ -21,27 +23,11 @@ const swInfo = (dir) => {
   const src = fs.readFileSync(path.join(dir, 'sw.js'), 'utf8');
   return { version: JSON.parse(src.match(/const VERSION = (".*?");/)[1]), assets: JSON.parse(src.match(/const ASSETS = (\[.*?\]);/s)[1]) };
 };
-const portFree = (p) => new Promise((res) => { const s = net.createServer().once('error', () => res(false)).once('listening', () => s.close(() => res(true))).listen(p, '127.0.0.1'); });
-
+const firstPort = Number(flags.port ?? 4173);
 async function serve(dir, port) {
-  const child = spawn(process.execPath, [path.join(root, 'node_modules/vite/bin/vite.js'), 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort', '--outDir', dir], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
-  let log = '';
-  child.stdout.on('data', (d) => (log += d));
-  child.stderr.on('data', (d) => (log += d));
-  for (let i = 0; i < 100; i++) {
-    try {
-      const r = await fetch(`http://127.0.0.1:${port}/`);
-      if (r.ok) return { child, stop: () => new Promise((res) => { child.once('exit', res); child.kill('SIGTERM'); }) };
-    } catch {}
-    await sleep(150);
-  }
-  child.kill('SIGTERM');
-  throw new Error('preview did not start:\n' + log);
-}
-
-async function pickPort() {
-  for (let p = Number(flags.port ?? 4173); p < 4200; p++) if (await portFree(p)) return p;
-  throw new Error('no free port');
+  const srv = await startPreview(dir, { ...(port ? { from: port, tries: 1 } : { from: firstPort }), probe: flags.path ? `/${flags.path.replace(/^\/|\/$/g, '')}/` : '/' });
+  console.log('preview:', srv.url);
+  return srv;
 }
 
 const watch = (page, bucket) => {
@@ -132,16 +118,17 @@ async function checkManifest(page, base, ctx) {
 async function offlineRun(name, launcher) {
   const report = { browser: name, steps: {} };
   const { version, assets } = swInfo(path.join(dist, flags.path ?? ''));
-  const port = await pickPort();
-  let srv = await serve(dist, port);
-  const base = `http://127.0.0.1:${port}/${flags.path ? flags.path.replace(/^\/|\/$/g, '') + '/' : ''}`;
-  const browser = await launcher.launch({ headless: true, args: name === 'chromium' ? ['--use-angle=vulkan', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-features=Vulkan'] : [] });
-  const ctx = await browser.newContext({ viewport: { width: 375, height: 800 }, serviceWorkers: 'allow', ...(flags.video ? { recordVideo: { dir: `${out}/video-${name}`, size: { width: 375, height: 800 } } } : {}) });
-  await ctx.addInitScript(INIT);
   const tStart = Date.now();
   const marks = (report.marks = []);
   const mark = (label) => marks.push({ t: (Date.now() - tStart) / 1000, label });
+  let srv;
+  let browser;
   try {
+    srv = await serve(dist);
+    const base = `${srv.url}${flags.path ? flags.path.replace(/^\/|\/$/g, '') + '/' : ''}`;
+    browser = await launcher.launch({ headless: true, args: name === 'chromium' ? ['--use-angle=vulkan', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-features=Vulkan'] : [] });
+    const ctx = await browser.newContext({ viewport: { width: 375, height: 800 }, serviceWorkers: 'allow', ...(flags.video ? { recordVideo: { dir: `${out}/video-${name}`, size: { width: 375, height: 800 } } } : {}) });
+    await ctx.addInitScript(INIT);
     const page = await ctx.newPage();
     mark('online: first visit');
     let b = bucket();
@@ -151,7 +138,7 @@ async function offlineRun(name, launcher) {
     const installMs = await waitInstalled(page, version, assets.length + 1);
     mark('service worker installed, ' + (assets.length + 1) + ' files cached');
     await page.waitForTimeout(1500);
-    report.steps.online = { swVersion: version, precached: assets.length + 1, installMs, ...(await cacheState(page)), csp: await page.evaluate(() => window.__csp), errors: b.errors };
+    report.steps.online = { swVersion: version, precached: assets.length + 1, installMs, ...(await cacheState(page)), csp: await page.evaluate(() => window.__csp), errors: b.errors, failed: b.failed };
     await page.screenshot({ path: `${out}/${name}-1-online.png` });
     report.steps.manifest = await checkManifest(page, base, name === 'chromium' ? ctx : null);
 
@@ -167,12 +154,13 @@ async function offlineRun(name, launcher) {
     await page.reload();
     await ready(page);
     await page.waitForTimeout(2500);
-    const fonts = await page.evaluate(async () => {
+    let fontTimeout;
+    const fonts = await Promise.race([page.evaluate(async () => {
       await document.fonts.ready;
       // ask for every face while offline, as the cutscene and end card will
       await Promise.all([document.fonts.load('500 16px Jost'), document.fonts.load('italic 600 16px Jost'), document.fonts.load('600 32px "Bodoni Moda"')]);
       return { loaded: [...document.fonts].filter((f) => f.status === 'loaded').map((f) => `${f.family} ${f.style}`), jost: document.fonts.check('500 16px Jost'), jostItalic: document.fonts.check('italic 600 16px Jost'), bodoni: document.fonts.check('600 32px "Bodoni Moda"') };
-    });
+    }), new Promise((_, reject) => { fontTimeout = setTimeout(() => reject(new Error('offline fonts never finished loading')), 30000); })]).finally(() => clearTimeout(fontTimeout));
     const scripts = await page.evaluate(() => performance.getEntriesByType('resource').filter((e) => /\.(js|css|woff2)$/.test(new URL(e.name).pathname)).map((e) => new URL(e.name).pathname));
     await page.screenshot({ path: `${out}/${name}-2-offline-reload.png` });
     report.steps.offlineReload = {
@@ -196,7 +184,7 @@ async function offlineRun(name, launcher) {
     await ready(cold);
     await cold.waitForTimeout(2000);
     await cold.screenshot({ path: `${out}/${name}-3-offline-cold.png` });
-    report.steps.offlineCold = { ready: true, failed: b.failed, errors: b.errors, notFromSW: b.responses.filter((r) => !r.sw && !/^(data|blob):/.test(r.url)).map((r) => r.url) };
+    report.steps.offlineCold = { ready: true, failed: b.failed, errors: b.errors, csp: await cold.evaluate(() => window.__csp), notFromSW: b.responses.filter((r) => !r.sw && !/^(data|blob):/.test(r.url)).map((r) => r.url) };
 
     // a lazily loaded chunk with its own CSS (lab pages are never loaded online in this run)
     b = bucket();
@@ -206,10 +194,10 @@ async function offlineRun(name, launcher) {
     await ready(cold);
     await cold.waitForTimeout(2500);
     await cold.screenshot({ path: `${out}/${name}-4-offline-lazy-chunk.png` });
-    report.steps.offlineLazyChunk = { ready: true, chunks: b.responses.filter((r) => /\/assets\//.test(r.url)).map((r) => `${new URL(r.url).pathname} ${r.status}${r.sw ? ' sw' : ''}`), failed: b.failed, errors: b.errors };
+    report.steps.offlineLazyChunk = { ready: true, chunks: b.responses.filter((r) => /\/assets\//.test(r.url)).map((r) => `${new URL(r.url).pathname} ${r.status}${r.sw ? ' sw' : ''}`), failed: b.failed, errors: b.errors, csp: await cold.evaluate(() => window.__csp) };
   } finally {
-    await browser.close();
-    if (srv) await srv.stop();
+    await browser?.close().catch(() => {});
+    await srv?.stop();
   }
   return report;
 }
@@ -230,7 +218,7 @@ function makeVersion(from, to, tag, renameChunk) {
   fs.rmSync(to, { recursive: true, force: true });
   fs.cpSync(from, to, { recursive: true });
   const html = path.join(to, 'index.html');
-  fs.writeFileSync(html, fs.readFileSync(html, 'utf8').replace('<title>', `<meta name="x-build" content="${tag}" />\n    <title>`));
+  fs.writeFileSync(html, fs.readFileSync(html, 'utf8').replace(/<meta name="x-build" content="[^"]*" \/>\n\s*/, '').replace('<title>', `<meta name="x-build" content="${tag}" />\n    <title>`));
   let renamed = null;
   if (renameChunk) {
     const assets = path.join(to, 'assets');
@@ -262,16 +250,21 @@ const updateReadyFired = (page) =>
 
 async function updateRun(name, launcher) {
   const report = { browser: name, steps: {} };
-  const v1 = { dir: dist, ...swInfo(dist) };
-  const v2 = makeVersion(dist, `/tmp/pwa-verify-v2`, 'v2', true);
-  const v3 = makeVersion(v2.dir, `/tmp/pwa-verify-v3`, 'v3', false);
-  const port = await pickPort();
-  const base = `http://127.0.0.1:${port}/${flags.path ? flags.path.replace(/^\/|\/$/g, '') + '/' : ''}`;
-  let srv = await serve(v1.dir, port);
-  const browser = await launcher.launch({ headless: true, args: name === 'chromium' ? ['--use-angle=vulkan', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-features=Vulkan'] : [] });
-  const ctx = await browser.newContext({ viewport: { width: 375, height: 800 }, serviceWorkers: 'allow' });
-  await ctx.addInitScript(INIT);
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'pwa-verify-'));
+  console.log('scratch:', scratch);
+  let srv;
+  let browser;
   try {
+    const v1 = { dir: dist, ...swInfo(dist) };
+    const v2 = makeVersion(dist, path.join(scratch, 'v2'), 'v2', true);
+    const v3 = makeVersion(v2.dir, path.join(scratch, 'v3'), 'v3', false);
+    const v4 = makeVersion(v3.dir, path.join(scratch, 'v4'), 'v4', false);
+    srv = await serve(v1.dir);
+    const port = srv.port;
+    const base = `${srv.url}${flags.path ? flags.path.replace(/^\/|\/$/g, '') + '/' : ''}`;
+    browser = await launcher.launch({ headless: true, args: name === 'chromium' ? ['--use-angle=vulkan', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-features=Vulkan'] : [] });
+    const ctx = await browser.newContext({ viewport: { width: 375, height: 800 }, serviceWorkers: 'allow' });
+    await ctx.addInitScript(INIT);
     const page = await ctx.newPage();
     const b = bucket();
     watch(page, b);
@@ -281,7 +274,7 @@ async function updateRun(name, launcher) {
     // nothing has loaded the window lab chunk yet; only the precache holds it
     report.steps.v1 = { ...(await cacheState(page)), onUpdateReadyFired: await updateReadyFired(page) };
 
-    const bad = makeBroken(dist, '/tmp/pwa-verify-broken');
+    const bad = makeBroken(dist, path.join(scratch, 'broken'));
     await srv.stop();
     srv = await serve(bad.dir, port);
     const victimStatus = await fetch(base + 'assets/' + bad.victim).then(async (r) => `${r.status} ${r.headers.get('content-type')}`);
@@ -331,10 +324,20 @@ async function updateRun(name, launcher) {
     srv = await serve(v3.dir, port);
     await page.evaluate(() => navigator.serviceWorker.getRegistration().then((r) => r.update()));
     await waitInstalled(page, v3.version, v3.assets.length + 1);
-    report.steps.v3Installed = { expectKept: [`dbt.precache.${v2.version}`, `dbt.precache.${v3.version}`], expectDeleted: `dbt.precache.${v1.version}`, ...(await cacheState(page)) };
+    report.steps.v3Installed = { expectKept: [v1, v2, v3].map((v) => `dbt.precache.${v.version}`), ...(await cacheState(page)) };
+
+    await srv.stop();
+    srv = await serve(v4.dir, port);
+    await page.evaluate(() => navigator.serviceWorker.getRegistration().then((r) => r.update()));
+    await waitInstalled(page, v4.version, v4.assets.length + 1);
+    report.steps.v4Installed = { expectKept: [v2, v3, v4].map((v) => `dbt.precache.${v.version}`), expectDeleted: `dbt.precache.${v1.version}`, ...(await cacheState(page)) };
+    report.errors = b.errors;
+    report.failed = b.failed;
+    report.csp = await page.evaluate(() => window.__csp);
   } finally {
-    await browser.close();
-    if (srv) await srv.stop();
+    await browser?.close().catch(() => {});
+    await srv?.stop();
+    fs.rmSync(scratch, { recursive: true, force: true });
   }
   return report;
 }
@@ -359,29 +362,29 @@ function problems(r) {
   const none = (label, list) => (list?.length ? [`${label}: ${list.slice(0, 3).join(' | ')}`] : []);
   if (!flags.update) {
     return [
-      ...none('online errors', s.online.errors),
+      ...none('online errors', [...s.online.errors, ...s.online.failed]),
       ...none('online CSP', s.online.csp),
       ...none('manifest', [...s.manifest.problems, ...s.manifest.splashMissing, ...[s.manifest.chromium?.manifestErrors ?? [], s.manifest.chromium?.installabilityErrors ?? []].flat().map((e) => e.message ?? e.errorId ?? e.error)]),
       ...(s.offlineReload.serverGone ? [] : ['server still answered while offline']),
       ...(s.offlineReload.allFromSW ? [] : [`offline reload left the service worker: ${s.offlineReload.notFromSW.slice(0, 3).join(' ')}`]),
       ...(s.offlineReload.fonts.jost && s.offlineReload.fonts.jostItalic && s.offlineReload.fonts.bodoni ? [] : ['fonts missing offline: ' + JSON.stringify(s.offlineReload.fonts)]),
       ...none('offline reload', [...s.offlineReload.failed, ...s.offlineReload.errors, ...s.offlineReload.csp]),
-      ...none('offline cold launch', [...s.offlineCold.failed, ...s.offlineCold.errors, ...s.offlineCold.notFromSW]),
-      ...none('offline lazy chunk', [...s.offlineLazyChunk.failed, ...s.offlineLazyChunk.errors]),
+      ...none('offline cold launch', [...s.offlineCold.failed, ...s.offlineCold.errors, ...s.offlineCold.csp, ...s.offlineCold.notFromSW]),
+      ...none('offline lazy chunk', [...s.offlineLazyChunk.failed, ...s.offlineLazyChunk.errors, ...s.offlineLazyChunk.csp]),
       ...(s.offlineLazyChunk.chunks.some((c) => /\/window-[^\s]+\.js 200 sw$/.test(c)) ? [] : ['offline window chunk was not served by the service worker']),
     ];
   }
   const v2 = s.v2Installed;
   return [
+    ...none('update errors', [...r.errors, ...r.failed, ...r.csp]),
     ...(s.brokenDeploy.brokenCacheCreated || s.brokenDeploy.stillCurrent !== s.v1.current || s.brokenDeploy.reloadShows !== 'v1' ? ['a broken deploy replaced the working version: ' + JSON.stringify(s.brokenDeploy)] : []),
-    ...(v2.pageStillOn !== 'v1' || !v2.onUpdateReadyFired || v2.oldPageLazyChunk !== 'loaded' || v2.current === s.v1.current ? ['update did not install quietly: ' + JSON.stringify(v2)] : []),
+    ...(v2.pageStillOn !== 'v1' || v2.onUpdateReadyFired !== true || v2.oldPageLazyChunk !== 'loaded' || v2.current === s.v1.current ? ['update did not install quietly: ' + JSON.stringify(v2)] : []),
     ...(s.nextLaunch.build !== 'v2' ? [`next launch shows ${s.nextLaunch.build}, want v2`] : []),
     ...none('next launch errors', s.nextLaunch.errors),
-    ...(s.v3Installed.expectKept.every((c) => c in s.v3Installed.caches) && !(s.v3Installed.expectDeleted in s.v3Installed.caches) ? [] : ['old caches not rotated: ' + Object.keys(s.v3Installed.caches).join(' ')]),
+    ...(s.v3Installed.expectKept.every((c) => c in s.v3Installed.caches) ? [] : ['a version that should stay was deleted at v3: ' + Object.keys(s.v3Installed.caches).join(' ')]),
+    ...(s.v4Installed.expectKept.every((c) => c in s.v4Installed.caches) && !(s.v4Installed.expectDeleted in s.v4Installed.caches) ? [] : ['old caches not rotated at v4: ' + Object.keys(s.v4Installed.caches).join(' ')]),
   ];
 }
-if (flags.check) {
-  const bad = results.flatMap((r) => problems(r).map((p) => `${r.browser}: ${p}`));
-  for (const p of bad) console.error('PROBLEM ' + p);
-  if (bad.length) process.exitCode = 1;
-}
+const bad = results.flatMap((r) => problems(r).map((p) => `${r.browser}: ${p}`));
+for (const p of bad) console.error('PROBLEM ' + p);
+process.exitCode = bad.length ? 1 : 0;

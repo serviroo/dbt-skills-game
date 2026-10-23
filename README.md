@@ -52,6 +52,9 @@ npm run preview  # serves dist/ on http://localhost:4173
 `dist/` is a plain static site with an offline service worker, so any static host works. The service worker only runs
 over HTTPS (or on localhost).
 
+Slow fonts and a broken intro model won't stop you from opening the game. Updates arrive in the background. If a
+page has stayed open through several updates, it may ask you to reload before starting the intro or companion.
+
 Handy URL flags while developing:
 
 - `/?fresh` plays the intro cutscene again.
