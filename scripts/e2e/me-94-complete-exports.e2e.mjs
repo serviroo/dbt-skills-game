@@ -51,7 +51,7 @@ export const scenarios = {
         const saved = await ss.saveChapter({ ...first, text: 'Earlier saved words.' }, [first.rev]);
         const prefix = window.__daily.store.key + '.story.live';
         const lives = [
-          [prefix, { chapter: first.id, text: 'Latest crash words.', bases: [saved.rev], t: saved.updated + 20 }],
+          [prefix + '.crashed-load.' + first.id, { chapter: first.id, text: 'Latest crash words.', bases: [saved.rev], t: saved.updated + 20 }],
           [prefix + '.other', { chapter: first.id, text: 'Other tab words.', bases: [saved.rev], t: saved.updated + 10 }],
           [prefix + '.old-notes', { chapter: story.notes, text: 'Notes left by a crash.', bases: [], t: saved.updated + 30 }],
           [prefix + '.orphan', { chapter: 'missing-page', text: 'Orphan crash words.', bases: [], t: saved.updated + 40 }],
