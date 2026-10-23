@@ -270,7 +270,7 @@ export const SKILLS: Skill[] = [
       {
         id: 'louder',
         kind: 'say',
-        text: "Thanks for being honest. Some thoughts are loud and heavy, and you don't have to sit with them alone. The Safe Zone is one tap away if you want it.",
+        text: "Thanks for telling me. Some thoughts are loud and heavy, and you don't have to sit with them alone. The Safe Zone is one tap away if you want it.",
         options: [{ label: 'Safe Zone', go: 'safe' }, { label: 'Done', go: 'end' }],
       },
     ],
