@@ -19,6 +19,7 @@ const ENFORCED = new Set([
   'absurd-scroll', 'flavour-tier', 'queue-up', 'lie-low',
   'wise-mind',
   'self-soothe',
+  'improve',
 ]);
 const MAX_TAPS = 12;
 const WORKERS = 3;

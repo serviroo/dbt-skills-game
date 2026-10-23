@@ -516,7 +516,7 @@ export const SKILLS: Skill[] = [
         go: 'done',
       },
       { id: 'enc', kind: 'choice', key: 'line', title: 'Encouragement', text: 'Pick a line to tell yourself.', options: o("I'm doing the best I can.", 'This feeling will pass.', "I've gotten through hard nights before.", 'I can handle one more minute.'), other: 'Write my own' },
-      { kind: 'timer', seconds: 10, visual: 'glow', big: (a) => s(a, 'line'), text: 'Read it once more. Slowly.', go: 'done' },
+      { kind: 'timer', seconds: 20, visual: 'glow', big: (a) => s(a, 'line'), text: 'Read it once more. Slowly.', go: 'done' },
       { id: 'done', kind: 'say', text: 'Buff applied.', cta: 'Done', go: 'end' },
     ],
   },
