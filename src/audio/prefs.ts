@@ -43,6 +43,7 @@ export function savePrefs(p: AudioLevels) {
 export interface VolumeCtrl {
   /** The levels the controls show (mute includes a ?mute override until the player changes it). */
   get(): AudioLevels;
+  snapshot(): AudioLevels;
   /** persist: true (default) saves now; false saves 250 ms after the last change (slider drags). */
   set(p: Partial<AudioLevels>, o?: { persist?: boolean }): void;
   restore(p: AudioLevels): AudioLevels;
@@ -103,6 +104,7 @@ export function createVolume(engine: AudioEngine | null, opts: { fresh: boolean;
     available: !!engine,
     fresh: opts.fresh,
     get: view,
+    snapshot: () => ({ ...state }),
     flush,
     restore(p) {
       flush();

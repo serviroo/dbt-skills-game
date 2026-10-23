@@ -8,12 +8,12 @@ interface Preferences {
 }
 const object = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
 
-export function exportPreferences(key: string) {
-  const preferences: Preferences = {};
+export function exportPreferences(key: string, volume?: VolumeCtrl) {
+  const preferences: Preferences = volume ? { audio: { v: 1, ...volume.snapshot() } } : {};
   let incomplete = false;
   try {
     const audio = localStorage.getItem(PREFS_KEY);
-    if (audio !== null) preferences.audio = { v: 1, ...parsePrefs(audio) };
+    if (!volume && audio !== null) preferences.audio = { v: 1, ...parsePrefs(audio) };
     const room = localStorage.getItem(`${key}:stealth`);
     if (room !== null) {
       const value: unknown = JSON.parse(room);

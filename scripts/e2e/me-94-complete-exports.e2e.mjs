@@ -429,6 +429,38 @@ export const scenarios = {
     } finally { await ctx.close(); }
   },
 
+  async 'crystal-malformed-cards'(h) {
+    const valid = { id: 'valid-card', mode: 'polish', text: 'Card to keep.', t: 1 };
+    const cases = [{ value: null }, { value: { unexpected: true } }, { value: [valid, null, { mode: 'unknown', text: 'Invalid card' }] }, { key: 7, value: [valid] }, { value: Array.from({ length: 13 }, (_, n) => ({ ...valid, id: 'over-' + n })) }];
+    for (const [index, example] of cases.entries()) {
+      const { ctx, page } = await h.open(seed(h));
+      let raw;
+      try {
+        await ready(page);
+        await page.evaluate(async (example) => {
+          const { storyStore } = await import('/src/daily/storystore.ts');
+          const ss = storyStore(window.__daily.store.key);
+          const { first } = await ss.create('Card recovery');
+          const db = await new Promise((resolve, reject) => { const r = indexedDB.open(window.__daily.store.key + '.story', 1); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+          await new Promise((resolve, reject) => { const tx = db.transaction('cards', 'readwrite'); tx.objectStore('cards').put(example.value, example.key ?? first.id); tx.oncomplete = resolve; tx.onabort = () => reject(tx.error); });
+          db.close();
+        }, example);
+        raw = await crystal(h, page, 'malformed-cards-' + index);
+        h.expect(raw.incomplete === true && /incomplete/.test(await page.locator('.dq-settings .dq-hint[aria-live]').textContent()), 'Malformed stored cards reported a complete backup.');
+        const cards = Object.values(raw.stories.cards).flat();
+        const expected = index === 2 ? [valid] : index === 4 ? example.value.slice(0, 12) : [];
+        assert.deepEqual(cards, expected);
+      } finally { await ctx.close(); }
+      const target = await h.open(seed(h));
+      try {
+        await ready(target.page);
+        await restore(target.page, raw);
+        const restored = await crystal(h, target.page, 'restored-malformed-cards-' + index);
+        assert.deepEqual(restored.stories.cards, raw.stories.cards);
+      } finally { await target.ctx.close(); }
+    }
+  },
+
   async 'crystal-preference-failures'(h) {
     for (const failure of ['read', 'write']) {
       const { ctx, page } = await h.open(seed(h));
@@ -569,6 +601,39 @@ export const scenarios = {
       const stored = JSON.parse(await h.ls(page, 'dbt.audio.v1'));
       assert.deepEqual(stored, { v: 1, master: .2, music: .3, sfx: .4, muted: true });
     } finally { await ctx.close(); }
+  },
+
+  async 'crystal-live-audio-export'(h) {
+    const old = { v: 1, master: .8, music: .7, sfx: .6, muted: true };
+    const cases = [[null, false], [null, true], [old, false], [old, true], [null, null]];
+    for (const [index, [stored, muted]] of cases.entries()) {
+      const expected = muted === null ? { master: 1, music: 1, sfx: 1, muted: false } : { master: .2, music: .3, sfx: .4, muted };
+      const { ctx, page } = await h.open(seed(h, stored ? { 'dbt.audio.v1': JSON.stringify(stored) } : {}));
+      let exported;
+      try {
+        await ready(page);
+        if (muted !== null) await page.evaluate((expected) => {
+          const set = Storage.prototype.setItem;
+          Storage.prototype.setItem = function (key, ...args) {
+            if (key === 'dbt.audio.v1') throw new DOMException('Storage full', 'QuotaExceededError');
+            return set.call(this, key, ...args);
+          };
+          try { window.__daily.opts.volume.set(expected); }
+          finally { Storage.prototype.setItem = set; }
+        }, expected);
+        assert.deepEqual(JSON.parse(await h.ls(page, 'dbt.audio.v1')), stored);
+        exported = await crystal(h, page, 'live-audio-' + index);
+        assert.deepEqual(exported.preferences?.audio, { v: 1, ...expected });
+        h.expect(exported.incomplete === false, 'Readable live choices produced an incomplete crystal.');
+        if (muted === null) h.expect(await page.evaluate(() => window.__daily.opts.volume.get().muted), 'Export removed the temporary mute.');
+      } finally { await ctx.close(); }
+      const target = await h.open(seed(h), '');
+      try {
+        await ready(target.page);
+        await restore(target.page, exported);
+        assert.deepEqual(await target.page.evaluate(() => window.__daily.opts.volume.get()), expected);
+      } finally { await target.ctx.close(); }
+    }
   },
 
   async 'crystal-old-fixture'(h) {

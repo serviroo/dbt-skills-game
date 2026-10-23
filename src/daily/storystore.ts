@@ -855,12 +855,18 @@ export class StoryStore {
       req<Story[]>(t.objectStore('stories').getAll()),
       req<Chapter[]>(t.objectStore('chapters').getAll()),
       req<IDBValidKey[]>(t.objectStore('cards').getAllKeys()),
-      req<Card[][]>(t.objectStore('cards').getAll()),
+      req<unknown[]>(t.objectStore('cards').getAll()),
     ]));
     const [ds, dc, cardKeys, cardValues] = r?.v ?? [[], [], [], []];
     const cards = new Map<string, Card[]>();
     let cardIncomplete = false;
-    cardKeys.forEach((k, i) => { if (validId(k)) cards.set(k, cardValues[i]); });
+    cardKeys.forEach((k, i) => {
+      const value = cardValues[i];
+      if (!validId(k) || !Array.isArray(value)) { cardIncomplete = true; return; }
+      const merged = mergeCards([], value);
+      cards.set(k, merged.cards);
+      cardIncomplete ||= merged.skipped > 0;
+    });
     for (const [k, v] of this.mem.cards) {
       if (this.cardImports.has(k)) {
         const merged = mergeCards(cards.get(k) ?? [], v);
