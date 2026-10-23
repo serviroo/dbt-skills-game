@@ -349,6 +349,35 @@ export const scenarios = {
     await ctx.close();
   },
 
+  async 'art-refused-save-of-saved-drawing-stays-one-page'(h) {
+    const { ctx, page: a, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute&reduced&nopost&msaa=0&dpr=1');
+    await art(h, a);
+    await draw(a);
+    await stroke(a);
+    await a.getByRole('button', { name: 'Save', exact: true }).click();
+    await a.getByRole('button', { name: 'Art room', exact: true }).click();
+    await a.locator('.dq-galitem').waitFor();
+    const id = (await a.evaluate(async () => (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).list()))[0].id;
+    await a.locator('.dq-galitem').click();
+    await a.getByRole('button', { name: 'Keep drawing', exact: true }).click();
+    await a.waitForFunction(() => window.__daily.ink?.strokes.length === 1);
+    await stroke(a, true);
+    const kept = await strokes(a);
+    await holdSave(a, 'fail');
+    await a.getByRole('button', { name: 'Save', exact: true }).click();
+    await a.waitForFunction(() => window.__hold.waiting);
+    await a.evaluate(() => window.__hold.release());
+    await a.waitForFunction(() => window.__hold.done);
+    await h.sleep(700);
+    const pages = await a.evaluate(async () => (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).list());
+    await evidence(h, a, 'refused-save-of-saved-drawing', { id, pages: pages.map((r) => r.id) });
+    h.expect(!(await a.getByText(KEPT_APART, { exact: true }).count()), 'a refused save said a newer copy arrived, though nothing was removed');
+    h.expect(pages.length === 1 && pages[0].id === id, `a refused save split one drawing into ${pages.length} gallery pages: ${pages.map((r) => r.id).join(', ')}`);
+    h.expect(same(await strokes(a), kept), 'the editor lost the strokes it could not store');
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
   async 'art-single-tab-reload-keeps-own-draft'(h) {
     const { ctx, page } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute&reduced&nopost&msaa=0&dpr=1');
     await art(h, page);
