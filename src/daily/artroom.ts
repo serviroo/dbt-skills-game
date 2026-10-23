@@ -535,17 +535,20 @@ export function drawScreen(app: App, route: Route): ScreenOut {
   const frame = fit.firstElementChild as HTMLElement;
   const layout = () => {
     const main = fit.parentElement!;
-    const row = getComputedStyle(main).flexDirection === 'row';
+    const side = getComputedStyle(main).display === 'contents';
+    const box = side ? el : main;
+    const row = side || getComputedStyle(main).flexDirection === 'row';
+    const gap = parseFloat(getComputedStyle(box).columnGap) || 0;
     const pad2 = row ? 12 : 0;
-    const w = row ? main.clientWidth - tools.offsetWidth - parseFloat(getComputedStyle(main).columnGap || '0') - pad2 : fit.clientWidth;
+    const w = row ? box.clientWidth - tools.offsetWidth - gap - pad2 : fit.clientWidth;
     const hh = fit.clientHeight - pad2;
     if (w <= 0 || hh <= 0) return;
     const a = pad.W / pad.H;
     const fw = Math.floor(Math.min(w, hh * a));
     frame.style.width = `${fw}px`;
     frame.style.height = `${Math.floor(fw / a)}px`;
-    fit.style.flex = row ? `0 0 ${fw + pad2}px` : '';
-    promptRow.style.width = row ? `${fw + pad2 + tools.offsetWidth + parseFloat(getComputedStyle(main).columnGap || '0')}px` : '';
+    fit.style.flex = row && !side ? `0 0 ${fw + pad2}px` : '';
+    promptRow.style.width = row && !side ? `${fw + pad2 + tools.offsetWidth + gap}px` : '';
   };
   const ro = new ResizeObserver(layout);
   const el = h(
@@ -646,6 +649,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     after: () => {
       app.root.append(sheet, riseEl);
       ro.observe(fit.parentElement!);
+      ro.observe(el);
       layout();
     },
     leave: () => {
