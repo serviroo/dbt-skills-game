@@ -560,7 +560,7 @@
   margin-top: 10px;
 }
 .dq-opts--fills .dq-opt {
-  font-size: 15px;
+  font-size: 16px;
   min-height: 44px;
   font-style: italic;
 }
@@ -1609,8 +1609,14 @@ textarea.dq-input {
 .dq-feedback .dq-text {
   font-size: 18px;
 }
+.dq-step-body .dq-btn--link {
+  min-width: 44px;
+}
 .dq-step-body .dq-small {
   margin-top: 14px;
+}
+.dq-step-body .dq-hint {
+  font-size: 16px;
 }
 
 .dq-ring {
