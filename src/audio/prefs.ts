@@ -45,6 +45,7 @@ export interface VolumeCtrl {
   get(): AudioLevels;
   /** persist: true (default) saves now; false saves 250 ms after the last change (slider drags). */
   set(p: Partial<AudioLevels>, o?: { persist?: boolean }): void;
+  restore(p: AudioLevels): AudioLevels;
   /** Saves a pending debounced change now. */
   flush(): void;
   subscribe(fn: (l: AudioLevels) => void): () => void;
@@ -59,6 +60,7 @@ export function createVolume(engine: AudioEngine | null, opts: { fresh: boolean;
   let force = !!opts.forceMute;
   let timer: ReturnType<typeof setTimeout> | 0 = 0;
   const subs = new Set<(l: AudioLevels) => void>();
+  const chosen = new Set<keyof AudioLevels>();
   const view = (): AudioLevels => ({ ...state, muted: state.muted || force });
   const apply = () => {
     try {
@@ -93,7 +95,7 @@ export function createVolume(engine: AudioEngine | null, opts: { fresh: boolean;
         timer = 0;
       }
       state = parsePrefs(e.key === null ? null : e.newValue);
-      force = false;
+      chosen.clear();
       apply();
     });
   }
@@ -102,6 +104,16 @@ export function createVolume(engine: AudioEngine | null, opts: { fresh: boolean;
     fresh: opts.fresh,
     get: view,
     flush,
+    restore(p) {
+      flush();
+      const next = { ...state };
+      for (const k of ['master', 'music', 'sfx'] as const) if (!chosen.has(k)) next[k] = unit(p[k]);
+      if (!chosen.has('muted')) next.muted ||= p.muted === true;
+      state = next;
+      apply();
+      savePrefs(state);
+      return { ...state };
+    },
     subscribe(fn) {
       subs.add(fn);
       return () => void subs.delete(fn);
@@ -109,6 +121,7 @@ export function createVolume(engine: AudioEngine | null, opts: { fresh: boolean;
     unlock: engine ? () => void engine.unlock() : undefined,
     set(p, o = {}) {
       const next = { ...state };
+      for (const k of ['master', 'music', 'sfx', 'muted'] as const) if (p[k] !== undefined) chosen.add(k);
       if (p.master !== undefined) next.master = unit(p.master);
       if (p.music !== undefined) next.music = unit(p.music);
       if (p.sfx !== undefined) next.sfx = unit(p.sfx);
@@ -118,6 +131,7 @@ export function createVolume(engine: AudioEngine | null, opts: { fresh: boolean;
       } else if (p.master !== undefined && next.master > 0 && (state.muted || force)) {
         next.muted = false;
         force = false;
+        chosen.add('muted');
       }
       state = next;
       apply();

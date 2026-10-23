@@ -321,7 +321,7 @@ export const scenarios = {
         const { first } = await ss.create('Card merge');
         await ss.putCards(first.id, Array.from({ length: 12 }, (_, n) => ({ id: 'card-' + n, mode: 'polish', text: 'Local card ' + n, t: 20 })));
         const stories = await ss.exportAll();
-        stories.cards = { [first.id]: [{ id: 'card-0', mode: 'polish', text: 'Older card', t: 10 }, { id: 'card-1', mode: 'polish', text: 'Newer card', t: 30 }, { id: 'extra-card', mode: 'polish', text: 'Extra card', t: 30 }] };
+        stories.cards = { [first.id]: [...Array.from({ length: 11 }, (_, n) => ({ id: 'extra-card-' + n, mode: 'polish', text: 'Extra card', t: 30 })), { id: 'card-0', mode: 'polish', text: 'Older card', t: 10 }, { id: 'card-1', mode: 'polish', text: 'Newer card', t: 30 }] };
         return JSON.parse(window.__daily.store.exportJSON({ stories }));
       });
       await restore(page, raw);
@@ -374,8 +374,59 @@ export const scenarios = {
         });
         const cleared = await crystal(h, page, 'explicitly-cleared-cards-' + blockRead);
         h.expect(Object.values(cleared.stories.cards).flat().length === 0, 'Recovery brought back cards after an explicit local clear.');
+        const empty = { ...raw, stories: { stories: [], chapters: [], cards: Object.fromEntries(Object.keys(raw.stories.cards).map((id) => [id, []])) } };
+        await restore(page, empty);
+        const retried = await crystal(h, page, 'cleared-cards-after-restore-' + blockRead);
+        h.expect(Object.values(retried.stories.cards).flat().length === 0, 'Another restore brought back cards after an explicit failed-write clear.');
       } finally { await ctx.close(); }
     }
+  },
+
+  async 'crystal-card-cap-recovery'(h) {
+    const { ctx, page } = await h.open(seed(h));
+    try {
+      await ready(page);
+      const raw = await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const { first } = await ss.create('Full card recovery');
+        await ss.putCards(first.id, Array.from({ length: 12 }, (_, n) => ({ id: 'saved-' + n, mode: 'polish', text: 'Saved card ' + n, t: 10 })));
+        const stories = await ss.exportAll();
+        stories.cards = { [first.id]: Array.from({ length: 12 }, (_, n) => ({ id: 'pending-' + n, mode: 'polish', text: 'Pending card ' + n, t: 20 })) };
+        const transaction = IDBDatabase.prototype.transaction;
+        IDBDatabase.prototype.transaction = function (stores, ...rest) {
+          const names = typeof stores === 'string' ? [stores] : [...stores];
+          if (this.name.endsWith('.story') && names.length === 1 && names[0] === 'cards') throw new DOMException('Temporary storage failure', 'SecurityError');
+          return transaction.call(this, stores, ...rest);
+        };
+        window.restoreCardStorage = () => { IDBDatabase.prototype.transaction = transaction; };
+        return JSON.parse(window.__daily.store.exportJSON({ stories }));
+      });
+      await restore(page, raw);
+      await page.evaluate(() => window.restoreCardStorage());
+      await restore(page, raw);
+      const result = await page.evaluate(async (raw) => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const id = Object.keys(raw.stories.cards)[0];
+        const db = await new Promise((resolve, reject) => { const r = indexedDB.open(window.__daily.store.key + '.story', 1); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+        const stored = await new Promise((resolve, reject) => { const r = db.transaction('cards').objectStore('cards').get(id); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+        db.close();
+        const readable = await ss.exportAll();
+        const transaction = IDBDatabase.prototype.transaction;
+        IDBDatabase.prototype.transaction = function (stores, mode, ...rest) {
+          if (this.name.endsWith('.story') && mode === 'readonly') throw new DOMException('Temporary storage failure', 'SecurityError');
+          return transaction.call(this, stores, mode, ...rest);
+        };
+        try { return { stored, readable, blocked: await ss.exportAll() }; }
+        finally { IDBDatabase.prototype.transaction = transaction; }
+      }, raw);
+      fs.writeFileSync(path.join(h.out, 'card-cap-recovery.json'), JSON.stringify(result, null, 2));
+      h.expect(result.stored.length === 12 && result.stored.every((c) => c.id.startsWith('saved-')), 'Retry exceeded the saved-card cap or removed local cards.');
+      h.expect(result.readable.incomplete === true, 'Overflowing pending cards reported a complete backup.');
+      const pending = Object.values(result.blocked.cards).flat();
+      h.expect(pending.length === 12 && pending.every((c) => c.id.startsWith('pending-')), 'Retry discarded the cards still held for this visit.');
+    } finally { await ctx.close(); }
   },
 
   async 'crystal-preference-failures'(h) {
@@ -465,6 +516,58 @@ export const scenarios = {
       await page.waitForFunction(() => window.__daily.store.state.settings.playerName === 'Kit');
       h.expect(!await page.getByRole('switch', { name: /^Sound/ }).isChecked(), 'Returning to Settings during a file read left the new Sound switch stale.');
       h.expect(await page.getByRole('radio', { name: 'Motion: Reduced', exact: true }).getAttribute('aria-checked') === 'true', 'Returning during restore left the new Motion choice stale.');
+    } finally { await ctx.close(); }
+  },
+
+  async 'crystal-query-mute'(h) {
+    for (const target of ['same-tab', 'other-tab']) {
+      for (const destination of [null, { v: 1, master: .12 }]) {
+        const values = destination ? { 'dbt.audio.v1': JSON.stringify(destination) } : {};
+        const { ctx, page } = await h.open(seed(h, values));
+        try {
+          await ready(page);
+          let receiver = page;
+          if (target === 'other-tab') {
+            receiver = await ctx.newPage();
+            await receiver.goto(h.server.url + '/');
+            await ready(receiver);
+          }
+          const raw = JSON.parse(fs.readFileSync(fixture, 'utf8'));
+          raw.settings.sound = true;
+          raw.preferences = { audio: { v: 1, master: .9, music: .8, sfx: .7, muted: false } };
+          await restore(receiver, raw);
+          await page.waitForFunction(() => window.__daily.opts.volume.get().music === .8);
+          const persisted = JSON.parse(await h.ls(page, 'dbt.audio.v1'));
+          h.expect(persisted.muted === false, 'Visit-only mute became a saved preference: ' + JSON.stringify(persisted));
+          h.expect(await page.evaluate(() => window.__daily.opts.volume.get().muted), 'Restore removed the current visit mute.');
+          await page.goto(h.server.url + '/');
+          await ready(page);
+          h.expect(!await page.evaluate(() => window.__daily.opts.volume.get().muted), 'Temporary mute survived a fresh visit without the query.');
+        } finally { await ctx.close(); }
+      }
+    }
+  },
+
+  async 'crystal-runtime-audio-choice'(h) {
+    const { ctx, page } = await h.open(seed(h), '');
+    try {
+      await ready(page);
+      await page.evaluate(() => {
+        const set = Storage.prototype.setItem;
+        Storage.prototype.setItem = function (key, ...args) {
+          if (key === 'dbt.audio.v1') throw new DOMException('Storage full', 'QuotaExceededError');
+          return set.call(this, key, ...args);
+        };
+        try { window.__daily.opts.volume.set({ master: .2, music: .3, sfx: .4, muted: true }); }
+        finally { Storage.prototype.setItem = set; }
+      });
+      const raw = JSON.parse(fs.readFileSync(fixture, 'utf8'));
+      raw.settings.sound = true;
+      raw.preferences = { audio: { v: 1, master: .9, music: .8, sfx: .7, muted: false } };
+      await restore(page, raw);
+      assert.deepEqual(await page.evaluate(() => window.__daily.opts.volume.get()), { master: .2, music: .3, sfx: .4, muted: true });
+      const stored = JSON.parse(await h.ls(page, 'dbt.audio.v1'));
+      assert.deepEqual(stored, { v: 1, master: .2, music: .3, sfx: .4, muted: true });
     } finally { await ctx.close(); }
   },
 

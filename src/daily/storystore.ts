@@ -119,14 +119,16 @@ function cleanCard(x: unknown): Card | null {
   return c;
 }
 
-function mergeCards(local: Card[], incoming: Card[]) {
+function mergeCards(local: Card[], incoming: unknown[]) {
   const merged = new Map<string, Card>();
   for (const card of local) {
     const had = merged.get(card.id);
     if (!had || card.t > had.t) merged.set(card.id, card);
   }
   let skipped = 0;
-  for (const card of incoming) {
+  for (const value of incoming) {
+    const card = cleanCard(value);
+    if (!card) { skipped++; continue; }
     const had = merged.get(card.id);
     if (!had && merged.size >= STORY_CAP.cards) { skipped++; continue; }
     if (!had || card.t > had.t) merged.set(card.id, card);
@@ -1105,23 +1107,26 @@ export class StoryStore {
           out.skipped++;
           continue;
         }
-        const incoming = list.slice(0, STORY_CAP.cards).map(cleanCard).filter((c): c is Card => !!c);
-        out.skipped += list.length - incoming.length;
         const r = await this.tx(['cards'], 'readwrite', async (t) => {
           const store = t.objectStore('cards');
           const disk = await req<unknown>(store.get(id));
-          const local = [...(Array.isArray(disk) ? disk.map(cleanCard).filter((c): c is Card => !!c) : []), ...(this.mem.cards.get(id) ?? [])];
-          const merged = mergeCards(local, incoming);
+          const local = Array.isArray(disk) ? disk.map(cleanCard).filter((c): c is Card => !!c) : [];
+          const memory = this.mem.cards.get(id);
+          const pending = memory && !this.cardImports.has(id) ? { cards: memory, skipped: 0 } : mergeCards(local, memory ?? []);
+          const merged = mergeCards(pending.cards, list);
           store.put(merged.cards, id);
-          return merged;
+          return { ...merged, pendingSkipped: pending.skipped };
         });
         if (r) {
-          this.mem.cards.delete(id);
-          this.cardImports.delete(id);
-          out.skipped += r.v.skipped;
+          if (r.v.pendingSkipped) out.unsaved++;
+          else {
+            this.mem.cards.delete(id);
+            this.cardImports.delete(id);
+          }
+          out.skipped += r.v.skipped + r.v.pendingSkipped;
           wrote = true;
         } else {
-          const merged = mergeCards(await this.cards(id), incoming);
+          const merged = mergeCards(await this.cards(id), list);
           this.mem.cards.set(id, merged.cards);
           this.cardImports.add(id);
           out.skipped += merged.skipped;

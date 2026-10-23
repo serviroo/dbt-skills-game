@@ -36,7 +36,7 @@ export function restorePreferences(raw: unknown, store: Store, volume?: VolumeCt
     const audio = object(prefs.audio) && prefs.audio.v === 1 ? parsePrefs(JSON.stringify(prefs.audio)) : null;
     let saved = true;
     if (object(destination) && (audioRaw === null || destination.v === 1)) {
-      const levels = volume?.get() ?? parsePrefs(audioRaw);
+      const levels = parsePrefs(audioRaw);
       let changed = false;
       if (audio) {
         for (const k of ['master', 'music', 'sfx'] as const) {
@@ -46,10 +46,10 @@ export function restorePreferences(raw: unknown, store: Store, volume?: VolumeCt
       }
       if (audioRaw === null && !audio && !store.state.settings.sound) { levels.muted = true; changed = true; }
       if (changed) {
-        if (volume) volume.set(levels);
-        else savePrefs(levels);
+        const expected = volume ? volume.restore(levels) : levels;
+        if (!volume) savePrefs(levels);
         const stored = parsePrefs(localStorage.getItem(PREFS_KEY));
-        saved = localStorage.getItem(PREFS_KEY) !== null && (Object.keys(levels) as (keyof AudioLevels)[]).every((k) => stored[k] === levels[k]);
+        saved = localStorage.getItem(PREFS_KEY) !== null && (Object.keys(expected) as (keyof AudioLevels)[]).every((k) => stored[k] === expected[k]);
       }
     }
     if (object(prefs.room)) {
