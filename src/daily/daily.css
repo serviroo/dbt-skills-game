@@ -652,6 +652,11 @@
   grid-template-columns: repeat(6, minmax(44px, 1fr));
   width: 100%;
 }
+@media (max-width: 359px) {
+  .dq-seg--6 {
+    grid-template-columns: repeat(3, minmax(44px, 1fr));
+  }
+}
 .dq-seg--3,
 .dq-seg--range,
 .dq-seg--pace {
@@ -2321,6 +2326,9 @@ textarea.dq-input {
   font-style: italic;
   white-space: nowrap;
 }
+.dq-diary .dq-small {
+  font-size: 16px;
+}
 .dq-week {
   overflow-x: auto;
   margin-top: 10px;
@@ -2354,6 +2362,7 @@ textarea.dq-input {
   letter-spacing: 0;
 }
 .dq-table tbody th {
+  font-size: 16px;
   text-align: left;
   font-weight: 400;
   line-height: 1.2;
@@ -3069,13 +3078,13 @@ textarea.dq-input {
   color: #eaf6ff;
 }
 .dq-artentry-s {
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.4;
   color: var(--t-body);
 }
 .dq-artentry-prompt {
   margin-top: 4px;
-  font-size: 14.5px;
+  font-size: 16px;
   font-style: italic;
   color: #a6d2f2;
 }
