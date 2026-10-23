@@ -69,7 +69,7 @@ async function home(h, page) {
     const win = page.locator('.dq-sw').first();
     if (await win.count()) {
       clear = 0;
-      const b = await win.boundingBox().catch(() => null);
+      const b = await win.boundingBox({ timeout: 500 }).catch(() => null);
       if (b) await page.mouse.click(b.x + b.width / 2, b.y + Math.min(b.height - 8, b.height / 2));
     } else if (!(await page.locator('.dq-scrim.is-on').count()) && (await page.locator('.dq-tile').first().isVisible().catch(() => false))) {
       if (++clear >= 4) return;
@@ -123,7 +123,7 @@ async function stepText(page) {
   return (await page.locator('.dq-step-body').innerText()).replace(/\s+/g, ' ').trim();
 }
 
-async function walk(h, page, id, steps, tag, reduced) {
+async function walk(h, page, steps, tag, reduced) {
   const tapIn = (name) => page.locator('.dq-skill').getByRole('button', { name, exact: true }).first();
   const settle = () => h.sleep(reduced ? 320 : 560);
   for (let i = 0; i < steps.length; i++) {
@@ -169,7 +169,7 @@ async function walk(h, page, id, steps, tag, reduced) {
   }
 }
 
-async function play(h, id, path, vp, tag, opts = {}) {
+async function play(h, id, steps, vp, tag, opts = {}) {
   const { ctx, page, errors } = await h.open(await returning(h), opts.mute ? '?mute' : '', vp);
   if (opts.reduced) {
     await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -180,11 +180,11 @@ async function play(h, id, path, vp, tag, opts = {}) {
   const before = await progress(h, page, id);
   h.expect(before.mine === 0 && !before.owned, `${id}: credited before it was opened`);
   await openFromLibrary(h, page, id);
-  await walk(h, page, id, WALKS[id][path], tag, opts.reduced);
+  await walk(h, page, steps, tag, opts.reduced);
   const after = await progress(h, page, id);
   h.expect(after.mine === 1 && after.owned, `${id}: not credited once after playing (${after.mine})`);
   h.expect(after.xp >= before.xp + 20 && after.sense === before.sense + 1, `${id}: XP ${before.xp}->${after.xp}, Sense ${before.sense}->${after.sense}`);
-  const last = WALKS[id][path].at(-1);
+  const last = steps.at(-1);
   h.expect(after.feedback.at(-1) === last.end, `${id}: the answer "${last.end}" was not stored`);
 
   await page.locator('.dq-skill').getByRole('button', { name: 'Back to the Lantern' }).click();
@@ -281,7 +281,7 @@ export const scenarios = {
     h.expect(s.events.filter((e) => e.k === 'skill').length === was.filter((e) => e.k === 'skill').length, 'arriving credited a skill');
     h.expect(s.events.reduce((n, e) => n + e.xp, 0) >= was.reduce((n, e) => n + e.xp, 0), 'XP went down on load');
     await page.getByRole('button', { name: "Reveal today's skill card" }).click({ force: true });
-    await page.locator('.dq-quest-note', { hasText: 'Shadow acquired: Spectator Mode' }).waitFor({ timeout: 10000 });
+    await page.getByText('Shadow acquired: Spectator Mode. It joins your collection.', { exact: true }).waitFor({ timeout: 10000 });
     h.expect((await page.locator('.dq-quest .dq-cardface--front').textContent()).includes('Mindfulness of Current Thoughts'), "today's card does not show the DBT name");
     await h.shot(page, 'skills-mind-old-save-card');
     await page.locator('.dq-quest-acts').getByRole('button', { name: 'Begin' }).click();
@@ -301,7 +301,7 @@ export const scenarios = {
     const { ctx, page, errors } = await h.open(await returning(h), '?mute', PHONE);
     try {
       await openFromLibrary(h, page, 'mindful-thoughts');
-      await walk(h, page, 'mindful-thoughts', [
+      await walk(h, page, [
         'Begin', 'Clouds crossing the sky', 'Ready', { timer: /Each thought is a cloud/ },
         'Next', 'About the same', { see: /^That[’']s okay\. Watching was the practice, not the quiet\./, tap: 'Done' },
         { end: 'A little', thanks: /A little counts/, code: 'helped' },
@@ -312,19 +312,30 @@ export const scenarios = {
     }
   },
 
+  async 'skills-mind-long-text'(h) {
+    const word = 'SomethingWithoutSpaces'.repeat(6);
+    for (const id of ['one-mindfully', 'effectively']) {
+      const steps = WALKS[id].b.map((step) => typeof step === 'string' ? step : { ...step });
+      steps.find((step) => step.other).text = word + '.';
+      if (id === 'one-mindfully') steps[2].timer = new RegExp('^' + word + String.raw`\. Only this\.`);
+      else steps[5].see = new RegExp('^“' + word + String.raw`\.” You picked`);
+      await play(h, id, steps, SMALL, `skills-mind-${id}-long-320`, { mute: true, reduced: true });
+    }
+  },
+
   async 'skills-mind-landscape'(h) {
     const { ctx, page, errors } = await h.open(await returning(h), '?mute', WIDE);
     for (const id of IDS) {
       await home(h, page);
       await openFromLibrary(h, page, id);
-      await walk(h, page, id, WALKS[id].a, `skills-mind-${id}-844`, false);
+      await walk(h, page, WALKS[id].a, `skills-mind-${id}-844`, false);
       await page.locator('.dq-skill').getByRole('button', { name: 'Back to the Lantern' }).click();
     }
     await home(h, page);
     await openFromLibrary(h, page, 'mindful-thoughts');
-    await walk(h, page, 'mindful-thoughts', WALKS['mindful-thoughts'].b.slice(0, 6), 'skills-mind-mindful-thoughts-844-louder', false);
+    await walk(h, page, WALKS['mindful-thoughts'].b.slice(0, 6), 'skills-mind-mindful-thoughts-844-louder', false);
     await page.locator('.dq-skill').getByRole('button', { name: 'Safe Zone', exact: true }).click();
-    await page.getByText('Talk to someone now').first().waitFor({ timeout: 10000 });
+    await page.getByText('Talk to someone now', { exact: true }).first().waitFor({ timeout: 10000 });
     await h.shot(page, 'skills-mind-mindful-thoughts-844-safe');
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
@@ -337,6 +348,6 @@ async function checkScreenWidth(h, page, where) {
 }
 
 for (const id of IDS) {
-  scenarios[`skills-mind-${id}-390`] = (h) => play(h, id, 'a', PHONE, `skills-mind-${id}-390`);
-  scenarios[`skills-mind-${id}-320`] = (h) => play(h, id, 'b', SMALL, `skills-mind-${id}-320`, { mute: true, reduced: true });
+  scenarios[`skills-mind-${id}-390`] = (h) => play(h, id, WALKS[id].a, PHONE, `skills-mind-${id}-390`);
+  scenarios[`skills-mind-${id}-320`] = (h) => play(h, id, WALKS[id].b, SMALL, `skills-mind-${id}-320`, { mute: true, reduced: true });
 }
