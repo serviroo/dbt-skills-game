@@ -1,0 +1,73 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  BASE_PATH: /dbt-skills-game/
+  BUILD_ID: ${{ github.sha }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
+      options: --user 1001
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Browsers come from the container
+        run: test "$(npx playwright --version)" = "Version 1.64.1" || { echo "package-lock has $(npx playwright --version); set the same version in the container image above"; exit 1; }
+      - name: Type-check
+        run: npx tsc --noEmit -p .
+      - name: Build for the Pages subpath
+        run: npm run build
+      - name: Offline install and boot
+        run: node scripts/pwa-verify.mjs --path="$BASE_PATH" --browser=chromium --out=artifacts/pwa --check
+      - name: Quiet update to the next deploy
+        run: node scripts/pwa-verify.mjs --path="$BASE_PATH" --browser=chromium --update --out=artifacts/pwa --check
+      - name: CSP sweep
+        run: node scripts/pwa-csp-sweep.mjs --path="$BASE_PATH" --check
+      - name: Live check on a Pages-like server
+        run: |
+          node scripts/serve-static.mjs --dir=dist --base="$BASE_PATH" --port=4180 &
+          node scripts/live-check.mjs "http://127.0.0.1:4180$BASE_PATH" --expect="$BUILD_ID" --wait=30
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: deploy-checks
+          path: artifacts/
+          retention-days: 7
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

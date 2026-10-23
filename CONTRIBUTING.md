@@ -104,3 +104,38 @@ real command. It creates temporary scenario files and removes them when it finis
 
 The intro is 3D, so for a real-GPU run on another machine, start a Playwright launch server there and pass
 `--ws=<its endpoint> --host=<this machine's address>`, so the dev server is reachable from that browser.
+
+## Static hosting
+
+The build uses `/` by default. Set `BASE_PATH` to the folder your host serves, with a trailing slash. Use `./` for
+relative URLs. The manifest and offline cache stay inside that folder; fonts, models and scripts follow the same base.
+
+```sh
+BASE_PATH=/dbt-skills-game/ npm run build
+node scripts/serve-static.mjs --dir=dist --base=/dbt-skills-game/ --port=4180
+```
+
+In another terminal, check the built site:
+
+```sh
+node scripts/live-check.mjs http://localhost:4180/dbt-skills-game/
+node scripts/pwa-verify.mjs --path=/dbt-skills-game/ --browser=chromium --out=artifacts/pwa --check
+node scripts/pwa-verify.mjs --path=/dbt-skills-game/ --browser=chromium --update --out=artifacts/pwa --check
+node scripts/pwa-csp-sweep.mjs --path=/dbt-skills-game/ --check
+```
+
+The live check opens a fresh browser profile at phone size. It checks the name prompt, Home, the one-tap Safe Zone,
+offline reload and launch, query links, the CSP and requests to other origins. Screenshots and a pass/fail report go
+in `artifacts/live/`. It exits with a non-zero status if a check fails.
+
+GitHub Pages builds on pushes to `main` and manual dispatches. Its build job runs the checks above before the deploy
+job can start. The build records `BUILD_ID` in a meta tag, using the commit SHA in Actions and the local HEAD
+(with `-dirty` for uncommitted changes) otherwise. After each deploy, check the published site against that build:
+
+```sh
+node scripts/live-check.mjs https://serviroo.github.io/dbt-skills-game/ --expect="$(git rev-parse HEAD)"
+```
+
+The check waits up to three minutes for the expected build. Pass the deployed commit, which can differ from your
+local HEAD after a merge. Service workers need HTTPS or localhost; for a local LAN proof, the live check trusts only
+the supplied HTTP origin in its isolated browser.

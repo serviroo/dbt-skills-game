@@ -5,17 +5,40 @@ import { spawnSync } from 'node:child_process';
 import { writeServiceWorker } from './scripts/sw-build.mjs';
 import { CSP, ICONS, headersFile, splashImages, splashLinkTags } from './scripts/pwa-spec.mjs';
 
-/** PWA build step: icons drawn in code, iOS splash links, CSP, host headers, and the precaching service worker. */
+function basePath(): string {
+  const raw = process.env.BASE_PATH?.trim();
+  if (!raw) return '/';
+  if (raw === './') return './';
+  const base = raw.replace(/\/*$/, '/');
+  if (!/^\/([\w.-]+\/)*$/.test(base)) throw new Error(`BASE_PATH must be a path like /dbt-skills-game/, got ${JSON.stringify(raw)}`);
+  return base;
+}
+
+function buildId(root: string): string {
+  const env = process.env.BUILD_ID?.trim();
+  if (env) {
+    if (!/^[\w.-]{1,64}$/.test(env)) throw new Error(`BUILD_ID must be letters, digits, dots or dashes, got ${JSON.stringify(env)}`);
+    return env;
+  }
+  const git = (...args: string[]) => spawnSync('git', args, { cwd: root, encoding: 'utf8' });
+  const head = git('rev-parse', 'HEAD');
+  if (head.status !== 0) return 'dev';
+  return head.stdout.trim() + (git('status', '--porcelain').stdout.trim() ? '-dirty' : '');
+}
+
+/** PWA build step: icons drawn in code, iOS splash links, CSP, build id, host headers, and the precaching service worker. */
 function pwa(): Plugin {
   let outDir = 'dist';
   let root = process.cwd();
   let build = false;
+  let base = './';
   return {
     name: 'lantern-pwa',
     configResolved(c) {
       root = c.root;
       build = c.command === 'build';
       outDir = path.resolve(c.root, c.build.outDir);
+      base = c.base;
     },
     buildStart() {
       if (!build) return;
@@ -31,14 +54,16 @@ function pwa(): Plugin {
     transformIndexHtml: {
       order: 'post',
       handler(html, ctx) {
-        html = html.replace('<!-- pwa:splash -->', splashLinkTags('./'));
+        html = html.replace('<!-- pwa:splash -->', splashLinkTags(base));
         if (ctx.server) return html;
-        return html.replace('<!-- pwa:csp -->', `<meta http-equiv="Content-Security-Policy" content="${CSP}" />`);
+        return html
+          .replace('<!-- pwa:csp -->', `<meta http-equiv="Content-Security-Policy" content="${CSP}" />`)
+          .replace('<!-- pwa:build -->', `<meta name="build" content="${buildId(root)}" />`);
       },
     },
     closeBundle() {
       if (!fs.existsSync(path.join(outDir, 'index.html'))) return;
-      fs.writeFileSync(path.join(outDir, '_headers'), headersFile());
+      fs.writeFileSync(path.join(outDir, '_headers'), headersFile(base.startsWith('/') ? base : '/'));
       const r = writeServiceWorker(outDir);
       this.info?.(`sw.js version ${r.version}: ${r.count} files, ${(r.bytes / 1024).toFixed(0)} KB precached`);
     },
@@ -46,7 +71,7 @@ function pwa(): Plugin {
 }
 
 export default defineConfig({
-  base: './',
+  base: basePath(),
   plugins: [pwa()],
   server: { host: '0.0.0.0', port: 5173, strictPort: true },
   preview: { host: '0.0.0.0', port: 4173, strictPort: true },
