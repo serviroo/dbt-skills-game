@@ -1,5 +1,5 @@
 // Loads every lab and the app from a built dist under its real CSP and lists any policy violations.
-// node scripts/pwa-csp-sweep.mjs [--dist=dist] [--seconds=6] [--shots=<dir under the project>] [--port=4179]
+// node scripts/pwa-csp-sweep.mjs [--dist=dist] [--path=<subpath to serve it under>] [--seconds=6] [--shots=<dir under the project>] [--port=4179]
 // Serves on the first free port from --port. Exits 1 if any page breaks the policy, logs an error, has a request fail
 // or never gets ready, or if the browser can't start. (--check, which older callers pass, changes nothing.)
 import { chromium } from 'playwright';
@@ -10,13 +10,15 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const flags = Object.fromEntries(process.argv.slice(2).filter((a) => a.startsWith('--')).map((a) => { const [k, v = 'true'] = a.slice(2).split('='); return [k, v]; }));
 const dist = path.resolve(root, flags.dist ?? 'dist');
 const secs = Number(flags.seconds ?? 6);
+const sub = (flags.path ?? '').replace(/^\/+|\/+$/g, '');
+const mount = sub ? `/${sub}/` : '/';
 const pages = ['', '?lab=character', '?lab=window', '?lab=gate', '?lab=awaken', '?lab=chest', '?lab=audio', '?lab=daily', '?cutscene=1'];
 const results = {};
 let fatal = null;
 let srv;
 let browser;
 try {
-  srv = await startPreview(dist, { from: Number(flags.port ?? 4179) });
+  srv = await startPreview(dist, { from: Number(flags.port ?? 4179), base: mount });
   console.log('preview:', srv.url);
   browser = await chromium.launch({ headless: true, args: ['--use-angle=vulkan', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-features=Vulkan', '--autoplay-policy=no-user-gesture-required'] });
   for (const q of pages) {

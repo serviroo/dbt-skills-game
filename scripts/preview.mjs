@@ -11,10 +11,10 @@ const live = new Set();
 process.once('exit', () => live.forEach((c) => c.kill('SIGTERM')));
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.once(sig, () => process.exit(130));
 
-export async function startPreview(dir, { from = 4173, tries = 500, timeoutMs = 90000, probe = '/' } = {}) {
+export async function startPreview(dir, { from = 4173, tries = 500, timeoutMs = 90000, base = '/', probe = base } = {}) {
   for (let port = from; port < from + tries; port++) {
     if (!(await portFree(port))) continue;
-    const child = spawn(process.execPath, [path.join(root, 'node_modules/vite/bin/vite.js'), 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort', '--outDir', dir], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [path.join(root, 'node_modules/vite/bin/vite.js'), 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort', '--outDir', dir, '--base', base], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
     live.add(child);
     const closed = new Promise((resolve) => child.once('close', resolve));
     let log = '';
@@ -31,7 +31,7 @@ export async function startPreview(dir, { from = 4173, tries = 500, timeoutMs = 
         closed.then(() => { clearTimeout(timer); res(); });
         child.kill('SIGTERM');
       });
-    const url = `http://127.0.0.1:${port}/`;
+    const url = `http://127.0.0.1:${port}${base}`;
     const t0 = Date.now();
     while (!gone() && Date.now() - t0 < timeoutMs) {
       if (log.replace(/\x1b\[[0-9;]*m/g, '').includes(`127.0.0.1:${port}`)) {

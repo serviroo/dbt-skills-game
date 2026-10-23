@@ -1,5 +1,5 @@
 // End-to-end proof that the built app installs its service worker, boots offline, and updates quietly.
-// node scripts/pwa-verify.mjs [--dist=dist] [--path=<app subpath>] [--video] [--browser=chromium|webkit|both] [--out=qa/out/pwa/verify] [--update] [--port=4173]
+// node scripts/pwa-verify.mjs [--dist=dist] [--path=<subpath to serve it under, e.g. /dbt-skills-game/>] [--video] [--browser=chromium|webkit|both] [--out=qa/out/pwa/verify] [--update] [--port=4173]
 // Starts its own `vite preview` on the first free port from --port and stops only that process, also on failure.
 // --update builds its extra versions in a scratch folder under the system temp dir (TMPDIR) and deletes it after.
 // Exits 1 if the report shows any problem or a browser can't start. (--check, which older callers pass, changes nothing.)
@@ -15,9 +15,19 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const flags = Object.fromEntries(process.argv.slice(2).filter((a) => a.startsWith('--')).map((a) => { const [k, v = 'true'] = a.slice(2).split('='); return [k, v]; }));
 const dist = path.resolve(root, flags.dist ?? 'dist');
 const out = path.resolve(root, flags.out ?? 'qa/out/pwa/verify');
+const sub = (flags.path ?? '').replace(/^\/+|\/+$/g, '');
+const mount = sub ? `/${sub}/` : '/';
 const browsers = flags.browser === 'both' || !flags.browser ? ['chromium', 'webkit'] : [flags.browser];
 fs.mkdirSync(out, { recursive: true });
 
+const swTemplate = fs.readFileSync(path.join(root, 'src/pwa/sw-template.js'), 'utf8');
+const swName = (k) => {
+  const name = swTemplate.match(new RegExp(`^const ${k} = '([^']+)';`, 'm'))?.[1];
+  if (!name) throw new Error(`src/pwa/sw-template.js has no ${k} cache name`);
+  return name;
+};
+const PREFIX = swName('PREFIX');
+const META = swName('META');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const swInfo = (dir) => {
   const src = fs.readFileSync(path.join(dir, 'sw.js'), 'utf8');
@@ -25,7 +35,7 @@ const swInfo = (dir) => {
 };
 const firstPort = Number(flags.port ?? 4173);
 async function serve(dir, port) {
-  const srv = await startPreview(dir, { ...(port ? { from: port, tries: 1 } : { from: firstPort }), probe: flags.path ? `/${flags.path.replace(/^\/|\/$/g, '')}/` : '/' });
+  const srv = await startPreview(dir, { ...(port ? { from: port, tries: 1 } : { from: firstPort }), base: mount });
   console.log('preview:', srv.url);
   return srv;
 }
@@ -45,26 +55,26 @@ const INIT = () => {
 };
 const ready = (page, ms = 30000) => page.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: ms });
 const cacheState = (page) =>
-  page.evaluate(async () => {
+  page.evaluate(async (metaName) => {
     const names = await caches.keys();
     const out = {};
     for (const n of names) out[n] = (await (await caches.open(n)).keys()).length;
-    const meta = names.includes('dbt.precache-meta') ? await caches.open('dbt.precache-meta') : null;
+    const meta = names.includes(metaName) ? await caches.open(metaName) : null;
     const cur = meta ? await (await meta.match('current'))?.text() : null;
     const prev = meta ? await (await meta.match('previous'))?.text() : null;
     return { caches: out, current: cur, previous: prev, controlled: !!navigator.serviceWorker.controller };
-  });
+  }, META);
 // page.waitForFunction does not await async predicates, so poll from Node
 async function waitInstalled(page, version, count, timeout = 90000) {
   const t0 = Date.now();
   for (;;) {
-    const ok = await page.evaluate(async ([v, n]) => {
-      const name = 'dbt.precache.' + v;
-      if (!(await caches.has(name)) || !(await caches.has('dbt.precache-meta'))) return false;
+    const ok = await page.evaluate(async ([v, n, prefix, metaName]) => {
+      const name = prefix + v;
+      if (!(await caches.has(name)) || !(await caches.has(metaName))) return false;
       const k = await (await caches.open(name)).keys();
-      const cur = await (await (await caches.open('dbt.precache-meta')).match('current'))?.text();
+      const cur = await (await (await caches.open(metaName)).match('current'))?.text();
       return k.length >= n && cur === name && !!navigator.serviceWorker.controller;
-    }, [version, count]);
+    }, [version, count, PREFIX, META]);
     if (ok) return Date.now() - t0;
     if (Date.now() - t0 > timeout) throw new Error(`service worker ${version} not installed after ${timeout} ms`);
     await sleep(250);
@@ -117,7 +127,7 @@ async function checkManifest(page, base, ctx) {
 
 async function offlineRun(name, launcher) {
   const report = { browser: name, steps: {} };
-  const { version, assets } = swInfo(path.join(dist, flags.path ?? ''));
+  const { version, assets } = swInfo(dist);
   const tStart = Date.now();
   const marks = (report.marks = []);
   const mark = (label) => marks.push({ t: (Date.now() - tStart) / 1000, label });
@@ -125,7 +135,7 @@ async function offlineRun(name, launcher) {
   let browser;
   try {
     srv = await serve(dist);
-    const base = `${srv.url}${flags.path ? flags.path.replace(/^\/|\/$/g, '') + '/' : ''}`;
+    const base = srv.url;
     browser = await launcher.launch({ headless: true, args: name === 'chromium' ? ['--use-angle=vulkan', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-features=Vulkan'] : [] });
     const ctx = await browser.newContext({ viewport: { width: 375, height: 800 }, serviceWorkers: 'allow', ...(flags.video ? { recordVideo: { dir: `${out}/video-${name}`, size: { width: 375, height: 800 } } } : {}) });
     await ctx.addInitScript(INIT);
@@ -261,7 +271,7 @@ async function updateRun(name, launcher) {
     const v4 = makeVersion(v3.dir, path.join(scratch, 'v4'), 'v4', false);
     srv = await serve(v1.dir);
     const port = srv.port;
-    const base = `${srv.url}${flags.path ? flags.path.replace(/^\/|\/$/g, '') + '/' : ''}`;
+    const base = srv.url;
     browser = await launcher.launch({ headless: true, args: name === 'chromium' ? ['--use-angle=vulkan', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-features=Vulkan'] : [] });
     const ctx = await browser.newContext({ viewport: { width: 375, height: 800 }, serviceWorkers: 'allow' });
     await ctx.addInitScript(INIT);
@@ -287,7 +297,7 @@ async function updateRun(name, launcher) {
       victim: bad.victim,
       hostAnswersMissingFileWith: victimStatus,
       updateCall: updateResult,
-      brokenCacheCreated: Object.keys(afterBad.caches).includes('dbt.precache.' + bad.version),
+      brokenCacheCreated: Object.keys(afterBad.caches).includes(PREFIX + bad.version),
       stillCurrent: afterBad.current,
       reloadShows: await page.evaluate(() => document.querySelector('meta[name=x-build]')?.content ?? 'v1'),
     };
@@ -324,13 +334,27 @@ async function updateRun(name, launcher) {
     srv = await serve(v3.dir, port);
     await page.evaluate(() => navigator.serviceWorker.getRegistration().then((r) => r.update()));
     await waitInstalled(page, v3.version, v3.assets.length + 1);
-    report.steps.v3Installed = { expectKept: [v1, v2, v3].map((v) => `dbt.precache.${v.version}`), ...(await cacheState(page)) };
+    report.steps.v3Installed = { expectKept: [v1, v2, v3].map((v) => PREFIX + v.version), ...(await cacheState(page)) };
 
     await srv.stop();
     srv = await serve(v4.dir, port);
     await page.evaluate(() => navigator.serviceWorker.getRegistration().then((r) => r.update()));
     await waitInstalled(page, v4.version, v4.assets.length + 1);
-    report.steps.v4Installed = { expectKept: [v2, v3, v4].map((v) => `dbt.precache.${v.version}`), expectDeleted: `dbt.precache.${v1.version}`, ...(await cacheState(page)) };
+    report.steps.v4Installed = { expectKept: [v2, v3, v4].map((v) => PREFIX + v.version), expectDeleted: PREFIX + v1.version, ...(await cacheState(page)) };
+
+    const idOnly = path.join(scratch, 'build-id-only');
+    fs.cpSync(v4.dir, idOnly, { recursive: true });
+    const html = path.join(idOnly, 'index.html');
+    fs.writeFileSync(html, fs.readFileSync(html, 'utf8').replace(/<meta name="build" content="[^"]*" \/>/, '<meta name="build" content="build-id-only" />'));
+    execFileSync(process.execPath, [path.join(root, 'scripts/sw-build.mjs'), idOnly]);
+    const next = swInfo(idOnly);
+    await srv.stop();
+    srv = await serve(idOnly, port);
+    await page.evaluate(() => navigator.serviceWorker.getRegistration().then((r) => r.update()));
+    await waitInstalled(page, next.version, next.assets.length + 1);
+    await page.reload();
+    await ready(page);
+    report.steps.buildIdOnly = { previousVersion: v4.version, version: next.version, served: await page.locator('meta[name=build]').getAttribute('content') };
     report.errors = b.errors;
     report.failed = b.failed;
     report.csp = await page.evaluate(() => window.__csp);
@@ -362,6 +386,7 @@ function problems(r) {
   const none = (label, list) => (list?.length ? [`${label}: ${list.slice(0, 3).join(' | ')}`] : []);
   if (!flags.update) {
     return [
+      ...(s.online.controlled ? [] : ['the service worker never took control']),
       ...none('online errors', [...s.online.errors, ...s.online.failed]),
       ...none('online CSP', s.online.csp),
       ...none('manifest', [...s.manifest.problems, ...s.manifest.splashMissing, ...[s.manifest.chromium?.manifestErrors ?? [], s.manifest.chromium?.installabilityErrors ?? []].flat().map((e) => e.message ?? e.errorId ?? e.error)]),
@@ -383,6 +408,7 @@ function problems(r) {
     ...none('next launch errors', s.nextLaunch.errors),
     ...(s.v3Installed.expectKept.every((c) => c in s.v3Installed.caches) ? [] : ['a version that should stay was deleted at v3: ' + Object.keys(s.v3Installed.caches).join(' ')]),
     ...(s.v4Installed.expectKept.every((c) => c in s.v4Installed.caches) && !(s.v4Installed.expectDeleted in s.v4Installed.caches) ? [] : ['old caches not rotated at v4: ' + Object.keys(s.v4Installed.caches).join(' ')]),
+    ...(s.buildIdOnly.previousVersion !== s.buildIdOnly.version && s.buildIdOnly.served === 'build-id-only' ? [] : ['a build-id-only deploy left the cached shell stale: ' + JSON.stringify(s.buildIdOnly)]),
   ];
 }
 const bad = results.flatMap((r) => problems(r).map((p) => `${r.browser}: ${p}`));
