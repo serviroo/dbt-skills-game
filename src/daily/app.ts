@@ -115,11 +115,6 @@ export class App {
     };
     document.addEventListener('visibilitychange', vis);
     this.offs.push(() => document.removeEventListener('visibilitychange', vis));
-    try {
-      void navigator.storage?.persist?.();
-    } catch {
-      /* not offered here */
-    }
   }
 
   reduced() {

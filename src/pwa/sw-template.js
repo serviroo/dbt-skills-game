@@ -8,14 +8,25 @@ const SCOPE = self.registration.scope;
 const SHELL = new URL('./', SCOPE).href;
 const abs = (path) => new URL(path, SCOPE).href;
 
-// Files that must never come back as the HTML fallback a static host serves for a missing path.
-const NOT_HTML = /\.(m?js|css|woff2?|png|webmanifest|json|svg|wasm)$/i;
+const KEEP = 3;
+
+const TYPES = [
+  [/\.m?js$/i, /javascript|ecmascript/i],
+  [/\.css$/i, /text\/css/i],
+  [/\.html?$/i, /text\/html/i],
+];
+function typeProblem(url, type) {
+  const path = new URL(url).pathname;
+  const want = url === SHELL ? /text\/html/i : TYPES.find(([ext]) => ext.test(path))?.[1];
+  if (want) return want.test(type) ? '' : `got ${type || 'no content type'}`;
+  return /text\/html/i.test(type) ? 'got HTML' : '';
+}
 
 async function fetchClean(url) {
   const res = await fetch(new Request(url, { cache: 'reload', credentials: 'same-origin' }));
   if (!res.ok) throw new Error(`precache ${url}: HTTP ${res.status}`);
-  const type = res.headers.get('content-type') || '';
-  if (NOT_HTML.test(new URL(url).pathname) && type.includes('text/html')) throw new Error(`precache ${url}: got HTML`);
+  const problem = typeProblem(url, res.headers.get('content-type') || '');
+  if (problem) throw new Error(`precache ${url}: ${problem}`);
   // A redirected response (pretty-URL hosts send /index.html -> /) can't answer a navigation; rebuild it.
   if (!res.redirected) return res;
   const body = await res.blob();
@@ -44,15 +55,19 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
-      // Keep this version and the one before it: a page that is still open may lazy-load its own older chunks.
       const meta = await caches.open(META);
-      const prev = await meta.match('current').then((r) => (r ? r.text() : ''));
-      const keep = new Set([CACHE]);
-      if (prev && prev !== CACHE) keep.add(prev);
-      await meta.put('current', new Response(CACHE));
-      await meta.put('previous', new Response(prev && prev !== CACHE ? prev : ''));
+      const read = (key) => meta.match(key).then((r) => (r ? r.text() : ''));
       const names = await caches.keys();
-      await Promise.all(names.filter((n) => n.startsWith(PREFIX) && !keep.has(n)).map((n) => caches.delete(n)));
+      let order = [];
+      try {
+        order = JSON.parse((await read('versions')) || '[]');
+      } catch {}
+      if (!Array.isArray(order) || !order.length) order = [await read('current'), await read('previous')];
+      const keep = [CACHE, ...order.filter((n) => n !== CACHE && names.includes(n))].slice(0, KEEP);
+      await meta.put('versions', new Response(JSON.stringify(keep)));
+      await meta.put('current', new Response(CACHE));
+      await meta.put('previous', new Response(keep[1] ?? ''));
+      await Promise.all(names.filter((n) => n.startsWith(PREFIX) && !keep.includes(n)).map((n) => caches.delete(n)));
       await self.clients.claim();
     })(),
   );
