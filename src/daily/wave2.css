@@ -417,6 +417,7 @@
   white-space: nowrap;
 }
 .w2-roster .dq-sec-sub {
+  font-size: 16px;
   text-align: right;
 }
 .w2-roster-row {
@@ -558,7 +559,7 @@
 }
 .w2-sh-idle {
   margin-top: 10px !important;
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.5;
   font-style: italic;
   color: var(--t-body);
