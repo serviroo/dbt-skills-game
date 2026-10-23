@@ -1,9 +1,10 @@
-import { LOADOUT, LOADOUT_COPY, MODULES, MODULE_ORDER, RESOURCES_CHECKED, SKILL, SKILLS } from '../content/dbt';
+import { LOADOUT, LOADOUT_COPY, MODULES, MODULE_ORDER, SAFE, SKILL, SKILLS } from '../content/dbt';
+import { CRISIS_CHECKED } from '../content/crisis-lines';
 import { ABOUT, CRYSTAL_COPY } from '../content/daily-lines';
 import type { App, ScreenOut } from './app';
 import { glyph, icon, mothSVG } from './art';
 import { skillCard } from './hub';
-import { telHref, smsHref } from './safe';
+import { regionPicker, telHref, smsHref } from './safe';
 import { allyCard } from './artroom';
 import { artStore } from './artstore';
 import { storyStore } from './storystore';
@@ -854,6 +855,7 @@ export function settingsScreen(app: App): ScreenOut {
           }, { labels: motionLabels, cls: 'dq-seg--3' }),
         ),
       ),
+      panel({ title: 'Crisis lines', ic: icon('phone') }, regionPicker(app, undefined, SAFE.settings)),
       wardrobePanel(app),
       panel(
         { title: 'Intro', ic: icon('replay') },
@@ -890,7 +892,7 @@ export function settingsScreen(app: App): ScreenOut {
         p(ABOUT.what, 'dq-text'),
         p(ABOUT.device, 'dq-text'),
         showTherapist ? p(ABOUT.therapist, 'dq-text dq-quietline') : null,
-        p(`Crisis lines in the Safe Zone were checked on ${RESOURCES_CHECKED}. They are free and private: 988 (call or text), Crisis Text Line (text HOME to 741741), and 911 for emergencies.`, 'dq-small'),
+        p(`Crisis lines in the Safe Zone were checked on ${CRISIS_CHECKED} against each service's own site.`, 'dq-small'),
       ),
     ),
   );

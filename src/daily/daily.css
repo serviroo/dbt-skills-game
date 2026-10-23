@@ -3979,3 +3979,10 @@ textarea.dq-input {
     --chrome: calc(120px + var(--safe-top) + var(--safe-bottom));
   }
 }
+.dq-select {
+  color-scheme: dark;
+  cursor: pointer;
+}
+.dq-region {
+  margin-top: 18px;
+}

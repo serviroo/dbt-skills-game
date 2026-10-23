@@ -7,7 +7,7 @@ import { createServer } from 'vite';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const flags = Object.fromEntries(process.argv.slice(2).filter((a) => a.startsWith('--')).map((a) => { const [k, v = 'true'] = a.slice(2).split('='); return [k, v]; }));
 const snapPath = path.resolve(root, flags.snapshot ?? 'scripts/stored-ids.json');
-const KEBAB = new Set(['skill', 'stat', 'event-kind', 'shadow', 'title', 'theme', 'accent', 'card-back', 'plate', 'motion', 'art-paper', 'chapter-kind']);
+const KEBAB = new Set(['skill', 'stat', 'event-kind', 'shadow', 'title', 'theme', 'accent', 'card-back', 'plate', 'motion', 'art-paper', 'chapter-kind', 'region']);
 
 class MemoryStorage {
   #m = new Map();
@@ -48,6 +48,7 @@ async function collect() {
     const dbt = await load('src/content/dbt.ts');
     const lines = await load('src/content/daily-lines.ts');
     const roster = await load('src/content/roster-lines.ts');
+    const crisis = await load('src/content/crisis-lines.ts');
     const art = await load('src/daily/artstore.ts');
     const ink = await load('src/daily/ink.ts');
     const story = await load('src/daily/storystore.ts');
@@ -123,6 +124,7 @@ async function collect() {
       accent: [...roster.ACCENT_IDS],
       'card-back': [...roster.CARD_BACK_IDS],
       plate: [...roster.PLATE_IDS],
+      region: [...crisis.REGION_IDS],
       motion: [...store.MOTIONS],
       'art-paper': Object.keys(ink.PAGE),
       'chapter-kind': [...story.CHAPTER_KINDS],
