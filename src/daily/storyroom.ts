@@ -1,9 +1,10 @@
 /**
  * Story Room: their stories on this device (chapters and a Notes page), and a co-writer the player asks only when the player wants.
- * Their words are only ever set through textContent or .value. The co-writer's network client loads on the first Ask.
+ * Their words are only ever set through textContent or .value. The co-writer runs on this device and never touches the network.
  */
 import { animate } from '../ui/anim';
-import type { CowriteReq, CowriteRes, CowriteTurn } from '../cowriter/client';
+import { cowrite } from '../cowriter/local';
+import type { CowriteReq, CowriteRes, CowriteTurn } from '../cowriter/types';
 import { CARE_KEY } from '../core/stored-names';
 import type { App, Route, ScreenOut } from './app';
 import { icon } from './art';
@@ -16,7 +17,7 @@ export const STORY = {
   sub: 'Write whatever you like. It stays on this device.',
   empty: 'No stories yet. Start one whenever you like.',
   privacyShelf: 'Your stories stay on this device.',
-  privacyCw: 'Ask sends the lines around your cursor and this story’s Notes to an AI, for one reply.',
+  privacyCw: 'Ask works right here on this device. Your story never leaves it.',
   saved: 'Saved on this device',
   notSaving: 'Not saving right now. Download the story to keep a copy.',
   copied: 'A newer version of this chapter arrived, so yours was kept as its own chapter.',
@@ -32,10 +33,6 @@ export const STORY = {
   deleteAsk: 'Delete for good? This can’t be undone.',
   care: 'If you need it tonight, the Safe Zone is one tap away.',
   msg: {
-    resting: 'The Lantern is resting. Back tomorrow. Your pages are all here.',
-    busy: 'Give it a minute, then ask again.',
-    offline: 'No connection right now. Your story is saved here.',
-    down: 'The co-writer isn’t answering right now. Your story is safe here.',
     toolong: 'That’s a lot of text at once. Select a smaller piece and ask again.',
   },
 };
@@ -238,7 +235,7 @@ export function writeScreen(app: App, route: Route): ScreenOut {
   const cwBtn = btn('Co-writer', () => openCw(), { kind: 'primary', ic: 'quill', cls: 'st-cwbtn' });
   cwBtn.setAttribute('aria-expanded', 'false');
   cwBtn.setAttribute('aria-controls', 'st-cw');
-  const dock = h('div', { class: 'st-dock' }, h('div', { class: 'st-dock-in' }, undoB, redoB, stateEl));
+  const dock = h('div', { class: 'st-dock' }, h('div', { class: 'st-dock-in' }, undoB, redoB, stateEl, cwBtn));
 
   // ---- co-writer ----
   let mode: CardMode = 'continue';
@@ -279,7 +276,7 @@ export function writeScreen(app: App, route: Route): ScreenOut {
   );
 
   const main = h('div', { class: 'st-main' }, titleIn, h('div', { class: 'st-bar' }, chBtn, seg, moreWrap), note, frame, dock);
-  const el = h('div', { class: 'st-write' }, h('h1', { class: 'dq-sr', 'data-focus': '', text: 'Your story' }), main);
+  const el = h('div', { class: 'st-write' }, h('h1', { class: 'dq-sr', 'data-focus': '', text: 'Your story' }), main, cw);
 
   // ---------- save state ----------
   const atCap = () => !!cur && ta.value.length >= STORY_CAP.text;
@@ -971,7 +968,7 @@ export function writeScreen(app: App, route: Route): ScreenOut {
   };
   const ask = async () => {
     if (asking || !story) return;
-    if (mode === 'polish' && !sel) return;
+    if (mode === 'polish' && !sel?.text.trim()) return showMsg(STORY.selectFirst);
     asking = true;
     askB.disabled = true;
     askT.textContent = 'Thinking it over…';
@@ -980,11 +977,12 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     const m = mode;
     const steer = steerIn.value.trim().slice(0, 240);
     const askPage = pageId;
-    let res: CowriteRes = { kind: 'down' };
+    let res: CowriteRes;
     let usedSel: Sel | undefined;
     try {
-      const page = await pageNow();
-      const notes = await notesNow();
+      // only the tab that isn't open is read from storage; if that read fails, Ask works from what is on screen
+      const page = await pageNow().catch(() => '');
+      const notes = await notesNow().catch(() => '');
       let before = '', selection = '', after = '';
       if (m === 'polish' && sel) {
         // the remembered range, or the one place the words still appear; never a guess between two matches
@@ -1004,16 +1002,14 @@ export function writeScreen(app: App, route: Route): ScreenOut {
         after = page.slice(at);
       }
       const req: CowriteReq = { mode: m, title: titleIn.value, before, selection, after, notes, steer, history: historyFor(m) };
-      const { cowrite } = await import('../cowriter/client');
       res = await cowrite(req);
-    } catch {
-      res = { kind: 'down' };
+    } finally {
+      asking = false;
+      askB.disabled = false;
+      askT.textContent = 'Ask';
+      wait.classList.add('is-hidden');
     }
-    asking = false;
     if (!alive) return;
-    askB.disabled = false;
-    askT.textContent = 'Ask';
-    wait.classList.add('is-hidden');
     if (res.kind === 'cards') {
       const t = Date.now();
       if (steer) steers.set(t, steer);
@@ -1081,12 +1077,14 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     const piece = t.trim();
     // only the exact range it was asked about; if those words changed, never search for them elsewhere
     if (s && s.text && text.slice(s.start, s.end) === s.text) {
+      // the spaces or line breaks the selection started or ended with stay, so it never glues onto the next word
+      const put = `${s.text.match(/^\s*/)![0]}${piece}${s.text.match(/\s*$/)![0]}`;
       const at = s.start;
-      const end = at + piece.length;
-      const next = text.slice(0, at) + piece + text.slice(at + s.text.length);
+      const end = at + put.length;
+      const next = text.slice(0, at) + put + text.slice(at + s.text.length);
       if (!change(next, at, end)) return null;
       caret = end;
-      sel = { start: at, end, text: piece };
+      sel = { start: at, end, text: put };
       return { next, moved: false };
     }
     const pre = text.length ? (text.endsWith('\n\n') ? '' : text.endsWith('\n') ? '\n' : '\n\n') : '';
@@ -1233,7 +1231,7 @@ export function writeScreen(app: App, route: Route): ScreenOut {
         persistCards();
         return;
       }
-      editor = h('textarea', { class: 'st-card-edit', 'aria-label': `Edit this ${MODE_LABEL[c.mode]} card`, maxlength: 4000, spellcheck: 'true', autocapitalize: 'sentences' }) as HTMLTextAreaElement;
+      editor = h('textarea', { class: 'st-card-edit', 'aria-label': `Edit this ${MODE_LABEL[c.mode]} card`, maxlength: STORY_CAP.card, spellcheck: 'true', autocapitalize: 'sentences' }) as HTMLTextAreaElement;
       editor.value = c.text;
       editor.addEventListener('input', () => {
         clearTimeout(editTimer);

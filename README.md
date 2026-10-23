@@ -23,7 +23,9 @@ back after a long break is always fine.
 - Your name and your companion's: the game asks what to call you the first time (or skip it and stay "Player"), and
   you can change both any time in Settings. Pick an accent colour in the Wardrobe.
 - The Night Watch, ranks and titles: small rewards that grow as you use things. Nothing is ever taken away.
-- Art room and Story Room: draw or write whatever you like. It all stays on your device.
+- Art room and Story Room: draw or write whatever you like. It all stays on your device. The Story Room's co-writer
+  can ask you questions, toss in a what-if, suggest a next line or tidy up a messy bit. It's scripted and runs on your
+  device too.
 - Save Crystal: a backup of your progress, stories, saved drawings and choices. Restore keeps choices you already made
   on this device, including mute. If something could not be read, the file and the app say the backup is incomplete.
 
