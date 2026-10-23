@@ -105,7 +105,7 @@ async function collect() {
         ...['Ev', 'Item', 'Person', 'SavedMap', 'DiaryEntry', 'LineEntry', 'Settings', 'Flags', 'State'].flatMap((type) => interfaceFields('src/daily/store.ts', type)),
         ...['DrawingMeta', 'Draft'].flatMap((type) => interfaceFields('src/daily/artstore.ts', type)),
         ...['Story', 'Chapter', 'Card', 'Live'].flatMap((type) => interfaceFields('src/daily/storystore.ts', type)),
-        ...interfaceFields('src/cowriter/client.ts', 'Cred'),
+        ...interfaceFields('src/cowriter/types.ts', 'Cred'),
       ],
       'app-field': [...fs.readFileSync(path.join(root, 'src/app.ts'), 'utf8').matchAll(/^  (\w+): boolean;/gm)].map((m) => m[1]),
       'stealth-field': [...fs.readFileSync(path.join(root, 'src/daily/pages.ts'), 'utf8').matchAll(/prefs: \{ ([^}]+) \}/g)].flatMap((m) => [...m[1].matchAll(/(\w+): boolean/g)].map((x) => x[1])),

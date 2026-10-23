@@ -84,7 +84,6 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin || !req.url.startsWith(SCOPE)) return;
-  if (url.pathname.slice(new URL(SCOPE).pathname.length - 1).includes('/api/')) return;
 
   if (req.mode === 'navigate') {
     const path = url.pathname.slice(new URL(SCOPE).pathname.length);
