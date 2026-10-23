@@ -25,7 +25,7 @@ function paths(o, at = '', out = new Set()) {
 }
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-function fullSave(now) {
+export function fullSave(now) {
   const today = dayOf(now);
   const t0 = now - 60 * DAY;
   const ev = [];
@@ -78,7 +78,7 @@ function fullSave(now) {
   };
 }
 
-function seedStores(page, SAVE, now) {
+export function seedStores(page, SAVE, now) {
   const day = dayOf(now - 5 * DAY);
   const t = now - 5 * DAY;
   const drawings = ids['art-paper'].map((kind, i) => ({ meta: { id: `draw-${kind}`, kind, day, t: t + i, updated: t + i, prompt: 'Draw a door to somewhere calm.', name: `Wisp ${i}`, n: 2, rev: `r${i}`, from: [`r9@${t}`] }, strokes: [{ i: 1, w: 6, p: [100, 100, 300, 320, 500, 410] }, { i: 2, w: 12, p: [40, 50, 60, 70] }] }));

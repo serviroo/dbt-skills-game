@@ -93,7 +93,15 @@ name order, and each file's scenarios run in the order they are written. Every s
 - `out`, the run's artifact folder; `renderer`, the WebGL renderer; `stop()`, which closes the browser and server.
 
 The runner closes any remaining browser profiles after each scenario, including failures. A scenario should also
-work on its own: create any fixture it needs when an earlier scenario has not run.
+work on its own: create any fixture it needs when an earlier scenario has not run. Whatever a scenario returns is kept
+as its `result` in `report.json`.
+
+### Phone layout
+
+`node scripts/e2e.mjs --file=layout-fit` opens every companion screen at 390x844, 320x568 and 844x390 and checks that
+nothing scrolls or sticks out sideways, every button, link and field takes taps across at least 44x44 px, and body
+text is at least 16 px. Screens in its `ENFORCED` list fail the run. Every other screen passes and prints its problems
+as a todo list, also kept in `report.json`. Once a screen fits, add it to `ENFORCED`.
 
 Run one file with `node scripts/e2e.mjs --file=<name>`, or one scenario with `--scenario=<scenario name>`. The browser
 renders with SwiftShader by default so local runs match CI. Add `--gpu` to render on this machine's GPU instead, or
