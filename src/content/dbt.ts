@@ -131,6 +131,36 @@ function tierLine(a: Answers) {
   return 'Tasted, if not sorted. That still counts.';
 }
 
+const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+const fullStop = (t: string) => (/[.!?]$/.test(t) ? t : `${t}.`);
+
+const GOALS: Record<string, string[]> = {
+  'Being kind': ['Do one kind thing a week', 'Be a bit kinder to myself', 'Help out with something'],
+  'Making things': ['Finish one small project', 'Make something each week', 'Learn a new technique'],
+  Learning: ['Read one book', 'Start a free course or guide', 'Learn the basics of something new'],
+  'Fun and play': ['Try a new game', 'Plan one fun day', 'Pick up an old hobby'],
+  Connection: ['Message someone more often', 'Join a club or a server', 'Plan a hangout'],
+  'Looking after me': ['Get outside more', 'Wind down earlier at night', 'Make my space cosier'],
+  'Doing good work': ['Get on top of one task', 'Finish something I put off', 'Learn one thing for work or school'],
+  Adventure: ['Visit somewhere new nearby', "Try something I've never done", 'Take a new route somewhere'],
+};
+function questLog(a: Answers) {
+  const goal = s(a, 'goal');
+  const first = s(a, 'first');
+  return `**Main quest:** ${fullStop(cap(s(a, 'value', 'Something that matters to you')))} ${goal ? `**Goal:** ${fullStop(cap(goal))} ` : ''}**First step:** ${first ? fullStop(cap(first)) : "Pick one when you're ready."}`;
+}
+
+const MYTHS: Record<string, string> = {
+  "I shouldn't feel this way": "There's no right way to feel. Two people can feel different things about the same moment, and both make sense.",
+  "Feeling bad means I'm weak": "Hard feelings come with being a person. They aren't weakness, and saying them out loud takes strength.",
+  'This feeling is stupid': 'Every feeling makes sense somewhere. Even an awkward one is usually pointing at something that matters to you.',
+  "If they disapprove, I shouldn't feel it": "Your feelings are yours. Someone else not getting them doesn't make them wrong.",
+  'Painful feelings should be ignored': "Painful feelings carry information. You don't have to act on them, and you don't have to pretend they aren't there.",
+  "Big feelings mean I'm out of control": 'You can feel a lot and still choose what you do next. That part is what skills are for.',
+};
+const ruleOf = (a: Answers) => s(a, 'myth', 'An old rule').trim();
+const patchOf = (a: Answers) => MYTHS[ruleOf(a)] ?? "Feelings aren't rules or verdicts. Every one makes sense somewhere, and you still get to choose what you do next.";
+
 export const SKILLS: Skill[] = [
   // ---------------- Mindfulness (Sense) ----------------
   {
@@ -594,8 +624,8 @@ export const SKILLS: Skill[] = [
       {
         id: 'fits',
         kind: 'say',
-        text: 'Then it fits. Your feeling is giving you real information, and it makes sense. Next could be some comfort, a DEAR MAN, or nothing at all.',
-        options: [{ label: 'Self-Soothe', go: 'skill:self-soothe' }, { label: 'DEAR MAN', go: 'skill:dear-man' }, { label: 'Done', go: 'end' }],
+        text: 'Then it fits. Your feeling is giving you real information, and it makes sense. Next could be some comfort, working on the problem, a DEAR MAN, or nothing at all.',
+        options: [{ label: 'Self-Soothe', go: 'skill:self-soothe' }, { label: 'Problem Solving', go: 'skill:problem-solving' }, { label: 'DEAR MAN', go: 'skill:dear-man' }, { label: 'Done', go: 'end' }],
       },
       {
         id: 'partly',
@@ -650,8 +680,8 @@ export const SKILLS: Skill[] = [
       {
         id: 'fits',
         kind: 'say',
-        text: "Then this isn't the skill for now. Your feeling makes sense. Want to plan what to say instead?",
-        options: [{ label: 'DEAR MAN', go: 'skill:dear-man' }, { label: 'Done', go: 'end' }],
+        text: "Then this isn't the skill for now. Your feeling makes sense. Want to work on the problem, or plan what to say?",
+        options: [{ label: 'Problem Solving', go: 'skill:problem-solving' }, { label: 'DEAR MAN', go: 'skill:dear-man' }, { label: 'Done', go: 'end' }],
       },
       {
         id: 'opp',
@@ -731,6 +761,108 @@ export const SKILLS: Skill[] = [
         text: 'Thanks for being honest. Big feelings are allowed. The Safe Zone is one tap away if you want it.',
         options: [{ label: 'Safe Zone', go: 'safe' }, { label: 'Done', go: 'end' }],
       },
+    ],
+  },
+  {
+    id: 'problem-solving',
+    sl: 'Keysmith',
+    real: 'Problem Solving',
+    module: 'er',
+    minutes: '3 min',
+    card: 'The feeling fits, so work on the problem. One small step at a time.',
+    steps: [
+      { kind: 'intro', text: "Something real is in the way, and it makes sense that it's getting to you. When a feeling fits the facts, the problem is the thing to work on. One small piece at a time." },
+      {
+        kind: 'say',
+        text: 'This one needs a little thinking room. Heavy right now? Comfort comes first. The problem will keep.',
+        options: [{ label: 'Calm or mild. Go on' }, { label: 'Heavy right now', go: 'heavy' }],
+      },
+      { kind: 'input', key: 'problem', text: "What's the problem? Stick to the facts, what a camera would see. Keep it vague if you like.", placeholder: 'The problem (optional)', skip: 'Keep it in my head' },
+      { kind: 'input', key: 'goal', text: 'What would need to change for this to feel okay? Keep it small and doable. "Have a plan for Friday" beats "fix everything".', placeholder: 'My goal (optional)', skip: 'Skip' },
+      { id: 'ideas', kind: 'input', key: 'ideas', lines: 3, text: 'Brainstorm. Every idea counts, even the odd ones. No judging yet. More ideas, more keys to try.', fills: ['Ask for help', 'Do a smaller piece', 'Look it up', 'Wait a day', 'Say no to something', 'Try a different time'], placeholder: 'Ideas (optional)', skip: 'Thought of some' },
+      {
+        kind: 'choice',
+        key: 'pick',
+        text: "Pick the idea most likely to get you there. Torn between two? Go with the one that's easier to start.",
+        options: [{ label: 'Got one' }, { label: 'Torn between two', reply: 'Start with the easier one. You can switch later.' }, { label: 'None of them fit', go: 'stuck' }],
+      },
+      { kind: 'input', key: 'first', text: "What's the first step? Small enough to do today, or even right now.", fills: ['Write it down', 'Look one thing up', 'Send one message', 'Five minutes on it'], placeholder: 'First step (optional)', skip: 'Skip' },
+      { kind: 'choice', key: 'try', text: "Try it, then see how it went. If it doesn't fit, nothing's lost. Come back and try the next key.", options: [{ label: 'Trying it now', go: 'end' }, { label: 'Later', go: 'end' }, { label: 'Only planning', go: 'end' }] },
+      {
+        id: 'stuck',
+        kind: 'say',
+        text: "That happens. Some locks need more ideas, more information or a night's sleep. Coming back to it later counts as a step.",
+        options: [{ label: 'More ideas', go: 'ideas' }, { label: 'Done for now', go: 'end' }],
+      },
+      {
+        id: 'heavy',
+        kind: 'say',
+        text: 'Then the problem waits. Heavy feelings get comfort first. No reason needed.',
+        options: [{ label: 'Something soothing', go: 'skill:self-soothe' }, { label: 'Safe Zone', go: 'safe' }, { label: 'Done', go: 'end:quiet' }],
+      },
+    ],
+  },
+  {
+    id: 'long-term-positives',
+    sl: 'Main Quest',
+    real: 'Long-Term Positives',
+    module: 'er',
+    minutes: '2 min',
+    card: 'Pick something that matters to you and take one small step toward it.',
+    steps: [
+      { kind: 'intro', text: 'If life has felt like all chores lately, that makes sense. A nice moment helps today. This one plays the long game: one small step toward something you care about.' },
+      {
+        kind: 'choice',
+        key: 'value',
+        grid: true,
+        text: 'Pick one thing that matters to you. Not what should matter. What does.',
+        small: 'Not sure? Pick the one that feels closest. You can change it any time.',
+        options: o(...Object.keys(GOALS)),
+        other: 'My own',
+      },
+      {
+        kind: 'choice',
+        key: 'goal',
+        text: (a) => `${cap(s(a, 'value', 'Something'))} matters to you. What's one goal that fits, something that could happen in the next month or so?`,
+        options: (a) => o(...(GOALS[s(a, 'value')] ?? ['One small project', 'More time for it each week', 'Try something new with it'])),
+        other: 'My own goal',
+      },
+      { kind: 'input', key: 'first', text: "Break it down. What's one small first step? So small it's almost too easy.", fills: ['Look something up', 'Write it down', 'Send one message', 'Ten minutes on it'], placeholder: 'First step (optional)', skip: 'Skip' },
+      { kind: 'say', title: '[Quest log updated]', text: (a) => questLog(a) },
+      { kind: 'choice', key: 'when', text: 'Small steps toward what matters add up. If a step starts to feel like too much, make it smaller. Smaller still counts. When will you try it?', options: [{ label: 'Today', go: 'end' }, { label: 'This week', go: 'end' }, { label: 'Only planning', go: 'end' }] },
+    ],
+  },
+  {
+    id: 'emotion-myths',
+    sl: 'Patch Notes',
+    real: 'Myths About Emotions',
+    module: 'er',
+    minutes: '2 min',
+    card: 'Old rules about feelings, patched with something truer.',
+    steps: [
+      { kind: 'intro', text: 'Feelings are hard enough on their own. Then old rules about them pile on top, like "I shouldn\'t feel this way." Let\'s catch one and patch it.' },
+      { kind: 'choice', key: 'myth', text: 'Which old rule has been loudest lately?', options: o(...Object.keys(MYTHS)), other: 'A different one' },
+      {
+        kind: 'timer',
+        title: '[Patch notes]',
+        seconds: 20,
+        extend: 20,
+        visual: 'glow',
+        text: (a) => `**Old rule:** "${fullStop(cap(ruleOf(a)))}" **Patched:** ${patchOf(a)}`,
+        small: 'Read the patch slowly while the ring runs.',
+      },
+      {
+        kind: 'choice',
+        key: 'land',
+        text: 'How does the patch sit?',
+        options: [
+          { label: 'Rings true', reply: 'Good. Keep it handy.' },
+          { label: 'Partly', reply: 'Partly is a start. Old rules take a while to update.' },
+          { label: 'Not yet', reply: "That's okay. Old rules take a while to update. Reading it still counts." },
+        ],
+      },
+      { kind: 'input', key: 'mine', text: 'Want to put the patch in your own words? Something to tell yourself next time the old rule shows up.', placeholder: 'My version (optional)', skip: 'Skip' },
+      { kind: 'say', text: "Feelings aren't right or wrong. They're information, and you get to decide what to do with them.", cta: 'Done', go: 'end' },
     ],
   },
 
@@ -1027,7 +1159,7 @@ SKILL['self-heal'] = SKILL['self-validation'];
 /** The loadout, in the order the cards are dealt. */
 export const LOADOUT = SKILLS.filter((k) => k.loadout).map((k) => k.id);
 
-/** 30-day rotation, advanced by visit day (never by calendar day). Distress tolerance early, practised while calm. */
+/** The daily rotation, advanced by visit day (never by calendar day). Distress tolerance early, practised while calm. */
 export interface Quest {
   skill: string;
   /** start at this step id (after the intro) */
@@ -1066,6 +1198,9 @@ export const ROTATION: Quest[] = [
   { skill: 'volume-down' },
   { skill: 'self-soothe', special: 'comfort', label: 'Add one thing to your Comfort inventory' },
   { skill: 'wise-mind', special: 'free', label: 'Free choice' },
+  { skill: 'emotion-myths' },
+  { skill: 'long-term-positives' },
+  { skill: 'problem-solving' },
 ];
 
 /**
