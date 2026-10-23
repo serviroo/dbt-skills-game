@@ -77,7 +77,7 @@ export async function startHarness(flags = {}) {
 
   /** A fresh, isolated browser profile at phone size, optionally seeded with localStorage before the app runs. */
   async function open(seed = {}, query = '?mute', viewport = { width: 390, height: 844 }) {
-    const ctx = await browser.newContext({ viewport, deviceScaleFactor: 2, acceptDownloads: true, serviceWorkers: 'block' });
+    const ctx = await browser.newContext({ viewport, deviceScaleFactor: 2, acceptDownloads: true, serviceWorkers: 'block', ...(flags.media === 'true' ? { recordVideo: { dir: out, size: viewport } } : {}) });
     await ctx.addInitScript((s) => {
       if (sessionStorage.getItem('e2e-seeded')) return;
       sessionStorage.setItem('e2e-seeded', '1');
