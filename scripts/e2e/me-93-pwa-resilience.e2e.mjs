@@ -10,7 +10,7 @@ import { writeServiceWorker } from '../sw-build.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const KIT = JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: 1, companionAt: 1 });
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.woff2': 'font/woff2', '.png': 'image/png', '.svg': 'image/svg+xml', '.glb': 'model/gltf-binary', '.txt': 'text/plain' };
+const MIME = { '.html': 'text/html; charset=utf-8; note="javascript"', '.js': 'application/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.woff2': 'font/woff2', '.png': 'image/png', '.svg': 'image/svg+xml', '.glb': 'model/gltf-binary', '.txt': 'text/plain' };
 const NOISE = /WebGL|GPU stall|AudioContext|Failed to load resource/i;
 
 let scratch;
@@ -189,7 +189,8 @@ export const scenarios = {
     const base = await build(shared);
     const v1 = deploy(base, 'v1');
     const srv = await host(v1.dir);
-    const { ctx, page, errors } = await context(h);
+    const { ctx, page, errors } = await context(h, { webgl: false });
+    const jsType = MIME['.js'];
     try {
       await page.goto(srv.url + '?mute');
       await ready(page);
@@ -219,12 +220,18 @@ export const scenarios = {
       await shot(page, 'pwa-01-working-version-after-broken-deploys');
       await ctx.setOffline(false);
       const v2 = deploy(base, 'v2', { rename: true });
+      MIME['.js'] = 'text/javascript1.5; charset=utf-8';
       srv.use(v2.dir);
       const good = await update(page);
       expect(good === 'activated', `a complete deploy ended "${good}" instead of installing`);
       await active(page, v2, sleep);
+      await page.reload();
+      await ready(page);
+      await page.locator('.title-screen').waitFor({ timeout: 20000 });
+      expect(await tagOf(page) === 'v2', 'the valid legacy JavaScript MIME type did not boot');
       expect(!errors.length, errors.join('\n'));
     } finally {
+      MIME['.js'] = jsType;
       await ctx.close();
       await srv.close();
     }

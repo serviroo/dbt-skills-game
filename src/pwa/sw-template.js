@@ -11,15 +11,16 @@ const abs = (path) => new URL(path, SCOPE).href;
 const KEEP = 3;
 
 const TYPES = [
-  [/\.m?js$/i, /javascript|ecmascript/i],
-  [/\.css$/i, /text\/css/i],
-  [/\.html?$/i, /text\/html/i],
+  [/\.m?js$/i, /^(?:(?:application|text)\/(?:x-)?(?:ecma|java)script|text\/(?:javascript1\.[0-5]|jscript|livescript))$/i],
+  [/\.css$/i, /^text\/css$/i],
+  [/\.html?$/i, /^text\/html$/i],
 ];
 function typeProblem(url, type) {
   const path = new URL(url).pathname;
-  const want = url === SHELL ? /text\/html/i : TYPES.find(([ext]) => ext.test(path))?.[1];
-  if (want) return want.test(type) ? '' : `got ${type || 'no content type'}`;
-  return /text\/html/i.test(type) ? 'got HTML' : '';
+  const essence = type.split(';', 1)[0].replace(/^[\t\n\r ]+|[\t\n\r ]+$/g, '');
+  const want = url === SHELL ? /^text\/html$/i : TYPES.find(([ext]) => ext.test(path))?.[1];
+  if (want) return want.test(essence) ? '' : `got ${type || 'no content type'}`;
+  return /^text\/html$/i.test(essence) ? 'got HTML' : '';
 }
 
 async function fetchClean(url) {
