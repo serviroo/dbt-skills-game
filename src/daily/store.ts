@@ -6,7 +6,6 @@
 import { MODULES, ROTATION, SKILL, type StatId } from '../content/dbt';
 import { DAILY_GIFTS, WARDEN_XP, RANK_XP, RANKS, STAT_BASE, TODAY_LINES, type DayLine } from '../content/daily-lines';
 import { ACCENT_IDS, CARD_BACK_IDS, PLATE_IDS, SHADOW_IDS, THEME_IDS, TITLE_IDS, type AccentId, type CardBackId, type PlateId, type ShadowId, type ThemeId, type TitleId } from '../content/roster-lines';
-import { REGION_IDS, type RegionId } from '../content/crisis-lines';
 import { cleanName, readYou, writeYou } from '../core/you';
 import { APP_ID, BESIDE, SAVE_KEY, YOU_KEY } from '../core/stored-names';
 
@@ -86,8 +85,11 @@ export interface Settings {
   companion: string;
   /** Their names for the roster shadows (each its own choice, 'name:<id>' in setAt). No entry = no name. */
   names: Partial<Record<ShadowId, string>>;
-  /** The country whose crisis lines the Safe Zone shows ('' = follow the device language). */
-  region: RegionId | '';
+  /**
+   * The country whose crisis lines the Safe Zone shows ('' = follow the device language). An id this build doesn't
+   * know is kept and shows "Somewhere else".
+   */
+  region: string;
 }
 export interface Flags {
   rankSeen: number;
@@ -421,7 +423,7 @@ export function normalize(raw: unknown): State | null {
     base.settings.title = oneOf<TitleId | ''>(pf.title, TITLE_IDS, '');
     base.settings.playerName = cleanName(pf.playerName);
     base.settings.companion = cleanName(pf.companion);
-    base.settings.region = oneOf<RegionId | ''>(pf.region, REGION_IDS, '');
+    base.settings.region = typeof pf.region === 'string' && /^[a-z]{2,16}$/.test(pf.region) ? pf.region : '';
     if (isObj(pf.names))
       for (const id of SHADOW_IDS) {
         const n = own(pf.names, id) ? cleanName(pf.names[id]) : '';
@@ -877,12 +879,12 @@ export class Store {
   /**
    * Union merge for Restore: imported data can only add. Events, list items, people and maps by id (duplicates inside
    * the file count once; one removed here comes back, newer than its removal), diary per field, the newer line per day,
-   * and the diary rows the file uses, and the titles the file has seen. The Wardrobe picks, the equipped title and each
-   * shadow's name come from the file only where this device has no change time for that choice (the player never set it here),
-   * so a new device gets them back; one the player made here, a cleared name included, always wins. A choice taken from the
-   * file takes the file's change time too, never later than this device's now (now when the file has none), so another
-   * open copy doesn't see it as older than its own default. Explicit sound and motion choices stay on this device, and the
-   * file's removals are not applied.
+   * and the diary rows the file uses, and the titles the file has seen. The Wardrobe picks, the equipped title, each
+   * shadow's name and the crisis-line country come from the file only where this device has no change time for that
+   * choice (the player never set it here), so a new device gets them back; one the player made here, a cleared name
+   * included, always wins. A choice taken from the file takes the file's change time too, never later than this
+   * device's now (now when the file has none), so another open copy doesn't see it as older than its own default.
+   * Explicit sound and motion choices stay on this device, and the file's removals are not applied.
    */
   merge(other: State) {
     this.sync();
