@@ -365,7 +365,7 @@ export const scenarios = {
     await h.sleep(800);
     const card = a.page.locator('.dq-card');
     h.expect(await card.evaluate((el) => el.classList.contains('is-open')), 'the card already flipped today is closed again');
-    h.expect(/Crossroads/.test(await card.getAttribute('aria-label')), `today's card after the rotation grew is not Crossroads: ${await card.getAttribute('aria-label')}`);
+    h.expect(/Still Center/.test(await card.getAttribute('aria-label')), `the card already revealed today changed when the rotation grew: ${await card.getAttribute('aria-label')}`);
     await h.shot(a.page, 'dt-rotation-flipped');
     const kept = await saved(h, a.page);
     h.expect(kept.events.length === flipped.events.length && progress(kept, 'turning-the-mind').xp === progress(flipped, 'turning-the-mind').xp, 'loading after the rotation change credited something');
