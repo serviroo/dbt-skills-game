@@ -13,7 +13,7 @@ const state = path.join(out, 'state.json');
 const results = [];
 fs.mkdirSync(out, { recursive: true });
 
-async function run(label, args, interrupt = false) {
+async function run(label, args, interrupt = null) {
   fs.rmSync(state, { force: true });
   const child = spawn(process.execPath, [path.join(root, 'scripts/e2e.mjs'), ...args], { cwd: out, env: { ...process.env, DEBUG: 'pw:browser' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';
@@ -22,7 +22,7 @@ async function run(label, args, interrupt = false) {
   const killTimer = setTimeout(() => child.kill('SIGKILL'), 100000);
   const collect = (data) => {
     log += data;
-    if (interrupt && log.includes('fixture ready')) { interrupt = false; child.kill('SIGTERM'); }
+    if (interrupt && log.includes('fixture ready')) { const signal = interrupt; interrupt = null; child.kill(signal); }
   };
   child.stdout.on('data', collect);
   child.stderr.on('data', collect);
@@ -103,8 +103,10 @@ export const scenarios = {
   const reportError = await run('report-write-error', [`--scenario=${name}-report-error`]);
   assert.notEqual(reportError.code, 0);
   assert.match(reportError.log, /EISDIR/);
-  const signal = await run('signal-cleanup', [`--scenario=${name}-signal`], true);
+  const signal = await run('signal-cleanup', [`--scenario=${name}-signal`], 'SIGTERM');
   assert.equal(signal.code, 130);
+  const sigint = await run('sigint-cleanup', [`--scenario=${name}-signal`], 'SIGINT');
+  assert.equal(sigint.code, 130);
   fs.writeFileSync(duplicate, `export const scenarios = { '${name}-signal': async () => {} };`, { flag: 'wx' });
   const collision = await run('duplicate-name', [`--file=${name}`]);
   assert.notEqual(collision.code, 0);
@@ -114,6 +116,12 @@ export const scenarios = {
   const missing = await run('missing-file', ['--file=does-not-exist']);
   assert.notEqual(missing.code, 0);
   assert.match(missing.log, /no scenario file/);
+  for (const key of ['file', 'scenario']) {
+    const empty = await run(`empty-${key}`, [`--${key}=`]);
+    assert.notEqual(empty.code, 0);
+    assert.match(empty.log, new RegExp(`--${key} needs a value`));
+    assert(!empty.log.includes('renderer:'));
+  }
   const startup = await run('startup-failure', [`--scenario=${name}-signal`, '--host=invalid.invalid']);
   assert.notEqual(startup.code, 0);
   assert.match(startup.log, /no free port/);

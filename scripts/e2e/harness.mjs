@@ -53,7 +53,7 @@ async function serve(host) {
 function launch(flags) {
   if (flags.ws) return chromium.connect(flags.ws, { headers: { 'x-playwright-launch-options': JSON.stringify({ headless: flags.headless === 'true', args: ['--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] }) } });
   const gl = flags.gpu ? ['--use-angle=vulkan', '--ignore-gpu-blocklist'] : ['--use-gl=angle', '--use-angle=swiftshader'];
-  return chromium.launch({ headless: flags.headed !== 'true', args: [...gl, '--autoplay-policy=no-user-gesture-required'] });
+  return chromium.launch({ headless: flags.headed !== 'true', handleSIGINT: false, handleSIGTERM: false, args: [...gl, '--autoplay-policy=no-user-gesture-required'] });
 }
 
 export async function startHarness(flags = {}) {

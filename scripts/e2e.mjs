@@ -12,6 +12,9 @@ import { startHarness } from './e2e/harness.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.join(root, 'scripts/e2e');
 const flags = Object.fromEntries(process.argv.slice(2).filter((a) => a.startsWith('--')).map((a) => { const [k, ...v] = a.slice(2).split('='); return [k, v.length ? v.join('=') : 'true']; }));
+for (const key of ['file', 'scenario']) {
+  if (flags[key] === '') throw new Error(`--${key} needs a value`);
+}
 
 const all = [];
 const fileOf = new Map();
