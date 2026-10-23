@@ -45,7 +45,7 @@ async function audit(page, cdp, scope, skip) {
           }
         }
       }
-      const tabbable = (el) => el.tabIndex >= 0 && !el.disabled && !el.closest('[inert]');
+      const tabbable = (el) => el.tabIndex >= 0 && !el.matches(':disabled') && !el.closest('[inert]');
       return { found, items: probe.map((el) => ({ kind: el.matches(CONTROLS) ? 'name' : 'image', what: name(el), tabbable: el.matches(CONTROLS) && tabbable(el) })) };
     },
     { scope, skip, CONTROLS },
