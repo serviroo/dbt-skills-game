@@ -79,13 +79,16 @@ function lowHum(scale: number) {
     return null;
   }
   void ctx.resume?.();
-  const master = ctx.createGain();
-  master.gain.value = 0;
+  // two gains in a row, one writer each: the breath slowly swells `breath`, the player's volume glides `vol`
+  const breath = ctx.createGain();
+  breath.gain.value = 0;
+  const vol = ctx.createGain();
+  vol.gain.value = scale;
   const lp = ctx.createBiquadFilter();
   lp.type = 'lowpass';
   lp.frequency.value = 360;
   lp.Q.value = 0.4;
-  lp.connect(master).connect(ctx.destination);
+  lp.connect(breath).connect(vol).connect(ctx.destination);
   const oscs = [
     [98, 'sine', 0.6],
     [98.6, 'sine', 0.35],
@@ -101,26 +104,23 @@ function lowHum(scale: number) {
     o.start();
     return o;
   });
-  let level = 0.05;
-  master.gain.setTargetAtTime(level * scale, ctx.currentTime, 0.8);
+  breath.gain.setTargetAtTime(0.05, ctx.currentTime, 0.8);
   let dead = false;
   return {
     setScale(s: number) {
       if (dead) return;
-      scale = s;
-      master.gain.cancelScheduledValues(ctx.currentTime);
-      master.gain.setValueAtTime(level * scale, ctx.currentTime);
+      // the glide the engine gives Master, Music and Effects (setUser: ramp 0.08 s, tau = ramp / 4), so no click
+      vol.gain.setTargetAtTime(s, ctx.currentTime, 0.02);
     },
     breathe(s: number) {
       if (dead) return;
-      level = 0.035 + s * 0.03;
-      master.gain.setTargetAtTime(level * scale, ctx.currentTime, 0.25);
+      breath.gain.setTargetAtTime(0.035 + s * 0.03, ctx.currentTime, 0.25);
       lp.frequency.setTargetAtTime(300 + s * 140, ctx.currentTime, 0.3);
     },
     stop() {
       if (dead) return;
       dead = true;
-      master.gain.setTargetAtTime(0, ctx.currentTime, 0.25);
+      breath.gain.setTargetAtTime(0, ctx.currentTime, 0.25);
       setTimeout(() => {
         oscs.forEach((o) => o.stop());
         void ctx.close();
