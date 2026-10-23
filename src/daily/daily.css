@@ -159,6 +159,12 @@
   border: 1.5px solid var(--accent);
   transform: rotate(45deg);
 }
+@media (max-width: 359px) {
+  .dq-brand {
+    gap: 8px;
+    letter-spacing: 0.12em;
+  }
+}
 .dq-safe,
 .dq-back,
 .dq-icbtn {
@@ -554,7 +560,7 @@
   margin-top: 10px;
 }
 .dq-opts--fills .dq-opt {
-  font-size: 15px;
+  font-size: 16px;
   min-height: 44px;
   font-style: italic;
 }
@@ -645,6 +651,11 @@
   display: grid;
   grid-template-columns: repeat(6, minmax(44px, 1fr));
   width: 100%;
+}
+@media (max-width: 359px) {
+  .dq-seg--6 {
+    grid-template-columns: repeat(3, minmax(44px, 1fr));
+  }
 }
 .dq-seg--3,
 .dq-seg--range,
@@ -1155,7 +1166,7 @@ textarea.dq-input {
 .dq-card {
   position: relative;
   display: block;
-  width: min(240px, 72vw);
+  width: min(240px, 75vw);
   container-type: inline-size;
   aspect-ratio: 5 / 7;
   padding: 0;
@@ -1314,7 +1325,7 @@ textarea.dq-input {
 }
 .dq-cf-blurb {
   margin-top: 10px !important;
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.45;
   color: #b4cce4;
 }
@@ -1347,7 +1358,7 @@ textarea.dq-input {
   margin-top: 0;
 }
 .dq-quest-foot {
-  font-size: 14px;
+  font-size: 16px;
   color: var(--t-faint);
   text-align: center;
 }
@@ -1461,7 +1472,7 @@ textarea.dq-input {
   color: var(--t-title);
 }
 .dq-tile-s {
-  font-size: 13.5px;
+  font-size: 16px;
   color: var(--t-dim);
   line-height: 1.3;
 }
@@ -1603,8 +1614,14 @@ textarea.dq-input {
 .dq-feedback .dq-text {
   font-size: 18px;
 }
+.dq-step-body .dq-btn--link {
+  min-width: 44px;
+}
 .dq-step-body .dq-small {
   margin-top: 14px;
+}
+.dq-step-body .dq-hint {
+  font-size: 16px;
 }
 
 .dq-ring {
@@ -2309,6 +2326,9 @@ textarea.dq-input {
   font-style: italic;
   white-space: nowrap;
 }
+.dq-diary .dq-small {
+  font-size: 16px;
+}
 .dq-week {
   overflow-x: auto;
   margin-top: 10px;
@@ -2342,6 +2362,7 @@ textarea.dq-input {
   letter-spacing: 0;
 }
 .dq-table tbody th {
+  font-size: 16px;
   text-align: left;
   font-weight: 400;
   line-height: 1.2;
@@ -2646,9 +2667,6 @@ textarea.dq-input {
   .dq-cardface--front {
     padding: 16px 16px 14px;
   }
-  .dq-cf-blurb {
-    font-size: 14.5px;
-  }
 }
 .dq-cf-art {
   flex: 1 1 auto;
@@ -2847,6 +2865,7 @@ textarea.dq-input {
 /* ---------- today's line ---------- */
 .dq-lines-ask {
   margin-bottom: 12px !important;
+  font-size: 16px;
 }
 .dq-lines-opts {
   display: flex;
@@ -3059,13 +3078,13 @@ textarea.dq-input {
   color: #eaf6ff;
 }
 .dq-artentry-s {
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.4;
   color: var(--t-body);
 }
 .dq-artentry-prompt {
   margin-top: 4px;
-  font-size: 14.5px;
+  font-size: 16px;
   font-style: italic;
   color: #a6d2f2;
 }
