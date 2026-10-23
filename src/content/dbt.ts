@@ -913,7 +913,7 @@ export const SKILLS: Skill[] = [
       { id: 'c', kind: 'input', key: 'c', title: 'C. Cope ahead', text: 'Something hard coming up? Describe it in a few words.', placeholder: 'Optional', skip: 'Keep it in my head' },
       { kind: 'choice', key: 'cskill', text: 'Pick a skill to bring with you.', options: o('STOP', 'TIPP breathing', 'Self-validation', 'DEAR MAN') },
       { kind: 'timer', seconds: 30, visual: 'glow', text: (a) => `Picture yourself in it, using ${s(a, 'cskill', 'that skill')}, step by step. See it going okay.` },
-      { kind: 'timer', seconds: 10, visual: 'glow', text: 'Now let your shoulders drop. Rehearsal done.', go: 'body' },
+      { kind: 'timer', seconds: 20, visual: 'glow', text: 'Now let your shoulders drop. Rehearsal done.', go: 'body' },
       { id: 'please', kind: 'checks', title: 'PLEASE. Body check', text: 'No grades. Only noticing.', rows: ['Body feeling okay, or looked after if it isn\'t?', 'Eaten something today?', 'Steered clear of things that knock your mood around?', 'Sleep okay?', 'Moved your body a little?'], go: 'body' },
       { id: 'body', kind: 'choice', key: 'now', text: 'Want to do one small thing for your body right now?', options: [{ label: 'Water', go: 'end' }, { label: 'A snack', go: 'end' }, { label: 'A stretch', go: 'end' }, { label: 'A few minutes outside', go: 'end' }, { label: 'Not now', go: 'end' }] },
     ],
@@ -1074,7 +1074,7 @@ export const SKILLS: Skill[] = [
     steps: [
       { kind: 'intro', text: 'For when the relationship matters most. Keep the connection while you talk.' },
       { kind: 'say', title: 'G. Gentle', text: 'No attacks, threats or put-downs, even when it\'s hard. A "no" can be tolerated.' },
-      { kind: 'say', title: 'I. Interested', text: 'Listen to their side. Let them finish. Be patient if they need time.' },
+      { kind: 'say', title: 'I. Interested', text: 'Listen to their side. Let them finish. Give them time if they need it.' },
       { kind: 'input', key: 'v', title: 'V. Validate', text: 'Show you get how they see it. "I can see this is hard for you, and..."', placeholder: 'My validating line (optional)', skip: 'Skip' },
       { kind: 'say', title: 'E. Easy manner', text: 'A little lightness. Soft, not stiff. A small smile helps.' },
       { kind: 'choice', key: 'first', text: 'Which one will you try first?', options: [{ label: 'Gentle', go: 'end' }, { label: 'Interested', go: 'end' }, { label: 'Validate', go: 'end' }, { label: 'Easy manner', go: 'end' }] },

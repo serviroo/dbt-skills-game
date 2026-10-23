@@ -21,6 +21,8 @@ const ENFORCED = new Set([
   'self-soothe',
   'improve',
   'willing-hands',
+  'abc-please',
+  'give',
 ]);
 const MAX_TAPS = 12;
 const WORKERS = 3;

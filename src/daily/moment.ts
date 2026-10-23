@@ -5,6 +5,7 @@
  *           No questions, no chips, no XP shown, exit any time, optional low hum (off by default).
  */
 import { animate } from '../ui/anim';
+import { WINDOW } from '../motion/tokens';
 import { type Next } from '../content/dbt';
 import { CHECKIN } from '../content/daily-lines';
 import type { App, Route, ScreenOut } from './app';
@@ -191,11 +192,11 @@ export function momentScreen(app: App, route: Route): ScreenOut {
     const still = app.reduced();
     const rr = still ? 64 : 44 + s * 32;
     line.setAttribute('r', rr.toFixed(2));
-    line.setAttribute('stroke-opacity', (0.55 + s * 0.4).toFixed(3));
+    line.setAttribute('stroke-opacity', (still ? 0.95 : 0.55 + s * 0.4).toFixed(3));
     orb.setAttribute('r', (rr + 14).toFixed(2));
-    orb.setAttribute('opacity', (still ? 0.35 + s * 0.65 : 0.75 + s * 0.25).toFixed(3));
+    orb.setAttribute('opacity', (still ? 1 : 0.75 + s * 0.25).toFixed(3));
     echo.setAttribute('r', (still ? 72 : rr + 6 + (1 - s) * 10).toFixed(2));
-    echo.setAttribute('stroke-opacity', (0.15 + s * 0.35).toFixed(3));
+    echo.setAttribute('stroke-opacity', (still ? 0.5 : 0.15 + s * 0.35).toFixed(3));
     hum?.breathe(s);
     // one line at a time: a beat of quiet first, then a new line every LINE_S seconds
     const k = Math.floor((e - 1.2) / LINE_S);
@@ -205,13 +206,14 @@ export function momentScreen(app: App, route: Route): ScreenOut {
       if (i === 0 && k > 0) passes++;
       words.textContent = typo(L[i]);
       fades.splice(0).forEach((a) => a.cancel());
+      const closeMs = still ? WINDOW.reducedCloseMs : 900;
       fades.push(
-        animate(words, [{ opacity: 0, transform: still ? 'none' : 'translateY(4px)' }, { opacity: 1, transform: 'none' }], { duration: still ? 400 : 1300, easing: 'cubic-bezier(.16,1,.3,1)', fill: 'both' }),
-        animate(words, [{ opacity: 1 }, { opacity: 0 }], { duration: 900, delay: (LINE_S - 1.1) * 1000, easing: 'ease-in', fill: 'forwards' }),
+        animate(words, still ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }], { duration: still ? WINDOW.reducedFadeMs : 1300, easing: 'cubic-bezier(.16,1,.3,1)', fill: 'both' }),
+        animate(words, [{ opacity: 1 }, { opacity: 0 }], { duration: closeMs, delay: (LINE_S - 0.2) * 1000 - closeMs, easing: 'ease-in', fill: 'forwards' }),
       );
       if (after && (passes > 0 || i === L.length - 1) && after.classList.contains('is-hidden')) {
         after.classList.remove('is-hidden');
-        animate(after, [{ opacity: 0 }, { opacity: 1 }], { duration: 1200 });
+        animate(after, [{ opacity: 0 }, { opacity: 1 }], { duration: still ? WINDOW.reducedFadeMs : 1200 });
       }
     }
   });
@@ -231,6 +233,7 @@ export function momentScreen(app: App, route: Route): ScreenOut {
     bubbles: [0.6, 0.3],
     leave: () => {
       stop();
+      fades.forEach((a) => a.cancel());
       offVolume?.();
       hum?.stop();
       hum = null;
