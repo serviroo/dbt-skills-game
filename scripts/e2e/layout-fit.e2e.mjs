@@ -206,7 +206,8 @@ function scenario(id, spec) {
           await settle(page);
           if ((await page.evaluate(() => document.querySelector('.dq-step-body')?.innerHTML)) === before) break;
         }
-        h.expect(views.length > 3, `${id} ${size}: the walk through ${WALK} stopped after ${views.length} steps`);
+        const left = await page.evaluate((sid) => !(window.__daily.route.name === 'skill' && window.__daily.route.id === sid), spec.route.id);
+        h.expect(left && views.length > 3, `${id} ${size}: the walk through ${WALK} stopped after ${views.length} steps without finishing it`);
       } else {
         if (spec.scope) await page.evaluate((s) => document.querySelector(s)?.scrollIntoView({ block: 'start', behavior: 'instant' }), spec.scope[0]);
         h.expect(await page.evaluate((s) => s.some((x) => document.querySelector(x)), scope), `${id} ${size}: nothing on screen matches ${scope.join(', ')}`);
