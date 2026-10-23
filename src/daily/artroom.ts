@@ -247,6 +247,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
   const own = (id?: string | null) => (id ? `edit:${id}:${tab.id}` : `${kind}:${tab.id}`);
   let key = own(r.id);
   let saving = false;
+  let storing = false;
   let recId = r.id ?? null;
   let rec: DrawingRec | null = null;
   let bases: string[] | undefined;
@@ -394,8 +395,12 @@ export function drawScreen(app: App, route: Route): ScreenOut {
       n: pad.strokes.length,
       strokes: pad.strokes.map((s) => ({ i: s.i, w: s.w, p: s.p })),
     };
-    const res = await as.put(first ? next : { ...next, bases: bases ?? [], after: rec?.updated });
-    if (recId !== id) {
+    storing = true;
+    const res = await as.put(first ? next : { ...next, bases: bases ?? [], after: rec?.updated }).finally(() => (storing = false));
+    // removed in another tab meanwhile: the removal kept these strokes as a draft. A save that landed on the page went
+    // with it, so that draft is the copy; one kept apart as its own page replaces the draft.
+    const lost = recId !== id;
+    if (lost && res.id === id) {
       dirty = true;
       flushDraft();
       return null;
@@ -408,7 +413,8 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     const copied = res.id !== id;
     const oldKey = key.endsWith(`:${tab.id}`) ? key : own(first ? undefined : id);
     key = oldKey;
-    if (copied) key = own(res.id);
+    // a copy kept only in memory rewrites the removal's draft in place, so the strokes stay on disk as one draft
+    if (copied && !(lost && failed)) key = own(res.id);
     if (failed) {
       dirty = true;
       flushDraft();
@@ -567,7 +573,8 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     recId = null;
     rec = null;
     bases = undefined;
-    if (dirty || pad.drawing) {
+    // a save still on its way to the disk may keep these strokes as their own page, so they stay until it lands
+    if (dirty || pad.drawing || storing) {
       dirty = true;
       flushDraft();
       say(p(ART.draft, 'dq-small'));
