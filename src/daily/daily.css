@@ -3078,13 +3078,13 @@ textarea.dq-input {
   color: #eaf6ff;
 }
 .dq-artentry-s {
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.4;
   color: var(--t-body);
 }
 .dq-artentry-prompt {
   margin-top: 4px;
-  font-size: 14.5px;
+  font-size: 16px;
   font-style: italic;
   color: #a6d2f2;
 }
