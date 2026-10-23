@@ -68,7 +68,7 @@ export function easeScreen(app: App, route: Route): ScreenOut {
 
 // ---------------- Give me a moment ----------------
 /** A low, soft two-note hum that swells a little with the breath. Off by default; made only after the player turns it on. */
-function lowHum() {
+function lowHum(scale: number) {
   type AC = typeof AudioContext;
   const Ctor: AC | undefined = window.AudioContext ?? (window as unknown as { webkitAudioContext?: AC }).webkitAudioContext;
   if (!Ctor) return null;
@@ -101,12 +101,20 @@ function lowHum() {
     o.start();
     return o;
   });
-  master.gain.setTargetAtTime(0.05, ctx.currentTime, 0.8);
+  let level = 0.05;
+  master.gain.setTargetAtTime(level * scale, ctx.currentTime, 0.8);
   let dead = false;
   return {
+    setScale(s: number) {
+      if (dead) return;
+      scale = s;
+      master.gain.cancelScheduledValues(ctx.currentTime);
+      master.gain.setValueAtTime(level * scale, ctx.currentTime);
+    },
     breathe(s: number) {
       if (dead) return;
-      master.gain.setTargetAtTime(0.035 + s * 0.03, ctx.currentTime, 0.25);
+      level = 0.035 + s * 0.03;
+      master.gain.setTargetAtTime(level * scale, ctx.currentTime, 0.25);
       lp.frequency.setTargetAtTime(300 + s * 140, ctx.currentTime, 0.3);
     },
     stop() {
@@ -157,8 +165,13 @@ export function momentScreen(app: App, route: Route): ScreenOut {
     goNext(app, { to: 'skill', id, entry });
   }, { kind: 'quiet', cls: 'dq-mo-next is-hidden' }) : null;
   let hum: ReturnType<typeof lowHum> = null;
+  const humScale = () => {
+    const l = app.opts.volume?.get();
+    return l ? (l.muted ? 0 : l.master * l.sfx) : (st.state.settings.sound ? 1 : 0);
+  };
+  const offVolume = app.opts.volume?.subscribe(() => hum?.setScale(humScale()));
   const humToggle = toggle('Low hum', false, (on) => {
-    if (on) hum = lowHum();
+    if (on) hum = lowHum(humScale());
     else {
       hum?.stop();
       hum = null;
@@ -218,6 +231,7 @@ export function momentScreen(app: App, route: Route): ScreenOut {
     bubbles: [0.6, 0.3],
     leave: () => {
       stop();
+      offVolume?.();
       hum?.stop();
       hum = null;
     },
