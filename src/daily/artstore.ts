@@ -107,6 +107,10 @@ export function cleanRec(raw: unknown): DrawingRec | null {
 const family = (id: string) => id.split('~')[0].slice(0, 26);
 const landKey = (id: string, rev: string) => `${id}\n${rev}`;
 const metaOf = (r: DrawingRec): DrawingMeta => ({ id: r.id, kind: r.kind, day: r.day, t: r.t, updated: r.updated, prompt: r.prompt, name: r.name, n: r.strokes.length, rev: r.rev, from: fromOf(r.from) });
+const detached = (d: Draft): Draft => {
+  const { editId, bases, base, ...draft } = d;
+  return draft;
+};
 
 function req<T>(r: IDBRequest<T>) {
   return new Promise<T>((ok, bad) => {
@@ -133,6 +137,10 @@ export class ArtStore {
   private lastStamp = -Infinity;
   private lastCopy = 0;
   private channel: BroadcastChannel | null = null;
+  private tab: { id: string; ready: Promise<void> } | null = null;
+  private claimMessage: ((data: Record<string, unknown>) => void) | null = null;
+  private removals = new Set<(id: string) => void>();
+  private deleted = new Set<string>();
   /** Versions this copy saw land on disk (id + identity). A version in memory that is not here never reached disk. */
   private landed = new Set<string>();
 
@@ -140,12 +148,70 @@ export class ArtStore {
     if (typeof BroadcastChannel !== 'undefined') {
       try {
         this.channel = new BroadcastChannel(name);
-        this.channel.onmessage = () => this.drop();
+        this.channel.onmessage = ({ data }: MessageEvent<unknown>) => {
+          if (isObj(data) && (data.type === 'tab-claim' || data.type === 'tab-owned')) this.claimMessage?.(data);
+          else if (isObj(data) && data.type === 'removed' && typeof data.id === 'string') this.forget(data.id);
+          else this.drop();
+        };
       } catch {
         this.channel = null;
       }
     }
     this.db = this.connect(true);
+  }
+
+  claimTab() {
+    if (this.tab) return this.tab;
+    const owner = uid();
+    let id = uid();
+    try {
+      id = sessionStorage.getItem('dbt.tab') || id;
+    } catch {}
+    const tab = (this.tab = { id, ready: Promise.resolve() });
+    tab.ready = new Promise<void>((resolve) => {
+      let timer = 0;
+      const claim = () => {
+        try {
+          sessionStorage.setItem('dbt.tab', tab.id);
+        } catch {}
+        this.announce({ type: 'tab-claim', id: tab.id, owner });
+        clearTimeout(timer);
+        timer = window.setTimeout(() => {
+          timer = 0;
+          resolve();
+        }, 100);
+      };
+      this.claimMessage = (data) => {
+        if (data.id !== tab.id || typeof data.owner !== 'string') return;
+        if (data.type === 'tab-claim') {
+          if (data.owner === owner) return;
+          if (!timer || owner < data.owner) {
+            this.announce({ type: 'tab-owned', id: tab.id, owner: data.owner });
+            return;
+          }
+        } else if (data.owner !== owner) return;
+        tab.id = uid();
+        claim();
+      };
+      claim();
+    });
+    return tab;
+  }
+
+  onRemove(fn: (id: string) => void) {
+    this.removals.add(fn);
+    return () => this.removals.delete(fn);
+  }
+
+  private forget(id: string) {
+    this.deleted.add(id);
+    this.mem.meta.delete(id);
+    this.mem.strokes.delete(id);
+    this.mem.thumbs.delete(id);
+    for (const [key, d] of this.mem.drafts) if (d.editId === id) this.mem.drafts.set(key, detached(d));
+    this.dropUrl(id);
+    this.drop();
+    this.removals.forEach((fn) => fn(id));
   }
 
   /** Opens the database; a lost connection on open gets one more try (`again`). Null when there is none to use. */
@@ -231,6 +297,7 @@ export class ArtStore {
     const gen = this.gen;
     const fails = this.readFails;
     const rows = await this.tx(['meta'], 'readonly', (t) => req(t.objectStore('meta').getAll() as IDBRequest<DrawingMeta[]>), () => [] as DrawingMeta[]);
+    if (gen !== this.gen) return this.list();
     const byId = new Map(rows.map((m) => [m.id, m]));
     for (const m of this.mem.meta.values()) {
       const db = byId.get(m.id);
@@ -254,21 +321,23 @@ export class ArtStore {
   }
 
   /** Tells the other open copies of the app that the saved drawings changed, so their next list() reads fresh. */
-  private announce() {
+  private announce(data: unknown = 'changed') {
     try {
-      this.channel?.postMessage('changed');
+      this.channel?.postMessage(data);
     } catch {
       this.channel = null;
     }
   }
 
   async get(id: string): Promise<DrawingRec | null> {
+    const gen = this.gen;
     const [m, s] = await this.tx(
       ['meta', 'strokes'],
       'readonly',
       (t) => Promise.all([req(t.objectStore('meta').get(id) as IDBRequest<DrawingMeta | undefined>), req(t.objectStore('strokes').get(id) as IDBRequest<Stroke[] | undefined>)]),
       (): [DrawingMeta | undefined, Stroke[] | undefined] => [undefined, undefined],
     );
+    if (gen !== this.gen) return this.get(id);
     const mm = this.mem.meta.get(id), ms = this.mem.strokes.get(id);
     if (mm && ms && (!m || !s || mm.updated > m.updated)) return { ...mm, strokes: ms };
     return m && s ? { ...m, strokes: s } : null;
@@ -300,7 +369,8 @@ export class ArtStore {
     const decide = (disk: DrawingMeta | undefined): 'copy' | 'write' => {
       decided = true;
       const seen = [disk, this.mem.meta.get(rec.id)].filter((m): m is DrawingMeta => !!m);
-      if (rec.bases !== undefined && seen.some((m) => !rec.bases!.includes(revOf(m)))) {
+      const missing = !disk && (!seen.length || this.deleted.has(rec.id) || seen.some((m) => this.landed.has(landKey(m.id, revOf(m)))));
+      if (rec.bases !== undefined && (missing || seen.some((m) => !rec.bases!.includes(revOf(m))))) {
         id = this.copyId(rec.id);
         return 'copy';
       }
@@ -336,9 +406,10 @@ export class ArtStore {
           g.onsuccess = () => {
             try {
               const had = g.result;
+              if (had) this.deleted.delete(rec.id);
               prev = had ? (fin(had.updated) ? had.updated : -Infinity) : undefined;
-              if (!force && had) {
-                same = revOf(had) === revOf({ rev, updated: stamp });
+              if (!force) {
+                same = !!had && revOf(had) === revOf({ rev, updated: stamp });
                 if (same && buf) t.objectStore('thumbs').put({ type: 'image/jpeg', buf }, rec.id);
                 return ok('held');
               }
@@ -370,7 +441,7 @@ export class ArtStore {
       this.dropUrl(rec.id);
     }
     const mm = this.mem.meta.get(id);
-    if (force || ((stored === 'wrote' || stored === 'failed' || same) && (!mm || stamp >= mm.updated))) {
+    if (!this.deleted.has(id) && (force || ((stored === 'wrote' || stored === 'failed' || same) && (!mm || stamp >= mm.updated)))) {
       this.mem.meta.set(id, meta);
       this.mem.strokes.set(id, rec.strokes);
       if (thumb) this.mem.thumbs.set(id, thumb);
@@ -394,21 +465,27 @@ export class ArtStore {
   }
 
   async remove(id: string) {
-    this.mem.meta.delete(id);
-    this.mem.strokes.delete(id);
-    this.mem.thumbs.delete(id);
     const done = await this.tx(
-      ['meta', 'strokes', 'thumbs'],
+      ['meta', 'strokes', 'thumbs', 'drafts'],
       'readwrite',
       async (t) => {
         for (const s of ['meta', 'strokes', 'thumbs']) t.objectStore(s).delete(id);
+        const cursor = t.objectStore('drafts').openCursor();
+        await new Promise<void>((ok, bad) => {
+          cursor.onerror = () => bad(cursor.error);
+          cursor.onsuccess = () => {
+            const c = cursor.result;
+            if (!c) return ok();
+            if ((c.value as Draft).editId === id) c.update(detached(c.value as Draft));
+            c.continue();
+          };
+        });
         return true;
       },
       () => false,
     );
-    this.dropUrl(id);
-    this.drop();
-    if (done) this.announce();
+    this.forget(id);
+    if (done) this.announce({ type: 'removed', id });
   }
 
   private dropUrl(id: string) {
@@ -449,7 +526,9 @@ export class ArtStore {
   }
 
   async drafts(): Promise<Draft[]> {
+    const gen = this.gen;
     const all = await this.tx(['drafts'], 'readonly', (t) => req(t.objectStore('drafts').getAll() as IDBRequest<Draft[]>), () => [] as Draft[]);
+    if (gen !== this.gen) return this.drafts();
     const byKey = new Map(all.filter((d) => d && typeof d.key === 'string').map((d) => [d.key, d]));
     for (const m of this.mem.drafts.values()) {
       const d = byKey.get(m.key);
@@ -460,7 +539,17 @@ export class ArtStore {
 
   async putDraft(d: Draft) {
     this.mem.drafts.set(d.key, d);
-    await this.tx(['drafts'], 'readwrite', async (t) => void t.objectStore('drafts').put(d, d.key), () => undefined);
+    await this.tx(['drafts', 'meta'], 'readwrite', async (t) => {
+      if (d.editId) {
+        const saved = await req(t.objectStore('meta').get(d.editId));
+        const m = this.mem.meta.get(d.editId);
+        if (!saved && (!m || this.deleted.has(d.editId) || this.landed.has(landKey(m.id, revOf(m))))) d = detached(d);
+      }
+      t.objectStore('drafts').put(d, d.key);
+    }, () => {
+      if (d.editId && this.deleted.has(d.editId)) d = detached(d);
+    });
+    this.mem.drafts.set(d.key, d);
   }
 
   async dropDraft(key: string) {
