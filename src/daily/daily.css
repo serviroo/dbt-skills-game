@@ -363,6 +363,7 @@
   max-width: 36em;
 }
 .dq-text--step {
+  overflow-wrap: anywhere;
   font-size: 18.5px;
   line-height: 1.6;
   color: #c9dcef;
