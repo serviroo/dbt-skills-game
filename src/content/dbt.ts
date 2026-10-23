@@ -1167,17 +1167,15 @@ export const SAFE = {
   comfort: { title: 'Your comfort kit', text: 'Pick one and do it now.', empty: 'Nothing saved yet. A blanket, a warm drink and a slow song are good places to start.' },
   talk: {
     title: 'Talk to someone now',
-    text: "These are free, private, and there for exactly this. You don't have to be in danger to reach out.",
-    danger: 'If you are in danger right now, call 911.',
+    text: "These are private, and there for exactly this. You don't have to be in danger to reach out.",
+    danger: 'If you are in danger right now, call {num}.',
+    dangerElsewhere: 'If you are in danger right now, call your local emergency number.',
+    emergency: 'If you are in danger right now.',
+    country: 'Lines for',
+    countryHint: "Change it if this isn't where you are. Nothing is looked up online.",
+    elsewhere: 'lists free lines in many countries.',
   },
+  settings: { label: 'Country', hint: 'The Safe Zone shows crisis lines for this country. Nothing is looked up online.' },
   close: ['This is here any time, on every screen.', "Go do your thing. This'll be here whenever."],
 };
 
-/** United States crisis resources (checked 2026-10-20 against 988lifeline.org, crisistextline.org, thehotline.org). */
-export const RESOURCES = [
-  { name: '988 Suicide & Crisis Lifeline', how: 'Call or text 988. Free, confidential, 24/7.', links: [{ label: 'Call 988', href: 'tel:988' }, { label: 'Text 988', href: 'sms:988' }] },
-  { name: 'Crisis Text Line', how: 'Text HOME to 741741. Free, 24/7.', links: [{ label: 'Text HOME to 741741', href: 'sms:741741', body: 'HOME' }] },
-  { name: 'Emergency', how: 'If you are in danger right now.', links: [{ label: 'Call 911', href: 'tel:911' }] },
-  { name: 'National Domestic Violence Hotline', how: 'For anyone feeling unsafe with someone. Call 1-800-799-7233, or text START to 88788.', links: [{ label: 'Call', href: 'tel:18007997233' }, { label: 'Text START', href: 'sms:88788', body: 'START' }] },
-];
-export const RESOURCES_CHECKED = '2026-10-20';
