@@ -1,5 +1,7 @@
 // Draws every PWA image in code: a GLSL gate tear rendered in headless Chromium, read back as PNG.
-// node scripts/icons.mjs [--out=public] [--only=icons|splash] [--sheet=qa/out/pwa/icon-src]
+// node scripts/icons.mjs [--out=public] [--only=icons|splash] [--sheet=qa/out/pwa/icon-src] [--lose-context-at=<n>] [--lose-context-times=<k>]
+// A lost WebGL context (GPU-less CI runners) redraws that image on a fresh page, then in a software-GL browser.
+// --lose-context-at=<n> (tests) loses the context on the nth image's first <k> draws (default 1).
 import { chromium } from 'playwright';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -150,12 +152,15 @@ window.render = (o) => {
   const c = document.getElementById('c');
   c.width = o.w; c.height = o.h;
   const gl = c.getContext('webgl', { preserveDrawingBuffer: true, antialias: false, premultipliedAlpha: false });
-  const sh = (t, s) => { const x = gl.createShader(t); gl.shaderSource(x, s); gl.compileShader(x); if (!gl.getShaderParameter(x, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(x)); return x; };
+  if (!gl) throw new Error('context lost: no WebGL');
+  if (o.lose) gl.getExtension('WEBGL_lose_context')?.loseContext();
+  const lost = () => gl.isContextLost() && new Error('context lost');
+  const sh = (t, s) => { const x = gl.createShader(t); gl.shaderSource(x, s); gl.compileShader(x); if (!gl.getShaderParameter(x, gl.COMPILE_STATUS)) throw lost() || new Error(gl.getShaderInfoLog(x)); return x; };
   const pr = gl.createProgram();
   gl.attachShader(pr, sh(gl.VERTEX_SHADER, VERT));
   gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FRAG));
   gl.linkProgram(pr);
-  if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(pr));
+  if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw lost() || new Error(gl.getProgramInfoLog(pr));
   gl.useProgram(pr);
   const b = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, b);
@@ -171,7 +176,13 @@ window.render = (o) => {
   gl.uniform1f(u('uBold'), o.bold);
   gl.uniform1f(u('uSS'), o.ss);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
-  return c.toDataURL('image/png');
+  const err = lost();
+  const url = err ? '' : c.toDataURL('image/png');
+  gl.getAttachedShaders(pr)?.forEach((x) => gl.deleteShader(x));
+  gl.deleteProgram(pr);
+  gl.deleteBuffer(b);
+  if (err) throw err;
+  return url;
 };
 </script></body></html>`;
 
@@ -181,9 +192,29 @@ const ICON_LOOK = {
   tiny: { scale: 1.05, bold: 1.9 },
 };
 
-const browser = await chromium.launch({ headless: true, args: ['--use-angle=vulkan', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-features=Vulkan'] });
-const page = await browser.newPage();
+const GPU = ['--use-angle=vulkan', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-features=Vulkan'];
+const SOFTWARE = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
+const loseAt = Number(flags['lose-context-at'] ?? 0);
+const loseTimes = Number(flags['lose-context-times'] ?? 1);
+let browser = await chromium.launch({ headless: true, args: GPU });
+let page = await browser.newPage();
 await page.setContent(PAGE);
+async function draw(j, n) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await page.evaluate((o) => window.render(o), { ...j, lose: n === loseAt && attempt <= loseTimes });
+    } catch (e) {
+      if (!/context lost/.test(String(e?.message)) || attempt === 3) throw new Error(`${j.file}: ${e?.message ?? e}`);
+      console.warn(`${j.file}: WebGL context lost, drawing it again (${attempt === 1 ? 'fresh page' : 'software GL'})`);
+      if (attempt === 2) {
+        await browser.close();
+        browser = await chromium.launch({ headless: true, args: SOFTWARE });
+      } else await page.close();
+      page = await browser.newPage();
+      await page.setContent(PAGE);
+    }
+  }
+}
 const write = (rel, dataUrl) => {
   const file = path.join(outDir, rel);
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -197,8 +228,8 @@ const jobs = [];
 if (flags.only !== 'splash') for (const i of ICONS) jobs.push({ file: i.file, w: i.size, h: i.size, mode: 0, ss: i.size <= 64 ? 8 : 6, ...ICON_LOOK[i.kind] });
 if (flags.only !== 'icons') for (const s of splashImages()) jobs.push({ file: s.file, w: s.width, h: s.height, mode: 1, ss: 1, scale: 1, bold: 1 });
 let total = 0;
-for (const j of jobs) {
-  const url = await page.evaluate((o) => window.render(o), j);
+for (const [n, j] of jobs.entries()) {
+  const url = await draw(j, n + 1);
   const size = write(j.file, url);
   total += size;
   if (!flags.quiet) console.log(`${j.file}  ${j.w}x${j.h}  ${(size / 1024).toFixed(1)} KB`);
