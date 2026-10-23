@@ -1,21 +1,22 @@
 // One content and flow check for every skill in SKILLS (src/content/dbt.ts).
 // Flow, on a seeded returning save at 390x844: open the skill from the library and walk it by the first offered option
-// until it ends (its end screen, or the hand-off its first option leads to). It must end within 12 taps (starting a timer
-// doesn't count, its Next does), credit the skill exactly once, offer a working "Leave this skill" on every step with
-// no confirm dialog, keep every timer it shows skippable while it runs, and still credit it when left on screen one.
+// until its own end screen. Leaving it for anything else (another skill, the Safe Zone, Home) is a problem. It must end
+// within 12 taps (starting a timer doesn't count, its Next does), credit the skill exactly once, and keep every timer it
+// shows skippable while it runs. Then, for every screen of that walk, the skill is opened again, walked back to that
+// screen (its timer started) and left with "Leave this skill": that must reach Home with no confirm and credit it once.
 // Copy, read from the skill's content object with its text functions run on many answer sets: no em dash, no diagnosis
-// words (DESIGN.md principle 8), no unsafe phrases (principle 9), no hard-coded "Player" or unknown token, every timer
-// 20 to 90 s, and cold-water or intense-exercise steps carry a caution and a "breathe instead" option (principle 11).
+// words (DESIGN.md principle 8), none of principle 9's wording a lint can catch, no hard-coded "Player" or unknown
+// token, every timer 20 to 90 s, and cold-water or intense-exercise steps carry a caution and a "breathe instead" option
+// (principle 11).
 // Skills in ENFORCED fail the run. Every other skill's problems are printed as a todo list and returned, so the runner
 // keeps them in report.json. Once a skill passes, add it to ENFORCED.
 
 const ENFORCED = new Set([
   'sense-up', 'clear-sight', 'one-mindfully', 'effectively', 'mindful-thoughts', 'stop', 'pros-cons',
-  'radical-acceptance', 'urge-surf', 'turning-the-mind', 'body-scan', 'alternate-rebellion', 'name-emotion',
-  'check-facts', 'opposite-action', 'current-emotion', 'problem-solving', 'long-term-positives', 'emotion-myths',
-  'dear-man', 'fast', 'validation', 'self-validation', 'clarifying-priorities', 'dialectics', 'mindfulness-of-others',
-  'leave-lobby', 'volume-down', 'supplies', 'cool-air', 'warm-hands', 'absurd-scroll', 'flavour-tier', 'queue-up',
-  'lie-low',
+  'radical-acceptance', 'urge-surf', 'turning-the-mind', 'body-scan', 'alternate-rebellion', 'current-emotion',
+  'problem-solving', 'long-term-positives', 'emotion-myths', 'dear-man', 'fast', 'validation', 'self-validation',
+  'dialectics', 'mindfulness-of-others', 'leave-lobby', 'volume-down', 'supplies', 'cool-air', 'warm-hands',
+  'absurd-scroll', 'flavour-tier', 'queue-up', 'lie-low',
 ]);
 const MAX_TAPS = 12;
 const WORKERS = 3;
@@ -24,7 +25,11 @@ const DAY = 864e5;
 const COPY = {
   emDash: '—',
   diagnosis: String.raw`\b(disorders?|diagnos\w*|symptoms?|patients?|illness\w*|treatments?|relapse\w*)\b`,
-  unsafe: String.raw`committed suicide|successful attempt|failed attempt|you died|game over`,
+  // Principle 9, as far as set phrases go. A lint can't see method or means details, guilt, or abandonment, comparison
+  // and body talk said in other words; those need a person reading the copy.
+  unsafe: String.raw`committed suicide|successful attempt|failed attempt|you died|game over|less fortunate`,
+  abandon: String.raw`you(?:'|’| a)re on your own|you(?:'|’| a)re all alone|no(?:body| ?-?one) (?:cares|would (?:care|notice|miss you)|will (?:care|notice|miss you))|better off without you|everyone (?:leaves|gives up on you)`,
+  bodyNumber: String.raw`\b\d+(?:[.,]\d+)?\s?(?:kg|kgs|kilos?|kilograms?|lbs?|pounds?|calories|kcal)\b`,
   player: String.raw`\bPlayer\b`,
   token: String.raw`\{(?!(?:name|companion)\})[^}]*\}`,
   coldOrHard: String.raw`\bcold (water|shower)|\bice\b|(?<!not )\bicy\b|\bcool shower|intense (exercise|movement)|hard exercise|fast movement|move fast|\bjog\b|sprint|jumping jacks|star jumps|burpees`,
@@ -112,8 +117,11 @@ function copyProblems(page) {
         for (const o of opts) own.push(o.label, ...(o.reply ? [o.reply] : []));
         for (const t of own) lines.push([where, t]);
         if (st.kind === 'timer') {
-          const secs = new Set(typeof st.seconds === 'function' ? sets.map((a) => run(st.seconds, a)).filter(Number.isFinite) : [st.seconds]);
-          for (const n of secs) if (!(n >= 20 && n <= 90)) bad.add(`${where}: timer runs ${n} s, not 20 to 90 s`);
+          const secs = new Set(typeof st.seconds === 'function' ? sets.map((a) => run(st.seconds, a)) : [st.seconds]);
+          for (const n of secs) {
+            if (typeof n !== 'number' || !Number.isFinite(n)) bad.add(`${where}: timer has no real length (${String(n)})`);
+            else if (n < 20 || n > 90) bad.add(`${where}: timer runs ${n} s, not 20 to 90 s`);
+          }
         }
         // Cold water or hard exercise, named in the step itself or in an option that has no step of its own to warn on
         const said = texts([st.title, st.text, st.big], sets).join(' ');
@@ -133,6 +141,10 @@ function copyProblems(page) {
         if (d) bad.add(`${where}: diagnosis word "${d[0]}" in ${quote}`);
         const u = t.match(re.unsafe);
         if (u) bad.add(`${where}: unsafe wording "${u[0]}" in ${quote}`);
+        const ab = t.match(re.abandon);
+        if (ab) bad.add(`${where}: abandonment cue "${ab[0]}" in ${quote}`);
+        const bn = t.match(re.bodyNumber);
+        if (bn) bad.add(`${where}: body, food or weight number "${bn[0]}" in ${quote}`);
         if (re.player.test(t)) bad.add(`${where}: hard-coded "Player" in ${quote}, use {name}`);
         const k = t.match(re.token);
         if (k) bad.add(`${where}: unknown token ${k[0]} in ${quote}`);
@@ -168,7 +180,7 @@ async function openFromLibrary(h, page, sk) {
   await page.locator('.dq-skill .dq-step-body > *').first().waitFor({ timeout: 10000 });
 }
 
-/** What ends the walk: the skill's end screen, or leaving it for another skill or the Safe Zone. */
+/** null while the walk is still in the skill, "end" on its own end screen, otherwise where it went instead. */
 const ending = (page, title) =>
   page.evaluate((t) => {
     const at = document.querySelector('.dq')?.dataset.screen;
@@ -212,34 +224,64 @@ const markFirst = (page) =>
 const markStep = (page, n) => page.evaluate((k) => document.querySelector('.dq-step-body')?.firstElementChild?.setAttribute('data-skill-step', String(k)), n);
 const stepGone = (page, n) => page.waitForFunction((k) => !document.querySelector(`[data-skill-step="${k}"]`) || document.querySelector('.dq')?.dataset.screen !== 'skill', n, { timeout: 10000 });
 
-async function walk(h, page, sk, bad) {
+/** Taps "Leave this skill": it must reach Home straight away, so a confirm or a broken leave shows up here. */
+async function leave(page, where, bad) {
+  const problem = await leaveProblem(page);
+  if (problem) {
+    bad.add(`${where}: ${problem}`);
+    return false;
+  }
+  await page.locator('.dq-top [aria-label="Leave this skill"]').click();
+  const home = await page.waitForFunction(() => document.querySelector('.dq')?.dataset.screen === 'hub', null, { timeout: 5000 }).then(() => true, () => false);
+  if (!home) bad.add(`${where}: "Leave this skill" did not go straight to Home`);
+  return home;
+}
+
+/** A fresh load, for when leaving didn't work and tapping it again would only repeat the problem. */
+async function reload(h, page) {
+  await page.goto(h.server.url + '/?mute');
+  await h.reachHub(page);
+}
+
+/**
+ * Taps the first offered option on each screen until the skill's own end screen, checking each timer on the way. With
+ * leaveAt, it replays the walk up to that screen instead, starts its timer if it has one, and leaves from there.
+ */
+async function walk(h, page, sk, bad, leaveAt = 0) {
   const title = await page.locator('.dq-skill h1').textContent();
   const path = [];
   let taps = 0;
   for (let step = 1; ; step++) {
     const end = await ending(page, title);
-    if (end) return { taps, end, path };
+    if (end && leaveAt) {
+      bad.add(`walk step ${leaveAt}: walking back to it ended at ${end} instead`);
+      return { left: false };
+    }
+    if (end) {
+      if (end !== 'end') bad.add(`the walk left for ${end} before the skill's end screen (${path.join(' > ')})`);
+      return { taps, end, path, screens: step - 1 };
+    }
     if (taps > MAX_TAPS + 20) {
       bad.add(`walk did not end after ${taps} taps (${path.join(' > ')})`);
-      return { taps, end: 'never', path };
+      return { taps, end: 'never', path, screens: step - 1 };
     }
     const where = `walk step ${step}`;
-    const leave = await leaveProblem(page);
-    if (leave) bad.add(`${where}: ${leave}`);
     const timer = page.locator('.dq-step-body .dq-timer');
-    if (await timer.count()) {
+    const timed = (await timer.count()) > 0 && (!leaveAt || leaveAt === step);
+    if (timed) {
       const start = timer.locator('.dq-actions .dq-btn--primary');
       if (await start.count()) await start.first().click();
+    }
+    if (leaveAt === step) return { left: await leave(page, where, bad) };
+    if (timed) {
       const skip = page.locator('.dq-step-body > .dq-actions > button', { hasText: /^Next$/ });
       if (!((await skip.count()) && (await skip.first().isVisible()) && (await skip.first().isEnabled()))) bad.add(`${where}: the running timer has no visible Next to skip it`);
-      const leaveRunning = await leaveProblem(page);
-      if (leaveRunning) bad.add(`${where}: while the timer runs, ${leaveRunning}`);
     }
     const pick = await markFirst(page);
     if (!pick) {
       bad.add(`${where}: nothing to tap`);
       await h.shot(page, `skill-check-${sk.id}-stuck`);
-      return { taps, end: 'stuck', path };
+      return leaveAt ? { left: false } : { taps, end: 'stuck', path, screens: step };
     }
     await markStep(page, step);
     await page.locator('[data-skill-check="tap"]').click();
@@ -253,28 +295,24 @@ async function walk(h, page, sk, bad) {
   }
 }
 
-async function checkSkill(h, page, sk) {
-  const bad = new Set();
+async function checkSkill(h, page, sk, bad) {
   await toHub(h, page);
   const before = await credits(h, page, sk.id);
   await openFromLibrary(h, page, sk);
   const walked = await walk(h, page, sk, bad);
   if (walked.taps > MAX_TAPS) bad.add(`walk takes ${walked.taps} taps, more than ${MAX_TAPS} (${walked.path.join(' > ')})`);
   await toHub(h, page);
-  const after = await credits(h, page, sk.id);
-  if (after - before !== 1) bad.add(`the walk credited it ${after - before} times, not once`);
-
-  await openFromLibrary(h, page, sk);
-  const leave = await leaveProblem(page);
-  if (leave) bad.add(`screen one: ${leave}`);
-  else {
-    await page.getByRole('button', { name: 'Leave this skill' }).click();
-    const home = await page.waitForFunction(() => document.querySelector('.dq')?.dataset.screen === 'hub', null, { timeout: 5000 }).then(() => true, () => false);
-    if (!home) bad.add('leaving on screen one did not go straight to Home');
+  let had = await credits(h, page, sk.id);
+  if (had - before !== 1) bad.add(`the walk credited it ${had - before} times, not once`);
+  // Opening it again credits it each time, and leaving from any screen, the first included, must keep that credit.
+  for (let at = 1; at <= walked.screens; at++) {
+    await openFromLibrary(h, page, sk);
+    if (!(await walk(h, page, sk, bad, at)).left) await reload(h, page);
+    const now = await credits(h, page, sk.id);
+    if (now - had !== 1) bad.add(`walk step ${at}: opening it and leaving there credited it ${now - had} times, not once`);
+    had = now;
   }
-  const again = await credits(h, page, sk.id);
-  if (again - after !== 1) bad.add(`leaving on screen one credited it ${again - after} times, not once`);
-  return { problems: [...bad], walk: { taps: walked.taps, end: walked.end, path: walked.path } };
+  return { taps: walked.taps, end: walked.end, path: walked.path };
 }
 
 /** One returning player on their own profile, checking a share of the skills. */
@@ -288,18 +326,18 @@ async function worker(h, list, copy, results) {
   await h.reachHub(page);
   h.expect(!errors.length, errors.join('\n'));
   for (const sk of list) {
-    let flow;
+    const bad = new Set();
+    let walked = null;
     const seen = errors.length, opened = dialogs.length;
     try {
-      flow = await checkSkill(h, page, sk);
+      walked = await checkSkill(h, page, sk, bad);
     } catch (e) {
       await h.shot(page, `skill-check-${sk.id}-error`).catch(() => {});
-      flow = { problems: [`the check could not finish: ${String(e?.message ?? e).split('\n')[0]}`], walk: null };
-      await page.goto(h.server.url + '/?mute');
-      await h.reachHub(page);
+      bad.add(`the check could not finish: ${String(e?.message ?? e).split('\n')[0]}`);
+      await reload(h, page);
     }
     const alerts = [...dialogs.slice(opened).map((d) => `a browser dialog opened: ${d}`), ...errors.slice(seen).map((e) => `page error: ${e}`)];
-    results[sk.id] = { name: `${sk.sl} (${sk.real})`, problems: [...copy[sk.id], ...flow.problems, ...alerts], walk: flow.walk };
+    results[sk.id] = { name: `${sk.sl} (${sk.real})`, problems: [...new Set([...copy[sk.id], ...bad, ...alerts])], walk: walked };
   }
   await ctx.close();
 }
@@ -312,8 +350,9 @@ export const scenarios = {
     const unknown = [...ENFORCED].filter((id) => !all.some((s) => s.id === id));
     h.expect(!unknown.length, `ENFORCED names skills that don't exist: ${unknown.join(', ')}`);
     const only = h.flags.skills?.split(',');
+    const missing = only?.filter((id) => !all.some((s) => s.id === id)) ?? [];
+    h.expect(!missing.length, `--skills names skills that don't exist: ${missing.join(', ')}`);
     const skills = only ? all.filter((s) => only.includes(s.id)) : all;
-    h.expect(skills.length, `no skill matches --skills=${h.flags.skills}`);
     const copy = await copyProblems(page);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
