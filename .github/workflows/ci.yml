@@ -43,8 +43,6 @@ jobs:
         run: node scripts/pwa-verify.mjs --update --check
       - name: CSP sweep
         run: node scripts/pwa-csp-sweep.mjs --check
-      - name: E2E
-        run: node scripts/e2e.mjs
       - name: E2E runner contract
         run: node scripts/e2e-runner-check.mjs
       - name: PWA failure paths and Firefox storage
@@ -52,10 +50,41 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: e2e-${{ github.run_attempt }}
+          name: checks-${{ github.run_attempt }}
           path: |
             artifacts/e2e
             qa/out/pwa
+          retention-days: 7
+          if-no-files-found: ignore
+
+  e2e:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
+      options: --user 1001
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20.x
+          cache: npm
+      - run: npm ci
+      - name: Browsers come from the container
+        run: test "$(npx playwright --version)" = "Version 1.64.1" || { echo "package-lock has $(npx playwright --version); set the same version in the container image above"; exit 1; }
+      - name: E2E part ${{ matrix.shard }} of 4
+        run: node scripts/e2e.mjs --shard=${{ matrix.shard }}/4
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: e2e-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: artifacts/e2e
           retention-days: 7
           if-no-files-found: ignore
 

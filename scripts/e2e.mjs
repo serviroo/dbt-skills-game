@@ -1,6 +1,7 @@
 // Runs the end-to-end scenarios in scripts/e2e/*.e2e.mjs (file by file in name order) against its own Vite dev server
 // and Playwright Chromium, then stops only the processes it started. Exits 1 if any scenario fails.
-// node scripts/e2e.mjs [--file=<name>] [--scenario=<name>] [--headed] [--gpu] [--ws=<playwright run-server endpoint> --host=<this machine's address>]
+// node scripts/e2e.mjs [--file=<name>] [--scenario=<name>] [--shard=<i>/<n>] [--headed] [--gpu] [--ws=<playwright run-server endpoint> --host=<this machine's address>]
+// --shard=2/4 runs the second of four parts; each file goes whole to one part, spread by scenario count, so CI can run the parts in parallel.
 // --file=names runs scripts/e2e/names.e2e.mjs only. --gpu renders on this machine's GPU (Vulkan) instead of SwiftShader.
 // With --ws the browser runs on another machine (one with a real GPU) and loads the dev server bound to --host.
 // Writes screenshots and report.json to artifacts/e2e/<time>/.
@@ -31,7 +32,26 @@ for (const f of fs.readdirSync(dir).filter((f) => f.endsWith('.e2e.mjs')).sort()
 }
 if (flags.file && !all.some((s) => s.file === flags.file)) throw new Error(`no scenario file scripts/e2e/${flags.file}.e2e.mjs`);
 if (flags.scenario && !fileOf.has(flags.scenario)) throw new Error('no scenario ' + flags.scenario);
-const pick = all.filter((s) => (!flags.file || s.file === flags.file) && (!flags.scenario || s.name === flags.scenario));
+let part = null;
+if (flags.shard) {
+  const m = /^(\d+)\/(\d+)$/.exec(flags.shard);
+  if (!m || +m[1] < 1 || +m[1] > +m[2]) throw new Error(`--shard needs <i>/<n> with 1 <= i <= n, got ${flags.shard}`);
+  const count = new Map();
+  for (const { file } of all) count.set(file, (count.get(file) ?? 0) + 1);
+  const load = Array(+m[2]).fill(0);
+  part = new Map();
+  for (const file of [...count.keys()].sort((a, b) => count.get(b) - count.get(a) || (a < b ? -1 : 1))) {
+    const k = load.indexOf(Math.min(...load));
+    part.set(file, k + 1);
+    load[k] += count.get(file);
+  }
+  part = new Set([...part].filter(([, k]) => k === +m[1]).map(([file]) => file));
+}
+const pick = all.filter((s) => (!flags.file || s.file === flags.file) && (!flags.scenario || s.name === flags.scenario) && (!part || part.has(s.file)));
+if (!pick.length && part) {
+  console.log(`shard ${flags.shard} has no scenarios`);
+  process.exit(0);
+}
 if (!pick.length) throw new Error(`scenario ${flags.scenario} is not in ${flags.file}.e2e.mjs`);
 
 let h;
