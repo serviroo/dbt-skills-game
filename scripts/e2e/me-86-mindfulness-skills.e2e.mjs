@@ -1,7 +1,3 @@
-// The mindfulness skills Single Target (One-Mindfully), Play the Map (Effectively) and Spectator Mode (Mindfulness of
-// Current Thoughts): each opens from the library for a returning player, plays to the end with the visible buttons at
-// phone sizes, credits the player on open, and shows no unfilled name token, diagnosis word, game-death line or em dash.
-
 const IDS = ['one-mindfully', 'effectively', 'mindful-thoughts'];
 const NAMES = { 'one-mindfully': ['Single Target', 'One-Mindfully'], effectively: ['Play the Map', 'Effectively'], 'mindful-thoughts': ['Spectator Mode', 'Mindfulness of Current Thoughts'] };
 const BANNED = /\b(disorder|diagnos\w*|symptoms?|patients?|illness|treatment|relapse)\b|game over|you died|\u2014/i;
@@ -11,8 +7,6 @@ const PHONE = { width: 390, height: 844 };
 const SMALL = { width: 320, height: 568 };
 const WIDE = { width: 844, height: 390 };
 const STAT = { 'wise-mind': 'sense', 'sense-up': 'sense', 'clear-sight': 'sense', stop: 'stamina', tipp: 'stamina', 'name-emotion': 'intelligence' };
-
-/** One entry per screen: a button to tap, or what to do there. Every walk ends on the "Did it help?" question. */
 const WALKS = {
   'one-mindfully': {
     a: ['Begin', 'Wash one cup', { timer: /^Wash one cup\. Only this\./ }, 'A few times', { see: /^Wandering is normal/, tap: 'Done' }, { end: 'Not this time', thanks: /Thanks for trying it/, code: "didn't help this time" }],
@@ -32,8 +26,6 @@ const addDays = (day, n) => {
   const [y, m, d] = day.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
 };
-
-/** A real save made by the app itself, shared by every scenario in the run. */
 async function baseSave(h) {
   if (h.shared.me86Base) return h.shared.me86Base;
   const { ctx, page } = await h.open({ 'dbt.app.v1': h.SEEN });
@@ -45,7 +37,6 @@ async function baseSave(h) {
   return (h.shared.me86Base = { save, today });
 }
 
-/** A returning player whose save predates these skills: visits and older skills on `days` earlier days, nothing today. */
 async function returning(h, days = 12) {
   const { save, today } = await baseSave(h);
   const s = structuredClone(save);
@@ -72,7 +63,6 @@ async function progress(h, page, id) {
   };
 }
 
-/** Taps through any Lantern window the companion shows on arrival, inside the viewport, then waits for a settled Home. */
 async function home(h, page) {
   let clear = 0;
   for (let i = 0; i < 80; i++) {
@@ -97,13 +87,13 @@ async function tile(h, page, name) {
 async function openFromLibrary(h, page, id) {
   await tile(h, page, 'Skills');
   const row = page.locator('.dq-librow', { hasText: NAMES[id][0] });
-  await row.waitFor({ timeout: 10000 });
+  await row.first().waitFor({ timeout: 5000 });
+  h.expect(await row.count() === 1, `${id}: the library must list the skill exactly once`);
   h.expect((await row.textContent()).includes(NAMES[id][1]), `${id}: the library row does not show the DBT name next to the game name`);
   await row.click();
   await page.locator('.dq-intro-name', { hasText: NAMES[id][0] }).waitFor({ timeout: 10000 });
 }
 
-/** Rules every skill screen keeps, at whatever size the page is. */
 async function checkScreen(h, page, where) {
   const text = await page.locator('.dq-skill').innerText();
   h.expect(!TOKEN.test(text), `${where}: unfilled name token in "${text}"`);
@@ -133,7 +123,6 @@ async function stepText(page) {
   return (await page.locator('.dq-step-body').innerText()).replace(/\s+/g, ' ').trim();
 }
 
-/** Walks one skill from its intro to the "Did it help?" answer, checking and photographing every screen. */
 async function walk(h, page, id, steps, tag, reduced) {
   const tapIn = (name) => page.locator('.dq-skill').getByRole('button', { name, exact: true }).first();
   const settle = () => h.sleep(reduced ? 320 : 560);
@@ -169,7 +158,6 @@ async function walk(h, page, id, steps, tag, reduced) {
       continue;
     }
     if (s.chip) await tapIn(s.chip).click();
-    if (s.fill) await page.locator('.dq-skill textarea, .dq-skill input[type=text]').first().fill(s.fill);
     if (s.other) {
       await page.locator('.dq-skill').getByRole('button', { name: s.other }).first().click();
       const f = page.getByPlaceholder('Type your own');
@@ -181,7 +169,6 @@ async function walk(h, page, id, steps, tag, reduced) {
   }
 }
 
-/** Plays one skill for a returning player and checks the credit, the diary card and leaving on screen one. */
 async function play(h, id, path, vp, tag, opts = {}) {
   const { ctx, page, errors } = await h.open(await returning(h), opts.mute ? '?mute' : '', vp);
   if (opts.reduced) {
@@ -221,7 +208,6 @@ async function play(h, id, path, vp, tag, opts = {}) {
 }
 
 export const scenarios = {
-  /** the content holds together: ids resolve, every jump lands on a real step, screens and timers stay in range */
   async 'skills-mind-content'(h) {
     const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN });
     const r = await page.evaluate(
@@ -282,7 +268,6 @@ export const scenarios = {
     await ctx.close();
   },
 
-  /** an old save: loads, credits nothing on arrival, lists the new skills, and today's card can be one of them */
   async 'skills-mind-old-save'(h) {
     const { ctx: c0, page: p0 } = await h.open({ 'dbt.app.v1': h.SEEN });
     const at = await p0.evaluate(async (id) => (await import('/src/content/dbt.ts')).ROTATION.findIndex((q) => q.skill === id), IDS[2]);
@@ -312,7 +297,21 @@ export const scenarios = {
     await ctx.close();
   },
 
-  /** a phone on its side: every new skill plays through and the Louder answer reaches the Safe Zone */
+  async 'skills-mind-thoughts-same'(h) {
+    const { ctx, page, errors } = await h.open(await returning(h), '?mute', PHONE);
+    try {
+      await openFromLibrary(h, page, 'mindful-thoughts');
+      await walk(h, page, 'mindful-thoughts', [
+        'Begin', 'Clouds crossing the sky', 'Ready', { timer: /Each thought is a cloud/ },
+        'Next', 'About the same', { see: /^That[’']s okay\. Watching was the practice, not the quiet\./, tap: 'Done' },
+        { end: 'A little', thanks: /A little counts/, code: 'helped' },
+      ], 'skills-mind-thoughts-same-390', false);
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   async 'skills-mind-landscape'(h) {
     const { ctx, page, errors } = await h.open(await returning(h), '?mute', WIDE);
     for (const id of IDS) {
@@ -338,8 +337,6 @@ async function checkScreenWidth(h, page, where) {
 }
 
 for (const id of IDS) {
-  /** sound and motion on, at a common phone width */
   scenarios[`skills-mind-${id}-390`] = (h) => play(h, id, 'a', PHONE, `skills-mind-${id}-390`);
-  /** the smallest phone, muted, with reduced motion, through the other answers */
   scenarios[`skills-mind-${id}-320`] = (h) => play(h, id, 'b', SMALL, `skills-mind-${id}-320`, { mute: true, reduced: true });
 }
