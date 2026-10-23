@@ -332,6 +332,52 @@ export const scenarios = {
     } finally { await ctx.close(); }
   },
 
+  async 'crystal-card-recovery'(h) {
+    for (const blockRead of [false, true]) {
+      const { ctx, page } = await h.open(seed(h));
+      try {
+        await ready(page);
+        const raw = await page.evaluate(async (blockRead) => {
+          const { storyStore } = await import('/src/daily/storystore.ts');
+          const a = window.__daily;
+          const ss = storyStore(a.store.key);
+          const { first } = await ss.create('Card recovery');
+          await ss.putCards(first.id, [{ id: 'local-card', mode: 'polish', text: 'Already saved card.', t: 10 }]);
+          const stories = await ss.exportAll();
+          stories.cards = { [first.id]: [{ id: 'incoming-card', mode: 'polish', text: 'Incoming card.', t: 20 }] };
+          const transaction = IDBDatabase.prototype.transaction;
+          IDBDatabase.prototype.transaction = function (stores, mode, ...rest) {
+            const names = typeof stores === 'string' ? [stores] : [...stores];
+            if (this.name.endsWith('.story') && names.length === 1 && names[0] === 'cards' && (mode === 'readwrite' || blockRead)) throw new DOMException('Temporary storage failure', mode === 'readwrite' ? 'QuotaExceededError' : 'SecurityError');
+            return transaction.call(this, stores, mode, ...rest);
+          };
+          window.restoreCardStorage = () => { IDBDatabase.prototype.transaction = transaction; };
+          return JSON.parse(a.store.exportJSON({ stories }));
+        }, blockRead);
+        await restore(page, raw);
+        await page.evaluate(() => window.restoreCardStorage());
+        const actual = await crystal(h, page, 'card-recovery-' + blockRead);
+        const cards = Object.values(actual.stories.cards ?? {}).flat();
+        h.expect(cards.some((c) => c.id === 'local-card') && cards.some((c) => c.id === 'incoming-card'), 'A failed card import hid saved cards from a later readable backup: ' + JSON.stringify(cards));
+        h.expect(actual.incomplete === false, 'Recovered readable card storage still reports an incomplete backup.');
+        await page.evaluate(async () => {
+          const { storyStore } = await import('/src/daily/storystore.ts');
+          const ss = storyStore(window.__daily.store.key);
+          const { chapters } = await ss.exportAll();
+          const id = chapters.find((c) => c.kind === 'page').id;
+          const transaction = IDBDatabase.prototype.transaction;
+          IDBDatabase.prototype.transaction = function (stores, mode, ...rest) {
+            if (this.name.endsWith('.story') && mode === 'readwrite') throw new DOMException('Temporary storage failure', 'QuotaExceededError');
+            return transaction.call(this, stores, mode, ...rest);
+          };
+          try { await ss.putCards(id, []); } finally { IDBDatabase.prototype.transaction = transaction; }
+        });
+        const cleared = await crystal(h, page, 'explicitly-cleared-cards-' + blockRead);
+        h.expect(Object.values(cleared.stories.cards).flat().length === 0, 'Recovery brought back cards after an explicit local clear.');
+      } finally { await ctx.close(); }
+    }
+  },
+
   async 'crystal-preference-failures'(h) {
     for (const failure of ['read', 'write']) {
       const { ctx, page } = await h.open(seed(h));
@@ -356,6 +402,70 @@ export const scenarios = {
         }
       } finally { await ctx.close(); }
     }
+  },
+
+  async 'crystal-restore-incomplete'(h) {
+    const raw = JSON.parse(fs.readFileSync(fixture, 'utf8'));
+    raw.incomplete = true;
+    const { ctx, page } = await h.open(seed(h));
+    try {
+      await ready(page);
+      await restore(page, raw);
+      const status = await page.locator('.dq-settings .dq-hint[aria-live]').textContent();
+      h.expect(/incomplete/.test(status) && /other backups/.test(status) && !/Everything in the file/.test(status), 'Restore concealed that its source backup was incomplete: ' + status);
+      const actual = await crystal(h, page, 'partial-file-restored');
+      h.expect(actual.diary['2026-01-02'].note === 'A quiet afternoon.', 'Partial restore did not retain the readable data.');
+    } finally { await ctx.close(); }
+  },
+
+  async 'crystal-fallback-sound'(h) {
+    const { ctx, page } = await h.open(seed(h));
+    try {
+      await ctx.addInitScript(() => {
+        window.AudioContext = class { constructor() { throw new DOMException('Audio unavailable', 'NotSupportedError'); } };
+        window.webkitAudioContext = window.AudioContext;
+      });
+      await page.reload();
+      await ready(page);
+      h.expect(await page.evaluate(() => !window.__daily.opts.volume), 'Test did not reach the real audio initialization fallback.');
+      const raw = JSON.parse(fs.readFileSync(fixture, 'utf8'));
+      await restore(page, raw);
+      h.expect(await page.evaluate(() => window.__daily.store.state.settings.sound === false), 'Restore did not import the old sound choice.');
+      h.expect(!await page.getByRole('switch', { name: /^Sound/ }).isChecked(), 'Fallback Sound switch shows the old value after restore.');
+      await page.reload();
+      await ready(page);
+      await go(page, 'settings');
+      h.expect(!await page.getByRole('switch', { name: /^Sound/ }).isChecked(), 'Fallback sound choice did not survive reload.');
+    } finally { await ctx.close(); }
+  },
+
+  async 'crystal-restore-return'(h) {
+    const { ctx, page } = await h.open(seed(h));
+    try {
+      await ctx.addInitScript(() => {
+        window.AudioContext = class { constructor() { throw new DOMException('Audio unavailable', 'NotSupportedError'); } };
+        window.webkitAudioContext = window.AudioContext;
+      });
+      await page.reload();
+      await ready(page);
+      await go(page, 'settings');
+      await page.evaluate(() => {
+        const text = File.prototype.text;
+        File.prototype.text = function () {
+          return new Promise((resolve) => { window.releaseRestore = () => { File.prototype.text = text; resolve(text.call(this)); }; });
+        };
+      });
+      const raw = JSON.parse(fs.readFileSync(fixture, 'utf8'));
+      await page.locator('input[type=file]').setInputFiles({ name: 'crystal.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(raw)) });
+      await page.evaluate(() => {
+        window.__daily.go({ name: 'safe' }, { quiet: true });
+        window.__daily.go({ name: 'settings' }, { quiet: true });
+        window.releaseRestore();
+      });
+      await page.waitForFunction(() => window.__daily.store.state.settings.playerName === 'Kit');
+      h.expect(!await page.getByRole('switch', { name: /^Sound/ }).isChecked(), 'Returning to Settings during a file read left the new Sound switch stale.');
+      h.expect(await page.getByRole('radio', { name: 'Motion: Reduced', exact: true }).getAttribute('aria-checked') === 'true', 'Returning during restore left the new Motion choice stale.');
+    } finally { await ctx.close(); }
   },
 
   async 'crystal-old-fixture'(h) {

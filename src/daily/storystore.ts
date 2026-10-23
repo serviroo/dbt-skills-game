@@ -119,6 +119,21 @@ function cleanCard(x: unknown): Card | null {
   return c;
 }
 
+function mergeCards(local: Card[], incoming: Card[]) {
+  const merged = new Map<string, Card>();
+  for (const card of local) {
+    const had = merged.get(card.id);
+    if (!had || card.t > had.t) merged.set(card.id, card);
+  }
+  let skipped = 0;
+  for (const card of incoming) {
+    const had = merged.get(card.id);
+    if (!had && merged.size >= STORY_CAP.cards) { skipped++; continue; }
+    if (!had || card.t > had.t) merged.set(card.id, card);
+  }
+  return { cards: [...merged.values()], skipped };
+}
+
 function req<T>(r: IDBRequest) {
   return new Promise<T>((ok, bad) => {
     r.onsuccess = () => ok(r.result as T);
@@ -146,6 +161,7 @@ export class StoryStore {
   private readFails = 0;
   private lost = new WeakSet<IDBDatabase>();
   private mem = { stories: new Map<string, Story>(), chapters: new Map<string, Chapter>(), cards: new Map<string, Card[]>(), days: new Set<string>() };
+  private cardImports = new Set<string>();
   /** For a chapter kept only in memory: the revisions it was saved over (a stored one in this set is its own past). */
   private memBases = new Map<string, Set<string>>();
   /** The last stored version of each story this copy read, so a failed write still has the story to add to. */
@@ -654,14 +670,17 @@ export class StoryStore {
 
   async cards(chapterId: string): Promise<Card[]> {
     const m = this.mem.cards.get(chapterId);
-    if (m) return m.map((c) => ({ ...c, ...(c.sel ? { sel: { ...c.sel } } : {}) }));
+    if (m && !this.cardImports.has(chapterId)) return m.map((c) => ({ ...c, ...(c.sel ? { sel: { ...c.sel } } : {}) }));
     const r = await this.tx(['cards'], 'readonly', (t) => req<unknown>(t.objectStore('cards').get(chapterId)));
-    return Array.isArray(r?.v) ? r.v.map(cleanCard).filter((c): c is Card => !!c) : [];
+    const disk = Array.isArray(r?.v) ? r.v.map(cleanCard).filter((c): c is Card => !!c) : [];
+    const list = m ? mergeCards(disk, m).cards : disk;
+    return list.map((c) => ({ ...c, ...(c.sel ? { sel: { ...c.sel } } : {}) }));
   }
 
   /** Keeps at most 12 (the newest by time when there are more), in the order given. */
   async putCards(chapterId: string, cards: Card[]) {
     if (!validId(chapterId)) return;
+    this.cardImports.delete(chapterId);
     let list = (Array.isArray(cards) ? cards : []).map(cleanCard).filter((c): c is Card => !!c);
     if (list.length > STORY_CAP.cards) {
       const keep = new Set([...list].sort((a, b) => b.t - a.t).slice(0, STORY_CAP.cards));
@@ -838,8 +857,15 @@ export class StoryStore {
     ]));
     const [ds, dc, cardKeys, cardValues] = r?.v ?? [[], [], [], []];
     const cards = new Map<string, Card[]>();
+    let cardIncomplete = false;
     cardKeys.forEach((k, i) => { if (validId(k)) cards.set(k, cardValues[i]); });
-    for (const [k, v] of this.mem.cards) cards.set(k, v);
+    for (const [k, v] of this.mem.cards) {
+      if (this.cardImports.has(k)) {
+        const merged = mergeCards(cards.get(k) ?? [], v);
+        cards.set(k, merged.cards);
+        cardIncomplete ||= merged.skipped > 0;
+      } else cards.set(k, v);
+    }
     const chapters = new Map(dc.map((c) => [c.id, c]));
     const after = new Map<string, string[]>();
     for (const m of this.mem.chapters.values()) {
@@ -914,7 +940,7 @@ export class StoryStore {
       stories: [...stories.values()].map((s) => ({ ...s, chapters: [...s.chapters] })).sort((a, b) => a.created - b.created || (a.id < b.id ? -1 : 1)),
       chapters: [...chapters.values()].map((c) => ({ ...c })).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
       cards: Object.fromEntries(cards),
-      incomplete: this.readFails > fails,
+      incomplete: this.readFails > fails || cardIncomplete,
     };
   }
 
@@ -1081,35 +1107,23 @@ export class StoryStore {
         }
         const incoming = list.slice(0, STORY_CAP.cards).map(cleanCard).filter((c): c is Card => !!c);
         out.skipped += list.length - incoming.length;
-        const mergeCards = (local: Card[]) => {
-          const merged = new Map<string, Card>();
-          for (const card of local) {
-            const had = merged.get(card.id);
-            if (!had || card.t > had.t) merged.set(card.id, card);
-          }
-          let skipped = 0;
-          for (const card of incoming) {
-            const had = merged.get(card.id);
-            if (!had && merged.size >= STORY_CAP.cards) { skipped++; continue; }
-            if (!had || card.t > had.t) merged.set(card.id, card);
-          }
-          return { cards: [...merged.values()], skipped };
-        };
         const r = await this.tx(['cards'], 'readwrite', async (t) => {
           const store = t.objectStore('cards');
           const disk = await req<unknown>(store.get(id));
           const local = [...(Array.isArray(disk) ? disk.map(cleanCard).filter((c): c is Card => !!c) : []), ...(this.mem.cards.get(id) ?? [])];
-          const merged = mergeCards(local);
+          const merged = mergeCards(local, incoming);
           store.put(merged.cards, id);
           return merged;
         });
         if (r) {
           this.mem.cards.delete(id);
+          this.cardImports.delete(id);
           out.skipped += r.v.skipped;
           wrote = true;
         } else {
-          const merged = mergeCards(this.mem.cards.get(id) ?? []);
+          const merged = mergeCards(await this.cards(id), incoming);
           this.mem.cards.set(id, merged.cards);
+          this.cardImports.add(id);
           out.skipped += merged.skipped;
           out.unsaved++;
         }

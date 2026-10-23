@@ -721,11 +721,16 @@ export function settingsScreen(app: App): ScreenOut {
       data = null;
     }
     if (!data) return "That file doesn't look like a Save Crystal from this app. Nothing changed.";
+    const fileIncomplete = (raw as { incomplete?: unknown }).incomplete === true;
     const { saving } = st.merge(data);
     const choicesSaved = restorePreferences((raw as { preferences?: unknown }).preferences, st, app.opts.volume);
     app.applyMotion();
     app.applySound();
-    el.querySelectorAll('[aria-label="Motion"] [role="radio"]').forEach((b, i) => b.setAttribute('aria-checked', String(['system', 'reduce', 'full'][i] === s.settings.motion)));
+    app.root.querySelectorAll('.dq-settings [aria-label="Motion"] [role="radio"]').forEach((b, i) => b.setAttribute('aria-checked', String(['system', 'reduce', 'full'][i] === s.settings.motion)));
+    if (!app.opts.volume) {
+      const sound = app.root.querySelector<HTMLInputElement>('.dq-settings input[role="switch"]');
+      if (sound) sound.checked = s.settings.sound;
+    }
     app.shown = null;
     const rawArt = (raw as { art?: unknown }).art;
     let art: Awaited<ReturnType<ReturnType<typeof artStore>['importAll']>> | null = null;
@@ -754,7 +759,7 @@ export function settingsScreen(app: App): ScreenOut {
     const parts = [
       !saving
         ? `Restored for this visit. This device isn't saving right now, so keep the Save Crystal file.${counts ? ` Drawings: ${counts}.` : ''}${told ? ` Stories: ${told}.` : ''}`
-        : artFailed || talesFailed || art?.skipped || tales?.skipped
+        : artFailed || talesFailed || art?.skipped || tales?.skipped || fileIncomplete
           ? 'Restored your progress and lists.'
           : `Restored. Everything in the file was added${too}. Nothing was removed.`,
     ];
@@ -765,6 +770,7 @@ export function settingsScreen(app: App): ScreenOut {
     if (art?.skipped) parts.push("A few drawings in the file couldn't be read and were left out.");
     if (tales?.skipped) parts.push(CRYSTAL_COPY.storySkipped);
     if (!choicesSaved) parts.push(CRYSTAL_COPY.choicesUnsaved);
+    if (fileIncomplete) parts.push(CRYSTAL_COPY.incompleteRestore);
     return parts.join(' ');
   };
   file.addEventListener('change', async () => {

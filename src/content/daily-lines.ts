@@ -5,7 +5,8 @@
 
 
 export const CRYSTAL_COPY = {
-  incomplete: "This Save Crystal is incomplete. Some {items} couldn't be read. Keep your other backups and try again after reopening the app.",
+  incomplete: "This Save Crystal is incomplete. Some {items} couldn't be included. Keep your other backups and try again after reopening the app.",
+  incompleteRestore: 'This Save Crystal was incomplete when it was made. Keep your other backups.',
   choicesUnsaved: "Some choices couldn't be saved on this device. Keep the Save Crystal file.",
   storySkipped: "Some story pages or cards couldn't be added. Keep the Save Crystal file.",
 };
