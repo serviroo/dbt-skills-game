@@ -2466,6 +2466,9 @@ textarea.dq-input {
   opacity: 1;
   pointer-events: auto;
 }
+.dq[data-screen='safe'] .dq-scrim {
+  transition: none;
+}
 .dq.is-windowed .dq-top {
   z-index: 16;
   pointer-events: none;

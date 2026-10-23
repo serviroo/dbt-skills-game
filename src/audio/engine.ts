@@ -374,9 +374,9 @@ export class AudioEngine {
     for (const g of [this.sfxUser, this.bedUser, this.sfxRoomIn, this.sfxHallIn]) g.gain.setTargetAtTime(s, t, tau);
   }
 
-  /** Current output gains (QA): master after scene level and mute, and the Music / Effects levels. */
+  /** Current output gains (QA): master after scene level and mute, the Music / Effects levels, and the score's own level. */
   get levels() {
-    return { master: this.volume.gain.value, music: this.musUser.gain.value, sfx: this.sfxUser.gain.value };
+    return { master: this.volume.gain.value, music: this.musUser.gain.value, sfx: this.sfxUser.gain.value, score: this.mlevel.gain.value };
   }
 
   /** QA: the Effects bus or the score's input, to feed a test tone through the real graph. */

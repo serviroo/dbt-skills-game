@@ -1,7 +1,7 @@
 import { companionName, playerName } from '../core/you';
 import { params } from '../core/params';
 import { animate } from '../ui/anim';
-import { LanternWindow, lanternLayer, windowSounds, type WindowSpec } from '../ui/lantern-window';
+import { DISMISSED, dismissWindows, LanternWindow, lanternLayer, windowSounds, type WindowSpec } from '../ui/lantern-window';
 import { revealRank } from '../ui/rank-reveal';
 import { isHeavy, MODULE_ORDER, MODULES, type Next, type StatId } from '../content/dbt';
 import { RANK_UP, RANKS, SAFE_CREDIT } from '../content/daily-lines';
@@ -46,7 +46,7 @@ export type ScreenFn = (app: App, route: Route) => ScreenOut;
 
 export interface DailyOpts {
   onReplay(): void;
-  sound?: { play(cue: string): void; setMuted?(muted: boolean): void };
+  sound?: { play(cue: string): void; setMuted?(muted: boolean): void; quiet?(on: boolean): void };
   /** Their levels (the speaker control). When present it owns mute; the old Sound switch goes away. */
   volume?: VolumeCtrl;
   /** localStorage key (the lab uses its own so it never touches real progress) */
@@ -75,6 +75,8 @@ export class App {
   private busy = false;
   private greeting = false;
   private winChain: Promise<unknown> = Promise.resolve();
+  private winGen = 0;
+  private dropScrim: (() => void) | null = null;
   /** One speaker for every screen, so an open popover survives a re-render of the top bar. */
   private volBtn: VolumeButton | null = null;
 
@@ -142,8 +144,8 @@ export class App {
   }
 
   sound(cue: string) {
+    if (this.route.name === 'safe') return;
     if (this.opts.volume ? this.opts.volume.get().muted : !this.store.state.settings.sound) return;
-    if (this.route.name === 'safe' && cue !== 'breath_in' && cue !== 'breath_out') return;
     try {
       this.opts.sound?.play(cue);
     } catch {
@@ -190,7 +192,9 @@ export class App {
 
   /** The chest on Home: today's gift (after a gap, a welcome back first) in a calm window, only when the player taps it. */
   async openGift() {
+    const gen = this.winGen;
     const { WELCOME_BACK } = await import('../content/daily-lines');
+    if (gen !== this.winGen || this.route.name === 'safe') return;
     const st = this.store;
     const today = st.today();
     const days = st.derived().visitDays;
@@ -200,9 +204,9 @@ export class App {
     const spec: WindowSpec = back
       ? { kind: 'notification', title: 'Welcome back', icon: 'reward', html: `<p>${typo(WELCOME_BACK[st.visitIndex() % WELCOME_BACK.length])}</p>${gift}`, tapToContinue: true }
       : { kind: 'notification', title: 'Daily gift', icon: 'reward', html: gift, tapToContinue: true };
+    if ((await this.window(spec)) === DISMISSED) return;
     st.state.flags.giftDay = today;
     st.save();
-    await this.window(spec);
     void this.celebrate();
   }
 
@@ -217,7 +221,12 @@ export class App {
 
   /** Shows a Lantern window over a dim scrim. Does not depend on the WebGL stage loop running. */
   window(spec: WindowSpec, silentOpen = false): Promise<string> {
-    const run = this.winChain.then(() => this.showWindow(spec, silentOpen));
+    const gen = this.winGen;
+    const run = this.winChain.then(async () => {
+      if (gen !== this.winGen || this.route.name === 'safe') return DISMISSED;
+      const answer = await this.showWindow(spec, silentOpen);
+      return gen === this.winGen ? answer : DISMISSED;
+    });
     this.winChain = run.catch(() => undefined);
     return run;
   }
@@ -229,6 +238,16 @@ export class App {
     windowSounds.tap = undefined;
     this.busy = true;
     const before = document.activeElement as HTMLElement | null;
+    let up = true;
+    const drop = () => {
+      if (!up) return;
+      up = false;
+      this.dropScrim = null;
+      this.scrim.classList.remove('is-on');
+      this.root.classList.remove('is-windowed');
+      this.view.inert = false;
+    };
+    this.dropScrim = drop;
     this.scrim.classList.add('is-on');
     this.root.classList.add('is-windowed');
     this.view.inert = true;
@@ -239,13 +258,13 @@ export class App {
     void w.open();
     w.root.focus({ preventScroll: true });
     const v = await w.waitForInput();
-    void w.close();
-    this.scrim.classList.remove('is-on');
-    this.root.classList.remove('is-windowed');
-    this.view.inert = false;
-    if (before?.isConnected && !this.root.contains(document.activeElement)) before.focus({ preventScroll: true });
-    await wait(this.reduced() ? 0.25 : 0.45);
-    w.destroy();
+    drop();
+    if (v !== DISMISSED) {
+      void w.close();
+      if (before?.isConnected && !this.root.contains(document.activeElement)) before.focus({ preventScroll: true });
+      await wait(this.reduced() ? 0.25 : 0.45);
+      w.destroy();
+    }
     Object.assign(windowSounds, saved);
     this.busy = false;
     return v;
@@ -280,6 +299,7 @@ export class App {
 
   private toastN = 0;
   toast(text: string, action?: { label: string; run(): void }) {
+    if (this.route.name === 'safe') return;
     const n = ++this.toastN;
     this.toastEl.replaceChildren(h('span', { text: typo(text) }));
     if (action)
@@ -306,11 +326,15 @@ export class App {
 
   go(route: Route, o: { replace?: boolean; quiet?: boolean } = {}) {
     if (!Object.prototype.hasOwnProperty.call(this.screens, route.name)) route = { name: 'hub' };
+    const safe = route.name === 'safe';
+    const wasSafe = this.route.name === 'safe';
+    if (safe) this.clearForSafe();
     if (!o.replace && this.current) this.stack.push(this.route);
     if (route.name === 'hub') this.stack = [];
     this.current?.leave?.();
     if (route.name !== 'hub') this.toastEl.classList.remove('is-on');
     this.route = route;
+    if (safe !== wasSafe) this.quietScore(safe);
     const out = this.screens[route.name](this, route);
     this.current = out;
     this.root.dataset.mode = out.mode;
@@ -333,6 +357,21 @@ export class App {
     }
     out.after?.();
     if (route.name === 'hub' && !o.quiet) void this.celebrate();
+  }
+
+  private clearForSafe() {
+    this.winGen++;
+    dismissWindows();
+    this.dropScrim?.();
+    document.querySelectorAll('[data-fx]').forEach((n) => n.remove());
+  }
+
+  private quietScore(on: boolean) {
+    try {
+      this.opts.sound?.quiet?.(on);
+    } catch {
+      /* sound is optional */
+    }
   }
 
   back() {
