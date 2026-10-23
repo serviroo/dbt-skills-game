@@ -9,7 +9,7 @@
 // and lists its problems on stdout and under `result` in report.json, as the todo list.
 import { fullSave, seedStores } from './me-91-final-save-ids.e2e.mjs';
 
-const ENFORCED = ['library', 'skill', 'home'];
+const ENFORCED = ['library', 'skill', 'home', 'diary', 'night-watch', 'wardrobe', 'art', 'stories', 'moment'];
 
 const SIZES = [
   { width: 390, height: 844 },
