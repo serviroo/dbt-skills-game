@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { siteUrl } from '../../core/base';
 import type { Stage } from '../../core/stage';
 import { light } from '../toon';
 import { radialGlowTexture } from '../glow';
@@ -85,7 +86,7 @@ const EYE_COLOR = new THREE.Color(0x9fe6ff);
 
 let cached: Promise<{ scene: THREE.Group; clips: THREE.AnimationClip[] }> | null = null;
 const loadGLB = () =>
-  (cached ??= new GLTFLoader().loadAsync(new URL('models/hero.glb', document.baseURI).href).then((g) => ({ scene: g.scene, clips: g.animations })));
+  (cached ??= new GLTFLoader().loadAsync(siteUrl('models/hero.glb')).then((g) => ({ scene: g.scene, clips: g.animations })));
 
 const SHADER_HEAD = /* glsl */ `
 uniform float uDissolve;

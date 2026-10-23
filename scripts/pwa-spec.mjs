@@ -67,8 +67,8 @@ export const CSP = [
   "form-action 'none'",
 ].join('; ');
 
-// Response headers for Cloudflare Pages and Netlify (both read <publish dir>/_headers).
-export function headersFile() {
+// Response headers for Cloudflare Pages and Netlify (both read <publish dir>/_headers); `base` is where the site is served.
+export function headersFile(base = '/') {
   return `/*
   Content-Security-Policy: ${CSP}; frame-ancestors 'none'
   X-Robots-Tag: noindex, nofollow, noarchive, nosnippet
@@ -76,13 +76,13 @@ export function headersFile() {
   X-Content-Type-Options: nosniff
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
 
-/assets/*
+${base}assets/*
   Cache-Control: public, max-age=31536000, immutable
 
-/sw.js
+${base}sw.js
   Cache-Control: no-cache
 
-/manifest.webmanifest
+${base}manifest.webmanifest
   Cache-Control: no-cache
 `;
 }

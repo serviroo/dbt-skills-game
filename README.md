@@ -40,6 +40,8 @@ care about your progress.
 
 ## Running it
 
+Live: [The Lantern](https://serviroo.github.io/dbt-skills-game/).
+
 You need Node.js 20.19 or newer.
 
 ```sh

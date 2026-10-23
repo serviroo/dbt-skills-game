@@ -1,3 +1,4 @@
+import { siteUrl } from '../core/base';
 import { params } from '../core/params';
 
 const UPDATE_CHECK_MS = 60 * 60 * 1000;
@@ -22,7 +23,7 @@ export function registerSW(): void {
     controlled = true;
   });
   const start = () => {
-    sw.register('./sw.js', { scope: './', updateViaCache: 'none' })
+    sw.register(siteUrl('sw.js'), { scope: siteUrl(''), updateViaCache: 'none' })
       .then((reg) => {
         // iOS resumes Home Screen apps instead of relaunching them, so also look for updates when the player comes back
         let last = Date.now();

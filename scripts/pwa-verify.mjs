@@ -1,5 +1,5 @@
 // End-to-end proof that the built app installs its service worker, boots offline, and updates quietly.
-// node scripts/pwa-verify.mjs [--dist=dist] [--path=<app subpath>] [--video] [--browser=chromium|webkit|both] [--out=qa/out/pwa/verify] [--update] [--check]
+// node scripts/pwa-verify.mjs [--dist=dist] [--path=<subpath to serve it under, e.g. /dbt-skills-game/>] [--video] [--browser=chromium|webkit|both] [--out=qa/out/pwa/verify] [--update] [--check]
 // Starts its own `vite preview` on a free port (4173 and up) and stops only that process.
 // --check exits 1 if the report shows a problem.
 import { chromium, webkit } from 'playwright';
@@ -7,12 +7,15 @@ import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const flags = Object.fromEntries(process.argv.slice(2).filter((a) => a.startsWith('--')).map((a) => { const [k, v = 'true'] = a.slice(2).split('='); return [k, v]; }));
 const dist = path.resolve(root, flags.dist ?? 'dist');
 const out = path.resolve(root, flags.out ?? 'qa/out/pwa/verify');
+const sub = (flags.path ?? '').replace(/^\/+|\/+$/g, '');
+const mount = sub ? `/${sub}/` : '/';
 const browsers = flags.browser === 'both' || !flags.browser ? ['chromium', 'webkit'] : [flags.browser];
 fs.mkdirSync(out, { recursive: true });
 
@@ -24,13 +27,13 @@ const swInfo = (dir) => {
 const portFree = (p) => new Promise((res) => { const s = net.createServer().once('error', () => res(false)).once('listening', () => s.close(() => res(true))).listen(p, '127.0.0.1'); });
 
 async function serve(dir, port) {
-  const child = spawn(process.execPath, [path.join(root, 'node_modules/vite/bin/vite.js'), 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort', '--outDir', dir], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [path.join(root, 'node_modules/vite/bin/vite.js'), 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort', '--outDir', dir, '--base', mount], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';
   child.stdout.on('data', (d) => (log += d));
   child.stderr.on('data', (d) => (log += d));
   for (let i = 0; i < 100; i++) {
     try {
-      const r = await fetch(`http://127.0.0.1:${port}/`);
+      const r = await fetch(`http://127.0.0.1:${port}${mount}`);
       if (r.ok) return { child, stop: () => new Promise((res) => { child.once('exit', res); child.kill('SIGTERM'); }) };
     } catch {}
     await sleep(150);
@@ -131,10 +134,10 @@ async function checkManifest(page, base, ctx) {
 
 async function offlineRun(name, launcher) {
   const report = { browser: name, steps: {} };
-  const { version, assets } = swInfo(path.join(dist, flags.path ?? ''));
+  const { version, assets } = swInfo(dist);
   const port = await pickPort();
   let srv = await serve(dist, port);
-  const base = `http://127.0.0.1:${port}/${flags.path ? flags.path.replace(/^\/|\/$/g, '') + '/' : ''}`;
+  const base = `http://127.0.0.1:${port}${mount}`;
   const browser = await launcher.launch({ headless: true, args: name === 'chromium' ? ['--use-angle=vulkan', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-features=Vulkan'] : [] });
   const ctx = await browser.newContext({ viewport: { width: 375, height: 800 }, serviceWorkers: 'allow', ...(flags.video ? { recordVideo: { dir: `${out}/video-${name}`, size: { width: 375, height: 800 } } } : {}) });
   await ctx.addInitScript(INIT);
@@ -263,10 +266,11 @@ const updateReadyFired = (page) =>
 async function updateRun(name, launcher) {
   const report = { browser: name, steps: {} };
   const v1 = { dir: dist, ...swInfo(dist) };
-  const v2 = makeVersion(dist, `/tmp/pwa-verify-v2`, 'v2', true);
-  const v3 = makeVersion(v2.dir, `/tmp/pwa-verify-v3`, 'v3', false);
+  const scratch = fs.mkdtempSync(path.join(tmpdir(), 'lantern-pwa-'));
+  const v2 = makeVersion(dist, path.join(scratch, 'v2'), 'v2', true);
+  const v3 = makeVersion(v2.dir, path.join(scratch, 'v3'), 'v3', false);
   const port = await pickPort();
-  const base = `http://127.0.0.1:${port}/${flags.path ? flags.path.replace(/^\/|\/$/g, '') + '/' : ''}`;
+  const base = `http://127.0.0.1:${port}${mount}`;
   let srv = await serve(v1.dir, port);
   const browser = await launcher.launch({ headless: true, args: name === 'chromium' ? ['--use-angle=vulkan', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-features=Vulkan'] : [] });
   const ctx = await browser.newContext({ viewport: { width: 375, height: 800 }, serviceWorkers: 'allow' });
@@ -281,7 +285,7 @@ async function updateRun(name, launcher) {
     // nothing has loaded the window lab chunk yet; only the precache holds it
     report.steps.v1 = { ...(await cacheState(page)), onUpdateReadyFired: await updateReadyFired(page) };
 
-    const bad = makeBroken(dist, '/tmp/pwa-verify-broken');
+    const bad = makeBroken(dist, path.join(scratch, 'broken'));
     await srv.stop();
     srv = await serve(bad.dir, port);
     const victimStatus = await fetch(base + 'assets/' + bad.victim).then(async (r) => `${r.status} ${r.headers.get('content-type')}`);
@@ -332,9 +336,24 @@ async function updateRun(name, launcher) {
     await page.evaluate(() => navigator.serviceWorker.getRegistration().then((r) => r.update()));
     await waitInstalled(page, v3.version, v3.assets.length + 1);
     report.steps.v3Installed = { expectKept: [`system-v${v2.version}`, `system-v${v3.version}`], expectDeleted: `system-v${v1.version}`, ...(await cacheState(page)) };
+
+    const idOnly = path.join(scratch, 'build-id-only');
+    fs.cpSync(v3.dir, idOnly, { recursive: true });
+    const html = path.join(idOnly, 'index.html');
+    fs.writeFileSync(html, fs.readFileSync(html, 'utf8').replace(/<meta name="build" content="[^"]*" \/>/, '<meta name="build" content="build-id-only" />'));
+    execFileSync(process.execPath, [path.join(root, 'scripts/sw-build.mjs'), idOnly]);
+    const next = swInfo(idOnly);
+    await srv.stop();
+    srv = await serve(idOnly, port);
+    await page.evaluate(() => navigator.serviceWorker.getRegistration().then((r) => r.update()));
+    await waitInstalled(page, next.version, next.assets.length + 1);
+    await page.reload();
+    await ready(page);
+    report.steps.buildIdOnly = { previousVersion: v3.version, version: next.version, served: await page.locator('meta[name=build]').getAttribute('content') };
   } finally {
     await browser.close();
     if (srv) await srv.stop();
+    fs.rmSync(scratch, { recursive: true, force: true });
   }
   return report;
 }
@@ -348,38 +367,45 @@ for (const name of browsers) {
     results.push({ browser: name, error: String(e.stack || e).slice(0, 1500) });
   }
 }
+function problems(r) {
+  if (r.error) return [r.error.split('\n')[0]];
+  const s = r.steps;
+  const list = (label, xs) => (xs?.length ? [`${label}: ${xs.slice(0, 3).join(' | ')}`] : []);
+  if (!flags.update) {
+    return [
+      ...(s.online.controlled ? [] : ['the service worker never took control']),
+      ...list('online CSP', s.online.csp), ...list('online errors', s.online.errors),
+      ...list('manifest', s.manifest.problems), ...list('missing splash', s.manifest.splashMissing),
+      ...list('manifest errors', s.manifest.chromium?.manifestErrors?.map((e) => e.message)), ...list('not installable', s.manifest.chromium?.installabilityErrors?.map((e) => e.errorId)),
+      ...(s.offlineReload.serverGone ? [] : ['the server was still up during the offline reload']),
+      ...list('offline reload missed the service worker', s.offlineReload.notFromSW), ...list('offline reload failed', s.offlineReload.failed),
+      ...list('offline CSP', s.offlineReload.csp), ...list('offline errors', s.offlineReload.errors),
+      ...(s.offlineReload.fonts.jost && s.offlineReload.fonts.jostItalic && s.offlineReload.fonts.bodoni ? [] : ['a font did not load offline']),
+      ...list('offline cold launch failed', s.offlineCold.failed), ...list('offline cold launch errors', s.offlineCold.errors), ...list('cold launch missed the service worker', s.offlineCold.notFromSW),
+      ...list('offline lazy chunk failed', s.offlineLazyChunk.failed), ...list('offline lazy chunk errors', s.offlineLazyChunk.errors),
+      ...(s.offlineReload.allFromSW ? [] : ['offline reload left the service worker']),
+      ...(s.offlineLazyChunk.chunks.some((c) => /\/window-[^\s]+\.js 200 sw$/.test(c)) ? [] : ['offline window chunk was not served by the service worker']),
+    ];
+  }
+  const v1 = s.v1.current;
+  return [
+    ...(s.brokenDeploy.brokenCacheCreated || s.brokenDeploy.stillCurrent !== v1 || s.brokenDeploy.reloadShows !== 'v1' ? ['a half-uploaded deploy replaced the working version'] : []),
+    ...(s.v2Installed.pageStillOn === 'v1' ? [] : ['the open page was swapped mid-session']),
+    ...(s.v2Installed.onUpdateReadyFired ? [] : ['the open page was never told an update is ready']),
+    ...(s.v2Installed.current !== v1 ? [] : ['the update never became the current version']),
+    ...(s.v2Installed.oldPageLazyChunk === 'loaded' ? [] : ['the open page could not load its own older chunk: ' + s.v2Installed.oldPageLazyChunk]),
+    ...(s.v2Installed.previous === v1 ? [] : ['the update did not keep the previous version']),
+    ...(s.nextLaunch.build === 'v2' ? [] : [`the next launch showed ${s.nextLaunch.build}, not the update`]), ...list('errors', s.nextLaunch.errors),
+    ...(s.v3Installed.expectKept.every((n) => n in s.v3Installed.caches) ? [] : ['a version that should stay was deleted']),
+    ...(s.v3Installed.expectDeleted in s.v3Installed.caches ? ['the oldest cache was never cleaned up'] : []),
+    ...(s.buildIdOnly.previousVersion !== s.buildIdOnly.version && s.buildIdOnly.served === 'build-id-only' ? [] : ['a build-id-only deploy left the cached shell stale']),
+  ];
+}
+
 const file = `${out}/${flags.update ? 'update' : 'offline'}-report.json`;
 fs.writeFileSync(file, JSON.stringify(results, null, 2));
 console.log(JSON.stringify(results, null, 2));
 console.log('report:', path.relative(root, file));
-
-function problems(r) {
-  if (r.error) return [r.error.split('\n')[0]];
-  const s = r.steps;
-  const none = (label, list) => (list?.length ? [`${label}: ${list.slice(0, 3).join(' | ')}`] : []);
-  if (!flags.update) {
-    return [
-      ...none('online errors', s.online.errors),
-      ...none('online CSP', s.online.csp),
-      ...none('manifest', [...s.manifest.problems, ...s.manifest.splashMissing, ...[s.manifest.chromium?.manifestErrors ?? [], s.manifest.chromium?.installabilityErrors ?? []].flat().map((e) => e.message ?? e.errorId ?? e.error)]),
-      ...(s.offlineReload.serverGone ? [] : ['server still answered while offline']),
-      ...(s.offlineReload.allFromSW ? [] : [`offline reload left the service worker: ${s.offlineReload.notFromSW.slice(0, 3).join(' ')}`]),
-      ...(s.offlineReload.fonts.jost && s.offlineReload.fonts.jostItalic && s.offlineReload.fonts.bodoni ? [] : ['fonts missing offline: ' + JSON.stringify(s.offlineReload.fonts)]),
-      ...none('offline reload', [...s.offlineReload.failed, ...s.offlineReload.errors, ...s.offlineReload.csp]),
-      ...none('offline cold launch', [...s.offlineCold.failed, ...s.offlineCold.errors, ...s.offlineCold.notFromSW]),
-      ...none('offline lazy chunk', [...s.offlineLazyChunk.failed, ...s.offlineLazyChunk.errors]),
-      ...(s.offlineLazyChunk.chunks.some((c) => /\/window-[^\s]+\.js 200 sw$/.test(c)) ? [] : ['offline window chunk was not served by the service worker']),
-    ];
-  }
-  const v2 = s.v2Installed;
-  return [
-    ...(s.brokenDeploy.brokenCacheCreated || s.brokenDeploy.stillCurrent !== s.v1.current || s.brokenDeploy.reloadShows !== 'v1' ? ['a broken deploy replaced the working version: ' + JSON.stringify(s.brokenDeploy)] : []),
-    ...(v2.pageStillOn !== 'v1' || !v2.onUpdateReadyFired || v2.oldPageLazyChunk !== 'loaded' || v2.current === s.v1.current ? ['update did not install quietly: ' + JSON.stringify(v2)] : []),
-    ...(s.nextLaunch.build !== 'v2' ? [`next launch shows ${s.nextLaunch.build}, want v2`] : []),
-    ...none('next launch errors', s.nextLaunch.errors),
-    ...(s.v3Installed.expectKept.every((c) => c in s.v3Installed.caches) && !(s.v3Installed.expectDeleted in s.v3Installed.caches) ? [] : ['old caches not rotated: ' + Object.keys(s.v3Installed.caches).join(' ')]),
-  ];
-}
 if (flags.check) {
   const bad = results.flatMap((r) => problems(r).map((p) => `${r.browser}: ${p}`));
   for (const p of bad) console.error('PROBLEM ' + p);
