@@ -62,11 +62,22 @@ async function host(dir) {
   let current = dir;
   const mount = (fs.readFileSync(path.join(dir, 'index.html'), 'utf8').match(/src="(\/[^"]*?)assets\//) ?? [, '/'])[1];
   const server = http.createServer((req, res) => {
-    const p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+    let p;
+    try {
+      p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+    } catch {
+      return res.writeHead(400).end();
+    }
+    if (p.includes('\0')) return res.writeHead(400).end();
     if (!p.startsWith(mount)) return res.writeHead(404).end();
-    let f = path.join(current, p.slice(mount.length));
+    const base = path.resolve(current);
+    let f = path.resolve(base, p.slice(mount.length));
+    if (f !== base && !f.startsWith(base + path.sep)) return res.writeHead(403).end();
     if (p.endsWith('/')) f = path.join(f, 'index.html');
     if (!fs.existsSync(f) || !fs.statSync(f).isFile()) f = path.join(current, 'index.html');
+    const realBase = fs.realpathSync(base);
+    const realFile = fs.realpathSync(f);
+    if (realFile !== realBase && !realFile.startsWith(realBase + path.sep)) return res.writeHead(403).end();
     res.writeHead(200, { 'content-type': MIME[path.extname(f)] ?? 'application/octet-stream', 'cache-control': 'no-cache' });
     res.end(fs.readFileSync(f));
   });
@@ -489,6 +500,40 @@ export const scenarios = {
 };
 
 export const checks = {
+  async 'pwa-fixture-keeps-files-contained'({ shared, expect, out }) {
+    const base = await build(shared);
+    const outside = path.join(scratchDir(), 'outside.txt');
+    fs.writeFileSync(outside, 'outside-fixture-root');
+    const link = path.join(base, 'outside-link.txt');
+    fs.symlinkSync(outside, link);
+    const srv = await host(base);
+    const request = (suffix) => new Promise((resolve, reject) => {
+      const req = http.get(srv.url + suffix, (res) => {
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (s) => (body += s));
+        res.on('error', reject);
+        res.on('end', () => resolve({ status: res.statusCode, body }));
+      }).on('error', reject);
+      req.setTimeout(5000, () => req.destroy(new Error('fixture request timed out')));
+    });
+    try {
+      const probes = [];
+      for (const suffix of ['..%2foutside.txt', 'assets/..%2f..%2foutside.txt', 'outside-link.txt']) {
+        const answer = await request(suffix);
+        probes.push({ path: suffix, ...answer });
+      }
+      fs.writeFileSync(path.join(out, 'pwa-fixture-boundary.json'), JSON.stringify(probes, null, 2));
+      expect(probes.every((r) => r.status === 403 && !r.body.includes('outside-fixture-root')), 'a request escaped the fixture root: ' + JSON.stringify(probes));
+      expect((await request('%zz')).status === 400, 'malformed encoding should be refused');
+      expect((await request('%00')).status === 400, 'a null byte should be refused');
+      expect((await request('')).status === 200, 'the fixture did not keep serving the game');
+    } finally {
+      await srv.close();
+      fs.rmSync(link);
+    }
+  },
+
 
   async 'pwa-csp-check-fails-loudly'({ shared, expect, out }) {
     const base = await build(shared);
@@ -564,7 +609,9 @@ if (path.resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
   fs.mkdirSync(out, { recursive: true });
   const h = { shared: {}, out, sleep: (ms) => new Promise((r) => setTimeout(r, ms)), expect: (ok, message) => { if (!ok) throw new Error(message); }, YOU: 'dbt.you.v1', SEEN: JSON.stringify({ seenCutscene: true }) };
   const results = [];
-  for (const [name, run] of Object.entries(checks)) {
+  const pick = process.argv.find((a) => a.startsWith('--check='))?.slice('--check='.length);
+  if (pick && !Object.hasOwn(checks, pick)) throw new Error('no check ' + pick);
+  for (const [name, run] of Object.entries(checks).filter(([name]) => !pick || name === pick)) {
     try { await run(h); results.push({ name, ok: true }); }
     catch (e) { results.push({ name, ok: false, error: String(e?.message ?? e) }); }
   }
