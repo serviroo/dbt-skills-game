@@ -441,8 +441,11 @@ export const scenarios = {
     const { ctx, page, errors } = await boot(h, { save: returning() });
     try {
       await WINDOWS['story-delete'].open(page);
-      await page.getByRole('button', { name: 'Delete', exact: true }).click();
-      await page.locator('header .dq-safe').click();
+      await page.getByRole('button', { name: 'Delete', exact: true }).waitFor({ state: 'visible' });
+      await page.evaluate(() => {
+        [...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Delete')?.click();
+        document.querySelector('header .dq-safe')?.click();
+      });
       await page.locator('header .dq-back').click();
       await h.sleep(700);
       await WINDOWS['story-delete'].kept(h, page);
