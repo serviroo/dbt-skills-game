@@ -155,7 +155,7 @@ function questSection(app: App) {
     if (card.classList.contains('is-open')) return begin();
     const isNew = !st.derived().collection.has(q.skill) && !q.special;
     st.state.flags.cardDay = today;
-    st.add('card', 0, { skill: q.special ? undefined : q.skill });
+    st.add('card', 0, q.special ? { data: { slot: q.slot, special: q.special } } : { skill: q.skill, data: { slot: q.slot } });
     app.sound('card_flip');
     card.classList.add('is-open');
     card.setAttribute('aria-label', `Today's skill card: ${cardName}. Open it.`);
