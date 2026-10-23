@@ -81,7 +81,7 @@ export const REGIONS: Region[] = [
     emergency: ['112'],
     lines: [
       { name: 'Tele-MANAS', how: 'Mental health support from the Ministry of Health. Call 14416, toll-free, 24/7.', links: [{ label: 'Call 14416', href: 'tel:14416' }] },
-      { name: 'Women Helpline', how: 'For women. Call 181, toll-free, 24 hours.', links: [{ label: 'Call 181', href: 'tel:181' }] },
+      { name: 'Women Helpline', how: 'For women. Call 181, toll-free, 24 hours, in every state except West Bengal.', links: [{ label: 'Call 181', href: 'tel:181' }] },
     ],
   },
   { id: 'elsewhere', name: 'Somewhere else', emergency: [], lines: [] },
