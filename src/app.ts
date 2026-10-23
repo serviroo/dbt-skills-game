@@ -200,7 +200,7 @@ async function enterDaily(stage: Stage | null, audio: AppAudio | null, state: Ap
       ? {
           play: (c: string) => audio.play(c),
           setMuted: (m: boolean) => audio.engine?.setMuted(m),
-          quiet: (on: boolean) => audio.engine?.music.level(on ? 0 : 1, on ? SCORE.safeOutSec : SCORE.safeBackSec),
+          quiet: (on: boolean) => audio.engine?.quiet(on, on ? SCORE.safeOutSec : SCORE.safeBackSec),
         }
       : undefined,
     volume: audio?.volume,

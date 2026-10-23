@@ -17,8 +17,9 @@ function returning(xp = 0) {
   return JSON.stringify({ v: 1, created: t, events, flags: { greetDay: day } });
 }
 
-async function boot(h, { save, viewport = TALL, reduced = false, ua, extra = {} } = {}) {
+async function boot(h, { save, viewport = TALL, reduced = false, ua, extra = {}, init } = {}) {
   const ctx = await h.browser.newContext({ viewport, deviceScaleFactor: 2, serviceWorkers: 'block', reducedMotion: reduced ? 'reduce' : 'no-preference', locale: 'en-US', ...(ua ? { userAgent: ua } : {}) });
+  if (init) await ctx.addInitScript(init);
   const seed = { [h.YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: Date.now() - 1000, companionAt: Date.now() - 1000 }), 'dbt.app.v1': h.SEEN, ...(save ? { [h.SAVE]: save } : {}), ...extra };
   await ctx.addInitScript((s) => {
     if (sessionStorage.getItem('e2e-seeded')) return;
@@ -76,6 +77,26 @@ const probe = (page) =>
     };
   });
 
+const tapOutput = () => {
+  const connect = AudioNode.prototype.connect;
+  window.__taps = [];
+  AudioNode.prototype.connect = function (dest, ...rest) {
+    const out = connect.call(this, dest, ...rest);
+    if (dest instanceof AudioDestinationNode) {
+      const a = this.context.createAnalyser();
+      a.fftSize = 4096;
+      connect.call(this, a);
+      window.__taps.push(a);
+    }
+    return out;
+  };
+};
+const outputRms = (page) =>
+  page.evaluate(() => Math.max(0, ...window.__taps.map((a) => {
+    const x = new Float32Array(a.fftSize);
+    a.getFloatTimeDomainData(x);
+    return Math.sqrt(x.reduce((n, v) => n + v * v, 0) / x.length);
+  })));
 const scoreLevel = (page) => page.evaluate(() => window.__dbtVolume?.gains().score);
 async function scoreReaches(h, page, ok, ms) {
   for (let t = 0; t < ms; t += 150) {
@@ -451,6 +472,31 @@ export const scenarios = {
       h.expect(before.fx === 1, `effects: the rising shadows did not start (${before.fx})`);
       await enterSafe(h, page, 'effects', before);
       h.expect(!errors.length, `effects: page errors: ${errors.join(' | ')}`);
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  'safe-zone-silences-score-and-reverb': async (h) => {
+    const { ctx, page, errors } = await boot(h, { save: returning(), init: tapOutput });
+    try {
+      await h.sleep(3000);
+      const home = await outputRms(page);
+      h.expect(home > 1e-3, `output: no score reached the speakers on Home to compare with (RMS ${home})`);
+      const before = await probe(page);
+      await enterSafe(h, page, 'output', before);
+      await h.sleep(8000);
+      const inside = [];
+      for (let i = 0; i < 8; i++) {
+        inside.push(await outputRms(page));
+        await h.sleep(400);
+      }
+      h.expect(Math.max(...inside) < 1e-4, `output: the score or its reverb still reaches the speakers in the Safe Zone (RMS ${inside.map((v) => v.toExponential(1)).join(' ')})`);
+      await leaveSafe(h, page, 'output', before);
+      await h.sleep(4000);
+      const back = await outputRms(page);
+      h.expect(back > 1e-3, `output: the score did not come back after leaving (RMS ${back})`);
+      h.expect(!errors.length, `output: page errors: ${errors.join(' | ')}`);
     } finally {
       await ctx.close();
     }
