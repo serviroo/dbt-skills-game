@@ -125,8 +125,8 @@ function mergeCards(local: Card[], incoming: unknown[]) {
     const had = merged.get(card.id);
     if (!had || card.t > had.t) merged.set(card.id, card);
   }
-  let skipped = 0;
-  for (const value of incoming) {
+  let skipped = Math.max(0, incoming.length - LISTED);
+  for (const value of incoming.slice(0, LISTED)) {
     const card = cleanCard(value);
     if (!card) { skipped++; continue; }
     const had = merged.get(card.id);
@@ -1108,7 +1108,9 @@ export class StoryStore {
       if (!r || this.mem.stories.has(sid) || [...this.mem.chapters.values()].some((m) => m.story === sid)) out.unsaved++;
     }
     if (isObj(raw.cards)) {
-      for (const [id, list] of Object.entries(raw.cards)) {
+      const entries = Object.entries(raw.cards);
+      out.skipped += Math.max(0, entries.length - maxCh);
+      for (const [id, list] of entries.slice(0, maxCh)) {
         if (!validId(id) || !Array.isArray(list)) {
           out.skipped++;
           continue;

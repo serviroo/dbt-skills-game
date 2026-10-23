@@ -500,6 +500,89 @@ export const scenarios = {
     }
   },
 
+  async 'crystal-fallback-audio-export'(h) {
+    for (const sound of [false, true, null]) {
+      const stored = { v: 1, master: .4, music: .3, sfx: .2, muted: sound ?? true };
+      const { ctx, page } = await h.open(seed(h, { 'dbt.audio.v1': JSON.stringify(stored) }), '');
+      let raw;
+      try {
+        await ctx.addInitScript(() => {
+          window.AudioContext = class { constructor() { throw new DOMException('Audio unavailable', 'NotSupportedError'); } };
+          window.webkitAudioContext = window.AudioContext;
+        });
+        await page.reload();
+        await ready(page);
+        h.expect(await page.evaluate(() => !window.__daily.opts.volume), 'Test did not reach the fallback Sound switch.');
+        await go(page, 'settings');
+        if (sound !== null) {
+          await page.getByRole('switch', { name: /^Sound/ }).setChecked(!sound);
+          await page.getByRole('switch', { name: /^Sound/ }).setChecked(sound);
+        }
+        raw = await crystal(h, page, 'fallback-audio-' + sound);
+        assert.deepEqual(raw.preferences?.audio, { ...stored, muted: !sound }, 'Fallback export ignored the latest Sound switch.');
+      } finally { await ctx.close(); }
+      const target = await h.open(seed(h), '');
+      try {
+        await ready(target.page);
+        await restore(target.page, raw);
+        const actual = await target.page.evaluate(() => window.__daily.opts.volume.snapshot());
+        assert.deepEqual(actual, { master: stored.master, music: stored.music, sfx: stored.sfx, muted: !sound });
+      } finally { await target.ctx.close(); }
+    }
+  },
+
+  async 'crystal-corrupt-destination-audio'(h) {
+    const audio = { v: 1, master: .4, music: .3, sfx: .2, muted: true };
+    for (const value of ['{}', '[]', 'null', 'false', '"foreign"', '{', '{"v":2,"master":0.8}', '{"v":1,"master":null,"music":"quiet","muted":"false"}', '{"v":1,"master":0,"muted":false}']) {
+      const { ctx, page } = await h.open(seed(h, { 'dbt.audio.v1': value }), '');
+      try {
+        await ready(page);
+        const raw = JSON.parse(fs.readFileSync(fixture, 'utf8'));
+        raw.preferences = { audio };
+        await restore(page, raw);
+        const actual = await page.evaluate(() => ({ saved: JSON.parse(localStorage.getItem('dbt.audio.v1')), live: window.__daily.opts.volume.snapshot() }));
+        const expected = value === '{"v":1,"master":0,"muted":false}' ? { ...audio, master: 0, muted: false } : audio;
+        assert.deepEqual(actual.saved, expected, 'Invalid destination audio blocked valid backup choices: ' + value);
+        const { v, ...levels } = expected;
+        assert.deepEqual(actual.live, levels);
+        h.expect(!/choices couldn't be saved/.test(await page.locator('.dq-settings .dq-hint[aria-live]').textContent()), 'Recovered corrupt preferences still report a save failure.');
+      } finally { await ctx.close(); }
+    }
+    const legacy = await h.open(seed(h, { 'dbt.audio.v1': '{}' }), '');
+    try {
+      await ready(legacy.page);
+      await restore(legacy.page, JSON.parse(fs.readFileSync(fixture, 'utf8')));
+      h.expect(await legacy.page.evaluate(() => window.__daily.opts.volume.snapshot().muted && JSON.parse(localStorage.getItem('dbt.audio.v1')).muted), 'An old crystal lost its Sound-off choice with corrupt destination preferences.');
+    } finally { await legacy.ctx.close(); }
+  },
+
+  async 'crystal-card-import-bounds'(h) {
+    const { ctx, page } = await h.open(seed(h));
+    try {
+      await ready(page);
+      const raw = await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const { first } = await ss.create('Bounded card import');
+        await ss.putCards(first.id, Array.from({ length: 12 }, (_, n) => ({ id: 'local-' + n, mode: 'polish', text: 'Local card ' + n, t: 10 })));
+        const list = Array(2001).fill(null);
+        list[12] = { id: 'local-0', mode: 'polish', text: 'Within scan bound.', t: 20 };
+        list[2000] = { id: 'local-0', mode: 'polish', text: 'Beyond scan bound.', t: 30 };
+        return JSON.parse(window.__daily.store.exportJSON({ stories: { cards: { [first.id]: list } } }));
+      });
+      await restore(page, raw);
+      const first = await crystal(h, page, 'bounded-card-records');
+      const id = Object.keys(raw.stories.cards)[0];
+      h.expect(first.stories.cards[id].find((c) => c.id === 'local-0')?.text === 'Within scan bound.', 'Card restore scanned beyond its record bound or missed an existing ID after position 12.');
+      const entries = Object.fromEntries(Array.from({ length: 500 * (300 + 2) }, (_, n) => ['?invalid-' + n, []]));
+      entries[id] = [{ id: 'local-0', mode: 'polish', text: 'Beyond entry bound.', t: 40 }];
+      await restore(page, { ...raw, stories: { cards: entries } });
+      h.expect(/pages or cards couldn't be added/.test(await page.locator('.dq-settings .dq-hint[aria-live]').textContent()), 'Discarded card entries were not reported.');
+      const final = await crystal(h, page, 'bounded-card-entries');
+      h.expect(final.stories.cards[id].find((c) => c.id === 'local-0')?.text === 'Within scan bound.', 'Card restore processed an entry beyond the chapter import bound.');
+    } finally { await ctx.close(); }
+  },
+
   async 'crystal-restore-incomplete'(h) {
     const raw = JSON.parse(fs.readFileSync(fixture, 'utf8'));
     raw.incomplete = true;

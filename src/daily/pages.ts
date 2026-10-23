@@ -872,7 +872,7 @@ export function settingsScreen(app: App): ScreenOut {
             app.opts.volume?.flush();
             const art = await artStore(st.key).exportAll();
             const { stories, chapters, cards, incomplete } = await storyStore(st.key).exportAll();
-            const choices = exportPreferences(st.key, app.opts.volume);
+            const choices = exportPreferences(st, app.opts.volume);
             const missing = [art.incomplete ? 'drawings' : '', incomplete ? 'stories' : '', choices.incomplete ? 'choices' : ''].filter(Boolean).join(' and ');
             const r = await shareOrSave(st.exportJSON({ art: art.records, stories: { stories, chapters, cards }, preferences: choices.preferences, incomplete: !!missing }), `save-crystal-${st.today()}.json`, 'application/json');
             const done = r === 'saved' ? 'Saved' : r === 'shared' ? 'Shared' : '';
