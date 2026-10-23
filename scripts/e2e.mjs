@@ -13,7 +13,7 @@ import { startHarness } from './e2e/harness.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.join(root, 'scripts/e2e');
 const flags = Object.fromEntries(process.argv.slice(2).filter((a) => a.startsWith('--')).map((a) => { const [k, ...v] = a.slice(2).split('='); return [k, v.length ? v.join('=') : 'true']; }));
-for (const key of ['file', 'scenario']) {
+for (const key of ['file', 'scenario', 'shard']) {
   if (flags[key] === '') throw new Error(`--${key} needs a value`);
 }
 
@@ -47,12 +47,13 @@ if (flags.shard) {
   }
   part = new Set([...part].filter(([, k]) => k === +m[1]).map(([file]) => file));
 }
-const pick = all.filter((s) => (!flags.file || s.file === flags.file) && (!flags.scenario || s.name === flags.scenario) && (!part || part.has(s.file)));
-if (!pick.length && part) {
+const matched = all.filter((s) => (!flags.file || s.file === flags.file) && (!flags.scenario || s.name === flags.scenario));
+if (!matched.length) throw new Error(`scenario ${flags.scenario} is not in ${flags.file}.e2e.mjs`);
+const pick = matched.filter((s) => !part || part.has(s.file));
+if (!pick.length) {
   console.log(`shard ${flags.shard} has no scenarios`);
   process.exit(0);
 }
-if (!pick.length) throw new Error(`scenario ${flags.scenario} is not in ${flags.file}.e2e.mjs`);
 
 let h;
 let report;
