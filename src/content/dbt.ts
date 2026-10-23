@@ -622,6 +622,91 @@ export const SKILLS: Skill[] = [
       },
     ],
   },
+  {
+    id: 'turning-the-mind',
+    sl: 'Crossroads',
+    real: 'Turning the Mind',
+    module: 'dt',
+    minutes: '2 min',
+    card: 'Caught fighting something that already happened? Turn toward accepting it, again.',
+    steps: [
+      {
+        kind: 'intro',
+        text: "Still fighting something that already happened? That makes sense. It hurt, and part of you wants it undone. Accepting isn't one and done. You choose it, then you choose it again.",
+        small: "Accepting isn't approving. It never means staying somewhere unsafe.",
+      },
+      { kind: 'choice', key: 'fight', multi: true, text: '**Notice the fight.** Is any of this here right now? No need to stop it. Only notice.', options: o('"Why me?"', '"This shouldn\'t be happening"', 'Bitterness', 'Wishing it away', 'Something else') },
+      { kind: 'hold', seconds: 4, label: 'Hold to turn', done: 'Turned.', text: "**Turn.** Picture a fork in the road. One way keeps fighting what's real. The other accepts it, even if you hate it. Turn toward that one, only for now." },
+      { kind: 'choice', key: 'sign', other: 'My own', text: "**Plan for next time.** The fight usually comes back. That's normal. What will tell you it's back?", options: o('A "why me" thought', 'A tight jaw or fists', 'Replaying it in my head', 'Feeling bitter') },
+      { kind: 'breath', inhale: 4, exhale: 6, rounds: 3, words: ['notice', 'turn'], text: '**Turn again.** Breathe in and notice the fight. Breathe out and turn.' },
+      { kind: 'choice', key: 'after', text: 'Every turn counts, even a small one. How is it now?', options: [{ label: 'A bit lighter', go: 'done' }, { label: 'About the same', go: 'same' }, { label: "It's a lot", go: 'lot' }] },
+      { id: 'done', kind: 'say', text: 'You turned your mind. When the fight comes back, you know the move: notice it, then turn again.', cta: 'Done', go: 'end' },
+      { id: 'same', kind: 'say', text: 'Thanks for trying it. Sometimes it takes a lot of turns before anything shifts. Each one still counts.', cta: 'Done', go: 'end' },
+      {
+        id: 'lot',
+        kind: 'say',
+        text: 'Thanks for being honest. Then only a little today. Some things take a lot of turning. The Safe Zone is one tap away if you want it.',
+        options: [{ label: 'Safe Zone', go: 'safe' }, { label: 'Done', go: 'end' }],
+      },
+    ],
+  },
+  {
+    id: 'body-scan',
+    sl: 'Quiet Scan',
+    real: 'Body Scan',
+    module: 'dt',
+    minutes: '2 min',
+    card: 'Move your attention slowly from your feet to your head. Only noticing.',
+    steps: [
+      { kind: 'intro', text: "Wound up, or a bit far away from yourself? That's hard, and it makes sense after a rough stretch. A slow scan can bring you back, one part at a time." },
+      { kind: 'say', text: "Sit or lie down, whichever is easier. Close your eyes, or rest them on one spot. Skip any part that doesn't feel okay. If it gets to be too much, open your eyes and look around the room.", cta: 'Ready' },
+      { kind: 'timer', seconds: 30, extend: 15, visual: 'glow', title: 'Feet and legs', text: 'Notice your feet. Warm, cool, heavy, tingly, or nothing much. Then slowly up your legs. No need to change anything.' },
+      { kind: 'timer', seconds: 30, extend: 15, visual: 'glow', title: 'Back, hands and shoulders', text: 'Notice where your back meets the chair or the bed. Then your hands, up your arms, to your shoulders. Tight is okay. Only notice.' },
+      { kind: 'timer', seconds: 30, extend: 15, visual: 'glow', title: 'Face and head', text: 'Your jaw, your cheeks, around your eyes, the top of your head. If something wants to soften, let it.' },
+      { kind: 'choice', key: 'after', text: 'Now your whole body at once, for one breath. How does it feel?', options: [{ label: 'A bit calmer', go: 'done' }, { label: 'About the same', go: 'same' }, { label: 'Harder', go: 'hard' }] },
+      { id: 'done', kind: 'say', text: 'You checked in with yourself, feet to head. That was care.', cta: 'Done', go: 'end' },
+      { id: 'same', kind: 'say', text: "Thanks for trying it. Noticing is the whole skill, and you did it. It doesn't have to feel different yet.", cta: 'Done', go: 'end' },
+      {
+        id: 'hard',
+        kind: 'say',
+        text: "Thanks for being honest. Some days, paying attention to your body is a lot. That's okay. Noticing what's around you might fit better.",
+        options: [{ label: 'Sense Up', go: 'skill:sense-up@sight' }, { label: 'Safe Zone', go: 'safe' }, { label: 'Done', go: 'end' }],
+      },
+    ],
+  },
+  {
+    id: 'alternate-rebellion',
+    sl: 'Off-Script',
+    real: 'Alternate Rebellion',
+    module: 'dt',
+    minutes: '1 min',
+    card: 'Want to break the rules? Break a harmless one, on purpose.',
+    steps: [
+      { kind: 'intro', text: "Sick of rules, plans and being careful? That urge to break out is real, and it makes sense. You can honour it in a way that doesn't hurt you or your goals." },
+      { kind: 'choice', key: 'against', other: 'My own', text: 'What are you pushing against today? Any answer makes sense.', options: o('Being told what to do', 'Being bored', 'Always being careful', 'Everything, honestly', 'Not sure') },
+      {
+        id: 'pick',
+        kind: 'choice',
+        key: 'rebel',
+        other: 'My own',
+        text: 'Pick a harmless rebellion. Small is fine.',
+        options: o('Wear something mismatched on purpose', 'Take a totally different route', "Blast a song you'd never admit to liking", 'Write a rant, then delete it', 'Rearrange one corner of your room', 'Sit somewhere you never sit'),
+      },
+      {
+        kind: 'choice',
+        key: 'check',
+        text: (a) => `${s(a, 'rebel', 'Your rebellion').replace(/[.!?\s]+$/, '')}. Quick check: could it hurt you, anyone else, or something you care about?`,
+        options: [{ label: "No, it's harmless", go: 'go' }, { label: 'Maybe', go: 'swap' }],
+      },
+      {
+        id: 'swap',
+        kind: 'say',
+        text: 'Good catch. Pick a gentler one. The best rebellions still feel good tomorrow.',
+        options: [{ label: 'Pick again', go: 'pick' }, { label: 'Done', go: 'end' }],
+      },
+      { id: 'go', kind: 'say', text: 'Go do it. Small, harmless and on purpose still counts as breaking out.', cta: 'Done', go: 'end' },
+    ],
+  },
 
   // ---------------- Emotion Regulation (Intelligence) ----------------
   {
@@ -1294,6 +1379,9 @@ export const ROTATION: Quest[] = [
   { skill: 'emotion-myths' },
   { skill: 'long-term-positives' },
   { skill: 'problem-solving' },
+  { skill: 'turning-the-mind' },
+  { skill: 'body-scan' },
+  { skill: 'alternate-rebellion' },
 ];
 
 /**
