@@ -343,18 +343,25 @@ export const scenarios = {
   },
 
   async 'final-ids-guard'({ out, expect }) {
-    const run = (snap) => {
+    const write = (snap) => {
       const file = path.join(out, `me91-snapshot-${Math.random().toString(36).slice(2, 8)}.json`);
       fs.writeFileSync(file, JSON.stringify(snap));
+      return file;
+    };
+    const run = (snap, base = snap, env = process.env) => {
+      const args = ['scripts/check-stored-ids.mjs', `--snapshot=${write(snap)}`, ...(base ? [`--baseline=${write(base)}`] : [])];
       try {
-        return { code: 0, text: execFileSync(process.execPath, ['scripts/check-stored-ids.mjs', `--snapshot=${file}`], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) };
+        return { code: 0, text: execFileSync(process.execPath, args, { cwd: root, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) };
       } catch (e) {
         return { code: e.status, text: `${e.stdout}${e.stderr}` };
       }
     };
     const snap = JSON.parse(fs.readFileSync(SNAP, 'utf8'));
-    const now = run(snap);
-    expect(now.code === 0 && /^OK/m.test(now.text), 'guard fails on the committed snapshot:\n' + now.text);
+    const now = run(snap, null);
+    fs.writeFileSync(path.join(out, 'me91-guard-main.txt'), now.text);
+    expect(now.code === 0 && /^OK/m.test(now.text), 'guard fails on the committed snapshot against main:\n' + now.text);
+    const lost = run(snap, null, { ...process.env, STORED_IDS_BASE: 'no-such-ref-me91' });
+    expect(lost.code === 1 && lost.text.includes("Can't find the earlier list"), 'guard passed without an earlier list to compare with:\n' + lost.text);
     const renamed = structuredClone(snap);
     renamed.ids.skill.push('renamed-away');
     const r = run(renamed);
@@ -363,6 +370,10 @@ export const scenarios = {
     renamed.migrations = [{ kind: 'skill', from: 'renamed-away', to: ids.skill[0], since: '2026-10-23' }];
     const m = run(renamed);
     expect(m.code === 0, 'guard refused a lost id that has a migration:\n' + m.text);
+    const moved = structuredClone(renamed);
+    moved.migrations[0].to = ids.skill[1];
+    const mv = run(moved, renamed);
+    expect(mv.code === 1 && mv.text.includes('was changed or removed'), 'guard accepted a shipped migration being changed:\n' + mv.text);
     const added = structuredClone(snap);
     const fresh = added.ids.skill.pop();
     const a = run(added);
@@ -382,7 +393,7 @@ export const scenarios = {
     fs.symlinkSync(path.join(root, 'node_modules'), path.join(scratch, 'node_modules'), 'dir');
     const sourceRun = (label, code, match) => {
       let actual = 0, output;
-      try { output = execFileSync(process.execPath, ['scripts/check-stored-ids.mjs'], { cwd: scratch, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
+      try { output = execFileSync(process.execPath, ['scripts/check-stored-ids.mjs', `--baseline=${SNAP}`], { cwd: scratch, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
       catch (e) { actual = e.status; output = `${e.stdout}${e.stderr}`; }
       fs.writeFileSync(path.join(out, `me91-source-${label}.txt`), output);
       expect(actual === code && match.test(output), `${label}: exit ${actual}\n${output}`);
@@ -391,6 +402,16 @@ export const scenarios = {
     const original = fs.readFileSync(file, 'utf8');
     fs.writeFileSync(file, original.replace("id: 'lie-low'", "id: 'lay-low'"));
     sourceRun('rename', 1, /skill "lie-low" is stored/);
+    const scratchSnap = path.join(scratch, 'scripts/stored-ids.json');
+    const frozen = fs.readFileSync(scratchSnap, 'utf8');
+    fs.writeFileSync(scratchSnap, frozen.replace('"lie-low"', '"lay-low"'));
+    sourceRun('rename-list-too', 1, /skill "lie-low" was frozen in .+ and is gone from the list/);
+    const kept = JSON.parse(frozen);
+    kept.ids.skill.push('lay-low');
+    kept.migrations.push({ kind: 'skill', from: 'lie-low', to: 'lay-low', since: '2026-10-23' });
+    fs.writeFileSync(scratchSnap, JSON.stringify(kept));
+    sourceRun('rename-migrated', 0, /renamed by a migration/);
+    fs.writeFileSync(scratchSnap, frozen);
     fs.writeFileSync(file, original.replace('export const SKILL =', "SKILLS.push({ ...SKILLS[0], id: 'guard-new-skill' });\nexport const SKILL ="));
     sourceRun('addition', 0, /skill: guard-new-skill[\s\S]*--update/);
     fs.writeFileSync(file, original);

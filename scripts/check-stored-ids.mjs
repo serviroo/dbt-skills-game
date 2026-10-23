@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -144,6 +145,33 @@ for (const [kind, ids] of Object.entries(snap.ids)) {
 }
 for (const m of migrations) {
   if (!m || !Object.hasOwn(snap.ids, m.kind) || !snap.ids[m.kind].includes(m.from) || !(m.to === null || typeof m.to === 'string' && m.to) || typeof m.since !== 'string' || !m.since.trim()) problems.push(`Invalid migration: expected { kind, from, to, since } naming a frozen id and its first release.`);
+}
+
+function earlier() {
+  if (flags.baseline) {
+    const file = path.resolve(root, flags.baseline);
+    return { from: path.relative(root, file), snap: JSON.parse(fs.readFileSync(file, 'utf8')) };
+  }
+  const git = (...args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  let ref;
+  try {
+    ref = process.env.STORED_IDS_BASE || git('merge-base', 'HEAD', 'origin/main');
+    git('rev-parse', '--verify', '--quiet', `${ref}^{commit}`);
+  } catch {
+    problems.push(`Can't find the earlier list to compare with (${ref ?? 'origin/main'}). Run: git fetch origin main, or pass --baseline=<an earlier stored-ids.json>.`);
+    return null;
+  }
+  try { git('cat-file', '-e', `${ref}:scripts/stored-ids.json`); } catch { return { from: ref, snap: null }; }
+  return { from: ref, snap: JSON.parse(git('show', `${ref}:scripts/stored-ids.json`)) };
+}
+const base = earlier();
+if (base && !base.snap) console.log(`No list at ${base.from} yet: this is the first freeze.`);
+for (const [kind, ids] of Object.entries(base?.snap?.ids ?? {})) {
+  const kept = new Set(snap.ids[kind] ?? []);
+  for (const id of ids) if (!kept.has(id)) problems.push(`${kind} "${id}" was frozen in ${base.from} and is gone from the list. Frozen ids stay listed for good: to rename one, keep it, freeze the new one and add a migration (CONTRIBUTING.md).`);
+}
+for (const m of base?.snap?.migrations ?? []) {
+  if (!migrations.some((x) => x?.kind === m.kind && x.from === m.from && x.to === m.to && x.since === m.since)) problems.push(`migration ${JSON.stringify(m)} from ${base.from} was changed or removed. Migrations stay as they shipped.`);
 }
 for (const [kind, ids] of Object.entries(now)) {
   if (!ids.length) problems.push(`found no ${kind} ids in the source: this check can't read them any more, so it can't protect them (fix scripts/check-stored-ids.mjs)`);

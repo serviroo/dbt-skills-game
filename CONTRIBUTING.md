@@ -28,7 +28,8 @@ fields and every id a save holds (skills, titles, Night Watch members, looks, li
 that list, never taken out.
 
 - `npm run check:ids` reads the names from the source and compares them with the list. It fails if a listed one is
-  gone. If you only added names, it passes and tells you which.
+  gone. If you only added names, it passes and tells you which. It also checks the list against the copy on `main`:
+  taking a name out of both the source and the list still fails.
 - Adding a skill, title or look? Pick its final id first (lowercase words joined by `-`, taken from the real skill name
   when there is one), run `npm run check:ids -- --update`, and commit the updated list with your change. New storage
   keys go in `src/core/stored-names.ts`.
