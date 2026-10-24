@@ -100,7 +100,9 @@ as its `result` in `report.json`.
 
 `node scripts/e2e.mjs --file=layout-fit` opens every companion screen at 390x844, 320x568 and 844x390 and checks that
 nothing scrolls or sticks out sideways, every button, link and field takes taps across at least 44x44 px, and body
-text is at least 16 px. Screens in its `ENFORCED` list fail the run. Every other screen passes and prints its problems
+text is at least 16 px. The drawing screen is also checked at 568x320, 360x740 and 375x667, for both Draw today and
+a shadow ally, with the Clear question open too, and its page must stay at least 180 px tall. Screens in its
+`ENFORCED` list fail the run. Every other screen passes and prints its problems
 as a todo list, also kept in `report.json`. Once a screen fits, add it to `ENFORCED`.
 
 ### Screen reader names
