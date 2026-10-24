@@ -2443,6 +2443,10 @@ textarea.dq-input {
 }
 .dq-settings .dq-panel .dq-small {
   margin-top: 12px;
+  font-size: 16px;
+}
+.dq-settings .dq-setting-h {
+  font-size: 16px;
 }
 
 @media (min-width: 900px) {
@@ -3287,7 +3291,7 @@ textarea.dq-input {
 }
 .dq-allyslot-s {
   max-width: 100%;
-  font-size: 13.5px;
+  font-size: 16px;
   line-height: 1.35;
   color: var(--t-dim);
   overflow-wrap: break-word;
@@ -3298,6 +3302,14 @@ textarea.dq-input {
 }
 .dq-shadows .dq-sec-h {
   margin-top: 10px;
+}
+.dq-shadows .dq-sec-h > :first-child {
+  flex: none;
+  white-space: nowrap;
+}
+.dq-shadows .dq-sec-sub {
+  font-size: 16px;
+  text-align: right;
 }
 
 /* ---------- drawing page ---------- */
