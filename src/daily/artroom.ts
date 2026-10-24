@@ -549,6 +549,8 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     frame.style.height = `${Math.floor(fw / a)}px`;
     fit.style.flex = row && !side ? `0 0 ${fw + pad2}px` : '';
     promptRow.style.width = row && !side ? `${fw + pad2 + tools.offsetWidth + gap}px` : '';
+    const cs = getComputedStyle(fit);
+    tools.style.setProperty('--page-w', side ? `${fw + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight)}px` : '');
   };
   const ro = new ResizeObserver(layout);
   const el = h(

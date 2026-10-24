@@ -7,8 +7,10 @@
 //   text        body text under 16 px: any visible run of four or more words, and the text in every field
 //   hidden      on a phone held sideways, a label the screen lists under `shown` is visually hidden
 //   page        the drawing page the screen lists under `page` is under 180 px tall
+//   covers      after Save, the message the screen lists under `saved` covers the prompt or the tools, or reaches
+//               past the edge of the screen
 // A screen can list more routes to check at each size under `also`, and `clear` draws a line and checks the screen
-// again with the Clear question open.
+// again with the Clear question open. `saved` then keeps the page and taps Save on the first route.
 // The Safe Zone and the Save Crystal panel are left out. Screens in ENFORCED fail the run; every other screen passes
 // and lists its problems on stdout and under `result` in report.json, as the todo list.
 import { fullSave, seedStores } from './me-91-final-save-ids.e2e.mjs';
@@ -37,7 +39,7 @@ export const SCREENS = {
   'night-watch': { route: { name: 'shadows' }, scope: ['.w2-roster'] },
   wardrobe: { route: { name: 'settings' }, scope: ['.w2-wardrobe-p'] },
   art: { route: { name: 'art' } },
-  draw: { route: { name: 'draw', kind: 'today' }, also: [{ at: 'shadow ally', route: { name: 'draw', kind: 'ally' } }], sizes: [{ width: 568, height: 320 }, { width: 360, height: 740 }, { width: 375, height: 667 }], shown: '.dq-swatch-n', page: '.dq-draw-frame', clear: '.dq-tool--clear' },
+  draw: { route: { name: 'draw', kind: 'today' }, also: [{ at: 'shadow ally', route: { name: 'draw', kind: 'ally' } }], sizes: [{ width: 568, height: 320 }, { width: 360, height: 740 }, { width: 375, height: 667 }], shown: '.dq-swatch-n', page: '.dq-draw-frame', clear: '.dq-tool--clear', saved: { button: '.dq-save', msg: '.dq-tools-msg', keep: ['.dq-prompt', '.dq-tools'] } },
   stories: { route: { name: 'stories' } },
   write: { route: { name: 'write', id: 'tale-1' } },
   settings: { route: { name: 'settings' }, skip: ['.w2-wardrobe-p'] },
@@ -249,6 +251,21 @@ function scenario(id, spec) {
             await settle(page);
             h.expect(await page.getByRole('group', { name: 'Clear the page' }).isVisible(), `${id} ${size}${at ? ` ${at}` : ''}: the Clear question did not open`);
             await look([at, 'Clear question open'].filter(Boolean).join(', '));
+          }
+          if (spec.saved && !i) {
+            await page.getByRole('button', { name: 'Keep it' }).click();
+            await page.click(spec.saved.button);
+            await page.waitForFunction((s) => document.querySelector(s)?.textContent.trim(), spec.saved.msg, { timeout: 10000 });
+            await settle(page);
+            const found = await page.evaluate(({ msg, keep }) => {
+              const m = document.querySelector(msg).getBoundingClientRect();
+              const over = keep.filter((s) => { const r = document.querySelector(s).getBoundingClientRect(); return m.left < r.right && r.left < m.right && m.top < r.bottom && r.top < m.bottom; });
+              const out = over.map((s) => ({ kind: 'covers', what: msg, detail: s }));
+              if (m.top < 0 || m.left < 0 || m.bottom > innerHeight || m.right > innerWidth) out.push({ kind: 'covers', what: msg, detail: 'the edge of the screen' });
+              return out;
+            }, spec.saved);
+            views.push({ at: 'saved', found });
+            await h.shot(page, `layout-fit-${id}-saved-${size}`);
           }
         }
       }
