@@ -4,6 +4,9 @@
 // The first scenario steps the real intro frame by frame and checks the hand where the shots frame it; the second
 // checks every pose gives the same bones however often it runs and that a positive curl closes either hand.
 
+import fs from 'node:fs';
+import path from 'node:path';
+
 /** Each case runs the same frame three more times: a pose that moves on a re-run has stacked. */
 const SAME = 1e-4;
 
@@ -107,6 +110,11 @@ export const scenarios = {
       return m;
     };
     const stepTo = (lt) => page.evaluate((lt) => window.__hand.step(() => (window.__awakenLT ?? -1) >= lt), lt);
+    // the stage draws only when stepped: save the canvas itself rather than a page screenshot
+    const snap = async (name) => {
+      const png = await page.evaluate(() => window.__stage.canvas.toDataURL('image/png'));
+      fs.writeFileSync(path.join(h.out, name + '.png'), Buffer.from(png.split(',')[1], 'base64'));
+    };
     const frames = (n) => page.evaluate((n) => { let i = 0; return window.__hand.step(() => ++i > n); }, n);
 
     // silhouette: he breathes with his hands at his sides; the right fist is the closed reference
@@ -124,7 +132,7 @@ export const scenarios = {
       h.expect(m.hand < m.shoulder - 0.12, `reach ${lt}: his hand is at ${near(m.hand)} m, up by his shoulder (${near(m.shoulder)} m) instead of at his waist`);
       h.expect(m.open > fist.open + 0.015, `reach ${lt}: his palm never opened (index tip ${near(m.open)} m from the wrist, a fist is ${near(fist.open)} m)`);
       reach ??= m;
-      if (lt === 3.42) await h.shot(page, 'intro-hand-reach');
+      if (lt === 3.42) await snap('intro-hand-reach');
     }
 
     // the shot from 11.9 to 13.1 s lines his raised hand up with the gate's light; in it the stones come down and the
@@ -143,7 +151,7 @@ export const scenarios = {
     log.push(`grip ${near(closed)}, hand to beam ${near(gap)} W`);
     h.expect(closed < reach.open - 0.015, `his hand never closed on the slam (index tip ${near(closed)} m from the wrist)`);
     h.expect(gap < 0.015, `his raised hand sits ${near(gap)} screen widths off the gate's light instead of in front of it`);
-    await h.shot(page, 'intro-hand-gate');
+    await snap('intro-hand-gate');
 
     // the risen stand: the hand held at shoulder height, never over his head
     for (const lt of [13.4, 14.3]) {
@@ -151,7 +159,7 @@ export const scenarios = {
       const m = await read(`raised ${lt}`);
       h.expect(m.hand > m.shoulder - 0.15 && m.hand < m.neck, `raised ${lt}: his hand is at ${near(m.hand)} m; shoulder height is ${near(m.shoulder)} m, his neck ${near(m.neck)} m`);
       h.expect(Math.abs(m.open - reach.open) < 0.005, `raised ${lt}: his hand didn't open again after the grip (${near(m.open)} m)`);
-      if (lt === 14.3) await h.shot(page, 'intro-hand-raised');
+      if (lt === 14.3) await snap('intro-hand-raised');
     }
 
     // the chest beat: the chest rises in front of him while he stands at rest
