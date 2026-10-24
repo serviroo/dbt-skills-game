@@ -76,12 +76,13 @@ async function probe(page) {
         s.step(0);
         return Object.fromEntries(Object.keys(pts).map((k, i) => [k, on[i] === null ? null : Math.abs(on[i] - off[i])]));
       },
-      // how far his hand sits from the gate's beam of light on screen, in screen widths
+      // whether his hand is on screen, and how far it sits from the gate's beam of light, in screen widths
       gap() {
         const cam = window.__stage.camera;
         const hand = at('middle_01_r');
         const beam = window.__stage.scene.children.find((o) => o.name === 'gate').getWorldPosition(hand.clone()).setY(hand.y);
-        return Math.abs(hand.clone().project(cam).x - beam.project(cam).x) / 2;
+        const p = hand.clone().project(cam);
+        return { seen: Math.abs(p.x) < 1 && Math.abs(p.y) < 1 && p.z < 1, gap: Math.abs(p.x - beam.project(cam).x) / 2 };
       },
     };
   });
@@ -90,88 +91,102 @@ async function probe(page) {
 const near = (x) => +x.toFixed(4);
 const fmt = (m) => JSON.stringify(Object.fromEntries(Object.entries(m).map(([k, v]) => [k, typeof v === 'number' ? near(v) : v])));
 
-export const scenarios = {
-  'intro hand: the reach, lift and grip land where the shots frame them': async (h) => {
-    const { page, errors } = await h.open({}, '?shot=silhouette&capture&mute&dpr=1&nopost');
-    await page.waitForFunction(() => !!window.__stage, null, { timeout: 60000 });
-    await probe(page);
-    const { HIT, slam } = await page.evaluate(async () => ({
-      HIT: (await import('/src/cutscene/awaken-shots.ts')).HIT,
-      slam: (await import('/src/scene/awaken/rubble.ts')).RUBBLE.slam,
-    }));
-    const slamAt = HIT + slam;
-    const log = [];
-    const read = async (label) => {
-      const m = await page.evaluate(() => window.__hand.read());
-      const veil = await page.evaluate(() => window.__hand.veil());
-      log.push(`${label} ${fmt(m)} aura ${fmt(veil)}`);
-      h.expect(m.drift < SAME, `${label}: re-running the same frame moved his bones by ${near(m.drift)} m`);
-      for (const [part, d] of Object.entries(veil)) if (d !== null) h.expect(d < 6, `${label}: his aura draws over his ${part} (${near(d)} of 255)`);
-      return m;
-    };
-    const stepTo = (lt) => page.evaluate((lt) => window.__hand.step(() => (window.__awakenLT ?? -1) >= lt), lt);
-    // the stage draws only when stepped: save the canvas itself rather than a page screenshot
-    const snap = async (name) => {
-      const png = await page.evaluate(() => window.__stage.canvas.toDataURL('image/png'));
-      fs.writeFileSync(path.join(h.out, name + '.png'), Buffer.from(png.split(',')[1], 'base64'));
-    };
-    const frames = (n) => page.evaluate((n) => { let i = 0; return window.__hand.step(() => ++i > n); }, n);
+/** The intro from `from` ('silhouette' or 'awaken') on, at one viewport: portrait and landscape use different cameras. */
+async function introHand(h, viewport, from) {
+  const name = viewport.width > viewport.height ? 'landscape' : 'portrait';
+  const { page, errors } = await h.open({}, `?shot=${from}&capture&mute&dpr=1&nopost`, viewport);
+  await page.waitForFunction(() => !!window.__stage, null, { timeout: 60000 });
+  await probe(page);
+  const { HIT, slam } = await page.evaluate(async () => ({
+    HIT: (await import('/src/cutscene/awaken-shots.ts')).HIT,
+    slam: (await import('/src/scene/awaken/rubble.ts')).RUBBLE.slam,
+  }));
+  const slamAt = HIT + slam;
+  const log = [];
+  const read = async (label) => {
+    const m = await page.evaluate(() => window.__hand.read());
+    const veil = await page.evaluate(() => window.__hand.veil());
+    log.push(`${label} ${fmt(m)} aura ${fmt(veil)}`);
+    h.expect(m.drift < SAME, `${label}: re-running the same frame moved his bones by ${near(m.drift)} m`);
+    for (const [part, d] of Object.entries(veil)) if (d !== null) h.expect(d < 6, `${label}: his aura draws over his ${part} (${near(d)} of 255)`);
+    return m;
+  };
+  const stepTo = (lt) => page.evaluate((lt) => window.__hand.step(() => (window.__awakenLT ?? -1) >= lt), lt);
+  // the stage draws only when stepped: save the canvas itself rather than a page screenshot
+  const snap = async (name) => {
+    const png = await page.evaluate(() => window.__stage.canvas.toDataURL('image/png'));
+    fs.writeFileSync(path.join(h.out, name + '.png'), Buffer.from(png.split(',')[1], 'base64'));
+  };
+  const frames = (n) => page.evaluate((n) => { let i = 0; return window.__hand.step(() => ++i > n); }, n);
 
-    // silhouette: he breathes with his hands at his sides; the right fist is the closed reference
-    h.expect(await page.evaluate(() => window.__hand.step(() => window.__hand.visible())), 'the hero never appeared');
+  h.expect(await page.evaluate(() => window.__hand.step(() => window.__hand.visible())), 'the hero never appeared');
+  if (from === 'silhouette') {
+    // he breathes with his hands at his sides
     await frames(30);
-    const fist = await read('silhouette');
+    await read('silhouette');
     await frames(75);
     await read('silhouette later');
+  }
+  // at rest before the reach: the right fist is the closed reference
+  h.expect(await stepTo(1.2), 'the AWAKEN beat never started');
+  const fist = await read('rest');
 
-    // the reach: palm up at his waist, open, his face above it, through the wide insert and the front mid shot
-    let reach;
-    for (const lt of [2.7, 3.42, 4.2, 6.6]) {
-      h.expect(await stepTo(lt), `the AWAKEN beat never reached ${lt} s`);
-      const m = await read(`reach ${lt}`);
-      h.expect(m.hand < m.shoulder - 0.12, `reach ${lt}: his hand is at ${near(m.hand)} m, up by his shoulder (${near(m.shoulder)} m) instead of at his waist`);
-      h.expect(m.open > fist.open + 0.015, `reach ${lt}: his palm never opened (index tip ${near(m.open)} m from the wrist, a fist is ${near(fist.open)} m)`);
-      reach ??= m;
-      if (lt === 3.42) await snap('intro-hand-reach');
-    }
+  // the reach: palm up at his waist, open, his face above it, through the wide insert and the front mid shot
+  let reach;
+  for (const lt of [2.7, 3.42, 4.2, 6.6]) {
+    h.expect(await stepTo(lt), `the AWAKEN beat never reached ${lt} s`);
+    const m = await read(`reach ${lt}`);
+    h.expect(m.hand < m.shoulder - 0.12, `reach ${lt}: his hand is at ${near(m.hand)} m, up by his shoulder (${near(m.shoulder)} m) instead of at his waist`);
+    h.expect(m.open > fist.open + 0.015, `reach ${lt}: his palm never opened (index tip ${near(m.open)} m from the wrist, a fist is ${near(fist.open)} m)`);
+    reach ??= m;
+    if (lt === 3.42) await snap(`intro-hand-reach-${name}`);
+  }
 
-    // the shot from 11.9 to 13.1 s lines his raised hand up with the gate's light; in it the stones come down and the
-    // hand closes, then eases open again
-    h.expect(await stepTo(slamAt - 0.2), 'the AWAKEN beat never reached the slam');
-    const { closed, gap } = await page.evaluate(async ([slamEnd, shot]) => {
-      let closed = Infinity, gap = 0;
-      await window.__hand.step(() => {
-        const lt = window.__awakenLT;
-        if (lt <= slamEnd) closed = Math.min(closed, window.__hand.read().open);
-        if (lt >= shot[0] && lt <= shot[1]) gap = Math.max(gap, window.__hand.gap());
-        return lt >= shot[1];
-      });
-      return { closed, gap };
-    }, [slamAt + 0.7, [11.95, 13.05]]);
-    log.push(`grip ${near(closed)}, hand to beam ${near(gap)} W`);
-    h.expect(closed < reach.open - 0.015, `his hand never closed on the slam (index tip ${near(closed)} m from the wrist)`);
-    h.expect(gap < 0.015, `his raised hand sits ${near(gap)} screen widths off the gate's light instead of in front of it`);
-    await snap('intro-hand-gate');
+  // the shot from 11.9 to 13.1 s lines his raised hand up with the gate's light; in it the stones come down and the
+  // hand closes, then eases open again
+  h.expect(await stepTo(slamAt - 0.2), 'the AWAKEN beat never reached the slam');
+  const { closed, gap, hidden } = await page.evaluate(async ([slamEnd, shot]) => {
+    let closed = Infinity, gap = 0, hidden = 0;
+    await window.__hand.step(() => {
+      const lt = window.__awakenLT;
+      if (lt <= slamEnd) closed = Math.min(closed, window.__hand.read().open);
+      if (lt >= shot[0] && lt <= shot[1]) {
+        const g = window.__hand.gap();
+        gap = Math.max(gap, g.gap);
+        if (!g.seen) hidden++;
+      }
+      return lt >= shot[1];
+    });
+    return { closed, gap, hidden };
+  }, [slamAt + 0.7, [11.95, 13.05]]);
+  log.push(`grip ${near(closed)}, hand to beam ${near(gap)} W`);
+  h.expect(closed < reach.open - 0.015, `his hand never closed on the slam (index tip ${near(closed)} m from the wrist)`);
+  h.expect(!hidden, `his raised hand is off screen in ${hidden} frames of the shot that lines it up with the gate`);
+  h.expect(gap < 0.008, `his raised hand sits ${near(gap)} screen widths off the gate's light instead of in front of it`);
+  await snap(`intro-hand-gate-${name}`);
 
-    // the risen stand: the hand held at shoulder height, never over his head
-    for (const lt of [13.4, 14.3]) {
-      h.expect(await stepTo(lt), `the AWAKEN beat never reached ${lt} s`);
-      const m = await read(`raised ${lt}`);
-      h.expect(m.hand > m.shoulder - 0.15 && m.hand < m.neck, `raised ${lt}: his hand is at ${near(m.hand)} m; shoulder height is ${near(m.shoulder)} m, his neck ${near(m.neck)} m`);
-      h.expect(Math.abs(m.open - reach.open) < 0.005, `raised ${lt}: his hand didn't open again after the grip (${near(m.open)} m)`);
-      if (lt === 14.3) await snap('intro-hand-raised');
-    }
+  // the risen stand: the hand held at shoulder height, never over his head
+  for (const lt of [13.4, 14.3]) {
+    h.expect(await stepTo(lt), `the AWAKEN beat never reached ${lt} s`);
+    const m = await read(`raised ${lt}`);
+    h.expect(m.hand > m.shoulder - 0.15 && m.hand < m.neck, `raised ${lt}: his hand is at ${near(m.hand)} m; shoulder height is ${near(m.shoulder)} m, his neck ${near(m.neck)} m`);
+    h.expect(Math.abs(m.open - reach.open) < 0.005, `raised ${lt}: his hand didn't open again after the grip (${near(m.open)} m)`);
+    if (lt === 14.3) await snap(`intro-hand-raised-${name}`);
+  }
 
-    // the chest beat: the chest rises in front of him while he stands at rest
-    const chestUp = await page.evaluate(() => window.__hand.step(() => !!window.__stage.scene.children.find((o) => o.name === 'chest')?.visible));
-    h.expect(chestUp, 'the chest beat never started');
-    await frames(15);
-    h.expect(await page.evaluate(() => window.__hand.visible()), 'the hero is gone in the chest beat');
-    await read('chest');
-    h.expect(!errors.length, errors.join('\n'));
-    return log;
-  },
+  // the chest beat: the chest rises in front of him while he stands at rest
+  const chestUp = await page.evaluate(() => window.__hand.step(() => !!window.__stage.scene.children.find((o) => o.name === 'chest')?.visible));
+  h.expect(chestUp, 'the chest beat never started');
+  await frames(15);
+  h.expect(await page.evaluate(() => window.__hand.visible()), 'the hero is gone in the chest beat');
+  await read('chest');
+  h.expect(!errors.length, errors.join('\n'));
+  return log;
+}
 
+export const scenarios = {
+  'intro hand in portrait: the reach, lift and grip land where the shots frame them': (h) => introHand(h, { width: 390, height: 844 }, 'silhouette'),
+  'intro hand in landscape: the reach, lift and grip land where the shots frame them': (h) => introHand(h, { width: 844, height: 390 }, 'awaken'),
   'intro hand: every pose gives the same bones however often it runs, and a positive curl closes either hand': async (h) => {
     const { page, errors } = await h.open({}, '?lab=character&view=front&pose=idle&light=eval&mute&dpr=1');
     await page.waitForFunction(() => !!window.__lab, null, { timeout: 60000 });
