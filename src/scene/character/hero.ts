@@ -36,8 +36,8 @@ export const POSES: Record<string, Pose> = {
     uaR: [-1.0, 0.1, 0.18],
     faR: [-0.18, 0, 0],
     haR: [0, -1.5, -0.1],
-    fiR: [0, 0, 0.35],
-    thR: [0, 0, 0.1],
+    fiR: [0, 0, -1.1],
+    thR: [0, 0, -0.25],
   },
   // the same gesture lifted to shoulder height as the risen stand
   awakenHigh: {
@@ -49,8 +49,8 @@ export const POSES: Record<string, Pose> = {
     uaR: [-1.45, 0.1, 0.2],
     faR: [-0.3, 0, 0],
     haR: [0.1, -1.5, -0.08],
-    fiR: [0, 0, 0.28],
-    thR: [0, 0, 0.05],
+    fiR: [0, 0, -1.15],
+    thR: [0, 0, -0.25],
   },
 };
 
@@ -198,7 +198,21 @@ export async function loadHero(stage: Stage): Promise<Character> {
   key.shadow.normalBias = 0.015;
   key.shadow.radius = 3;
 
-  const mixer = new THREE.AnimationMixer(model);
+  // the clips play on a hidden copy of the skeleton and every pose pass starts from it: three.js only writes a bone
+  // when its clip value changes, so posing the shown bones in place stacked the pose on each extra pass in a frame
+  const played = src.clone(true);
+  const clipBones: [THREE.Bone, THREE.Bone][] = [];
+  played.traverse((o) => {
+    const shown = bonesByName.get(o.name);
+    if (shown && (o as THREE.Bone).isBone) clipBones.push([shown, o as THREE.Bone]);
+  });
+  const fromClips = () => {
+    for (const [shown, clip] of clipBones) {
+      shown.position.copy(clip.position);
+      shown.quaternion.copy(clip.quaternion);
+    }
+  };
+  const mixer = new THREE.AnimationMixer(played);
   const actions = new Map<string, THREE.AnimationAction>();
   for (const c of clips) {
     const a = mixer.clipAction(c);
@@ -213,6 +227,7 @@ export async function loadHero(stage: Stage): Promise<Character> {
     actions.set(c.name, a);
   }
   mixer.update(0);
+  fromClips();
 
   /* ---------- eyes: the model's own irises glow, plus a soft halo sprite in front of each */
   const head = bonesByName.get('Head')!;
@@ -245,6 +260,11 @@ export async function loadHero(stage: Stage): Promise<Character> {
       s.scale.setScalar(0.04);
       eyesGroup.add(s);
     }
+    // between the eyes: what the aura keeps its smoke clear of
+    const face = new THREE.Object3D();
+    face.name = 'face';
+    for (const c of centres) face.position.add(c.clone().applyMatrix4(inv).multiplyScalar(1 / centres.length));
+    head.add(face);
   }
   const setGlow = (g: number) => {
     halo.opacity = Math.min(1, g) * 0.85;
@@ -292,6 +312,7 @@ export async function loadHero(stage: Stage): Promise<Character> {
     }
     actions.get('idle')?.setEffectiveWeight(Math.max(0, rest));
     mixer.update(0);
+    fromClips();
     model.updateMatrixWorld(true);
     model.getWorldQuaternion(rootInv).invert();
     for (const { bone } of mapped) animW.set(bone, bone.getWorldQuaternion(new THREE.Quaternion()).premultiply(rootInv));
@@ -309,8 +330,8 @@ export async function loadHero(stage: Stage): Promise<Character> {
     }
     for (const { s, fingers, thumb } of fingerBones) {
       const side = s === 'l' ? 'L' : 'R';
-      const curl = val('fi' + side, a, b, t, add)[2] * (s === 'l' ? -1 : 1);
-      const th = val('th' + side, a, b, t, add)[2] * (s === 'l' ? -1 : 1);
+      const curl = val('fi' + side, a, b, t, add)[2];
+      const th = val('th' + side, a, b, t, add)[2];
       for (const chain of fingers) chain.forEach((bn, i) => bn.quaternion.multiply(qa.setFromAxisAngle(CURL_AXIS, CURL_SIGN[s] * curl * CURL_SPLIT[i])));
       thumb.forEach((bn, i) => bn.quaternion.multiply(qa.setFromAxisAngle(CURL_AXIS, CURL_SIGN[s] * th * CURL_SPLIT[i])));
     }
