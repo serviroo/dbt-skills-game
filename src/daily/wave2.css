@@ -412,14 +412,6 @@
   gap: 12px;
   margin-top: 6px;
 }
-.w2-roster .dq-sec-h > :first-child {
-  flex: none;
-  white-space: nowrap;
-}
-.w2-roster .dq-sec-sub {
-  font-size: 16px;
-  text-align: right;
-}
 .w2-roster-row {
   display: flex;
   gap: 12px;
@@ -755,7 +747,7 @@
   color: #fff3d8;
 }
 .w2-item-l {
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.45;
   color: var(--t-body);
 }
