@@ -124,8 +124,8 @@ export function awakenSequence(stage: Stage, awaken: Awaken, jw: Character, cam:
     // brightest light and his head catches its rim a few degrees to the side
     {
       t0: 11.9,
-      L: [V(-0.82, 0.5, 6.0), V(0.05, 1.55, -2.0), 46],
-      P: [V(-0.69, 0.45, 3.95), V(0.05, 1.78, -1.5), 60],
+      L: [V(-0.52, 0.5, 6.0), V(0.05, 1.55, -2.0), 46],
+      P: [V(-0.44, 0.45, 3.95), V(0.05, 1.78, -1.5), 60],
       move: (u, c) => c.pos.addScaledVector(V(0.25, 0, -1), u * 0.1),
     },
     // they kneel toward the camera (13.18-14.48, done before the result window opens at 14.67). The camera pitches up

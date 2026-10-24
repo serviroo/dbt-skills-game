@@ -77,6 +77,11 @@ export function createAura(o: AuraOpts): Aura {
       A = sin(3.1416 * age) * clamp((uIntensity - s2.w * 0.5) / 0.5, 0.0, 1.0);
       vec4 mvq = modelViewMatrix * vec4(P, 1.0);
       A *= mix(0.35, 1.0, smoothstep(1.2, 3.6, -mvq.z));
+      // the same puff on screen, set back along the view ray past his far side so the body always covers it
+      vec3 ray = P - cameraPosition;
+      float k = 1.0 + uRadius / max(length(ray), 1e-3);
+      P = cameraPosition + ray * k;
+      S *= k;
       C = mix(uCol, uHot, s2.y * 0.4);
     `,
     fragmentBody: /* glsl */ `
@@ -197,9 +202,10 @@ export function createAura(o: AuraOpts): Aura {
   group.add(sparks.mesh, flecks.mesh);
   const wp = new THREE.Vector3();
   const spOff = new THREE.Vector3(0, o.height * 0.4, 0);
-  // keep-clear anchors read from the target's rig when it has one (bones 'head', 'haR'/'fiR', 'haL'/'fiL')
+  // keep-clear anchors read from the target's rig when it has one ('face', and each hand from the wrist toward the
+  // middle knuckle)
   const bone = (n: string) => o.target.getObjectByName(n) ?? null;
-  const rig = { head: bone('head'), haR: bone('haR'), fiR: bone('fiR'), haL: bone('haL'), fiL: bone('fiL') };
+  const rig = { face: bone('face'), haR: bone('hand_r'), fiR: bone('middle_01_r'), haL: bone('hand_l'), fiL: bone('middle_01_l') };
   const aHead = new THREE.Vector3(), aR = new THREE.Vector3(), aL = new THREE.Vector3(), tmp = new THREE.Vector3();
   const handAt = (wr: THREE.Object3D | null, kn: THREE.Object3D | null, out: THREE.Vector3) => {
     if (!wr) return undefined;
@@ -221,10 +227,7 @@ export function createAura(o: AuraOpts): Aura {
     update(t: number) {
       o.target.getWorldPosition(wp);
       shared.uOrigin.value.copy(wp);
-      if (rig.head) {
-        rig.head.updateWorldMatrix(true, false);
-        smoke.setAnchors(rig.head.localToWorld(aHead.set(0, 0.09, 0.05)), handAt(rig.haR, rig.fiR, aR), handAt(rig.haL, rig.fiL, aL));
-      }
+      if (rig.face) smoke.setAnchors(rig.face.getWorldPosition(aHead), handAt(rig.haR, rig.fiR, aR), handAt(rig.haL, rig.fiL, aL));
       if (gate === undefined && group.parent) gate = group.parent.getObjectByName('gate') ?? null;
       const ghw = gate && gate.visible ? Number(gate.userData.slitHalfWidth) || 0 : 0;
       if (gate && ghw > 0) {
