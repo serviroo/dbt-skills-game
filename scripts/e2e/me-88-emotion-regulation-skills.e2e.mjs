@@ -123,11 +123,11 @@ async function act(page, step) {
   }
   if (kind === 'extend') {
     const before = await page.locator('.dq-timer-num').evaluate((el) => ({ left: Number(el.textContent), at: performance.now() }));
-    await tap(page, '+20 s');
+    await tap(page, '+15 s');
     await page.waitForFunction((b) => {
       const left = Number(document.querySelector('.dq-timer-num')?.textContent);
       const added = left + (performance.now() - b.at) / 1000 - b.left;
-      return added >= 18 && added <= 22;
+      return added >= 13 && added <= 17;
     }, before, { timeout: 5000 });
     return;
   }

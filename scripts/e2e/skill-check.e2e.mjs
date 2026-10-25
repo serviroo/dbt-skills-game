@@ -6,7 +6,9 @@
 // screen (its timer started) and left with "Leave this skill": that must reach Home with no confirm and credit it once.
 // Copy, read from the skill's content object with its text functions run on many answer sets: no em dash, no diagnosis
 // words (DESIGN.md principle 8), none of principle 9's wording a lint can catch, no hard-coded "Player" or unknown
-// token, every timer 20 to 90 s, and cold-water or intense-exercise steps carry a caution that names the heart risk and a
+// token, every timer 20 to 90 s with a step id (skill-flows opens each one), a screen that offers another skill or the
+// Safe Zone leads with this skill's own way forward (its finish, a later step, or the Safe Zone; never another skill or
+// a repeat), and cold-water or intense-exercise steps carry a caution that names the heart risk and a
 // "breathe instead" option (principle 11). Each of those steps is then opened at 390x844, 844x390 and 320x568: its
 // caution, its own action and "Breathe instead" must show without scrolling, and the last two must be buttons of the same
 // weight. On a timer, once Start is tapped, the countdown, Next and "Breathe instead" must all be on screen.
@@ -53,12 +55,12 @@ const COPY = {
   caution: String.raw`^(?=[\s\S]*\bskip\b)(?=[\s\S]*\bheart\b)`,
 };
 
-const dayKey = (ms) => {
+export const dayKey = (ms) => {
   const d = new Date(ms - 6 * 3600e3);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 /** A player back after a few days, with names set, who has practised STOP before. */
-function returning(h) {
+export function returning(h) {
   const now = Date.now();
   const events = [];
   for (let i = 5; i >= 1; i--) {
@@ -136,10 +138,20 @@ function copyProblems(page) {
         for (const o of opts) own.push(o.label, ...(o.reply ? [o.reply] : []));
         for (const t of own) lines.push([where, t]);
         if (st.kind === 'timer') {
+          if (!st.id) bad.add(`${where}: timer with no step id, so skill-flows can't open it to check its "+N s"`);
           const secs = new Set(typeof st.seconds === 'function' ? sets.map((a) => run(st.seconds, a)) : [st.seconds]);
           for (const n of secs) {
             if (typeof n !== 'number' || !Number.isFinite(n)) bad.add(`${where}: timer has no real length (${String(n)})`);
             else if (n < 20 || n > 90) bad.add(`${where}: timer runs ${n} s, not 20 to 90 s`);
+          }
+        }
+        // A way out (another skill or the Safe Zone) never leads: the first button, and any equal one beside it, keeps going
+        if (st.kind === 'say' && st.options?.some((o) => /^(skill:|safe)/.test(o.go ?? ''))) {
+          const at = sk.steps.findIndex((x) => x.id && x.id === st.id);
+          const forward = (o) => o.go === undefined || o.go === 'end' || o.go === 'end:quiet' || o.go.startsWith('safe') || sk.steps.findIndex((x) => x.id === o.go) > i;
+          if (!st.id || at !== i) bad.add(`${where}: a screen with a way out has no step id, so skill-flows can't open it`);
+          for (const o of [st.options[0], ...st.options.slice(1).filter((x) => x.instead)]) {
+            if (!forward(o)) bad.add(`${where}: leads with "${o.label}", which ${o.go.startsWith('skill:') ? 'opens another skill' : 'goes back to an earlier step'}; lead with this skill's own way forward`);
           }
         }
         // Cold water or hard exercise, named in the step itself or in an option that has no step of its own to warn on
@@ -287,9 +299,9 @@ function shippedStrings() {
   return out;
 }
 
-const credits = async (h, page, id) => (JSON.parse((await h.ls(page, h.SAVE)) ?? 'null')?.events ?? []).filter((e) => e.k === 'skill' && e.skill === id).length;
+export const credits = async (h, page, id) => (JSON.parse((await h.ls(page, h.SAVE)) ?? 'null')?.events ?? []).filter((e) => e.k === 'skill' && e.skill === id).length;
 
-async function toHub(h, page) {
+export async function toHub(h, page) {
   const at = await page.evaluate(() => document.querySelector('.dq')?.dataset.screen);
   if (at !== 'hub') await page.locator(at === 'skill' ? '.dq-top [aria-label="Leave this skill"]' : '.dq-top .dq-back').click();
   const home = await page.waitForFunction(() => document.querySelector('.dq')?.dataset.screen === 'hub', null, { timeout: 10000 }).then(() => true, () => false);
@@ -313,7 +325,7 @@ async function openFromLibrary(h, page, sk) {
 }
 
 /** null while the walk is still in the skill, "end" on its own end screen, otherwise where it went instead. */
-const ending = (page, title) =>
+export const ending = (page, title) =>
   page.evaluate((t) => {
     const at = document.querySelector('.dq')?.dataset.screen;
     if (at !== 'skill') return at;
@@ -379,7 +391,7 @@ async function reload(h, page) {
  * Taps the first offered option on each screen until the skill's own end screen, checking each timer on the way. With
  * leaveAt, it replays the walk up to that screen instead, starts its timer if it has one, and leaves from there.
  */
-async function walk(h, page, sk, bad, leaveAt = 0) {
+export async function walk(h, page, sk, bad, leaveAt = 0) {
   const title = await page.locator('.dq-skill h1').textContent();
   const path = [];
   let taps = 0;

@@ -238,7 +238,11 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
   let t0 = -1;
   let stop: (() => void) | null = null;
   let finished = false;
-  const fmt = (s: number) => (s >= 60 ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : String(Math.ceil(s)));
+  // whole seconds left, rounded up all the way down, so no second shows twice ("1:00" then "60")
+  const fmt = (s: number) => {
+    const c = Math.ceil(s);
+    return c >= 60 ? `${Math.floor(c / 60)}:${String(c % 60).padStart(2, '0')}` : String(c);
+  };
   const render = (t: number) => {
     const e = t0 < 0 ? 0 : t - t0;
     const left = Math.max(0, dur - e);
@@ -300,7 +304,9 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
         btn(`+${opts.extend} s`, () => {
           dur = Math.max(dur, now() - t0) + opts.extend!;
           if (finished) {
+            // a finished timer runs again the way it first started (a dimmed timer dims again)
             finished = false;
+            opts.onStart?.();
             stop = onFrame(render);
           }
         }, { kind: 'quiet' }),
