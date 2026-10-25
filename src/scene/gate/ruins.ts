@@ -102,22 +102,34 @@ function pier(h: number, r: number, broken: number, seed: number) {
   const plinth = new THREE.CylinderGeometry(r * 1.32, r * 1.38, 0.7, 8, 1);
   plinth.rotateY(Math.PI / 8);
   plinth.translate(0, 0.35, 0);
-  parts.push(plinth);
+  parts.push(faceted(plinth));
   const ring = (y: number, scale: number, jag?: (i: number) => number) =>
     Array.from({ length: N }, (_, i) => {
       const th = (i / N) * Math.PI * 2;
       const rr = pierRadius(th, r) * scale;
       return new THREE.Vector3(Math.cos(th) * rr, y - (jag ? jag(i) : 0), Math.sin(th) * rr);
     });
+  // rings joined into a surface, shaded smooth round the pier (the shafts read round, not as 48 flat strips) and flat up
+  // each band, so the mouldings keep crisp steps
+  const around = new THREE.Vector3(), up = new THREE.Vector3(), nrm = new THREE.Vector3();
   const band = (rings: THREE.Vector3[][]) => {
-    const pos: number[] = [];
+    const pos: number[] = [], nor: number[] = [];
+    const vert = (k: number, r: number, j: number) => {
+      const p = rings[r][j];
+      around.subVectors(rings[r][(j + 1) % N], rings[r][(j + N - 1) % N]);
+      up.subVectors(rings[k + 1][j], rings[k][j]);
+      nrm.crossVectors(up, around).normalize();
+      pos.push(p.x, p.y, p.z);
+      nor.push(nrm.x, nrm.y, nrm.z);
+    };
     for (let k = 0; k < rings.length - 1; k++)
       for (let i = 0; i < N; i++) {
-        const a = rings[k][i], b = rings[k][(i + 1) % N], c = rings[k + 1][(i + 1) % N], d = rings[k + 1][i];
-        pos.push(a.x, a.y, a.z, d.x, d.y, d.z, c.x, c.y, c.z, a.x, a.y, a.z, c.x, c.y, c.z, b.x, b.y, b.z);
+        const j = (i + 1) % N;
+        for (const [r, c] of [[k, i], [k + 1, i], [k + 1, j], [k, i], [k + 1, j], [k, j]]) vert(k, r, c);
       }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
     return g;
   };
   const base = band([ring(0.7, 1.16), ring(0.86, 1.16), ring(0.98, 1.04), ring(1.12, 1.0)]);
@@ -191,6 +203,13 @@ function wall(w: number, h: number, t: number, windows: { x: number; span: numbe
   return slab(outline, holes, t);
 }
 
+/** The wall over an arch, `w` wide: it sits on the arch's outer curve (span `span`, springing at y = 0), broken off above. */
+function spandrel(w: number, span: number, h: number, t: number, breakDepth: number, rnd: () => number) {
+  const apex = span * 0.87;
+  const outline = [V2(-w / 2, 0), V2(-span / 2, 0), ...lancet(span, 0, 14).slice(1, -1), V2(span / 2, 0), V2(w / 2, 0), ...brokenEdge(w / 2, -w / 2, h, breakDepth, rnd, apex + 0.6)];
+  return slab(outline, [], t);
+}
+
 /** Tracery for a great lancet window: two sub-lancets under an oculus, recessed in the opening. */
 function tracery(span: number, bottom: number, spring: number, depth: number) {
   const outer = opening(span, bottom, spring);
@@ -231,10 +250,21 @@ function hills(radius: number, rnd: () => number) {
   return g;
 }
 
+/** Flat shading for a part whose own normals are smoothed across hard edges (an octagon, a block). */
+function faceted(g: THREE.BufferGeometry) {
+  const f = g.index ? g.toNonIndexed() : g;
+  f.deleteAttribute('normal');
+  f.computeVertexNormals();
+  if (f !== g) g.dispose();
+  return f;
+}
+
+/** One geometry from many: positions and each part's own normals (flat face normals where a part has none). */
 function mergeAll(parts: THREE.BufferGeometry[]) {
   const flat = parts.map((p) => {
     const g = p.index ? p.toNonIndexed() : p;
-    for (const k of Object.keys(g.attributes)) if (k !== 'position') g.deleteAttribute(k);
+    for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);
+    if (!g.attributes.normal) g.computeVertexNormals();
     return g;
   });
   const m = mergeGeometries(flat)!;
@@ -285,40 +315,43 @@ export function buildRuins(shared: Record<string, THREE.IUniform>, seed = 11): R
     parts.push(place(pier(hl, pierR, bl, seed * 31 + i * 2), -NAVE_X, 0, z, rnd() * 0.3));
     parts.push(place(pier(hr, pierR, br, seed * 31 + i * 2 + 1), NAVE_X, 0, z, rnd() * 0.3));
   }
-  // surviving arcade arches between neighbouring intact piers (spanning along z, springing from the abacus)
+  // surviving arcade arches between neighbouring intact piers (spanning along z), springing from the abacus top (10.4)
+  const SPRING = 10.4;
   for (const [side, from, broken] of ARCHES) {
     const z0 = NAVE[from][0], z1 = NAVE[from + 1][0];
     const span = Math.abs(z1 - z0) - pierR * 2.4;
-    const g = archRing(span, 0.62, 1.1, broken, rnd);
-    // the ring lies in XY; turn it to run along z, spring on top of the abacus
-    place(g, side * NAVE_X, 10.4 + 0.9, (z0 + z1) / 2, side < 0 ? Math.PI / 2 : -Math.PI / 2);
+    const ringW = 0.62;
+    const g = archRing(span, ringW, 1.1, broken, rnd);
+    // the ring lies in XY; turn it to run along z
+    place(g, side * NAVE_X, SPRING, (z0 + z1) / 2, side < 0 ? Math.PI / 2 : -Math.PI / 2);
     parts.push(g);
-    // the spandrel wall over the arch, broken off above it
+    // the spandrel wall over the arch, sitting on its outer curve and broken off above it
     if (!broken) {
-      const w = Math.abs(z1 - z0) + pierR * 2;
-      const sp = wall(w, 5.6, 0.9, [{ x: 0, span, bottom: -1, spring: 0 }], 2.2, rnd);
-      place(sp, side * NAVE_X, 10.4 + 0.9, (z0 + z1) / 2, side < 0 ? Math.PI / 2 : -Math.PI / 2);
+      const sp = spandrel(Math.abs(z1 - z0) + pierR * 2, span + ringW * 2, 5.6, 0.9, 2.2, rnd);
+      place(sp, side * NAVE_X, SPRING, (z0 + z1) / 2, side < 0 ? Math.PI / 2 : -Math.PI / 2);
       parts.push(sp);
     }
   }
 
   // aisle walls: broken runs of wall with lancet windows, beyond the piers
+  const AISLE_X = NAVE_X + 7.2, AISLE_T = 1.0;
   for (const side of [-1, 1]) {
     for (const [z0, z1, h] of [[-4, -16, 7.5], [-21, -33, 5.2], [-35, -46, 8.6]] as const) {
       const w = Math.abs(z1 - z0);
-      const wins = [];
-      for (let x = -w / 2 + 2.4; x < w / 2 - 1.5; x += 4.2) wins.push({ x, span: 1.6, bottom: 1.6, spring: 4.4 });
-      const g = wall(w, h + rnd() * 1.5, 1.0, wins.filter((o) => o.spring + 1.4 < h), 3.8, rnd);
-      place(g, side * (NAVE_X + 7.2), 0, (z0 + z1) / 2, side < 0 ? Math.PI / 2 : -Math.PI / 2);
-      parts.push(g);
-      // buttresses against the outside of the wall at each window pier
-      for (let x = -w / 2; x <= w / 2 + 0.01; x += 4.2) {
-        const b = block(1.2, h * (0.55 + 0.35 * rnd()), 1.6);
-        b.translate(0, b.boundingBox ? 0 : 0, 0);
-        b.computeBoundingBox();
-        const bh = b.boundingBox!.max.y - b.boundingBox!.min.y;
-        place(b, side * (NAVE_X + 8.4), bh / 2, (z0 + z1) / 2 + x);
-        parts.push(b);
+      const grid: number[] = [];
+      for (let x = -w / 2 + 2.4; x < w / 2 - 1.5; x += 4.2) grid.push(x);
+      const wins = grid.map((x) => ({ x, span: 1.6, bottom: 1.6, spring: 4.4 })).filter((o) => o.spring + 1.4 < h);
+      const ry = side < 0 ? Math.PI / 2 : -Math.PI / 2;
+      parts.push(place(wall(w, h + rnd() * 1.5, AISLE_T, wins, 3.8, rnd), side * AISLE_X, 0, (z0 + z1) / 2, ry));
+      // buttresses against the outside of the wall: at both ends and between the windows, in two set-back stages
+      const at = [-w / 2 + 0.8, ...grid.slice(0, -1).map((x) => x + 2.1), w / 2 - 0.8];
+      for (const x of at) {
+        // the wall's local x runs along -z on the left side and +z on the right (the turn above)
+        const z = (z0 + z1) / 2 + (side < 0 ? -x : x);
+        const bh = h * (0.55 + 0.35 * rnd());
+        const face = side * (AISLE_X + AISLE_T / 2);
+        parts.push(place(block(1.2, bh, 1.4), face + side * 0.58, bh / 2, z));
+        if (bh > 3) parts.push(place(block(0.8, bh * 0.35, 1.1), face + side * 0.38, bh + bh * 0.175, z));
       }
     }
   }
@@ -328,7 +361,9 @@ export function buildRuins(shared: Record<string, THREE.IUniform>, seed = 11): R
     const W = 27, H = 21;
     const great = { x: 0, span: 7.2, bottom: 3.6, spring: 12.4 };
     const lesser = [-8.4, 8.4].map((x) => ({ x, span: 2.4, bottom: 4.2, spring: 9.6 }));
-    const outline = [V2(-W / 2, 0), V2(W / 2, 0), V2(W / 2, H - 6), ...brokenEdge(W / 2 - 3, 2, H + 2.5, 2.6, rnd), V2(0, H + 4.2), ...brokenEdge(-1.5, -W / 2 + 2, H + 1.5, 4.5, rnd), V2(-W / 2, H - 5)];
+    // the gable breaks away, but never down into the great window or the moulded ring round it
+    const gableMin = great.spring + (great.span + 0.1 + 0.55 * 2) * 0.87 + 0.6;
+    const outline = [V2(-W / 2, 0), V2(W / 2, 0), V2(W / 2, H - 6), ...brokenEdge(W / 2 - 3, 2, H + 2.5, 2.6, rnd, gableMin), V2(0, H + 4.2), ...brokenEdge(-1.5, -W / 2 + 2, H + 1.5, 4.5, rnd, gableMin), V2(-W / 2, H - 5)];
     const front = slab(outline, [opening(great.span, great.bottom, great.spring), ...lesser.map((o) => opening(o.span, o.bottom, o.spring, o.x))], 2.2);
     place(front, 0, 0, WEST_Z);
     parts.push(front);
@@ -376,7 +411,6 @@ export function buildRuins(shared: Record<string, THREE.IUniform>, seed = 11): R
   parts.push(hills(150, rnd));
 
   const geo = mergeAll(parts);
-  geo.computeVertexNormals();
   const material = ruinMaterial(shared);
   const mesh = new THREE.Mesh(geo, material);
   mesh.name = 'ruins';
@@ -384,9 +418,13 @@ export function buildRuins(shared: Record<string, THREE.IUniform>, seed = 11): R
   return { mesh, material };
 }
 
-/** Coursed stone, weathered, lit by the gate and the night sky; fog to the night horizon with mist at its feet. */
-export function ruinMaterial(shared: Record<string, THREE.IUniform>) {
+/**
+ * Coursed stone, weathered, lit by the gate and the night sky; fog to the night horizon with mist at its feet. `courses`
+ * false drops the coursed joints for loose stones (rubble), keeping the same stone, light and fog.
+ */
+export function ruinMaterial(shared: Record<string, THREE.IUniform>, opts: { courses?: boolean } = {}) {
   return new THREE.ShaderMaterial({
+    defines: opts.courses === false ? {} : { COURSES: 1 },
     uniforms: {
       ...shared,
       uFogColor: light.uFogColor,
@@ -412,6 +450,7 @@ export function ruinMaterial(shared: Record<string, THREE.IUniform>) {
       float hh(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
       void main() {
         vec3 n = normalize(vN);
+        #ifdef COURSES
         // coursed masonry, projected on the face's own plane
         vec2 q = abs(n.y) > 0.75 ? vW.xz : (abs(n.x) > abs(n.z) ? vW.zy : vW.xy);
         float course = 0.46;
@@ -426,6 +465,12 @@ export function ruinMaterial(shared: Record<string, THREE.IUniform>) {
         float detail = 1.0 - smoothstep(0.04, 0.14, fw);
         float joint = (1.0 - smoothstep(0.012, 0.04 + fw, edge)) * detail;
         float tone = hh(vec2(row, col) + 0.37);
+        #else
+        // loose stones: no joints, one tone per stone-sized patch
+        vec2 q = vW.xz + vW.y;
+        float detail = 1.0, joint = 0.0;
+        float tone = hh(floor(vW.xz * 3.0) + 0.37);
+        #endif
         float n1 = texture2D(uNoise, q * 0.19 + 0.21).r;
         float n2 = texture2D(uNoise, q * 0.83 + 0.6).g;
         // rain streaks down the faces and darker damp near the ground

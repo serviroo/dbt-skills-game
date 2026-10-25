@@ -4,7 +4,7 @@ import { params } from '../../core/params';
 
 /**
  * Crackling energy filaments along the torn edges, redrawn "on 2s" (12 fps). Each slot holds a bolt for an epoch of
- * 2-4 steps (same path, fresh jitter every step, decaying), so the look is a crackle, never a strobe. CPU ribbons in
+ * 2-4 steps (same path, fresh jitter every step, swelling in and fading), so the look is a crackle, never a strobe. CPU ribbons in
  * the gate plane; the whole state is a pure function of the step index derived from stage time.
  */
 export interface FilamentShape {
@@ -24,7 +24,7 @@ export interface FilamentShape {
   centerY: number;
 }
 
-const SLOTS = params.reduced ? 3 : 5;
+const SLOTS = params.reduced ? 3 : 4;
 const PTS = 16;
 const BR = 6;
 const MAX_POLY = SLOTS * 2;
@@ -132,7 +132,7 @@ export function createFilaments(shape: FilamentShape) {
       const epoch = Math.floor(kk / L);
       const ls = kk - epoch * L;
       const er = mulberry32(epoch * 977 + j * 131 + 7);
-      const active = er() < 0.42 && open > 0.35;
+      const active = er() < 0.34 && open > 0.35;
       if (!active || level <= 0) { clearPoly(j * 2); clearPoly(j * 2 + 1); continue; }
       const sgn = er() < 0.5 ? -1 : 1;
       let u0 = er() * 1.7 - 0.85;
@@ -141,7 +141,8 @@ export function createFilaments(shape: FilamentShape) {
       const len = crawl ? (0.06 + 0.16 * er()) * Z : (0.03 + 0.07 * er()) * Z;
       const dir = er() < 0.5 ? -1 : 1;
       const bulge = (crawl ? 0.02 + 0.05 * er() : 0.06 + 0.1 * er()) * Z * 0.35;
-      const I = 0.6 * [1, 0.62, 0.38, 0.22][ls] * (0.7 + 0.5 * er()) * level * Math.min(1, (open - 0.35) / 0.3) * (shape.fadeAt?.(u0) ?? 1);
+      // each bolt swells in and fades over its epoch instead of popping on at full strength: a crackle, never a strobe
+      const I = 0.6 * Math.sin((Math.PI * (ls + 0.5)) / L) * (0.7 + 0.5 * er()) * level * Math.min(1, (open - 0.35) / 0.3) * (shape.fadeAt?.(u0) ?? 1);
       const ang = (er() - 0.5) * 0.5;
       const jr = mulberry32(epoch * 977 + j * 131 + k * 31 + 3);
       const n = PTS;
@@ -161,7 +162,7 @@ export function createFilaments(shape: FilamentShape) {
           x = (shape.centerX?.(u0) ?? 0) + sgn * (hw * 0.95 + f * len * 0.5 * Math.cos(ang));
           y = (shape.yAt?.(u0) ?? shape.centerY + (u0 * H) / 2) + dir * Math.sin(Math.PI * f) * bulge + f * len * Math.sin(ang);
         }
-        const amp = (0.008 + 0.012 * Math.sin(Math.PI * f)) * Z * 0.35;
+        const amp = (0.005 + 0.008 * Math.sin(Math.PI * f)) * Z * 0.35;
         x += (jr() - 0.5) * amp * 1.4;
         y += (jr() - 0.5) * amp;
         line[i].set(x, y);
@@ -180,7 +181,7 @@ export function createFilaments(shape: FilamentShape) {
           line[bi].y + Math.sin(bang) * bl * f + (jr() - 0.5) * bl * 0.18,
         ));
       }
-      if (jr() < 0.12) writePoly(j * 2 + 1, br, BR, w * 0.7, I * 0.5);
+      if (jr() < 0.08) writePoly(j * 2 + 1, br, BR, w * 0.7, I * 0.5);
       else clearPoly(j * 2 + 1);
     }
     geo.attributes.position.needsUpdate = true;

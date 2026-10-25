@@ -9,7 +9,7 @@ import { noiseTexture } from './fx/noise';
  * the gate and lights the cloud edges nearest it. Nothing here glows: the sky stays far under the bloom threshold.
  */
 export const NIGHT = {
-  /** The horizon and the fog: a deep blue, never grey. Same object as light.uFogColor. */
+  /** The horizon, which is also the fog: the same uniform as light.uFogColor (buildDungeonEnv sets it to NIGHT_HORIZON). */
   uHorizon: light.uFogColor,
   uZenith: { value: new THREE.Color(0.0016, 0.0019, 0.0042) },
   /** The cloud banks where nothing lights them: darker than the sky behind, so they read as shapes. */
@@ -21,7 +21,9 @@ export const NIGHT = {
   uStars: { value: 1 },
   uTime: { value: 0 },
 };
-light.uFogColor.value.setRGB(0.0042, 0.0072, 0.0205);
+/** The night horizon and fog colour: a deep blue, never grey. The intro world sets it when it builds (not on import, so
+ * the labs and anything else that loads this file keep their own fog). */
+export const NIGHT_HORIZON = new THREE.Color(0.0042, 0.0072, 0.0205);
 
 /** Sky colour along a world direction seen from `cam`. Needs uNoise (the shared noise texture). */
 export const NIGHT_GLSL = /* glsl */ `

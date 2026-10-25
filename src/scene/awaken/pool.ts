@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { light } from '../toon';
 import { clamp } from '../../core/math';
+import { noiseTexture } from '../fx/noise';
+import { PAVING_GLSL } from '../gate/paving';
 
 export const FX_NOISE = /* glsl */ `
 float h12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
@@ -39,44 +41,24 @@ uniform vec3 uBoostColor;
 uniform float uTime;
 uniform vec3 uFogColor;
 uniform float uFogDensity;
+uniform sampler2D uNoise;
 varying vec3 vPos;
 ${FX_NOISE}
-vec3 voro(vec2 x, out vec2 rel) {
-  vec2 n = floor(x), f = fract(x);
-  vec2 mg, mr; float md = 8.0; float id = 0.0;
-  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
-    vec2 g = vec2(float(i), float(j));
-    vec2 o = h22(n + g) * 0.85 + 0.075;
-    vec2 r = g + o - f; float d = dot(r, r);
-    if (d < md) { md = d; mr = r; mg = g; id = h12(n + g); }
-  }
-  md = 8.0;
-  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
-    vec2 g = mg + vec2(float(i), float(j));
-    vec2 o = h22(n + g) * 0.85 + 0.075;
-    vec2 r = g + o - f;
-    if (dot(mr - r, mr - r) > 0.00001) md = min(md, dot(0.5 * (mr + r), normalize(r - mr)));
-  }
-  rel = mr;
-  return vec3(md, id, 0.0);
-}
+${PAVING_GLSL}
 void main() {
   vec2 p = vPos.xz;
   float d = length(p - uCenter);
-  // cracked flagstone floor
-  vec2 wp = p + vec2(fbm2(p * 0.45), fbm2(p * 0.45 + 5.2)) * 0.9;
-  vec2 rel;
-  vec3 v = voro(wp * 0.62, rel);
-  float crackN = fbm2(p * 2.3 + 7.0);
-  float crack = (1.0 - smoothstep(0.008, 0.035, v.x)) * smoothstep(0.3, 0.55, crackN);
+  // the abbey's flagstones (gate/paving.ts): the same slabs, in the same places, as the floor round the gate, lit up
+  // from the hit so the dark disc reads (f0237). Each slab is faintly domed and lit from the gate side, darker into
+  // its joints and cracks, so the floor reads as stone rather than a flat plane
+  Paving pv = paving(p);
+  float crack = max(pv.crack, pv.joint * 0.6);
   float grain = fbm2(p * 3.1);
-  // worn rubble stones (f0236: ground #1F243B, rocks #181D2F): each stone domed and lit from the gate side, darker into
-  // the cracks, so the floor reads as rock rather than flat tiles
-  vec3 sn = normalize(vec3(-rel.x * 1.3, 1.0, -rel.y * 1.3));
-  float dome = 0.62 + 0.55 * max(dot(sn, vec3(0.0, 0.72, -0.69)), 0.0);
-  vec3 stone = mix(srgb(vec3(0.085, 0.093, 0.135)), srgb(vec3(0.125, 0.135, 0.19)), v.y) * (0.82 + 0.36 * grain);
-  stone *= dome * (0.62 + 0.38 * smoothstep(0.0, 0.22, v.x)) * 1.25;
-  stone *= (1.0 - 0.55 * crack) * uFloorGain;
+  vec3 sn = normalize(vec3(-pv.rel.x * 0.5, 1.0, -pv.rel.y * 0.5));
+  float dome = 0.75 + 0.4 * max(dot(sn, vec3(0.0, 0.72, -0.69)), 0.0);
+  vec3 stone = mix(srgb(vec3(0.085, 0.093, 0.135)), srgb(vec3(0.125, 0.135, 0.19)), pv.id) * (0.82 + 0.36 * grain);
+  stone *= dome * 1.25 * (1.0 - 0.6 * pv.joint) * (1.0 - 0.5 * pv.crack);
+  stone *= uFloorGain;
   float fr = length(p);
   float floorA = uFloor * (1.0 - smoothstep(uFloorR * 0.55, uFloorR, fr));
   vec3 col = stone;
@@ -97,8 +79,8 @@ void main() {
     float sa = uTime * 0.12 + 0.18 * d;
     vec2 rp = mat2(cos(sa), -sin(sa), sin(sa), cos(sa)) * (p - uCenter);
     float swirl = inner > 0.0 ? fbm2(rp * 0.45 + vec2(0.0, -uTime * 0.15)) : 0.0;
-    vec3 lit = mix(srgb(vec3(0.137, 0.188, 0.369)), srgb(vec3(0.165, 0.204, 0.345)), v.y) * (0.85 + 0.3 * grain);
-    lit *= (1.0 - 0.6 * crack) * (0.9 + 0.25 * smoothstep(0.3, 0.7, v.y));
+    vec3 lit = mix(srgb(vec3(0.137, 0.188, 0.369)), srgb(vec3(0.165, 0.204, 0.345)), pv.id) * (0.85 + 0.3 * grain);
+    lit *= (1.0 - 0.6 * crack) * (0.9 + 0.25 * smoothstep(0.3, 0.7, pv.id));
     lit += srgb(vec3(0.16, 0.24, 0.5)) * smoothstep(0.45, 0.8, swirl) * 0.8;
     lit += srgb(vec3(0.3, 0.6, 1.0)) * crack * 0.25 * (0.3 + 0.35 * uBoost);
     float fall = mix(1.0, 0.6, smoothstep(0.0, 0.85, x));
@@ -161,6 +143,7 @@ export function buildPool(rMax: number, center: THREE.Vector2) {
     uTime: { value: 0 },
     uFogColor: light.uFogColor,
     uFogDensity: light.uFogDensity,
+    uNoise: { value: noiseTexture() },
   };
   const mat = new THREE.ShaderMaterial({
     vertexShader: decalVert,
@@ -174,6 +157,7 @@ export function buildPool(rMax: number, center: THREE.Vector2) {
   });
   const size = rMax * 3.6;
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(size, size, 1, 1), mat);
+  mesh.name = 'pool';
   mesh.rotation.x = -Math.PI / 2;
   mesh.position.set(0, 0.002, 0);
   mesh.renderOrder = -4;

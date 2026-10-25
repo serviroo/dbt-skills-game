@@ -206,16 +206,17 @@ void main() {
   // cheap exit in the far field before any texture reads (the quad spans the whole light spill)
   if (cover <= 0.0 && dot((halo + cViolet * vb) * 2.0 * amp + fGlow, vec3(1.0)) * uI < 0.0004) discard;
   vec2 hp = vP / uH;
-  // vertical light shafts: long curtain bands and fine streaks drifting slowly (the reference halo is striated, f0071)
+  // vertical light shafts: long curtain bands and fine streaks drifting slowly (the reference halo is striated, f0071).
+  // They only shade the halo gently: one soft halo round the core, never wide striped curtains across a desktop frame
   float sh1 = texture2D(uNoise, vec2(hp.x * 2.4 + 0.5, hp.y * 0.1 - uTime * 0.005)).r;
   float sh2 = texture2D(uNoise, vec2(hp.x * 6.5 + 0.13, hp.y * 0.05 + uTime * 0.003)).g;
   float shafts = smoothstep(0.2, 0.8, 0.55 * sh1 + 0.55 * sh2);
   // slow swells of light climbing the shafts; also where the violet gathers
   float vcl = texture2D(uNoise, vec2(hp.x * 0.32 + 0.5, hp.y * 0.22 - uTime * 0.02)).r;
   // (the violet blooms out as the tear opens, not round the racing halves)
-  halo += cViolet * vb * mix(0.2, 1.0, smoothstep(0.4, 0.8, vcl)) * (1.0 - 0.6 * au * au) * mix(0.5, 1.4, shafts) * smoothstep(0.5, 1.0, uOpen);
+  halo += cViolet * vb * mix(0.2, 1.0, smoothstep(0.4, 0.8, vcl)) * (1.0 - 0.6 * au * au) * mix(0.85, 1.15, shafts) * smoothstep(0.5, 1.0, uOpen);
   float near = exp(-dn / 0.06);
-  halo *= mix(mix(0.3, 1.5, shafts) * mix(0.75, 1.25, vcl), 0.8 + 0.4 * shafts, near) * amp;
+  halo *= mix(mix(0.72, 1.22, shafts) * mix(0.88, 1.12, vcl), 0.88 + 0.24 * shafts, near) * amp;
   // near the lip the halo runs on inside the slit, so the edge is one continuous falloff (no dark seam, no outline)
   float sIn = clamp(ax / max(hw, 1e-5), 0.0, 1.0);
   halo *= 1.0 - cover * (1.0 - 0.6 * smoothstep(0.62, 1.0, sIn));
