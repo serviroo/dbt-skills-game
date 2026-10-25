@@ -44,7 +44,7 @@ export type Step =
   | (Base & { kind: 'input'; text: Txt; key: string; placeholder?: string; fills?: string[]; skip?: string; cta?: string; lines?: number; prefix?: (a: Answers) => string })
   | (Base & { kind: 'slider'; text: Txt; key: string; min: number; max: number; ends?: [string, string]; words?: string[] })
   | (Base & { kind: 'breath'; text: Txt; inhale: number; exhale: number; rounds: number; alt?: [number, number]; words?: [string, string] })
-  | (Base & { kind: 'timer'; text: Txt; seconds: number | ((a: Answers) => number); start?: string; visual?: Visual; extend?: number; small?: string; options?: Opt[]; big?: Txt; dim?: boolean })
+  | (Base & { kind: 'timer'; text: Txt; seconds: number | ((a: Answers) => number); start?: string; visual?: Visual; extend?: 0; small?: string; options?: Opt[]; big?: Txt; dim?: boolean })
   | (Base & { kind: 'hold'; text: Txt; seconds: number; label: string; done: string; tone?: 'heal' })
   | (Base & { kind: 'tier'; text: Txt; key: string; from: string; tiers: string[] })
   | (Base & { kind: 'count'; text: Txt; n: number; label: string })
@@ -237,7 +237,7 @@ export const SKILLS: Skill[] = [
     steps: [
       { kind: 'intro', text: "Being pulled in ten directions is tiring. Minds do that, and it isn't your fault. For the next minute, you only do one thing." },
       { kind: 'choice', key: 'one', text: 'Pick one small thing to give all your attention to.', small: 'Close other tabs and let messages wait, if you can.', options: o('Wash one cup', 'Fold a few clothes', 'Draw a little doodle', 'Just breathe'), other: 'My own' },
-      { id: 'one-thing', kind: 'timer', seconds: 60, visual: 'ring', extend: 30, text: (a) => `${said(a, 'one', 'This one thing')}. Only this. Your mind will wander. When it does, notice where it went and come back. Again and again.` },
+      { id: 'one-thing', kind: 'timer', seconds: 60, visual: 'ring', text: (a) => `${said(a, 'one', 'This one thing')}. Only this. Your mind will wander. When it does, notice where it went and come back. Again and again.` },
       { kind: 'choice', key: 'drift', text: 'How often did your mind wander off?', options: ['Hardly', 'A few times', 'A lot', 'Lost count'].map((label) => ({ label, reply: 'Wandering is normal. Coming back is the skill, and you did it.' })) },
       { kind: 'say', text: 'Try it once more today with something ordinary. When you walk, only walk. When you listen, only listen. One thing, then the next.', cta: 'Done', go: 'end' },
     ],
@@ -289,7 +289,7 @@ export const SKILLS: Skill[] = [
       { kind: 'intro', text: "A busy or loud head is hard to be in. That's real. For a minute, you don't have to fix your thoughts or believe them. Only watch them go by." },
       { kind: 'choice', key: 'pic', text: 'Pick a picture for your thoughts.', options: [{ label: 'Clouds crossing the sky', value: 'clouds' }, { label: 'Cars on a quiet road', value: 'cars' }, { label: 'Leaves on a stream', value: 'leaves' }] },
       { kind: 'say', text: 'When a thought shows up, give it a plain label. "A worry." "A plan." "A memory." Then let it move on. No need to push it away or follow it.', cta: 'Ready' },
-      { id: 'watch', kind: 'timer', seconds: 60, visual: 'tide', extend: 30, text: (a) => `${THOUGHT_PICS[s(a, 'pic', 'clouds')] ?? THOUGHT_PICS.clouds} If you get pulled into one, that's normal. Step back and watch again.` },
+      { id: 'watch', kind: 'timer', seconds: 60, visual: 'tide', text: (a) => `${THOUGHT_PICS[s(a, 'pic', 'clouds')] ?? THOUGHT_PICS.clouds} If you get pulled into one, that's normal. Step back and watch again.` },
       { kind: 'say', text: "Thoughts are only thoughts. They aren't facts, and they aren't orders. You can notice one without doing what it says." },
       {
         kind: 'choice',
@@ -396,8 +396,8 @@ export const SKILLS: Skill[] = [
       {
         id: 'higher',
         kind: 'say',
-        text: "Thanks for telling me. When it climbs, you don't have to ride it out alone. The Safe Zone is one tap away if you want it.",
-        options: [{ label: 'Safe Zone', go: 'safe' }, { label: 'Done', go: 'end' }, { label: 'Another part', go: 'pick' }],
+        text: "Thanks for telling me. When it climbs, you don't have to ride it out alone. Someone to talk to is one tap away if you want it.",
+        options: [{ label: 'People to talk to', go: 'safe:people' }, { label: 'Done', go: 'end' }, { label: 'Another part', go: 'pick' }],
       },
     ],
   },
@@ -442,7 +442,7 @@ export const SKILLS: Skill[] = [
           { label: 'No timer', go: 'go' },
         ],
       },
-      { id: 'clock', kind: 'timer', seconds: 60, extend: 30, visual: 'ring', text: 'Go do it. The timer just gets you started. Your break can go on as long as you like. The quest already counts.', go: 'end' },
+      { id: 'clock', kind: 'timer', seconds: 60, visual: 'ring', text: 'Go do it. The timer just gets you started. Your break can go on as long as you like. The quest already counts.', go: 'end' },
       { id: 'go', kind: 'say', text: 'Go do it. Your break can go on as long as you like. This quest already counts, whether or not you open the app again today.', cta: 'Done', go: 'end' },
     ],
   },
@@ -479,7 +479,7 @@ export const SKILLS: Skill[] = [
             }) as Record<string, string[]>)[s(a, 'sense', 'Touch')],
           ),
       },
-      { id: 'savour', kind: 'timer', seconds: 90, extend: 30, start: 'Start 90 s', visual: 'glow', text: 'Take a minute or two with it. Slowly. Let it be the only thing.', options: [{ label: "I'm doing it" }] },
+      { id: 'savour', kind: 'timer', seconds: 90, start: 'Start 90 s', visual: 'glow', text: 'Take a minute or two with it. Slowly. Let it be the only thing.', options: [{ label: "I'm doing it" }] },
       { kind: 'save', effect: 'saveSoothe', text: "Want to save this to your Comfort kit? It'll show up in the Safe Zone too.", yes: 'Save', no: 'No thanks' },
       { kind: 'say', text: 'That was care. It counts.', cta: 'Done', go: 'end' },
     ],
@@ -614,7 +614,7 @@ export const SKILLS: Skill[] = [
       { kind: 'intro', text: "Urges rise like waves. They peak, and they fall, even when you don't act on them." },
       { kind: 'choice', key: 'where', text: 'Where do you feel the urge in your body?', options: o('Chest', 'Stomach', 'Hands', 'Throat', 'Head', 'Everywhere', 'Not sure') },
       { kind: 'slider', key: 'before', min: 0, max: 10, text: 'How strong is it right now?', ends: ['Barely there', 'Huge'] },
-      { id: 'ride', kind: 'timer', seconds: 90, visual: 'wave', extend: 30, text: 'Picture yourself on a board. Breathe and watch the wave. No need to fight it or obey it. Only ride.' },
+      { id: 'ride', kind: 'timer', seconds: 90, visual: 'wave', text: 'Picture yourself on a board. Breathe and watch the wave. No need to fight it or obey it. Only ride.' },
       { kind: 'slider', key: 'after', min: 0, max: 10, text: 'How strong is it now?', ends: ['Barely there', 'Huge'] },
       {
         kind: 'branch',
@@ -672,9 +672,9 @@ export const SKILLS: Skill[] = [
     steps: [
       { kind: 'intro', text: "Wound up, or a bit far away from yourself? That's hard, and it makes sense after a rough stretch. A slow scan can bring you back, one part at a time." },
       { kind: 'say', text: "Sit or lie down, whichever is easier. Close your eyes, or rest them on one spot. Skip any part that doesn't feel okay. If it gets to be too much, open your eyes and look around the room.", cta: 'Ready' },
-      { id: 'feet', kind: 'timer', seconds: 30, extend: 15, visual: 'glow', title: 'Feet and legs', text: 'Notice your feet. Warm, cool, heavy, tingly, or nothing much. Then slowly up your legs. No need to change anything.' },
-      { id: 'back', kind: 'timer', seconds: 30, extend: 15, visual: 'glow', title: 'Back, hands and shoulders', text: 'Notice where your back meets the chair or the bed. Then your hands, up your arms, to your shoulders. Tight is okay. Only notice.' },
-      { id: 'head', kind: 'timer', seconds: 30, extend: 15, visual: 'glow', title: 'Face and head', text: 'Your jaw, your cheeks, around your eyes, the top of your head. If something wants to soften, let it.' },
+      { id: 'feet', kind: 'timer', seconds: 30, visual: 'glow', title: 'Feet and legs', text: 'Notice your feet. Warm, cool, heavy, tingly, or nothing much. Then slowly up your legs. No need to change anything.' },
+      { id: 'back', kind: 'timer', seconds: 30, visual: 'glow', title: 'Back, hands and shoulders', text: 'Notice where your back meets the chair or the bed. Then your hands, up your arms, to your shoulders. Tight is okay. Only notice.' },
+      { id: 'head', kind: 'timer', seconds: 30, visual: 'glow', title: 'Face and head', text: 'Your jaw, your cheeks, around your eyes, the top of your head. If something wants to soften, let it.' },
       { kind: 'choice', key: 'after', text: 'Now your whole body at once, for one breath. How does it feel?', options: [{ label: 'A bit calmer', go: 'done' }, { label: 'About the same', go: 'same' }, { label: 'Harder', go: 'hard' }] },
       { id: 'done', kind: 'say', text: 'You checked in with yourself, feet to head. That was care.', cta: 'Done', go: 'end' },
       { id: 'same', kind: 'say', text: "Thanks for trying it. Noticing is the whole skill, and you did it. It doesn't have to feel different yet.", cta: 'Done', go: 'end' },
@@ -1036,7 +1036,6 @@ export const SKILLS: Skill[] = [
         kind: 'timer',
         title: '[Patch notes]',
         seconds: 20,
-        extend: 20,
         visual: 'glow',
         text: (a) => `**Old rule:** "${fullStop(cap(ruleOf(a)))}" **Another way to see it:** ${patchOf(a)}`,
         small: 'Read it slowly while the ring runs.',
@@ -1278,7 +1277,6 @@ export const SKILLS: Skill[] = [
         seconds: 30,
         start: 'Start 30 s',
         visual: 'glow',
-        extend: 30,
         text: "Next time you're with them, give them your full attention. For now, picture them: their face, their voice, what they're into lately. If a judgment pops up, let it drift past and come back to them.",
       },
       {

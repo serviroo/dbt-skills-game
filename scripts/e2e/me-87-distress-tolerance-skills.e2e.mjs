@@ -396,22 +396,27 @@ export const scenarios = {
     const before = progress(await saved(h, page), 'accepts');
     await page.locator('.dq-tile').filter({ hasText: 'All of them, any time' }).first().click();
     await page.locator('.dq-libsec.dq-mod-dt .dq-librow').filter({ has: page.locator('.dq-librow-n', { hasText: /^Trade Places$/ }) }).click();
+    // The page clock stands still from here and only moves when told to, so no time slips in between a tap and a
+    // reading however slow the machine is, and every reading lands half a second into a second. (The page's time runs
+    // until the pause lands, so it pauses a second ahead.)
+    await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000);
     for (const name of ['Begin', 'Thoughts', 'Count blue things in the room', '1 min']) await tap(name)(page);
     await page.locator('.dq-step-body', { hasText: 'Your break can go on as long as you like.' }).waitFor({ timeout: 5000 });
     const num = page.locator('.dq-timer-num');
-    const secs = async () => (await num.textContent()).split(':').reduce((n, part) => n * 60 + Number(part), 0);
-    const start = await secs();
-    h.expect(start >= 58 && start <= 60, `the timer does not start at one minute (shows ${start} s)`);
-    await page.clock.fastForward(61000);
-    await num.filter({ hasText: 'Done' }).waitFor({ timeout: 5000 });
+    const shows = async () => (await num.textContent()).trim();
+    const start = await shows();
+    h.expect(start === '1:00', `the timer does not start at one minute (shows ${start})`);
+    await page.clock.fastForward(60500);
+    h.expect((await shows()) === 'Done', `half a second after its minute the timer shows ${await shows()}, not Done`);
     await tap('+30 s')(page);
-    await page.clock.fastForward(1000);
-    const restarted = await page.waitForFunction(() => /^\d/.test(document.querySelector('.dq-timer-num')?.textContent ?? ''), null, { timeout: 5000 }).then(() => true, () => false);
-    h.expect(restarted, '+30 s on a finished timer did nothing: it still shows Done');
-    const left = await secs();
-    h.expect(left >= 28 && left <= 30, `+30 s on a finished timer did not start 30 more seconds (shows ${left})`);
-    await page.clock.fastForward(31000);
-    await num.filter({ hasText: 'Done' }).waitFor({ timeout: 5000 });
+    await page.clock.runFor(500);
+    const left = await shows();
+    h.expect(left === '30', `+30 s on a finished timer shows ${left} half a second later, not 30`);
+    await page.clock.runFor(29000);
+    const last = await shows();
+    h.expect(last === '1', `half a second before its 30 more seconds end the timer shows ${last}, not 1`);
+    await page.clock.runFor(1000);
+    h.expect((await shows()) === 'Done', `half a second after its 30 more seconds the timer shows ${await shows()}, not Done`);
     await tap('Next')(page);
     await page.locator('.dq-step-body .dq-intro--end').waitFor({ timeout: 5000 });
     const after = progress(await saved(h, page), 'accepts');

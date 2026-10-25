@@ -1,10 +1,11 @@
 // How each skill's flows finish, on a seeded returning save at 390x844. skill-check makes every timer and every screen
 // with a way out carry a step id; these open each one in its real skill (from Home, past the intro) and play it.
-// skill-timers: every timer offers "+N s" once it runs, and it adds N seconds both while running and after Done, on the
-// same screen, with Next still there and no extra credit. Cold water is the one exception (principle 11: about 30 s),
-// so its timer has no "+N s".
+// skill-timers: every timer offers "+N s" once it runs (+15 s up to 30 s, +30 s above), and it adds N seconds both
+// while running and after Done, on the same screen, with Next still there and no extra credit. Cold water is the one
+// exception (principle 11: about 30 s), so its timer has no "+N s".
 // skill-exits: on a screen that offers another skill or the Safe Zone, the first button finishes this skill on its own
-// end screen (or opens the Safe Zone when that leads), crediting this skill once and no other.
+// end screen (or opens the Safe Zone when that leads), crediting this skill once and no other. After a "Higher" answer
+// the first button is people to talk to, which opens the Safe Zone at its talk screen.
 // skill-practise-again: a full end screen offers "Practise again", which opens the same skill fresh (one credit, like
 // any opening) at the part the player opened; a quiet "not this time" end doesn't offer it.
 // skill-answers-rotate: what the player typed or picked stays through turning the phone sideways and back.
@@ -31,8 +32,11 @@ async function pastIntro(page) {
 }
 
 const secsOf = (t) => (/^\d+(:\d\d)?$/.test(t) ? t.split(':').reduce((n, part) => n * 60 + Number(part), 0) : NaN);
-/** A whole-second countdown is within a second of the time left, whichever way it rounds. */
-const near = (shown, left) => Math.abs(shown - left) < 1;
+/** What a countdown shows with this many seconds left: the whole seconds, rounded up, as m:ss from a minute up. */
+const countdown = (left) => {
+  const c = Math.ceil(left);
+  return c >= 60 ? `${Math.floor(c / 60)}:${String(c % 60).padStart(2, '0')}` : String(c);
+};
 
 export const scenarios = {
   async 'skill-timers'(h) {
@@ -80,21 +84,23 @@ export const scenarios = {
           bad.push(`${where}: the running timer has no "+N s"`);
         } else {
           const n = Number(/\d+/.exec(await more.first().textContent())[0]);
+          if (n !== (len <= 30 ? 15 : 30)) bad.push(`${where}: its ${len} s timer offers "+${n} s"; up to 30 s it's +15 s, above that +30 s`);
           await page.clock.runFor(2500);
           const ran = await shows();
-          if (!near(secsOf(ran), len - 2.5)) bad.push(`${where}: 2.5 s into its ${len} s the timer shows ${ran}`);
+          if (ran !== countdown(len - 2.5)) bad.push(`${where}: 2.5 s into its ${len} s the timer shows ${ran}, not ${countdown(len - 2.5)}`);
           await more.first().click();
           await page.clock.runFor(1000);
           const now = await shows();
-          if (!near(secsOf(now), len + n - 3.5)) bad.push(`${where}: "+${n} s" while running shows ${now} a second later, not ${len + n - 3.5} s left`);
-          await page.clock.fastForward((len + n - 3) * 1000);
+          if (now !== countdown(len + n - 3.5)) bad.push(`${where}: "+${n} s" while running shows ${now} a second later, not ${countdown(len + n - 3.5)}`);
+          // well past Done, so a tap that only added to the time already used up would show far less than N
+          await page.clock.fastForward((len + n - 3.5 + 5) * 1000);
           const done = (await shows()) === 'Done';
-          if (!done) bad.push(`${where}: the timer shows ${await shows()}, not Done, half a second after its ${len + n} s`);
+          if (!done) bad.push(`${where}: the timer shows ${await shows()}, not Done, 5 s after its ${len + n} s`);
           else {
             await more.first().click();
             await page.clock.runFor(500);
             const again = await shows();
-            if (!near(secsOf(again), n - 0.5)) bad.push(`${where}: "+${n} s" after Done shows ${again} half a second later, not ${n - 0.5} s left`);
+            if (again !== countdown(n - 0.5)) bad.push(`${where}: "+${n} s" after Done shows ${again} half a second later, not ${countdown(n - 0.5)}`);
             if (t.dim && !(await page.locator('.dq-skill.is-dim').count())) bad.push(`${where}: running again after Done, the screen didn't dim the way it does at the start`);
           }
           if (!(await next.isVisible())) bad.push(`${where}: Next is gone after "+${n} s"`);
@@ -122,13 +128,19 @@ export const scenarios = {
     await h.reachHub(page);
     const exits = await page.evaluate(async () =>
       (await import('/src/content/dbt.ts')).SKILLS.flatMap((sk) =>
-        sk.steps.flatMap((st, i) =>
-          st.kind === 'say' && st.options?.some((o) => /^(skill:|safe)/.test(o.go ?? '')) ? [{ skill: sk.id, sl: sk.sl, step: st.id, where: `${sk.id} step ${i + 1} (${st.id})`, first: st.options[0].label, safe: /^safe/.test(st.options[0].go ?? '') }] : [],
-        ),
+        sk.steps.flatMap((st, i) => {
+          if (st.kind !== 'say' || !st.options?.some((o) => /^(skill:|safe)/.test(o.go ?? ''))) return [];
+          const go = st.options[0].go ?? '';
+          // the screen a "Higher" answer leads to
+          const higher = sk.steps.some((c) => c.kind === 'choice' && (typeof c.options === 'function' ? c.options({}) : c.options).some((o) => o.label === 'Higher' && o.go === st.id));
+          return [{ skill: sk.id, sl: sk.sl, step: st.id, where: `${sk.id} step ${i + 1} (${st.id})`, first: st.options[0].label, safe: /^safe/.test(go), talk: go === 'safe:people', higher }];
+        }),
       ),
     );
     const bad = new Set();
     for (const x of exits) {
+      // DESIGN.md: a "Higher" answer brings "Talk to someone now" to the top
+      if (x.higher && !x.talk) bad.add(`${x.where}: after a "Higher" answer it leads with "${x.first}", not people to talk to`);
       try {
         await toHub(h, page);
         const before = await skillEvents(h, page);
@@ -137,6 +149,7 @@ export const scenarios = {
           await page.locator('.dq-step-body .dq-actions button').first().click();
           const safe = await page.waitForFunction(() => document.querySelector('.dq')?.dataset.screen === 'safe', null, { timeout: 5000 }).then(() => true, () => false);
           if (!safe) bad.add(`${x.where}: "${x.first}" did not open the Safe Zone`);
+          else if (x.talk && !(await page.locator('.dq-sz-t', { hasText: /^Talk to someone now$/ }).waitFor({ timeout: 5000 }).then(() => true, () => false))) bad.add(`${x.where}: "${x.first}" opened the Safe Zone but not its talk screen`);
         } else {
           const found = new Set();
           const walked = await walk(h, page, { id: x.skill }, found);

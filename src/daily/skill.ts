@@ -245,8 +245,8 @@ export function skillScreen(app: App, route: Route): ScreenOut {
           seconds: secs,
           visual: s.visual,
           start: s.start,
-          // every timer can take more time (principle 3) unless its step sets extend: 0
-          extend: (s.extend ?? (secs <= 30 ? 15 : 30)) || undefined,
+          // every timer can take more time (principle 3): +15 s up to 30 s, +30 s above; extend: 0 keeps cold water about 30 s
+          extend: s.extend === 0 ? undefined : secs <= 30 ? 15 : 30,
           peers,
           big: s.big ? tx(s.big, answers) : undefined,
           onStart: () => {
