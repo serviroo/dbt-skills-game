@@ -113,6 +113,7 @@ async function crystal(h, page, name) {
 async function restore(page, raw) {
   await page.evaluate(() => window.__daily.go({ name: 'settings' }, { quiet: true }));
   await page.locator('input[type=file]').setInputFiles({ name: 'crystal.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(raw)) });
+  await page.getByRole('button', { name: 'Restore this Save Crystal' }).click();
   await page.waitForFunction(() => /Restored/.test(document.querySelector('.dq-settings .dq-hint[aria-live]')?.textContent ?? ''));
 }
 

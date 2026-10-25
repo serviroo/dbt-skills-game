@@ -182,6 +182,7 @@ async function exportCrystal(page, openSettings, file) {
 async function restoreCrystal(page, openSettings, file) {
   await openSettings(page);
   await page.locator('input[type=file]').setInputFiles(file);
+  await page.getByRole('button', { name: 'Restore this Save Crystal' }).click();
   await page.getByText(/^Restored/).first().waitFor({ timeout: 20000 });
   return page.getByText(/^Restored/).first().textContent();
 }

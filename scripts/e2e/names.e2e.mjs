@@ -106,6 +106,7 @@ export const scenarios = {
     await openSettings(fresh.page);
     expect((await fresh.page.locator('#set-playerName').inputValue()) === '', 'fresh device should start with no name');
     await fresh.page.locator('input[type=file]').setInputFiles(file);
+    await fresh.page.getByRole('button', { name: 'Restore this Save Crystal' }).click();
     await fresh.page.waitForFunction(() => document.querySelector('#set-playerName')?.value === 'Kit', null, { timeout: 15000 });
     expect((await fresh.page.locator('#set-companion').inputValue()) === 'Lumen', 'restore lost the companion name');
     const mirror = await youOf(fresh.page);
@@ -122,6 +123,7 @@ export const scenarios = {
     const { ctx, page, errors } = await open({ [YOU]: JSON.stringify({ name: '', companion: '', nameAt: 0, companionAt: 0 }), 'dbt.app.v1': SEEN });
     await openSettings(page);
     await page.locator('input[type=file]').setInputFiles(file);
+    await page.getByRole('button', { name: 'Restore this Save Crystal' }).click();
     await page.waitForFunction(() => document.querySelector('#set-playerName')?.value === 'Kit', null, { timeout: 15000 });
     expect((await page.locator('#set-companion').inputValue()) === 'Lumen', 'restore after skip lost the companion name');
     await page.reload();

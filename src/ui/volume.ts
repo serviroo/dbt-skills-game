@@ -15,6 +15,8 @@ const ROWS: [Key, string][] = [
   ['sfx', 'Effects'],
 ];
 const STOP = ['pointerdown', 'pointerup', 'click', 'keydown', 'keyup'];
+/** The keys the control acts on: pressing its buttons and moving its sliders. */
+const OWN_KEYS = new Set([' ', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
 let uid = 0;
 
 const pct = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 100);
@@ -26,7 +28,10 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, attrs: R
   return n;
 }
 
-/** Keeps touches and keys on the control from reaching the cutscene (continue, chest hold) or the companion. */
+/**
+ * Keeps touches, and the keys the control acts on, from reaching the cutscene (continue, chest hold) or the companion.
+ * Any other key (Escape while the popover is closed) goes on to whatever else is open.
+ */
 function isolate(root: HTMLElement, ctrl: VolumeCtrl) {
   let unlocked = false;
   for (const t of STOP)
@@ -35,6 +40,7 @@ function isolate(root: HTMLElement, ctrl: VolumeCtrl) {
         unlocked = true;
         ctrl.unlock?.();
       }
+      if (e instanceof KeyboardEvent && !OWN_KEYS.has(e.key)) return;
       e.stopPropagation();
     });
 }

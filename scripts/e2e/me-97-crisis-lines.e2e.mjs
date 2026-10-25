@@ -206,6 +206,7 @@ export const scenarios = {
     try {
       await b.page.evaluate(() => window.__daily.go({ name: 'settings' }));
       await b.page.locator('input[type=file]').setInputFiles(file);
+      await b.page.getByRole('button', { name: 'Restore this Save Crystal' }).click();
       await b.page.waitForFunction(() => window.__daily.store.state.settings.region === 'in', null, { timeout: 15000 });
       await b.page.evaluate(() => window.__daily.go({ name: 'hub' }));
       await talk(b.page);
@@ -266,6 +267,7 @@ export const scenarios = {
     const restore = async (page, name, profile) => {
       await page.evaluate(() => window.__daily.go({ name: 'settings' }));
       await page.locator('input[type=file]').setInputFiles(crystal(name, profile));
+      await page.getByRole('button', { name: 'Restore this Save Crystal' }).click();
       await page.waitForFunction((id) => window.__daily.store.state.events.some((e) => e.id === id), `me97-${name}`, { timeout: 15000 });
       await page.evaluate(() => window.__daily.go({ name: 'hub' }));
       await talk(page);

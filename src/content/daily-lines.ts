@@ -11,6 +11,25 @@ export const CRYSTAL_COPY = {
   storySkipped: "Some story pages or cards couldn't be added. Keep the Save Crystal file.",
 };
 
+export const PEEK_COPY = {
+  title: 'Inside this Save Crystal',
+  file: 'File:',
+  name: 'Name',
+  began: 'Game began',
+  made: 'Crystal made',
+  skills: 'Different skills practiced',
+  diary: 'Diary days',
+  drawings: 'Saved drawings',
+  stories: 'Stories',
+  notSaved: 'Not saved in this file',
+  adds: "Restore adds what's in this file to what's already here. Nothing here is removed, and choices you've made on this device stay as they are.",
+  unreadable: "Some drawings or story pages in this file can't be read, so they won't be added.",
+  confirm: 'Restore this Save Crystal',
+  cancel: 'Cancel',
+  reading: 'Opening the file...',
+  closed: 'Closed without restoring. Nothing changed.',
+};
+
 export const KEEP_COPY = {
   checking: 'Checking with your browser...',
   granted: "**Your browser agreed to keep these saves** when the device runs low on space. Clearing this site's data still removes them, so a Save Crystal is still worth having.",

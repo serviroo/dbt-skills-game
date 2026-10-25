@@ -1,6 +1,6 @@
 import { LOADOUT, LOADOUT_COPY, MODULES, MODULE_ORDER, SAFE, SKILL, SKILLS } from '../content/dbt';
 import { CRISIS_CHECKED } from '../content/crisis-lines';
-import { ABOUT, CRYSTAL_COPY, KEEP_COPY } from '../content/daily-lines';
+import { ABOUT, CRYSTAL_COPY, KEEP_COPY, PEEK_COPY } from '../content/daily-lines';
 import type { App, ScreenOut } from './app';
 import { glyph, icon, mothSVG } from './art';
 import { skillCard } from './hub';
@@ -8,7 +8,7 @@ import { regionPicker, telHref, smsHref } from './safe';
 import { allyCard } from './artroom';
 import { artStore } from './artstore';
 import { storyStore } from './storystore';
-import { addDays, cleanName, fieldKey, fieldTimes, isSkillId, normalize, ROW_CAP, uid, type DiaryEntry, type State, type Store } from './store';
+import { addDays, cleanName, fieldKey, fieldTimes, isSkillId, ROW_CAP, uid, type DiaryEntry, type State, type Store } from './store';
 import { btn, copyText, field, h, md, p, panel, place, segmented, shareOrSave, toggle, typo } from './ui';
 import type { KeepStatus } from '../pwa/register';
 import { volumeSliders } from '../ui/volume';
@@ -19,7 +19,7 @@ import { inventorySection, rosterSection, brambleNap } from './roster';
 import { wardrobePanel } from './wardrobe';
 import { DEFAULT_COMPANION, DEFAULT_NAME } from '../core/you';
 import { BESIDE } from '../core/stored-names';
-import { exportPreferences, restorePreferences } from './crystal';
+import { exportPreferences, readCrystal, restorePreferences, type Peek } from './crystal';
 
 const pageHead = (title: string, sub?: string) => h('header', { class: 'dq-pagehead' }, h('h1', { class: 'dq-h1', 'data-focus': '', text: title }), sub ? p(sub, 'dq-text dq-pagesub') : null);
 
@@ -717,6 +717,7 @@ export function comfortScreen(app: App): ScreenOut {
 }
 
 // ---------------- Settings ----------------
+const longDate = (t: number) => new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 function browserKeeps() {
   const say = h('p', { class: 'dq-small dq-keep-s', 'aria-live': 'polite' });
   const ask = btn(KEEP_COPY.ask, () => request(), { kind: 'quiet', cls: 'dq-keep-ask' });
@@ -799,24 +800,8 @@ export function settingsScreen(app: App): ScreenOut {
   const file = h('input', { type: 'file', accept: 'application/json,.json', class: 'dq-sr', 'aria-hidden': 'true', tabindex: -1 });
   const notSaving = p("This device isn't saving right now (storage may be full or private browsing). Your progress is safe for this visit; a Save Crystal keeps a copy.", `dq-small${st.saving ? ' is-hidden' : ''}`);
   const keeps = browserKeeps();
-  const restore = async (f: File) => {
-    if (f.size > 80 * 1024 * 1024) return 'That file is too big to be a Save Crystal. Nothing changed.';
-    let text: string;
-    try {
-      text = await f.text();
-    } catch {
-      return "That file couldn't be read. Nothing changed.";
-    }
-    let raw: unknown = null;
-    let data: ReturnType<typeof normalize> = null;
-    try {
-      raw = JSON.parse(text);
-      data = normalize(raw);
-    } catch {
-      data = null;
-    }
-    if (!data) return "That file doesn't look like a Save Crystal from this app. Nothing changed.";
-    const fileIncomplete = (raw as { incomplete?: unknown }).incomplete === true;
+  const restoreBtn = btn('Restore', () => file.click(), { kind: 'quiet', ic: 'import' });
+  const restore = async ({ raw, data, incomplete: fileIncomplete }: Peek) => {
     const { saving } = st.merge(data);
     const choicesSaved = restorePreferences((raw as { preferences?: unknown }).preferences, st, app.opts.volume);
     app.applyMotion();
@@ -868,16 +853,87 @@ export function settingsScreen(app: App): ScreenOut {
     if (fileIncomplete) parts.push(CRYSTAL_COPY.incompleteRestore);
     return parts.join(' ');
   };
+  const peek = h('section', { class: 'dq-peek is-hidden', 'aria-labelledby': 'dq-peek-h' });
+  let pick = 0;
+  let held: Peek | null = null;
+  let gone = false;
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === 'Escape' && held) (e.stopPropagation(), cancel());
+  };
+  const close = () => {
+    held = null;
+    document.removeEventListener('keydown', onKey);
+    peek.classList.add('is-hidden');
+    peek.replaceChildren();
+  };
+  const cancel = () => {
+    const at = document.activeElement;
+    const lost = !at || at === document.body || peek.contains(at);
+    pick++;
+    close();
+    status.textContent = typo(PEEK_COPY.closed);
+    if (lost) restoreBtn.focus({ preventScroll: true });
+  };
+  const confirm = async () => {
+    const c = held;
+    if (!c) return;
+    const n = ++pick;
+    close();
+    restoreBtn.focus({ preventScroll: true });
+    let said: string;
+    try {
+      said = await restore(c);
+    } catch {
+      said = "That file doesn't look like a Save Crystal from this app. Nothing changed.";
+    }
+    // another file was picked while this one restored: its preview owns the status line now
+    if (n === pick) status.textContent = said;
+    notSaving.classList.toggle('is-hidden', st.saving);
+  };
+  const show = (c: Peek, fileName: string) => {
+    held = c;
+    document.addEventListener('keydown', onKey);
+    const missing = typo(PEEK_COPY.notSaved);
+    const row = (label: string, value: string | number | null, cls = '') =>
+      h('div', { class: 'dq-peek-row' }, h('dt', { text: typo(label) }), h('dd', { class: value === null || value === '' ? 'is-missing' : cls, text: value === null || value === '' ? missing : String(value) }));
+    const head = h('h3', { class: 'dq-peek-h', id: 'dq-peek-h', tabindex: -1, text: typo(PEEK_COPY.title) });
+    peek.replaceChildren(
+      head,
+      h('p', { class: 'dq-peek-file' }, `${typo(PEEK_COPY.file)} `, h('span', { class: 'dq-peek-fname', text: fileName })),
+      h(
+        'dl',
+        { class: 'dq-peek-list' },
+        row(PEEK_COPY.name, c.name),
+        row(PEEK_COPY.began, c.began === null ? null : longDate(c.began)),
+        row(PEEK_COPY.made, c.made === null ? null : longDate(c.made)),
+        row(PEEK_COPY.skills, c.skills, 'dq-num'),
+        row(PEEK_COPY.diary, c.diaryDays, 'dq-num'),
+        row(PEEK_COPY.drawings, c.drawings, 'dq-num'),
+        row(PEEK_COPY.stories, c.stories, 'dq-num'),
+      ),
+      ...[c.incomplete && p(CRYSTAL_COPY.incompleteRestore, 'dq-small dq-peek-note'), c.unreadable && p(PEEK_COPY.unreadable, 'dq-small dq-peek-note')].filter((x) => !!x),
+      p(PEEK_COPY.adds, 'dq-small'),
+      h('div', { class: 'dq-actions' }, btn(PEEK_COPY.confirm, () => void confirm(), { kind: 'primary', ic: 'import' }), btn(PEEK_COPY.cancel, cancel, { kind: 'quiet' })),
+    );
+    peek.classList.remove('is-hidden');
+    head.focus({ preventScroll: true });
+    head.scrollIntoView({ block: 'start' });
+  };
   file.addEventListener('change', async () => {
     const f = file.files?.[0];
-    if (!f) return;
-    try {
-      status.textContent = await restore(f);
-    } catch {
-      status.textContent = "That file doesn't look like a Save Crystal from this app. Nothing changed.";
-    }
-    notSaving.classList.toggle('is-hidden', st.saving);
     file.value = '';
+    if (!f) return;
+    const n = ++pick;
+    close();
+    status.textContent = typo(PEEK_COPY.reading);
+    const r = await readCrystal(f).catch(() => 'wrong' as const);
+    if (gone || n !== pick) return;
+    if (typeof r !== 'string') {
+      status.textContent = '';
+      return show(r, f.name);
+    }
+    status.textContent =
+      r === 'big' ? 'That file is too big to be a Save Crystal. Nothing changed.' : r === 'unread' ? "That file couldn't be read. Nothing changed." : "That file doesn't look like a Save Crystal from this app. Nothing changed.";
   });
   const showTherapist = !s.flags.therapistLineShown;
   if (showTherapist) {
@@ -974,10 +1030,11 @@ export function settingsScreen(app: App): ScreenOut {
             const done = r === 'saved' ? 'Saved' : r === 'shared' ? 'Shared' : '';
             status.textContent = done && missing ? `${done}. ${CRYSTAL_COPY.incomplete.replace('{items}', missing)}` : r === 'saved' ? 'Save Crystal downloaded.' : r === 'shared' ? 'Save Crystal shared.' : '';
           }, { kind: 'quiet', ic: 'export' }),
-          btn('Restore', () => file.click(), { kind: 'quiet', ic: 'import' }),
+          restoreBtn,
           btn('Diary card text', () => app.go({ name: 'diary' }), { kind: 'link' }),
         ),
         file,
+        peek,
         status,
       ),
       panel(
@@ -996,6 +1053,9 @@ export function settingsScreen(app: App): ScreenOut {
     leave: () => {
       offSaving();
       keeps.stop();
+      gone = true;
+      pick++;
+      close();
       levels?.dispose();
     },
   };

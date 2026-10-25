@@ -443,6 +443,7 @@ export const scenarios = {
     try {
       await to.page.evaluate(() => window.__daily.go({ name: 'settings' }));
       await to.page.locator('input[type=file]').setInputFiles(file);
+      await to.page.getByRole('button', { name: 'Restore this Save Crystal' }).click();
       await to.page.waitForFunction(() => window.__daily.store.state.settings.region === 'za', null, { timeout: 15000 });
       await talk(to.page);
       expectCountry(h, await read(to.page), 'za', 'restored on an en-SG device');

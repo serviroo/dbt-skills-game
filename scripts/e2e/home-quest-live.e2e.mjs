@@ -223,6 +223,7 @@ export const scenarios = {
         await fresh.page.reload();
         await h.openSettings(fresh.page);
         await fresh.page.locator('input[type=file]').setInputFiles(file);
+        await fresh.page.getByRole('button', { name: 'Restore this Save Crystal' }).click();
         await fresh.page.getByText(/^Restored/).first().waitFor({ timeout: 20000 });
         await fresh.page.getByRole('button', { name: 'Lantern', exact: true }).click();
         await route(fresh.page, 'hub');
@@ -254,6 +255,7 @@ export const scenarios = {
         const x = await crystal(h, await front(a), file);
         fs.writeFileSync(file, JSON.stringify({ ...x, flags: { ...x.flags, questAsideDay: today, questAsideAt: at } }));
         await a.locator('input[type=file]').setInputFiles(file);
+        await a.getByRole('button', { name: 'Restore this Save Crystal' }).click();
         await a.getByText(/^Restored/).first().waitFor({ timeout: 20000 });
         await a.getByRole('button', { name: 'Lantern', exact: true }).click();
         await route(a, 'hub');
