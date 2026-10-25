@@ -423,7 +423,7 @@ export const SKILLS: Skill[] = [
       { id: 'e', kind: 'choice', title: 'E. Emotions', key: 'pick', text: 'Put on something that brings a different feeling.', options: o('A comedy', 'A hype song', 'Cute animal videos'), other: 'My own', go: 'timer' },
       { id: 'p', kind: 'hold', title: 'P. Pushing away', seconds: 4, label: 'Hold to store', done: 'Stored. It keeps until you decide to look at it.', text: 'Put this in the vault for now. Picture it boxed up and shelved.', go: 'timer' },
       { id: 't', kind: 'choice', title: 'T. Thoughts', key: 'pick', text: 'Fill your mind with something.', options: o('Count blue things in the room', 'Name a song for every letter', 'A puzzle or a word game'), other: 'My own', go: 'timer' },
-      { id: 's', kind: 'choice', title: 'S. Sensations', key: 'pick', text: 'Something strong and safe.', options: o('Hold something cold, not icy', 'A hot shower', 'Squeeze a stress ball', 'A strong mint'), other: 'My own', go: 'timer' },
+      { id: 's', kind: 'choice', title: 'S. Sensations', key: 'pick', text: 'Something strong and safe.', options: o('Hold something cold, not icy', 'A warm shower', 'Squeeze a stress ball', 'A strong mint'), other: 'My own', go: 'timer' },
       {
         id: 'timer',
         kind: 'choice',
@@ -817,7 +817,7 @@ export const SKILLS: Skill[] = [
       {
         id: 'heavy',
         kind: 'say',
-        text: 'Then not facts today. Heavy feelings get comfort first. No reason needed.',
+        text: 'Then not facts today. Heavy feelings need comfort, not facts. No reason needed.',
         options: [{ label: 'Done', go: 'end:quiet' }, { label: 'Something soothing', go: 'skill:self-soothe' }, { label: 'Self-Heal', go: 'skill:self-validation' }, { label: 'Safe Zone', go: 'safe' }],
       },
     ],
@@ -1587,7 +1587,7 @@ export const SAFE = {
   cold: {
     title: 'Cool air, or something cool',
     text: 'Open a window or step outside for cool air. Or cold water on your face, or something cold over your eyes and cheeks. Thirty seconds.',
-    small: `Cool, not icy. Skip cold water if you ${CONDITION}, take a beta-blocker or similar, are allergic to cold, or ${EATING}.`,
+    small: 'Cool, not icy. Skip cold water with a heart or medical condition, heart-slowing medicine, a cold allergy, or if eating has been hard lately.',
     during: 'Cool tells your body to slow down.',
   },
   light: { up: 'Lights up', down: 'Lights down', hint: 'Dim or bright. Whichever sits better right now.' },

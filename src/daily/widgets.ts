@@ -294,7 +294,6 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
   };
   const begin = () => {
     t0 = now();
-    opts.onStart?.();
     actions.replaceChildren(...extra);
     if (opts.extend) {
       actions.prepend(
@@ -307,6 +306,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
         }, { kind: 'quiet' }),
       );
     }
+    opts.onStart?.();
     stop = onFrame(render);
   };
   if (opts.start) actions.append(btn(opts.start, begin, { kind: 'primary' }), ...extra);
