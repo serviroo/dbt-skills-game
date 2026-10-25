@@ -85,7 +85,8 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     }
     applyLight();
   });
-  const el = h('div', { class: 'dq-safezone' }, h('h1', { class: 'dq-sr', text: 'Safe Zone' }), box, h('div', { class: 'dq-sz-foot' }, talkLink, lightBtn));
+  const foot = h('div', { class: 'dq-sz-foot' }, talkLink, lightBtn);
+  const el = h('div', { class: 'dq-safezone' }, h('h1', { class: 'dq-sr', text: 'Safe Zone' }), box, foot);
   applyLight();
 
   const nextOf = (at: At) => FLOW[Math.min(FLOW.length - 1, FLOW.indexOf(at) + 1)];
@@ -95,6 +96,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     const halves = [h('div', { class: 'dq-sz-lead' }, lead), h('div', { class: 'dq-sz-main' }, kids)];
     body.replaceChildren(...halves);
     talkLink.classList.toggle('is-hidden', at === 'talk');
+    foot.classList.toggle('is-talk', at === 'talk');
     talkLink.classList.toggle('is-strong', higher && at !== 'talk');
     // upright the body fades in; held sideways the body is display: contents, so its two halves fade instead
     for (const e of [body, ...halves]) animate(e, [{ opacity: 0 }, { opacity: 1 }], { duration: app.reduced() ? 160 : 520, easing: 'ease-out' });

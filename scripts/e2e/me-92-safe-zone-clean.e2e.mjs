@@ -409,7 +409,7 @@ async function everyScreen(h, viewport) {
         return t && t !== was && !!document.querySelector(`.dq-sz-body ${sel}`);
       }, [heading, sel]);
       // fonts in and the screen's fade-in done, so the boxes and screenshots are what the player sees
-      await page.evaluate(() => Promise.all([document.fonts.ready, ...document.querySelector('.dq-sz-body').getAnimations().map((a) => a.finished)]));
+      await page.evaluate(() => Promise.all([document.fonts.ready, ...[...document.querySelectorAll('.dq-sz-body, .dq-sz-body > *')].flatMap((e) => e.getAnimations()).map((a) => a.finished)]));
       heading = await page.locator('.dq-sz-body [data-focus]').textContent();
       if (sideways) {
         const got = await page.evaluate((sel) => {

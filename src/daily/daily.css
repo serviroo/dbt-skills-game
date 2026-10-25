@@ -2881,13 +2881,15 @@ textarea.dq-input {
   .dq-sz .dq-addrow .dq-field {
     flex-basis: 100%;
   }
+  /* 12px under the foot keeps "Talk to someone now" on screen while a screen slides in 10px */
   .dq-sz-foot {
-    padding: 4px 0 calc(var(--safe-bottom) + 6px);
+    padding: 4px 0 calc(var(--safe-bottom) + 12px);
   }
-  /* on Talk the foot holds only Lights up, so it pins under the lines and leaves the danger line beside them clear */
-  .dq-sz-foot:has(> .dq-sz-talk.is-hidden) {
+  /* Talk's foot holds only Lights up: it pins under the lines, leaving the danger line beside them clear */
+  .dq-sz-foot.is-talk {
     align-self: flex-end;
     width: 50%;
+    padding-bottom: calc(var(--safe-bottom) + 6px);
   }
 }
 .dq-cardbtn .dq-cf-stat {

@@ -361,18 +361,20 @@ export const scenarios = {
             else await page.locator('.dq-sz-talk').click();
             await page.locator('.dq-region select').waitFor();
             // fonts in and the screen's fade-in done, so the boxes and screenshots are what the player sees
-            await page.evaluate(() => Promise.all([document.fonts.ready, ...document.querySelector('.dq-sz-body').getAnimations().map((a) => a.finished)]));
+            await page.evaluate(() => Promise.all([document.fonts.ready, ...[...document.querySelectorAll('.dq-sz-body, .dq-sz-body > *')].flatMap((e) => e.getAnimations()).map((a) => a.finished)]));
             const got = await page.evaluate(() => {
               const top = document.querySelector('.dq-top').getBoundingClientRect().bottom;
-              const foot = document.querySelector('.dq-sz-foot').getBoundingClientRect().top;
+              const f = document.querySelector('.dq-sz-foot').getBoundingClientRect();
+              const foot = f.top;
               const seen = (el) => {
                 if (!el) return null;
                 const r = el.getBoundingClientRect();
                 // 4 px in from each corner, clear of the rounded corners
                 const at = [[r.left + 4, r.top + 4], [r.right - 4, r.top + 4], [r.left + 4, r.bottom - 4], [r.right - 4, r.bottom - 4], [r.left + r.width / 2, r.top + r.height / 2]];
+                const underFoot = r.right > f.left && r.left < f.right && r.bottom > f.top + 0.5;
                 return {
                   box: [r.left, r.top, r.right, r.bottom].map(Math.round).join(', '),
-                  whole: r.left >= 0 && r.right <= innerWidth && r.top >= top - 0.5 && r.bottom <= innerHeight + 0.5,
+                  whole: r.left >= 0 && r.right <= innerWidth && r.top >= top - 0.5 && r.bottom <= innerHeight + 0.5 && !underFoot,
                   hit: at.every(([x, y]) => el.contains(document.elementFromPoint(x, y))),
                   tall: r.height,
                 };
