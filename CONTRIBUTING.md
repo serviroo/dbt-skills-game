@@ -137,13 +137,34 @@ once, and its timers must stay skippable while they run. Then it opens the skill
 walks back to that screen and taps "Leave this skill". Each time it must go straight to Home with no confirm and still
 credit the skill. It also reads each skill's copy from `src/content/dbt.ts`: no em dashes, no diagnosis words, no set
 phrases DESIGN.md rules out (unsafe wording, "less fortunate", abandonment cues, body, food or weight numbers), no
-hard-coded "Player", timers of 20 to 90 seconds, and a caution that names the heart risk plus a "breathe instead" option
-on cold-water or hard-exercise steps. It then opens each of those steps at 390x844, 844x390 and 320x568: the caution,
+hard-coded "Player", and a caution that names the heart risk plus a "breathe instead" option on cold-water or
+hard-exercise steps. Every timer runs 20 to 90 seconds and has a step id. A screen that offers another skill or the Safe
+Zone also needs a step id, and its first button (and any equal button beside it) must be this skill's own way forward:
+its finish, a later step or the Safe Zone, never another skill or a repeat of an earlier step. It then opens each
+cold-water or hard-exercise step at 390x844, 844x390 and 320x568: the caution,
 the step's own action and "Breathe instead" must show without scrolling, with "Breathe instead" the same kind and height
 of button as that action. On a timer, once Start is tapped, the countdown, Next and "Breathe instead" must all still be
 on screen. Skills in its `ENFORCED` list fail the run. Every other skill's problems print as a todo list, also kept in
 `report.json`. Once a skill passes, add it to `ENFORCED`. Add `--skills=<id>,<id>` to check only those skills; an id
 that doesn't exist fails the run.
+
+`node scripts/e2e.mjs --file=skill-flows` opens those step ids in their real skills, on a returning save at 390x844:
+
+- `skill-timers`: every timer offers "+15 s" once it runs (timers up to 30 seconds) or "+30 s" (longer ones). It adds
+  exactly that much while the timer runs and after Done, on the same screen, with Next still there and no extra credit.
+  Cold water is the one exception (about 30 seconds, no extra time), marked `extend: 0` on its step.
+- `skill-exits`: on every screen that offers another skill or the Safe Zone, the first button finishes this skill on its
+  own end screen, or opens the Safe Zone when that leads, and credits this skill once and no other. When an answer
+  shows distress rising (a "Higher" answer), the screen it leads to puts people first: "People to talk to"
+  (`safe:people`) leads and opens the Safe Zone at "Talk to someone now".
+- `skill-practise-again`: a full end screen offers "Practise again", which opens the same skill fresh at the part the
+  player opened, with one credit like any opening. A quiet "Not this time" end doesn't offer it.
+- `skill-answers-rotate`: what the player typed or picked stays when the phone turns sideways and back.
+
+To add a skill, add its object to `SKILLS` in `src/content/dbt.ts` (`id`, `sl`, `real`, `module`, `minutes`, `card`,
+`steps`); the Skills list shows it under its module. Freeze its id with `npm run check:ids -- --update`, run
+`node scripts/e2e.mjs --file=skill-check --skills=<id>` and `node scripts/e2e.mjs --file=skill-flows`, and add the id
+to `ENFORCED` once it passes. Give it its own E2E file for the paths it adds.
 
 The same file's `copy-everywhere` scenario reads every string the app ships, not only the skills: the string and
 template text in `src/` (comments left out), quoted text in its CSS, `index.html` and the web app manifest. Any em dash,

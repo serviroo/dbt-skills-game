@@ -147,6 +147,15 @@ const THOUGHT_PICS: Record<string, string> = {
 const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 const fullStop = (t: string) => (/[.!?]$/.test(t) ? t : `${t}.`);
 
+const WISHES = ['May this moment be a little gentler', 'May today go a bit easier', 'May there be a moment of rest', 'May something small go well'];
+const ownWish = (a: Answers) => !WISHES.includes(s(a, 'wish', WISHES[0]).trim());
+const wishee = (a: Answers) => s(a, 'them').trim().replace(/[\s.!?]+$/, '');
+function kindWish(a: Answers, to: 'me' | 'them') {
+  const wish = s(a, 'wish', WISHES[0]).trim();
+  if (ownWish(a)) return fullStop(cap(wish));
+  return `${wish} for ${to === 'me' ? 'me' : wishee(a) || 'them'}.`;
+}
+
 const GOALS: Record<string, string[]> = {
   'Being kind': ['Do one kind thing a week', 'Be a bit kinder to myself', 'Help out with something'],
   'Making things': ['Finish one small project', 'Make something each week', 'Learn a new technique'],
@@ -307,6 +316,81 @@ export const SKILLS: Skill[] = [
         kind: 'say',
         text: "Thanks for telling me. Some thoughts are loud and heavy, and you don't have to sit with them alone. The Safe Zone is one tap away if you want it.",
         options: [{ label: 'Safe Zone', go: 'safe' }, { label: 'Done', go: 'end' }],
+      },
+    ],
+  },
+  {
+    id: 'loving-kindness',
+    sl: 'Kind Light',
+    real: 'Loving-Kindness',
+    module: 'mind',
+    minutes: '90 s',
+    card: 'Send one small, kind wish to yourself or someone easy to care about.',
+    steps: [
+      { kind: 'intro', text: "Kindness can start as a small, quiet wish. It doesn't have to feel warm to count. Pick one and send it to yourself or someone easy to care about." },
+      { kind: 'choice', key: 'wish', text: 'Pick a kind wish that feels believable today. Small is good.', options: o(...WISHES), other: 'My own wish' },
+      {
+        kind: 'choice',
+        key: 'who',
+        text: 'Who gets it first?',
+        small: 'It stays in your head. Nobody needs to know.',
+        options: [{ label: 'Me', value: 'me', go: 'me' }, { label: 'Someone easy to care about', value: 'them', go: 'name' }],
+      },
+      {
+        id: 'me',
+        kind: 'timer',
+        title: 'For you',
+        seconds: 20,
+        start: 'Start 20 s',
+        visual: 'glow',
+        big: (a) => kindWish(a, 'me'),
+        text: (a) => `Say it slowly in your head, a few times. Let your shoulders soften. If your mind wanders, come back to the wish. Coming back is the practice.${ownWish(a) ? ' Change the words to fit you if you like.' : ''}`,
+        go: 'after-me',
+      },
+      { id: 'after-me', kind: 'branch', pick: (a) => (a.who === 'them' ? 'felt' : 'add-them') },
+      { id: 'add-them', kind: 'choice', key: 'also', text: 'Send the same wish to someone easy to care about too?', options: [{ label: 'Yes, them too', go: 'name' }, { label: 'Just me today', go: 'felt' }] },
+      {
+        id: 'name',
+        kind: 'input',
+        key: 'them',
+        lines: 1,
+        text: 'Picture someone easy to care about: a friend, family, a pet. Leave out anyone who feels hard right now.',
+        placeholder: 'Name or nickname (optional)',
+        skip: 'Keep it in my head',
+        go: 'them',
+      },
+      {
+        id: 'them',
+        kind: 'timer',
+        title: 'For them',
+        seconds: 20,
+        start: 'Start 20 s',
+        visual: 'glow',
+        big: (a) => kindWish(a, 'them'),
+        text: (a) => `Picture ${wishee(a) || 'them'} for a moment and say it slowly in your head. If your mind wanders, come back to the wish.${ownWish(a) ? ' Change the words to fit them if you like.' : ''}`,
+        go: 'after-them',
+      },
+      { id: 'after-them', kind: 'branch', pick: (a) => (a.who === 'me' ? 'felt' : 'add-me') },
+      { id: 'add-me', kind: 'choice', key: 'also', text: 'Send the same wish to yourself too?', options: [{ label: 'Yes, me too', go: 'me' }, { label: 'Just them today', go: 'felt' }] },
+      {
+        id: 'felt',
+        kind: 'choice',
+        key: 'felt',
+        text: 'How did that feel?',
+        options: [
+          { label: 'A little warmer' },
+          { label: 'Quieter' },
+          { label: 'Not feeling it', reply: "That's okay. Warmth doesn't have to show up. Each time you came back to the wish, you were practising." },
+          { label: 'It stirred up something hard', go: 'hard' },
+        ],
+        go: 'close',
+      },
+      { id: 'close', kind: 'say', text: "A kind wish isn't a promise, and it doesn't make anything hurtful okay. It's a small light you can send any time.", cta: 'Done', go: 'end' },
+      {
+        id: 'hard',
+        kind: 'say',
+        text: "Thanks for telling me. Kind words can stir up old hurt, and you don't have to sit with it alone. Someone to talk to is one tap away.",
+        options: [{ label: 'People to talk to', go: 'safe:people' }, { label: 'Done', go: 'end' }],
       },
     ],
   },
