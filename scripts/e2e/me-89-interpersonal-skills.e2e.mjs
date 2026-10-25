@@ -128,7 +128,7 @@ const PATHS = {
   },
 };
 
-const BANNED = /\b(disorders?|diagnos\w*|symptoms?|patients?|illness(es)?|treatments?|relapse\w*)\b|game over|you died|\u2014/i;
+const BANNED = /\b(disorder\w*|diagnos\w*|symptom\w*|patients?|illness\w*|treatment\w*|relaps\w*)\b|game over|you died|\u2014/i;
 const norm = (t) => (t ?? '').replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/\s+/g, ' ').trim();
 const addDays = (day, n) => {
   const [y, m, d] = day.split('-').map(Number);

@@ -21,7 +21,7 @@ const SKILLS = {
   'body-scan': { sl: 'Quiet Scan', real: 'Body Scan', minutes: '2 min' },
   'alternate-rebellion': { sl: 'Off-Script', real: 'Alternate Rebellion', minutes: '1 min' },
 };
-const BANNED = [/\{(name|companion)\}/i, /\b(disorder|diagnos\w*|symptoms?|patients?|illness\w*|treatment|relapse\w*)\b/i, /game over|you died/i, /\u2014/];
+const BANNED = [/\{(name|companion)\}/i, /\b(disorder\w*|diagnos\w*|symptom\w*|patients?|illness\w*|treatment\w*|relaps\w*)\b/i, /game over|you died/i, /\u2014/];
 
 const progress = (save, id) => {
   const ev = save?.events ?? [];
@@ -386,5 +386,37 @@ export const scenarios = {
     h.expect(now.uses === 1 && now.owned, `opening today's new card did not credit it: ${JSON.stringify(now)}`);
     h.expect(!b.errors.length, b.errors.join('\n'));
     await b.ctx.close();
+  },
+
+  async 'skills-dt-trade-places-timer'(h) {
+    const { ctx, page, errors } = await h.open({ [h.SAVE]: JSON.stringify(oldSave()), 'dbt.app.v1': h.SEEN }, '?mute', { width: 390, height: 844 });
+    await page.clock.install();
+    await page.reload();
+    await h.reachHub(page);
+    const before = progress(await saved(h, page), 'accepts');
+    await page.locator('.dq-tile').filter({ hasText: 'All of them, any time' }).first().click();
+    await page.locator('.dq-libsec.dq-mod-dt .dq-librow').filter({ has: page.locator('.dq-librow-n', { hasText: /^Trade Places$/ }) }).click();
+    for (const name of ['Begin', 'Thoughts', 'Count blue things in the room', '1 min']) await tap(name)(page);
+    await page.locator('.dq-step-body', { hasText: 'Your break can go on as long as you like.' }).waitFor({ timeout: 5000 });
+    const num = page.locator('.dq-timer-num');
+    const secs = async () => (await num.textContent()).split(':').reduce((n, part) => n * 60 + Number(part), 0);
+    const start = await secs();
+    h.expect(start >= 58 && start <= 60, `the timer does not start at one minute (shows ${start} s)`);
+    await page.clock.fastForward(61000);
+    await num.filter({ hasText: 'Done' }).waitFor({ timeout: 5000 });
+    await tap('+30 s')(page);
+    await page.clock.fastForward(1000);
+    const restarted = await page.waitForFunction(() => /^\d/.test(document.querySelector('.dq-timer-num')?.textContent ?? ''), null, { timeout: 5000 }).then(() => true, () => false);
+    h.expect(restarted, '+30 s on a finished timer did nothing: it still shows Done');
+    const left = await secs();
+    h.expect(left >= 28 && left <= 30, `+30 s on a finished timer did not start 30 more seconds (shows ${left})`);
+    await page.clock.fastForward(31000);
+    await num.filter({ hasText: 'Done' }).waitFor({ timeout: 5000 });
+    await tap('Next')(page);
+    await page.locator('.dq-step-body .dq-intro--end').waitFor({ timeout: 5000 });
+    const after = progress(await saved(h, page), 'accepts');
+    h.expect(after.uses === before.uses + 1, `Trade Places was not credited once: ${JSON.stringify({ before, after })}`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
   },
 };

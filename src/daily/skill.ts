@@ -240,14 +240,18 @@ export function skillScreen(app: App, route: Route): ScreenOut {
         const secs = typeof s.seconds === 'function' ? s.seconds(answers) : s.seconds;
         const nextBtn = btn('Next', next, { kind: 'quiet' });
         const go = (o: Opt) => () => follow(o.go, i + 1);
+        const peers = s.options?.filter((o) => o.instead).map((o) => btn(o.label, go(o), { kind: 'primary' })) ?? [];
         const tv = timerView(ctx, {
           seconds: secs,
           visual: s.visual,
           start: s.start,
           extend: s.extend,
-          peers: s.options?.filter((o) => o.instead).map((o) => btn(o.label, go(o), { kind: 'primary' })),
+          peers,
           big: s.big ? tx(s.big, answers) : undefined,
-          onStart: s.dim ? () => el.classList.add('is-dim') : undefined,
+          onStart: () => {
+            if (s.dim) el.classList.add('is-dim');
+            if (peers.length) nextBtn.scrollIntoView({ block: 'nearest', behavior: app.reduced() ? 'auto' : 'smooth' });
+          },
           onDone: () => {
             el.classList.remove('is-dim');
             nextBtn.classList.remove('dq-btn--quiet');

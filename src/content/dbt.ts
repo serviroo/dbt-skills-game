@@ -75,10 +75,13 @@ export interface Skill {
   art?: 'mittens' | 'lobby' | 'heal' | 'scroll' | 'tier' | 'air' | 'volume' | 'supplies' | 'queue' | 'lowlight';
 }
 
-const SKIP_IF = 'you have a heart condition, take a beta-blocker or another medicine that slows your heart, are allergic to cold, or are struggling with eating right now';
-export const TIPP_CAUTION = `Skip cold water and hard exercise if ${SKIP_IF}. Check with a doctor first. Breathing works for everyone.`;
+const CONDITION = 'have a heart or other medical condition';
+const EATING = 'have found eating hard lately';
+const DOCTOR_OK = "unless a doctor says it's okay";
+export const TIPP_CAUTION = `Skip cold water and hard exercise if you ${CONDITION}, take a beta-blocker or other heart-slowing medicine, are allergic to cold, or ${EATING}, ${DOCTOR_OK}. Breathing works for everyone.`;
+const COLD_CAUTION = `Skip cold water if you ${CONDITION}, take a beta-blocker or other heart-slowing medicine, are allergic to cold, or ${EATING}, ${DOCTOR_OK}.`;
 /** Hard movement always comes last, behind "More", with this line. */
-export const MOVE_CAUTION = "Skip if you feel dizzy, sick or sore, have a heart condition, take a beta-blocker or another medicine that slows your heart, or are struggling with eating right now. Check with a doctor first. Standing only, easy on the knees.";
+export const MOVE_CAUTION = `Skip if you feel dizzy, sick or sore. Skip it too if you ${CONDITION}, take a beta-blocker or other heart-slowing medicine, or ${EATING}, ${DOCTOR_OK}. Standing only, easy on the knees.`;
 /** "Not this time" is always an answer on a loadout card. */
 const NOT_THIS_TIME: Opt = { label: 'Not this time', go: 'end:quiet' };
 
@@ -354,7 +357,7 @@ export const SKILLS: Skill[] = [
         start: 'Start 30 s',
         visual: 'cold',
         text: 'Open a window or step outside into cool air. Or cold water on your face, or something cold over your eyes and cheeks. Cool, not icy.',
-        small: TIPP_CAUTION,
+        small: COLD_CAUTION,
         options: [{ label: 'Breathe instead', go: 'paced', instead: true }],
         go: 'check',
       },
@@ -420,19 +423,19 @@ export const SKILLS: Skill[] = [
       { id: 'e', kind: 'choice', title: 'E. Emotions', key: 'pick', text: 'Put on something that brings a different feeling.', options: o('A comedy', 'A hype song', 'Cute animal videos'), other: 'My own', go: 'timer' },
       { id: 'p', kind: 'hold', title: 'P. Pushing away', seconds: 4, label: 'Hold to store', done: 'Stored. It keeps until you decide to look at it.', text: 'Put this in the vault for now. Picture it boxed up and shelved.', go: 'timer' },
       { id: 't', kind: 'choice', title: 'T. Thoughts', key: 'pick', text: 'Fill your mind with something.', options: o('Count blue things in the room', 'Name a song for every letter', 'A puzzle or a word game'), other: 'My own', go: 'timer' },
-      { id: 's', kind: 'choice', title: 'S. Sensations', key: 'pick', text: 'Something strong and safe.', options: o('Hold something cold, not icy', 'A warm shower', 'Squeeze a stress ball', 'A strong mint'), other: 'My own', go: 'timer' },
+      { id: 's', kind: 'choice', title: 'S. Sensations', key: 'pick', text: 'Something strong and safe.', options: o('Hold something cold, not icy', 'A hot shower', 'Squeeze a stress ball', 'A strong mint'), other: 'My own', go: 'timer' },
       {
         id: 'timer',
         kind: 'choice',
         key: 'mins',
-        text: 'Want a gentle timer for the first minute? It only shows here. No alerts.',
+        text: 'Want a gentle timer to get you started? It only shows here. No alerts.',
         options: [
-          { label: '1 min', value: '1', go: 'clock' },
+          { label: '1 min', go: 'clock' },
           { label: 'No timer', go: 'go' },
         ],
       },
-      { id: 'clock', kind: 'timer', seconds: 60, extend: 30, visual: 'ring', text: 'Go do it. The timer only covers the first minute. Keep going for as long as you like after that. The quest already counts.', go: 'end' },
-      { id: 'go', kind: 'say', text: 'Go do it, for as long as you like. This quest already counts, whether or not you open the app again today.', cta: 'Done', go: 'end' },
+      { id: 'clock', kind: 'timer', seconds: 60, extend: 30, visual: 'ring', text: 'Go do it. The timer just gets you started. Your break can go on as long as you like. The quest already counts.', go: 'end' },
+      { id: 'go', kind: 'say', text: 'Go do it. Your break can go on as long as you like. This quest already counts, whether or not you open the app again today.', cta: 'Done', go: 'end' },
     ],
   },
   {
@@ -763,10 +766,10 @@ export const SKILLS: Skill[] = [
         title: '[Appraisal complete]',
         text: (a) => `${appraisal(a)} Nothing to fix right now.`,
         options: [
+          { label: 'Done', go: 'end' },
           { label: 'Something soothing', go: 'skill:self-soothe' },
           { label: 'Self-Heal', go: 'skill:self-validation' },
           { label: 'Let it be', go: 'skill:current-emotion' },
-          { label: 'Done', go: 'end' },
         ],
       },
     ],
@@ -815,7 +818,7 @@ export const SKILLS: Skill[] = [
         id: 'heavy',
         kind: 'say',
         text: 'Then not facts today. Heavy feelings get comfort first. No reason needed.',
-        options: [{ label: 'Something soothing', go: 'skill:self-soothe' }, { label: 'Self-Heal', go: 'skill:self-validation' }, { label: 'Safe Zone', go: 'safe' }, { label: 'Done', go: 'end:quiet' }],
+        options: [{ label: 'Done', go: 'end:quiet' }, { label: 'Something soothing', go: 'skill:self-soothe' }, { label: 'Self-Heal', go: 'skill:self-validation' }, { label: 'Safe Zone', go: 'safe' }],
       },
     ],
   },
@@ -1584,7 +1587,7 @@ export const SAFE = {
   cold: {
     title: 'Cool air, or something cool',
     text: 'Open a window or step outside for cool air. Or cold water on your face, or something cold over your eyes and cheeks. Thirty seconds.',
-    small: `Cool, not icy. Skip cold water if ${SKIP_IF}. Check with a doctor first.`,
+    small: `Cool, not icy. Skip cold water if you ${CONDITION}, take a beta-blocker or similar, are allergic to cold, or ${EATING}.`,
     during: 'Cool tells your body to slow down.',
   },
   light: { up: 'Lights up', down: 'Lights down', hint: 'Dim or bright. Whichever sits better right now.' },

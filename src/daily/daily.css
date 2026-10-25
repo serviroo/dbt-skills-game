@@ -4007,6 +4007,9 @@ textarea.dq-input {
   }
 }
 @media (orientation: landscape) and (max-height: 500px) {
+  .dq-timer--peers .dq-timer-stage {
+    width: min(180px, 46vh);
+  }
   .dq-draw {
     display: grid;
     grid-template-columns: auto 352px;

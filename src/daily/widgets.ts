@@ -234,7 +234,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
   const peers = opts.peers ?? [];
   const extra = [...(opts.extra ?? []), ...peers];
   const actions = h('div', { class: `dq-actions dq-actions--center ${peers.length ? 'dq-actions--pair' : ''}` });
-  const el = h('div', { class: 'dq-timer' }, big, peers.length ? actions : null, stageEl, peers.length ? null : actions);
+  const el = h('div', { class: `dq-timer ${peers.length ? 'dq-timer--peers' : ''}` }, big, peers.length ? actions : null, stageEl, peers.length ? null : actions);
   let t0 = -1;
   let stop: (() => void) | null = null;
   let finished = false;
@@ -296,7 +296,17 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
     t0 = now();
     opts.onStart?.();
     actions.replaceChildren(...extra);
-    if (opts.extend) actions.prepend(btn(`+${opts.extend} s`, () => (dur += opts.extend!), { kind: 'quiet' }));
+    if (opts.extend) {
+      actions.prepend(
+        btn(`+${opts.extend} s`, () => {
+          dur = Math.max(dur, now() - t0) + opts.extend!;
+          if (finished) {
+            finished = false;
+            stop = onFrame(render);
+          }
+        }, { kind: 'quiet' }),
+      );
+    }
     stop = onFrame(render);
   };
   if (opts.start) actions.append(btn(opts.start, begin, { kind: 'primary' }), ...extra);

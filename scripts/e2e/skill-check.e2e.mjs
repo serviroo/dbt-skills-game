@@ -6,9 +6,10 @@
 // screen (its timer started) and left with "Leave this skill": that must reach Home with no confirm and credit it once.
 // Copy, read from the skill's content object with its text functions run on many answer sets: no em dash, no diagnosis
 // words (DESIGN.md principle 8), none of principle 9's wording a lint can catch, no hard-coded "Player" or unknown
-// token, every timer 20 to 90 s, and cold-water or intense-exercise steps carry a caution and a "breathe instead" option
-// (principle 11). Each of those steps is then opened at 390x844 and 844x390: its caution, its own action and "Breathe
-// instead" must show without scrolling, and the last two must be buttons of the same weight.
+// token, every timer 20 to 90 s, and cold-water or intense-exercise steps carry a caution that names the heart risk and a
+// "breathe instead" option (principle 11). Each of those steps is then opened at 390x844 and 844x390: its caution, its own
+// action and "Breathe instead" must show without scrolling, and the last two must be buttons of the same weight. On a
+// timer, once Start is tapped, the countdown, Next and "Breathe instead" must all be on screen.
 // Skills in ENFORCED fail the run. Every other skill's problems are printed as a todo list and returned, so the runner
 // keeps them in report.json. Once a skill passes, add it to ENFORCED.
 // copy-everywhere holds every other string the app ships (the Safe Zone, Home, the intro, labels in code) to the same
@@ -39,7 +40,7 @@ const SIDEWAYS = { width: 844, height: 390 };
 const DAY = 864e5;
 const COPY = {
   emDash: '—',
-  diagnosis: String.raw`\b(disorders?|diagnos\w*|symptoms?|patients?|illness\w*|treatments?|relapse\w*)\b`,
+  diagnosis: String.raw`\b(disorder\w*|diagnos\w*|symptom\w*|patients?|illness\w*|treatment\w*|relaps\w*)\b`,
   // Principle 9, as far as set phrases go. A lint can't see method or means details, guilt, or abandonment, comparison
   // and body talk said in other words; those need a person reading the copy.
   unsafe: String.raw`committed suicide|successful attempt|failed attempt|you died|game over|less fortunate`,
@@ -48,7 +49,7 @@ const COPY = {
   player: String.raw`\bPlayer\b`,
   token: String.raw`\{(?!(?:name|companion)\})[^}]*\}`,
   coldOrHard: String.raw`\bcold (water|shower)|\bice\b|(?<!not )\bicy\b|\bcool shower|intense (exercise|movement)|hard exercise|fast movement|move fast|\bjog\b|sprint|jumping jacks|star jumps|burpees`,
-  caution: String.raw`\bskip\b[^.]*\bif\b|heart condition`,
+  caution: String.raw`^(?=[\s\S]*\bskip\b)(?=[\s\S]*\bheart\b)`,
 };
 
 const dayKey = (ms) => {
@@ -173,6 +174,33 @@ function copyProblems(page) {
   }, COPY);
 }
 
+const onScreen = (page) =>
+  page.evaluate(() => {
+    const body = document.querySelector('.dq-step-body');
+    const top = document.querySelector('.dq-top')?.getBoundingClientRect().bottom ?? 0;
+    const seen = (e) => {
+      const r = e?.getBoundingClientRect();
+      if (!r?.width || !r.height || r.top < top || r.left < 0 || r.bottom > innerHeight || r.right > innerWidth) return false;
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return !!hit && e.contains(hit);
+    };
+    const kind = (b) => (b.classList.contains('dq-opt') ? 'chip' : [...b.classList].find((c) => c.startsWith('dq-btn--'))?.slice(8) ?? 'plain');
+    const buttons = [...body.querySelectorAll('button')].filter((b) => b.getClientRects().length && !b.disabled);
+    const breathe = buttons.find((b) => /breath/i.test(b.textContent));
+    const main = buttons.find((b) => b !== breathe);
+    const next = buttons.find((b) => b.textContent.trim() === 'Next' && !b.closest('.dq-timer'));
+    const caution = body.querySelector('.dq-small');
+    const btn = (b) => b && { label: b.textContent.trim(), kind: kind(b), height: Math.round(b.getBoundingClientRect().height), seen: seen(b) };
+    return {
+      breathe: btn(breathe),
+      main: btn(main),
+      start: !!main?.closest('.dq-timer'),
+      caution: caution ? seen(caution) : null,
+      countdown: seen(body.querySelector('.dq-timer-stage')),
+      next: seen(next),
+    };
+  });
+
 async function insteadProblems(h, risky) {
   const out = {};
   for (const vp of [PHONE, SIDEWAYS]) {
@@ -193,22 +221,7 @@ async function insteadProblems(h, risky) {
           await page.waitForFunction(() => !document.querySelector('.dq-step-body .dq-intro'), null, { timeout: 10000 });
         }
         await page.waitForTimeout(500);
-        const found = await page.evaluate(() => {
-          const body = document.querySelector('.dq-step-body');
-          const seen = (e) => {
-            const r = e.getBoundingClientRect();
-            if (!r.width || !r.height || r.top < 0 || r.left < 0 || r.bottom > innerHeight || r.right > innerWidth) return false;
-            const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-            return !!hit && e.contains(hit);
-          };
-          const kind = (b) => (b.classList.contains('dq-opt') ? 'chip' : [...b.classList].find((c) => c.startsWith('dq-btn--'))?.slice(8) ?? 'plain');
-          const buttons = [...body.querySelectorAll('button')].filter((b) => b.getClientRects().length && !b.disabled);
-          const breathe = buttons.find((b) => /breath/i.test(b.textContent));
-          const main = buttons.find((b) => b !== breathe);
-          const caution = body.querySelector('.dq-small');
-          const btn = (b) => b && { label: b.textContent.trim(), kind: kind(b), height: Math.round(b.getBoundingClientRect().height), seen: seen(b) };
-          return { breathe: btn(breathe), main: btn(main), caution: caution ? seen(caution) : null };
-        });
+        const found = await onScreen(page);
         const { breathe, main } = found;
         if (found.caution === null) bad.add(`${where}: no caution on screen at ${size}`);
         else if (!found.caution) bad.add(`${where}: the caution needs scrolling at ${size}`);
@@ -219,6 +232,14 @@ async function insteadProblems(h, risky) {
           if (main && (main.kind !== breathe.kind || Math.abs(main.height - breathe.height) > 1)) {
             bad.add(`${where}: "${breathe.label}" (${breathe.kind}, ${breathe.height} px) has less weight than "${main.label}" (${main.kind}, ${main.height} px) at ${size}`);
           }
+        }
+        if (found.start) {
+          await page.locator('.dq-step-body .dq-timer .dq-actions .dq-btn--primary').first().click();
+          await page.waitForTimeout(900);
+          const running = await onScreen(page);
+          if (!running.countdown) bad.add(`${where}: after Start the countdown is off screen at ${size}`);
+          if (!running.next) bad.add(`${where}: after Start, Next is off screen at ${size}`);
+          if (breathe && !running.breathe?.seen) bad.add(`${where}: after Start, "${breathe.label}" is off screen at ${size}`);
         }
         await page.evaluate(() => window.__daily.go({ name: 'hub' }));
         await h.reachHub(page);

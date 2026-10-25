@@ -3,7 +3,7 @@ const NEW = {
   'long-term-positives': { sl: 'Main Quest', real: 'Long-Term Positives' },
   'emotion-myths': { sl: 'Patch Notes', real: 'Myths About Emotions' },
 };
-const BANNED = [/\{(name|companion)\}/, /\b(disorders?|diagnos\w*|symptoms?|patients?|illness\w*|treatments?|relapse\w*)\b/i, /game over/i, /you died/i, /\u2014/];
+const BANNED = [/\{(name|companion)\}/, /\b(disorder\w*|diagnos\w*|symptom\w*|patients?|illness\w*|treatment\w*|relaps\w*)\b/i, /game over/i, /you died/i, /\u2014/];
 const PHONE = { width: 390, height: 844 };
 const SMALL = { width: 320, height: 568 };
 const LANDSCAPE = { width: 844, height: 390 };
