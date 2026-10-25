@@ -1149,6 +1149,8 @@ textarea.dq-input {
 }
 
 .dq-quest {
+  --quest-top: 126px;
+  --quest-room: calc(100dvh - var(--safe-top) - var(--safe-bottom) - var(--quest-top) - 169px);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1179,11 +1181,11 @@ textarea.dq-input {
   padding: 6px 0;
 }
 .dq-card {
+  --card-w: min(240px, 75vw, max(150px, var(--quest-room) * 5 / 7));
   position: relative;
   display: block;
-  width: min(240px, 75vw);
+  width: var(--card-w);
   container-type: inline-size;
-  aspect-ratio: 5 / 7;
   padding: 0;
   border: 0;
   background: none;
@@ -1194,9 +1196,13 @@ textarea.dq-input {
   -webkit-tap-highlight-color: transparent;
 }
 .dq-card-inner {
-  position: absolute;
-  inset: 0;
+  display: grid;
+  min-height: min(var(--card-w) * 7 / 5, var(--quest-room));
   transform-style: preserve-3d;
+}
+.dq-card-inner > .dq-cardface {
+  position: relative;
+  grid-area: 1 / 1;
 }
 .dq-card.is-open .dq-card-inner {
   transform: rotateY(180deg);
@@ -1363,8 +1369,7 @@ textarea.dq-input {
   mix-blend-mode: screen;
 }
 .dq-quest-note {
-  min-height: 1.5em;
-  font-size: 15px;
+  font-size: 16px;
   font-style: italic;
   color: #a6d2f2;
   text-align: center;
@@ -1376,6 +1381,118 @@ textarea.dq-input {
   font-size: 16px;
   color: var(--t-faint);
   text-align: center;
+}
+.dq-quest-alt {
+  margin-top: -8px;
+}
+.dq-quest-look {
+  font-size: 16px;
+}
+.dq-quest.is-aside > :not(.dq-sec-h, .dq-quest-aside),
+.dq-quest:not(.is-aside) > .dq-quest-aside {
+  display: none;
+}
+.dq-quest-aside {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0 4px;
+}
+.dq-quest-aside-t {
+  max-width: 34ch;
+  font-size: 16px;
+  font-style: italic;
+  color: #a6d2f2;
+  text-align: center;
+}
+.dq-quest-aside-t:focus {
+  outline: none;
+}
+@container (max-width: 235px) {
+  .dq-card .dq-cf-blurb,
+  .dq-card .dq-cf-stat,
+  .dq-card .dq-cf-mod span {
+    display: none;
+  }
+  .dq-card .dq-cardface--front {
+    padding: 14px 14px 12px;
+  }
+  .dq-card .dq-cardface--front .dq-cf-art {
+    max-height: none;
+  }
+  .dq-card .dq-cf-name {
+    font-size: 24px;
+  }
+  .dq-card .dq-cf-real {
+    font-size: 12px;
+    letter-spacing: 0.12em;
+  }
+  .dq-card .dq-cb-t {
+    letter-spacing: 0.14em;
+  }
+  .dq-card .dq-cb-t::before,
+  .dq-card .dq-cb-t::after {
+    width: 12px;
+    margin: 0 6px 4px;
+  }
+}
+@container (max-width: 160px) {
+  .dq-card .dq-cf-name {
+    font-size: 20px;
+  }
+  .dq-card .dq-cf-real {
+    margin-top: 6px;
+    padding-top: 6px;
+    letter-spacing: 0.08em;
+  }
+  .dq-card .dq-cb-t {
+    letter-spacing: 0.1em;
+  }
+  .dq-card .dq-cb-t::before,
+  .dq-card .dq-cb-t::after {
+    display: none;
+  }
+}
+@media (orientation: landscape) and (max-height: 540px) {
+  .dq-quest {
+    --quest-room: calc(100dvh - var(--safe-top) - var(--safe-bottom) - var(--quest-top) - 20px);
+  }
+  .dq-quest:not(.is-aside) {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: repeat(5, auto) 1fr;
+    grid-template-areas: 'scene head' 'scene acts' 'scene alt' 'scene note' 'scene foot' 'scene .';
+    align-items: start;
+    gap: 12px 20px;
+  }
+  .dq-quest:not(.is-aside) > .dq-card-scene {
+    grid-area: scene;
+  }
+  .dq-quest:not(.is-aside) > .dq-sec-h {
+    grid-area: head;
+    flex-wrap: wrap;
+  }
+  .dq-quest:not(.is-aside) > .dq-quest-acts {
+    grid-area: acts;
+    flex-direction: column;
+    align-items: stretch;
+    justify-self: start;
+  }
+  .dq-quest:not(.is-aside) > .dq-quest-alt {
+    grid-area: alt;
+    justify-self: start;
+  }
+  .dq-quest:not(.is-aside) > .dq-quest-note,
+  .dq-quest:not(.is-aside) > .dq-quest-foot {
+    text-align: left;
+  }
+  .dq-quest:not(.is-aside) > .dq-quest-note {
+    grid-area: note;
+  }
+  .dq-quest:not(.is-aside) > .dq-quest-foot {
+    grid-area: foot;
+  }
 }
 
 .dq-checkin-body {
@@ -1518,8 +1635,11 @@ textarea.dq-input {
   .dq-col--g {
     grid-area: g;
   }
+  .dq-quest {
+    --quest-top: 128px;
+  }
   .dq-card {
-    width: min(300px, 34vw);
+    --card-w: min(300px, 34vw, max(150px, var(--quest-room) * 5 / 7));
   }
   .dq-h1 {
     font-size: 46px;
@@ -1536,8 +1656,11 @@ textarea.dq-input {
   .dq-col--b {
     position: static;
   }
+  .dq-quest {
+    --quest-top: 136px;
+  }
   .dq-card {
-    width: 318px;
+    --card-w: min(318px, max(150px, var(--quest-room) * 5 / 7));
   }
   .dq-cf-name {
     font-size: 36px;
@@ -2774,9 +2897,10 @@ textarea.dq-input {
   }
 }
 .dq-card .dq-cf-art {
-  flex: 0 1 35cqw;
+  flex: 1 1 0;
   height: auto;
-  min-height: 36px;
+  min-height: 0;
+  max-height: 35cqw;
 }
 .dq-card .dq-cf-top {
   align-items: flex-start;
@@ -2923,6 +3047,16 @@ textarea.dq-input {
     flex-direction: column;
     gap: 28px;
     min-width: 0;
+    grid-row: 2;
+  }
+  .dq-hcol--l {
+    grid-column: 1;
+  }
+  .dq-hcol--m {
+    grid-column: 2;
+  }
+  .dq-hcol--r {
+    grid-column: 3;
   }
   .dq-hcol .dq-col {
     grid-area: auto;

@@ -75,20 +75,62 @@ export async function startHarness(flags = {}) {
   }
   console.log('renderer:', renderer);
 
+  const trail = new WeakMap();
+  const urlOf = (u) => {
+    const url = new URL(u);
+    const p = url.pathname.replace(/^\/@fs\/.*\/([^/]+)$/, '/@fs/$1');
+    return url.origin === server.url ? p : url.origin + p;
+  };
+  const clean = (s) => s.replaceAll(server.url, '').replace(/\/@fs\/\S*\/([^/\s?]+)/g, '/@fs/$1');
+  function track(page, errors, t0) {
+    const life = [];
+    const log = (ev, extra) => life.push({ t: Date.now() - t0, ev, ...extra });
+    page.on('request', (r) => log('request', { type: r.resourceType(), url: urlOf(r.url()) }));
+    page.on('response', (r) => log('response', { url: urlOf(r.url()), status: r.status() }));
+    page.on('requestfailed', (r) => log('failed', { url: urlOf(r.url()), why: r.failure()?.errorText ?? null }));
+    for (const ev of ['domcontentloaded', 'load', 'crash', 'close']) page.on(ev, () => log(ev));
+    trail.set(page, { t0, life, errors });
+  }
+
   /** A fresh, isolated browser profile at phone size, optionally seeded with localStorage before the app runs. */
-  async function open(seed = {}, query = '?mute', viewport = { width: 390, height: 844 }) {
+  async function open(seed = {}, query = '?mute', viewport = { width: 390, height: 844 }, prepare) {
+    const t0 = Date.now();
     const ctx = await browser.newContext({ viewport, deviceScaleFactor: 2, acceptDownloads: true, serviceWorkers: 'block', ...(flags.media === 'true' ? { recordVideo: { dir: out, size: viewport } } : {}) });
     await ctx.addInitScript((s) => {
       if (sessionStorage.getItem('e2e-seeded')) return;
       sessionStorage.setItem('e2e-seeded', '1');
       for (const [k, v] of Object.entries(s)) localStorage.setItem(k, v);
     }, seed);
+    await prepare?.(ctx);
     const page = await ctx.newPage();
     const errors = [];
+    track(page, errors, t0);
     page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
     page.on('console', (m) => m.type() === 'error' && !/WebGL|GPU stall|AudioContext/i.test(m.text()) && errors.push('console: ' + m.text().slice(0, 300)));
     await page.goto(server.url + '/' + query);
     return { ctx, page, errors };
+  }
+  async function evidence(page, name) {
+    const { t0, life, errors } = trail.get(page) ?? { t0: Date.now(), life: [], errors: [] };
+    const state = await Promise.race([
+      page
+        .evaluate(() => ({
+          path: location.pathname + location.search,
+          readyState: document.readyState,
+          visibility: document.visibilityState,
+          ready: document.documentElement.dataset.ready ?? null,
+          mounted: !!window.__daily,
+          route: window.__daily?.route.name ?? null,
+          windows: [...document.querySelectorAll('.dq-sw')].map((w) => {
+            const r = w.getBoundingClientRect();
+            return { visible: w.checkVisibility(), box: [r.left, r.top, r.width, r.height].map(Math.round) };
+          }),
+        }))
+        .catch((e) => ({ unreadable: clean(String(e?.message ?? e).split('\n')[0]) })),
+      sleep(3000).then(() => ({ unreadable: 'no answer in 3 s' })),
+    ]);
+    fs.writeFileSync(path.join(out, name + '.json'), JSON.stringify({ t: Date.now() - t0, state, errors: errors.map(clean), life }, null, 2));
+    await page.screenshot({ path: path.join(out, name + '.png'), timeout: 3000 }).catch(() => {});
   }
   const shot = (page, name) => page.screenshot({ path: path.join(out, name + '.png') });
   const ls = (page, k) => page.evaluate((key) => localStorage.getItem(key), k);
@@ -140,5 +182,5 @@ export async function startHarness(flags = {}) {
     }
   })());
 
-  return { browser, server, out, flags, shared: {}, renderer, open, shot, ls, youOf, deepFind, deepDrop, expect, sleep, reachHub, openSettings, SAVE, YOU, SEEN, stop };
+  return { browser, server, out, flags, shared: {}, renderer, open, evidence, shot, ls, youOf, deepFind, deepDrop, expect, sleep, reachHub, openSettings, SAVE, YOU, SEEN, stop };
 }

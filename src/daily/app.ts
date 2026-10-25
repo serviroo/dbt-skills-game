@@ -324,6 +324,7 @@ export class App {
     if (!Object.prototype.hasOwnProperty.call(this.screens, route.name)) route = { name: 'hub' };
     const safe = route.name === 'safe';
     const wasSafe = this.route.name === 'safe';
+    const fromSkill = this.route.name === 'skill';
     if (safe) this.clearForSafe();
     if (!o.replace && this.current) this.stack.push(this.route);
     if (route.name === 'hub') this.stack = [];
@@ -352,7 +353,7 @@ export class App {
       focus.focus({ preventScroll: true });
     }
     out.after?.();
-    if (route.name === 'hub' && !o.quiet) void this.celebrate();
+    if (route.name === 'hub' && !o.quiet && !fromSkill) void this.celebrate();
   }
 
   private clearForSafe() {

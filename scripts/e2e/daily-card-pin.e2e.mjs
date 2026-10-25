@@ -68,8 +68,8 @@ async function face(h, page) {
       name: front.querySelector('.dq-cf-name')?.textContent.trim(),
       real: front.querySelector('.dq-cf-real')?.textContent.trim(),
       special: front.classList.contains('is-special'),
-      primary: acts.querySelector('.dq-btn--primary')?.textContent.trim(),
-      shown: !acts.classList.contains('is-hidden'),
+      primary: acts.querySelector('.dq-quest-go')?.textContent.trim(),
+      shown: !!acts.querySelector('.dq-quest-go')?.checkVisibility(),
       collection: [...window.__daily.store.derived().collection],
     };
   });
@@ -148,7 +148,7 @@ export const scenarios = {
       h.expect(!before.open && !before.shown, 'with no card event today the card should start face-down');
       // the face-down card floats, so it never holds still for an actionability check
       await page.locator('.dq-quest .dq-card').click({ force: true });
-      await page.locator('.dq-quest-acts:not(.is-hidden)').waitFor({ timeout: 5000 });
+      await page.locator('.dq-quest-go').waitFor({ timeout: 5000 });
       const ev = JSON.parse(await h.ls(page, h.SAVE)).events.filter((e) => e.k === 'card' && e.day === dayOf(Date.now()));
       h.expect(ev.length === 1, `revealing stored ${ev.length} card events today`);
       h.expect(ev[0].data?.slot === slot && ev[0].skill === (q.special ? undefined : q.skill) && ev[0].data?.special === q.special, `the card event does not record slot ${slot} (${describe(q)}): ${JSON.stringify(ev[0])}`);

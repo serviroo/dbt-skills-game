@@ -107,6 +107,16 @@ export const RANK_NOTE = 'Every Wanderer starts at E. Rank only goes up.';
 /** Shown once on the next Lantern visit after the Safe Zone was used. Never inside the Safe Zone. */
 export const SAFE_CREDIT = 'Stamina +1. You looked after yourself.';
 
+export const QUEST = {
+  foot: 'A suggestion, not a task. Any skill counts, and so does none.',
+  acquired: (name: string) => `Shadow acquired: ${name}. It joins your collection.`,
+  again: 'Already in your collection. Good to see it again.',
+  done: 'Quest complete. Anything more today is extra.',
+  look: 'Just look around',
+  aside: "Okay. Wander wherever you like. Nothing's waiting on you.",
+  back: "Show today's card",
+};
+
 export const SKILL_END = {
   ask: 'Did it help, even a little?',
   thanks: {

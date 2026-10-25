@@ -1,7 +1,7 @@
 import { animate } from '../ui/anim';
-import { WINDOW } from '../motion/tokens';
+import { CALM, css, WINDOW } from '../motion/tokens';
 import { FEELINGS, isHeavy, MODULES, MODULE_ORDER, SKILL, STRENGTH_FEELINGS, suggestFor, type Feeling } from '../content/dbt';
-import { CHECKIN, RANKS } from '../content/daily-lines';
+import { CHECKIN, QUEST, RANKS } from '../content/daily-lines';
 import type { App, ScreenOut } from './app';
 import { cardArtSVG, catSVG, crystalSVG, glyph, icon, mothSVG } from './art';
 import { wait } from './clock';
@@ -136,30 +136,43 @@ function questSection(app: App) {
   const st = app.store;
   const q = st.quest();
   const today = st.today();
-  const revealed = st.state.flags.cardDay === today;
+  const practised = () => st.state.events.some((e) => e.k === 'skill' && e.day === today);
+  let open = st.state.flags.cardDay === today;
+  let done = practised();
   const front = skillCard(q.skill, { label: q.label, special: q.special });
   front.append(h('span', { class: 'dq-sheen', 'aria-hidden': 'true' }));
   const foil = foilLayer(app, front, today);
   const cardName = q.special === 'comfort' ? 'Comfort' : q.special === 'free' ? 'Free choice' : SKILL[isSkillId(q.skill) ? q.skill : 'wise-mind'].sl;
+  const openLabel = `Today's skill card: ${cardName}. Open it.`;
   const back = h('div', { class: 'dq-cardface dq-cardface--back', html: cardBackArt(app) }, h('span', { class: 'dq-cb-orn', 'aria-hidden': 'true' }), h('span', { class: 'dq-cb-t', text: 'Tap to reveal' }));
   const inner = h('div', { class: 'dq-card-inner' }, back, front);
-  const note = h('p', { class: 'dq-quest-note', 'aria-live': 'polite' });
-  const card = h('button', { type: 'button', class: `dq-card ${revealed ? 'is-open' : ''}`, 'aria-label': revealed ? `Today's skill card: ${cardName}. Open it.` : "Reveal today's skill card" }, inner);
+  const note = h('p', { class: 'dq-quest-note', 'aria-live': 'polite', text: done ? typo(QUEST.done) : '' });
+  const card = h('button', { type: 'button', class: `dq-card ${open ? 'is-open' : ''}`, 'aria-label': open ? openLabel : "Reveal today's skill card" }, inner);
   const begin = () => {
     if (q.special === 'comfort') app.go({ name: 'comfort' });
     else if (q.special === 'free') app.go({ name: 'shadows' });
     else app.go({ name: 'skill', id: q.skill, entry: q.entry });
   };
-  const acts = h('div', { class: 'dq-actions dq-actions--center dq-quest-acts' }, btn(q.special ? 'Open' : 'Begin', begin, { kind: 'primary' }), btn('Pick another', () => app.go({ name: 'library' }), { kind: 'quiet' }));
-  if (!revealed) acts.classList.add('is-hidden');
+  const go = btn(q.special ? 'Open' : 'Begin', begin, { kind: done ? 'quiet' : 'primary', cls: 'dq-quest-go' });
+  const pick = btn('Pick another', () => app.go({ name: 'library' }), { kind: 'quiet' });
+  const acts = h('div', { class: 'dq-actions dq-actions--center dq-quest-acts' }, go, pick);
+  if (!open) go.classList.add('is-hidden');
+  const look = btn(QUEST.look, () => setAside(true), { kind: 'link', cls: 'dq-quest-look' });
+  const asideText = h('p', { class: 'dq-quest-aside-t', tabindex: '-1', text: typo(QUEST.aside) });
+  const aside = h('div', { class: 'dq-quest-aside' }, asideText, h('div', { class: 'dq-actions dq-actions--center' }, btn(QUEST.back, () => setAside(false), { kind: 'quiet', cls: 'dq-quest-back' })));
+  const fade = (...els: Element[]) => {
+    for (const e of els) animate(e, [{ opacity: 0 }, { opacity: 1 }], { duration: app.reduced() ? WINDOW.reducedFadeMs : CALM.fadeMs, easing: css(CALM.ease) });
+  };
+  const shown = (from: number) => [...section.children].slice(from).filter((e) => e.getClientRects().length);
   const flip = async () => {
-    if (card.classList.contains('is-open')) return begin();
+    if (open) return begin();
+    open = true;
     const isNew = !st.derived().collection.has(q.skill) && !q.special;
+    card.classList.add('is-open');
+    card.setAttribute('aria-label', openLabel);
     st.state.flags.cardDay = today;
     st.add('card', 0, q.special ? { data: { slot: q.slot, special: q.special } } : { skill: q.skill, data: { slot: q.slot } });
     app.sound('card_flip');
-    card.classList.add('is-open');
-    card.setAttribute('aria-label', `Today's skill card: ${cardName}. Open it.`);
     if (app.reduced()) {
       animate(front, [{ opacity: 0 }, { opacity: 1 }], { duration: WINDOW.reducedFadeMs });
     } else {
@@ -172,21 +185,50 @@ function questSection(app: App) {
     }
     foil?.play();
     await wait(app.reduced() ? 0 : 0.9);
-    acts.classList.remove('is-hidden');
-    animate(acts, app.reduced() ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: app.reduced() ? WINDOW.reducedFadeMs : 380, easing: 'cubic-bezier(.16,1,.3,1)' });
-    note.textContent = isNew ? typo(`Shadow acquired: ${SKILL[isSkillId(q.skill) ? q.skill : 'wise-mind'].sl}. It joins your collection.`) : typo('Already in your collection. Good to see it again.');
-    if (q.special) note.textContent = '';
+    if (!q.special && !done) note.textContent = typo(isNew ? QUEST.acquired(SKILL[isSkillId(q.skill) ? q.skill : 'wise-mind'].sl) : QUEST.again);
+    go.classList.remove('is-hidden');
+    fade(...shown(2));
   };
   card.addEventListener('click', flip);
-  return h(
+  const section = h(
     'section',
-    { class: 'dq-quest', 'aria-labelledby': 'dq-quest-h' },
+    { class: `dq-quest ${done ? 'is-done' : ''} ${st.questAside() ? 'is-aside' : ''}`, 'aria-labelledby': 'dq-quest-h' },
     h('h2', { class: 'dq-sec-h', id: 'dq-quest-h' }, h('span', { text: "Today's quest" }), h('span', { class: 'dq-sec-sub', text: 'One skill card' })),
     h('div', { class: 'dq-card-scene' }, card),
-    note,
     acts,
-    h('p', { class: 'dq-quest-foot', text: typo('A suggestion, not a task. Any skill counts, and so does none.') }),
+    h('div', { class: 'dq-quest-alt' }, look),
+    note,
+    h('p', { class: 'dq-quest-foot', text: typo(QUEST.foot) }),
+    aside,
   );
+  const sync = () => {
+    if (!open && st.state.flags.cardDay === today) {
+      open = true;
+      card.classList.add('is-open');
+      card.setAttribute('aria-label', openLabel);
+      go.classList.remove('is-hidden');
+      fade(card, ...shown(2));
+    }
+    if (!done && practised()) {
+      done = true;
+      section.classList.add('is-done');
+      note.textContent = typo(QUEST.done);
+      go.classList.replace('dq-btn--primary', 'dq-btn--quiet');
+    }
+    const on = st.questAside();
+    if (on === section.classList.contains('is-aside')) return;
+    const had = section.contains(document.activeElement) ? document.activeElement : null;
+    section.classList.toggle('is-aside', on);
+    fade(...shown(1));
+    if (had && !had.getClientRects().length) (on ? asideText : card).focus({ preventScroll: true });
+  };
+  const setAside = (on: boolean) => {
+    st.setQuestAside(on);
+    sync();
+    (on ? aside : card).scrollIntoView({ block: 'nearest', behavior: app.reduced() ? 'auto' : 'smooth' });
+    (on ? asideText : card).focus({ preventScroll: true });
+  };
+  return { el: section, sync };
 }
 
 function checkinPanel(app: App) {
@@ -385,14 +427,16 @@ function menu(app: App) {
 
 export function hubScreen(app: App): ScreenOut {
   const gift = h('p', { class: 'dq-gift' }, h('span', { class: 'dq-gift-k', text: 'Daily gift' }), h('span', { class: 'dq-gift-t', html: md(app.store.giftLine()) }));
+  const quest = questSection(app);
   const el = h(
     'div',
     { class: 'dq-hub' },
     h('h1', { class: 'dq-sr', text: 'The Lantern' }),
     h('div', { class: 'dq-col dq-col--t' }, lobby(app, gift)),
+    h('div', { class: 'dq-hcol dq-hcol--m' }, h('div', { class: 'dq-col dq-col--b' }, quest.el), h('div', { class: 'dq-col dq-col--g' }, gift), h('div', { class: 'dq-col dq-col--l' }, linePanel(app))),
     h('div', { class: 'dq-hcol dq-hcol--l' }, h('div', { class: 'dq-col dq-col--a' }, statusPanel(app))),
-    h('div', { class: 'dq-hcol dq-hcol--m' }, h('div', { class: 'dq-col dq-col--b' }, questSection(app)), h('div', { class: 'dq-col dq-col--g' }, gift), h('div', { class: 'dq-col dq-col--l' }, linePanel(app))),
     h('div', { class: 'dq-hcol dq-hcol--r' }, h('div', { class: 'dq-col dq-col--c' }, checkinPanel(app)), h('div', { class: 'dq-col dq-col--m' }, menu(app))),
   );
-  return { el, title: 'The Lantern', mode: 'hub', bubbles: [2.4, 0.75] };
+  const off = app.store.onChange(quest.sync);
+  return { el, title: 'The Lantern', mode: 'hub', bubbles: [2.4, 0.75], leave: () => void off() };
 }

@@ -102,6 +102,8 @@ export interface Flags {
   safeCredit: boolean;
   therapistLineShown: boolean;
   checkinDay: string;
+  questAsideDay: string;
+  questAsideAt: number | string;
   /** Titles whose unlock line was already shown. Only grows. */
   titlesSeen: TitleId[];
 }
@@ -159,7 +161,7 @@ export function freshState(now = Date.now()): State {
       names: {},
       region: '',
     },
-    flags: { rankSeen: 0, wardenSeen: false, giftDay: '', cardDay: '', greetDay: '', safeCredit: false, therapistLineShown: false, checkinDay: '', titlesSeen: [] },
+    flags: { rankSeen: 0, wardenSeen: false, giftDay: '', cardDay: '', greetDay: '', safeCredit: false, therapistLineShown: false, checkinDay: '', questAsideDay: '', questAsideAt: 0, titlesSeen: [] },
     gone: {},
     setAt: {},
   };
@@ -262,7 +264,7 @@ function canon(s: State) {
     set(s.maps),
     Object.entries(s.gone).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
     SET_KEYS.map((k) => [getSet(s, k), s.setAt[k] ?? 0]),
-    [s.flags.rankSeen, s.flags.wardenSeen, s.flags.therapistLineShown, ...DAY_FLAGS.map((k) => s.flags[k]), [...s.flags.titlesSeen].sort()],
+    [s.flags.rankSeen, s.flags.wardenSeen, s.flags.therapistLineShown, ...DAY_FLAGS.map((k) => s.flags[k]), s.flags.questAsideDay, s.flags.questAsideAt, [...s.flags.titlesSeen].sort()],
     extrasOf(s),
   ]);
 }
@@ -274,6 +276,9 @@ export function validDay(d: unknown): d is string {
 }
 const str = (x: unknown, max = 2000) => (typeof x === 'string' ? x.slice(0, max) : '');
 const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x : null);
+const SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+const fromBig = (b: bigint) => (b > SAFE ? b.toString() : Number(b));
+const stamp = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) && x > 0 ? fromBig(BigInt(Math.floor(x))) : typeof x === 'string' && /^\d+$/.test(x) ? fromBig(BigInt(x)) : 0);
 const oneOf = <T extends string>(x: unknown, list: readonly T[], fallback: T): T => (typeof x === 'string' && (list as readonly string[]).includes(x) ? (x as T) : fallback);
 export const isSkillId = (id: unknown): id is string => typeof id === 'string' && Object.prototype.hasOwnProperty.call(SKILL, id);
 
@@ -467,6 +472,8 @@ export function normalize(raw: unknown): State | null {
     base.flags.safeCredit = f.safeCredit === true;
     base.flags.therapistLineShown = f.therapistLineShown === true;
     base.flags.checkinDay = day(f.checkinDay);
+    base.flags.questAsideDay = day(f.questAsideDay);
+    base.flags.questAsideAt = stamp(f.questAsideAt);
   }
   return base;
 }
@@ -727,6 +734,11 @@ export class Store {
     f.therapistLineShown ||= o.therapistLineShown;
     for (const t of o.titlesSeen) if (!f.titlesSeen.includes(t)) f.titlesSeen.push(t);
     for (const k of DAY_FLAGS) if (validDay(o[k]) && (!validDay(f[k]) || o[k] > f[k])) f[k] = o[k];
+    const oa = BigInt(o.questAsideAt), fa = BigInt(f.questAsideAt);
+    if (oa > fa || (oa === fa && o.questAsideDay > f.questAsideDay)) {
+      f.questAsideDay = o.questAsideDay;
+      f.questAsideAt = o.questAsideAt;
+    }
   }
 
   /**
@@ -847,6 +859,18 @@ export class Store {
       if (match !== undefined) slot = match;
     }
     return { ...ROTATION[slot], slot };
+  }
+
+  questAside() {
+    return this.state.flags.questAsideDay === this.today();
+  }
+  setQuestAside(on: boolean) {
+    this.sync();
+    const f = this.state.flags;
+    f.questAsideDay = on ? this.today() : '';
+    const next = BigInt(f.questAsideAt) + 1n, now = BigInt(Math.floor(this.now()));
+    f.questAsideAt = fromBig(now > next ? now : next);
+    this.save();
   }
 
   /** Today's picked line, if any. */

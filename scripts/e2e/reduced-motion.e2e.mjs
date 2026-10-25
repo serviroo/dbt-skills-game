@@ -46,7 +46,7 @@ const ACT = {
     run: async (page) => {
       // with motion on the card floats, so it is never still enough for a normal click
       await page.locator('.dq-card').click({ force: true });
-      await page.locator('.dq-quest-acts:not(.is-hidden)').waitFor({ timeout: 5000 });
+      await page.locator('.dq-quest-go').waitFor({ timeout: 5000 });
       await page.locator('.dq-stats-toggle').click();
       const win = page.locator('.sw-layer .dq-sw');
       // with motion on, the first tap finishes the typing and the next one closes the window
