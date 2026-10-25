@@ -447,6 +447,9 @@
   width: auto;
   padding-inline: 8px;
 }
+.dq-actions--pair .dq-btn-t {
+  text-wrap: balance;
+}
 .dq-timer > .dq-actions--pair {
   margin-bottom: 16px;
 }
