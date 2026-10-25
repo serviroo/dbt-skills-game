@@ -1,6 +1,6 @@
 const IDS = ['one-mindfully', 'effectively', 'mindful-thoughts'];
 const NAMES = { 'one-mindfully': ['Single Target', 'One-Mindfully'], effectively: ['Play the Map', 'Effectively'], 'mindful-thoughts': ['Spectator Mode', 'Mindfulness of Current Thoughts'] };
-const BANNED = /\b(disorder|diagnos\w*|symptoms?|patients?|illness|treatment|relapse)\b|game over|you died|\u2014/i;
+const BANNED = /\b(disorder\w*|diagnos\w*|symptom\w*|patients?|illness\w*|treatment\w*|relaps\w*)\b|game over|you died|\u2014/i;
 const TOKEN = /\{(name|companion)\}/i;
 const ROUTES = ['end', 'end:quiet', 'safe', 'safe:people'];
 const PHONE = { width: 390, height: 844 };

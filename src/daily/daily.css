@@ -438,6 +438,21 @@
 .dq-actions--stack .dq-btn {
   width: 100%;
 }
+.dq-actions--pair {
+  width: 100%;
+  margin-top: 0;
+}
+.dq-actions--pair > .dq-btn {
+  flex: 1 1 0;
+  width: auto;
+  padding-inline: 8px;
+}
+.dq-actions--pair .dq-btn-t {
+  text-wrap: balance;
+}
+.dq-timer > .dq-actions--pair {
+  margin-bottom: 16px;
+}
 .dq-btn {
   position: relative;
   display: inline-flex;
@@ -3996,6 +4011,9 @@ textarea.dq-input {
   }
 }
 @media (orientation: landscape) and (max-height: 500px) {
+  .dq-timer--peers .dq-timer-stage {
+    width: min(180px, 46vh);
+  }
   .dq-draw {
     display: grid;
     grid-template-columns: auto 352px;

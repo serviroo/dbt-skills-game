@@ -109,8 +109,16 @@ export function skillScreen(app: App, route: Route): ScreenOut {
         );
       }
       case 'say': {
-        const acts = s.options?.length
-          ? h('div', { class: 'dq-actions dq-actions--stack' }, s.options.map((o, k) => btn(o.label, () => follow(o.go, i + 1), { kind: k === 0 ? 'primary' : 'quiet' })))
+        const opt = (o: Opt, kind: 'primary' | 'quiet') => btn(o.label, () => follow(o.go, i + 1), { kind });
+        const [first, ...rest] = s.options ?? [];
+        const peers = rest.filter((o) => o.instead);
+        const acts = first
+          ? h(
+              'div',
+              { class: 'dq-actions dq-actions--stack' },
+              peers.length ? h('div', { class: 'dq-actions dq-actions--pair' }, [first, ...peers].map((o) => opt(o, 'primary'))) : opt(first, 'primary'),
+              rest.filter((o) => !o.instead).map((o) => opt(o, 'quiet')),
+            )
           : h('div', { class: 'dq-actions' }, btn(s.cta ?? 'Next', next, { kind: 'primary' }));
         return swap(...head(s), textEl(tx(s.text, answers), !titled), s.small ? p(s.small, 'dq-small') : null, acts);
       }
@@ -231,13 +239,19 @@ export function skillScreen(app: App, route: Route): ScreenOut {
       case 'timer': {
         const secs = typeof s.seconds === 'function' ? s.seconds(answers) : s.seconds;
         const nextBtn = btn('Next', next, { kind: 'quiet' });
+        const go = (o: Opt) => () => follow(o.go, i + 1);
+        const peers = s.options?.filter((o) => o.instead).map((o) => btn(o.label, go(o), { kind: 'primary' })) ?? [];
         const tv = timerView(ctx, {
           seconds: secs,
           visual: s.visual,
           start: s.start,
           extend: s.extend,
+          peers,
           big: s.big ? tx(s.big, answers) : undefined,
-          onStart: s.dim ? () => el.classList.add('is-dim') : undefined,
+          onStart: () => {
+            if (s.dim) el.classList.add('is-dim');
+            if (peers.length) nextBtn.scrollIntoView({ block: 'nearest', behavior: app.reduced() ? 'auto' : 'smooth' });
+          },
           onDone: () => {
             el.classList.remove('is-dim');
             nextBtn.classList.remove('dq-btn--quiet');
@@ -245,7 +259,7 @@ export function skillScreen(app: App, route: Route): ScreenOut {
           },
         });
         stops.push(tv.stop);
-        const alts = s.options?.map((o) => btn(o.label, () => follow(o.go, i + 1), { kind: 'link' })) ?? [];
+        const alts = s.options?.filter((o) => !o.instead).map((o) => btn(o.label, go(o), { kind: 'link' })) ?? [];
         return swap(...head(s), textEl(tx(s.text, answers), !titled), s.small ? p(s.small, 'dq-small') : null, tv.el, h('div', { class: 'dq-actions dq-actions--center' }, nextBtn, ...alts));
       }
       case 'hold': {

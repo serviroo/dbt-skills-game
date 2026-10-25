@@ -132,15 +132,22 @@ The intro is 3D, so for a real-GPU run on another machine, start a Playwright la
 
 `node scripts/e2e.mjs --file=skill-check` checks every skill in `SKILLS`. On a returning save at 390x844 it opens each
 one from the Skills list and taps the first option on every screen until the skill's own end screen. Moving on to
-another skill, the Safe Zone or Home first counts as a problem. That walk must take at most 12 taps and credit the
-skill once, and its timers must stay skippable while they run. Then it opens the skill again for each screen of the
-walk, walks back to that screen and taps "Leave this skill". Each time it must go straight to Home with no confirm
-and still credit the skill. It also reads each skill's copy from `src/content/dbt.ts`: no em dashes, no diagnosis
-words, no set phrases DESIGN.md rules out (unsafe wording, "less fortunate", abandonment cues, body, food or weight
-numbers), no hard-coded "Player", timers of 20 to 90 seconds, and a caution plus a "breathe instead" option on
-cold-water or hard-exercise steps. Skills in its `ENFORCED` list fail the run. Every other skill's problems print as a
-todo list, also kept in `report.json`. Once a skill passes, add it to `ENFORCED`. Add `--skills=<id>,<id>` to check
-only those skills; an id that doesn't exist fails the run.
+another skill, the Safe Zone or Home first counts as a problem. That walk must take at most 12 taps and credit the skill
+once, and its timers must stay skippable while they run. Then it opens the skill again for each screen of the walk,
+walks back to that screen and taps "Leave this skill". Each time it must go straight to Home with no confirm and still
+credit the skill. It also reads each skill's copy from `src/content/dbt.ts`: no em dashes, no diagnosis words, no set
+phrases DESIGN.md rules out (unsafe wording, "less fortunate", abandonment cues, body, food or weight numbers), no
+hard-coded "Player", timers of 20 to 90 seconds, and a caution that names the heart risk plus a "breathe instead" option
+on cold-water or hard-exercise steps. It then opens each of those steps at 390x844, 844x390 and 320x568: the caution,
+the step's own action and "Breathe instead" must show without scrolling, with "Breathe instead" the same kind and height
+of button as that action. On a timer, once Start is tapped, the countdown, Next and "Breathe instead" must all still be
+on screen. Skills in its `ENFORCED` list fail the run. Every other skill's problems print as a todo list, also kept in
+`report.json`. Once a skill passes, add it to `ENFORCED`. Add `--skills=<id>,<id>` to check only those skills; an id
+that doesn't exist fails the run.
+
+The same file's `copy-everywhere` scenario reads every string the app ships, not only the skills: the string and
+template text in `src/` (comments left out), quoted text in its CSS, `index.html` and the web app manifest. Any em dash,
+diagnosis word or principle 9 phrase fails it, with the file and line.
 
 ## Static hosting
 

@@ -185,7 +185,7 @@ function frost() {
 }
 
 /** Countdown with an optional visual. Waits for a tap when `start` is given. */
-export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; start?: string; extend?: number; big?: string; extra?: HTMLElement[]; onStart?: () => void; onDone: () => void }) {
+export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; start?: string; extend?: number; big?: string; extra?: HTMLElement[]; peers?: HTMLElement[]; onStart?: () => void; onDone: () => void }) {
   let dur = opts.seconds;
   const visual = opts.visual ?? 'ring';
   const wide = visual === 'wave';
@@ -231,8 +231,10 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
   const num = h('div', { class: 'dq-timer-num' });
   const big = opts.big ? h('p', { class: 'dq-timer-big', text: typo(opts.big) }) : null;
   const stageEl = h('div', { class: `dq-timer-stage ${wide ? 'is-wide' : ''}` }, svg, h('div', { class: 'dq-timer-center' }, num));
-  const actions = h('div', { class: 'dq-actions dq-actions--center' });
-  const el = h('div', { class: 'dq-timer' }, big, stageEl, actions);
+  const peers = opts.peers ?? [];
+  const extra = [...(opts.extra ?? []), ...peers];
+  const actions = h('div', { class: `dq-actions dq-actions--center ${peers.length ? 'dq-actions--pair' : ''}` });
+  const el = h('div', { class: `dq-timer ${peers.length ? 'dq-timer--peers' : ''}` }, big, peers.length ? actions : null, stageEl, peers.length ? null : actions);
   let t0 = -1;
   let stop: (() => void) | null = null;
   let finished = false;
@@ -292,12 +294,22 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
   };
   const begin = () => {
     t0 = now();
+    actions.replaceChildren(...extra);
+    if (opts.extend) {
+      actions.prepend(
+        btn(`+${opts.extend} s`, () => {
+          dur = Math.max(dur, now() - t0) + opts.extend!;
+          if (finished) {
+            finished = false;
+            stop = onFrame(render);
+          }
+        }, { kind: 'quiet' }),
+      );
+    }
     opts.onStart?.();
-    actions.replaceChildren(...(opts.extra ?? []));
-    if (opts.extend) actions.prepend(btn(`+${opts.extend} s`, () => (dur += opts.extend!), { kind: 'quiet' }));
     stop = onFrame(render);
   };
-  if (opts.start) actions.append(btn(opts.start, begin, { kind: 'primary' }), ...(opts.extra ?? []));
+  if (opts.start) actions.append(btn(opts.start, begin, { kind: 'primary' }), ...extra);
   else begin();
   render(now());
   return { el, stop: () => stop?.(), begin, started: () => t0 >= 0 };

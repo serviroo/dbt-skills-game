@@ -25,6 +25,7 @@ export interface Opt {
   go?: Go;
   /** shown as a quiet lead line on the next screen */
   reply?: string;
+  instead?: boolean;
 }
 
 export type ListId = 'comfort' | 'activities' | 'reasons';
@@ -74,10 +75,13 @@ export interface Skill {
   art?: 'mittens' | 'lobby' | 'heal' | 'scroll' | 'tier' | 'air' | 'volume' | 'supplies' | 'queue' | 'lowlight';
 }
 
-export const TIPP_CAUTION =
-  'Skip cold water and hard exercise if you have a heart condition, take a beta-blocker or a medicine that slows your heart, are allergic to cold, or have an eating disorder. Breathing works for everyone.';
+const CONDITION = 'have a heart or other medical condition';
+const EATING = 'have found eating hard lately';
+const DOCTOR_OK = "unless a doctor says it's okay";
+export const TIPP_CAUTION = `Skip cold water and hard exercise if you ${CONDITION}, take a beta-blocker or other heart-slowing medicine, are allergic to cold, or ${EATING}, ${DOCTOR_OK}. Breathing works for everyone.`;
+const COLD_CAUTION = `Skip cold water if you ${CONDITION}, take a beta-blocker or other heart-slowing medicine, are allergic to cold, or ${EATING}, ${DOCTOR_OK}.`;
 /** Hard movement always comes last, behind "More", with this line. */
-export const MOVE_CAUTION = "Skip if you're dizzy, sick or sore. Standing only, easy on the knees.";
+export const MOVE_CAUTION = `Skip if you feel dizzy, sick or sore. Skip it too if you ${CONDITION}, take a beta-blocker or other heart-slowing medicine, or ${EATING}, ${DOCTOR_OK}. Standing only, easy on the knees.`;
 /** "Not this time" is always an answer on a loadout card. */
 const NOT_THIS_TIME: Opt = { label: 'Not this time', go: 'end:quiet' };
 
@@ -353,8 +357,8 @@ export const SKILLS: Skill[] = [
         start: 'Start 30 s',
         visual: 'cold',
         text: 'Open a window or step outside into cool air. Or cold water on your face, or something cold over your eyes and cheeks. Cool, not icy.',
-        small: TIPP_CAUTION,
-        options: [{ label: "Can't right now", go: 'paced' }],
+        small: COLD_CAUTION,
+        options: [{ label: 'Breathe instead', go: 'paced', instead: true }],
         go: 'check',
       },
       {
@@ -363,7 +367,7 @@ export const SKILLS: Skill[] = [
         title: 'I. Intense movement',
         text: 'A minute of fast movement can burn off the rush. Only if your body is up for it today.',
         small: MOVE_CAUTION,
-        options: [{ label: 'Move for 1 min', go: 'move' }, { label: 'Back to the list', go: 'pick' }],
+        options: [{ label: 'Move for 1 min', go: 'move' }, { label: 'Breathe instead', go: 'paced', instead: true }, { label: 'Back to the list', go: 'pick' }],
       },
       { id: 'paced', kind: 'breath', title: 'P. Paced breathing', inhale: 4, exhale: 6, rounds: 6, alt: [5, 7], text: 'Breathe into your belly. In for 4. Out for 6. Slower out than in.', go: 'check' },
       { id: 'pmr', kind: 'pmr', title: 'P. Paired muscle relaxation', rounds: 3, text: 'Breathe in and tighten: fists, shoulders up to your ears, face scrunched. Not so hard it hurts. Breathe out, think "relax", and let it all drop.', go: 'check' },
@@ -375,8 +379,8 @@ export const SKILLS: Skill[] = [
         start: 'Start 60 s',
         visual: 'ring',
         text: 'Standing, move fast for a minute: march or jog on the spot, shake out your arms and hands. Stop any time.',
-        small: `${MOVE_CAUTION} ${TIPP_CAUTION}`,
-        options: [{ label: "Can't right now", go: 'paced' }],
+        small: MOVE_CAUTION,
+        options: [{ label: 'Breathe instead', go: 'paced', instead: true }],
         go: 'check',
       },
       { id: 'check', kind: 'choice', key: 'volume', text: 'Is the volume even a little lower?', options: [{ label: 'Lower', go: 'lower' }, { label: 'Same', go: 'same' }, { label: 'Higher', go: 'same' }] },
@@ -419,21 +423,19 @@ export const SKILLS: Skill[] = [
       { id: 'e', kind: 'choice', title: 'E. Emotions', key: 'pick', text: 'Put on something that brings a different feeling.', options: o('A comedy', 'A hype song', 'Cute animal videos'), other: 'My own', go: 'timer' },
       { id: 'p', kind: 'hold', title: 'P. Pushing away', seconds: 4, label: 'Hold to store', done: 'Stored. It keeps until you decide to look at it.', text: 'Put this in the vault for now. Picture it boxed up and shelved.', go: 'timer' },
       { id: 't', kind: 'choice', title: 'T. Thoughts', key: 'pick', text: 'Fill your mind with something.', options: o('Count blue things in the room', 'Name a song for every letter', 'A puzzle or a word game'), other: 'My own', go: 'timer' },
-      { id: 's', kind: 'choice', title: 'S. Sensations', key: 'pick', text: 'Something strong and safe.', options: o('Hold an ice cube', 'A cool shower', 'Squeeze a stress ball', 'A strong mint'), other: 'My own', go: 'timer' },
+      { id: 's', kind: 'choice', title: 'S. Sensations', key: 'pick', text: 'Something strong and safe.', options: o('Hold something cold, not icy', 'A warm shower', 'Squeeze a stress ball', 'A strong mint'), other: 'My own', go: 'timer' },
       {
         id: 'timer',
         kind: 'choice',
         key: 'mins',
-        text: 'Want a gentle timer? It only shows here. No alerts.',
+        text: 'Want a gentle timer to get you started? It only shows here. No alerts.',
         options: [
-          { label: '5 min', value: '5', go: 'clock' },
-          { label: '10 min', value: '10', go: 'clock' },
-          { label: '20 min', value: '20', go: 'clock' },
+          { label: '1 min', go: 'clock' },
           { label: 'No timer', go: 'go' },
         ],
       },
-      { id: 'clock', kind: 'timer', seconds: (a) => Number(a.mins ?? 5) * 60, visual: 'ring', text: 'Go do it. The quest already counts.', options: [{ label: 'Done early', go: 'end' }], go: 'end' },
-      { id: 'go', kind: 'say', text: 'Go do it. This quest already counts, whether or not you open the app again today.', cta: 'Done', go: 'end' },
+      { id: 'clock', kind: 'timer', seconds: 60, extend: 30, visual: 'ring', text: 'Go do it. The timer just gets you started. Your break can go on as long as you like. The quest already counts.', go: 'end' },
+      { id: 'go', kind: 'say', text: 'Go do it. Your break can go on as long as you like. This quest already counts, whether or not you open the app again today.', cta: 'Done', go: 'end' },
     ],
   },
   {
@@ -740,10 +742,10 @@ export const SKILLS: Skill[] = [
         title: '[Appraisal complete]',
         text: (a) => appraisal(a),
         options: [
+          { label: 'Done', go: 'end' },
           { label: 'Let it be', go: 'skill:current-emotion' },
           { label: 'Check the facts', go: 'skill:check-facts' },
           { label: 'Something soothing', go: 'skill:self-soothe' },
-          { label: 'Done', go: 'end' },
         ],
       },
       {
@@ -752,10 +754,10 @@ export const SKILLS: Skill[] = [
         title: '[Appraisal complete]',
         text: (a) => appraisal(a),
         options: [
+          { label: 'Done', go: 'end' },
           { label: 'Let it be', go: 'skill:current-emotion' },
           { label: 'Absurd Scroll', go: 'skill:absurd-scroll' },
           { label: 'Something soothing', go: 'skill:self-soothe' },
-          { label: 'Done', go: 'end' },
         ],
       },
       {
@@ -764,10 +766,10 @@ export const SKILLS: Skill[] = [
         title: '[Appraisal complete]',
         text: (a) => `${appraisal(a)} Nothing to fix right now.`,
         options: [
+          { label: 'Done', go: 'end' },
           { label: 'Something soothing', go: 'skill:self-soothe' },
           { label: 'Self-Heal', go: 'skill:self-validation' },
           { label: 'Let it be', go: 'skill:current-emotion' },
-          { label: 'Done', go: 'end' },
         ],
       },
     ],
@@ -803,20 +805,20 @@ export const SKILLS: Skill[] = [
         id: 'fits',
         kind: 'say',
         text: 'Then it fits. Your feeling is giving you real information, and it makes sense. Next could be some comfort, working on the problem, a DEAR MAN, or nothing at all.',
-        options: [{ label: 'Self-Soothe', go: 'skill:self-soothe' }, { label: 'Problem Solving', go: 'skill:problem-solving' }, { label: 'DEAR MAN', go: 'skill:dear-man' }, { label: 'Done', go: 'end' }],
+        options: [{ label: 'Done', go: 'end' }, { label: 'Self-Soothe', go: 'skill:self-soothe' }, { label: 'Problem Solving', go: 'skill:problem-solving' }, { label: 'DEAR MAN', go: 'skill:dear-man' }],
       },
       {
         id: 'partly',
         kind: 'say',
         text: "That makes sense. Old hurts can make a new moment feel bigger. That's not your fault.",
-        options: [{ label: 'Opposite Action', go: 'skill:opposite-action' }, { label: 'Done', go: 'end' }],
+        options: [{ label: 'Done', go: 'end' }, { label: 'Opposite Action', go: 'skill:opposite-action' }],
       },
       { id: 'unsure', kind: 'say', text: "That's okay. You looked closely. That's the skill.", cta: 'Done', go: 'end' },
       {
         id: 'heavy',
         kind: 'say',
-        text: 'Then not facts today. Heavy feelings get comfort first. No reason needed.',
-        options: [{ label: 'Something soothing', go: 'skill:self-soothe' }, { label: 'Self-Heal', go: 'skill:self-validation' }, { label: 'Safe Zone', go: 'safe' }, { label: 'Done', go: 'end:quiet' }],
+        text: "Then not facts today. When it's this heavy, comfort matters more. No reason needed.",
+        options: [{ label: 'Done', go: 'end:quiet' }, { label: 'Something soothing', go: 'skill:self-soothe' }, { label: 'Self-Heal', go: 'skill:self-validation' }, { label: 'Safe Zone', go: 'safe' }],
       },
     ],
   },
@@ -859,7 +861,7 @@ export const SKILLS: Skill[] = [
         id: 'fits',
         kind: 'say',
         text: "Then this isn't the skill for now. Your feeling makes sense. Want to work on the problem, or plan what to say?",
-        options: [{ label: 'Problem Solving', go: 'skill:problem-solving' }, { label: 'DEAR MAN', go: 'skill:dear-man' }, { label: 'Done', go: 'end' }],
+        options: [{ label: 'Done', go: 'end' }, { label: 'Problem Solving', go: 'skill:problem-solving' }, { label: 'DEAR MAN', go: 'skill:dear-man' }],
       },
       {
         id: 'opp',
@@ -1192,9 +1194,9 @@ export const SKILLS: Skill[] = [
           { label: "Can't pick one", go: 'tie' },
         ],
       },
-      { id: 'result', kind: 'say', text: 'Then the result leads. Ask clearly, or say no clearly. Kindness and self-respect still come along, one step behind.', options: [{ label: 'Plan it with DEAR MAN', go: 'skill:dear-man' }, { label: 'Done', go: 'end' }] },
-      { id: 'bond-first', kind: 'say', text: "Then the relationship leads. Keep things warm while you talk. You might push a little less today. That's your call to make.", options: [{ label: 'Practise GIVE', go: 'skill:give' }, { label: 'Done', go: 'end' }] },
-      { id: 'self-first', kind: 'say', text: "Then your self-respect leads. Stay true to what you value, even if you don't get the yes.", options: [{ label: 'Practise FAST', go: 'skill:fast' }, { label: 'Done', go: 'end' }] },
+      { id: 'result', kind: 'say', text: 'Then the result leads. Ask clearly, or say no clearly. Kindness and self-respect still come along, one step behind.', options: [{ label: 'Done', go: 'end' }, { label: 'Plan it with DEAR MAN', go: 'skill:dear-man' }] },
+      { id: 'bond-first', kind: 'say', text: "Then the relationship leads. Keep things warm while you talk. You might push a little less today. That's your call to make.", options: [{ label: 'Done', go: 'end' }, { label: 'Practise GIVE', go: 'skill:give' }] },
+      { id: 'self-first', kind: 'say', text: "Then your self-respect leads. Stay true to what you value, even if you don't get the yes.", options: [{ label: 'Done', go: 'end' }, { label: 'Practise FAST', go: 'skill:fast' }] },
       {
         id: 'tie',
         kind: 'say',
@@ -1585,7 +1587,7 @@ export const SAFE = {
   cold: {
     title: 'Cool air, or something cool',
     text: 'Open a window or step outside for cool air. Or cold water on your face, or something cold over your eyes and cheeks. Thirty seconds.',
-    small: 'Cool, not icy. Skip cold water if you have a heart condition, take a beta-blocker, are allergic to cold, or have an eating disorder.',
+    small: 'Cool, not icy. Skip cold water with a heart or medical condition, heart-slowing medicine, a cold allergy, or if eating has been hard lately.',
     during: 'Cool tells your body to slow down.',
   },
   light: { up: 'Lights up', down: 'Lights down', hint: 'Dim or bright. Whichever sits better right now.' },
