@@ -5,29 +5,7 @@ on:
 permissions:
   contents: read
 jobs:
-  two-prompts-30:
-    runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/playwright:v1.64.1-noble
-      options: --user 1001
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 20.x
-          cache: npm
-      - run: npm ci
-      - name: two-prompts 30 runs in a row
-        run: |
-          for i in $(seq 30); do
-            node scripts/e2e.mjs --scenario=two-prompts > run.log 2>&1 || { cat run.log; echo "RESULT two-prompts: failed on run $i"; exit 1; }
-            grep -E "^ok" run.log
-          done
-          echo "RESULT two-prompts: 30 of 30 in a row passed"
-  two-prompts-trace:
+  two-prompts-freeze:
     runs-on: ubuntu-latest
     container:
       image: mcr.microsoft.com/playwright:v1.64.1-noble
@@ -36,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        part: [1, 2, 3, 4]
+        part: [1, 2, 3]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -46,64 +24,8 @@ jobs:
           node-version: 20.x
           cache: npm
       - run: npm ci
-      - name: two-prompts with a trace, 15 runs
+      - name: two-prompts freeze probe, 10 runs
         run: |
-          pass=0; fail=0
-          for i in $(seq 15); do
-            if node scripts/e2e.mjs --file=zz-trace > run.log 2>&1; then pass=$((pass+1)); else fail=$((fail+1)); echo "--- run $i failed"; grep -E "TRACE|FAIL" run.log; fi
-          done
-          echo "RESULT two-prompts-trace: $pass passed, $fail failed"
-  slow-frames:
-    runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/playwright:v1.64.1-noble
-      options: --user 1001
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 20.x
-          cache: npm
-      - run: npm ci
-      - name: slow-frames, 10 runs
-        run: |
-          pass=0; fail=0
           for i in $(seq 10); do
-            if node scripts/e2e.mjs --file=slow-frames > run.log 2>&1; then pass=$((pass+1)); else fail=$((fail+1)); echo "--- run $i failed"; grep -E "FAIL" run.log; fi
+            node scripts/e2e.mjs --file=zz-freeze > run.log 2>&1; grep -E "FREEZE|FAIL" run.log
           done
-          echo "RESULT slow-frames: $pass passed, $fail failed"
-  live:
-    runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/playwright:v1.64.1-noble
-      options: --user 1001
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        part: [1, 2, 3, 4, 5, 6]
-    env:
-      BASE_PATH: /dbt-skills-game/
-      BUILD_ID: ${{ github.sha }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npm run build
-      - name: live check with a trace, 3 runs
-        run: |
-          node scripts/serve-static.mjs --dir=dist --base="$BASE_PATH" --port=4180 &
-          pass=0; fail=0
-          for i in 1 2 3; do
-            if node scripts/live-check.mjs "http://127.0.0.1:4180$BASE_PATH" --expect="$BUILD_ID" --wait=30 > run.log 2>&1; then pass=$((pass+1)); else fail=$((fail+1)); echo "--- run $i failed"; fi
-            grep -E "TRACE|FAIL" run.log
-          done
-          echo "RESULT live-check: $pass passed, $fail failed"
