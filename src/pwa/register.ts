@@ -49,17 +49,71 @@ export function onUpdateReady(cb: () => void): () => void {
   return () => listeners.delete(cb);
 }
 
-/** Asks the browser to keep their saved progress through storage pressure. Never prompts; resolves false when unsupported. */
-export async function requestPersistentStorage(): Promise<boolean> {
+/** Asks the browser to keep their saved progress through storage pressure, unless a request is already out. Never prompts. */
+export async function requestPersistentStorage(): Promise<void> {
   try {
     const storage = navigator.storage;
-    if (!storage?.persist) return false;
-    if (await storage.persisted?.()) return true;
+    if (!storage?.persist) return;
+    const before = requests;
+    if (await storage.persisted?.()) return;
     // desktop Firefox turns this into a permission prompt; the player should never be asked for it
     const ua = navigator.userAgent;
-    if (/Firefox\/\d/.test(ua) && !/FxiOS/.test(ua)) return false;
-    return await storage.persist();
+    if (/Firefox\/\d/.test(ua) && !/FxiOS/.test(ua)) return;
+    if (requests === before) askToKeep();
+  } catch {}
+}
+
+export type KeepStatus = 'granted' | 'not-granted' | 'refused' | 'unsupported' | 'failed';
+
+const KEEP_CHECK_MS = 6000;
+let asking: Promise<KeepStatus> | null = null;
+let requests = 0;
+const watchers = new Set<(job: Promise<KeepStatus>) => void>();
+
+export async function readKeepStatus(): Promise<KeepStatus> {
+  let timer = 0;
+  try {
+    const storage = navigator.storage;
+    if (typeof storage?.persisted !== 'function') return 'unsupported';
+    const late = new Promise<'late'>((res) => (timer = window.setTimeout(res, KEEP_CHECK_MS, 'late')));
+    const r = await Promise.race([storage.persisted(), late]);
+    return r === true ? 'granted' : r === false ? 'not-granted' : 'failed';
   } catch {
-    return false;
+    return 'failed';
+  } finally {
+    clearTimeout(timer);
   }
+}
+
+async function answer(reply: Promise<boolean | undefined>): Promise<KeepStatus> {
+  const said = await reply;
+  const now = await readKeepStatus();
+  if (now === 'granted') return now;
+  if (said === false) return 'refused';
+  if (now === 'not-granted') return now;
+  return said === true ? 'granted' : 'failed';
+}
+
+export const canAskToKeep = (): boolean => typeof navigator.storage?.persist === 'function';
+
+export const keepRequest = (): Promise<KeepStatus> | null => asking;
+
+export function onKeepRequest(cb: (job: Promise<KeepStatus>) => void): () => void {
+  watchers.add(cb);
+  return () => watchers.delete(cb);
+}
+
+export function askToKeep(): void {
+  if (asking) return;
+  requests++;
+  const reply = (async () => {
+    try {
+      return await navigator.storage.persist();
+    } catch {
+      return undefined;
+    }
+  })();
+  const job = (asking = answer(reply));
+  void job.finally(() => asking === job && (asking = null));
+  watchers.forEach((cb) => cb(job));
 }

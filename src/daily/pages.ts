@@ -1,6 +1,6 @@
 import { LOADOUT, LOADOUT_COPY, MODULES, MODULE_ORDER, SAFE, SKILL, SKILLS } from '../content/dbt';
 import { CRISIS_CHECKED } from '../content/crisis-lines';
-import { ABOUT, CRYSTAL_COPY } from '../content/daily-lines';
+import { ABOUT, CRYSTAL_COPY, KEEP_COPY } from '../content/daily-lines';
 import type { App, ScreenOut } from './app';
 import { glyph, icon, mothSVG } from './art';
 import { skillCard } from './hub';
@@ -9,7 +9,8 @@ import { allyCard } from './artroom';
 import { artStore } from './artstore';
 import { storyStore } from './storystore';
 import { addDays, cleanName, fieldKey, fieldTimes, isSkillId, normalize, ROW_CAP, uid, type DiaryEntry, type State, type Store } from './store';
-import { btn, copyText, field, h, p, panel, place, segmented, shareOrSave, toggle, typo } from './ui';
+import { btn, copyText, field, h, md, p, panel, place, segmented, shareOrSave, toggle, typo } from './ui';
+import type { KeepStatus } from '../pwa/register';
 import { volumeSliders } from '../ui/volume';
 import { STEALTH, STEALTH_LINES } from '../content/stealth-lines';
 import { fishSVG, lurkCatSVG, seaweedSVG, sharkFinSVG, sharkTailSVG } from './art';
@@ -716,14 +717,88 @@ export function comfortScreen(app: App): ScreenOut {
 }
 
 // ---------------- Settings ----------------
+function browserKeeps() {
+  const say = h('p', { class: 'dq-small dq-keep-s', 'aria-live': 'polite' });
+  const ask = btn(KEEP_COPY.ask, () => request(), { kind: 'quiet', cls: 'dq-keep-ask' });
+  const askT = ask.querySelector('.dq-btn-t')!;
+  const el = h('div', { class: 'dq-keep' }, say, h('div', { class: 'dq-actions' }, ask));
+  const copy: Record<KeepStatus | 'checking', string> = {
+    checking: KEEP_COPY.checking,
+    granted: KEEP_COPY.granted,
+    'not-granted': KEEP_COPY.notGranted,
+    refused: KEEP_COPY.refused,
+    unsupported: KEEP_COPY.unsupported,
+    failed: KEEP_COPY.failed,
+  };
+  let mod: typeof import('../pwa/register') | null = null;
+  let seq = 0;
+  let gone = false;
+  let refused = false;
+  let off = () => {};
+  const show = (s: KeepStatus | 'checking') => {
+    if (s === 'refused') refused = true;
+    else if (s === 'granted') refused = false;
+    const shown = s === 'not-granted' && refused ? 'refused' : s;
+    el.dataset.keep = shown;
+    say.innerHTML = md(copy[shown]);
+    ask.classList.toggle('is-hidden', s === 'checking' || s === 'granted' || !mod?.canAskToKeep());
+    ask.disabled = false;
+    ask.removeAttribute('aria-busy');
+    askT.textContent = typo(KEEP_COPY.ask);
+  };
+  const wait = async (job: Promise<KeepStatus>) => {
+    const n = ++seq;
+    ask.classList.remove('is-hidden');
+    ask.disabled = true;
+    ask.setAttribute('aria-busy', 'true');
+    askT.textContent = typo(KEEP_COPY.asking);
+    const s = await job;
+    if (!gone && n === seq) show(s);
+  };
+  const request = () => {
+    if (mod && !ask.disabled) mod.askToKeep();
+  };
+  const check = async (): Promise<void> => {
+    if (gone || !mod) return;
+    const job = mod.keepRequest();
+    if (job) return void job.then(check);
+    const n = ++seq;
+    const s = await mod.readKeepStatus();
+    if (!gone && n === seq) show(s);
+  };
+  const onBack = (e: Event) => {
+    if (e.type === 'pageshow' ? !(e as PageTransitionEvent).persisted : document.visibilityState !== 'visible') return;
+    void check();
+  };
+  show('checking');
+  void import('../pwa/register').then(
+    (m) => {
+      if (gone) return;
+      mod = m;
+      off = m.onKeepRequest((job) => void wait(job));
+      const job = m.keepRequest();
+      void (job ? wait(job) : check());
+    },
+    () => !gone && show('failed'),
+  );
+  document.addEventListener('visibilitychange', onBack);
+  window.addEventListener('pageshow', onBack);
+  const stop = () => {
+    gone = true;
+    off();
+    document.removeEventListener('visibilitychange', onBack);
+    window.removeEventListener('pageshow', onBack);
+  };
+  return { el, stop };
+}
+
 export function settingsScreen(app: App): ScreenOut {
   const st = app.store;
   const s = st.state;
   const status = h('p', { class: 'dq-hint', 'aria-live': 'polite' });
   const file = h('input', { type: 'file', accept: 'application/json,.json', class: 'dq-sr', 'aria-hidden': 'true', tabindex: -1 });
   const notSaving = p("This device isn't saving right now (storage may be full or private browsing). Your progress is safe for this visit; a Save Crystal keeps a copy.", `dq-small${st.saving ? ' is-hidden' : ''}`);
-  const standalone = matchMedia('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
-  const homeTip = (window as unknown as { __persisted?: boolean }).__persisted === false && !standalone ? p('Tip: add the Lantern to your Home Screen so your phone keeps it safe. A Save Crystal is a spare copy.', 'dq-small') : null;
+  const keeps = browserKeeps();
   const restore = async (f: File) => {
     if (f.size > 80 * 1024 * 1024) return 'That file is too big to be a Save Crystal. Nothing changed.';
     let text: string;
@@ -885,7 +960,7 @@ export function settingsScreen(app: App): ScreenOut {
         p('**Saved only on this device.** No account, no tracking.', 'dq-text'),
         p('A Save Crystal is a backup file of everything here, your stories and saved drawings included (an unfinished drawing is not, until you save it). Keep one somewhere safe; Restore adds it back without removing anything.', 'dq-small'),
         notSaving,
-        homeTip,
+        keeps.el,
         h(
           'div',
           { class: 'dq-actions' },
@@ -920,6 +995,7 @@ export function settingsScreen(app: App): ScreenOut {
     mode: 'sub',
     leave: () => {
       offSaving();
+      keeps.stop();
       levels?.dispose();
     },
   };
