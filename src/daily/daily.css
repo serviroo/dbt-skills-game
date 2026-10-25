@@ -443,8 +443,9 @@
   margin-top: 0;
 }
 .dq-actions--pair > .dq-btn {
-  flex: 1 1 200px;
+  flex: 1 1 0;
   width: auto;
+  padding-inline: 8px;
 }
 .dq-timer > .dq-actions--pair {
   margin-bottom: 16px;

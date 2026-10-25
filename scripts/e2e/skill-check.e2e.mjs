@@ -7,9 +7,9 @@
 // Copy, read from the skill's content object with its text functions run on many answer sets: no em dash, no diagnosis
 // words (DESIGN.md principle 8), none of principle 9's wording a lint can catch, no hard-coded "Player" or unknown
 // token, every timer 20 to 90 s, and cold-water or intense-exercise steps carry a caution that names the heart risk and a
-// "breathe instead" option (principle 11). Each of those steps is then opened at 390x844 and 844x390: its caution, its own
-// action and "Breathe instead" must show without scrolling, and the last two must be buttons of the same weight. On a
-// timer, once Start is tapped, the countdown, Next and "Breathe instead" must all be on screen.
+// "breathe instead" option (principle 11). Each of those steps is then opened at 390x844, 844x390 and 320x568: its
+// caution, its own action and "Breathe instead" must show without scrolling, and the last two must be buttons of the same
+// weight. On a timer, once Start is tapped, the countdown, Next and "Breathe instead" must all be on screen.
 // Skills in ENFORCED fail the run. Every other skill's problems are printed as a todo list and returned, so the runner
 // keeps them in report.json. Once a skill passes, add it to ENFORCED.
 // copy-everywhere holds every other string the app ships (the Safe Zone, Home, the intro, labels in code) to the same
@@ -37,6 +37,7 @@ const MAX_TAPS = 12;
 const WORKERS = 3;
 const PHONE = { width: 390, height: 844 };
 const SIDEWAYS = { width: 844, height: 390 };
+const SMALL = { width: 320, height: 568 };
 const DAY = 864e5;
 const COPY = {
   emDash: '—',
@@ -180,7 +181,7 @@ const onScreen = (page) =>
     const top = document.querySelector('.dq-top')?.getBoundingClientRect().bottom ?? 0;
     const seen = (e) => {
       const r = e?.getBoundingClientRect();
-      if (!r?.width || !r.height || r.top < top || r.left < 0 || r.bottom > innerHeight || r.right > innerWidth) return false;
+      if (!r?.width || !r.height || r.top < top - 1 || r.left < -1 || r.bottom > innerHeight + 1 || r.right > innerWidth + 1) return false;
       const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
       return !!hit && e.contains(hit);
     };
@@ -203,7 +204,7 @@ const onScreen = (page) =>
 
 async function insteadProblems(h, risky) {
   const out = {};
-  for (const vp of [PHONE, SIDEWAYS]) {
+  for (const vp of [PHONE, SIDEWAYS, SMALL]) {
     const size = `${vp.width}x${vp.height}`;
     const { ctx, page, errors } = await h.open(returning(h), '?mute', vp);
     await h.reachHub(page);
