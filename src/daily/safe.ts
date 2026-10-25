@@ -95,6 +95,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   const swap = (at: At, lead: (Node | null)[], ...kids: (Node | null)[]) => {
     const halves = [h('div', { class: 'dq-sz-lead' }, lead), h('div', { class: 'dq-sz-main' }, kids)];
     body.replaceChildren(...halves);
+    el.dataset.at = at;
     talkLink.classList.toggle('is-hidden', at === 'talk');
     foot.classList.toggle('is-talk', at === 'talk');
     talkLink.classList.toggle('is-strong', higher && at !== 'talk');
@@ -131,7 +132,8 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     );
   };
 
-  function show(at: At) {
+  /** `then` is where breathing goes next when it was picked instead of cool water. */
+  function show(at: At, then?: At) {
     clear();
     switch (at) {
       case 'start':
@@ -153,13 +155,26 @@ export function safeScreen(app: App, route: Route): ScreenOut {
       case 'breathe': {
         const ring = breathRing(ctx, { inhale: 4, exhale: 6, rounds: 6 });
         stops.push(ring.stop);
-        return swap(at, [h3(SAFE.breathe.title), p(SAFE.breathe.text, 'dq-text')], ring.el, h('div', { class: 'dq-actions dq-actions--center' }, nextBtn(at, 'Next', 'quiet')));
+        return swap(at, [h3(SAFE.breathe.title), p(SAFE.breathe.text, 'dq-text')], ring.el, h('div', { class: 'dq-actions dq-actions--center' }, btn('Next', () => show(then ?? nextOf(at)), { kind: 'quiet' })));
       }
       case 'cold': {
-        const skip = btn("Can't right now", () => show(nextOf(at)), { kind: 'quiet' });
-        const tv = timerView(ctx, { seconds: 30, visual: 'cold', start: 'Start 30 seconds', extra: [skip], onDone: () => show(nextOf(at)) });
+        const instead = btn('Breathe instead', () => show('breathe', nextOf(at)), { kind: 'primary' });
+        const tv = timerView(ctx, {
+          seconds: 30,
+          visual: 'cold',
+          start: 'Start 30 seconds',
+          peers: [instead],
+          // on a short phone the countdown starts under the pinned "Talk to someone now": bring it up with "Breathe instead"
+          onStart: () => {
+            const t = tv.el.getBoundingClientRect();
+            const f = foot.getBoundingClientRect();
+            const bottom = f.height && t.left < f.right && t.right > f.left ? f.top : innerHeight;
+            if (t.bottom > bottom) app.root.scrollBy({ top: t.bottom - bottom, behavior: app.reduced() ? 'auto' : 'smooth' });
+          },
+          onDone: () => show(nextOf(at)),
+        });
         stops.push(tv.stop);
-        return swap(at, [h3(SAFE.cold.title), p(SAFE.cold.text, 'dq-text')], p(SAFE.cold.small, 'dq-small'), tv.el);
+        return swap(at, [h3(SAFE.cold.title)], p(SAFE.cold.small, 'dq-small'), tv.el, p(SAFE.cold.text, 'dq-text'), h('div', { class: 'dq-actions dq-actions--center' }, nextBtn(at, 'Next', 'quiet')));
       }
       case 'squeeze': {
         const nb = nextBtn(at, 'Next', 'quiet');

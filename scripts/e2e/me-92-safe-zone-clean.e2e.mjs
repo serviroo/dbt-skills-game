@@ -3,6 +3,8 @@ const TALL = { width: 390, height: 844 };
 const SMALL = { width: 320, height: 568 };
 const WIDE = { width: 844, height: 390 };
 const SHORT = { width: 568, height: 320 };
+const MID = { width: 375, height: 667 };
+const MID_WIDE = { width: 667, height: 375 };
 const AUDIO = 'dbt.audio.v1';
 const HINT = 'dbt.install-hint.v1';
 
@@ -385,13 +387,13 @@ async function allRoutes(h, { viewport, reduced = false }) {
 }
 
 // What each Safe Zone screen must show whole on arrival, on any phone either way up: its choices, or the first thing
-// it has. Held sideways the cold-water caution shows too.
+// it has. The cold-water caution and both of its choices count (DESIGN.md principle 11).
 const ACTS = '.dq-actions--stack .dq-btn';
-const shown = (sideways) => ({
+const SHOWN = {
   start: [ACTS, 4],
   breathe: ['.dq-ring-count', 1],
   squeeze: ['.dq-ring-count', 1],
-  cold: [sideways ? '.dq-small' : '.dq-sz-t', 1],
+  cold: ['.dq-small, .dq-timer .dq-btn', 3],
   check: ['.dq-opt', 3],
   stop: [`.dq-sz-stop:not(.is-hidden), ${ACTS}:first-child`, 2],
   reasons: ['.dq-sz-list > li:first-child', 1],
@@ -399,14 +401,14 @@ const shown = (sideways) => ({
   people: ['.dq-person:first-child', 1],
   talk: ['.dq-res-list > li:first-child .dq-res-a:first-child', 1],
   close: [ACTS, 2],
-});
+};
 const listed = (n, k) => Array.from({ length: n }, (_, i) => ({ id: `me92-${k}${i}`, text: `${k} ${i + 1}, a few words long`, at: Date.now() - 86400e3 }));
 const filled = () => JSON.stringify({ ...JSON.parse(returning()), lists: { reasons: listed(3, 'reason'), comfort: listed(3, 'comfort'), activities: [], people: [{ id: 'me92-p1', name: 'Sam', phone: '+1 555 0100', at: Date.now() - 86400e3 }, { id: 'me92-p2', name: 'Robin', phone: '', at: Date.now() - 86400e3 }] } });
 // an iPhone with a notch held sideways (the smallest is 812x375): 47 px each side, 21 px for the home bar
 const NOTCH = { top: 0, left: 47, right: 47, bottom: 21 };
 
 /**
- * Every Safe Zone screen at one size (ME-127, ME-210). On arrival: what shown() names is whole on screen, clear of the top
+ * Every Safe Zone screen at one size (ME-127, ME-210). On arrival: what SHOWN names is whole on screen, clear of the top
  * bar, the pinned foot and the screen's safe-area insets, and taps land on it; "Talk to someone now" stays pinned and
  * tappable; every text is at least 20 px and every button, link and picker at least 44 px; nothing scrolls sideways.
  * With notch insets, the top bar's buttons and the Safe Zone keep clear of them. Held sideways, an opened "Add one" box
@@ -425,7 +427,7 @@ async function everyScreen(h, viewport, { insets } = {}) {
     }
     await page.locator('header .dq-safe').click();
     let heading = '';
-    for (const [at, [sel, n]] of Object.entries(shown(sideways))) {
+    for (const [at, [sel, n]] of Object.entries(SHOWN)) {
       const label = `${size} ${at}`;
       await page.evaluate((at) => window.__daily.go({ name: 'safe', at }), at);
       await page.waitForFunction(([was, sel]) => {
@@ -435,7 +437,7 @@ async function everyScreen(h, viewport, { insets } = {}) {
       // fonts in and the screen's fade-in done, so the boxes and screenshots are what the player sees
       await page.evaluate(() => Promise.all([document.fonts.ready, ...[...document.querySelectorAll('.dq-sz-body, .dq-sz-body > *')].flatMap((e) => e.getAnimations()).map((a) => a.finished)]));
       heading = await page.locator('.dq-sz-body [data-focus]').textContent();
-      const got = await page.evaluate(([sel, insets]) => {
+      const look = (sel) => page.evaluate(([sel, insets]) => {
         const left = insets?.left ?? 0;
         const right = innerWidth - (insets?.right ?? 0);
         const bottom = innerHeight - (insets?.bottom ?? 0);
@@ -469,14 +471,23 @@ async function everyScreen(h, viewport, { insets } = {}) {
           wide: document.documentElement.scrollWidth <= innerWidth,
         };
       }, [sel, insets]);
-      if (got.count !== n) failed.push(`${label}: found ${got.count} of the ${n} things (${sel}) it should show`);
-      if (got.off.length) failed.push(`${label}: not whole on screen, or covered, on arrival: ${got.off.join('; ')}`);
-      if (!got.talk) failed.push(`${label}: "Talk to someone now" is not pinned and tappable`);
-      if (got.tiny.length) failed.push(`${label}: tap targets under 44 px: ${got.tiny.join(', ')}`);
-      if (got.small.length) failed.push(`${label}: Safe Zone text under 20 px: ${got.small.join(', ')}`);
-      if (got.bar.length) failed.push(`${label}: top bar buttons inside the notch: ${got.bar.join(', ')}`);
-      if (!got.zone) failed.push(`${label}: the Safe Zone runs into the notch`);
-      if (!got.wide) failed.push(`${label}: the page scrolls sideways`);
+      const judge = (label, got, sel, n) => {
+        if (got.count !== n) failed.push(`${label}: found ${got.count} of the ${n} things (${sel}) it should show`);
+        if (got.off.length) failed.push(`${label}: not whole on screen, or covered: ${got.off.join('; ')}`);
+        if (!got.talk) failed.push(`${label}: "Talk to someone now" is not pinned and tappable`);
+        if (got.tiny.length) failed.push(`${label}: tap targets under 44 px: ${got.tiny.join(', ')}`);
+        if (got.small.length) failed.push(`${label}: Safe Zone text under 20 px: ${got.small.join(', ')}`);
+        if (got.bar.length) failed.push(`${label}: top bar buttons inside the notch: ${got.bar.join(', ')}`);
+        if (!got.zone) failed.push(`${label}: the Safe Zone runs into the notch`);
+        if (!got.wide) failed.push(`${label}: the page scrolls sideways`);
+      };
+      judge(`${label} on arrival`, await look(sel), sel, n);
+      if (at === 'cold') {
+        // principle 11: "Breathe instead" carries the same weight as Start, not a quieter link under it
+        const pair = await page.locator('.dq-sz-body .dq-timer .dq-btn').evaluateAll((bs) => bs.map((b) => `${b.textContent.trim()}: ${b.className} ${Math.round(b.getBoundingClientRect().height)}px`));
+        const weights = new Set(pair.map((p) => p.slice(p.indexOf(':'))));
+        if (pair.length !== 2 || !/^Breathe instead:/.test(pair[1]) || weights.size !== 1) failed.push(`${label}: Start and "Breathe instead" are not two choices of the same weight: ${pair.join(' | ')}`);
+      }
       await h.shot(page, `me92-every-${at}-${size.replace(/ /g, '-')}`);
       if (sideways && at === 'reasons') {
         const add = page.getByRole('button', { name: 'Add one' });
@@ -496,6 +507,14 @@ async function everyScreen(h, viewport, { insets } = {}) {
         const flat = await boxes();
         const moved = grouped.filter((b, i) => b !== flat[i]);
         if (grouped.length !== flat.length || moved.length) failed.push(`${label}: grouping the heading moved ${moved.length} of ${grouped.length} boxes: ${moved.slice(0, 3).join(' | ')}`);
+      }
+      if (at === 'cold') {
+        // once Start is tapped, the countdown and "Breathe instead" are on screen together (SAFE-02)
+        await page.getByRole('button', { name: 'Start 30 seconds', exact: true }).click();
+        await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+        const running = '.dq-timer-num, .dq-timer .dq-btn';
+        judge(`${label} after Start`, await look(running), running, 2);
+        await h.shot(page, `me92-every-cold-started-${size.replace(/ /g, '-')}`);
       }
     }
     if (insets) {
@@ -543,12 +562,44 @@ export const scenarios = {
     await allRoutes(h, { viewport: WIDE });
   },
   'safe-zone-every-screen-sideways': async (h) => {
-    const failed = [...(await everyScreen(h, WIDE)), ...(await everyScreen(h, SHORT))];
+    const failed = [...(await everyScreen(h, WIDE)), ...(await everyScreen(h, MID_WIDE)), ...(await everyScreen(h, SHORT))];
     h.expect(!failed.length, failed.join('\n'));
   },
   'safe-zone-every-screen-upright': async (h) => {
-    const failed = [...(await everyScreen(h, TALL)), ...(await everyScreen(h, SMALL))];
+    const failed = [...(await everyScreen(h, TALL)), ...(await everyScreen(h, MID)), ...(await everyScreen(h, SMALL))];
     h.expect(!failed.length, failed.join('\n'));
+  },
+  // SAFE-02: "Breathe instead" goes straight to breathing, whose Next then skips past cool water; the quiet Next skips too
+  'safe-zone-cold-breathe-instead': async (h) => {
+    const { ctx, page, errors } = await boot(h, { save: returning(), reduced: true });
+    const c = step();
+    const at = () => page.evaluate(() => document.querySelector('.dq-safezone')?.dataset.at);
+    const tap = async (name, want) => {
+      await page.getByRole('button', { name, exact: true }).click({ timeout: 3000 });
+      await page.waitForFunction((w) => document.querySelector('.dq-safezone')?.dataset.at === w, want, { timeout: 3000 }).catch(() => {});
+      return at();
+    };
+    try {
+      await page.locator('header .dq-safe').click();
+      for (const start of [true, false]) {
+        const tag = start ? 'after Start' : 'before Start';
+        await page.evaluate(() => window.__daily.go({ name: 'safe', at: 'cold' }));
+        await page.waitForFunction(() => document.querySelector('.dq-safezone')?.dataset.at === 'cold');
+        if (start) await page.getByRole('button', { name: 'Start 30 seconds', exact: true }).click();
+        c.ok((await tap('Breathe instead', 'breathe')) === 'breathe', `${tag}: "Breathe instead" did not open breathing (at ${await at()})`);
+        c.ok((await tap('Next', 'check')) === 'check', `${tag}: Next after breathing instead went to ${await at()}, not past cool water`);
+      }
+      await page.evaluate(() => window.__daily.go({ name: 'safe', at: 'cold' }));
+      await page.waitForFunction(() => document.querySelector('.dq-safezone')?.dataset.at === 'cold');
+      c.ok((await tap('Next', 'check')) === 'check', `cold's own Next went to ${await at()}`);
+      await page.evaluate(() => window.__daily.go({ name: 'safe', at: 'breathe' }));
+      await page.waitForFunction(() => document.querySelector('.dq-safezone')?.dataset.at === 'breathe');
+      c.ok((await tap('Next', 'squeeze')) === 'squeeze', `breathing reached the usual way went to ${await at()}, not squeeze`);
+      c.ok(!errors.length, errors.join(' | '));
+      c.end();
+    } finally {
+      await ctx.close();
+    }
   },
   'safe-zone-every-screen-notch': async (h) => {
     const failed = [...(await everyScreen(h, WIDE, { insets: NOTCH })), ...(await everyScreen(h, { width: 812, height: 375 }, { insets: NOTCH }))];

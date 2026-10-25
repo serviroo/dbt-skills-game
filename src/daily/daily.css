@@ -2863,12 +2863,19 @@ textarea.dq-input {
    to the bottom of the screen, so the first call button or choice shows without scrolling */
 @media (orientation: landscape) and (max-height: 500px) and (min-width: 540px) {
   .dq-safezone {
+    --cols: minmax(0, 1fr) minmax(0, 1fr);
+    --lead-share: 50%;
     margin-top: 0;
     max-width: 900px;
   }
+  /* the cold-water caution and its two choices need the wider column to sit together on screen */
+  .dq-safezone[data-at='cold'] {
+    --cols: minmax(0, 2fr) minmax(0, 3fr);
+    --lead-share: 40%;
+  }
   .dq-sz {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: var(--cols);
     grid-template-rows: auto 1fr;
     column-gap: var(--pad);
     padding-top: 12px;
@@ -2900,7 +2907,7 @@ textarea.dq-input {
   /* "Talk to someone now" pins under the heading's column; 12px below it keeps it on screen while a screen slides in */
   .dq-sz-foot {
     align-self: flex-start;
-    width: 50%;
+    width: var(--lead-share);
     padding: 4px 0 calc(var(--safe-bottom) + 12px);
   }
 }
