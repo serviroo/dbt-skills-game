@@ -1,5 +1,5 @@
 import '../styles/cutscene.css';
-import { animate, el, finished, wait } from './anim';
+import { animate, el, finished, wait, waitPage } from './anim';
 import { params } from '../core/params';
 import { ICON_LETTER, ICON_LANTERN, ICON_MOTH, ICON_STAR, FLOURISH } from './icons';
 import type { RewardItem } from '../content/intro';
@@ -155,7 +155,7 @@ export async function awakenWord(text = 'AWAKEN', holdSec = 0.5) {
       { opacity: 0.5, transform: `scale(1.18) translateX(${dx * 2}%)`, offset: 0.82 },
       { opacity: 0, transform: `scale(1.26) translateX(${dx * 5}%)` },
     ], { duration: D, easing: 'ease-out' });
-  await wait(D / 1000);
+  await waitPage(D / 1000);
   root.remove();
 }
 
@@ -192,7 +192,7 @@ export async function rewardCards(items: RewardItem[], opts: { onCard?: (i: numb
   ui().append(root);
   animate(root, [{ opacity: 0 }, { opacity: 1 }], { duration: 500, easing: 'ease-out' });
   animate(head, [{ opacity: 0, letterSpacing: '0.5em' }, { opacity: 1, letterSpacing: '0.22em' }], { duration: 700, easing: 'cubic-bezier(.16,1,.3,1)' });
-  await wait(0.45);
+  await waitPage(0.45);
   for (let i = 0; i < cards.length; i++) {
     const c = cards[i];
     opts.onCard?.(i);
@@ -203,9 +203,9 @@ export async function rewardCards(items: RewardItem[], opts: { onCard?: (i: numb
       { opacity: 1, transform: 'rotateY(0deg) translateY(0) scale(1)', filter: 'brightness(1)' },
     ], { duration: params.reduced ? 200 : 620, easing: 'cubic-bezier(.16,1,.3,1)' });
     animate(c.querySelector('.sweep')!, [{ transform: 'translateX(-100%)' }, { transform: 'translateX(100%)' }], { duration: 900, delay: 260, easing: 'ease-out' });
-    await wait(params.reduced ? 0.2 : 0.5);
+    await waitPage(params.reduced ? 0.2 : 0.5);
   }
-  await wait(0.3);
+  await waitPage(0.3);
   animate(btn, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 420, easing: 'cubic-bezier(.16,1,.3,1)' });
   await new Promise<void>((resolve) => {
     btn.addEventListener('click', () => resolve(), { once: true });

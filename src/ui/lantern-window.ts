@@ -1,5 +1,5 @@
 import '../styles/lantern-window.css';
-import { animate, complete, el, finished, wait } from './anim';
+import { animate, complete, el, waitPage } from './anim';
 import { params } from '../core/params';
 import { EASE, LEVEL, WINDOW as W, css, fr } from '../motion/tokens';
 
@@ -229,15 +229,18 @@ export class LanternWindow {
   private typeAnims: Animation[] = [];
   private typing = false;
   private skipRes: (() => void) | null = null;
-  private skipEv: Event | null = null;
-  private offSkip: (() => void) | null = null;
+  private offInput: (() => void) | null = null;
   private reduced = params.reduced;
-  private resolveTap: ((v: string) => void) | null = null;
+  /** the player's one answer, kept for whoever waits on it, however early or late they start */
+  private readonly answer: Promise<string>;
+  private settle!: (v: string) => void;
+  private answered = false;
   private gone = false;
   readonly spec: WindowSpec;
 
   constructor(readonly layer: HTMLElement, spec: WindowSpec) {
     this.spec = spec;
+    this.answer = new Promise((resolve) => (this.settle = resolve));
     const t = textures();
     const kind = spec.kind ?? 'notification';
     const root = el('div', 'sw') as HTMLDivElement;
@@ -279,8 +282,9 @@ export class LanternWindow {
         btn.type = 'button';
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
+          if (this.answered || this.gone) return;
           windowSounds.tap?.();
-          this.resolveTap?.(a.value);
+          this.reply(a.value);
         });
         acts.append(btn);
       }
@@ -343,13 +347,15 @@ export class LanternWindow {
     this.reduced = params.reduced || this.root.classList.contains('dq-sw--still');
     this.root.style.visibility = 'visible';
     windowSounds.open?.(kind);
+    this.listen();
     let hookAt = 0;
     const ctx: RevealCtx = { root: this.root, reduced: this.reduced, animate: (e, f, o) => this.typed(e, f, { ...o, delay: hookAt + Number(o.delay ?? 0) }) };
     const rolls = Array.from(this.root.querySelectorAll<HTMLElement>('.sw-roll')).map(buildRoll);
     if (this.reduced) {
       this.spec.reveal?.(ctx);
       for (const r of rolls) r.oldN.style.opacity = '0';
-      await finished(animate(this.root, [{ opacity: 0 }, { opacity: 1 }], { duration: W.reducedFadeMs, easing: css(EASE.outCubic) }));
+      animate(this.root, [{ opacity: 0 }, { opacity: 1 }], { duration: W.reducedFadeMs, easing: css(EASE.outCubic) });
+      await waitPage(W.reducedFadeMs / 1000);
       if (this.gone) return;
       if (this.spec.tapToContinue) this.next.style.opacity = '0.85';
       this.spec.onCue?.('typed');
@@ -438,32 +444,73 @@ export class LanternWindow {
     }
     if (lineMode) at += W.bodyLineMs;
     if (!rolls.length && bigEnd) cues.push([bigEnd, 'land']);
-    const acts = this.root.querySelector('.sw-actions');
+    const acts = this.root.querySelector<HTMLElement>('.sw-actions');
     if (acts) {
       at += fr(W.actionsDelayFrames);
-      this.typed(acts, [{ opacity: 0 }, { opacity: 1 }], { duration: W.actionsFadeMs, delay: at, easing: css(EASE.outCubic) });
+      // the buttons take taps from the frame they have shown in: until then a tap there completes the text like a tap
+      // anywhere (a tap that completes it finishes this fade too)
+      acts.style.pointerEvents = 'none';
+      const shown = this.typed(acts, [{ opacity: 0 }, { opacity: 1 }], { duration: W.actionsFadeMs, delay: at, easing: css(EASE.outCubic) });
+      shown.finished.then(() => acts.style.removeProperty('pointer-events'), () => undefined);
       at += W.actionsFadeMs;
     }
-    for (const [t, c, i] of cues) wait(t / 1000).then(() => this.typing && this.spec.onCue?.(c, i));
+    for (const [t, c, i] of cues) waitPage(t / 1000).then(() => this.typing && this.spec.onCue?.(c, i));
 
     // 4. a tap (or Enter / Space) while the Lantern types completes the text at once
     this.typing = true;
     const skipped = new Promise<void>((r) => (this.skipRes = r));
-    const onSkip = (e: Event) => {
-      if (!this.typing) return;
-      if (e instanceof KeyboardEvent && e.key !== 'Enter' && e.key !== ' ') return;
-      if ((e.target as Element | null)?.closest?.('.sw-btn, .ui-skip')) return;
-      this.skipEv = e;
-      this.skipTyping();
-    };
-    window.addEventListener('pointerup', onSkip);
-    window.addEventListener('keydown', onSkip);
-    this.offSkip = () => {
-      window.removeEventListener('pointerup', onSkip);
-      window.removeEventListener('keydown', onSkip);
-    };
-    await Promise.race([wait(at / 1000), skipped]);
+    await Promise.race([waitPage(at / 1000), skipped]);
     this.endTyping();
+  }
+
+  /** Taps and keys count only when they start after the window opened. A window can open while the tap or key that
+   * opened it is still on its way up to `window` (the title's tap opens the name prompt), and a press held from before
+   * it showed (the chest's hold) isn't meant for it either. */
+  private listen() {
+    if (this.offInput) return;
+    const pressed = new Set<number>();
+    const mine = (e: Event) => !(e.target as Element | null)?.closest?.('.sw-btn, .ui-skip');
+    const onDown = (e: PointerEvent) => {
+      pressed.add(e.pointerId);
+    };
+    const onUp = (e: PointerEvent) => {
+      if (pressed.delete(e.pointerId) && mine(e)) this.input(true);
+    };
+    const onCancel = (e: PointerEvent) => {
+      pressed.delete(e.pointerId);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.key === 'Enter' || e.key === ' ') && !e.repeat && mine(e)) this.input(false);
+    };
+    // a listener added during that event's dispatch would still hear it, so start once it is over
+    const start = setTimeout(() => {
+      window.addEventListener('pointerdown', onDown);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onCancel);
+      window.addEventListener('keydown', onKey);
+    });
+    this.offInput = () => {
+      clearTimeout(start);
+      window.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('keydown', onKey);
+    };
+  }
+
+  private input(tap: boolean) {
+    if (this.typing) return this.skipTyping();
+    if (!this.spec.tapToContinue || this.answered) return;
+    if (tap) windowSounds.tap?.();
+    this.reply('tap');
+  }
+
+  private reply(v: string) {
+    if (this.answered) return;
+    this.answered = true;
+    // an answer given while the Lantern types (a button reached by keyboard, a timeout) shows the whole text first
+    this.skipTyping();
+    this.settle(v);
   }
 
   /** Completes the typed text now (a tap while the Lantern types). */
@@ -476,51 +523,17 @@ export class LanternWindow {
   private endTyping() {
     if (!this.typing) return;
     this.typing = false;
-    this.offSkip?.();
-    this.offSkip = null;
     this.skipRes?.();
     this.spec.onCue?.('typed');
     if (this.spec.tapToContinue && this.root.isConnected)
       animate(this.next, [{ opacity: W.nextPulseLow }, { opacity: 1 }], { duration: W.nextPulseMs, iterations: Infinity, direction: 'alternate', easing: css(EASE.inOutSine) });
   }
 
-  /** Resolves with an action value, or 'tap' on any tap when tapToContinue; or 'timeout'. */
+  /** Resolves with the answer: an action's value, 'tap' (tapToContinue), 'timeout', or DISMISSED once the window is
+   * gone. Every call gets the same answer, including one given before the call. */
   waitForInput(timeoutSec = 0): Promise<string> {
-    if (this.gone) return Promise.resolve(DISMISSED);
-    return new Promise((resolve) => {
-      let done = false;
-      const finish = (v: string) => {
-        if (done) return;
-        done = true;
-        this.resolveTap = null;
-        window.removeEventListener('pointerup', onTap);
-        window.removeEventListener('keydown', onKey);
-        resolve(v);
-      };
-      this.resolveTap = finish;
-      const onTap = (e: PointerEvent) => {
-        if (!this.spec.tapToContinue) return;
-        if ((e.target as HTMLElement).closest('.sw-btn, .ui-skip')) return;
-        if (e === this.skipEv) return;
-        if (this.typing) {
-          this.skipEv = e;
-          return this.skipTyping();
-        }
-        windowSounds.tap?.();
-        finish('tap');
-      };
-      const onKey = (e: KeyboardEvent) => {
-        if (!this.spec.tapToContinue || (e.key !== 'Enter' && e.key !== ' ') || e === this.skipEv) return;
-        if (this.typing) {
-          this.skipEv = e;
-          return this.skipTyping();
-        }
-        finish('tap');
-      };
-      window.addEventListener('pointerup', onTap);
-      window.addEventListener('keydown', onKey);
-      if (timeoutSec > 0) wait(timeoutSec).then(() => finish('timeout'));
-    });
+    if (timeoutSec > 0 && !this.answered) waitPage(timeoutSec).then(() => this.reply('timeout'));
+    return this.answer;
   }
 
   /** Measured close: one frame at scale .85 with a soft wash, 167 ms collapse to a bright bar, the bar fades. */
@@ -530,7 +543,8 @@ export class LanternWindow {
     windowSounds.close?.();
     const h = this.plate.offsetHeight;
     if (this.reduced) {
-      await finished(animate(this.root, [{ opacity: 1 }, { opacity: 0 }], { duration: W.reducedCloseMs, easing: css(EASE.outCubic) }));
+      animate(this.root, [{ opacity: 1 }, { opacity: 0 }], { duration: W.reducedCloseMs, easing: css(EASE.outCubic) });
+      await waitPage(W.reducedCloseMs / 1000);
       this.destroy();
       return;
     }
@@ -544,26 +558,29 @@ export class LanternWindow {
     const rx = `rotateX(${W.tiltDeg}deg)`;
     const [sx, sy] = W.closeEndScale;
     animate(this.tilt, [{ transform: `${rx} scale(1)` }, { transform: `${rx} scale(${W.closeFlashScale})`, offset: flash, easing: 'linear' }, { transform: `${rx} scale(${sx},${sy})` }], { duration: W.closeMs, easing: 'linear' });
-    await wait((W.closeMs + W.closeBarHoldMs) / 1000);
-    await finished(animate(this.root, [{ opacity: 1 }, { opacity: 0 }], { duration: W.closeFadeMs, easing: css(EASE.outCubic) }));
+    const barMs = W.closeMs + W.closeBarHoldMs;
+    animate(this.root, [{ opacity: 1 }, { opacity: 0 }], { duration: W.closeFadeMs, delay: barMs, easing: css(EASE.outCubic) });
+    await waitPage((barMs + W.closeFadeMs) / 1000);
     this.destroy();
   }
 
   dismiss() {
-    const answer = this.resolveTap;
     this.destroy();
-    answer?.(DISMISSED);
   }
 
   destroy() {
     live.delete(this);
     this.gone = true;
-    this.offSkip?.();
+    this.offInput?.();
     this.typing = false;
     this.skipRes?.();
     this.typeAnims.forEach((a) => a.cancel());
     this.plasmaAnims.forEach((a) => a.cancel());
     this.root.remove();
+    if (!this.answered) {
+      this.answered = true;
+      this.settle(DISMISSED);
+    }
   }
 }
 
@@ -592,7 +609,7 @@ export async function lanternMessage(spec: WindowSpec, opts: { hold?: number; ti
   await w.open();
   let v = 'auto';
   if (spec.tapToContinue || spec.actions?.length) v = await w.waitForInput(opts.timeout ?? 0);
-  else await wait(opts.hold ?? 3);
+  else await waitPage(opts.hold ?? 3);
   await w.close();
   return v;
 }

@@ -79,6 +79,41 @@ export function wait(sec: number) {
   return new Promise<void>((resolve) => waiters.push({ at: clockNow() + sec, resolve }));
 }
 
+/* Page time: real time while the page is shown, the clock DOM animations run on, and held while it is hidden, like the
+ * stage clock. Unlike the stage clock it keeps pace when frames are long (the stage moves at most 0.1 s a frame). */
+let hiddenAt = document.hidden ? performance.now() : NaN;
+let heldMs = 0;
+const pageMs = () => (Number.isNaN(hiddenAt) ? performance.now() : hiddenAt) - heldMs;
+type PageWaiter = { at: number; resolve: () => void; timer: number };
+const pageWaiters = new Set<PageWaiter>();
+function arm(w: PageWaiter) {
+  w.timer = window.setTimeout(() => {
+    if (pageMs() < w.at) return arm(w);
+    pageWaiters.delete(w);
+    w.resolve();
+  }, w.at - pageMs());
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && Number.isNaN(hiddenAt)) {
+    hiddenAt = performance.now();
+    for (const w of pageWaiters) clearTimeout(w.timer);
+  } else if (!document.hidden && !Number.isNaN(hiddenAt)) {
+    heldMs += performance.now() - hiddenAt;
+    hiddenAt = NaN;
+    for (const w of pageWaiters) arm(w);
+  }
+});
+
+/** Resolves when page time has advanced by `sec` (the stage clock in capture mode). Paces DOM windows and cards. */
+export function waitPage(sec: number) {
+  if (params.capture) return wait(sec);
+  return new Promise<void>((resolve) => {
+    const w = { at: pageMs() + sec * 1000, resolve, timer: 0 };
+    pageWaiters.add(w);
+    if (!document.hidden) arm(w);
+  });
+}
+
 export function finished(a: Animation) {
   if (params.capture) {
     return new Promise<void>((resolve) => {
