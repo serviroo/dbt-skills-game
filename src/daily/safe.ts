@@ -92,10 +92,12 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   const clear = () => stops.splice(0).forEach((f) => f());
   /** `lead` is the screen's heading and words, `kids` what the player does; a phone held sideways shows them side by side. */
   const swap = (at: At, lead: (Node | null)[], ...kids: (Node | null)[]) => {
-    body.replaceChildren(h('div', { class: 'dq-sz-lead' }, lead), h('div', { class: 'dq-sz-main' }, kids));
+    const halves = [h('div', { class: 'dq-sz-lead' }, lead), h('div', { class: 'dq-sz-main' }, kids)];
+    body.replaceChildren(...halves);
     talkLink.classList.toggle('is-hidden', at === 'talk');
     talkLink.classList.toggle('is-strong', higher && at !== 'talk');
-    animate(body, [{ opacity: 0 }, { opacity: 1 }], { duration: app.reduced() ? 160 : 520, easing: 'ease-out' });
+    // upright the body fades in; held sideways the body is display: contents, so its two halves fade instead
+    for (const e of [body, ...halves]) animate(e, [{ opacity: 0 }, { opacity: 1 }], { duration: app.reduced() ? 160 : 520, easing: 'ease-out' });
     const f = body.querySelector<HTMLElement>('[data-focus]');
     f?.setAttribute('tabindex', '-1');
     f?.focus({ preventScroll: true });

@@ -435,6 +435,17 @@ async function everyScreen(h, viewport) {
         if (!got.talk) failed.push(`${label}: "Talk to someone now" is not pinned and tappable`);
         if (!got.wide) failed.push(`${label}: the page scrolls sideways`);
         await h.shot(page, `me92-sideways-${at}-${size}`);
+        if (at === 'reasons') {
+          const add = page.getByRole('button', { name: 'Add one' });
+          await add.evaluate((b) => b.scrollIntoView({ block: 'center' }));
+          await add.click();
+          const row = await page.evaluate(() => {
+            const r = document.querySelector('.dq-sz .dq-addrow');
+            return { row: r.getBoundingClientRect().width, field: r.querySelector('.dq-field').getBoundingClientRect().width };
+          });
+          if (row.field < Math.min(row.row - 1, 240)) failed.push(`${label}: with Add one open the text box is squeezed to ${Math.round(row.field)} of ${Math.round(row.row)} px`);
+          await h.shot(page, `me92-sideways-reasons-add-${size}`);
+        }
       } else {
         // live counters (the breathing word and number) are left out: they change while the boxes are read
         const boxes = () => page.evaluate(() => [...document.querySelectorAll('.dq-safezone *')].filter((e) => e instanceof HTMLElement && !e.matches('.dq-sz-lead, .dq-sz-main') && !e.closest('.dq-ring-center, .dq-timer-center')).map((e) => `${e.tagName.toLowerCase()}.${e.className} ${e.offsetLeft},${e.offsetTop},${e.offsetWidth},${e.offsetHeight}`));

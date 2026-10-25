@@ -2091,55 +2091,6 @@ textarea.dq-input {
   display: flex;
   flex-direction: column;
 }
-.dq-sz-lead,
-.dq-sz-main {
-  display: contents;
-}
-/* a phone held sideways: the heading and its words sit beside what the player does, which starts at the top, so the
-   first call button or choice shows without scrolling. A crisis line's buttons come before its details there. */
-@media (orientation: landscape) and (max-height: 500px) {
-  @supports (grid-template-rows: subgrid) {
-    .dq-safezone {
-      max-width: 900px;
-      padding-inline: max(0px, env(safe-area-inset-left, 0px) - 16px) max(0px, env(safe-area-inset-right, 0px) - 16px);
-    }
-    .dq-sz {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-      grid-template-rows: auto 1fr;
-      column-gap: var(--pad);
-    }
-    .dq-sz > .dq-chip {
-      grid-area: 1 / 1;
-    }
-    .dq-sz-body {
-      grid-area: 1 / 1 / 3 / 3;
-      display: grid;
-      grid-template-columns: subgrid;
-      grid-template-rows: subgrid;
-    }
-    .dq-sz-lead {
-      display: block;
-      grid-area: 2 / 1;
-    }
-    .dq-sz-main {
-      display: block;
-      grid-area: 1 / 2 / 3 / 3;
-    }
-    .dq-res {
-      display: flex;
-      flex-direction: column;
-    }
-    .dq-res-acts {
-      order: 1;
-      margin-top: 10px;
-    }
-    .dq-res-how {
-      order: 2;
-      margin-top: 10px !important;
-    }
-  }
-}
 
 /* ---------- pages ---------- */
 .dq-rest {
@@ -2874,6 +2825,69 @@ textarea.dq-input {
   .dq-sz .dq-ring-stage,
   .dq-sz .dq-timer-stage {
     width: min(196px, 52vw);
+  }
+}
+.dq-sz-lead,
+.dq-sz-main {
+  display: contents;
+}
+/* a phone held sideways: the heading and its words sit beside what the player does, which starts at the top, so the
+   first call button or choice shows without scrolling. A crisis line's buttons come before its details there. */
+@media (orientation: landscape) and (max-height: 500px) and (min-width: 540px) {
+  .dq-safezone {
+    margin-top: 0;
+    max-width: min(900px, 100vw - 2 * max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px)));
+  }
+  .dq-sz {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    column-gap: var(--pad);
+    padding-top: 12px;
+  }
+  .dq-sz > .dq-chip {
+    grid-area: 1 / 1;
+    margin-bottom: 10px;
+  }
+  .dq-sz-body {
+    display: contents;
+  }
+  .dq-sz-lead {
+    display: block;
+    grid-area: 2 / 1;
+  }
+  .dq-sz-main {
+    display: block;
+    grid-area: 1 / 2 / 3 / 3;
+  }
+  .dq-sz-main > :first-child {
+    margin-top: 0;
+  }
+  .dq-res {
+    display: flex;
+    flex-direction: column;
+  }
+  .dq-res-acts {
+    order: 1;
+    margin-top: 10px;
+  }
+  .dq-res-how {
+    order: 2;
+    margin-top: 10px !important;
+  }
+  .dq-sz .dq-addrow {
+    flex-wrap: wrap;
+  }
+  .dq-sz .dq-addrow .dq-field {
+    flex-basis: 100%;
+  }
+  .dq-sz-foot {
+    padding: 4px 0 calc(var(--safe-bottom) + 6px);
+  }
+  /* on Talk the foot holds only Lights up, so it pins under the lines and leaves the danger line beside them clear */
+  .dq-sz-foot:has(> .dq-sz-talk.is-hidden) {
+    align-self: flex-end;
+    width: 50%;
   }
 }
 .dq-cardbtn .dq-cf-stat {
