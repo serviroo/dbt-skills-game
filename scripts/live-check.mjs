@@ -84,14 +84,25 @@ async function profile({ seed = null, sw = true } = {}) {
 const ready = (page, ms = 45000) => page.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: ms });
 const shownBuild = (page) => page.evaluate(() => document.querySelector('meta[name=build]')?.getAttribute('content') ?? null);
 async function reachHome(page) {
-  let clear = 0;
-  for (let i = 0; i < 40 && clear < 3; i++) {
-    const home = !(await page.locator('.dq-sw').count()) && (await page.locator('.dq-tile').first().isVisible().catch(() => false));
-    clear = home ? clear + 1 : 0;
-    if (!home) await page.mouse.click(195, 700);
-    await sleep(400);
+  await page.waitForFunction(() => window.__daily, null, { timeout: 45000 });
+  let settled = false;
+  let broke = null;
+  const settling = page.evaluate(() => window.__daily.settled).then(() => (settled = true), (e) => (broke = e));
+  let missed = '';
+  for (const end = Date.now() + 30000; !settled; ) {
+    if (broke) throw new Error('the companion failed while opening: ' + broke.message.split('\n')[0]);
+    if (Date.now() > end) throw new Error('the companion never settled: its opening window stayed up. ' + missed);
+    if (await page.locator('.dq-scrim.is-on').count()) await page.locator('.dq-sw').last().click({ timeout: 2000 }).catch((e) => (missed = e.message.split('\n')[0]));
+    await Promise.race([settling, sleep(300)]);
   }
-  if (clear < 3) throw new Error('Home never appeared');
+  const onHome = () => {
+    const view = document.querySelector('.dq-view');
+    return document.querySelector('.dq')?.dataset.screen === 'hub' && !!view && !view.inert && !document.querySelector('.dq-sw');
+  };
+  if (!(await page.waitForFunction(onHome, null, { timeout: 5000 }).then(() => true, () => false))) {
+    throw new Error('Home never appeared: ' + (await page.evaluate(() => `screen ${document.querySelector('.dq')?.dataset.screen}, ${document.querySelectorAll('.dq-sw').length} window(s)`)));
+  }
+  await page.locator('.dq-tile').first().waitFor({ state: 'visible', timeout: 5000 });
 }
 
 let assetCount = 0;
@@ -134,8 +145,7 @@ try {
     const page = await ctx.newPage();
     await page.goto(new URL('?mute', site).href);
     await ready(page);
-    await sleep(2500);
-    await page.mouse.click(195, 500);
+    await page.locator('.title-screen').click();
     await page.locator('#np-name').waitFor({ timeout: 20000 });
     await page.locator('.title-screen').waitFor({ state: 'detached', timeout: 30000 });
     await shot(page);
@@ -197,8 +207,7 @@ try {
     ctx.on('requestfailed', (r) => failed.push(r.url()));
     await page.reload();
     await ready(page);
-    await sleep(2500);
-    await page.mouse.click(195, 500);
+    await page.locator('.title-screen').click();
     await page.locator('#np-name').waitFor({ timeout: 20000 });
     await page.locator('.title-screen').waitFor({ state: 'detached', timeout: 30000 });
     await shot(page, 'offline-reload');
