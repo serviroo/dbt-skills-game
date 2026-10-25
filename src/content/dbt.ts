@@ -817,7 +817,7 @@ export const SKILLS: Skill[] = [
       {
         id: 'heavy',
         kind: 'say',
-        text: 'Then not facts today. Heavy feelings need comfort, not facts. No reason needed.',
+        text: "Then not facts today. When it's this heavy, comfort matters more. No reason needed.",
         options: [{ label: 'Done', go: 'end:quiet' }, { label: 'Something soothing', go: 'skill:self-soothe' }, { label: 'Self-Heal', go: 'skill:self-validation' }, { label: 'Safe Zone', go: 'safe' }],
       },
     ],
