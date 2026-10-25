@@ -1366,7 +1366,7 @@ export const SKILLS: Skill[] = [
       { kind: 'intro', text: 'Cool air tells your body to slow down. A window, a step outside, or something cool on your face.', small: 'Cool, not icy.' },
       { kind: 'choice', key: 'pick', text: 'Pick one.', options: [...o('Open a window', 'Step outside', 'Something cool on my face'), NOT_THIS_TIME], go: 'air' },
       { id: 'air', kind: 'timer', seconds: 30, start: 'Start 30 s', visual: 'cold', text: (a) => `${s(a, 'pick', 'Cool air')}. Breathe it in slowly. The timer is optional.`, options: [{ label: 'No timer', go: 'done' }], go: 'done' },
-      { id: 'done', kind: 'say', text: 'Cool air in. Thirty seconds of reset, banked.', cta: 'Done', go: 'end' },
+      { id: 'done', kind: 'say', text: 'Cool air in. However long it took, that reset is banked.', cta: 'Done', go: 'end' },
     ],
   },
   {

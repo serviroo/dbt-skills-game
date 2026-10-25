@@ -6,7 +6,7 @@
 // skill-exits: on a screen that offers another skill or the Safe Zone, the first button finishes this skill on its own
 // end screen (or opens the Safe Zone when that leads), crediting this skill once and no other.
 // skill-practise-again: a full end screen offers "Practise again", which opens the same skill fresh (one credit, like
-// any opening); a quiet "not this time" end doesn't offer it.
+// any opening) at the part the player opened; a quiet "not this time" end doesn't offer it.
 // skill-answers-rotate: what the player typed or picked stays through turning the phone sideways and back.
 import { credits, returning, toHub, walk } from './skill-check.e2e.mjs';
 
@@ -18,6 +18,11 @@ const skillEvents = async (h, page) => (JSON.parse((await h.ls(page, h.SAVE)) ??
 /** Opens a skill at one of its steps the way a "skill:<id>@<step>" link does: past its intro, straight to that step. */
 async function openAt(page, id, step) {
   await page.evaluate(({ id, step }) => window.__daily.go({ name: 'skill', id, entry: step }), { id, step });
+  await pastIntro(page);
+}
+
+/** Taps through a skill's intro, if it has one, to the step it leads to. */
+async function pastIntro(page) {
   await page.locator('.dq-skill .dq-step-body > *').first().waitFor({ timeout: 10000 });
   if (await page.locator('.dq-step-body .dq-intro').count()) {
     await page.locator('.dq-step-body .dq-actions .dq-btn--primary').first().click();
@@ -26,6 +31,8 @@ async function openAt(page, id, step) {
 }
 
 const secsOf = (t) => (/^\d+(:\d\d)?$/.test(t) ? t.split(':').reduce((n, part) => n * 60 + Number(part), 0) : NaN);
+/** A whole-second countdown is within a second of the time left, whichever way it rounds. */
+const near = (shown, left) => Math.abs(shown - left) < 1;
 
 export const scenarios = {
   async 'skill-timers'(h) {
@@ -51,13 +58,21 @@ export const scenarios = {
       }
       try {
         const before = await credits(h, page, t.skill);
+        // The page clock stands still while a timer is checked and only moves when told to, so the countdown can't
+        // move between a tap and a reading however slow the machine is. Every reading lands half a second into a
+        // second, away from the edge where the display ticks over. (The page's time runs until the pause lands, so it
+        // pauses a second ahead.)
+        await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000);
         await openAt(page, t.skill, t.step);
         const timer = page.locator('.dq-step-body .dq-timer');
         await timer.waitFor({ timeout: 5000 });
+        const num = page.locator('.dq-step-body .dq-timer-num');
+        const shows = async () => (await num.textContent()).trim();
+        // no time has passed on this screen yet, so it shows its full length
+        const len = secsOf(await shows());
         const start = timer.locator('.dq-actions .dq-btn--primary', { hasText: /start/i });
         if (await start.count()) await start.first().click();
         const more = timer.locator('button', { hasText: /^\+\d+ s$/ });
-        const num = page.locator('.dq-step-body .dq-timer-num');
         const next = page.locator('.dq-step-body > .dq-actions > button', { hasText: /^Next$/ });
         if (t.cold) {
           if (await more.count()) bad.push(`${where}: cold water offers "${await more.first().textContent()}"; it stays about 30 s`);
@@ -65,30 +80,33 @@ export const scenarios = {
           bad.push(`${where}: the running timer has no "+N s"`);
         } else {
           const n = Number(/\d+/.exec(await more.first().textContent())[0]);
-          const was = secsOf((await num.textContent()).trim());
+          await page.clock.runFor(2500);
+          const ran = await shows();
+          if (!near(secsOf(ran), len - 2.5)) bad.push(`${where}: 2.5 s into its ${len} s the timer shows ${ran}`);
           await more.first().click();
-          await page.waitForTimeout(250);
-          const now = secsOf((await num.textContent()).trim());
-          if (!(now - was >= n - 2 && now - was <= n + 1)) bad.push(`${where}: "+${n} s" while running went from ${was} to ${now}`);
-          await page.clock.fastForward((now + 2) * 1000);
-          const done = await num.filter({ hasText: 'Done' }).waitFor({ timeout: 5000 }).then(() => true, () => false);
-          if (!done) bad.push(`${where}: the timer did not reach Done after ${now + 2} s`);
+          await page.clock.runFor(1000);
+          const now = await shows();
+          if (!near(secsOf(now), len + n - 3.5)) bad.push(`${where}: "+${n} s" while running shows ${now} a second later, not ${len + n - 3.5} s left`);
+          await page.clock.fastForward((len + n - 3) * 1000);
+          const done = (await shows()) === 'Done';
+          if (!done) bad.push(`${where}: the timer shows ${await shows()}, not Done, half a second after its ${len + n} s`);
           else {
             await more.first().click();
-            await page.clock.fastForward(500);
-            await page.waitForTimeout(250);
-            const again = secsOf((await num.textContent()).trim());
-            if (!(again >= n - 2 && again <= n)) bad.push(`${where}: "+${n} s" after Done shows ${await num.textContent()}, not ${n} more seconds`);
+            await page.clock.runFor(500);
+            const again = await shows();
+            if (!near(secsOf(again), n - 0.5)) bad.push(`${where}: "+${n} s" after Done shows ${again} half a second later, not ${n - 0.5} s left`);
             if (t.dim && !(await page.locator('.dq-skill.is-dim').count())) bad.push(`${where}: running again after Done, the screen didn't dim the way it does at the start`);
           }
           if (!(await next.isVisible())) bad.push(`${where}: Next is gone after "+${n} s"`);
           if (!(await timer.count())) bad.push(`${where}: "+${n} s" left the timer screen`);
         }
+        await page.clock.resume();
         await toHub(h, page);
         const now = await credits(h, page, t.skill);
         if (now - before !== 1) bad.push(`${where}: opening it and using the timer credited it ${now - before} times, not once`);
       } catch (e) {
         bad.push(`${where}: the check could not finish: ${String(e?.message ?? e).split('\n')[0]}`);
+        await page.clock.resume();
         await page.goto(h.server.url + '/?mute');
         await h.reachHub(page);
       }
@@ -177,6 +195,17 @@ export const scenarios = {
     await page.locator('.dq-step-body .ca-quietend').waitFor({ timeout: 5000 });
     const quiet = (await page.locator('.dq-after:not(.is-hidden) button').allTextContents()).map((t) => t.trim());
     h.expect(quiet.join('|') === 'Back to the Lantern|Another skill', `the quiet end offers ${JSON.stringify(quiet)}`);
+    // a part opened on its own (TIPP's Paced breathing, from the skill's parts) practises that part again, not the start
+    await toHub(h, page);
+    await openAt(page, 'tipp', 'paced');
+    const paced = page.locator('.dq-step-body', { hasText: 'Paced breathing' });
+    h.expect(await paced.isVisible(), 'opening TIPP at Paced breathing did not show it');
+    found.clear();
+    h.expect((await walk(h, page, { id: 'tipp' }, found)).end === 'end', `Paced breathing did not reach TIPP's end screen: ${[...found].join('; ')}`);
+    await page.locator('.dq-feedback .dq-opt', { hasText: /^Yes$/ }).click();
+    await page.locator('.dq-after button', { hasText: /^Practise again$/ }).click();
+    await pastIntro(page);
+    h.expect(await paced.isVisible(), `Practise again after Paced breathing opened "${(await page.locator('.dq-step-body').textContent()).trim().slice(0, 60)}"`);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },

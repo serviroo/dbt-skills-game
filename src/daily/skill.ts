@@ -436,8 +436,8 @@ export function skillScreen(app: App, route: Route): ScreenOut {
       app.sound('soft_chime');
     }
     const reply = h('p', { class: 'dq-lead', 'aria-live': 'polite' });
-    // a quiet end is the player saying "not now", so it doesn't offer a repeat
-    const again = quiet ? null : btn('Practise again', () => app.go({ name: 'skill', id: sk.id }, { replace: true }), { kind: 'quiet' });
+    // a quiet end is the player saying "not now", so it doesn't offer a repeat; a repeat opens the same part they opened
+    const again = quiet ? null : btn('Practise again', () => app.go({ name: 'skill', id: sk.id, entry: r.entry }, { replace: true }), { kind: 'quiet' });
     const after = h('div', { class: 'dq-after is-hidden' }, h('div', { class: 'dq-actions dq-actions--stack' }, btn('Back to the Lantern', () => app.go({ name: 'hub' }), { kind: 'primary' }), again, btn('Another skill', () => app.go({ name: 'library' }), { kind: 'quiet' })));
     const answer = (a: string) => {
       app.store.add('feedback', 0, { skill: sk.id, data: { answer: a } });
