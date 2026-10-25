@@ -1620,6 +1620,7 @@ export const SAFE = {
   talk: {
     title: 'Talk to someone now',
     text: "These are private, and there for exactly this. You don't have to be in danger to reach out.",
+    none: "This app doesn't have a checked free, confidential line for where you are.",
     danger: 'If you are in danger right now, call {num}.',
     dangerElsewhere: 'If you are in danger right now, call your local emergency number.',
     emergency: 'If you are in danger right now.',

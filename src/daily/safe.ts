@@ -243,8 +243,11 @@ export function safeScreen(app: App, route: Route): ScreenOut {
       }
       case 'talk': {
         const region = regionOf(app);
-        const action = (l: CrisisLine['links'][number], noteId?: string) =>
-          h('a', { class: 'dq-btn dq-btn--quiet dq-res-a', href: l.href.startsWith('sms:') ? smsHref(l.href.slice(4), l.body) : telHref(l.href.slice(4)), 'aria-describedby': noteId, html: `<span class="dq-btn-ic">${icon(l.href.startsWith('tel:') ? 'phone' : 'text')}</span><span>${l.label}</span>` });
+        const action = (l: CrisisLine['links'][number], noteId?: string) => {
+          const web = l.href.startsWith('https:');
+          const href = web ? l.href : l.href.startsWith('sms:') ? smsHref(l.href.slice(4), l.body) : telHref(l.href.slice(4));
+          return h('a', { class: 'dq-btn dq-btn--quiet dq-res-a', href, target: web ? '_blank' : null, rel: web ? 'noopener noreferrer' : null, 'aria-describedby': noteId, html: `<span class="dq-btn-ic">${icon(l.href.startsWith('tel:') ? 'phone' : 'text')}</span><span>${l.label}</span>` });
+        };
         const noted = (line: CrisisLine) =>
           line.links.map((l) => {
             const id = l.note ? `dq-res-note-${uid()}` : undefined;
@@ -260,13 +263,13 @@ export function safeScreen(app: App, route: Route): ScreenOut {
           );
         const rows = region.lines.map((line) => row(line));
         if (region.emergency.length) {
-          const sos = row({ name: 'Emergency', how: SAFE.talk.emergency, links: region.emergency.map((n) => ({ label: `Call ${n}`, href: `tel:${n}` })) }, danger);
+          const sos = row({ name: 'Emergency', how: SAFE.talk.emergency, links: region.emergency.map((n) => ({ label: `Call ${n}`, href: `tel:${n}`, note: region.emergencyNotes?.[n] })) }, danger);
           rows.splice(danger ? 0 : Math.min(2, rows.length), 0, sos);
         }
         const dangerText = region.emergency.length ? SAFE.talk.danger.replace('{num}', region.emergency.join(' or ')) : SAFE.talk.dangerElsewhere;
         return swap(
           at,
-          [h3(SAFE.talk.title), danger || !region.emergency.length ? p(dangerText, `dq-text ${danger ? 'dq-sz-danger' : ''}`) : null, p(SAFE.talk.text, 'dq-text')],
+          [h3(SAFE.talk.title), danger || !region.emergency.length ? p(dangerText, `dq-text ${danger ? 'dq-sz-danger' : ''}`) : null, p(region.lines.length ? SAFE.talk.text : SAFE.talk.none, 'dq-text')],
           rows.length ? h('ul', { class: 'dq-res-list' }, rows) : null,
           h('p', { class: 'dq-small' }, h('a', { href: 'https://findahelpline.com', target: '_blank', rel: 'noopener noreferrer', class: 'dq-a', text: 'findahelpline.com' }), ` ${SAFE.talk.elsewhere}`),
           regionPicker(app, () => show('talk')),
