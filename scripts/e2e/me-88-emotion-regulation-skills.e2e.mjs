@@ -410,7 +410,7 @@ export const scenarios = {
       const before = JSON.parse(await h.ls(page, h.SAVE)).events;
       h.expect(before.filter((e) => e.k === 'skill').length === 1 && !before.some((e) => e.k === 'card'), `${id}: opening Home credited something`);
       await page.locator('.dq-card').click({ force: true });
-      await page.locator('.dq-quest-acts:not(.is-hidden)').waitFor({ timeout: 5000 });
+      await page.locator('.dq-quest-go').waitFor({ timeout: 5000 });
       const after = JSON.parse(await h.ls(page, h.SAVE)).events;
       h.expect(after.filter((e) => e.k === 'skill').length === 1 && after.reduce((a, e) => a + e.xp, 0) === before.reduce((a, e) => a + e.xp, 0), `${id}: flipping the card credited XP or a skill`);
       if (NEW[id]) {

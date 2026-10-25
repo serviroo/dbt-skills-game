@@ -1,5 +1,5 @@
 /**
- * Motion tokens for the Lantern window, the level reveal, the rank reveal and the gate intro.
+ * Motion tokens for the Lantern window, the level reveal, the rank reveal, the gate intro and the companion's fades.
  * One editable source for the motion timings.
  * Frames are at 60 fps; durations in ms unless the name ends in Sec.
  */
@@ -59,6 +59,11 @@ export const WINDOW = {
   /** reduced motion: the finished state, softened */
   reducedFadeMs: 160,
   reducedCloseMs: 180,
+} as const;
+
+export const CALM = {
+  fadeMs: 380,
+  ease: EASE.outExpo,
 } as const;
 
 export const LEVEL = {

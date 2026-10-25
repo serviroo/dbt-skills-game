@@ -140,6 +140,20 @@ export async function copyText(text: string) {
   }
 }
 
+export function place(box: HTMLElement, kids: HTMLElement[], fallback?: () => HTMLElement | null | undefined) {
+  const keep = new Set<Element>(kids);
+  const was = [...box.children];
+  const lost = was.findIndex((c) => !keep.has(c) && c.contains(document.activeElement));
+  for (const c of was) if (!keep.has(c)) c.remove();
+  kids.forEach((k, i) => {
+    if (box.children[i] !== k) box.insertBefore(k, box.children[i] ?? null);
+  });
+  if (lost < 0) return;
+  const next = was.slice(lost + 1).find((c) => keep.has(c)) ?? was.slice(0, lost).reverse().find((c) => keep.has(c));
+  const to = next?.querySelector<HTMLElement>('[aria-checked="true"]') ?? next?.querySelector<HTMLElement>('button, input, textarea') ?? fallback?.();
+  to?.focus({ preventScroll: true });
+}
+
 export function sr(text: string) {
   return h('span', { class: 'dq-sr', text });
 }

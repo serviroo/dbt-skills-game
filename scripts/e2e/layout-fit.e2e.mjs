@@ -86,7 +86,7 @@ export const settle = (page) =>
   });
 
 /** Every problem on the screen as it is now, inside `scope` and outside `skip`. */
-const audit = (page, scope, skip) =>
+export const audit = (page, scope, skip) =>
   page.evaluate(
     async ({ scope, skip, MIN_TAP, MIN_TEXT }) => {
       const vw = innerWidth;

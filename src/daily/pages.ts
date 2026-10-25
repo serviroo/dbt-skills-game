@@ -9,7 +9,7 @@ import { allyCard } from './artroom';
 import { artStore } from './artstore';
 import { storyStore } from './storystore';
 import { addDays, cleanName, fieldKey, fieldTimes, isSkillId, normalize, ROW_CAP, uid, type DiaryEntry, type State, type Store } from './store';
-import { btn, copyText, field, h, p, panel, segmented, shareOrSave, toggle, typo } from './ui';
+import { btn, copyText, field, h, p, panel, place, segmented, shareOrSave, toggle, typo } from './ui';
 import { volumeSliders } from '../ui/volume';
 import { STEALTH, STEALTH_LINES } from '../content/stealth-lines';
 import { fishSVG, lurkCatSVG, seaweedSVG, sharkFinSVG, sharkTailSVG } from './art';
@@ -363,8 +363,8 @@ export function diaryScreen(app: App): ScreenOut {
   const entry = s.diary[today] ?? { day: today, emotions: {}, urges: {}, note: '', updatedAt: 0 };
   const draft = { emotions: { ...entry.emotions }, urges: { ...entry.urges }, note: entry.note };
   type Kind = 'emotions' | 'urges';
-  const rowsShown = new Map<string, { kind: Kind; name: string; mount: () => void; busy: () => boolean }>();
-  const touched = new Set<string>();
+  const rowsShown = new Map<string, { kind: Kind; name: string; el: HTMLElement; mount: () => void; busy: () => boolean }>();
+  const touched = new Map<string, { kind: Kind; name: string }>();
   let noteTouched = false;
   const rowEl = (name: string, kind: Kind) => {
     const key = `${kind}:${name}`;
@@ -373,7 +373,7 @@ export function diaryScreen(app: App): ScreenOut {
     const mount = () => {
       const next = segmented(name, [0, 1, 2, 3, 4, 5], draft[kind][name] ?? null, (v) => {
         draft[kind][name] = typeof v === 'number' ? v : null;
-        touched.add(key);
+        touched.set(key, { kind, name });
         touch();
       }, { allowClear: true, cls: 'dq-seg--6' });
       if (seg) seg.replaceWith(next);
@@ -381,20 +381,31 @@ export function diaryScreen(app: App): ScreenOut {
       seg = next;
     };
     mount();
-    rowsShown.set(key, { kind, name, mount, busy: () => !!seg?.contains(document.activeElement) });
+    rowsShown.set(key, { kind, name, el: row, mount, busy: () => !!seg?.contains(document.activeElement) });
     return row;
   };
+  const ROWS = { emotions: 'emotionRows', urges: 'urgeRows' } as const;
+  const heads = { emotions: h('h3', { class: 'dq-label', text: 'Feelings, 0 to 5' }), urges: h('h3', { class: 'dq-label', text: 'Urges, 0 to 5' }) };
+  const boxes = { emotions: h('div', { class: 'dq-drows' }), urges: h('div', { class: 'dq-drows' }) };
+  const renderRows = () => {
+    for (const kind of ['emotions', 'urges'] as const) {
+      const names = s.settings[ROWS[kind]];
+      for (const [key, r] of rowsShown) if (r.kind === kind && !names.includes(r.name)) rowsShown.delete(key);
+      place(boxes[kind], names.map((n) => rowsShown.get(`${kind}:${n}`)?.el ?? rowEl(n, kind)), () => (kind === 'emotions' ? boxes.urges.querySelector('button') : null) ?? note.input);
+      heads[kind].classList.toggle('is-hidden', !names.length);
+      boxes[kind].classList.toggle('is-hidden', !names.length);
+    }
+  };
+  renderRows();
   const writeTouched = () => {
     st.sync();
     const cur = s.diary[today];
     const ft = fieldTimes(cur);
     const at = Math.max(st.now(), Math.max(cur?.updatedAt ?? -Infinity, ...Object.values(ft)) + 1);
     const e: DiaryEntry = { day: today, emotions: { ...cur?.emotions }, urges: { ...cur?.urges }, note: cur?.note ?? '', updatedAt: cur?.updatedAt ?? 0, ft };
-    for (const key of touched) {
-      const r = rowsShown.get(key);
-      if (!r) continue;
-      e[r.kind][r.name] = draft[r.kind][r.name] ?? null;
-      ft[fieldKey(r.kind, r.name)] = at;
+    for (const { kind, name } of touched.values()) {
+      e[kind][name] = draft[kind][name] ?? null;
+      ft[fieldKey(kind, name)] = at;
     }
     if (noteTouched) {
       e.note = draft.note.trim().slice(0, 300);
@@ -504,42 +515,47 @@ export function diaryScreen(app: App): ScreenOut {
     ),
   );
   // rows editor
-  const rowsEditor = h('div', { class: 'dq-rowsed is-hidden' });
-  const renderRowsEd = () => {
-    const mk = (kind: 'emotionRows' | 'urgeRows', label: string) => {
-      const list = s.settings[kind];
-      const cap = ROW_CAP[kind === 'emotionRows' ? 'emotions' : 'urges'];
-      const f = field(`Add a row to ${label}`, { placeholder: 'Row name', hideLabel: true, max: 60 });
-      const full = p(`The card holds ${cap} rows here. Remove one to add another.`, 'dq-small is-hidden');
-      return h(
-        'div',
-        { class: 'dq-rowsed-g' },
-        h('h3', { class: 'dq-label', text: label }),
-        h('ul', { class: 'dq-items' }, list.map((r) => h('li', { class: 'dq-item' }, h('span', { text: r }), h('button', { type: 'button', class: 'dq-icbtn dq-icbtn--sm', 'aria-label': `Remove ${r}`, html: icon('close'), onclick: () => {
-          st.sync();
-          const j = list.indexOf(r);
-          if (j >= 0) list.splice(j, 1);
-          st.touch(kind);
-          st.save();
-          app.go({ name: 'diary' }, { replace: true, quiet: true });
-        } })))),
-        h('div', { class: 'dq-addrow' }, f.el, btn('Add', () => {
-          st.sync();
-          const v = f.input.value.trim();
-          if (!v || list.includes(v)) return f.input.focus();
-          if (list.length >= cap) return full.classList.remove('is-hidden');
-          list.push(v);
-          st.touch(kind);
-          st.save();
-          app.go({ name: 'diary' }, { replace: true, quiet: true });
-        }, { kind: 'quiet', ic: 'plus' })),
-        full,
-      );
+  const rowsGroup = (kind: Kind, label: string) => {
+    const cap = ROW_CAP[kind];
+    const f = field(`Add a row to ${label}`, { placeholder: 'Row name', hideLabel: true, max: 60 });
+    const full = p(`The card holds ${cap} rows here. Remove one to add another.`, 'dq-small is-hidden');
+    const items = h('ul', { class: 'dq-items' });
+    const shown = new Map<string, HTMLElement>();
+    const item = (r: string) => h('li', { class: 'dq-item' }, h('span', { text: r }), h('button', { type: 'button', class: 'dq-icbtn dq-icbtn--sm', 'aria-label': `Remove ${r}`, html: icon('close'), onclick: () => remove(r) }));
+    const render = () => {
+      const list = s.settings[ROWS[kind]];
+      for (const r of [...shown.keys()]) if (!list.includes(r)) shown.delete(r);
+      for (const r of list) if (!shown.has(r)) shown.set(r, item(r));
+      place(items, list.map((r) => shown.get(r)!), () => f.input);
+      if (list.length < cap) full.classList.add('is-hidden');
     };
-    rowsEditor.replaceChildren(p('Rename by removing and adding. Use private words if you like. Past entries keep their rows.', 'dq-small'), mk('emotionRows', 'Feelings'), mk('urgeRows', 'Urges'));
+    const remove = (r: string) => {
+      st.sync();
+      const list = s.settings[ROWS[kind]];
+      const j = list.indexOf(r);
+      if (j >= 0) list.splice(j, 1);
+      st.touch(ROWS[kind]);
+      st.save();
+      const left = items.querySelectorAll<HTMLElement>('button');
+      (left[Math.min(Math.max(j, 0), left.length - 1)] ?? f.input).focus();
+    };
+    const add = () => {
+      st.sync();
+      const list = s.settings[ROWS[kind]];
+      const v = f.input.value.trim();
+      if (!v || list.includes(v)) return f.input.focus();
+      if (list.length >= cap) return full.classList.remove('is-hidden');
+      list.push(v);
+      st.touch(ROWS[kind]);
+      st.save();
+      f.input.value = '';
+      f.input.focus();
+    };
+    render();
+    return { render, el: h('div', { class: 'dq-rowsed-g' }, h('h3', { class: 'dq-label', text: label }), items, h('div', { class: 'dq-addrow' }, f.el, btn('Add', add, { kind: 'quiet', ic: 'plus' })), full) };
   };
-  renderRowsEd();
-  const urgeRows = rowsFor(s, 'urges', [today]);
+  const groups = [rowsGroup('emotions', 'Feelings'), rowsGroup('urges', 'Urges')];
+  const rowsEditor = h('div', { class: 'dq-rowsed is-hidden' }, p('Rename by removing and adding. Use private words if you like. Past entries keep their rows.', 'dq-small'), groups.map((g) => g.el));
   const el = h(
     'div',
     { class: 'dq-page dq-diary' },
@@ -549,10 +565,10 @@ export function diaryScreen(app: App): ScreenOut {
       { class: 'dq-diary-grid' },
       panel(
         { title: dayLabel(today), ic: icon('diary'), cls: 'dq-today' },
-        h('h3', { class: 'dq-label', text: 'Feelings, 0 to 5' }),
-        h('div', { class: 'dq-drows' }, rowsFor(s, 'emotions', [today]).map((r) => rowEl(r, 'emotions'))),
-        urgeRows.length ? h('h3', { class: 'dq-label', text: 'Urges, 0 to 5' }) : null,
-        h('div', { class: 'dq-drows' }, urgeRows.map((r) => rowEl(r, 'urges'))),
+        heads.emotions,
+        boxes.emotions,
+        heads.urges,
+        boxes.urges,
         h('h3', { class: 'dq-label', text: 'Skills today' }),
         used.length
           ? h('ul', { class: 'dq-skillsused' }, used.map((id) => h('li', {}, h('span', { text: typo(`${SKILL[id].sl} (${SKILL[id].real})`) }), h('span', { class: 'dq-code', text: codes[id] === 5 ? 'helped' : codes[id] === 4 ? "didn't help this time" : 'practised' }))))
@@ -565,6 +581,8 @@ export function diaryScreen(app: App): ScreenOut {
     ),
   );
   const off = st.onChange(() => {
+    renderRows();
+    groups.forEach((g) => g.render());
     const cur = s.diary[today];
     for (const [key, r] of rowsShown) {
       if (touched.has(key) || r.busy()) continue;
