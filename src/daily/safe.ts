@@ -243,19 +243,20 @@ export function safeScreen(app: App, route: Route): ScreenOut {
       }
       case 'talk': {
         const region = regionOf(app);
+        const action = (l: CrisisLine['links'][number], noteId?: string) =>
+          h('a', { class: 'dq-btn dq-btn--quiet dq-res-a', href: l.href.startsWith('sms:') ? smsHref(l.href.slice(4), l.body) : telHref(l.href.slice(4)), 'aria-describedby': noteId, html: `<span class="dq-btn-ic">${icon(l.href.startsWith('tel:') ? 'phone' : 'text')}</span><span>${l.label}</span>` });
+        const noted = (line: CrisisLine) =>
+          line.links.map((l) => {
+            const id = l.note ? `dq-res-note-${uid()}` : undefined;
+            return h('div', { class: 'dq-res-act' }, action(l, id), l.note ? h('p', { id, class: 'dq-res-note', text: typo(l.note) }) : null);
+          });
         const row = (line: CrisisLine, first = false) =>
           h(
             'li',
             { class: `dq-res ${first ? 'is-first' : ''}` },
             h('div', { class: 'dq-res-n', text: line.name }),
             h('p', { class: 'dq-res-how', text: typo(line.how) }),
-            h(
-              'div',
-              { class: 'dq-res-acts' },
-              line.links.map((l) =>
-                h('a', { class: 'dq-btn dq-btn--quiet dq-res-a', href: l.href.startsWith('sms:') ? smsHref(l.href.slice(4), l.body) : telHref(l.href.slice(4)), html: `<span class="dq-btn-ic">${icon(l.href.startsWith('tel:') ? 'phone' : 'text')}</span><span>${l.label}</span>` }),
-              ),
-            ),
+            line.links.some((l) => l.note) ? h('div', { class: 'dq-res-acts dq-res-acts--notes' }, noted(line)) : h('div', { class: 'dq-res-acts' }, line.links.map((l) => action(l))),
           );
         const rows = region.lines.map((line) => row(line));
         if (region.emergency.length) {
