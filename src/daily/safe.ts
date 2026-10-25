@@ -88,6 +88,10 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   const foot = h('div', { class: 'dq-sz-foot' }, talkLink);
   const el = h('div', { class: 'dq-safezone' }, h('h1', { class: 'dq-sr', text: 'Safe Zone' }), box, foot);
   applyLight();
+  // the foot is pinned over the bottom of the page: its height, as it wraps, turns or hides on Talk, is how far above
+  // the bottom a scroll or focus stops (scroll-padding in daily.css)
+  const footFit = new ResizeObserver(() => app.root.style.setProperty('--sz-foot', `${foot.offsetHeight}px`));
+  footFit.observe(foot, { box: 'border-box' });
 
   const nextOf = (at: At) => FLOW[Math.min(FLOW.length - 1, FLOW.indexOf(at) + 1)];
   const clear = () => stops.splice(0).forEach((f) => f());
@@ -95,7 +99,6 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   const swap = (at: At, lead: (Node | null)[], ...kids: (Node | null)[]) => {
     const halves = [h('div', { class: 'dq-sz-lead' }, lead), h('div', { class: 'dq-sz-main' }, kids)];
     body.replaceChildren(...halves);
-    el.dataset.at = at;
     talkLink.classList.toggle('is-hidden', at === 'talk');
     foot.classList.toggle('is-talk', at === 'talk');
     talkLink.classList.toggle('is-strong', higher && at !== 'talk');
@@ -164,13 +167,6 @@ export function safeScreen(app: App, route: Route): ScreenOut {
           visual: 'cold',
           start: 'Start 30 seconds',
           peers: [instead],
-          // on a short phone the countdown starts under the pinned "Talk to someone now": bring it up with "Breathe instead"
-          onStart: () => {
-            const t = tv.el.getBoundingClientRect();
-            const f = foot.getBoundingClientRect();
-            const bottom = f.height && t.left < f.right && t.right > f.left ? f.top : innerHeight;
-            if (t.bottom > bottom) app.root.scrollBy({ top: t.bottom - bottom, behavior: app.reduced() ? 'auto' : 'smooth' });
-          },
           onDone: () => show(nextOf(at)),
         });
         stops.push(tv.stop);
@@ -304,6 +300,8 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     bubbles: [0, 0],
     leave: () => {
       clear();
+      footFit.disconnect();
+      app.root.style.removeProperty('--sz-foot');
       app.root.classList.remove('ca-szlit');
     },
     after: () => show((r.at as At) ?? 'start'),

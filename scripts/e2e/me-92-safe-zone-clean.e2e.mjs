@@ -509,7 +509,7 @@ async function everyScreen(h, viewport, { insets } = {}) {
         if (grouped.length !== flat.length || moved.length) failed.push(`${label}: grouping the heading moved ${moved.length} of ${grouped.length} boxes: ${moved.slice(0, 3).join(' | ')}`);
       }
       if (at === 'cold') {
-        // once Start is tapped, the countdown and "Breathe instead" are on screen together (SAFE-02)
+        // once Start is tapped, the countdown and "Breathe instead" are on screen together (principle 11)
         await page.getByRole('button', { name: 'Start 30 seconds', exact: true }).click();
         await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
         const running = '.dq-timer-num, .dq-timer .dq-btn';
@@ -569,31 +569,43 @@ export const scenarios = {
     const failed = [...(await everyScreen(h, TALL)), ...(await everyScreen(h, MID)), ...(await everyScreen(h, SMALL))];
     h.expect(!failed.length, failed.join('\n'));
   },
-  // SAFE-02: "Breathe instead" goes straight to breathing, whose Next then skips past cool water; the quiet Next skips too
+  // principle 11: "Breathe instead" goes straight to breathing, whose Next then skips past cool water; the quiet Next
+  // skips too. Each screen is told apart by the heading the player sees.
   'safe-zone-cold-breathe-instead': async (h) => {
     const { ctx, page, errors } = await boot(h, { save: returning(), reduced: true });
     const c = step();
-    const at = () => page.evaluate(() => document.querySelector('.dq-safezone')?.dataset.at);
+    await page.evaluate(async () => {
+      const { SAFE } = await import('/src/content/dbt.ts');
+      const { typo } = await import('/src/daily/ui.ts');
+      const by = new Map([[SAFE.breathe.title, 'breathe'], [SAFE.squeeze.title, 'squeeze'], [SAFE.cold.title, 'cold'], [SAFE.check, 'check']].map(([t, at]) => [typo(t), at]));
+      window.__me92at = () => {
+        const t = document.querySelector('.dq-sz-body [data-focus]')?.textContent ?? '';
+        return by.get(t) ?? t;
+      };
+    });
+    const at = () => page.evaluate(() => window.__me92at());
+    const reach = (want, timeout) => page.waitForFunction((w) => window.__me92at() === w, want, { timeout });
     const tap = async (name, want) => {
       await page.getByRole('button', { name, exact: true }).click({ timeout: 3000 });
-      await page.waitForFunction((w) => document.querySelector('.dq-safezone')?.dataset.at === w, want, { timeout: 3000 }).catch(() => {});
+      await reach(want, 3000).catch(() => {});
       return at();
+    };
+    const open = async (to) => {
+      await page.evaluate((to) => window.__daily.go({ name: 'safe', at: to }), to);
+      await reach(to);
     };
     try {
       await page.locator('header .dq-safe').click();
       for (const start of [true, false]) {
         const tag = start ? 'after Start' : 'before Start';
-        await page.evaluate(() => window.__daily.go({ name: 'safe', at: 'cold' }));
-        await page.waitForFunction(() => document.querySelector('.dq-safezone')?.dataset.at === 'cold');
+        await open('cold');
         if (start) await page.getByRole('button', { name: 'Start 30 seconds', exact: true }).click();
         c.ok((await tap('Breathe instead', 'breathe')) === 'breathe', `${tag}: "Breathe instead" did not open breathing (at ${await at()})`);
         c.ok((await tap('Next', 'check')) === 'check', `${tag}: Next after breathing instead went to ${await at()}, not past cool water`);
       }
-      await page.evaluate(() => window.__daily.go({ name: 'safe', at: 'cold' }));
-      await page.waitForFunction(() => document.querySelector('.dq-safezone')?.dataset.at === 'cold');
+      await open('cold');
       c.ok((await tap('Next', 'check')) === 'check', `cold's own Next went to ${await at()}`);
-      await page.evaluate(() => window.__daily.go({ name: 'safe', at: 'breathe' }));
-      await page.waitForFunction(() => document.querySelector('.dq-safezone')?.dataset.at === 'breathe');
+      await open('breathe');
       c.ok((await tap('Next', 'squeeze')) === 'squeeze', `breathing reached the usual way went to ${await at()}, not squeeze`);
       c.ok(!errors.length, errors.join(' | '));
       c.end();

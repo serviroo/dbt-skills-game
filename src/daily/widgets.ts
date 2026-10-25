@@ -184,8 +184,11 @@ function frost() {
   return g;
 }
 
-/** Countdown with an optional visual. Waits for a tap when `start` is given. */
-export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; start?: string; extend?: number; big?: string; extra?: HTMLElement[]; peers?: HTMLElement[]; onStart?: () => void; onDone: () => void }) {
+/**
+ * Countdown with an optional visual. Waits for a tap when `start` is given; that tap brings `reveal` (the countdown
+ * unless the caller names something further down) into view if it isn't, stopping clear of anything pinned.
+ */
+export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; start?: string; extend?: number; big?: string; extra?: HTMLElement[]; peers?: HTMLElement[]; reveal?: HTMLElement; onStart?: () => void; onDone: () => void }) {
   let dur = opts.seconds;
   const visual = opts.visual ?? 'ring';
   const wide = visual === 'wave';
@@ -309,7 +312,11 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
     opts.onStart?.();
     stop = onFrame(render);
   };
-  if (opts.start) actions.append(btn(opts.start, begin, { kind: 'primary' }), ...extra);
+  const tapped = () => {
+    begin();
+    (opts.reveal ?? stageEl).scrollIntoView({ block: 'nearest', behavior: ctx.reduced() ? 'auto' : 'smooth' });
+  };
+  if (opts.start) actions.append(btn(opts.start, tapped, { kind: 'primary' }), ...extra);
   else begin();
   render(now());
   return { el, stop: () => stop?.(), begin, started: () => t0 >= 0 };

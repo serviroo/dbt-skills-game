@@ -247,11 +247,10 @@ export function skillScreen(app: App, route: Route): ScreenOut {
           start: s.start,
           extend: s.extend,
           peers,
+          // with choices beside Start, Next sits below the countdown and has to show too
+          reveal: peers.length ? nextBtn : undefined,
           big: s.big ? tx(s.big, answers) : undefined,
-          onStart: () => {
-            if (s.dim) el.classList.add('is-dim');
-            if (peers.length) nextBtn.scrollIntoView({ block: 'nearest', behavior: app.reduced() ? 'auto' : 'smooth' });
-          },
+          onStart: s.dim ? () => el.classList.add('is-dim') : undefined,
           onDone: () => {
             el.classList.remove('is-dim');
             nextBtn.classList.remove('dq-btn--quiet');

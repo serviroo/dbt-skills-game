@@ -4,6 +4,9 @@
 //   cut-off     a visible element or line of text reaches past the left or right edge of the screen (parts hidden
 //               inside a box that clips or scrolls them don't count)
 //   tap         a button, link or input smaller than 44x44 px whose taps don't land on it across a 44x44 px area
+//   covered     the middle of a button, link or input sits under something pinned (fixed or sticky, like the top bar or
+//               the Safe Zone's "Talk to someone now") that it isn't part of: as the screen opens, and once it is
+//               scrolled into view the way focus brings it there, coming from the top of the page and from the bottom
 //   text        body text under 16 px: any visible run of four or more words, and the text in every field
 //   hidden      on a phone held sideways, a label the screen lists under `shown` is visually hidden
 //   page        the drawing page the screen lists under `page` is under 180 px tall
@@ -11,11 +14,12 @@
 //               past the edge of the screen
 // A screen can list more routes to check at each size under `also`, and `clear` draws a line and checks the screen
 // again with the Clear question open. `saved` then keeps the page and taps Save on the first route.
-// The Safe Zone and the Save Crystal panel are left out. Screens in ENFORCED fail the run; every other screen passes
-// and lists its problems on stdout and under `result` in report.json, as the todo list.
+// The Safe Zone is checked screen by screen, at every phone size either way up and on a desktop. The Save Crystal panel
+// is left out. Screens in ENFORCED fail the run; every other screen passes and lists its problems on stdout and under
+// `result` in report.json, as the todo list.
 import { fullSave, seedStores } from './me-91-final-save-ids.e2e.mjs';
 
-const ENFORCED = ['library', 'draw', 'skill', 'home', 'diary', 'night-watch', 'wardrobe', 'art', 'stories', 'moment', 'write', 'settings', 'shadows'];
+const ENFORCED = ['library', 'draw', 'skill', 'home', 'diary', 'night-watch', 'wardrobe', 'art', 'stories', 'moment', 'write', 'settings', 'shadows', 'safe-zone'];
 
 const SIZES = [
   { width: 390, height: 844 },
@@ -26,7 +30,7 @@ const MIN_TAP = 44;
 const MIN_TEXT = 16;
 const MIN_PAGE = 180;
 export const PAGE = ['.dq-top', '#dq-main'];
-export const SKIP = ['.dq-safe', '.dq-safezone', '.pwa-hint-layer', '.dq-panel:has(input[type=file])'];
+export const SKIP = ['.dq-safe', '.pwa-hint-layer', '.dq-panel:has(input[type=file])'];
 // one skill walked from its intro to the thanks at the end
 export const WALK = 'check-facts';
 
@@ -44,6 +48,14 @@ export const SCREENS = {
   write: { route: { name: 'write', id: 'tale-1' } },
   settings: { route: { name: 'settings' }, skip: ['.w2-wardrobe-p'] },
   shadows: { route: { name: 'shadows' }, skip: ['.w2-roster'] },
+};
+
+// every Safe Zone screen in the order the player meets them, each opened on its own
+const SAFE_AT = ['start', 'breathe', 'squeeze', 'cold', 'check', 'stop', 'reasons', 'comfort', 'people', 'talk', 'close'];
+const SAFE_ZONE = {
+  route: { name: 'safe', at: SAFE_AT[0] },
+  also: SAFE_AT.slice(1).map((at) => ({ at, route: { name: 'safe', at } })),
+  sizes: [{ width: 375, height: 667 }, { width: 667, height: 375 }, { width: 568, height: 320 }, { width: 1440, height: 900 }],
 };
 
 /** Opens Home on the full save. `o.edit(save)` changes the save first; `o.media` is emulated from the reload on. */
@@ -156,7 +168,7 @@ const audit = (page, scope, skip) =>
         const r = el.getBoundingClientRect();
         return el.checkVisibility({ checkVisibilityCSS: true }) && getComputedStyle(el).pointerEvents !== 'none' && r.width > 2 && r.height > 2;
       };
-      const scrolled = new Map();
+      const controls = [];
       for (const root of roots) {
         for (const c of [root, ...root.querySelectorAll(sel)]) {
           if (!c.matches(sel) || skipped(c) || c.parentElement?.closest(sel)) continue;
@@ -165,16 +177,48 @@ const audit = (page, scope, skip) =>
           if (!parts.length) continue;
           const area = (e) => e.getBoundingClientRect().width * e.getBoundingClientRect().height;
           const anchor = parts.reduce((a, b) => (area(b) > area(a) ? b : a));
-          for (let p = anchor.parentElement; p; p = p.parentElement) if (!scrolled.has(p)) scrolled.set(p, [p.scrollLeft, p.scrollTop]);
-          anchor.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
-          if (parts.some((e) => e.getBoundingClientRect().width >= MIN_TAP - 0.5 && e.getBoundingClientRect().height >= MIN_TAP - 0.5)) continue;
-          const r = anchor.getBoundingClientRect();
-          const w = Math.max(MIN_TAP, r.width) / 2 - 1;
-          const hh = Math.max(MIN_TAP, r.height) / 2 - 1;
-          const [cx, cy] = [r.left + r.width / 2, r.top + r.height / 2];
           const mine = (n) => !!n && (c.contains(n) || labels.some((l) => l.contains(n)));
-          const misses = [[-w, -hh], [0, -hh], [w, -hh], [-w, 0], [w, 0], [-w, hh], [0, hh], [w, hh]].filter(([dx, dy]) => !mine(document.elementFromPoint(cx + dx, cy + dy)));
-          if (misses.length) found.push({ kind: 'tap', what: name(shown(c) ? c : anchor), detail: `${Math.round(r.width)}x${Math.round(r.height)} px` });
+          controls.push({ c, parts, anchor, mine, what: name(shown(c) ? c : anchor) });
+        }
+      }
+      // the pinned box (fixed or sticky, inside the page's frame) that takes a tap on the control's middle instead of it
+      const pinnedOver = ({ c, anchor, mine }) => {
+        const r = anchor.getBoundingClientRect();
+        const [x, y] = [r.left + r.width / 2, r.top + r.height / 2];
+        if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return null;
+        const hit = document.elementFromPoint(x, y);
+        if (!hit || mine(hit)) return null;
+        for (let p = hit; p && !frame.has(p); p = p.parentElement) if (/^(fixed|sticky)$/.test(getComputedStyle(p).position)) return p.contains(c) ? null : p;
+        return null;
+      };
+      const covered = (k, when) => {
+        const pin = pinnedOver(k);
+        if (pin) found.push({ kind: 'covered', what: k.what, detail: `under ${name(pin)}, ${when}` });
+      };
+      for (const k of controls) covered(k, 'as the screen opens');
+      const scrolled = new Map();
+      const keep = (e) => {
+        for (let p = e.parentElement; p; p = p.parentElement) if (!scrolled.has(p)) scrolled.set(p, [p.scrollLeft, p.scrollTop]);
+      };
+      for (const { c, parts, anchor, mine, what } of controls) {
+        keep(anchor);
+        anchor.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+        if (parts.some((e) => e.getBoundingClientRect().width >= MIN_TAP - 0.5 && e.getBoundingClientRect().height >= MIN_TAP - 0.5)) continue;
+        const r = anchor.getBoundingClientRect();
+        const w = Math.max(MIN_TAP, r.width) / 2 - 1;
+        const hh = Math.max(MIN_TAP, r.height) / 2 - 1;
+        const [cx, cy] = [r.left + r.width / 2, r.top + r.height / 2];
+        const misses = [[-w, -hh], [0, -hh], [w, -hh], [-w, 0], [w, 0], [-w, hh], [0, hh], [w, hh]].filter(([dx, dy]) => !mine(document.elementFromPoint(cx + dx, cy + dy)));
+        if (misses.length) found.push({ kind: 'tap', what, detail: `${Math.round(r.width)}x${Math.round(r.height)} px` });
+      }
+      // focus scrolls a control the least it can to show it, which is what scrollIntoView's nearest does
+      const page = document.querySelector('.dq');
+      for (const k of controls) {
+        keep(k.anchor);
+        for (const [top, when] of [[0, 'scrolled to from above'], [page.scrollHeight, 'scrolled to from below']]) {
+          page.scrollTo({ top, behavior: 'instant' });
+          k.anchor.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+          covered(k, when);
         }
       }
       for (const [p, [l, t]] of scrolled) p.scrollTo({ left: l, top: t, behavior: 'instant' });
@@ -288,4 +332,4 @@ function scenario(id, spec) {
   };
 }
 
-export const scenarios = Object.fromEntries(Object.entries(SCREENS).map(([id, spec]) => [`layout-fit-${id}`, scenario(id, spec)]));
+export const scenarios = Object.fromEntries(Object.entries({ ...SCREENS, 'safe-zone': SAFE_ZONE }).map(([id, spec]) => [`layout-fit-${id}`, scenario(id, spec)]));

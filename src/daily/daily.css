@@ -1922,6 +1922,7 @@ textarea.dq-input {
 
 /* ---------- Safe Zone ---------- */
 .dq-safezone {
+  --pad: 24px;
   max-width: 600px;
   margin: 6px auto 0;
   --chrome: calc(112px + var(--safe-top) + var(--safe-bottom));
@@ -1930,7 +1931,6 @@ textarea.dq-input {
   flex-direction: column;
 }
 .dq-sz {
-  --pad: 24px;
   flex: 1 0 auto;
   background: linear-gradient(180deg, rgba(8, 18, 32, 0.9), rgba(5, 12, 22, 0.92));
 }
@@ -2019,6 +2019,11 @@ textarea.dq-input {
   justify-content: center;
   padding: 14px 0 calc(var(--safe-bottom) + 14px);
   background: linear-gradient(0deg, rgba(7, 8, 15, 0.97) 60%, rgba(7, 8, 15, 0));
+}
+/* the foot covers the bottom of the scroller, so a scroll or focus that brings something into view stops above it;
+   safe.ts keeps --sz-foot at the foot's height */
+.dq[data-screen='safe'] {
+  scroll-padding-bottom: var(--sz-foot, 0px);
 }
 .dq-sz-talk {
   display: inline-flex;
@@ -2847,7 +2852,7 @@ textarea.dq-input {
   height: 100%;
 }
 @media (max-width: 759px) {
-  .dq-sz {
+  .dq-safezone {
     --pad: 20px;
   }
   .dq-sz .dq-ring-stage,
@@ -2860,22 +2865,16 @@ textarea.dq-input {
   display: contents;
 }
 /* a phone held sideways: the heading and its words sit beside what the player does, which starts at the top and runs
-   to the bottom of the screen, so the first call button or choice shows without scrolling */
+   to the bottom of the screen, so the first call button or choice shows without scrolling. The words take two parts of
+   the width and the choices three, on every screen. */
 @media (orientation: landscape) and (max-height: 500px) and (min-width: 540px) {
   .dq-safezone {
-    --cols: minmax(0, 1fr) minmax(0, 1fr);
-    --lead-share: 50%;
     margin-top: 0;
     max-width: 900px;
   }
-  /* the cold-water caution and its two choices need the wider column to sit together on screen */
-  .dq-safezone[data-at='cold'] {
-    --cols: minmax(0, 2fr) minmax(0, 3fr);
-    --lead-share: 40%;
-  }
   .dq-sz {
     display: grid;
-    grid-template-columns: var(--cols);
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
     grid-template-rows: auto 1fr;
     column-gap: var(--pad);
     padding-top: 12px;
@@ -2904,11 +2903,26 @@ textarea.dq-input {
   .dq-sz .dq-addrow .dq-field {
     flex-basis: 100%;
   }
-  /* "Talk to someone now" pins under the heading's column; 12px below it keeps it on screen while a screen slides in */
+  /* "Talk to someone now" pins under the words, from the panel's edge to where the choices start (its 1px border, the
+     padding, the words' two fifths and the gap), so it never covers a choice; 12px below it keeps it on screen while a
+     screen slides in */
   .dq-sz-foot {
     align-self: flex-start;
-    width: var(--lead-share);
+    width: calc(1px + 2 * var(--pad) + (100% - 2px - 3 * var(--pad)) * 2 / 5);
     padding: 4px 0 calc(var(--safe-bottom) + 12px);
+  }
+  /* one line in the narrowest foot (219px at 540px wide), lit up or not */
+  .dq-sz-talk {
+    gap: 8px;
+    padding: 0 6px;
+    white-space: nowrap;
+  }
+  .dq-sz-talk.is-strong {
+    padding: 0 12px;
+  }
+  /* so the foot covers nothing a scroll or focus brings into view: the choices run past it */
+  .dq[data-screen='safe'] {
+    scroll-padding-bottom: 0;
   }
 }
 .dq-cardbtn .dq-cf-stat {
