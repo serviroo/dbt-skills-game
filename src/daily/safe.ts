@@ -90,8 +90,9 @@ export function safeScreen(app: App, route: Route): ScreenOut {
 
   const nextOf = (at: At) => FLOW[Math.min(FLOW.length - 1, FLOW.indexOf(at) + 1)];
   const clear = () => stops.splice(0).forEach((f) => f());
-  const swap = (at: At, ...kids: (Node | null)[]) => {
-    body.replaceChildren(...kids.filter((k): k is Node => !!k));
+  /** `lead` is the screen's heading and words, `kids` what the player does; a phone held sideways shows them side by side. */
+  const swap = (at: At, lead: (Node | null)[], ...kids: (Node | null)[]) => {
+    body.replaceChildren(h('div', { class: 'dq-sz-lead' }, lead), h('div', { class: 'dq-sz-main' }, kids));
     talkLink.classList.toggle('is-hidden', at === 'talk');
     talkLink.classList.toggle('is-strong', higher && at !== 'talk');
     animate(body, [{ opacity: 0 }, { opacity: 1 }], { duration: app.reduced() ? 160 : 520, easing: 'ease-out' });
@@ -116,8 +117,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     }, { kind: 'quiet' }));
     return swap(
       at,
-      h3(title),
-      text ? p(text, 'dq-text') : null,
+      [h3(title), text ? p(text, 'dq-text') : null],
       items.length ? list : p(empty, 'dq-text dq-sz-empty'),
       add,
       h('div', { class: 'dq-actions dq-actions--stack' }, nextBtn(at), btn('Add one', () => {
@@ -133,7 +133,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
       case 'start':
         return swap(
           at,
-          h('div', { class: 'dq-sz-hello' }, SAFE.intro.map((l, i) => h(i ? 'p' : 'h2', { class: i ? 'dq-text' : 'dq-sz-t', 'data-focus': i ? null : '', text: typo(l) }))),
+          [h('div', { class: 'dq-sz-hello' }, SAFE.intro.map((l, i) => h(i ? 'p' : 'h2', { class: i ? 'dq-text' : 'dq-sz-t', 'data-focus': i ? null : '', text: typo(l) })))],
           h(
             'div',
             { class: 'dq-actions dq-actions--stack' },
@@ -149,24 +149,24 @@ export function safeScreen(app: App, route: Route): ScreenOut {
       case 'breathe': {
         const ring = breathRing(ctx, { inhale: 4, exhale: 6, rounds: 6 });
         stops.push(ring.stop);
-        return swap(at, h3(SAFE.breathe.title), p(SAFE.breathe.text, 'dq-text'), ring.el, h('div', { class: 'dq-actions dq-actions--center' }, nextBtn(at, 'Next', 'quiet')));
+        return swap(at, [h3(SAFE.breathe.title), p(SAFE.breathe.text, 'dq-text')], ring.el, h('div', { class: 'dq-actions dq-actions--center' }, nextBtn(at, 'Next', 'quiet')));
       }
       case 'cold': {
         const skip = btn("Can't right now", () => show(nextOf(at)), { kind: 'quiet' });
         const tv = timerView(ctx, { seconds: 30, visual: 'cold', start: 'Start 30 seconds', extra: [skip], onDone: () => show(nextOf(at)) });
         stops.push(tv.stop);
-        return swap(at, h3(SAFE.cold.title), p(SAFE.cold.text, 'dq-text'), p(SAFE.cold.small, 'dq-small'), tv.el);
+        return swap(at, [h3(SAFE.cold.title), p(SAFE.cold.text, 'dq-text')], p(SAFE.cold.small, 'dq-small'), tv.el);
       }
       case 'squeeze': {
         const nb = nextBtn(at, 'Next', 'quiet');
         const v = pmrView(ctx, { rounds: 3, onDone: () => nb.classList.replace('dq-btn--quiet', 'dq-btn--primary') });
         stops.push(v.stop);
-        return swap(at, h3(SAFE.squeeze.title), p(SAFE.squeeze.text, 'dq-text'), v.el, h('div', { class: 'dq-actions dq-actions--center' }, nb));
+        return swap(at, [h3(SAFE.squeeze.title), p(SAFE.squeeze.text, 'dq-text')], v.el, h('div', { class: 'dq-actions dq-actions--center' }, nb));
       }
       case 'check':
         return swap(
           at,
-          h3(SAFE.check),
+          [h3(SAFE.check)],
           h(
             'div',
             { class: 'dq-opts dq-opts--stack' },
@@ -195,7 +195,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
         const nb = nextBtn(at, 'Next', 'quiet');
         lines[0].classList.remove('is-hidden');
         k = 1;
-        return swap(at, h3('Stop. Step back. Notice. Next step.'), h('ol', { class: 'dq-sz-stops' }, lines), h('div', { class: 'dq-actions dq-actions--stack' }, more, nb));
+        return swap(at, [h3('Stop. Step back. Notice. Next step.')], h('ol', { class: 'dq-sz-stops' }, lines), h('div', { class: 'dq-actions dq-actions--stack' }, more, nb));
       }
       case 'reasons':
         return listScreen('reasons', SAFE.reasons.title, SAFE.reasons.text, SAFE.reasons.empty);
@@ -228,8 +228,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
         }, { kind: 'quiet' })));
         return swap(
           at,
-          h3(SAFE.people.title),
-          p(SAFE.people.text, 'dq-text'),
+          [h3(SAFE.people.title), p(SAFE.people.text, 'dq-text')],
           ppl.length ? list : p(SAFE.people.empty, 'dq-text dq-sz-empty'),
           add,
           h('div', { class: 'dq-actions dq-actions--stack' }, nextBtn(at), btn('Add a person', () => {
@@ -262,9 +261,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
         const dangerText = region.emergency.length ? SAFE.talk.danger.replace('{num}', region.emergency.join(' or ')) : SAFE.talk.dangerElsewhere;
         return swap(
           at,
-          h3(SAFE.talk.title),
-          danger || !region.emergency.length ? p(dangerText, `dq-text ${danger ? 'dq-sz-danger' : ''}`) : null,
-          p(SAFE.talk.text, 'dq-text'),
+          [h3(SAFE.talk.title), danger || !region.emergency.length ? p(dangerText, `dq-text ${danger ? 'dq-sz-danger' : ''}`) : null, p(SAFE.talk.text, 'dq-text')],
           rows.length ? h('ul', { class: 'dq-res-list' }, rows) : null,
           h('p', { class: 'dq-small' }, h('a', { href: 'https://findahelpline.com', target: '_blank', rel: 'noopener noreferrer', class: 'dq-a', text: 'findahelpline.com' }), ` ${SAFE.talk.elsewhere}`),
           regionPicker(app, () => show('talk')),
@@ -274,7 +271,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
       case 'close':
         return swap(
           at,
-          h('div', { class: 'dq-sz-hello' }, h('h2', { class: 'dq-sz-t', 'data-focus': '', text: typo(SAFE.close[0]) }), p(SAFE.close[1], 'dq-text')),
+          [h('div', { class: 'dq-sz-hello' }, h('h2', { class: 'dq-sz-t', 'data-focus': '', text: typo(SAFE.close[0]) }), p(SAFE.close[1], 'dq-text'))],
           h('div', { class: 'dq-actions dq-actions--stack' }, btn('Stay a little longer', () => show('breathe'), { kind: 'quiet' }), btn('Back to the Lantern', () => app.go({ name: 'hub' }), { kind: 'primary' })),
         );
     }
