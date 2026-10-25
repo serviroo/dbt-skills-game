@@ -1,7 +1,6 @@
 import './install-hint.css';
 import { DISMISSED, LanternWindow, windowSounds } from '../ui/lantern-window';
-import { animate, el, finished, uiNow, wait } from '../ui/anim';
-import { params } from '../core/params';
+import { el, waitPage } from '../ui/anim';
 import { INSTALL_HINT_KEY } from '../core/stored-names';
 
 const SHARE = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 9.5H6.8a1.3 1.3 0 0 0-1.3 1.3v8.4a1.3 1.3 0 0 0 1.3 1.3h10.4a1.3 1.3 0 0 0 1.3-1.3v-8.4a1.3 1.3 0 0 0-1.3-1.3h-1.7M12 14.5V3.2M8.4 6.6 12 3l3.6 3.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
@@ -38,22 +37,6 @@ function remember() {
   }
 }
 
-const frame = () => new Promise<number>((r) => requestAnimationFrame(r));
-
-/** True when the UI clock (stage time) is running. The quiet companion pauses the stage, which freezes wait(). */
-async function clockRuns() {
-  if (params.capture) return true;
-  const t0 = uiNow();
-  for (let i = 0; i < 3; i++) await frame();
-  return uiNow() !== t0;
-}
-
-/** Page-clock delay, only for when the stage clock is frozen. */
-async function realWait(sec: number) {
-  const start = performance.now();
-  while (performance.now() - start < sec * 1000) await frame();
-}
-
 let active = false;
 
 /**
@@ -77,9 +60,7 @@ export async function maybeShowInstallHint(opts: { delay?: number; force?: boole
 }
 
 async function show(delay: number, still?: () => boolean) {
-  const live = await clockRuns();
-  const pause = live ? wait : realWait;
-  if (delay) await pause(delay);
+  if (delay) await waitPage(delay);
   if (still && !still()) return false;
 
   let layer = document.querySelector<HTMLDivElement>('.pwa-hint-layer');
@@ -106,9 +87,8 @@ async function show(delay: number, still?: () => boolean) {
   // a hint arrives without a chime; their own tap still answers with one
   const chime = windowSounds.open;
   windowSounds.open = undefined;
-  const opening = win.open();
+  void win.open();
   windowSounds.open = chime;
-  // listen right away: open() ends on a stage-clock wait that never resolves while the stage is paused
   const answered = win.waitForInput();
 
   const onKey = (e: KeyboardEvent) => {
@@ -119,17 +99,6 @@ async function show(delay: number, still?: () => boolean) {
   window.removeEventListener('keydown', onKey);
   if (answer === DISMISSED) return false;
   remember();
-  const closing = win.close();
-  if (live) {
-    await opening;
-    await closing;
-  } else {
-    // the measured collapse still plays on the page clock; finish it here instead of waiting on stage time
-    await realWait(0.19);
-    if (win.root.isConnected) {
-      await finished(animate(win.root, [{ opacity: 1, filter: 'brightness(1.4)' }, { opacity: 0, filter: 'brightness(1)' }], { duration: 140, easing: 'ease-out' }));
-      win.destroy();
-    }
-  }
+  await win.close();
   return true;
 }

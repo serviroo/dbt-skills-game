@@ -79,6 +79,13 @@ export function wait(sec: number) {
   return new Promise<void>((resolve) => waiters.push({ at: clockNow() + sec, resolve }));
 }
 
+/** Resolves when the page clock, the one DOM animations play on, has advanced by `sec`; the stage clock in a capture.
+ * Unlike `wait`, it keeps time while the stage draws slowly (its clock moves at most 0.1 s a frame). */
+export function waitPage(sec: number) {
+  if (params.capture) return wait(sec);
+  return new Promise<void>((resolve) => setTimeout(resolve, sec * 1000));
+}
+
 export function finished(a: Animation) {
   if (params.capture) {
     return new Promise<void>((resolve) => {
