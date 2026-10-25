@@ -115,9 +115,7 @@ export async function runApp(stage: Stage | null) {
     pwaMods[pk]()
       .then((m: any) => {
         m.registerSW?.();
-        return m.requestPersistentStorage?.().then((r: boolean) => {
-          (window as unknown as { __persisted?: boolean }).__persisted = r === true;
-        });
+        return m.requestPersistentStorage?.();
       })
       .catch(() => undefined);
   // the reward card shows the full companion drawing

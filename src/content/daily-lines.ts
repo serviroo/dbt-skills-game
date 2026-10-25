@@ -11,6 +11,17 @@ export const CRYSTAL_COPY = {
   storySkipped: "Some story pages or cards couldn't be added. Keep the Save Crystal file.",
 };
 
+export const KEEP_COPY = {
+  checking: 'Checking with your browser...',
+  granted: "**Your browser agreed to keep these saves** when the device runs low on space. Clearing this site's data still removes them, so a Save Crystal is still worth having.",
+  notGranted: "**Your browser hasn't agreed to keep these saves.** If the device runs low on space, it may clear them. A Save Crystal keeps a copy you hold.",
+  refused: "**Your browser didn't agree this time.** Browsers decide this for themselves, and some agree later on. Your saves are still here. A Save Crystal keeps a copy you hold.",
+  unsupported: "**This browser doesn't say whether it keeps these saves** when the device runs low on space. A Save Crystal keeps a copy you hold.",
+  failed: "**Your browser didn't answer just now.** Your saves are still here. A Save Crystal keeps a copy you hold.",
+  ask: 'Ask browser to keep saves',
+  asking: 'Asking your browser...',
+};
+
 /** One per visit day, in order. A gap never skips ahead or piles up; the next line simply arrives. */
 export const DAILY_GIFTS: string[] = [
   'Login reward: one ordinary day, fully yours.',
