@@ -384,69 +384,111 @@ async function allRoutes(h, { viewport, reduced = false }) {
   h.expect(!failed.length, failed.join('\n'));
 }
 
-// What each Safe Zone screen shows first beside its heading, so it has to be on screen when a phone is held sideways
+// What each Safe Zone screen must show whole on arrival, on any phone either way up: its choices, or the first thing
+// it has. Held sideways the cold-water caution shows too.
 const ACTS = '.dq-actions--stack .dq-btn';
-const FIRST = { start: ACTS, breathe: '.dq-ring-count', squeeze: '.dq-ring-count', cold: '.dq-small', check: '.dq-opt', stop: ACTS, reasons: '.dq-sz-empty', comfort: '.dq-sz-empty', people: '.dq-sz-empty', talk: '.dq-res-a', close: ACTS };
+const shown = (sideways) => ({
+  start: [ACTS, 4],
+  breathe: ['.dq-ring-count', 1],
+  squeeze: ['.dq-ring-count', 1],
+  cold: [sideways ? '.dq-small' : '.dq-sz-t', 1],
+  check: ['.dq-opt', 3],
+  stop: [`.dq-sz-stop:not(.is-hidden), ${ACTS}:first-child`, 2],
+  reasons: ['.dq-sz-list > li:first-child', 1],
+  comfort: ['.dq-sz-list > li:first-child', 1],
+  people: ['.dq-person:first-child', 1],
+  talk: ['.dq-res-list > li:first-child .dq-res-a:first-child', 1],
+  close: [ACTS, 2],
+});
+const listed = (n, k) => Array.from({ length: n }, (_, i) => ({ id: `me92-${k}${i}`, text: `${k} ${i + 1}, a few words long`, at: Date.now() - 86400e3 }));
+const filled = () => JSON.stringify({ ...JSON.parse(returning()), lists: { reasons: listed(3, 'reason'), comfort: listed(3, 'comfort'), activities: [], people: [{ id: 'me92-p1', name: 'Sam', phone: '+1 555 0100', at: Date.now() - 86400e3 }, { id: 'me92-p2', name: 'Robin', phone: '', at: Date.now() - 86400e3 }] } });
+// an iPhone with a notch held sideways (the smallest is 812x375): 47 px each side, 21 px for the home bar
+const NOTCH = { top: 0, left: 47, right: 47, bottom: 21 };
 
 /**
- * Every Safe Zone screen at every size. Held sideways: the heading and the screen's first thing are whole on screen on
- * arrival, clear of the top bar and the pinned foot, "Talk to someone now" stays pinned and tappable, and nothing
- * scrolls sideways. Upright: grouping the heading apart from the rest moves no box at all.
+ * Every Safe Zone screen at one size (ME-127, ME-210). On arrival: what shown() names is whole on screen, clear of the top
+ * bar, the pinned foot and the screen's safe-area insets, and taps land on it; "Talk to someone now" stays pinned and
+ * tappable; every text is at least 20 px and every button, link and picker at least 44 px; nothing scrolls sideways.
+ * With notch insets, the top bar's buttons and the Safe Zone keep clear of them. Held sideways, an opened "Add one" box
+ * keeps the column's width. Upright, grouping the heading apart from the rest moves no box at all.
  */
-async function everyScreen(h, viewport) {
-  const size = `${viewport.width}x${viewport.height}`;
+async function everyScreen(h, viewport, { insets } = {}) {
+  const size = `${viewport.width}x${viewport.height}${insets ? ' with a notch' : ''}`;
   const sideways = viewport.width > viewport.height;
-  const { ctx, page, errors } = await boot(h, { save: returning(), viewport, reduced: true });
+  const { ctx, page, errors } = await boot(h, { save: filled(), viewport, reduced: true });
   const failed = [];
   try {
+    if (insets) {
+      await (await ctx.newCDPSession(page)).send('Emulation.setSafeAreaInsetsOverride', { insets });
+      await page.reload();
+      await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
+    }
     await page.locator('header .dq-safe').click();
     let heading = '';
-    for (const [at, sel] of Object.entries(FIRST)) {
+    for (const [at, [sel, n]] of Object.entries(shown(sideways))) {
       const label = `${size} ${at}`;
       await page.evaluate((at) => window.__daily.go({ name: 'safe', at }), at);
       await page.waitForFunction(([was, sel]) => {
         const t = document.querySelector('.dq-sz-body [data-focus]')?.textContent;
-        return t && t !== was && !!document.querySelector(`.dq-sz-body ${sel}`);
+        return t && t !== was && !!document.querySelector(`.dq-sz-body :is(${sel})`);
       }, [heading, sel]);
       // fonts in and the screen's fade-in done, so the boxes and screenshots are what the player sees
       await page.evaluate(() => Promise.all([document.fonts.ready, ...[...document.querySelectorAll('.dq-sz-body, .dq-sz-body > *')].flatMap((e) => e.getAnimations()).map((a) => a.finished)]));
       heading = await page.locator('.dq-sz-body [data-focus]').textContent();
-      if (sideways) {
-        const got = await page.evaluate((sel) => {
-          const top = document.querySelector('.dq-top').getBoundingClientRect().bottom;
-          const foot = document.querySelector('.dq-sz-foot').getBoundingClientRect().top;
-          const whole = (e) => {
-            const r = e.getBoundingClientRect();
-            return r.left >= 0 && r.right <= innerWidth && r.top >= top - 0.5 && r.bottom <= Math.min(foot, innerHeight) + 0.5;
-          };
-          const first = document.querySelector(`.dq-sz-body ${sel}`);
-          const talk = document.querySelector('.dq-sz-talk:not(.is-hidden)');
-          const t = talk?.getBoundingClientRect();
-          return {
-            first: whole(first),
-            box: Object.values(first.getBoundingClientRect().toJSON()).slice(0, 4).map(Math.round),
-            heading: whole(document.querySelector('.dq-sz-body [data-focus]')),
-            talk: !talk || (t.bottom <= innerHeight && talk.contains(document.elementFromPoint(t.left + t.width / 2, t.top + t.height / 2))),
-            wide: document.documentElement.scrollWidth <= innerWidth,
-          };
-        }, sel);
-        if (!got.first) failed.push(`${label}: ${sel} is at x, y ${got.box.slice(0, 2).join(', ')} (${got.box[2]}x${got.box[3]}), not whole on screen above the pinned foot`);
-        if (!got.heading) failed.push(`${label}: the heading is not whole on screen`);
-        if (!got.talk) failed.push(`${label}: "Talk to someone now" is not pinned and tappable`);
-        if (!got.wide) failed.push(`${label}: the page scrolls sideways`);
-        await h.shot(page, `me92-sideways-${at}-${size}`);
-        if (at === 'reasons') {
-          const add = page.getByRole('button', { name: 'Add one' });
-          await add.evaluate((b) => b.scrollIntoView({ block: 'center' }));
-          await add.click();
-          const row = await page.evaluate(() => {
-            const r = document.querySelector('.dq-sz .dq-addrow');
-            return { row: r.getBoundingClientRect().width, field: r.querySelector('.dq-field').getBoundingClientRect().width };
-          });
-          if (row.field < Math.min(row.row - 1, 240)) failed.push(`${label}: with Add one open the text box is squeezed to ${Math.round(row.field)} of ${Math.round(row.row)} px`);
-          await h.shot(page, `me92-sideways-reasons-add-${size}`);
-        }
-      } else {
+      const got = await page.evaluate(([sel, insets]) => {
+        const left = insets?.left ?? 0;
+        const right = innerWidth - (insets?.right ?? 0);
+        const bottom = innerHeight - (insets?.bottom ?? 0);
+        const top = document.querySelector('.dq-top').getBoundingClientRect().bottom;
+        const name = (e) => (e.getAttribute('aria-label') || e.textContent).trim().replace(/\s+/g, ' ').slice(0, 24);
+        // 4 px in from each corner, clear of the rounded corners; anything pinned over a control takes the tap instead,
+        // and words or a visual must not sit under the pinned foot
+        const off = (e) => {
+          const r = e.getBoundingClientRect();
+          const at = [[r.left + 4, r.top + 4], [r.right - 4, r.top + 4], [r.left + 4, r.bottom - 4], [r.right - 4, r.bottom - 4], [r.left + r.width / 2, r.top + r.height / 2]];
+          const whole = r.left >= left - 0.5 && r.right <= right + 0.5 && r.top >= top - 0.5 && r.bottom <= bottom + 0.5;
+          const f = document.querySelector('.dq-sz-foot').getBoundingClientRect();
+          const clear = e.matches('button, a, select') ? at.every(([x, y]) => e.contains(document.elementFromPoint(x, y))) : !(f.height && r.right > f.left && r.left < f.right && r.bottom > f.top + 0.5);
+          return whole && clear ? null : `${name(e)} at ${[r.left, r.top, r.right, r.bottom].map(Math.round).join(', ')}`;
+        };
+        const shown = [...document.querySelectorAll(`.dq-sz-body :is(${sel})`)];
+        const talk = document.querySelector('.dq-sz-talk:not(.is-hidden)');
+        const t = talk?.getBoundingClientRect();
+        const tap = [...document.querySelectorAll('.dq-safezone :is(button, a[href], select), .dq-top .ca-sz-light')].filter((e) => !e.closest('.is-hidden'));
+        const words = [...document.querySelectorAll('.dq-safezone *')].filter((e) => !e.closest('button, a, select, .dq-chip, .dq-sr, .dq-ring, .dq-timer-stage, .is-hidden') && [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()));
+        const bar = [...document.querySelectorAll('.dq-top button')].filter((b) => b.offsetParent && !b.closest('[hidden], .vol-pop'));
+        const zone = document.querySelector('.dq-safezone').getBoundingClientRect();
+        return {
+          count: shown.length,
+          off: shown.map(off).filter(Boolean),
+          talk: !talk || (t.bottom <= bottom + 0.5 && talk.contains(document.elementFromPoint(t.left + t.width / 2, t.top + t.height / 2))),
+          tiny: tap.map((e) => [name(e), e.getBoundingClientRect()]).filter(([, r]) => r.width < 44 || r.height < 44).map(([t, r]) => `${t} ${Math.round(r.width)}x${Math.round(r.height)}`),
+          small: [...new Set(words.map((e) => [e.textContent.trim().slice(0, 24), parseFloat(getComputedStyle(e).fontSize)]).filter(([, px]) => px < 20).map(([t, px]) => `"${t}" ${px}px`))],
+          bar: bar.map((b) => [name(b) || 'sound', b.getBoundingClientRect()]).filter(([, r]) => r.left < left - 0.5 || r.right > right + 0.5).map(([t, r]) => `${t} at ${Math.round(r.left)}-${Math.round(r.right)}`),
+          zone: zone.left >= left - 0.5 && zone.right <= right + 0.5,
+          wide: document.documentElement.scrollWidth <= innerWidth,
+        };
+      }, [sel, insets]);
+      if (got.count !== n) failed.push(`${label}: found ${got.count} of the ${n} things (${sel}) it should show`);
+      if (got.off.length) failed.push(`${label}: not whole on screen, or covered, on arrival: ${got.off.join('; ')}`);
+      if (!got.talk) failed.push(`${label}: "Talk to someone now" is not pinned and tappable`);
+      if (got.tiny.length) failed.push(`${label}: tap targets under 44 px: ${got.tiny.join(', ')}`);
+      if (got.small.length) failed.push(`${label}: Safe Zone text under 20 px: ${got.small.join(', ')}`);
+      if (got.bar.length) failed.push(`${label}: top bar buttons inside the notch: ${got.bar.join(', ')}`);
+      if (!got.zone) failed.push(`${label}: the Safe Zone runs into the notch`);
+      if (!got.wide) failed.push(`${label}: the page scrolls sideways`);
+      await h.shot(page, `me92-every-${at}-${size.replace(/ /g, '-')}`);
+      if (sideways && at === 'reasons') {
+        const add = page.getByRole('button', { name: 'Add one' });
+        await add.evaluate((b) => b.scrollIntoView({ block: 'center' }));
+        await add.click();
+        const row = await page.evaluate(() => {
+          const r = document.querySelector('.dq-sz .dq-addrow');
+          return { row: r.getBoundingClientRect().width, field: r.querySelector('.dq-field').getBoundingClientRect().width };
+        });
+        if (row.field < Math.min(row.row - 1, 240)) failed.push(`${label}: with Add one open the text box is squeezed to ${Math.round(row.field)} of ${Math.round(row.row)} px`);
+      }
+      if (!sideways && !insets) {
         // live counters (the breathing word and number) are left out: they change while the boxes are read
         const boxes = () => page.evaluate(() => [...document.querySelectorAll('.dq-safezone *')].filter((e) => e instanceof HTMLElement && !e.matches('.dq-sz-lead, .dq-sz-main') && !e.closest('.dq-ring-center, .dq-timer-center')).map((e) => `${e.tagName.toLowerCase()}.${e.className} ${e.offsetLeft},${e.offsetTop},${e.offsetWidth},${e.offsetHeight}`));
         const grouped = await boxes();
@@ -455,6 +497,12 @@ async function everyScreen(h, viewport) {
         const moved = grouped.filter((b, i) => b !== flat[i]);
         if (grouped.length !== flat.length || moved.length) failed.push(`${label}: grouping the heading moved ${moved.length} of ${grouped.length} boxes: ${moved.slice(0, 3).join(' | ')}`);
       }
+    }
+    if (insets) {
+      await page.evaluate(() => window.__daily.go({ name: 'hub' }));
+      await page.locator('.dq-tile').first().waitFor();
+      const bar = await page.evaluate((insets) => [...document.querySelectorAll('.dq-top :is(button, .dq-brand)')].filter((b) => b.offsetParent && !b.closest('.vol-pop')).map((b) => [(b.getAttribute('aria-label') || b.textContent).trim().slice(0, 24), b.getBoundingClientRect()]).filter(([, r]) => r.left < insets.left - 0.5 || r.right > innerWidth - insets.right + 0.5).map(([t, r]) => `${t} at ${Math.round(r.left)}-${Math.round(r.right)}`), insets);
+      if (bar.length) failed.push(`${size} Home: top bar inside the notch: ${bar.join(', ')}`);
     }
     if (errors.length) failed.push(`${size}: ${errors.join(' | ')}`);
   } finally {
@@ -500,6 +548,10 @@ export const scenarios = {
   },
   'safe-zone-every-screen-upright': async (h) => {
     const failed = [...(await everyScreen(h, TALL)), ...(await everyScreen(h, SMALL))];
+    h.expect(!failed.length, failed.join('\n'));
+  },
+  'safe-zone-every-screen-notch': async (h) => {
+    const failed = [...(await everyScreen(h, WIDE, { insets: NOTCH })), ...(await everyScreen(h, { width: 812, height: 375 }, { insets: NOTCH }))];
     h.expect(!failed.length, failed.join('\n'));
   },
 

@@ -40,6 +40,7 @@ export interface ScreenOut {
   title: string;
   mode: 'hub' | 'sub' | 'skill' | 'safe';
   bubbles?: [number, number];
+  tools?: HTMLElement[];
   leave?: () => void;
   after?: () => void;
 }
@@ -389,10 +390,11 @@ export class App {
       left = h('button', { type: 'button', class: 'dq-back', onclick: () => this.go({ name: 'hub' }) }, h('span', { html: icon('close') }), h('span', { text: 'Leave' }));
     else left = h('button', { type: 'button', class: 'dq-back', onclick: () => this.back() }, h('span', { html: icon('back') }), h('span', { text: 'Lantern' }));
     const mid = h('span', { class: 'dq-sr', text: typo(out.title) });
-    let right: HTMLElement = out.mode === 'safe' ? h('span', { class: 'dq-top-spacer' }) : safeBtn;
+    const tools = out.tools ?? [];
+    let right: HTMLElement = out.mode === 'safe' ? (tools.length ? h('div', { class: 'dq-top-end' }, tools) : h('span', { class: 'dq-top-spacer' })) : safeBtn;
     if (this.volBtn) {
       this.volBtn.close();
-      right = out.mode === 'safe' ? h('div', { class: 'dq-top-end' }, this.volBtn) : h('div', { class: 'dq-top-end' }, this.volBtn, safeBtn);
+      right = out.mode === 'safe' ? h('div', { class: 'dq-top-end' }, tools, this.volBtn) : h('div', { class: 'dq-top-end' }, tools, this.volBtn, safeBtn);
     }
     this.top.replaceChildren(left, mid, right);
   }

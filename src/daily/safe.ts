@@ -85,7 +85,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     }
     applyLight();
   });
-  const foot = h('div', { class: 'dq-sz-foot' }, talkLink, lightBtn);
+  const foot = h('div', { class: 'dq-sz-foot' }, talkLink);
   const el = h('div', { class: 'dq-safezone' }, h('h1', { class: 'dq-sr', text: 'Safe Zone' }), box, foot);
   applyLight();
 
@@ -248,7 +248,6 @@ export function safeScreen(app: App, route: Route): ScreenOut {
             'li',
             { class: `dq-res ${first ? 'is-first' : ''}` },
             h('div', { class: 'dq-res-n', text: line.name }),
-            h('p', { class: 'dq-res-how', text: typo(line.how) }),
             h(
               'div',
               { class: 'dq-res-acts' },
@@ -256,6 +255,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
                 h('a', { class: 'dq-btn dq-btn--quiet dq-res-a', href: l.href.startsWith('sms:') ? smsHref(l.href.slice(4), l.body) : telHref(l.href.slice(4)), html: `<span class="dq-btn-ic">${icon(l.href.startsWith('tel:') ? 'phone' : 'text')}</span><span>${l.label}</span>` }),
               ),
             ),
+            h('p', { class: 'dq-res-how', text: typo(line.how) }),
           );
         const rows = region.lines.map((line) => row(line));
         if (region.emergency.length) {
@@ -284,6 +284,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   return {
     el,
     title: 'Safe Zone',
+    tools: [lightBtn],
     mode: 'safe',
     bubbles: [0, 0],
     leave: () => {

@@ -125,14 +125,6 @@
 }
 
 /* ---------- Safe Zone: lights up beside the dim default ---------- */
-.dq-sz-foot {
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 6px;
-}
-.dq-sz-foot .dq-sz-talk {
-  padding: 0 8px;
-}
 .ca-sz-light {
   display: inline-flex;
   flex: none;
@@ -199,7 +191,7 @@
 .dq-safezone.is-lit .dq-sz-talk {
   color: #ffffff;
 }
-.dq-safezone.is-lit .ca-sz-light {
+.dq.ca-szlit .ca-sz-light {
   background: rgba(70, 100, 136, 0.8);
   border-color: rgba(220, 238, 252, 0.6);
   color: #ffffff;
