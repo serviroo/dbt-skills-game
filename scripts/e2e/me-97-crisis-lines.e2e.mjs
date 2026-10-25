@@ -9,7 +9,7 @@ const EXPECT = {
   us: { locale: 'en-US', name: 'United States', services: ['988 Suicide & Crisis Lifeline', 'Crisis Text Line', 'Emergency', 'National Domestic Violence Hotline'], hrefs: ['tel:988', 'sms:988', 'sms:741741?body=HOME', 'tel:911', 'tel:18007997233', 'sms:88788?body=START'], sos: ['tel:911'] },
   ca: { locale: 'en-CA', name: 'Canada', services: ['9-8-8: Suicide Crisis Helpline', 'Emergency'], hrefs: ['tel:988', 'sms:988', 'tel:911'], sos: ['tel:911'] },
   uk: { locale: 'en-GB', name: 'United Kingdom', services: ['Samaritans', 'Shout', 'Emergency'], hrefs: ['tel:116123', 'sms:85258?body=SHOUT', 'tel:999'], sos: ['tel:999'] },
-  ie: { locale: 'en-IE', name: 'Ireland', services: ['Samaritans', 'Text 50808', 'Emergency', "Women's Aid"], hrefs: ['tel:116123', 'sms:50808?body=HELLO', 'tel:112', 'tel:999', 'tel:1800341900'], sos: ['tel:112', 'tel:999'] },
+  ie: { locale: 'en-IE', name: 'Ireland', services: ['Samaritans', 'Text About It', 'Emergency', "Women's Aid"], hrefs: ['tel:116123', 'sms:50808?body=HELLO', 'sms:0861800280?body=HELLO', 'tel:112', 'tel:999', 'tel:1800341900'], sos: ['tel:112', 'tel:999'] },
   au: { locale: 'en-AU', name: 'Australia', services: ['Lifeline', '1800RESPECT', 'Emergency'], hrefs: ['tel:131114', 'sms:0477131114', 'tel:1800737732', 'sms:0458737732', 'tel:000'], sos: ['tel:000'] },
   nz: { locale: 'en-NZ', name: 'New Zealand', services: ['1737', "Women's Refuge", 'Emergency'], hrefs: ['tel:1737', 'sms:1737', 'tel:0800733843', 'tel:111'], sos: ['tel:111'] },
   in: { locale: 'en-IN', name: 'India', services: ['Tele-MANAS', 'Women Helpline', 'Emergency'], hrefs: ['tel:14416', 'tel:181', 'tel:112'], sos: ['tel:112'] },

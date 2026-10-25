@@ -1,14 +1,14 @@
 /**
  * Crisis lines by country, checked 2026-10-23 against each service's own site, or an official government page where
- * that was the source that could be read (emergency numbers, Ireland's 50808 on the HSE, India's 181). A number that
- * couldn't be confirmed from one of those is left out, and so is a cost or name the source didn't state.
+ * that was the source that could be read (emergency numbers, India's 181). A number that couldn't be confirmed from one
+ * of those is left out, and so is a cost or name the source didn't state.
  */
 export type RegionId = 'us' | 'ca' | 'uk' | 'ie' | 'au' | 'nz' | 'in' | 'elsewhere';
 
 export interface CrisisLine {
   name: string;
   how: string;
-  links: { label: string; href: string; body?: string }[];
+  links: { label: string; href: string; body?: string; note?: string }[];
 }
 
 export interface Region {
@@ -26,8 +26,8 @@ export const REGIONS: Region[] = [
     emergency: ['911'],
     lines: [
       { name: '988 Suicide & Crisis Lifeline', how: 'Call or text 988. Free, confidential, 24/7.', links: [{ label: 'Call 988', href: 'tel:988' }, { label: 'Text 988', href: 'sms:988' }] },
-      { name: 'Crisis Text Line', how: 'Text HOME to 741741. Free, 24/7.', links: [{ label: 'Text HOME to 741741', href: 'sms:741741', body: 'HOME' }] },
-      { name: 'National Domestic Violence Hotline', how: 'For anyone feeling unsafe with someone. Call 1-800-799-7233, or text START to 88788. Free, 24/7.', links: [{ label: 'Call', href: 'tel:18007997233' }, { label: 'Text START', href: 'sms:88788', body: 'START' }] },
+      { name: 'Crisis Text Line', how: 'Text HOME to 741741. Free support, 24/7.', links: [{ label: 'Text HOME to 741741', href: 'sms:741741', body: 'HOME', note: "Your carrier's message and data rates may apply." }] },
+      { name: 'National Domestic Violence Hotline', how: 'For anyone feeling unsafe with someone. Call 1-800-799-7233, or text START to 88788. Free, confidential support, 24/7.', links: [{ label: 'Call', href: 'tel:18007997233' }, { label: 'Text START', href: 'sms:88788', body: 'START', note: "Your carrier's message and data rates may apply." }] },
     ],
   },
   {
@@ -53,7 +53,14 @@ export const REGIONS: Region[] = [
     emergency: ['112', '999'],
     lines: [
       { name: 'Samaritans', how: 'Call 116 123. Free, day or night.', links: [{ label: 'Call 116 123', href: 'tel:116123' }] },
-      { name: 'Text 50808', how: 'Text HELLO to 50808. Free and anonymous, any time.', links: [{ label: 'Text HELLO to 50808', href: 'sms:50808', body: 'HELLO' }] },
+      {
+        name: 'Text About It',
+        how: 'Run by spunout. Text HELLO to 50808. Free support, 24/7.',
+        links: [
+          { label: 'Text HELLO to 50808', href: 'sms:50808', body: 'HELLO', note: 'Free to text on the main networks.' },
+          { label: 'Text HELLO to 086\u00a01800\u00a0280', href: 'sms:0861800280', body: 'HELLO', note: "For 48, An Post and Clear Mobile. Your network's standard text rate may apply." },
+        ],
+      },
       { name: "Women's Aid", how: 'Domestic abuse helpline. Freephone 1800 341 900, 24/7.', links: [{ label: 'Call', href: 'tel:1800341900' }] },
     ],
   },
@@ -63,7 +70,14 @@ export const REGIONS: Region[] = [
     emergency: ['000'],
     lines: [
       { name: 'Lifeline', how: 'Call 13 11 14 or text 0477 13 11 14, 24/7. Calls from mobiles are free.', links: [{ label: 'Call 13 11 14', href: 'tel:131114' }, { label: 'Text', href: 'sms:0477131114' }] },
-      { name: '1800RESPECT', how: 'Family, domestic and sexual violence support. Call 1800 737 732 or text 0458 737 732. Free, 24/7.', links: [{ label: 'Call', href: 'tel:1800737732' }, { label: 'Text', href: 'sms:0458737732' }] },
+      {
+        name: '1800RESPECT',
+        how: 'Family, domestic and sexual violence support. Call 1800 737 732 or text 0458 737 732. Free, confidential support, 24/7.',
+        links: [
+          { label: 'Call', href: 'tel:1800737732', note: 'Free from landlines, payphones and most mobiles. Some mobile carriers charge.' },
+          { label: 'Text', href: 'sms:0458737732', note: "Your carrier's standard text rates may apply." },
+        ],
+      },
     ],
   },
   {
