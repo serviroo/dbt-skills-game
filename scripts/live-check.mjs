@@ -63,6 +63,10 @@ const browser = await chromium.launch({
 async function profile({ seed = null, sw = true } = {}) {
   const ctx = await browser.newContext({ ...VIEW, serviceWorkers: sw ? 'allow' : 'block' });
   await ctx.exposeBinding('__liveCsp', (_src, v) => cspViolations.push(v));
+  await ctx.addInitScript(() => {
+    window.__taps = [];
+    addEventListener('pointerup', (e) => window.__taps.push(Math.round(performance.now()) + ' ' + (e.target?.closest?.('[class]')?.className?.toString() ?? '').split(' ')[0].slice(0, 18) + (document.querySelector('.dq-scrim.is-on') ? '@scrim' : '') + (document.querySelector('.dq-sw') ? '@sw' : '') + ' screen=' + (document.querySelector('.dq')?.dataset.screen ?? '-')), true);
+  });
   await ctx.addInitScript(() => document.addEventListener('securitypolicyviolation', (e) => window.__liveCsp(`${e.violatedDirective} ${e.blockedURI || 'inline'} @ ${location.pathname}${location.search}`)));
   if (seed) {
     await ctx.addInitScript(([s, at]) => {
@@ -85,13 +89,22 @@ const ready = (page, ms = 45000) => page.waitForFunction(() => document.document
 const shownBuild = (page) => page.evaluate(() => document.querySelector('meta[name=build]')?.getAttribute('content') ?? null);
 async function reachHome(page) {
   let clear = 0;
+  const log = [];
+  const t0 = Date.now();
   for (let i = 0; i < 40 && clear < 3; i++) {
+    const st = await page.evaluate(() => ({ sw: document.querySelectorAll('.dq-sw').length, scrim: !!document.querySelector('.dq-scrim.is-on'), screen: document.querySelector('.dq')?.dataset.screen ?? document.querySelector('.dq')?.dataset.mode ?? '-', card: !!document.querySelector('.dq-card.is-open') })).catch((e) => ({ err: String(e).slice(0, 60) }));
     const home = !(await page.locator('.dq-sw').count()) && (await page.locator('.dq-tile').first().isVisible().catch(() => false));
     clear = home ? clear + 1 : 0;
+    log.push(`${Date.now() - t0} ${JSON.stringify(st)}${home ? ' HOME' : ' tap'}`);
     if (!home) await page.mouse.click(195, 700);
     await sleep(400);
   }
-  if (clear < 3) throw new Error('Home never appeared');
+  const taps = await page.evaluate(() => JSON.stringify(window.__taps ?? [])).catch(() => '?');
+  console.log(`TRACE reachHome ${clear < 3 ? 'FAILED' : 'ok'} (${current}) taps landed on: ${taps}`);
+  if (clear < 3) {
+    console.log('TRACE ' + log.join('\nTRACE '));
+    throw new Error('Home never appeared');
+  }
 }
 
 let assetCount = 0;
