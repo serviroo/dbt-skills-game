@@ -18,6 +18,7 @@ const EXPECT = {
 const TALL = { width: 390, height: 844 };
 const SMALL = { width: 320, height: 568 };
 const WIDE = { width: 844, height: 390 };
+const SHORT = { width: 568, height: 320 };
 const dayKey = (ms) => {
   const d = new Date(ms - 6 * 3600e3);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -331,5 +332,80 @@ export const scenarios = {
         await ctx.close();
       }
     }
+  },
+
+  /**
+   * A phone held sideways (ME-127): the moment Talk opens, with no scrolling, the first call button is whole on screen,
+   * clear of the top bar and the pinned foot, and a tap anywhere on it lands on it. Every country, opened from "Talk to
+   * someone now" and from "I might not be safe" (local emergency number first). With no lines known, the same holds
+   * for the findahelpline link. At the two phone sizes the danger line ("If you are in danger right now, call ...") is
+   * whole on screen too. 780x280 and 640x280 are Chrome on a 360 px Android phone held sideways, toolbar showing.
+   */
+  async 'crisis-lines-first-call-sideways'(h) {
+    const failed = [];
+    for (const [size, viewport, note] of [['844x390', WIDE, true], ['568x320', SHORT, true], ['780x280', { width: 780, height: 280 }, false], ['640x280', { width: 640, height: 280 }, false]]) {
+      const { ctx, page, errors } = await boot(h, { locale: 'en-US', viewport });
+      try {
+        for (const [id, want] of Object.entries(EXPECT)) {
+          await page.evaluate((id) => {
+            const st = window.__daily.store;
+            st.state.settings.region = id;
+            st.touch('region');
+            st.save();
+          }, id);
+          for (const danger of [false, true]) {
+            const label = `${size} ${id}${danger ? ', might not be safe' : ''}`;
+            await page.evaluate(() => window.__daily.go({ name: 'hub' }));
+            await page.locator('header .dq-safe').click();
+            if (danger) await page.getByRole('button', { name: 'I might not be safe' }).click();
+            else await page.locator('.dq-sz-talk').click();
+            await page.locator('.dq-region select').waitFor();
+            // fonts in and the screen's fade-in done, so the boxes and screenshots are what the player sees
+            await page.evaluate(() => Promise.all([document.fonts.ready, ...[...document.querySelectorAll('.dq-sz-body, .dq-sz-body > *')].flatMap((e) => e.getAnimations()).map((a) => a.finished)]));
+            const got = await page.evaluate(() => {
+              const top = document.querySelector('.dq-top').getBoundingClientRect().bottom;
+              const f = document.querySelector('.dq-sz-foot').getBoundingClientRect();
+              const foot = f.top;
+              const seen = (el) => {
+                if (!el) return null;
+                const r = el.getBoundingClientRect();
+                // 4 px in from each corner, clear of the rounded corners
+                const at = [[r.left + 4, r.top + 4], [r.right - 4, r.top + 4], [r.left + 4, r.bottom - 4], [r.right - 4, r.bottom - 4], [r.left + r.width / 2, r.top + r.height / 2]];
+                const underFoot = r.right > f.left && r.left < f.right && r.bottom > f.top + 0.5;
+                return {
+                  box: [r.left, r.top, r.right, r.bottom].map(Math.round).join(', '),
+                  whole: r.left >= 0 && r.right <= innerWidth && r.top >= top - 0.5 && r.bottom <= innerHeight + 0.5 && !underFoot,
+                  hit: at.every(([x, y]) => el.contains(document.elementFromPoint(x, y))),
+                  tall: r.height,
+                };
+              };
+              const a = document.querySelector('.dq-safezone .dq-res-a') ?? document.querySelector('.dq-safezone a[href="https://findahelpline.com"]');
+              return {
+                href: a.getAttribute('href'),
+                first: seen(a),
+                note: seen([...document.querySelectorAll('.dq-safezone .dq-text')].find((p) => p.textContent.startsWith('If you are in danger right now, call'))),
+                top: Math.round(top),
+                foot: Math.round(foot),
+                small: [...document.querySelectorAll('.dq-safezone .dq-text')].map((p) => parseFloat(getComputedStyle(p).fontSize)).filter((px) => px < 20),
+                wide: document.documentElement.scrollWidth <= innerWidth,
+              };
+            });
+            const first = (danger ? want.sos[0] : want.hrefs[0]) ?? 'https://findahelpline.com';
+            if (got.href !== first) failed.push(`${label}: the first button dials ${got.href}, want ${first}`);
+            else if (!got.first.whole || !got.first.hit) failed.push(`${label}: ${first} at ${got.first.box} is not whole on screen below the top bar (${got.top}) and above the pinned foot (${got.foot})`);
+            if (first.startsWith('tel:') && got.first.tall < 44) failed.push(`${label}: the first call button is ${got.first.tall}px tall`);
+            if (danger && !got.note) failed.push(`${label}: no danger line naming the emergency number`);
+            if (note && got.note && (!got.note.whole || !got.note.hit)) failed.push(`${label}: the danger line at ${got.note.box} is cut off or covered`);
+            if (got.small.length) failed.push(`${label}: Safe Zone text at ${got.small.join(', ')}px, under 20`);
+            if (!got.wide) failed.push(`${label}: the page scrolls sideways`);
+            if (['us', 'ca', 'ie', 'elsewhere'].includes(id)) await h.shot(page, `me97-sideways-${id}${danger ? '-danger' : ''}-${size}`);
+          }
+        }
+        if (errors.length) failed.push(`${size}: ${errors.join(' | ')}`);
+      } finally {
+        await ctx.close();
+      }
+    }
+    h.expect(!failed.length, failed.join('\n'));
   },
 };

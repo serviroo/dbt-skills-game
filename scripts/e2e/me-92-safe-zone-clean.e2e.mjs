@@ -2,6 +2,7 @@ const SAFARI = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebK
 const TALL = { width: 390, height: 844 };
 const SMALL = { width: 320, height: 568 };
 const WIDE = { width: 844, height: 390 };
+const SHORT = { width: 568, height: 320 };
 const AUDIO = 'dbt.audio.v1';
 const HINT = 'dbt.install-hint.v1';
 
@@ -383,6 +384,85 @@ async function allRoutes(h, { viewport, reduced = false }) {
   h.expect(!failed.length, failed.join('\n'));
 }
 
+// What each Safe Zone screen shows first beside its heading, so it has to be on screen when a phone is held sideways
+const ACTS = '.dq-actions--stack .dq-btn';
+const FIRST = { start: ACTS, breathe: '.dq-ring-count', squeeze: '.dq-ring-count', cold: '.dq-small', check: '.dq-opt', stop: ACTS, reasons: '.dq-sz-empty', comfort: '.dq-sz-empty', people: '.dq-sz-empty', talk: '.dq-res-a', close: ACTS };
+
+/**
+ * Every Safe Zone screen at every size. Held sideways: the heading and the screen's first thing are whole on screen on
+ * arrival, clear of the top bar and the pinned foot, "Talk to someone now" stays pinned and tappable, and nothing
+ * scrolls sideways. Upright: grouping the heading apart from the rest moves no box at all.
+ */
+async function everyScreen(h, viewport) {
+  const size = `${viewport.width}x${viewport.height}`;
+  const sideways = viewport.width > viewport.height;
+  const { ctx, page, errors } = await boot(h, { save: returning(), viewport, reduced: true });
+  const failed = [];
+  try {
+    await page.locator('header .dq-safe').click();
+    let heading = '';
+    for (const [at, sel] of Object.entries(FIRST)) {
+      const label = `${size} ${at}`;
+      await page.evaluate((at) => window.__daily.go({ name: 'safe', at }), at);
+      await page.waitForFunction(([was, sel]) => {
+        const t = document.querySelector('.dq-sz-body [data-focus]')?.textContent;
+        return t && t !== was && !!document.querySelector(`.dq-sz-body ${sel}`);
+      }, [heading, sel]);
+      // fonts in and the screen's fade-in done, so the boxes and screenshots are what the player sees
+      await page.evaluate(() => Promise.all([document.fonts.ready, ...[...document.querySelectorAll('.dq-sz-body, .dq-sz-body > *')].flatMap((e) => e.getAnimations()).map((a) => a.finished)]));
+      heading = await page.locator('.dq-sz-body [data-focus]').textContent();
+      if (sideways) {
+        const got = await page.evaluate((sel) => {
+          const top = document.querySelector('.dq-top').getBoundingClientRect().bottom;
+          const foot = document.querySelector('.dq-sz-foot').getBoundingClientRect().top;
+          const whole = (e) => {
+            const r = e.getBoundingClientRect();
+            return r.left >= 0 && r.right <= innerWidth && r.top >= top - 0.5 && r.bottom <= Math.min(foot, innerHeight) + 0.5;
+          };
+          const first = document.querySelector(`.dq-sz-body ${sel}`);
+          const talk = document.querySelector('.dq-sz-talk:not(.is-hidden)');
+          const t = talk?.getBoundingClientRect();
+          return {
+            first: whole(first),
+            box: Object.values(first.getBoundingClientRect().toJSON()).slice(0, 4).map(Math.round),
+            heading: whole(document.querySelector('.dq-sz-body [data-focus]')),
+            talk: !talk || (t.bottom <= innerHeight && talk.contains(document.elementFromPoint(t.left + t.width / 2, t.top + t.height / 2))),
+            wide: document.documentElement.scrollWidth <= innerWidth,
+          };
+        }, sel);
+        if (!got.first) failed.push(`${label}: ${sel} is at x, y ${got.box.slice(0, 2).join(', ')} (${got.box[2]}x${got.box[3]}), not whole on screen above the pinned foot`);
+        if (!got.heading) failed.push(`${label}: the heading is not whole on screen`);
+        if (!got.talk) failed.push(`${label}: "Talk to someone now" is not pinned and tappable`);
+        if (!got.wide) failed.push(`${label}: the page scrolls sideways`);
+        await h.shot(page, `me92-sideways-${at}-${size}`);
+        if (at === 'reasons') {
+          const add = page.getByRole('button', { name: 'Add one' });
+          await add.evaluate((b) => b.scrollIntoView({ block: 'center' }));
+          await add.click();
+          const row = await page.evaluate(() => {
+            const r = document.querySelector('.dq-sz .dq-addrow');
+            return { row: r.getBoundingClientRect().width, field: r.querySelector('.dq-field').getBoundingClientRect().width };
+          });
+          if (row.field < Math.min(row.row - 1, 240)) failed.push(`${label}: with Add one open the text box is squeezed to ${Math.round(row.field)} of ${Math.round(row.row)} px`);
+          await h.shot(page, `me92-sideways-reasons-add-${size}`);
+        }
+      } else {
+        // live counters (the breathing word and number) are left out: they change while the boxes are read
+        const boxes = () => page.evaluate(() => [...document.querySelectorAll('.dq-safezone *')].filter((e) => e instanceof HTMLElement && !e.matches('.dq-sz-lead, .dq-sz-main') && !e.closest('.dq-ring-center, .dq-timer-center')).map((e) => `${e.tagName.toLowerCase()}.${e.className} ${e.offsetLeft},${e.offsetTop},${e.offsetWidth},${e.offsetHeight}`));
+        const grouped = await boxes();
+        await page.evaluate(() => document.querySelectorAll('.dq-sz-lead, .dq-sz-main').forEach((w) => w.replaceWith(...w.childNodes)));
+        const flat = await boxes();
+        const moved = grouped.filter((b, i) => b !== flat[i]);
+        if (grouped.length !== flat.length || moved.length) failed.push(`${label}: grouping the heading moved ${moved.length} of ${grouped.length} boxes: ${moved.slice(0, 3).join(' | ')}`);
+      }
+    }
+    if (errors.length) failed.push(`${size}: ${errors.join(' | ')}`);
+  } finally {
+    await ctx.close();
+  }
+  return failed;
+}
+
 export const scenarios = {
   'safe-zone-stays-quiet': async (h) => {
     const { ctx, page, errors } = await boot(h, { save: returning() });
@@ -413,6 +493,14 @@ export const scenarios = {
     await allRoutes(h, { viewport: TALL });
     await allRoutes(h, { viewport: SMALL, reduced: true });
     await allRoutes(h, { viewport: WIDE });
+  },
+  'safe-zone-every-screen-sideways': async (h) => {
+    const failed = [...(await everyScreen(h, WIDE)), ...(await everyScreen(h, SHORT))];
+    h.expect(!failed.length, failed.join('\n'));
+  },
+  'safe-zone-every-screen-upright': async (h) => {
+    const failed = [...(await everyScreen(h, TALL)), ...(await everyScreen(h, SMALL))];
+    h.expect(!failed.length, failed.join('\n'));
   },
 
   'safe-zone-cancels-queued-windows': async (h) => {

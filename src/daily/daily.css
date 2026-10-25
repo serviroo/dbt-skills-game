@@ -2827,6 +2827,71 @@ textarea.dq-input {
     width: min(196px, 52vw);
   }
 }
+.dq-sz-lead,
+.dq-sz-main {
+  display: contents;
+}
+/* a phone held sideways: the heading and its words sit beside what the player does, which starts at the top, so the
+   first call button or choice shows without scrolling. A crisis line's buttons come before its details there. */
+@media (orientation: landscape) and (max-height: 500px) and (min-width: 540px) {
+  .dq-safezone {
+    margin-top: 0;
+    max-width: min(900px, 100vw - 2 * max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px)));
+  }
+  .dq-sz {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    column-gap: var(--pad);
+    padding-top: 12px;
+  }
+  .dq-sz > .dq-chip {
+    grid-area: 1 / 1;
+    margin-bottom: 10px;
+  }
+  .dq-sz-body {
+    display: contents;
+  }
+  .dq-sz-lead {
+    display: block;
+    grid-area: 2 / 1;
+  }
+  .dq-sz-main {
+    display: block;
+    grid-area: 1 / 2 / 3 / 3;
+  }
+  .dq-sz-main > :first-child {
+    margin-top: 0;
+  }
+  .dq-res {
+    display: flex;
+    flex-direction: column;
+  }
+  .dq-res-acts {
+    order: 1;
+    margin-top: 10px;
+  }
+  .dq-res-how {
+    order: 2;
+    margin-top: 10px !important;
+  }
+  .dq-sz .dq-addrow {
+    flex-wrap: wrap;
+  }
+  .dq-sz .dq-addrow .dq-field {
+    flex-basis: 100%;
+  }
+  /* 12px under the foot keeps "Talk to someone now" on screen while a screen slides in 10px */
+  .dq-sz-foot {
+    padding: 4px 0 calc(var(--safe-bottom) + 12px);
+  }
+  /* Talk's foot holds only Lights up: it pins under the lines, leaving the danger line beside them clear */
+  .dq-sz-foot.is-talk {
+    align-self: flex-end;
+    width: 50%;
+    padding-bottom: calc(var(--safe-bottom) + 6px);
+  }
+}
 .dq-cardbtn .dq-cf-stat {
   display: none;
 }
