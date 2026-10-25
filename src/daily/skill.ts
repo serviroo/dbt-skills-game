@@ -245,7 +245,8 @@ export function skillScreen(app: App, route: Route): ScreenOut {
           seconds: secs,
           visual: s.visual,
           start: s.start,
-          extend: s.extend,
+          // every timer can take more time (principle 3) unless its step sets extend: 0
+          extend: (s.extend ?? (secs <= 30 ? 15 : 30)) || undefined,
           peers,
           big: s.big ? tx(s.big, answers) : undefined,
           onStart: () => {
@@ -435,7 +436,9 @@ export function skillScreen(app: App, route: Route): ScreenOut {
       app.sound('soft_chime');
     }
     const reply = h('p', { class: 'dq-lead', 'aria-live': 'polite' });
-    const after = h('div', { class: 'dq-after is-hidden' }, h('div', { class: 'dq-actions dq-actions--stack' }, btn('Back to the Lantern', () => app.go({ name: 'hub' }), { kind: 'primary' }), btn('Another skill', () => app.go({ name: 'library' }), { kind: 'quiet' })));
+    // a quiet end is the player saying "not now", so it doesn't offer a repeat
+    const again = quiet ? null : btn('Practise again', () => app.go({ name: 'skill', id: sk.id }, { replace: true }), { kind: 'quiet' });
+    const after = h('div', { class: 'dq-after is-hidden' }, h('div', { class: 'dq-actions dq-actions--stack' }, btn('Back to the Lantern', () => app.go({ name: 'hub' }), { kind: 'primary' }), again, btn('Another skill', () => app.go({ name: 'library' }), { kind: 'quiet' })));
     const answer = (a: string) => {
       app.store.add('feedback', 0, { skill: sk.id, data: { answer: a } });
       reply.textContent = typo(SKILL_END.thanks[a]);

@@ -300,7 +300,9 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
         btn(`+${opts.extend} s`, () => {
           dur = Math.max(dur, now() - t0) + opts.extend!;
           if (finished) {
+            // a finished timer runs again the way it first started (a dimmed timer dims again)
             finished = false;
+            opts.onStart?.();
             stop = onFrame(render);
           }
         }, { kind: 'quiet' }),
