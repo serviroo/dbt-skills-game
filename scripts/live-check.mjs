@@ -63,6 +63,10 @@ const browser = await chromium.launch({
 async function profile({ seed = null, sw = true } = {}) {
   const ctx = await browser.newContext({ ...VIEW, serviceWorkers: sw ? 'allow' : 'block' });
   await ctx.exposeBinding('__liveCsp', (_src, v) => cspViolations.push(v));
+  await ctx.addInitScript(() => {
+    window.__taps = [];
+    addEventListener('pointerup', (e) => window.__taps.push(Math.round(performance.now()) + ' ' + (e.target?.closest?.('[class]')?.className?.toString() ?? '').split(' ')[0].slice(0, 18) + (document.querySelector('.dq-scrim.is-on') ? '@scrim' : '') + (document.querySelector('.dq-sw') ? '@sw' : '') + ' screen=' + (document.querySelector('.dq')?.dataset.screen ?? '-')), true);
+  });
   await ctx.addInitScript(() => document.addEventListener('securitypolicyviolation', (e) => window.__liveCsp(`${e.violatedDirective} ${e.blockedURI || 'inline'} @ ${location.pathname}${location.search}`)));
   if (seed) {
     await ctx.addInitScript(([s, at]) => {
@@ -92,6 +96,8 @@ async function reachHome(page) {
     if (!home && (await page.locator('.dq-scrim.is-on').count())) await page.mouse.click(195, 700);
     await sleep(400);
   }
+  const taps = await page.evaluate(() => JSON.stringify(window.__taps ?? [])).catch(() => '?');
+  console.log(`TRACE reachHome ${clear < 3 ? 'FAILED' : 'ok'} (${current}) taps landed on: ${taps}`);
   if (clear < 3) throw new Error('Home never appeared');
 }
 
