@@ -7,9 +7,16 @@
 // Copy, read from the skill's content object with its text functions run on many answer sets: no em dash, no diagnosis
 // words (DESIGN.md principle 8), none of principle 9's wording a lint can catch, no hard-coded "Player" or unknown
 // token, every timer 20 to 90 s, and cold-water or intense-exercise steps carry a caution and a "breathe instead" option
-// (principle 11).
+// (principle 11). Each of those steps is then opened at 390x844 and 844x390: its caution, its own action and "Breathe
+// instead" must show without scrolling, and the last two must be buttons of the same weight.
 // Skills in ENFORCED fail the run. Every other skill's problems are printed as a todo list and returned, so the runner
 // keeps them in report.json. Once a skill passes, add it to ENFORCED.
+// copy-everywhere holds every other string the app ships (the Safe Zone, Home, the intro, labels in code) to the same
+// em dash, principle 8 and principle 9 wording rules.
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parseAst } from 'vite';
 
 const ENFORCED = new Set([
   'sense-up', 'clear-sight', 'one-mindfully', 'effectively', 'mindful-thoughts', 'stop', 'pros-cons',
@@ -23,10 +30,12 @@ const ENFORCED = new Set([
   'willing-hands',
   'abc-please',
   'give',
+  'tipp', 'accepts', 'name-emotion', 'check-facts', 'opposite-action', 'clarifying-priorities',
 ]);
 const MAX_TAPS = 12;
 const WORKERS = 3;
 const PHONE = { width: 390, height: 844 };
+const SIDEWAYS = { width: 844, height: 390 };
 const DAY = 864e5;
 const COPY = {
   emDash: '—',
@@ -111,8 +120,10 @@ function copyProblems(page) {
       return Array.isArray(st.options) ? st.options : [];
     };
     const out = {};
+    const risky = {};
     for (const sk of SKILLS) {
       const bad = new Set();
+      risky[sk.id] = [];
       const sets = answerSets(sk);
       const byId = new Map(sk.steps.filter((st) => st.id).map((st) => [st.id, st]));
       const lines = texts([sk.sl, sk.real, sk.card, sk.minutes], sets);
@@ -132,8 +143,9 @@ function copyProblems(page) {
         // Cold water or hard exercise, named in the step itself or in an option that has no step of its own to warn on
         const said = texts([st.title, st.text, st.big], sets).join(' ');
         const isColdOrHard = (s) => !!s && re.coldOrHard.test(texts([s.title, s.text, s.big], sets).join(' '));
-        const risky = re.coldOrHard.test(said) || opts.some((o) => re.coldOrHard.test(o.label) && !isColdOrHard(byId.get(o.go)));
-        if (risky) {
+        const coldOrHard = re.coldOrHard.test(said) || opts.some((o) => re.coldOrHard.test(o.label) && !isColdOrHard(byId.get(o.go)));
+        if (coldOrHard) {
+          risky[sk.id].push({ where, step: st.id ?? null, first: i === 0 });
           const small = texts(st.small, sets).join(' ');
           if (!re.caution.test(small)) bad.add(`${where}: cold water or hard exercise with no caution`);
           if (!opts.some((o) => /breath/i.test(o.label) && byId.get(o.go)?.kind === 'breath')) bad.add(`${where}: cold water or hard exercise with no "breathe instead" option`);
@@ -157,8 +169,100 @@ function copyProblems(page) {
       }
       out[sk.id] = [...bad].sort((a, b) => Number(/^step (\d+)/.exec(a)?.[1] ?? 0) - Number(/^step (\d+)/.exec(b)?.[1] ?? 0));
     }
-    return out;
+    return { problems: out, risky };
   }, COPY);
+}
+
+async function insteadProblems(h, risky) {
+  const out = {};
+  for (const vp of [PHONE, SIDEWAYS]) {
+    const size = `${vp.width}x${vp.height}`;
+    const { ctx, page, errors } = await h.open(returning(h), '?mute', vp);
+    await h.reachHub(page);
+    for (const [id, steps] of Object.entries(risky)) {
+      for (const { where, step, first } of steps) {
+        const bad = (out[id] ??= new Set());
+        if (!step) {
+          bad.add(`${where}: cold water or hard exercise on a step with no id, so the check can't open it to look`);
+          continue;
+        }
+        await page.evaluate(({ id, step }) => window.__daily.go({ name: 'skill', id, entry: step }), { id, step });
+        await page.locator('.dq-skill .dq-step-body > *').first().waitFor({ timeout: 10000 });
+        if (!first && (await page.locator('.dq-step-body .dq-intro').count())) {
+          await page.locator('.dq-step-body .dq-actions .dq-btn--primary').first().click();
+          await page.waitForFunction(() => !document.querySelector('.dq-step-body .dq-intro'), null, { timeout: 10000 });
+        }
+        await page.waitForTimeout(500);
+        const found = await page.evaluate(() => {
+          const body = document.querySelector('.dq-step-body');
+          const seen = (e) => {
+            const r = e.getBoundingClientRect();
+            if (!r.width || !r.height || r.top < 0 || r.left < 0 || r.bottom > innerHeight || r.right > innerWidth) return false;
+            const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+            return !!hit && e.contains(hit);
+          };
+          const kind = (b) => (b.classList.contains('dq-opt') ? 'chip' : [...b.classList].find((c) => c.startsWith('dq-btn--'))?.slice(8) ?? 'plain');
+          const buttons = [...body.querySelectorAll('button')].filter((b) => b.getClientRects().length && !b.disabled);
+          const breathe = buttons.find((b) => /breath/i.test(b.textContent));
+          const main = buttons.find((b) => b !== breathe);
+          const caution = body.querySelector('.dq-small');
+          const btn = (b) => b && { label: b.textContent.trim(), kind: kind(b), height: Math.round(b.getBoundingClientRect().height), seen: seen(b) };
+          return { breathe: btn(breathe), main: btn(main), caution: caution ? seen(caution) : null };
+        });
+        const { breathe, main } = found;
+        if (found.caution === null) bad.add(`${where}: no caution on screen at ${size}`);
+        else if (!found.caution) bad.add(`${where}: the caution needs scrolling at ${size}`);
+        if (!breathe) bad.add(`${where}: no "Breathe instead" button on screen at ${size}`);
+        else {
+          if (!breathe.seen) bad.add(`${where}: "${breathe.label}" needs scrolling at ${size}`);
+          if (main && !main.seen) bad.add(`${where}: "${main.label}" needs scrolling at ${size}`);
+          if (main && (main.kind !== breathe.kind || Math.abs(main.height - breathe.height) > 1)) {
+            bad.add(`${where}: "${breathe.label}" (${breathe.kind}, ${breathe.height} px) has less weight than "${main.label}" (${main.kind}, ${main.height} px) at ${size}`);
+          }
+        }
+        await page.evaluate(() => window.__daily.go({ name: 'hub' }));
+        await h.reachHub(page);
+      }
+    }
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  }
+  return Object.fromEntries(Object.entries(out).map(([id, bad]) => [id, [...bad]]));
+}
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+
+function shippedStrings() {
+  const out = [];
+  const lineOf = (src) => {
+    const starts = [...src.matchAll(/\n/g)].map((m) => m.index + 1);
+    return (at) => 1 + starts.filter((s) => s <= at).length;
+  };
+  const files = (dir) => fs.readdirSync(path.join(root, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(`${dir}/${e.name}`) : [`${dir}/${e.name}`]));
+  for (const file of files('src')) {
+    const src = fs.readFileSync(path.join(root, file), 'utf8');
+    const line = lineOf(src);
+    if (/\.[jt]s$/.test(file)) {
+      const walk = (n) => {
+        if (!n || typeof n !== 'object') return;
+        if (Array.isArray(n)) return n.forEach(walk);
+        if (n.type === 'Literal' && typeof n.value === 'string') out.push({ file, line: line(n.start), text: n.value });
+        else if (n.type === 'TemplateElement') out.push({ file, line: line(n.start), text: n.value.cooked ?? n.value.raw });
+        for (const k in n) if (n[k] && typeof n[k] === 'object') walk(n[k]);
+      };
+      walk(parseAst(src, { lang: file.endsWith('.ts') ? 'ts' : 'js' }));
+    } else if (file.endsWith('.css')) {
+      const bare = src.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '));
+      for (const m of bare.matchAll(/(['"])((?:\\.|(?!\1)[^\\\n])*)\1/g)) out.push({ file, line: line(m.index), text: m[2] });
+    }
+  }
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const bare = html.replace(/<!--[\s\S]*?-->/g, (c) => c.replace(/[^\n]/g, ' '));
+  bare.split('\n').forEach((text, i) => out.push({ file: 'index.html', line: i + 1, text }));
+  const manifest = 'public/manifest.webmanifest';
+  const strings = (v) => (typeof v === 'string' ? [v] : v && typeof v === 'object' ? Object.values(v).flatMap(strings) : []);
+  for (const text of strings(JSON.parse(fs.readFileSync(path.join(root, manifest), 'utf8')))) out.push({ file: manifest, line: 0, text });
+  return out;
 }
 
 const credits = async (h, page, id) => (JSON.parse((await h.ls(page, h.SAVE)) ?? 'null')?.events ?? []).filter((e) => e.k === 'skill' && e.skill === id).length;
@@ -359,12 +463,14 @@ export const scenarios = {
     const missing = only?.filter((id) => !all.some((s) => s.id === id)) ?? [];
     h.expect(!missing.length, `--skills names skills that don't exist: ${missing.join(', ')}`);
     const skills = only ? all.filter((s) => only.includes(s.id)) : all;
-    const copy = await copyProblems(page);
+    const { problems: copy, risky } = await copyProblems(page);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
 
     const results = {};
     await Promise.all(Array.from({ length: WORKERS }, (_, w) => worker(h, skills.filter((_, i) => i % WORKERS === w), copy, results)));
+    const instead = await insteadProblems(h, Object.fromEntries(skills.map((s) => [s.id, risky[s.id]])));
+    for (const [id, found] of Object.entries(instead)) results[id].problems = [...new Set([...results[id].problems, ...found])];
 
     const failing = skills.filter((s) => results[s.id].problems.length);
     const todo = failing.filter((s) => !ENFORCED.has(s.id)).map((s) => ({ id: s.id, ...results[s.id] }));
@@ -378,5 +484,21 @@ export const scenarios = {
     if (passing.length) console.log(`skill-check: passing but not in ENFORCED yet: ${passing.join(', ')}`);
     h.expect(!broken.length, broken.map((s) => `${s.id}: ${results[s.id].problems.join('; ')}`).join('\n'));
     return { skills: skills.length, enforced: [...ENFORCED], passing, todo, walks: Object.fromEntries(skills.map((s) => [s.id, results[s.id].walk])) };
+  },
+
+  async 'copy-everywhere'(h) {
+    const re = Object.fromEntries(Object.entries(COPY).map(([k, v]) => [k, new RegExp(v, 'i')]));
+    const RULES = [['emDash', 'em dash'], ['diagnosis', 'diagnosis word'], ['unsafe', 'unsafe wording'], ['abandon', 'abandonment cue'], ['bodyNumber', 'body, food or weight number']];
+    const all = shippedStrings();
+    const problems = [];
+    for (const { file, line, text } of all) {
+      for (const [k, name] of RULES) {
+        const m = text.match(re[k]);
+        if (m) problems.push(`${file}${line ? `:${line}` : ''}: ${name} "${m[0]}" in "${text.length > 90 ? text.slice(0, 87) + '...' : text}"`);
+      }
+    }
+    console.log(`copy-everywhere: ${all.length} strings in ${new Set(all.map((s) => s.file)).size} files`);
+    h.expect(!problems.length, problems.join('\n'));
+    return { strings: all.length };
   },
 };

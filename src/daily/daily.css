@@ -438,6 +438,17 @@
 .dq-actions--stack .dq-btn {
   width: 100%;
 }
+.dq-actions--pair {
+  width: 100%;
+  margin-top: 0;
+}
+.dq-actions--pair > .dq-btn {
+  flex: 1 1 200px;
+  width: auto;
+}
+.dq-timer > .dq-actions--pair {
+  margin-bottom: 16px;
+}
 .dq-btn {
   position: relative;
   display: inline-flex;
