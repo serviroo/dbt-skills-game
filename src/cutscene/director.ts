@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Stage } from '../core/stage';
 import { params } from '../core/params';
 import { clamp, cubicBezier, ease, fbm1, lerp, smoothstep } from '../core/math';
-import { animate, wait, uiNow } from '../ui/anim';
+import { animate, wait, waitPage, uiNow } from '../ui/anim';
 import { LanternWindow, levelBody, lanternLayer } from '../ui/lantern-window';
 import { GATE, LEVEL } from '../motion/tokens';
 import { Letterbox, awakenWord, rewardCards, letterView, endCard, fader, skipButton } from '../ui/cutscene-ui';
@@ -189,7 +189,7 @@ export class Director {
       },
       5.6,
     );
-    wait(LEVEL.ringSec).then(() => this.audio.play('level_ring'));
+    waitPage(LEVEL.ringSec).then(() => this.audio.play('level_ring'));
     await levelWin;
     if (this.skipped) return;
     await this.hold(0.1);
@@ -213,7 +213,7 @@ export class Director {
       root.querySelectorAll<SVGPathElement>('.dq-box path.c').forEach((tick, i) => {
         const at = 0.95 + i * 0.26;
         animate(tick, [{ strokeDashoffset: 1 }, { strokeDashoffset: 0 }], { duration: 190, delay: at * 1000, easing: 'cubic-bezier(.4,0,.2,1)' });
-        wait(at).then(() => live() && this.audio.play('level_tick', { index: i, detune: 200 + i * 200 }));
+        waitPage(at).then(() => live() && this.audio.play('level_tick', { index: i, detune: 200 + i * 200 }));
       });
       const reveal = (sel: string, at: number, dur: number) => {
         const n = root.querySelector<HTMLElement>(sel);
@@ -222,7 +222,7 @@ export class Director {
       reveal('.dq-dots', 1.75, 420);
       reveal('.dq-punch', 2.3, 260);
       reveal('.dq-side span', 2.75, 500);
-      wait(2.3).then(() => live() && this.audio.play('soft_chime', { gain: 0.5 }));
+      waitPage(2.3).then(() => live() && this.audio.play('soft_chime', { gain: 0.5 }));
     }
     await questWin;
   }
@@ -443,7 +443,13 @@ export class Director {
 
 export async function playCutscene(stage: Stage, audio?: AudioLike, opts: { skippable?: boolean } = {}) {
   const d = new Director(stage, audio);
-  await d.init();
+  stage.stop();
+  try {
+    await d.init();
+    await stage.compileShaders();
+  } finally {
+    stage.start();
+  }
   return d.play(opts);
 }
 

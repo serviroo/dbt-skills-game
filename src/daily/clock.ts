@@ -5,7 +5,7 @@
  * Capture mode (?capture): follows the Stage clock through src/ui/anim.ts, so qa/capture.mjs renders exact frames.
  */
 import { params } from '../core/params';
-import { uiNow, wait as stageWait } from '../ui/anim';
+import { uiNow, waitPage } from '../ui/anim';
 
 type FrameFn = (t: number) => void;
 const fns = new Set<FrameFn>();
@@ -38,7 +38,4 @@ export function onFrame(fn: FrameFn) {
   return () => fns.delete(fn);
 }
 
-export function wait(sec: number) {
-  if (params.capture) return stageWait(sec);
-  return new Promise<void>((r) => setTimeout(r, sec * 1000));
-}
+export const wait = waitPage;

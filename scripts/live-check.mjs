@@ -88,7 +88,7 @@ async function reachHome(page) {
   for (let i = 0; i < 40 && clear < 3; i++) {
     const home = !(await page.locator('.dq-sw').count()) && (await page.locator('.dq-tile').first().isVisible().catch(() => false));
     clear = home ? clear + 1 : 0;
-    if (!home) await page.mouse.click(195, 700);
+    if (!home && (await page.locator('.dq-scrim.is-on').count())) await page.mouse.click(195, 700);
     await sleep(400);
   }
   if (clear < 3) throw new Error('Home never appeared');

@@ -204,6 +204,20 @@ export class Stage {
     cancelAnimationFrame(this.raf);
   }
 
+  async compileShaders() {
+    const r = this.renderer;
+    const drawn: THREE.Object3D[] = [];
+    this.scene.traverseVisible((o) => (o as THREE.Mesh).material && drawn.push(o));
+    for (const o of drawn) {
+      const before = r.info.programs?.length ?? 0;
+      const target = r.getRenderTarget();
+      r.setRenderTarget(this.composer.inputBuffer);
+      for (const m of r.compile(o, this.camera, this.scene)) (r.properties.get(m) as { currentProgram?: THREE.WebGLProgram }).currentProgram?.getUniforms();
+      r.setRenderTarget(target);
+      if ((r.info.programs?.length ?? 0) > before) await new Promise((resolve) => setTimeout(resolve));
+    }
+  }
+
   /** 0 full quality, 1 MSAA off, 2 lower resolution floor; only ever steps down. */
   private tier = 0;
 

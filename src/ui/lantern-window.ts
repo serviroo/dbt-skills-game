@@ -1,5 +1,5 @@
 import '../styles/lantern-window.css';
-import { animate, complete, el, finished, wait } from './anim';
+import { animate, complete, el, wait, waitPage } from './anim';
 import { params } from '../core/params';
 import { EASE, LEVEL, WINDOW as W, css, fr } from '../motion/tokens';
 
@@ -233,6 +233,7 @@ export class LanternWindow {
   private offSkip: (() => void) | null = null;
   private reduced = params.reduced;
   private resolveTap: ((v: string) => void) | null = null;
+  private early: string | null = null;
   private gone = false;
   readonly spec: WindowSpec;
 
@@ -280,7 +281,7 @@ export class LanternWindow {
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
           windowSounds.tap?.();
-          this.resolveTap?.(a.value);
+          this.act(a.value);
         });
         acts.append(btn);
       }
@@ -349,7 +350,8 @@ export class LanternWindow {
     if (this.reduced) {
       this.spec.reveal?.(ctx);
       for (const r of rolls) r.oldN.style.opacity = '0';
-      await finished(animate(this.root, [{ opacity: 0 }, { opacity: 1 }], { duration: W.reducedFadeMs, easing: css(EASE.outCubic) }));
+      animate(this.root, [{ opacity: 0 }, { opacity: 1 }], { duration: W.reducedFadeMs, easing: css(EASE.outCubic) });
+      await waitPage(W.reducedFadeMs / 1000);
       if (this.gone) return;
       if (this.spec.tapToContinue) this.next.style.opacity = '0.85';
       this.spec.onCue?.('typed');
@@ -444,7 +446,7 @@ export class LanternWindow {
       this.typed(acts, [{ opacity: 0 }, { opacity: 1 }], { duration: W.actionsFadeMs, delay: at, easing: css(EASE.outCubic) });
       at += W.actionsFadeMs;
     }
-    for (const [t, c, i] of cues) wait(t / 1000).then(() => this.typing && this.spec.onCue?.(c, i));
+    for (const [t, c, i] of cues) waitPage(t / 1000).then(() => this.typing && this.spec.onCue?.(c, i));
 
     // 4. a tap (or Enter / Space) while the Lantern types completes the text at once
     this.typing = true;
@@ -462,7 +464,7 @@ export class LanternWindow {
       window.removeEventListener('pointerup', onSkip);
       window.removeEventListener('keydown', onSkip);
     };
-    await Promise.race([wait(at / 1000), skipped]);
+    await Promise.race([waitPage(at / 1000), skipped]);
     this.endTyping();
   }
 
@@ -484,9 +486,21 @@ export class LanternWindow {
       animate(this.next, [{ opacity: W.nextPulseLow }, { opacity: 1 }], { duration: W.nextPulseMs, iterations: Infinity, direction: 'alternate', easing: css(EASE.inOutSine) });
   }
 
+  private act(v: string) {
+    if (this.resolveTap) return this.resolveTap(v);
+    if (this.gone) return;
+    this.early ??= v;
+    this.skipTyping();
+  }
+
   /** Resolves with an action value, or 'tap' on any tap when tapToContinue; or 'timeout'. */
   waitForInput(timeoutSec = 0): Promise<string> {
     if (this.gone) return Promise.resolve(DISMISSED);
+    if (this.early !== null) {
+      const v = this.early;
+      this.early = null;
+      return Promise.resolve(v);
+    }
     return new Promise((resolve) => {
       let done = false;
       const finish = (v: string) => {
@@ -530,7 +544,8 @@ export class LanternWindow {
     windowSounds.close?.();
     const h = this.plate.offsetHeight;
     if (this.reduced) {
-      await finished(animate(this.root, [{ opacity: 1 }, { opacity: 0 }], { duration: W.reducedCloseMs, easing: css(EASE.outCubic) }));
+      animate(this.root, [{ opacity: 1 }, { opacity: 0 }], { duration: W.reducedCloseMs, easing: css(EASE.outCubic) });
+      await waitPage(W.reducedCloseMs / 1000);
       this.destroy();
       return;
     }
@@ -544,8 +559,9 @@ export class LanternWindow {
     const rx = `rotateX(${W.tiltDeg}deg)`;
     const [sx, sy] = W.closeEndScale;
     animate(this.tilt, [{ transform: `${rx} scale(1)` }, { transform: `${rx} scale(${W.closeFlashScale})`, offset: flash, easing: 'linear' }, { transform: `${rx} scale(${sx},${sy})` }], { duration: W.closeMs, easing: 'linear' });
-    await wait((W.closeMs + W.closeBarHoldMs) / 1000);
-    await finished(animate(this.root, [{ opacity: 1 }, { opacity: 0 }], { duration: W.closeFadeMs, easing: css(EASE.outCubic) }));
+    const hold = W.closeMs + W.closeBarHoldMs;
+    animate(this.root, [{ opacity: 1 }, { opacity: 0 }], { duration: W.closeFadeMs, delay: hold, easing: css(EASE.outCubic) });
+    await waitPage((hold + W.closeFadeMs) / 1000);
     this.destroy();
   }
 

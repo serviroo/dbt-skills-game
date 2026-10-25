@@ -79,6 +79,11 @@ export function wait(sec: number) {
   return new Promise<void>((resolve) => waiters.push({ at: clockNow() + sec, resolve }));
 }
 
+export function waitPage(sec: number) {
+  if (params.capture) return wait(sec);
+  return new Promise<void>((resolve) => setTimeout(resolve, sec * 1000));
+}
+
 export function finished(a: Animation) {
   if (params.capture) {
     return new Promise<void>((resolve) => {
