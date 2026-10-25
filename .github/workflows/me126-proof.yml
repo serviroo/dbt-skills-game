@@ -1,0 +1,35 @@
+name: ME-126 proof
+on:
+  push:
+    branches: ['servi/me-126-ci-proof*']
+permissions:
+  contents: read
+jobs:
+  two-prompts:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
+      options: --user 1001
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20.x
+          cache: npm
+      - run: npm ci
+      - name: two-prompts, 10 runs on the software renderer
+        run: |
+          pass=0; fail=0
+          for i in $(seq 10); do
+            if node scripts/e2e.mjs --scenario=two-prompts > run.log 2>&1; then pass=$((pass+1)); else fail=$((fail+1)); echo "--- run $i failed"; grep -E "renderer|FAIL|Timeout|resolved" run.log | head -8; fi
+          done
+          grep renderer run.log | head -1
+          echo "RESULT part ${{ matrix.part }}: $pass passed, $fail failed"
+          test "$fail" = 0
