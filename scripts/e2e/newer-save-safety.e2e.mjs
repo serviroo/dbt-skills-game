@@ -10,8 +10,9 @@
 // newer-tabs-same-item: the stored copy of an item both tabs hold, added at the same time, differs one level down; the
 // stored copy's value is the one written back.
 // newer-limited-records: a newer Save Crystal (Restore) and a newer build in another tab each add or change a field
-// this build doesn't read on records it keeps as stored (XP past its cap, text past its length): the next write keeps
-// the record exactly as stored, with the new field, never the trimmed form this build reads.
+// this build doesn't read on records it keeps as stored (XP past its cap, text past its length, a diary day with an
+// 800-character note whose merged fields match neither copy): the next write keeps the record exactly as stored, with
+// the new field, never the trimmed form this build reads. Another tab's change to a field on the day's line is kept.
 // newer-tabs-removals: in a list a newer build added (and among the records of a known list this build can't read), the
 // newer build in another tab removes one, changes one and adds one; this tab writes and keeps exactly that, never
 // showing the list. A Restore of an earlier Save Crystal brings the removed ones back, newer than their removal.
@@ -324,14 +325,31 @@ export const scenarios = {
   },
 
   async 'newer-limited-records'(h) {
-    const seed = { [h.SAVE]: JSON.stringify(newerSave()), 'dbt.app.v1': h.SEEN, [h.YOU]: YOU };
-    const limited = (save, glow, colour) => {
-      const want = newerSave();
+    // day D's note is past this build's 600 characters
+    const NOTE = 'A long walk by the sea, slow and quiet. '.repeat(20);
+    const longDay = () => {
+      const save = newerSave();
+      save.diary[D].note = NOTE;
+      return save;
+    };
+    const seed = { [h.SAVE]: JSON.stringify(longDay()), 'dbt.app.v1': h.SEEN, [h.YOU]: YOU };
+    // keys in a fixed order, so two records compare by content
+    const tidy = (x) => (Array.isArray(x) ? x.map(tidy) : x && typeof x === 'object' ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, tidy(x[k])])) : x);
+    /** Day D swaps weather for a tide: merged with this device's copy, the day holds both, so it matches neither. */
+    const tideFor = (save, tide) => {
+      const day = save.diary[D];
+      delete day.weather;
+      delete day.ft['x:weather'];
+      day.tide = tide;
+      day.ft['x:tide'] = T;
+    };
+    const limited = (save, glow, colour, tide) => {
+      const want = longDay();
       const ev = want.events.find((e) => e.id === 'nx1');
       const item = want.lists.comfort.find((i) => i.id === 'nc-long');
-      const at = (s) => [s.events.find((e) => e.id === 'nx1'), s.lists.comfort.find((i) => i.id === 'nc-long')];
-      const [gotEv, gotItem] = at(save);
-      return { want: { ev: { ...ev, glow }, item: { ...item, colour } }, got: { ev: gotEv, item: gotItem } };
+      const day = { ...want.diary[D], tide, ft: { ...want.diary[D].ft, 'x:tide': T } };
+      const got = { ev: save.events.find((e) => e.id === 'nx1'), item: save.lists.comfort.find((i) => i.id === 'nc-long'), day: save.diary?.[D] };
+      return { want: tidy({ ev: { ...ev, glow }, item: { ...item, colour }, day }), got: tidy(got) };
     };
     // Restore: a Save Crystal from a newer version adds a field to the 800 XP event and to the 300-character item
     {
@@ -341,15 +359,17 @@ export const scenarios = {
       file.schema += 1;
       file.events.find((e) => e.id === 'nx1').glow = { ring: 3 };
       file.lists.comfort.find((i) => i.id === 'nc-long').colour = 'amber';
+      tideFor(file, 'high');
       h.expect(/Restored/.test(await restore(h, page, file, 'limited-newer.json')), 'the newer Save Crystal was not restored');
       await rename(page, 'Robin Vale');
       await page.waitForFunction((k) => JSON.parse(localStorage.getItem(k) ?? 'null')?.profile?.playerName === 'Robin Vale', h.SAVE, { timeout: 10000 });
-      const { want, got } = limited(await saveOf(h, page), { ring: 3 }, 'amber');
+      const { want, got } = limited(await saveOf(h, page), { ring: 3 }, 'amber', 'high');
       h.expect(same(want, got), `after a newer Save Crystal added fields, records kept as stored were written another way: ${diff(want, got)}`);
       h.expect(!errors.length, errors.join('\n'));
       await ctx.close();
     }
-    // two tabs: a newer build in the other tab changes the event's field and adds one to the item
+    // two tabs: a newer build in the other tab changes the event's field, adds one to the item, swaps day D's weather
+    // for a tide and changes the voice of D's line (same time, same id)
     {
       const { ctx, page: a, errors } = await h.open(seed);
       await h.reachHub(a);
@@ -357,17 +377,26 @@ export const scenarios = {
       b.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
       await b.goto(a.url());
       await h.reachHub(b);
-      await b.evaluate((key) => {
+      await b.evaluate(([key, d, t]) => {
         const s = JSON.parse(localStorage.getItem(key));
         s.events.find((e) => e.id === 'nx1').glow = { ring: 4 };
         s.lists.comfort.find((i) => i.id === 'nc-long').colour = 'rose';
+        const day = s.diary[d];
+        delete day.weather;
+        delete day.ft['x:weather'];
+        day.tide = 'low';
+        day.ft['x:tide'] = t;
+        s.lines.find((l) => l.day === d).voice = 'loud';
         localStorage.setItem(key, JSON.stringify(s));
-      }, h.SAVE);
+      }, [h.SAVE, D, T]);
       await settings(h, a);
       await rename(a, 'Robin Vale');
       await a.waitForFunction((k) => JSON.parse(localStorage.getItem(k) ?? 'null')?.profile?.playerName === 'Robin Vale', h.SAVE, { timeout: 10000 });
-      const { want, got } = limited(await saveOf(h, a), { ring: 4 }, 'rose');
+      const saved = await saveOf(h, a);
+      const { want, got } = limited(saved, { ring: 4 }, 'rose', 'low');
       h.expect(same(want, got), `after another tab added fields, records kept as stored were written another way: ${diff(want, got)}`);
+      const line = saved.lines.find((l) => l.day === D);
+      h.expect(line?.voice === 'loud', `the other tab's change to the day's line was lost: ${JSON.stringify(line)}`);
       h.expect(!errors.length, errors.join('\n'));
       await ctx.close();
     }

@@ -600,6 +600,28 @@ export function mergeEntry(a: DiaryEntry, b: DiaryEntry, prefer?: 'a' | 'b'): Di
   return out;
 }
 const isFieldKey = (k: string) => k === 'note' || k.startsWith('e:') || k.startsWith('u:');
+/** What this build reads of a diary day, each field with the time it counts from: nothing a newer build added. */
+const entryRead = (e: DiaryEntry) => flat({ day: e.day, emotions: e.emotions, urges: e.urges, note: e.note, updatedAt: e.updatedAt, times: fieldTimes(e) });
+/**
+ * A merged diary day that differs from one copy only in fields a newer build added takes that copy's stored form with
+ * the merged fields laid on it, so a day past this build's limits (a longer note, rows past 5) is still written as
+ * stored (see AS_STORED). A day whose known fields came from both copies is this build's own, written as it reads it.
+ */
+function keepStoredDay(merged: DiaryEntry, ...copies: DiaryEntry[]): DiaryEntry {
+  const read = entryRead(merged);
+  for (const c of copies) {
+    const t = AS_STORED.get(c);
+    if (!t || !isObj(t.raw) || t.read !== JSON.stringify(c) || entryRead(c) !== read) continue;
+    const raw = JSON.parse(JSON.stringify(t.raw)) as Record<string, unknown>;
+    for (const [k, v] of restOf(merged, ENTRY_KEYS)) putOwn(raw, k, v);
+    const times = Object.entries(merged.ft ?? {}).filter(([k]) => !isFieldKey(k));
+    if (times.length && raw.ft === undefined) raw.ft = {};
+    if (times.length && !isObj(raw.ft)) continue;
+    for (const [k, v] of times) putOwn(raw.ft as object, k, v);
+    return twin(merged, raw, true);
+  }
+  return merged;
+}
 
 /** True when a holds a field b lacks, a different value, or a later time for one. */
 function entryAhead(a: DiaryEntry, b: DiaryEntry) {
@@ -1038,7 +1060,7 @@ export class Store {
       const merged = mergeEntry(mine, e, prefer);
       const f = flat(merged);
       // an unchanged side keeps its object, so a newer save's stored form still reaches stored()
-      this.state.diary[day] = f === flat(mine) ? mine : f === flat(e) ? e : merged;
+      this.state.diary[day] = f === flat(mine) ? mine : f === flat(e) ? e : keepStoredDay(merged, mine, e);
     }
   }
 
@@ -1076,6 +1098,8 @@ export class Store {
     // what a newer build stored: the stored copy's, never dropped
     adoptKept(this.state, other, true);
     adoptEventRest(this.state.events, other.events, true);
+    // the line this copy keeps for a day (absorbProgress), when the other copy holds the same one
+    adoptRest(this.state.lines, other.lines, (l) => `${l.day}\n${l.id}\n${l.t}`, LINE_KEYS, true);
     this.state.v = Math.max(this.state.v, other.v);
     const gone = { ...this.state.gone };
     for (const [id, t] of Object.entries(other.gone)) if (t > goneAt(gone, id)) setOwn(gone, id, t);
