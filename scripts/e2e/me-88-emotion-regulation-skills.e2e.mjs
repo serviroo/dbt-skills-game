@@ -65,11 +65,20 @@ async function openFromLibrary(h, page, id) {
 }
 
 const stepText = async (page) => norm((await page.locator('.dq-step-body').textContent().catch(() => '')) ?? '');
+/** Taps the visible button with exactly this label, found when it is clicked, so a screen that changes meanwhile can't
+ * shift it onto another button. */
 async function tap(page, label) {
-  const btns = page.locator('.dq-skill button:visible');
-  const n = await btns.count();
-  for (let i = 0; i < n; i++) if (norm(await btns.nth(i).textContent()) === label) return btns.nth(i).click();
-  throw new Error(`no visible "${label}" button; screen: ${await stepText(page)}`);
+  const exact = new RegExp(`^\\s*${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/'/g, "['\u2019]")}\\s*$`);
+  const btn = page.locator('.dq-skill button:visible').filter({ hasText: exact }).first();
+  if (!(await btn.waitFor({ timeout: 5000 }).then(() => true, () => false))) throw new Error(`no visible "${label}" button; screen: ${await stepText(page)}`);
+  await btn.click();
+}
+/** Taps an answer and waits for the next step's own prompt, so a repeated label (Skip) lands on its own step each time. */
+async function stepTo(page, label, next) {
+  await tap(page, label);
+  // the screen sets curly apostrophes
+  const want = new RegExp(next.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/'/g, "['\u2019]"));
+  await page.locator('.dq-skill .dq-step-body').filter({ hasText: want }).first().waitFor({ timeout: 5000 });
 }
 
 async function checkScreen(h, page, name, see) {
@@ -429,23 +438,34 @@ export const scenarios = {
     const { ctx, page, errors } = await h.open(seedFor(h, returning(12)), '?mute', PHONE);
     await library(h, page);
     await page.locator('.dq-librow', { has: page.locator('.dq-librow-n', { hasText: /^True Sight$/ }) }).click();
-    for (const label of ['Begin', 'Calm or mild. Go on', 'Anger', 'Skip', 'Skip', 'Skip', 'Skip', 'Skip', 'Skip', 'Yes, it fits']) {
-      await page.locator('.dq-step-body').waitFor();
-      await h.sleep(250);
-      await tap(page, label);
-    }
-    await h.sleep(300);
+    await page.locator('.dq-skill .dq-step-body').filter({ hasText: 'see the whole picture clearly' }).waitFor({ timeout: 10000 });
+    for (const [label, next] of [
+      ['Begin', 'works best on a calm or mild day'],
+      ['Calm or mild. Go on', 'Which feeling do you want to look at?'],
+      ['Anger', 'How strong is it?'],
+      ['Skip', 'What happened?'],
+      ['Skip', 'saying it means?'],
+      ['Skip', 'What else could it mean?'],
+      ['Skip', 'expecting something bad to happen?'],
+      ['Skip', 'If the worst did happen'],
+      ['Skip', 'Does the size of the feeling fit the facts?'],
+      ['Yes, it fits', 'Then it fits.'],
+    ])
+      await stepTo(page, label, next);
     await checkScreen(h, page, 'er-links-01-check-facts', 'working on the problem');
     await tap(page, 'Problem Solving');
     await page.locator('.dq-skill .dq-intro-name', { hasText: /^Keysmith$/ }).waitFor({ timeout: 5000 });
     await page.getByRole('button', { name: 'Leave this skill' }).click();
     await library(h, page);
     await page.locator('.dq-librow', { has: page.locator('.dq-librow-n', { hasText: /^Reverse Cast$/ }) }).click();
-    for (const label of ['Begin', 'Fear', 'Avoid it', 'It fits, and following it helps']) {
-      await h.sleep(250);
-      await tap(page, label);
-    }
-    await h.sleep(300);
+    await page.locator('.dq-skill .dq-step-body').filter({ hasText: 'Every emotion comes with an urge.' }).waitFor({ timeout: 10000 });
+    for (const [label, next] of [
+      ['Begin', 'Which emotion?'],
+      ['Fear', 'What does it make you want to do?'],
+      ['Avoid it', 'Wise Mind check.'],
+      ['It fits, and following it helps', "Then this isn't the skill for now."],
+    ])
+      await stepTo(page, label, next);
     await checkScreen(h, page, 'er-links-02-opposite-action', 'Want to work on the problem, or plan what to say?');
     await tap(page, 'Problem Solving');
     await page.locator('.dq-skill .dq-intro-name', { hasText: /^Keysmith$/ }).waitFor({ timeout: 5000 });
