@@ -51,6 +51,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   let evicted = false;
   const evict = () => {
     evicted = true;
+    dropFence();
     setLive(false);
     sync();
   };
@@ -102,6 +103,12 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   let gaps: number[] = [];
   let lastTick = -1;
   let goodFor = 0;
+  /**
+   * The context has finished drawing a frame. Until then the scene draws nothing more, stays hidden behind its flat
+   * picture and doesn't judge the device's speed: a new or restored context first builds the scene's shaders on the GPU,
+   * which can take seconds on a slow one, and frames queued behind that only stretch it out.
+   */
+  let ready = false;
   /** draws at pixel ratio r from now on, the current frame straight away; false when the scene has no size yet */
   function setRatio(r: number) {
     mine = r;
@@ -116,9 +123,19 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
     if (drawn && !lost && !evicted) draw(clock.now(), beatAt(clock.now()), still());
     return true;
   }
+  /** stops looking at the first frame's fence (the scene stops, or the renderer went to another scene) */
+  function dropFence() {
+    cancelAnimationFrame(fenceRaf);
+    fenceRaf = 0;
+    if (fence && !gl.isContextLost()) gl.deleteSync(fence);
+    fence = null;
+  }
   /** the ratio that would fit `ms` into `budget` */
   const fit = (ms: number, budget: number) => Math.max(minDpr, mine * Math.min(0.85, Math.max(0.4, Math.sqrt(budget / ms))));
-  /** looks at the first frame's fence once an animation frame: how long it was still drawing is what a frame costs here */
+  /**
+   * Looks at the first frame's fence once an animation frame. Once that frame is drawn the scene is ready: it shows the
+   * frame for now and moves on. How long it was still drawing is what a frame costs here.
+   */
   function checkFence() {
     fenceRaf = 0;
     if (!fence) return;
@@ -127,20 +144,25 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
       fence = null;
       return;
     }
-    if (gl.getSyncParameter(fence, gl.SYNC_STATUS) !== gl.SIGNALED && now - fenceAt < 2000) {
+    if (gl.getSyncParameter(fence, gl.SYNC_STATUS) !== gl.SIGNALED) {
       fenceBusy = now;
       fenceRaf = requestAnimationFrame(checkFence);
       return;
     }
     gl.deleteSync(fence);
     fence = null;
-    // at least this long: it was still drawing when last looked at. One frame only lowers this scene, for now.
+    ready = true;
+    lastTick = -1;
+    gaps = [];
+    // at least this long: it was still drawing when last looked at. One frame only lowers this scene, for now; a still
+    // frame is the only one, so it keeps the full ratio.
     const ms = fenceBusy - fenceAt;
-    const r = ms > BUDGET ? fit(ms, BUDGET) : mine;
+    const calm = still();
+    const r = ms > BUDGET && !calm ? fit(ms, BUDGET) : mine;
     if (r < mine - 0.01) {
       before ??= mine;
       setRatio(r);
-    }
+    } else if (drawn && !lost && !evicted) draw(clock.now(), beatAt(clock.now()), calm);
   }
   /** called on every frame of the clock while the scene moves: how far apart the page's frames are */
   function watch(t: number) {
@@ -189,7 +211,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   const draw = (t: number, b: Beat, calm: boolean) => {
     v.pose(b, calm);
     renderer.render(v.scene, v.camera);
-    if (!calm && --timeIn === 0) {
+    if (--timeIn === 0) {
       fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
       gl.flush();
       fenceAt = fenceBusy = performance.now();
@@ -200,9 +222,10 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
     sceneStats.frames++;
     sceneStats.last = { kind: opts.kind, e: b.e, dur: b.dur, done: b.done, still: calm };
     sceneStats.dpr = renderer.getPixelRatio();
-    setLive(true);
+    if (ready) setLive(true);
   };
   const tick = (t: number) => {
+    if (!ready) return;
     const b = beatAt(t);
     if (!still()) watch(t);
     if (still()) {
@@ -258,9 +281,11 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
     setLive(false);
     sync();
   };
-  // three.js rebuilds its GPU state on its own listener, added before this one; the scene then draws straight away
+  // three.js rebuilds its GPU state on its own listener, added before this one; the scene then draws its first frame
+  // straight away and shows once that frame is drawn
   const onRestored = () => {
     lost = false;
+    ready = false;
     // a restored context may be slower or faster, so its first frame is timed again
     timeIn = 1;
     resync();
@@ -273,9 +298,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   return () => {
     sub?.();
     sub = null;
-    cancelAnimationFrame(fenceRaf);
-    if (fence && !gl.isContextLost()) gl.deleteSync(fence);
-    fence = null;
+    dropFence();
     io.disconnect();
     ro.disconnect();
     canvas.removeEventListener('webglcontextlost', onLost);

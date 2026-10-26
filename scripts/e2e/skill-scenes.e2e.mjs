@@ -90,6 +90,9 @@ async function pixels(page) {
 }
 
 async function drawn(h, page, where) {
+  // a scene fades in over its flat picture once it shows, so it is judged once fully in (the page clock may be stopped,
+  // so this looks from here rather than from the page)
+  for (const t0 = Date.now(); Number(await page.locator('.dq-scene').evaluate((e) => getComputedStyle(e).opacity)) < 0.99 && Date.now() - t0 < 5000; ) await h.sleep(50);
   const p = await pixels(page);
   h.expect(p.sd > 4 && p.max > 40 && p.mean > 6, `${where}: the scene looks blank (${JSON.stringify(p)})`);
   return p;
@@ -162,7 +165,7 @@ export const scenarios = {
     await page.clock.resume();
     await h.sleep(1500);
     const c = await pair(page);
-    h.expect(c.s.frames > b.s.frames + 10 && c.s.last.e > b.s.last.e + 1, `resumed: the scene did not move on (${b.s.frames} -> ${c.s.frames} frames)`);
+    h.expect(c.s.frames > b.s.frames + 10 && c.s.last.e > b.s.last.e + 1, `resumed: the scene did not move on (${b.s.frames} -> ${c.s.frames} frames, ${b.s.last.e.toFixed(2)} -> ${c.s.last.e.toFixed(2)} s)`);
     inStep(h, c, 'resumed');
 
     await page.locator('.dq-timer').getByRole('button', { name: '+15 s' }).click();
@@ -421,9 +424,8 @@ export const scenarios = {
     await home(h, page);
     await page.evaluate(() => window.__daily.go({ name: 'skill', id: 'wise-mind', entry: 'stone' }));
     await page.locator('.dq-skill').getByRole('button', { name: 'Begin', exact: true }).first().click({ timeout: 10000 });
-    await page.locator('.dq-timer-svg--drift').waitFor({ timeout: 10000 });
+    await page.locator('.dq-scene canvas').waitFor({ state: 'attached', timeout: 15000 });
     await pauseSoon(page);
-    await live(h, page, 'one slow frame');
     // every change of the canvas size has to come with a frame drawn at the new size before the page shows it
     await page.evaluate(() => {
       const c = document.querySelector('.dq-scene canvas');
@@ -432,7 +434,14 @@ export const scenarios = {
       }).observe(c, { attributes: true, attributeFilter: ['width'] });
     });
     const full = await page.evaluate(() => Math.min(window.devicePixelRatio, 2));
-    await page.clock.runFor(700);
+    // the scene shows once its first frame is drawn: the page clock is stepped until then (600 ms at least)
+    for (const t0 = Date.now(); !(await page.locator('.dq-timer-stage.is-scene-live').count()); ) {
+      if (Date.now() - t0 > 30000) {
+        await h.shot(page, 'fail-one-slow-frame');
+        throw new Error('one slow frame: the 3D scene never came on screen');
+      }
+      await page.clock.runFor(100);
+    }
     const low = await scenes(page);
     h.expect(low.dpr < full, `the slow first frame did not lower the scene (${low.dpr})`);
     await page.clock.runFor(6000);
