@@ -40,6 +40,9 @@ export interface ScreenOut {
   title: string;
   mode: 'hub' | 'sub' | 'skill' | 'safe';
   bubbles?: [number, number];
+  tools?: HTMLElement[];
+  /** a bar the screen pins over the bottom of the page, which a scroll or focus then stops above */
+  foot?: HTMLElement;
   leave?: () => void;
   after?: () => void;
 }
@@ -65,6 +68,8 @@ export class App {
   private view: HTMLElement;
   private scrim: HTMLElement;
   private toastEl: HTMLElement;
+  /** keeps --dq-top and --dq-foot at the pinned bars' real heights (scroll-padding in daily.css) */
+  private pins: ResizeObserver;
   route: Route = { name: 'hub' };
   private stack: Route[] = [];
   private current: ScreenOut | null = null;
@@ -96,6 +101,11 @@ export class App {
     this.toastEl = h('div', { class: 'dq-toast', role: 'status', 'aria-live': 'polite' });
     this.root.append(this.bubbles.canvas, h('div', { class: 'dq-vignette', 'aria-hidden': 'true' }), this.top, this.view, this.toastEl, this.scrim);
     host.append(this.root);
+    this.pins = new ResizeObserver(() => {
+      this.root.style.setProperty('--dq-top', `${this.top.offsetHeight}px`);
+      this.root.style.setProperty('--dq-foot', `${this.current?.foot?.offsetHeight ?? 0}px`);
+    });
+    this.pins.observe(this.top);
     if (opts.volume) {
       // first launch with the speaker: an earlier Sound off carries over as mute
       if (opts.volume.fresh && this.store.state.settings.sound === false) opts.volume.set({ muted: true });
@@ -329,11 +339,14 @@ export class App {
     if (!o.replace && this.current) this.stack.push(this.route);
     if (route.name === 'hub') this.stack = [];
     this.current?.leave?.();
+    if (this.current?.foot) this.pins.unobserve(this.current.foot);
     if (route.name !== 'hub') this.toastEl.classList.remove('is-on');
     this.route = route;
     if (safe !== wasSafe) this.quietScore(safe);
     const out = this.screens[route.name](this, route);
     this.current = out;
+    this.root.style.setProperty('--dq-foot', '0px');
+    if (out.foot) this.pins.observe(out.foot);
     this.root.dataset.mode = out.mode;
     this.root.dataset.screen = route.name;
     this.renderTop(out);
@@ -390,10 +403,11 @@ export class App {
       left = h('button', { type: 'button', class: 'dq-back', onclick: () => this.go({ name: 'hub' }) }, h('span', { html: icon('close') }), h('span', { text: 'Leave' }));
     else left = h('button', { type: 'button', class: 'dq-back', onclick: () => this.back() }, h('span', { html: icon('back') }), h('span', { text: 'Lantern' }));
     const mid = h('span', { class: 'dq-sr', text: typo(out.title) });
-    let right: HTMLElement = out.mode === 'safe' ? h('span', { class: 'dq-top-spacer' }) : safeBtn;
+    const tools = out.tools ?? [];
+    let right: HTMLElement = out.mode === 'safe' ? (tools.length ? h('div', { class: 'dq-top-end' }, tools) : h('span', { class: 'dq-top-spacer' })) : safeBtn;
     if (this.volBtn) {
       this.volBtn.close();
-      right = out.mode === 'safe' ? h('div', { class: 'dq-top-end' }, this.volBtn) : h('div', { class: 'dq-top-end' }, this.volBtn, safeBtn);
+      right = out.mode === 'safe' ? h('div', { class: 'dq-top-end' }, tools, this.volBtn) : h('div', { class: 'dq-top-end' }, tools, this.volBtn, safeBtn);
     }
     this.top.replaceChildren(left, mid, right);
   }
@@ -408,6 +422,7 @@ export class App {
 
   destroy() {
     this.current?.leave?.();
+    this.pins.disconnect();
     this.volBtn?.dispose();
     this.store.dispose();
     this.offs.forEach((f) => f());

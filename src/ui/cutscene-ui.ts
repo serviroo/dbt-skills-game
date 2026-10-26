@@ -5,6 +5,7 @@ import { ICON_LETTER, ICON_LANTERN, ICON_MOTH, ICON_STAR, FLOURISH } from './ico
 import type { RewardItem } from '../content/intro';
 import { LETTER, END_CARD, NAME_PROMPT, TITLE_SCREEN } from '../content/intro';
 import { DEFAULT_COMPANION, DEFAULT_NAME, chooseYou, cleanName } from '../core/you';
+import { mayMentionTherapist } from '../core/session';
 import { LanternWindow, lanternLayer } from './lantern-window';
 
 /** Sound hook (wired to the audio engine by the app). */
@@ -222,6 +223,8 @@ const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 /* ---------------------------------------------------------------- letter */
 
 export async function letterView(): Promise<void> {
+  // the letter mentions a therapist, so nothing else in the companion does this session
+  mayMentionTherapist();
   const wrap = el('div', 'ov interactive letter-wrap');
   const card = el('article', 'letter');
   card.setAttribute('aria-label', 'Welcome note');

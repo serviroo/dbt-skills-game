@@ -11,6 +11,7 @@ import type { App, Route, ScreenOut } from './app';
 import { icon } from './art';
 import { uid } from './store';
 import { btn, chip, field, h, p, panel, typo } from './ui';
+import { supportListsCopy } from './support-lists';
 import { breathRing, pmrView, timerView, type Ctx } from './widgets';
 
 const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.userAgent));
@@ -85,7 +86,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     }
     applyLight();
   });
-  const foot = h('div', { class: 'dq-sz-foot' }, talkLink, lightBtn);
+  const foot = h('div', { class: 'dq-sz-foot' }, talkLink);
   const el = h('div', { class: 'dq-safezone' }, h('h1', { class: 'dq-sr', text: 'Safe Zone' }), box, foot);
   applyLight();
 
@@ -97,12 +98,19 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     body.replaceChildren(...halves);
     talkLink.classList.toggle('is-hidden', at === 'talk');
     foot.classList.toggle('is-talk', at === 'talk');
-    talkLink.classList.toggle('is-strong', higher && at !== 'talk');
+    talkLink.classList.toggle('is-strong', (higher || danger) && at !== 'talk');
+    // once it's higher, or they might not be safe, "Talk to someone now" moves above the screen for the rest of the visit
+    if ((higher || danger) && !foot.classList.contains('is-top')) {
+      foot.classList.add('is-top');
+      el.insertBefore(foot, box);
+    }
     // upright the body fades in; held sideways the body is display: contents, so its two halves fade instead
     for (const e of [body, ...halves]) animate(e, [{ opacity: 0 }, { opacity: 1 }], { duration: app.reduced() ? 160 : 520, easing: 'ease-out' });
     const f = body.querySelector<HTMLElement>('[data-focus]');
     f?.setAttribute('tabindex', '-1');
     f?.focus({ preventScroll: true });
+    // upright only the body scrolls, held sideways the whole page does
+    body.scrollTo({ top: 0 });
     app.root.scrollTo({ top: 0 });
   };
   const h3 = (t: string) => h('h2', { class: 'dq-sz-t', 'data-focus': '', text: typo(t) });
@@ -111,6 +119,8 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   const listScreen = (at: 'reasons' | 'comfort', title: string, text: string | null, empty: string) => {
     const items = st.state.lists[at];
     const list = h('ul', { class: 'dq-sz-list' }, items.map((i) => h('li', { text: typo(i.text) })));
+    const lists = supportListsCopy(app);
+    stops.push(lists.dispose);
     const f = field('Add one', { placeholder: at === 'reasons' ? SAFE.reasons.add : 'Something that helps, even a little', hideLabel: true });
     const add = h('div', { class: 'dq-addrow is-hidden' }, f.el, btn('Save', () => {
       const v = f.input.value.trim();
@@ -127,11 +137,13 @@ export function safeScreen(app: App, route: Route): ScreenOut {
       h('div', { class: 'dq-actions dq-actions--stack' }, nextBtn(at), btn('Add one', () => {
         add.classList.remove('is-hidden');
         f.input.focus();
-      }, { kind: 'quiet', ic: 'plus' })),
+      }, { kind: 'quiet', ic: 'plus' }), lists.open),
+      lists.box,
     );
   };
 
-  function show(at: At) {
+  /** `then` is where breathing goes next when it was picked instead of cool water. */
+  function show(at: At, then?: At) {
     clear();
     switch (at) {
       case 'start':
@@ -153,13 +165,19 @@ export function safeScreen(app: App, route: Route): ScreenOut {
       case 'breathe': {
         const ring = breathRing(ctx, { inhale: 4, exhale: 6, rounds: 6 });
         stops.push(ring.stop);
-        return swap(at, [h3(SAFE.breathe.title), p(SAFE.breathe.text, 'dq-text')], ring.el, h('div', { class: 'dq-actions dq-actions--center' }, nextBtn(at, 'Next', 'quiet')));
+        return swap(at, [h3(SAFE.breathe.title), p(SAFE.breathe.text, 'dq-text')], ring.el, h('div', { class: 'dq-actions dq-actions--center' }, btn('Next', () => show(then ?? nextOf(at)), { kind: 'quiet' })));
       }
       case 'cold': {
-        const skip = btn("Can't right now", () => show(nextOf(at)), { kind: 'quiet' });
-        const tv = timerView(ctx, { seconds: 30, visual: 'cold', start: 'Start 30 seconds', extra: [skip], onDone: () => show(nextOf(at)) });
+        const instead = btn('Breathe instead', () => show('breathe', nextOf(at)), { kind: 'primary' });
+        const tv = timerView(ctx, {
+          seconds: 30,
+          visual: 'cold',
+          start: 'Start 30 seconds',
+          peers: [instead],
+          onDone: () => show(nextOf(at)),
+        });
         stops.push(tv.stop);
-        return swap(at, [h3(SAFE.cold.title), p(SAFE.cold.text, 'dq-text')], p(SAFE.cold.small, 'dq-small'), tv.el);
+        return swap(at, [h3(SAFE.cold.title)], p(SAFE.cold.small, 'dq-small'), tv.el, p(SAFE.cold.text, 'dq-text'), h('div', { class: 'dq-actions dq-actions--center' }, nextBtn(at, 'Next', 'quiet')));
       }
       case 'squeeze': {
         const nb = nextBtn(at, 'Next', 'quiet');
@@ -223,6 +241,8 @@ export function safeScreen(app: App, route: Route): ScreenOut {
         );
         const n = field('Name', { placeholder: 'Name', autocomplete: 'off' });
         const ph = field('Number', { placeholder: 'Phone number', type: 'tel', inputmode: 'tel' });
+        const lists = supportListsCopy(app);
+        stops.push(lists.dispose);
         const add = h('div', { class: 'dq-person-add is-hidden' }, n.el, ph.el, h('div', { class: 'dq-actions' }, btn('Save', () => {
           const name = n.input.value.trim();
           if (!name) return n.input.focus();
@@ -238,7 +258,8 @@ export function safeScreen(app: App, route: Route): ScreenOut {
           h('div', { class: 'dq-actions dq-actions--stack' }, nextBtn(at), btn('Add a person', () => {
             add.classList.remove('is-hidden');
             n.input.focus();
-          }, { kind: 'quiet', ic: 'plus' })),
+          }, { kind: 'quiet', ic: 'plus' }), lists.open),
+          lists.box,
         );
       }
       case 'talk': {
@@ -253,23 +274,30 @@ export function safeScreen(app: App, route: Route): ScreenOut {
             const id = l.note ? `dq-res-note-${uid()}` : undefined;
             return h('div', { class: 'dq-res-act' }, action(l, id), l.note ? h('p', { id, class: 'dq-res-note', text: typo(l.note) }) : null);
           });
-        const row = (line: CrisisLine, first = false) =>
+        // a lead line takes the place of the row's how, right under its name: it says who to call when the player might
+        // not be safe
+        const row = (line: CrisisLine, lead?: HTMLElement) =>
           h(
             'li',
-            { class: `dq-res ${first ? 'is-first' : ''}` },
+            { class: `dq-res ${lead ? 'is-first' : ''}` },
             h('div', { class: 'dq-res-n', text: line.name }),
-            h('p', { class: 'dq-res-how', text: typo(line.how) }),
+            lead ?? null,
             line.links.some((l) => l.note) ? h('div', { class: 'dq-res-acts dq-res-acts--notes' }, noted(line)) : h('div', { class: 'dq-res-acts' }, line.links.map((l) => action(l))),
+            lead ? null : h('p', { class: 'dq-res-how', text: typo(line.how) }),
           );
         const rows = region.lines.map((line) => row(line));
-        if (region.emergency.length) {
-          const sos = row({ name: 'Emergency', how: SAFE.talk.emergency, links: region.emergency.map((n) => ({ label: `Call ${n}`, href: `tel:${n}`, note: region.emergencyNotes?.[n] })) }, danger);
-          rows.splice(danger ? 0 : Math.min(2, rows.length), 0, sos);
+        const nums = region.emergency;
+        // the danger line says who to call, so it sits right above the buttons that call: on the emergency card, first in
+        // line, when there is a number, and first among the choices when there isn't
+        const dangerLine = (t: string) => p(t, `dq-text dq-sz-advice ${danger ? 'dq-sz-danger' : ''}`);
+        if (nums.length) {
+          const sos = { name: 'Emergency', how: SAFE.talk.emergency, links: nums.map((n) => ({ label: `Call ${n}`, href: `tel:${n}`, note: region.emergencyNotes?.[n] })) };
+          rows.splice(danger ? 0 : Math.min(2, rows.length), 0, row(sos, danger ? dangerLine(SAFE.talk.danger.replace('{num}', nums.join(' or '))) : undefined));
         }
-        const dangerText = region.emergency.length ? SAFE.talk.danger.replace('{num}', region.emergency.join(' or ')) : SAFE.talk.dangerElsewhere;
         return swap(
           at,
-          [h3(SAFE.talk.title), danger || !region.emergency.length ? p(dangerText, `dq-text ${danger ? 'dq-sz-danger' : ''}`) : null, p(region.lines.length ? SAFE.talk.text : SAFE.talk.none, 'dq-text')],
+          [h3(SAFE.talk.title), p(region.lines.length ? SAFE.talk.text : SAFE.talk.none, 'dq-text')],
+          nums.length ? null : dangerLine(SAFE.talk.dangerElsewhere),
           rows.length ? h('ul', { class: 'dq-res-list' }, rows) : null,
           h('p', { class: 'dq-small' }, h('a', { href: 'https://findahelpline.com', target: '_blank', rel: 'noopener noreferrer', class: 'dq-a', text: 'findahelpline.com' }), ` ${SAFE.talk.elsewhere}`),
           regionPicker(app, () => show('talk')),
@@ -288,6 +316,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   return {
     el,
     title: 'Safe Zone',
+    tools: [lightBtn],
     mode: 'safe',
     bubbles: [0, 0],
     leave: () => {

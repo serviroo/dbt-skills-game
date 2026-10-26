@@ -3,6 +3,8 @@ const TALL = { width: 390, height: 844 };
 const SMALL = { width: 320, height: 568 };
 const WIDE = { width: 844, height: 390 };
 const SHORT = { width: 568, height: 320 };
+const MID = { width: 375, height: 667 };
+const MID_WIDE = { width: 667, height: 375 };
 const AUDIO = 'dbt.audio.v1';
 const HINT = 'dbt.install-hint.v1';
 
@@ -384,69 +386,135 @@ async function allRoutes(h, { viewport, reduced = false }) {
   h.expect(!failed.length, failed.join('\n'));
 }
 
-// What each Safe Zone screen shows first beside its heading, so it has to be on screen when a phone is held sideways
+// What each Safe Zone screen must show whole on arrival, on any phone either way up: its choices, or the first thing
+// it has. The cold-water caution and both of its choices count (DESIGN.md principle 11).
 const ACTS = '.dq-actions--stack .dq-btn';
-const FIRST = { start: ACTS, breathe: '.dq-ring-count', squeeze: '.dq-ring-count', cold: '.dq-small', check: '.dq-opt', stop: ACTS, reasons: '.dq-sz-empty', comfort: '.dq-sz-empty', people: '.dq-sz-empty', talk: '.dq-res-a', close: ACTS };
+const SHOWN = {
+  start: [ACTS, 4],
+  breathe: ['.dq-ring-count', 1],
+  squeeze: ['.dq-ring-count', 1],
+  cold: ['.dq-small, .dq-timer .dq-btn', 3],
+  check: ['.dq-opt', 3],
+  stop: [`.dq-sz-stop:not(.is-hidden), ${ACTS}:first-child`, 2],
+  reasons: ['.dq-sz-list > li:first-child', 1],
+  comfort: ['.dq-sz-list > li:first-child', 1],
+  people: ['.dq-person:first-child', 1],
+  talk: ['.dq-res-list > li:first-child .dq-res-a:first-child', 1],
+  close: [ACTS, 2],
+};
+const listed = (n, k) => Array.from({ length: n }, (_, i) => ({ id: `me92-${k}${i}`, text: `${k} ${i + 1}, a few words long`, at: Date.now() - 86400e3 }));
+const filled = () => JSON.stringify({ ...JSON.parse(returning()), lists: { reasons: listed(3, 'reason'), comfort: listed(3, 'comfort'), activities: [], people: [{ id: 'me92-p1', name: 'Sam', phone: '+1 555 0100', at: Date.now() - 86400e3 }, { id: 'me92-p2', name: 'Robin', phone: '', at: Date.now() - 86400e3 }] } });
+// an iPhone with a notch held sideways (the smallest is 812x375): 47 px each side, 21 px for the home bar
+const NOTCH = { top: 0, left: 47, right: 47, bottom: 21 };
+// the same iPhone upright: 47 px for the status bar, 34 px for the home bar
+const HOME_BAR = { top: 47, left: 0, right: 0, bottom: 34 };
 
 /**
- * Every Safe Zone screen at every size. Held sideways: the heading and the screen's first thing are whole on screen on
- * arrival, clear of the top bar and the pinned foot, "Talk to someone now" stays pinned and tappable, and nothing
- * scrolls sideways. Upright: grouping the heading apart from the rest moves no box at all.
+ * Every Safe Zone screen at one size (ME-127, ME-210). On arrival: what SHOWN names is whole on screen, clear of the top
+ * bar, the pinned foot and the screen's safe-area insets, and taps land on it; "Talk to someone now" stays pinned and
+ * tappable; every text is at least 20 px and every button, link and picker at least 44 px; nothing scrolls sideways.
+ * With notch insets, the top bar's buttons and the Safe Zone keep clear of them. Held sideways, an opened "Add one" box
+ * keeps the column's width. Upright, grouping the heading apart from the rest moves no box at all. With "Copy your lists"
+ * open and Copy tapped, the preview and what Copy says are Safe Zone text too.
  */
-async function everyScreen(h, viewport) {
-  const size = `${viewport.width}x${viewport.height}`;
+async function everyScreen(h, viewport, { insets } = {}) {
+  const size = `${viewport.width}x${viewport.height}${insets ? ' with a notch' : ''}`;
   const sideways = viewport.width > viewport.height;
-  const { ctx, page, errors } = await boot(h, { save: returning(), viewport, reduced: true });
+  const { ctx, page, errors } = await boot(h, { save: filled(), viewport, reduced: true });
   const failed = [];
   try {
+    if (insets) {
+      await (await ctx.newCDPSession(page)).send('Emulation.setSafeAreaInsetsOverride', { insets });
+      await page.reload();
+      await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
+    }
     await page.locator('header .dq-safe').click();
     let heading = '';
-    for (const [at, sel] of Object.entries(FIRST)) {
+    for (const [at, [sel, n]] of Object.entries(SHOWN)) {
       const label = `${size} ${at}`;
       await page.evaluate((at) => window.__daily.go({ name: 'safe', at }), at);
       await page.waitForFunction(([was, sel]) => {
         const t = document.querySelector('.dq-sz-body [data-focus]')?.textContent;
-        return t && t !== was && !!document.querySelector(`.dq-sz-body ${sel}`);
+        return t && t !== was && !!document.querySelector(`.dq-sz-body :is(${sel})`);
       }, [heading, sel]);
       // fonts in and the screen's fade-in done, so the boxes and screenshots are what the player sees
       await page.evaluate(() => Promise.all([document.fonts.ready, ...[...document.querySelectorAll('.dq-sz-body, .dq-sz-body > *')].flatMap((e) => e.getAnimations()).map((a) => a.finished)]));
       heading = await page.locator('.dq-sz-body [data-focus]').textContent();
-      if (sideways) {
-        const got = await page.evaluate((sel) => {
-          const top = document.querySelector('.dq-top').getBoundingClientRect().bottom;
-          const foot = document.querySelector('.dq-sz-foot').getBoundingClientRect().top;
-          const whole = (e) => {
-            const r = e.getBoundingClientRect();
-            return r.left >= 0 && r.right <= innerWidth && r.top >= top - 0.5 && r.bottom <= Math.min(foot, innerHeight) + 0.5;
-          };
-          const first = document.querySelector(`.dq-sz-body ${sel}`);
-          const talk = document.querySelector('.dq-sz-talk:not(.is-hidden)');
-          const t = talk?.getBoundingClientRect();
-          return {
-            first: whole(first),
-            box: Object.values(first.getBoundingClientRect().toJSON()).slice(0, 4).map(Math.round),
-            heading: whole(document.querySelector('.dq-sz-body [data-focus]')),
-            talk: !talk || (t.bottom <= innerHeight && talk.contains(document.elementFromPoint(t.left + t.width / 2, t.top + t.height / 2))),
-            wide: document.documentElement.scrollWidth <= innerWidth,
-          };
-        }, sel);
-        if (!got.first) failed.push(`${label}: ${sel} is at x, y ${got.box.slice(0, 2).join(', ')} (${got.box[2]}x${got.box[3]}), not whole on screen above the pinned foot`);
-        if (!got.heading) failed.push(`${label}: the heading is not whole on screen`);
+      const look = (sel) => page.evaluate(([sel, insets]) => {
+        const left = insets?.left ?? 0;
+        const right = innerWidth - (insets?.right ?? 0);
+        const bottom = innerHeight - (insets?.bottom ?? 0);
+        const top = document.querySelector('.dq-top').getBoundingClientRect().bottom;
+        const name = (e) => (e.getAttribute('aria-label') || e.textContent).trim().replace(/\s+/g, ' ').slice(0, 24);
+        // 4 px in from each corner, clear of the rounded corners; anything pinned over a control takes the tap instead,
+        // and words or a visual must not sit under the pinned foot
+        const off = (e) => {
+          const r = e.getBoundingClientRect();
+          const at = [[r.left + 4, r.top + 4], [r.right - 4, r.top + 4], [r.left + 4, r.bottom - 4], [r.right - 4, r.bottom - 4], [r.left + r.width / 2, r.top + r.height / 2]];
+          const whole = r.left >= left - 0.5 && r.right <= right + 0.5 && r.top >= top - 0.5 && r.bottom <= bottom + 0.5;
+          const f = document.querySelector('.dq-sz-foot').getBoundingClientRect();
+          const clear = e.matches('button, a, select') ? at.every(([x, y]) => e.contains(document.elementFromPoint(x, y))) : !(f.height && r.right > f.left && r.left < f.right && r.bottom > f.top + 0.5);
+          return whole && clear ? null : `${name(e)} at ${[r.left, r.top, r.right, r.bottom].map(Math.round).join(', ')}`;
+        };
+        const shown = [...document.querySelectorAll(`.dq-sz-body :is(${sel})`)];
+        const talk = document.querySelector('.dq-sz-talk:not(.is-hidden)');
+        const t = talk?.getBoundingClientRect();
+        const tap = [...document.querySelectorAll('.dq-safezone :is(button, a[href], select), .dq-top .ca-sz-light')].filter((e) => !e.closest('.is-hidden'));
+        const words = [...document.querySelectorAll('.dq-safezone *')].filter((e) => !e.closest('button, a, select, .dq-chip, .dq-sr, .dq-ring, .dq-timer-stage, .is-hidden') && [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()));
+        const bar = [...document.querySelectorAll('.dq-top button')].filter((b) => b.offsetParent && !b.closest('[hidden], .vol-pop'));
+        const zone = document.querySelector('.dq-safezone').getBoundingClientRect();
+        return {
+          count: shown.length,
+          off: shown.map(off).filter(Boolean),
+          talk: !talk || (t.bottom <= bottom + 0.5 && talk.contains(document.elementFromPoint(t.left + t.width / 2, t.top + t.height / 2))),
+          tiny: tap.map((e) => [name(e), e.getBoundingClientRect()]).filter(([, r]) => r.width < 44 || r.height < 44).map(([t, r]) => `${t} ${Math.round(r.width)}x${Math.round(r.height)}`),
+          small: [...new Set(words.map((e) => [e.textContent.trim().slice(0, 24), parseFloat(getComputedStyle(e).fontSize)]).filter(([, px]) => px < 20).map(([t, px]) => `"${t}" ${px}px`))],
+          bar: bar.map((b) => [name(b) || 'sound', b.getBoundingClientRect()]).filter(([, r]) => r.left < left - 0.5 || r.right > right + 0.5).map(([t, r]) => `${t} at ${Math.round(r.left)}-${Math.round(r.right)}`),
+          zone: zone.left >= left - 0.5 && zone.right <= right + 0.5,
+          wide: document.documentElement.scrollWidth <= innerWidth,
+        };
+      }, [sel, insets]);
+      const judge = (label, got, sel, n) => {
+        if (got.count !== n) failed.push(`${label}: found ${got.count} of the ${n} things (${sel}) it should show`);
+        if (got.off.length) failed.push(`${label}: not whole on screen, or covered: ${got.off.join('; ')}`);
         if (!got.talk) failed.push(`${label}: "Talk to someone now" is not pinned and tappable`);
+        if (got.tiny.length) failed.push(`${label}: tap targets under 44 px: ${got.tiny.join(', ')}`);
+        if (got.small.length) failed.push(`${label}: Safe Zone text under 20 px: ${got.small.join(', ')}`);
+        if (got.bar.length) failed.push(`${label}: top bar buttons inside the notch: ${got.bar.join(', ')}`);
+        if (!got.zone) failed.push(`${label}: the Safe Zone runs into the notch`);
         if (!got.wide) failed.push(`${label}: the page scrolls sideways`);
-        await h.shot(page, `me92-sideways-${at}-${size}`);
-        if (at === 'reasons') {
-          const add = page.getByRole('button', { name: 'Add one' });
-          await add.evaluate((b) => b.scrollIntoView({ block: 'center' }));
-          await add.click();
-          const row = await page.evaluate(() => {
-            const r = document.querySelector('.dq-sz .dq-addrow');
-            return { row: r.getBoundingClientRect().width, field: r.querySelector('.dq-field').getBoundingClientRect().width };
-          });
-          if (row.field < Math.min(row.row - 1, 240)) failed.push(`${label}: with Add one open the text box is squeezed to ${Math.round(row.field)} of ${Math.round(row.row)} px`);
-          await h.shot(page, `me92-sideways-reasons-add-${size}`);
-        }
-      } else {
+      };
+      judge(`${label} on arrival`, await look(sel), sel, n);
+      if (at === 'cold') {
+        // principle 11: "Breathe instead" carries the same weight as Start, not a quieter link under it
+        const pair = await page.locator('.dq-sz-body .dq-timer .dq-btn').evaluateAll((bs) => bs.map((b) => `${b.textContent.trim()}: ${b.className} ${Math.round(b.getBoundingClientRect().height)}px`));
+        const weights = new Set(pair.map((p) => p.slice(p.indexOf(':'))));
+        if (pair.length !== 2 || !/^Breathe instead:/.test(pair[1]) || weights.size !== 1) failed.push(`${label}: Start and "Breathe instead" are not two choices of the same weight: ${pair.join(' | ')}`);
+      }
+      await h.shot(page, `me92-every-${at}-${size.replace(/ /g, '-')}`);
+      const lists = page.locator('.dq-sz-body').getByRole('button', { name: 'Copy your lists' });
+      if (await lists.count()) {
+        await lists.click();
+        await page.locator('.dq-lists-copy').getByRole('button', { name: 'Copy', exact: true }).click();
+        await page.waitForFunction(() => document.querySelector('.dq-lists-copy [aria-live]')?.textContent.trim());
+        const got = await look('.dq-lists-pre');
+        if (got.small.length) failed.push(`${label} with the copy preview open: Safe Zone text under 20 px: ${got.small.join(', ')}`);
+        if (got.tiny.length) failed.push(`${label} with the copy preview open: tap targets under 44 px: ${got.tiny.join(', ')}`);
+        if (!got.wide) failed.push(`${label} with the copy preview open: the page scrolls sideways`);
+        await h.shot(page, `me92-every-${at}-copy-${size.replace(/ /g, '-')}`);
+        await page.locator('.dq-lists-copy').getByRole('button', { name: 'Close' }).click();
+      }
+      if (sideways && at === 'reasons') {
+        const add = page.getByRole('button', { name: 'Add one' });
+        await add.evaluate((b) => b.scrollIntoView({ block: 'center' }));
+        await add.click();
+        const row = await page.evaluate(() => {
+          const r = document.querySelector('.dq-sz .dq-addrow');
+          return { row: r.getBoundingClientRect().width, field: r.querySelector('.dq-field').getBoundingClientRect().width };
+        });
+        if (row.field < Math.min(row.row - 1, 240)) failed.push(`${label}: with Add one open the text box is squeezed to ${Math.round(row.field)} of ${Math.round(row.row)} px`);
+      }
+      if (!sideways && !insets) {
         // live counters (the breathing word and number) are left out: they change while the boxes are read
         const boxes = () => page.evaluate(() => [...document.querySelectorAll('.dq-safezone *')].filter((e) => e instanceof HTMLElement && !e.matches('.dq-sz-lead, .dq-sz-main') && !e.closest('.dq-ring-center, .dq-timer-center')).map((e) => `${e.tagName.toLowerCase()}.${e.className} ${e.offsetLeft},${e.offsetTop},${e.offsetWidth},${e.offsetHeight}`));
         const grouped = await boxes();
@@ -455,6 +523,20 @@ async function everyScreen(h, viewport) {
         const moved = grouped.filter((b, i) => b !== flat[i]);
         if (grouped.length !== flat.length || moved.length) failed.push(`${label}: grouping the heading moved ${moved.length} of ${grouped.length} boxes: ${moved.slice(0, 3).join(' | ')}`);
       }
+      if (at === 'cold') {
+        // once Start is tapped, the countdown and "Breathe instead" are on screen together (principle 11)
+        await page.getByRole('button', { name: 'Start 30 seconds', exact: true }).click();
+        await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+        const running = '.dq-timer-num, .dq-timer .dq-btn';
+        judge(`${label} after Start`, await look(running), running, 2);
+        await h.shot(page, `me92-every-cold-started-${size.replace(/ /g, '-')}`);
+      }
+    }
+    if (insets) {
+      await page.evaluate(() => window.__daily.go({ name: 'hub' }));
+      await page.locator('.dq-tile').first().waitFor();
+      const bar = await page.evaluate((insets) => [...document.querySelectorAll('.dq-top :is(button, .dq-brand)')].filter((b) => b.offsetParent && !b.closest('.vol-pop')).map((b) => [(b.getAttribute('aria-label') || b.textContent).trim().slice(0, 24), b.getBoundingClientRect()]).filter(([, r]) => r.left < insets.left - 0.5 || r.right > innerWidth - insets.right + 0.5).map(([t, r]) => `${t} at ${Math.round(r.left)}-${Math.round(r.right)}`), insets);
+      if (bar.length) failed.push(`${size} Home: top bar inside the notch: ${bar.join(', ')}`);
     }
     if (errors.length) failed.push(`${size}: ${errors.join(' | ')}`);
   } finally {
@@ -495,11 +577,236 @@ export const scenarios = {
     await allRoutes(h, { viewport: WIDE });
   },
   'safe-zone-every-screen-sideways': async (h) => {
-    const failed = [...(await everyScreen(h, WIDE)), ...(await everyScreen(h, SHORT))];
+    const failed = [...(await everyScreen(h, WIDE)), ...(await everyScreen(h, MID_WIDE)), ...(await everyScreen(h, SHORT))];
     h.expect(!failed.length, failed.join('\n'));
   },
   'safe-zone-every-screen-upright': async (h) => {
-    const failed = [...(await everyScreen(h, TALL)), ...(await everyScreen(h, SMALL))];
+    const failed = [...(await everyScreen(h, TALL)), ...(await everyScreen(h, MID)), ...(await everyScreen(h, SMALL))];
+    h.expect(!failed.length, failed.join('\n'));
+  },
+  // principle 11: "Breathe instead" goes straight to breathing, whose Next then skips past cool water; the quiet Next
+  // skips too. Each screen is told apart by the heading the player sees.
+  'safe-zone-cold-breathe-instead': async (h) => {
+    const { ctx, page, errors } = await boot(h, { save: returning(), reduced: true });
+    const c = step();
+    await page.evaluate(async () => {
+      const { SAFE } = await import('/src/content/dbt.ts');
+      const { typo } = await import('/src/daily/ui.ts');
+      const by = new Map([[SAFE.breathe.title, 'breathe'], [SAFE.squeeze.title, 'squeeze'], [SAFE.cold.title, 'cold'], [SAFE.check, 'check']].map(([t, at]) => [typo(t), at]));
+      window.__me92at = () => {
+        const t = document.querySelector('.dq-sz-body [data-focus]')?.textContent ?? '';
+        return by.get(t) ?? t;
+      };
+    });
+    const at = () => page.evaluate(() => window.__me92at());
+    const reach = (want, timeout) => page.waitForFunction((w) => window.__me92at() === w, want, { timeout });
+    const tap = async (name, want) => {
+      await page.getByRole('button', { name, exact: true }).click({ timeout: 3000 });
+      await reach(want, 3000).catch(() => {});
+      return at();
+    };
+    const open = async (to) => {
+      await page.evaluate((to) => window.__daily.go({ name: 'safe', at: to }), to);
+      await reach(to);
+    };
+    try {
+      await page.locator('header .dq-safe').click();
+      for (const start of [true, false]) {
+        const tag = start ? 'after Start' : 'before Start';
+        await open('cold');
+        if (start) await page.getByRole('button', { name: 'Start 30 seconds', exact: true }).click();
+        c.ok((await tap('Breathe instead', 'breathe')) === 'breathe', `${tag}: "Breathe instead" did not open breathing (at ${await at()})`);
+        c.ok((await tap('Next', 'check')) === 'check', `${tag}: Next after breathing instead went to ${await at()}, not past cool water`);
+      }
+      await open('cold');
+      c.ok((await tap('Next', 'check')) === 'check', `cold's own Next went to ${await at()}`);
+      await open('breathe');
+      c.ok((await tap('Next', 'squeeze')) === 'squeeze', `breathing reached the usual way went to ${await at()}, not squeeze`);
+      c.ok(!errors.length, errors.join(' | '));
+      c.end();
+    } finally {
+      await ctx.close();
+    }
+  },
+  'safe-zone-every-screen-notch': async (h) => {
+    const failed = [...(await everyScreen(h, WIDE, { insets: NOTCH })), ...(await everyScreen(h, { width: 812, height: 375 }, { insets: NOTCH }))];
+    h.expect(!failed.length, failed.join('\n'));
+  },
+  /**
+   * The bottom stays clear wherever "Talk to someone now" is: under the frame, hidden on Talk, and above the frame after
+   * "I might not be safe". Scrolled to the end, nothing ends inside an iPhone's home bar, nor within 8 px of the bottom
+   * edge without one. Upright nothing passes under the foot, so it has no backdrop (lights up too); held sideways the page
+   * scrolls under it, so it keeps one.
+   */
+  'safe-zone-bottom-clear': async (h) => {
+    const failed = [];
+    for (const [viewport, insets] of [[TALL, HOME_BAR], [SMALL, HOME_BAR], [WIDE, NOTCH], [{ width: 1280, height: 800 }, null]]) {
+      const size = `${viewport.width}x${viewport.height}${insets ? ` with a ${insets.bottom} px home bar` : ''}`;
+      const sideways = viewport.width > viewport.height && viewport.height <= 500;
+      const { ctx, page, errors } = await boot(h, { save: filled(), viewport, reduced: true });
+      try {
+        if (insets) {
+          await (await ctx.newCDPSession(page)).send('Emulation.setSafeAreaInsetsOverride', { insets });
+          await page.reload();
+          await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
+        }
+        await page.locator('header .dq-safe').click();
+        const at = async (title) => {
+          await page.locator('.dq-sz-t', { hasText: title }).first().waitFor({ timeout: 10000 });
+          await page.evaluate(() => Promise.all([document.fonts.ready, ...[...document.querySelectorAll('.dq-sz-body, .dq-sz-body > *')].flatMap((e) => e.getAnimations()).map((a) => a.finished)]));
+        };
+        const check = async (label, backdrop) => {
+          const got = await page.evaluate(async (inset) => {
+            for (const s of [document.querySelector('.dq-sz-body'), document.querySelector('.dq')]) s.scrollTop = s.scrollHeight;
+            await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+            const limit = innerHeight - inset - 8;
+            const frame = document.querySelector('.dq-sz');
+            const things = [frame, ...document.querySelectorAll('.dq-safezone :is(button, a[href], select)')].filter((e) => e.checkVisibility());
+            const name = (e) => (e === frame ? 'the frame' : (e.getAttribute('aria-label') || e.textContent).trim().replace(/\s+/g, ' ').slice(0, 24));
+            const foot = document.querySelector('.dq-sz-foot');
+            return {
+              low: things.map((e) => [name(e), e.getBoundingClientRect().bottom]).filter(([, b]) => b > limit + 0.5).map(([n, b]) => `${n} ends at ${Math.round(b)} of ${innerHeight}`),
+              backdrop: foot.checkVisibility() ? getComputedStyle(foot).backgroundImage !== 'none' : null,
+            };
+          }, insets?.bottom ?? 0);
+          if (got.low.length) failed.push(`${size} ${label}: in the home bar or at the bottom edge: ${got.low.join('; ')}`);
+          if (backdrop !== undefined && got.backdrop !== backdrop) failed.push(`${size} ${label}: the foot ${got.backdrop ? 'has' : 'has no'} backdrop ${sideways ? 'though the page scrolls under it' : 'though nothing passes under it'}`);
+          await h.shot(page, `me92-bottom-${label.replace(/[^a-z]+/gi, '-')}-${size.replace(/ /g, '-')}`);
+        };
+        await at('');
+        await check('start, Talk under the frame', sideways);
+        await page.getByRole('button', { name: 'I might not be safe' }).click();
+        await at('Talk to someone now');
+        await check('Talk, its link hidden');
+        await page.getByRole('button', { name: 'Back to breathing' }).click();
+        await at('Breathe with the light');
+        await check('breathing, Talk above the frame', sideways);
+        await page.locator('.dq-top .ca-sz-light').click();
+        await check('breathing with lights up', sideways);
+        if (errors.length) failed.push(`${size}: ${errors.join(' | ')}`);
+      } finally {
+        await ctx.close();
+      }
+    }
+    h.expect(!failed.length, failed.join('\n'));
+  },
+  /**
+   * "Talk to someone now" never covers any part of another control that shows, at every step with Talk under the frame
+   * and above it, on arrival and scrolled to the end, upright and sideways. A control cut off at the frame's scrolling
+   * edge counts only for the part that shows, and a tap anywhere on that part reaches it.
+   */
+  'safe-zone-talk-covers-nothing': async (h) => {
+    const failed = [];
+    const walk = [['Breathe with the light', 'Next'], ['Squeeze and release', 'Next'], ['Cool air', 'Next'], ['Is it even a little lower?', 'A little lower'], ['Stop. Step back.', 'Next'], ['Things that are yours', 'Next'], ['Your comfort kit', 'Next'], ['Your people', 'Next'], ['Talk to someone now', 'Next'], ['', null]];
+    for (const viewport of [SMALL, MID, TALL, WIDE, SHORT]) {
+      for (const top of [false, true]) {
+        const size = `${viewport.width}x${viewport.height} ${top ? 'Talk above the frame' : 'Talk under the frame'}`;
+        const { ctx, page, errors } = await boot(h, { save: filled(), viewport, reduced: true });
+        try {
+          await page.locator('header .dq-safe').click();
+          await page.locator('.dq-sz-t').first().waitFor({ timeout: 10000 });
+          const check = async () => {
+            const step = (await page.locator('.dq-sz-body [data-focus]').first().textContent()).trim().slice(0, 24);
+            for (const end of [false, true]) {
+              const got = await page.evaluate(async (end) => {
+                if (end) for (const s of [document.querySelector('.dq-sz-body'), document.querySelector('.dq')]) s.scrollTop = s.scrollHeight;
+                await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+                const talk = document.querySelector('.dq-sz-talk');
+                if (!talk?.checkVisibility()) return [];
+                const t = talk.getBoundingClientRect();
+                const out = [];
+                for (const e of document.querySelectorAll('.dq-safezone :is(button, a[href], select, input)')) {
+                  if (e === talk || !e.checkVisibility()) continue;
+                  // the part that shows: inside every box around it that clips, and the screen
+                  const b = e.getBoundingClientRect();
+                  const r = { left: b.left, top: Math.max(b.top, 0), right: b.right, bottom: Math.min(b.bottom, innerHeight) };
+                  for (let p = e.parentElement; p; p = p.parentElement) {
+                    const cs = getComputedStyle(p);
+                    if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
+                    const c = p.getBoundingClientRect();
+                    r.left = Math.max(r.left, c.left);
+                    r.top = Math.max(r.top, c.top);
+                    r.right = Math.min(r.right, c.right);
+                    r.bottom = Math.min(r.bottom, c.bottom);
+                  }
+                  const w = r.right - r.left, ht = r.bottom - r.top;
+                  if (w < 1 || ht < 1) continue;
+                  const under = Math.min(r.right, t.right) - Math.max(r.left, t.left) > 0.5 && Math.min(r.bottom, t.bottom) - Math.max(r.top, t.top) > 0.5;
+                  const i = Math.min(4, w / 2 - 0.5, ht / 2 - 0.5);
+                  const lost = [[r.left + i, r.top + i], [r.right - i, r.top + i], [r.left + i, r.bottom - i], [r.right - i, r.bottom - i], [r.left + w / 2, r.top + ht / 2]].some(([x, y]) => talk.contains(document.elementFromPoint(x, y)));
+                  if (under || lost) out.push(`"${(e.textContent || e.getAttribute('aria-label') || e.tagName).trim().slice(0, 24)}" shows at ${[r.top, r.bottom].map(Math.round).join('-')}, Talk at ${[t.top, t.bottom].map(Math.round).join('-')}`);
+                }
+                return out;
+              }, end);
+              for (const g of got) failed.push(`${size}, ${step}${end ? ' scrolled to the end' : ''}: Talk covers ${g}`);
+            }
+          };
+          if (top) {
+            await page.getByRole('button', { name: 'I might not be safe' }).evaluate((e) => e.click());
+            await page.locator('.dq-sz-t', { hasText: 'Talk to someone now' }).first().waitFor({ timeout: 10000 });
+            await page.getByRole('button', { name: 'Back to breathing' }).evaluate((e) => e.click());
+          } else {
+            await check();
+            await page.getByRole('button', { name: 'Calm my body first' }).evaluate((e) => e.click());
+          }
+          for (const [title, go] of walk) {
+            await page.locator('.dq-sz-t', { hasText: title }).first().waitFor({ timeout: 10000 });
+            await page.evaluate(() => Promise.all([document.fonts.ready, ...[...document.querySelectorAll('.dq-sz-body, .dq-sz-body > *')].flatMap((e) => e.getAnimations()).map((a) => a.finished)]));
+            await check();
+            // taps were checked above; these only move on
+            if (title.startsWith('Stop.')) while (await page.getByRole('button', { name: 'Next line' }).count()) await page.getByRole('button', { name: 'Next line' }).evaluate((e) => e.click());
+            if (go) await page.locator('.dq-sz-body').getByRole('button', { name: go, exact: true }).last().evaluate((e) => e.click());
+          }
+          if (errors.length) failed.push(`${size}: ${errors.join(' | ')}`);
+        } finally {
+          await ctx.close();
+        }
+      }
+    }
+    h.expect(!failed.length, failed.join('\n'));
+  },
+  /**
+   * Held sideways the foot can be as narrow as 219 px (540 px wide). "Talk to someone now" fits it on one line, and with
+   * its text at twice the size (as text-only zoom does) it wraps inside the foot instead of spilling past it, plain under
+   * the frame and strong above it.
+   */
+  'safe-zone-talk-big-text': async (h) => {
+    const { ctx, page, errors } = await boot(h, { save: returning(), viewport: { width: 540, height: 320 }, reduced: true });
+    const failed = [];
+    try {
+      await page.locator('header .dq-safe').click();
+      await page.locator('.dq-sz-t').first().waitFor({ timeout: 10000 });
+      const fit = (label) =>
+        page.evaluate(async (label) => {
+          const b = document.querySelector('.dq-sz-talk');
+          const words = b.lastElementChild;
+          const out = [];
+          // with reduced motion every change has a near-zero transition: the new size shows on a later frame
+          const frames = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+          for (const scale of [1, 2]) {
+            b.style.fontSize = '';
+            await frames();
+            if (scale > 1) b.style.fontSize = `${parseFloat(getComputedStyle(b).fontSize) * scale}px`;
+            await frames();
+            const f = b.parentElement.getBoundingClientRect();
+            const r = b.getBoundingClientRect();
+            const t = words.getBoundingClientRect();
+            const lines = Math.round(t.height / parseFloat(getComputedStyle(words).lineHeight));
+            if (scale === 1 && lines !== 1) out.push(`${label}: Talk takes ${lines} lines at its usual size`);
+            if (r.left < f.left - 0.5 || r.right > f.right + 0.5 || t.right > f.right + 0.5) out.push(`${label}: at ${scale}x text, Talk runs ${Math.round(Math.max(r.right, t.right) - f.right)} px past its ${Math.round(f.width)} px foot`);
+          }
+          b.style.fontSize = '';
+          return out;
+        }, label);
+      failed.push(...(await fit('under the frame')));
+      await page.getByRole('button', { name: 'I might not be safe' }).click();
+      await page.getByRole('button', { name: 'Back to breathing' }).click();
+      await page.locator('.dq-sz-t', { hasText: 'Breathe with the light' }).first().waitFor({ timeout: 10000 });
+      failed.push(...(await fit('strong, above the frame')));
+      if (errors.length) failed.push(errors.join(' | '));
+    } finally {
+      await ctx.close();
+    }
     h.expect(!failed.length, failed.join('\n'));
   },
 

@@ -16,12 +16,17 @@
   --mint: #89cf9d;
   --gap: 16px;
   --pad: 18px;
+  /* how far the top bar's shade runs below it */
+  --top-shade: 10px;
   position: fixed;
   inset: 0;
   z-index: 10;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* a scroll or focus that brings something into view stops clear of the pinned bars on every screen: app.ts keeps
+     --dq-top and --dq-foot at their real heights as they wrap, turn or hide */
+  scroll-padding: calc(var(--dq-top, 0px) + var(--top-shade)) 0 var(--dq-foot, 0px);
   -webkit-overflow-scrolling: touch;
   pointer-events: auto;
   background:
@@ -105,20 +110,20 @@
   justify-content: space-between;
   align-items: center;
   gap: 8px;
-  padding: calc(var(--safe-top) + 8px) 12px 4px;
+  padding: calc(var(--safe-top) + 8px) max(12px, var(--safe-right)) 4px max(12px, var(--safe-left));
   margin-bottom: 6px;
 }
 .dq-top::after {
   content: '';
   position: absolute;
-  inset: 0 0 -10px;
+  inset: 0 0 calc(-1 * var(--top-shade));
   z-index: -1;
   pointer-events: none;
   --vig: radial-gradient(130% 90vh at 50% 45vh, transparent 55%, rgba(3, 4, 9, 0.55) 100%);
   --glow: radial-gradient(120% 60vh at 50% -10vh, rgba(20, 52, 92, 0.42), transparent 60%);
   background: var(--vig), var(--glow), #07080f;
-  -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 10px), transparent);
-  mask-image: linear-gradient(180deg, #000 calc(100% - 10px), transparent);
+  -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - var(--top-shade)), transparent);
+  mask-image: linear-gradient(180deg, #000 calc(100% - var(--top-shade)), transparent);
 }
 @supports (height: 1dvh) {
   .dq-top::after {
@@ -252,7 +257,7 @@
 .dq-view {
   position: relative;
   z-index: 1;
-  padding: 4px 16px calc(var(--safe-bottom) + 40px);
+  padding: 4px max(16px, var(--safe-right)) calc(var(--safe-bottom) + 40px) max(16px, var(--safe-left));
 }
 .dq-page {
   max-width: 760px;
@@ -1611,7 +1616,7 @@ textarea.dq-input {
 
 @media (min-width: 760px) {
   .dq-view {
-    padding: 10px 28px 48px;
+    padding: 10px max(28px, var(--safe-right)) 48px max(28px, var(--safe-left));
   }
   .dq-hub {
     max-width: 980px;
@@ -2045,6 +2050,7 @@ textarea.dq-input {
 
 /* ---------- Safe Zone ---------- */
 .dq-safezone {
+  --pad: 24px;
   max-width: 600px;
   margin: 6px auto 0;
   --chrome: calc(112px + var(--safe-top) + var(--safe-bottom));
@@ -2053,7 +2059,6 @@ textarea.dq-input {
   flex-direction: column;
 }
 .dq-sz {
-  --pad: 24px;
   flex: 1 0 auto;
   background: linear-gradient(180deg, rgba(8, 18, 32, 0.9), rgba(5, 12, 22, 0.92));
 }
@@ -2066,7 +2071,7 @@ textarea.dq-input {
   color: #cfe0f1;
 }
 .dq-sz .dq-small {
-  font-size: 16.5px;
+  font-size: 20px;
 }
 .dq-sz-t {
   margin: 0 0 12px;
@@ -2104,7 +2109,7 @@ textarea.dq-input {
   padding: 12px 14px;
   border-left: 2px solid rgba(137, 207, 157, 0.55);
   background: rgba(10, 26, 30, 0.45);
-  font-size: 19px;
+  font-size: 20px;
   color: #dcefe2;
 }
 .dq-sz-empty {
@@ -2129,10 +2134,13 @@ textarea.dq-input {
   font-style: normal;
   color: #eaf5ff;
 }
+/* the danger line is brighter than the words around it; on the emergency card the card is its box */
 .dq-sz-danger {
+  color: #eaf5ff !important;
+}
+.dq-sz-main > .dq-sz-danger {
   padding: 12px 14px;
   border: 1px solid rgba(160, 200, 235, 0.55);
-  color: #eaf5ff !important;
 }
 .dq-sz-foot {
   position: sticky;
@@ -2142,6 +2150,61 @@ textarea.dq-input {
   justify-content: center;
   padding: 14px 0 calc(var(--safe-bottom) + 14px);
   background: linear-gradient(0deg, rgba(7, 8, 15, 0.97) 60%, rgba(7, 8, 15, 0));
+}
+/* upright and on a desktop the Safe Zone is one screen tall, like the drawing page: only its words and choices scroll,
+   inside the frame, and the foot sits under the frame, so nothing ever rests or scrolls under "Talk to someone now".
+   Held sideways the page scrolls and the foot sits beside the choices (below). */
+@media not all and (orientation: landscape) and (max-height: 500px) and (min-width: 540px) {
+  .dq[data-screen='safe'] {
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .dq[data-screen='safe'] .dq-top {
+    flex: none;
+  }
+  /* the page keeps the home bar clear, and a gap, under whatever ends it: the foot, or the frame while the foot is
+     hidden on Talk or sits above the frame */
+  .dq[data-screen='safe'] .dq-view {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding-bottom: calc(var(--safe-bottom) + 12px);
+  }
+  .dq-safezone {
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: 0;
+  }
+  .dq-sz {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding-bottom: 0;
+  }
+  .dq-sz > .dq-chip {
+    flex: none;
+  }
+  /* the scroller runs to the frame's edges so the words scroll right up to its border, and the frame's bottom padding
+     comes after the last choice */
+  .dq-sz-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    margin: 0 calc(-1 * var(--pad));
+    padding: 0 var(--pad) var(--pad);
+    scrollbar-width: thin;
+    scrollbar-color: rgba(125, 150, 197, 0.35) transparent;
+  }
+  /* nothing passes under the foot here, so it has no backdrop */
+  .dq-sz-foot {
+    position: static;
+    padding-bottom: 0;
+    background: none;
+  }
 }
 .dq-sz-talk {
   display: inline-flex;
@@ -2204,17 +2267,17 @@ textarea.dq-input {
   gap: 10px;
 }
 .dq-res-n {
-  font-size: 19px;
+  font-size: 20px;
   font-weight: 500;
   color: #e3f1fd;
 }
 .dq-res-how {
-  margin-top: 4px !important;
-  font-size: 17px;
+  margin-top: 10px !important;
+  font-size: 20px;
   color: #c3d7eb;
 }
 .dq-res-acts {
-  margin-top: 12px;
+  margin-top: 10px;
 }
 .dq-res-a {
   min-height: 50px;
@@ -2242,6 +2305,43 @@ textarea.dq-input {
 }
 .dq-res.is-first {
   border-color: rgba(190, 225, 250, 0.7);
+}
+.dq-sz .dq-person-n,
+.dq-sz .dq-res-note,
+.dq-sz .dq-setting-t,
+.dq-sz .dq-setting-h {
+  font-size: 20px;
+}
+.dq-sz .dq-small .dq-a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+.dq-sz-foot.is-talk {
+  display: none;
+}
+/* after "Higher" or "I might not be safe" the foot moves above the frame and stays there for the visit */
+.dq-sz-foot.is-top {
+  top: var(--dq-top, 0px);
+  bottom: auto;
+  padding: 0 0 12px;
+}
+/* Copy your lists: the preview reads like the lists, wraps on a phone and stays selectable */
+.dq-lists-row {
+  margin: 0 0 var(--gap);
+}
+.dq-lists-copy {
+  margin-top: 12px;
+}
+.dq-lists-copy .dq-pre {
+  max-height: none;
+  font: 16px/1.5 var(--font-ui);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.dq-sz .dq-lists-copy .dq-pre,
+.dq-sz .dq-lists-copy .dq-hint {
+  font-size: 20px;
 }
 .dq-person-add {
   display: flex;
@@ -2613,7 +2713,6 @@ textarea.dq-input {
 }
 .dq-peek-h {
   margin: 0;
-  scroll-margin-top: calc(var(--safe-top) + 84px);
   font-size: 19px;
   font-weight: 500;
   color: var(--t-title);
@@ -3040,7 +3139,7 @@ textarea.dq-input {
   height: 100%;
 }
 @media (max-width: 759px) {
-  .dq-sz {
+  .dq-safezone {
     --pad: 20px;
   }
   .dq-sz .dq-ring-stage,
@@ -3052,16 +3151,17 @@ textarea.dq-input {
 .dq-sz-main {
   display: contents;
 }
-/* a phone held sideways: the heading and its words sit beside what the player does, which starts at the top, so the
-   first call button or choice shows without scrolling. A crisis line's buttons come before its details there. */
+/* a phone held sideways: the heading and its words sit beside what the player does, which starts at the top and runs
+   to the bottom of the screen, so the first call button or choice shows without scrolling. The words take two parts of
+   the width and the choices three, on every screen. */
 @media (orientation: landscape) and (max-height: 500px) and (min-width: 540px) {
   .dq-safezone {
     margin-top: 0;
-    max-width: min(900px, 100vw - 2 * max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px)));
+    max-width: 900px;
   }
   .dq-sz {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
     grid-template-rows: auto 1fr;
     column-gap: var(--pad);
     padding-top: 12px;
@@ -3084,33 +3184,31 @@ textarea.dq-input {
   .dq-sz-main > :first-child {
     margin-top: 0;
   }
-  .dq-res {
-    display: flex;
-    flex-direction: column;
-  }
-  .dq-res-acts {
-    order: 1;
-    margin-top: 10px;
-  }
-  .dq-res-how {
-    order: 2;
-    margin-top: 10px !important;
-  }
   .dq-sz .dq-addrow {
     flex-wrap: wrap;
   }
   .dq-sz .dq-addrow .dq-field {
     flex-basis: 100%;
   }
-  /* 12px under the foot keeps "Talk to someone now" on screen while a screen slides in 10px */
+  /* "Talk to someone now" pins under the words, from the panel's edge to where the choices start (its 1px border, the
+     padding, the words' two fifths and the gap), so it never covers a choice; 12px below it keeps it on screen while a
+     screen slides in */
   .dq-sz-foot {
+    align-self: flex-start;
+    width: calc(1px + 2 * var(--pad) + (100% - 2px - 3 * var(--pad)) * 2 / 5);
     padding: 4px 0 calc(var(--safe-bottom) + 12px);
   }
-  /* Talk's foot holds only Lights up: it pins under the lines, leaving the danger line beside them clear */
-  .dq-sz-foot.is-talk {
-    align-self: flex-end;
-    width: 50%;
-    padding-bottom: calc(var(--safe-bottom) + 6px);
+  .dq-sz-foot.is-top {
+    padding: 0 0 8px;
+    background: linear-gradient(180deg, rgba(7, 8, 15, 0.97) 60%, rgba(7, 8, 15, 0));
+  }
+  /* one line in the narrowest foot (219px at 540px wide), lit up or not; enlarged text wraps inside it */
+  .dq-sz-talk {
+    gap: 8px;
+    padding: 0 6px;
+  }
+  .dq-sz-talk.is-strong {
+    padding: 0 12px;
   }
 }
 .dq-cardbtn .dq-cf-stat {
@@ -3622,7 +3720,7 @@ textarea.dq-input {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 0 12px calc(var(--safe-bottom) + 8px);
+  padding: 0 max(12px, var(--safe-right)) calc(var(--safe-bottom) + 8px) max(12px, var(--safe-left));
 }
 .dq-draw {
   flex: 1 1 auto;

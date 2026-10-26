@@ -872,11 +872,12 @@
     gap: 36px;
     max-width: 1240px;
   }
+  /* pinned 14px under the top bar, at its real height (app.ts), and 20px clear of the bottom */
   .st-cw {
     position: sticky;
-    top: 70px;
-    max-height: calc(100vh - 90px);
-    max-height: calc(100dvh - 90px);
+    top: calc(var(--dq-top, 56px) + 14px);
+    max-height: calc(100vh - var(--dq-top, 56px) - 34px);
+    max-height: calc(100dvh - var(--dq-top, 56px) - 34px);
     margin-top: 6px;
     overflow-y: auto;
     overscroll-behavior: contain;

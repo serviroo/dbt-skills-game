@@ -137,7 +137,8 @@ const read = (page) =>
       region: select?.value,
       regionName: select?.selectedOptions[0]?.textContent,
       options: [...(select?.options ?? [])].map((o) => [o.value, o.textContent]),
-      lead: [...zone.querySelectorAll('.dq-sz-lead .dq-text')].map((p) => p.textContent.replace(/\s+/g, ' ')),
+      lead: [...zone.querySelectorAll('.dq-sz-lead .dq-text, .dq-sz-advice')].map((p) => p.textContent.replace(/\s+/g, ' ')),
+      first: zone.querySelector('.dq-sz-main > *')?.textContent.replace(/\s+/g, ' ') ?? '',
       help: help ? { text: help.closest('p').textContent, target: help.getAttribute('target'), rel: help.getAttribute('rel') ?? '' } : null,
       rows: [...zone.querySelectorAll('.dq-res')].map((row) => ({
         name: row.querySelector('.dq-res-n')?.textContent ?? '',
@@ -341,7 +342,7 @@ export const scenarios = {
       await talk(b.page, { danger: true });
       const danger = await read(b.page);
       expectElsewhere(h, danger, 'de-DE danger');
-      h.expect(danger.lead[0] === 'If you are in danger right now, call your local emergency number.', `de-DE danger: the first line is ${JSON.stringify(danger.lead[0])}`);
+      h.expect(danger.first === 'If you are in danger right now, call your local emergency number.', `de-DE danger: the first line beside the choices is ${JSON.stringify(danger.first)}`);
       await talk(b.page);
       for (const id of Object.keys(FACTS)) {
         await pick(b.page, id);
