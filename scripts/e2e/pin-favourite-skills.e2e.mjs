@@ -308,7 +308,9 @@ export const scenarios = {
       await a.waitForFunction(() => document.querySelector('[data-skill="validation"] .dq-libpin')?.getAttribute('aria-pressed') === 'false', null, { timeout: 5000 }).catch(() => {});
       expectPinned(h, await pinsOf(a), cat, ['fast'], all, 'the first copy after a tied unpin');
       await b.evaluate(([k, v]) => localStorage.setItem(k, v), [h.SAVE, tied(true)]);
-      await a.waitForTimeout(600);
+      // the first copy reads the tied pin, keeps its unpin and writes that back: wait for the write, not a fixed time
+      await a.waitForFunction((k) => JSON.parse(localStorage.getItem(k)).skillPins.validation?.pinned === false, h.SAVE, { timeout: 5000 }).catch(() => {});
+      h.expect(JSON.parse(await h.ls(a, h.SAVE)).skillPins.validation?.pinned === false, 'the first copy did not settle the tied pin as unpinned in the save');
       expectPinned(h, await pinsOf(a), cat, ['fast'], all, 'the first copy after a tied pin');
       await b.reload();
       await h.reachHub(b);
