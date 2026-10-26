@@ -1132,8 +1132,21 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     startT.textContent = starts[startAt];
     startBox.classList.remove('is-hidden');
     startBtn.setAttribute('aria-expanded', 'true');
-    // above the pinned dock, so Use this is never under it on a phone held sideways
-    startBox.scrollIntoView({ block: 'nearest' });
+    startInView();
+  };
+  /**
+   * The line, Use this and the first line of the page all in view between the top bar and the dock, so they see where
+   * the line will go. The "Need a starting point?" row above may scroll away for that; when even then not everything
+   * fits, the starting point's line stays and the page shows less.
+   */
+  const startInView = () => {
+    const box = app.root;
+    const top = box.getBoundingClientRect().top + (parseFloat(getComputedStyle(box).scrollPaddingTop) || 0);
+    const cs = getComputedStyle(ta);
+    const line = ta.getBoundingClientRect().top + (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.lineHeight) || 32);
+    // whole pixels, so the line ends above the dock rather than a fraction under it
+    const dy = Math.min(Math.ceil(line - dock.getBoundingClientRect().top), Math.floor(startBox.getBoundingClientRect().top - top));
+    if (dy > 0) box.scrollBy({ top: dy });
   };
   const closeStart = () => {
     startBox.classList.add('is-hidden');
@@ -1469,37 +1482,63 @@ export function readScreen(app: App, route: Route): ScreenOut {
   };
   setSize(storedSize(app));
 
+  /**
+   * The chapter they came from starts just clear of the top bar and its shade (the scroll padding in daily.css). Measured
+   * from the layout, so the screen's entry motion can't shift it, and placed again once the fonts are in unless they
+   * have scrolled since.
+   */
+  const openAt = (sec: HTMLElement) => {
+    const box = app.root;
+    const place = () => {
+      let y = 0;
+      for (let n: HTMLElement | null = sec; n && n !== box; n = n.offsetParent as HTMLElement | null) y += n.offsetTop;
+      box.scrollTop = y - (parseFloat(getComputedStyle(box).scrollPaddingTop) || 0);
+      return box.scrollTop;
+    };
+    const put = place();
+    void document.fonts?.ready.then(() => alive && box.scrollTop === put && place());
+  };
+
+  let titled!: () => void;
+  const ready = new Promise<void>((done) => (titled = done));
   const init = async () => {
     const s = await ss.story(r.id);
     if (!alive) return;
     if (!s || s.removed) {
       title.textContent = STORY.title;
+      titled();
       tools.remove();
       body.replaceChildren(h('p', { class: 'st-read-empty', text: STORY_READ.gone }));
       return;
     }
     title.textContent = shownTitle(s.title);
     sub.textContent = storyMeta(app, s);
+    titled();
     // what this copy holds but couldn't store yet reads as it is in the editor
     const chs = await Promise.all(s.chapters.map(async (id) => ss.unsaved(id) ?? (await ss.chapter(id))));
     if (!alive) return;
-    const secs = chs.flatMap((c, i) =>
+    const shown = chs.flatMap((c, i) =>
       c && c.text.trim()
-        ? [h('section', { class: 'st-read-ch', 'data-id': c.id }, h('h2', { class: 'st-read-ch-h', text: c.title.trim() || `Chapter ${i + 1}` }), h('div', { class: 'st-read-text', text: c.text.replace(/\s+$/, '') }))]
+        ? [{ i, sec: h('section', { class: 'st-read-ch', 'data-id': c.id }, h('h2', { class: 'st-read-ch-h', text: c.title.trim() || `Chapter ${i + 1}` }), h('div', { class: 'st-read-text', text: c.text.replace(/\s+$/, '') })) }]
         : [],
     );
-    if (!secs.length) return body.replaceChildren(h('p', { class: 'st-read-empty', text: STORY_READ.empty }));
-    body.replaceChildren(...secs);
-    const at = secs.findIndex((x) => x.dataset.id === r.ch);
-    if (at > 0) secs[at].scrollIntoView({ block: 'start' });
+    if (!shown.length) return body.replaceChildren(h('p', { class: 'st-read-empty', text: STORY_READ.empty }));
+    body.replaceChildren(...shown.map((x) => x.sec));
+    // an empty chapter isn't shown, so Read from one (a chapter just added) opens at the nearest chapter before it
+    const from = r.ch ? s.chapters.indexOf(r.ch) : -1;
+    let at = -1;
+    for (const [k, x] of shown.entries()) if (x.i <= from) at = k;
+    if (at > 0) openAt(shown[at].sec);
   };
-  void init();
+  void init().finally(titled);
 
   return {
     el,
     title: STORY.title,
     mode: 'sub',
     bubbles: [0.9, 0.45],
+    // focus lands on the heading once it holds the story's title
+    ready,
     leave: () => {
       alive = false;
     },
