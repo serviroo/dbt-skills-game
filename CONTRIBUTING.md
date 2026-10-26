@@ -60,8 +60,8 @@ can't run, add `--browser=chromium`.
 
 `scripts/e2e.mjs` starts its own dev server and Playwright Chromium, runs every scenario in `scripts/e2e/*.e2e.mjs`
 and saves screenshots and `report.json` to `artifacts/e2e/<time>/`. It exits non-zero if any scenario fails. Scenarios
-run side by side, longest first, each in a browser of its own: `--jobs=<n>` browsers, by default one less than the
-machine's cores and at most 4. CI runs the same checks on every pull request and splits the scenarios into parts with
+run side by side, longest first, each in a browser of its own: `--jobs=<n>` browsers, by default half the machine's
+cores and at most 4. CI runs the same checks on every pull request and splits the scenarios into parts with
 `--shard=<i>/<n>`, spread by the seconds each one took on CI, kept in `scripts/e2e/timings.json`. A scenario not listed
 there counts as 15 s; after adding a long one, refresh the file from a CI run's `e2e-*` artifacts with
 `node scripts/e2e-timings.mjs <every part's report.json>`. For anything visual, also look at it in a browser at phone
@@ -127,8 +127,8 @@ To fix a screen, give each control a short, accurate name that says what it does
 decorative. Never hide a control or a picture a player needs just to pass the check.
 
 Run one file with `node scripts/e2e.mjs --file=<name>`, or one scenario with `--scenario=<scenario name>`. The browser
-renders with SwiftShader by default so local runs match CI. Add `--gpu` to render on this machine's GPU instead, or
-`--headed` to watch it.
+renders WebGL with SwiftShader and draws the page in software by default, so local runs match CI. Add `--gpu`
+to render on this machine's GPU instead, or `--headed` to watch it.
 
 `node scripts/e2e-runner-check.mjs` checks file selection, duplicate names, failure reports and cleanup through the
 real command. It creates temporary scenario files and removes them when it finishes.
