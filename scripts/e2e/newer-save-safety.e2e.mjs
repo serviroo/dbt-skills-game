@@ -3,9 +3,14 @@
 // open tabs, through a Save Crystal and Restore, and when this build is the older one, loaded offline from its cached
 // service worker while a newer build shares the device.
 // newer-keeps: a synthetic newer save boots, Settings opens, one known choice changes; the stored save and its Save
-// Crystal still hold every unknown value exactly, and its version. Restored into a clean profile and exported again,
-// nothing is lost. A clash on restore keeps the newer version's value.
+// Crystal still hold every unknown value exactly, and its version, and every record past this build's limits or that it
+// can't read is stored as it was. Restored into a clean profile and exported again, nothing is lost. A clash on restore
+// keeps the newer version's value.
 // newer-tabs: two open tabs change different known things at the same moment; both changes and every newer field stay.
+// newer-tabs-same-item: the stored copy of an item both tabs hold, added at the same time, differs one level down; the
+// stored copy's value is the one written back.
+// old-crystal-unknown-choice: a version 1 Save Crystal holding a choice this build can't use, with no change time, is
+// restored on a clean device and keeps that choice.
 // newer-bad-files: a file from another app, a broken file and a cancelled preview change nothing at all.
 // newer-cached-build: two real production builds on one origin with the service worker on. Newer build B stores new
 // fields; this build A, the older one, is then served by its cached worker while offline and changes a known choice;
@@ -40,15 +45,27 @@ export function newerSave() {
         { id: 'ns2', t: T + 2, day: D, k: 'skill', xp: 20, stat: 'wonder', skill: 'wise-mind' },
         { id: 'nq1', t: T + 3, day: D, k: 'quest', xp: 40, quest: { step: 2, of: 5 } },
         { id: 'nc1', t: T + 4, day: D, k: 'checkin', xp: 5, data: { feel: 'Calm', level: 2, sky: 'clear' } },
+        // past this build's limits, and unreadable here: kept as stored
+        { id: 'nx1', t: T + 5, day: D, k: 'skill', xp: 800, skill: 'stop' },
+        { id: 'nd1', t: T + 6, day: null, k: 'visit', xp: 10 },
       ],
       diary: {
         [D]: { day: D, emotions: { Joy: 3 }, urges: {}, note: 'A calm day', updatedAt: T, ft: { 'e:Joy': T, 'x:weather': T }, weather: { sky: 'clear' } },
         [TODAY]: { day: TODAY, emotions: { Joy: 2 }, urges: {}, note: '', updatedAt: T, ft: { 'e:Joy': T, 'x:tide': T }, tide: 'high' },
+        someday: { day: 'someday', emotions: { Joy: 1 }, urges: {}, note: 'Kept for later', updatedAt: T },
       },
-      lists: { comfort: [{ id: 'nc-tea', text: 'Tea', at: T, colour: 'teal' }], activities: [], reasons: [], people: [{ id: 'np-sam', name: 'Sam', phone: '0123', at: T, pronouns: 'they' }] },
+      lists: {
+        comfort: [{ id: 'nc-tea', text: 'Tea', at: T, colour: 'teal' }, { id: 'nc-long', text: 'Slow tea by the window. '.repeat(13).slice(0, 300), at: T }],
+        activities: [],
+        reasons: [],
+        people: [{ id: 'np-sam', name: 'Sam', phone: '0123', at: T, pronouns: 'they' }],
+      },
       maps: [{ id: 'nm1', t: T, urge: 'Scroll', p1: 'Rest', c1: 'Late', p2: 'Sleep', c2: 'Bored', choice: 'wait', at: T, sketch: [1, 2] }],
-      lines: [{ day: D, id: 'l1', tag: 'calm', text: 'One small step.', t: T, voice: 'soft' }],
-      settings: { sound: true, motion: 'gentle', emotionRows: ['Joy', 'Sadness'], urgeRows: ['Urge to give up on today'], haptics: { level: 2 } },
+      lines: [
+        { day: D, id: 'l1', tag: 'calm', text: 'One small step.', t: T, voice: 'soft' },
+        { day: D, id: 'l2', tag: 'calm', text: 'Another line.', t: T - 5 },
+      ],
+      settings: { sound: true, motion: 'gentle', emotionRows: ['Joy', 'Sadness', ...Array.from({ length: 28 }, (_, i) => `Feeling ${i + 3}`)], urgeRows: ['Urge to give up on today'], haptics: { level: 2 } },
       flags: { rankSeen: 0, wardenSeen: false, giftDay: D, cardDay: '', greetDay: D, safeCredit: false, therapistLineShown: false, checkinDay: D, questAsideDay: '', questAsideAt: 0, bloomSeen: true },
       gone: {},
       setAt: { motion: T, haptics: T },
@@ -93,6 +110,19 @@ export function newerParts(save, crystal = false) {
   };
 }
 
+/** The records of a newer save past this build's limits or unreadable here, which must be stored exactly as they came. */
+export function newerRecords(save, rows = true) {
+  const ev = (id) => save.events?.find((e) => e.id === id);
+  return {
+    bigXp: ev('nx1'),
+    noDay: ev('nd1'),
+    longText: save.lists?.comfort?.find((i) => i.id === 'nc-long'),
+    lines: save.lines?.filter((l) => l.day === D).sort((a, b) => (a.id < b.id ? -1 : 1)),
+    oddDay: save.diary?.someday,
+    ...(rows ? { rows: save.settings?.emotionRows } : {}),
+  };
+}
+
 const saveOf = async (h, page) => JSON.parse((await h.ls(page, h.SAVE)) ?? 'null');
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const diff = (want, got) => Object.keys(want).filter((k) => !same(want[k], got[k])).map((k) => `${k}: want ${JSON.stringify(want[k])}, got ${JSON.stringify(got[k])}`).join('; ');
@@ -130,11 +160,19 @@ async function rename(page, to, key = 'playerName') {
 export const scenarios = {
   async 'newer-keeps'(h) {
     const want = newerParts(newerSave());
+    const records = newerRecords(newerSave());
+    const restoredRecords = newerRecords(newerSave(), false);
     const seed = { [h.SAVE]: JSON.stringify(newerSave()), 'dbt.app.v1': h.SEEN, [h.YOU]: YOU };
     const { ctx, page, errors } = await h.open(seed);
     await h.reachHub(page);
-    let got = newerParts(await saveOf(h, page));
+    const booted = await saveOf(h, page);
+    let got = newerParts(booted);
     h.expect(same(want, got), `booting a newer save lost what this build doesn't read: ${diff(want, got)}`);
+    h.expect(same(records, newerRecords(booted)), `booting a newer save changed records it can't hold as stored: ${diff(records, newerRecords(booted))}`);
+    // every event's XP counts, those this build can't read too, each at most 500 as this build counts it
+    const xpWant = newerSave().events.reduce((n, e) => n + Math.min(500, Math.max(0, e.xp)), 0);
+    const xp = await page.evaluate(() => window.__daily.store.derived().xp);
+    h.expect(xp >= xpWant, `a newer save shows ${xp} XP, less than the ${xpWant} its events hold`);
     h.expect((await page.evaluate(() => Object.keys(localStorage).filter((k) => k.includes('.unreadable')))).length === 0, 'a newer save was set aside as unreadable');
     await settings(h, page);
     got = newerParts(await saveOf(h, page));
@@ -147,13 +185,16 @@ export const scenarios = {
     const after = await saveOf(h, page);
     got = newerParts(after);
     h.expect(same(want, got), `changing the name lost newer values: ${diff(want, got)}`);
+    h.expect(same(records, newerRecords(after)), `changing the name rewrote records this build can't hold as stored: ${diff(records, newerRecords(after))}`);
     h.expect(after.profile.playerName === 'Robin Vale' && after.profile.setAt.playerName > T, 'the name change was not stored');
     // a rating changed in today's diary keeps what a newer build stored on the day
     await page.evaluate(() => window.__daily.go({ name: 'diary' }));
     await page.locator('[aria-label="Joy"] [role="radio"]').filter({ hasText: /^\s*4\s*$/ }).click();
     await page.waitForFunction(([k, d]) => JSON.parse(localStorage.getItem(k) ?? 'null')?.diary?.[d]?.emotions?.Joy === 4, [h.SAVE, TODAY], { timeout: 10000 });
-    got = newerParts(await saveOf(h, page));
+    const edited = await saveOf(h, page);
+    got = newerParts(edited);
     h.expect(same(want, got), `editing today's diary lost newer values: ${diff(want, got)}`);
+    h.expect(same(records, newerRecords(edited)), `editing today's diary rewrote records this build can't hold as stored: ${diff(records, newerRecords(edited))}`);
     await page.reload();
     await h.reachHub(page);
     h.expect(['nv1', 'ns1', 'ns2', 'nc1'].every((id) => after.events.some((e) => e.id === id)), 'known progress was lost');
@@ -164,6 +205,7 @@ export const scenarios = {
     got = newerParts(file, true);
     h.expect(file.v === 2 && file.schema === 3, `the Save Crystal is v${file.v} holding a v${file.schema} save, not v2 holding v3`);
     h.expect(same(want, got), `the Save Crystal lost newer values: ${diff(want, got)}`);
+    h.expect(same(records, newerRecords(file)), `the Save Crystal changed records this build can't hold as stored: ${diff(records, newerRecords(file))}`);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
 
@@ -177,9 +219,12 @@ export const scenarios = {
     got = newerParts(restored);
     h.expect(same(want, got), `restoring lost newer values: ${diff(want, got)}`);
     h.expect(['nv1', 'ns1', 'ns2', 'nc1'].every((id) => restored.events.some((e) => e.id === id)), 'restoring lost known progress');
+    // a restore adds the file's rows to this device's own list, up to this build's limit, so rows aren't compared
+    h.expect(same(restoredRecords, newerRecords(restored, false)), `restoring changed records this build can't hold as stored: ${diff(restoredRecords, newerRecords(restored, false))}`);
     const again = await crystal(h, clean.page, 'newer-crystal-again');
     got = newerParts(again, true);
     h.expect(same(want, got), `backing up the restored save lost newer values: ${diff(want, got)}`);
+    h.expect(same(restoredRecords, newerRecords(again, false)), `backing up the restored save changed records this build can't hold as stored: ${diff(restoredRecords, newerRecords(again, false))}`);
     h.expect(!clean.errors.length, clean.errors.join('\n'));
     await clean.ctx.close();
 
@@ -227,6 +272,50 @@ export const scenarios = {
     const want = newerParts(newerSave());
     const got = newerParts(s);
     h.expect(same(want, got), `two tabs writing lost newer values: ${diff(want, got)}`);
+    const records = newerRecords(newerSave());
+    h.expect(same(records, newerRecords(s)), `two tabs writing changed records this build can't hold as stored: ${diff(records, newerRecords(s))}`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  async 'newer-tabs-same-item'(h) {
+    const save = newerSave();
+    save.lists.comfort.find((i) => i.id === 'nc-tea').swatch = { hue: 1 };
+    const { ctx, page: a, errors } = await h.open({ [h.SAVE]: JSON.stringify(save), 'dbt.app.v1': h.SEEN, [h.YOU]: YOU });
+    await h.reachHub(a);
+    const b = await ctx.newPage();
+    b.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+    await b.goto(a.url());
+    await h.reachHub(b);
+    // the other tab's stored copy of the item, added at the same time, holds another value one level down
+    await b.evaluate((key) => {
+      const s = JSON.parse(localStorage.getItem(key));
+      s.lists.comfort.find((i) => i.id === 'nc-tea').swatch = { hue: 2 };
+      localStorage.setItem(key, JSON.stringify(s));
+    }, h.SAVE);
+    await settings(h, a);
+    await rename(a, 'Robin Vale');
+    await a.waitForFunction((k) => JSON.parse(localStorage.getItem(k) ?? 'null')?.profile?.playerName === 'Robin Vale', h.SAVE, { timeout: 10000 });
+    const s = await saveOf(h, a);
+    const item = s.lists.comfort.find((i) => i.id === 'nc-tea');
+    h.expect(same(item?.swatch, { hue: 2 }) && item?.at === T, `the stored copy's value one level down was not kept: ${JSON.stringify(item)}`);
+    const want = newerParts(newerSave());
+    const got = newerParts(s);
+    h.expect(same(want, got), `two tabs holding the same item lost newer values: ${diff(want, got)}`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  async 'old-crystal-unknown-choice'(h) {
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN, [h.YOU]: YOU });
+    await h.reachHub(page);
+    // a theme this build doesn't have, in a version 1 file, with no time for when it was chosen
+    const file = { app: 'the-quiet-lantern', exported: new Date().toISOString(), v: 2, schema: 1, created: T, events: [{ id: 'o1', t: T, day: D, k: 'visit', xp: 10 }], profile: { theme: 'aurora' } };
+    h.expect(/Restored/.test(await restore(h, page, file, 'old.json')), 'the version 1 Save Crystal was not restored');
+    await page.reload();
+    await h.reachHub(page);
+    const s = await saveOf(h, page);
+    h.expect(s.profile?.theme === 'aurora', `the restored save's theme is ${JSON.stringify(s.profile?.theme)}, not the file's "aurora"`);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },

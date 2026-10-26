@@ -142,6 +142,9 @@ export interface Kept {
   titles: unknown[];
   raw: Partial<Record<SetKey, unknown>>;
   events: Record<string, unknown>[];
+  /** Records of a newer save this build can't read (no text, a broken day, a second line for a day), as stored. */
+  dropped: Record<'lines' | 'maps' | (typeof LIST_KEYS)[number], unknown[]>;
+  days: Record<string, unknown>;
 }
 export const KEPT: unique symbol = Symbol('kept');
 export interface State {
@@ -230,9 +233,23 @@ function keepRest<T extends object>(into: T, raw: Record<string, unknown>, known
   return into;
 }
 export function kept(s: State): Kept {
-  if (!s[KEPT]) Object.defineProperty(s, KEPT, { value: { profile: {}, profileAt: {}, setAt: {}, names: {}, titles: [], raw: {}, events: [] }, enumerable: false, writable: true, configurable: true });
+  if (!s[KEPT]) Object.defineProperty(s, KEPT, { value: { profile: {}, profileAt: {}, setAt: {}, names: {}, titles: [], raw: {}, events: [], dropped: { lines: [], maps: [], comfort: [], activities: [], reasons: [], people: [] }, days: {} }, enumerable: false, writable: true, configurable: true });
   return s[KEPT]!;
 }
+/**
+ * For a save newer than this build: each record as it was stored, and what this build read from it. stored() writes the
+ * stored form back for as long as this build hasn't changed the record, so its own trimming and limits (XP per event,
+ * text length, diary rows) never reach a newer build's data.
+ */
+const AS_STORED = new WeakMap<object, { raw: unknown; read: string }>();
+function twin<T extends object>(rec: T, raw: unknown, on: boolean): T {
+  if (on) AS_STORED.set(rec, { raw, read: JSON.stringify(rec) });
+  return rec;
+}
+const asStored = <T>(rec: T): T => {
+  const t = rec && typeof rec === 'object' ? AS_STORED.get(rec as object) : undefined;
+  return (t && t.read === JSON.stringify(rec) ? t.raw : rec) as T;
+};
 const EV_KEYS = ['id', 't', 'day', 'k', 'xp', 'stat', 'skill', 'data'];
 const ENTRY_KEYS = ['day', 'emotions', 'urges', 'note', 'updatedAt', 'ft'];
 const ITEM_KEYS = ['id', 'text', 'at'];
@@ -264,10 +281,15 @@ function stored(s: State) {
   const setAt: Record<string, unknown> = { ...k?.setAt };
   const profileAt: Record<string, unknown> = { ...k?.profileAt };
   for (const [key, t] of Object.entries(s.setAt)) if (typeof t === 'number') putOwn((PROFILE_SET_KEYS as string[]).includes(key) ? profileAt : setAt, key, t);
+  const back = <T>(l: T[], extra?: unknown[]) => (extra?.length ? [...l.map(asStored), ...extra] : l.map(asStored));
   return {
     ...s,
-    events: k?.events.length ? [...s.events, ...k.events] : s.events,
-    settings: { ...settings, sound: as('sound', settings.sound), motion: as('motion', settings.motion) },
+    events: back(s.events, k?.events),
+    diary: { ...k?.days, ...Object.fromEntries(Object.entries(s.diary).map(([d, e]) => [d, asStored(e)])) },
+    lists: Object.fromEntries(LIST_KEYS.map((key) => [key, back<Item | Person>(s.lists[key], k?.dropped[key])])),
+    maps: back(s.maps, k?.dropped.maps),
+    lines: back(s.lines, k?.dropped.lines),
+    settings: { ...settings, emotionRows: asStored(settings.emotionRows), urgeRows: asStored(settings.urgeRows), sound: as('sound', settings.sound), motion: as('motion', settings.motion) },
     flags,
     setAt,
     profile: {
@@ -307,6 +329,11 @@ function adoptKept(into: State, from: State, theirsWin: boolean) {
   put(a.names, Object.entries(b.names));
   const titles = new Set(a.titles.map((t) => JSON.stringify(t)));
   for (const t of b.titles) if (!titles.has(JSON.stringify(t))) a.titles.push(t);
+  for (const key of Object.keys(b.dropped) as (keyof Kept['dropped'])[]) {
+    const have = new Set(a.dropped[key].map((x) => JSON.stringify(x)));
+    for (const x of b.dropped[key]) if (!have.has(JSON.stringify(x))) a.dropped[key].push(x);
+  }
+  put(a.days, Object.entries(b.days));
   const ids = new Set([...into.events.map((e) => e.id), ...a.events.map((e) => e.id)]);
   for (const e of b.events) {
     if (ids.has(e.id as string)) continue;
@@ -318,11 +345,11 @@ function adoptKept(into: State, from: State, theirsWin: boolean) {
  * On records both copies hold (the same key), the fields this build doesn't read, by adoptKept's rule; inner does the
  * same one level down (an event's data).
  */
-function adoptRest<T extends object>(mine: T[], theirs: T[], keyOf: (x: T) => string, known: readonly string[], theirsWin: boolean, inner?: (m: T, t: T) => void) {
+function adoptRest<T extends object>(mine: T[], theirs: T[], keyOf: (x: T) => string, known: readonly string[], theirsWin: boolean, inner?: (m: T, t: T) => void, when?: (m: T, t: T) => boolean) {
   const map = new Map(theirs.map((x) => [keyOf(x), x]));
   for (const m of mine) {
     const t = map.get(keyOf(m));
-    if (!t || t === m) continue;
+    if (!t || t === m || (when && !when(m, t))) continue;
     for (const [k, v] of restOf(t, known)) if (theirsWin || !own(m, k)) putOwn(m, k, v);
     inner?.(m, t);
   }
@@ -342,7 +369,7 @@ function adoptEventRest(mine: Ev[], theirs: Ev[], theirsWin: boolean) {
 function keptCanon(s: State) {
   const k = s[KEPT];
   const sorted = (o: object | undefined) => (o ? Object.entries(o).sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0)) : []);
-  return [s.v, restOf(s.settings, SETTINGS_KEYS), restOf(s.flags, FLAG_KEYS), sorted(k?.profile), sorted(k?.profileAt), sorted(k?.setAt), sorted(k?.names), (k?.titles ?? []).map((t) => JSON.stringify(t)).sort(), (k?.events ?? []).map((e) => String(e.id)).sort()];
+  return [s.v, restOf(s.settings, SETTINGS_KEYS), restOf(s.flags, FLAG_KEYS), sorted(k?.profile), sorted(k?.profileAt), sorted(k?.setAt), sorted(k?.names), (k?.titles ?? []).map((t) => JSON.stringify(t)).sort(), (k?.events ?? []).map((e) => String(e.id)).sort(), k ? Object.values(k.dropped).map((l) => l.map((x) => JSON.stringify(x)).sort()) : [], sorted(k?.days)];
 }
 /** Each id once, the first kept. */
 function firstById<T extends { id: string }>(list: T[]) {
@@ -355,7 +382,8 @@ function capGone(entries: [string, number][]) {
   for (const [id, t] of entries.sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).slice(0, GONE_CAP)) setOwn(g, id, t);
   return g;
 }
-const flat = (x: object) => JSON.stringify(x, Object.keys(x).sort());
+/** A record as text with keys sorted at every depth, so two copies of the same thing always read the same. */
+const flat = (x: object) => JSON.stringify(x, (_k, v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : v));
 const atOf = (x: { at?: number }) => x.at ?? 0;
 /** Each id once: mine keep their order, theirs not seen here are appended; on both sides the later-added copy wins. */
 function unionInto<T extends { id: string; at?: number }>(mine: T[], theirs: T[]) {
@@ -518,6 +546,7 @@ export function normalize(raw: unknown): State | null {
   // one than this build writes is read like any other and keeps its number, so it is never written back as older.
   const saved = raw.app === APP_ID ? raw.schema : raw.v;
   if (typeof saved === 'number' && Number.isFinite(saved) && saved > SCHEMA) base.v = saved;
+  const newer = base.v > SCHEMA;
   const kinds = EV_KINDS;
   const stats = Object.values(MODULES).map((m) => m.stat);
   if (Array.isArray(raw.events)) {
@@ -532,7 +561,14 @@ export function normalize(raw: unknown): State | null {
         }
         continue;
       }
-      if (typeof e.day !== 'string' || !validDay(e.day.slice(0, 10))) continue;
+      if (typeof e.day !== 'string' || !validDay(e.day.slice(0, 10))) {
+        // in a newer save, an event this build can't read is kept whole too
+        if (newer) {
+          seen.add(e.id);
+          kept(base).events.push(e);
+        }
+        continue;
+      }
       const ev: Ev = { id: e.id, t: num(e.t) ?? 0, day: e.day.slice(0, 10), k: e.k as EvKind, xp: Math.max(0, Math.min(500, num(e.xp) ?? 0)) };
       // a stat a newer build added stays on the event; derived() counts only the stats it knows
       if (stats.includes(e.stat as StatId) || (own(e, 'stat') && e.stat !== undefined)) putOwn(ev, 'stat', e.stat);
@@ -548,12 +584,15 @@ export function normalize(raw: unknown): State | null {
       }
       keepRest(ev, e, EV_KEYS);
       seen.add(ev.id);
-      base.events.push(ev);
+      base.events.push(twin(ev, e, newer));
     }
   }
   if (isObj(raw.diary)) {
     for (const [day, e] of Object.entries(raw.diary)) {
-      if (!isObj(e) || !validDay(day)) continue;
+      if (!isObj(e) || !validDay(day)) {
+        if (newer) putOwn(kept(base).days, day, e);
+        continue;
+      }
       const rows = (r: unknown) => {
         const out: Record<string, number | null> = {};
         if (isObj(r))
@@ -575,21 +614,30 @@ export function normalize(raw: unknown): State | null {
         }
         if (Object.keys(ft).length) entry.ft = ft;
       }
-      base.diary[day] = keepRest(entry, e, ENTRY_KEYS);
+      base.diary[day] = twin(keepRest(entry, e, ENTRY_KEYS), e, newer);
     }
   }
   const withAt = <T extends object>(o: T, raw: Record<string, unknown>, known: readonly string[]): T => keepRest(num(raw.at) !== null ? { ...o, at: raw.at as number } : o, raw, known);
-  const items = (x: unknown): Item[] => (Array.isArray(x) ? firstById(x.filter(isObj).map((i) => withAt({ id: str(i.id, 40) || uid(), text: str(i.text, 200) }, i, ITEM_KEYS)).filter((i) => i.text)) : []);
+  /** A list of records; in a newer save, one this build can't read is kept as stored. */
+  const listOf = <T extends { id: string }>(x: unknown, make: (i: Record<string, unknown>) => T, ok: (r: T) => boolean, key: keyof Kept['dropped']): T[] => {
+    if (!Array.isArray(x)) return [];
+    const out: T[] = [];
+    for (const i of x) {
+      const r = isObj(i) ? make(i) : null;
+      if (r && ok(r)) out.push(twin(r, i, newer && isObj(i) && i.id === r.id));
+      else if (newer) kept(base).dropped[key].push(i);
+    }
+    return firstById(out);
+  };
+  const item = (i: Record<string, unknown>): Item => withAt({ id: str(i.id, 40) || uid(), text: str(i.text, 200) }, i, ITEM_KEYS);
   if (isObj(raw.lists)) {
-    base.lists.comfort = items(raw.lists.comfort);
-    base.lists.activities = items(raw.lists.activities);
-    base.lists.reasons = items(raw.lists.reasons);
-    base.lists.people = Array.isArray(raw.lists.people)
-      ? firstById(raw.lists.people.filter(isObj).map((p) => withAt({ id: str(p.id, 40) || uid(), name: str(p.name, 80), phone: str(p.phone, 40) }, p, PERSON_KEYS)).filter((p) => p.name))
-      : [];
+    base.lists.comfort = listOf(raw.lists.comfort, item, (i) => !!i.text, 'comfort');
+    base.lists.activities = listOf(raw.lists.activities, item, (i) => !!i.text, 'activities');
+    base.lists.reasons = listOf(raw.lists.reasons, item, (i) => !!i.text, 'reasons');
+    base.lists.people = listOf(raw.lists.people, (p) => withAt({ id: str(p.id, 40) || uid(), name: str(p.name, 80), phone: str(p.phone, 40) }, p, PERSON_KEYS), (p) => !!p.name, 'people');
   }
   if (Array.isArray(raw.maps)) {
-    base.maps = firstById(raw.maps.filter(isObj).map((m) => withAt({ id: str(m.id, 40) || uid(), t: num(m.t) ?? 0, urge: str(m.urge), p1: str(m.p1), c1: str(m.c1), p2: str(m.p2), c2: str(m.c2), choice: str(m.choice, 40) }, m, MAP_KEYS)));
+    base.maps = listOf(raw.maps, (m) => withAt({ id: str(m.id, 40) || uid(), t: num(m.t) ?? 0, urge: str(m.urge), p1: str(m.p1), c1: str(m.c1), p2: str(m.p2), c2: str(m.c2), choice: str(m.choice, 40) }, m, MAP_KEYS), () => true, 'maps');
   }
   if (isObj(raw.gone)) base.gone = capGone(Object.entries(raw.gone).filter((e): e is [string, number] => !!e[0] && e[0].length <= 40 && num(e[1]) !== null));
   if (isObj(raw.setAt)) {
@@ -630,18 +678,25 @@ export function normalize(raw: unknown): State | null {
   if (Array.isArray(raw.lines)) {
     const byDay = new Map<string, LineEntry>();
     for (const l of raw.lines) {
-      if (!isObj(l) || !validDay(l.day) || !str(l.text, 200)) continue;
-      const e: LineEntry = keepRest({ day: l.day, id: str(l.id, 12), tag: str(l.tag, 24), text: str(l.text, 200), t: num(l.t) ?? 0 }, l, LINE_KEYS);
+      if (!isObj(l) || !validDay(l.day) || !str(l.text, 200)) {
+        if (newer) kept(base).dropped.lines.push(l);
+        continue;
+      }
+      const e: LineEntry = twin(keepRest({ day: l.day, id: str(l.id, 12), tag: str(l.tag, 24), text: str(l.text, 200), t: num(l.t) ?? 0 }, l, LINE_KEYS), l, newer);
       const had = byDay.get(e.day);
-      if (!had || e.t >= had.t) byDay.set(e.day, e);
+      if (!had || e.t >= had.t) {
+        // a newer save's second line for a day is kept as stored
+        if (had && newer) kept(base).dropped.lines.push(AS_STORED.get(had)?.raw ?? had);
+        byDay.set(e.day, e);
+      } else if (newer) kept(base).dropped.lines.push(l);
     }
     base.lines = [...byDay.values()].sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
   }
   if (isObj(raw.settings)) {
     const s = raw.settings;
     for (const k of ['sound', 'motion'] as const) if (own(s, k) && s[k] !== undefined) putSet(base, k, s[k] as SetVal);
-    if (Array.isArray(s.emotionRows)) base.settings.emotionRows = s.emotionRows.map((r) => str(r, 60)).filter(Boolean).slice(0, ROW_CAP.emotions);
-    if (Array.isArray(s.urgeRows)) base.settings.urgeRows = s.urgeRows.map((r) => str(r, 60)).filter(Boolean).slice(0, ROW_CAP.urges);
+    if (Array.isArray(s.emotionRows)) base.settings.emotionRows = twin(s.emotionRows.map((r) => str(r, 60)).filter(Boolean).slice(0, ROW_CAP.emotions), s.emotionRows, newer);
+    if (Array.isArray(s.urgeRows)) base.settings.urgeRows = twin(s.urgeRows.map((r) => str(r, 60)).filter(Boolean).slice(0, ROW_CAP.urges), s.urgeRows, newer);
     keepRest(base.settings, s, SETTINGS_KEYS);
   }
   if (isObj(raw.flags)) {
@@ -941,9 +996,11 @@ export class Store {
     this.state.gone = Object.keys(gone).length > GONE_CAP ? capGone(Object.entries(gone)) : gone;
     for (const k of LIST_KEYS) {
       unionInto<Item | Person>(this.state.lists[k], other.lists[k]);
+      adoptRest<Item | Person>(this.state.lists[k], other.lists[k], (x) => x.id, k === 'people' ? PERSON_KEYS : ITEM_KEYS, true, undefined, (m, t) => atOf(m) === atOf(t));
       prune<Item | Person>(this.state.lists[k], this.state.gone);
     }
     unionInto(this.state.maps, other.maps);
+    adoptRest(this.state.maps, other.maps, (m) => m.id, MAP_KEYS, true, undefined, (m, t) => atOf(m) === atOf(t));
     prune(this.state.maps, this.state.gone);
     for (const k of SET_KEYS) {
       const mt = this.state.setAt[k] ?? 0, ot = other.setAt[k] ?? 0;
@@ -998,6 +1055,8 @@ export class Store {
       if (e.k === 'visit') days.add(e.day);
       if ((e.k === 'skill' || e.k === 'card') && isSkillId(e.skill)) collection.add(e.skill);
     }
+    // events this build can't read still carry their XP, so a newer save never shows less
+    for (const e of this.state[KEPT]?.events ?? []) xp += typeof e.xp === 'number' && Number.isFinite(e.xp) ? Math.max(0, Math.min(500, e.xp)) : 0;
     const rank = rankFor(xp);
     return { xp, rank, warden: xp >= WARDEN_XP, nextAt: rank < RANKS.length - 1 ? RANK_XP[rank + 1] : xp < WARDEN_XP ? WARDEN_XP : null, stats, visitDays: [...days].sort(), collection };
   }
@@ -1172,7 +1231,8 @@ export class Store {
       }
       raws.add(k);
       putSet(this.state, k, getSet(other, k));
-      this.state.setAt[k] = Math.min(other.setAt[k] ?? now, now);
+      // later than this device's own change, so no other open copy undoes it
+      this.state.setAt[k] = own(this.state.setAt, k) ? Math.max(now, (this.state.setAt[k] ?? 0) + 1) : Math.min(other.setAt[k] ?? now, now);
     }
     for (const k of ['sound', 'motion', ...PROFILE_SET_KEYS] as SetKey[]) {
       if (own(this.state.setAt, k) || raws.has(k)) continue;
