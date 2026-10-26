@@ -360,9 +360,12 @@ const smallAction = (a: Answers) => s(a, 'action', 'One helpful action').trim().
 const firstSteps = (a: Answers) => (Object.hasOwn(SMALL_FIRST, smallAction(a)) ? SMALL_FIRST[smallAction(a)] : SMALL_ANY);
 const smallFirst = (a: Answers) => s(a, 'first', firstSteps(a)[0]).trim().replace(/[.!?]+$/, '');
 const smallReward = (a: Answers) => s(a, 'reward', REWARDS[0]).trim().replace(/[.!?]+$/, '');
+const smallerList = (a: Answers) => (Object.hasOwn(SMALLER, smallAction(a)) ? SMALLER[smallAction(a)] : SMALLER_ANY);
+/** A step in the player's own words has a size only they know, so the game offers no steps of its own as smaller. */
+const ownStep = (a: Answers) => ![...firstSteps(a), ...smallerList(a)].includes(smallFirst(a));
 /** Only steps smaller than the one already picked; none once it's the smallest. */
 function smallerSteps(a: Answers) {
-  const list = Object.hasOwn(SMALLER, smallAction(a)) ? SMALLER[smallAction(a)] : SMALLER_ANY;
+  const list = smallerList(a);
   const at = list.indexOf(smallFirst(a));
   return at < 0 ? list : list.slice(at + 1);
 }
@@ -1665,8 +1668,17 @@ export const SKILLS: Skill[] = [
         options: [{ label: 'Straight after, got it' }, { label: 'Make the step smaller', go: 'shrink' }],
       },
       { id: 'plan', kind: 'say', text: smallPlan, options: [{ label: 'Done', go: 'end' }, { label: 'Make the step smaller', go: 'shrink' }] },
-      { id: 'shrink', kind: 'branch', pick: (a) => (smallerSteps(a).length ? 'smaller' : 'smallest') },
+      { id: 'shrink', kind: 'branch', pick: (a) => (ownStep(a) ? 'smaller-own' : smallerSteps(a).length ? 'smaller' : 'smallest') },
       { id: 'smaller', kind: 'choice', key: 'first', text: 'Smaller is smart. What tiny first step would be easy to start?', options: (a) => o(...smallerSteps(a)), other: 'My own', go: 'plan' },
+      {
+        id: 'smaller-own',
+        kind: 'choice',
+        key: 'first',
+        text: (a) => `Smaller is smart. "${smallFirst(a)}" is your own step, so you know its size best. What tinier piece of it would be easy to start?`,
+        options: (a) => [{ label: 'Keep this step', value: smallFirst(a) }],
+        other: 'My own',
+        go: 'plan',
+      },
       { id: 'smallest', kind: 'say', text: "That's already about as small as a step gets, and small is the point. Keep it, and let the reward do its work.", cta: 'Back to my plan', go: 'plan' },
       { id: 'not-today', kind: 'say', text: "That's okay. Today can just be today. The idea will keep for another time.", cta: 'Done', go: 'end:quiet' },
     ],

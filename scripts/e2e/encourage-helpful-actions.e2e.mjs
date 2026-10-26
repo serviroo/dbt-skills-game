@@ -1,6 +1,7 @@
 // Small Steps (Reinforcement and Shaping), applied to yourself: one helpful action, a first step small enough for a low
 // day, and a small free reward straight after it. small-plans: a scripted plan, a plan in your own words (shown
-// literally, markup and all), a smaller step chosen twice and "Not today" all finish with exactly one credit for
+// literally, markup and all), a smaller step chosen twice, a step in your own words that only you can make smaller
+// (the game offers none of its own) and "Not today" all finish with exactly one credit for
 // opening; revising and finishing add nothing and XP never drops. small-sizes: every screen at four sizes.
 import { credits, returning, toHub } from './skill-check.e2e.mjs';
 import { ended, leave, look, openFromList, sees, SIZES, tap } from './choose-ask-refusal-strength.e2e.mjs';
@@ -49,6 +50,15 @@ export const scenarios = {
     await tap(page, 'Straight after, got it');
     await sees(h, page, 'own plan', { text: ['Helpful action: Water the <b>plants</b>.', 'First small step: Fill the can.', 'Then, straight after: Sit in the sun for <i>one</i> minute.'] });
     h.expect((await page.locator('.dq-step-body b:text("plants"), .dq-step-body i:text("one")').count()) === 0, 'typed markup became page elements');
+    // a step in your own words: no game step is offered as smaller, since the game can't know it is
+    await tap(page, 'Make the step smaller');
+    await sees(h, page, 'own smaller', { text: ['Smaller is smart.', '"Fill the can" is your own step'], offers: ['Keep this step', 'My own'] });
+    await own(page, 'Hold the can');
+    await sees(h, page, 'own smaller plan', { text: 'First small step: Hold the can.', not: 'Fill the can' });
+    await tap(page, 'Make the step smaller');
+    await sees(h, page, 'own smaller again', { text: '"Hold the can" is your own step', offers: ['Keep this step', 'My own'] });
+    await tap(page, 'Keep this step');
+    await sees(h, page, 'own step kept', { text: 'First small step: Hold the can.' });
     await tap(page, 'Done');
     // a smaller step, twice, with no extra credit
     n = await events(h, page);
@@ -74,6 +84,24 @@ export const scenarios = {
     h.expect((await events(h, page)) === n, 'revising the plan added an event');
     await tap(page, 'Done');
     await ended(h, page, 'smaller', NAME);
+    // a smaller step typed in your own words: the next "smaller" offers none of the game's steps, which may be bigger
+    await openFromList(h, page, NAME, REAL);
+    n += 1;
+    await tap(page, 'Begin');
+    await tap(page, 'Tidy one corner');
+    await tap(page, 'Clear one surface');
+    await tap(page, 'Time on a hobby');
+    await tap(page, 'Make the step smaller');
+    await sees(h, page, 'tidy smaller', { offers: ['One minute of it', 'Put one thing away', 'Look at the corner for a moment', 'My own'] });
+    await own(page, 'Pick up one sock');
+    await sees(h, page, 'tidy own plan', { text: 'First small step: Pick up one sock.' });
+    await tap(page, 'Make the step smaller');
+    await sees(h, page, 'tidy own smaller', { text: '"Pick up one sock" is your own step', offers: ['Keep this step', 'My own'] });
+    await tap(page, 'Keep this step');
+    await sees(h, page, 'tidy own kept', { text: 'First small step: Pick up one sock.' });
+    h.expect((await events(h, page)) === n, 'revising the plan added an event');
+    await tap(page, 'Done');
+    await ended(h, page, 'smaller own', NAME);
     // not today
     await openFromList(h, page, NAME, REAL);
     await tap(page, 'Begin');
@@ -105,14 +133,18 @@ export const scenarios = {
       await look(h, page, problems, shots, at('02-action'));
       await tap(page, 'Reply to messages');
       await look(h, page, problems, shots, at('03-first'));
-      await own(page, 'Reply to the one from my cousin about the weekend plans');
+      await tap(page, 'Reply to one person');
       await look(h, page, problems, shots, at('04-reward'));
       await tap(page, 'A round of a game I like');
       await look(h, page, problems, shots, at('05-link'));
       await tap(page, 'Make the step smaller');
       await look(h, page, problems, shots, at('06-smaller'));
-      await tap(page, 'Open the messages app');
+      await own(page, 'Open the chat with my cousin about the weekend plans and read the last message');
       await look(h, page, problems, shots, at('07-plan'));
+      await tap(page, 'Make the step smaller');
+      await look(h, page, problems, shots, at('08-own-smaller'));
+      await tap(page, 'Keep this step');
+      await look(h, page, problems, shots, at('09-plan'));
       await tap(page, 'Done');
       await ended(h, page, at('end'), NAME);
       await toHub(h, page);
