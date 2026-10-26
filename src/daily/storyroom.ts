@@ -283,8 +283,8 @@ function fitted(s: StoryText): StoryText {
       let cut = text.lastIndexOf('\n\n', STORY_CAP.text);
       if (cut < STORY_CAP.text / 2) cut = text.lastIndexOf(' ', STORY_CAP.text);
       if (cut <= 0) cut = STORY_CAP.text;
-      chapters.push({ title: named(), text: text.slice(0, cut).replace(/\s+$/, '') });
-      text = text.slice(cut).replace(/^\s+/, '');
+      chapters.push({ title: named(), text: text.slice(0, cut).trimEnd() });
+      text = text.slice(cut).trimStart();
       part++;
     }
     chapters.push({ title: named(), text });
@@ -1267,7 +1267,7 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     // only the exact range it was asked about; if those words changed, never search for them elsewhere
     if (s && s.text && text.slice(s.start, s.end) === s.text) {
       // the spaces or line breaks the selection started or ended with stay, so it never glues onto the next word
-      const put = `${s.text.match(/^\s*/)![0]}${piece}${s.text.match(/\s*$/)![0]}`;
+      const put = `${s.text.slice(0, s.text.length - s.text.trimStart().length)}${piece}${s.text.slice(s.text.trimEnd().length)}`;
       const at = s.start;
       const end = at + put.length;
       const next = text.slice(0, at) + put + text.slice(at + s.text.length);
@@ -1599,7 +1599,7 @@ export function readScreen(app: App, route: Route): ScreenOut {
     if (!alive) return;
     const secs = chs.flatMap((c, i) =>
       c && c.text.trim()
-        ? [h('section', { class: 'st-read-ch', 'data-id': c.id }, h('h2', { class: 'st-read-ch-h', text: c.title.trim() || `Chapter ${i + 1}` }), h('div', { class: 'st-read-text', text: c.text.replace(/\s+$/, '') }))]
+        ? [h('section', { class: 'st-read-ch', 'data-id': c.id }, h('h2', { class: 'st-read-ch-h', text: c.title.trim() || `Chapter ${i + 1}` }), h('div', { class: 'st-read-text', text: c.text.trimEnd() }))]
         : [],
     );
     if (!secs.length) return body.replaceChildren(h('p', { class: 'st-read-empty', text: STORY_READ.empty }));

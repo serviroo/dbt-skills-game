@@ -186,6 +186,76 @@ export const scenarios = {
     }
   },
 
+  /** long runs of spaces read, download and show in one pass: the page never freezes and the Safe Zone is one tap away */
+  async 'story-bring-in-spaces'(h) {
+    const gap = ' '.repeat(200_000);
+    const files = [
+      // a heading line and a chapter each with 200k spaces inside
+      ['gap-heading.md', `# Wide Open\n\n## The${gap}gap\n\nShort${gap}story.\n`, 'Short' + gap + 'story.'],
+      // 900 KB of spaces between two words
+      ['gap-text.txt', `Once${' '.repeat(900_000)}upon a time.\n`, 'Once'],
+    ];
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await h.reachHub(page);
+      await shelfOf(h, page);
+      // reading each file, and writing it back out the way Download does, take under 200 ms each
+      const timed = await Promise.race([
+        page
+          .evaluate(async (list) => {
+            const { storyFromText, storyToText } = await import('/src/daily/storytext.ts');
+            return list.map(([name, body]) => {
+              const t0 = performance.now();
+              const s = storyFromText(body, name);
+              const t1 = performance.now();
+              storyToText(s);
+              return { name, read: t1 - t0, write: performance.now() - t1 };
+            });
+          }, files)
+          .catch(() => null),
+        h.sleep(10000).then(() => null),
+      ]);
+      h.expect(timed, 'reading the files froze the page for more than 10 s');
+      fs.writeFileSync(path.join(h.out, 'spaces-timing.json'), JSON.stringify(timed, null, 1));
+      for (const t of timed) h.expect(t.read < 200 && t.write < 200, `${t.name}: read in ${Math.round(t.read)} ms, written in ${Math.round(t.write)} ms`);
+
+      const quick = async (what, ms, step) => {
+        const t0 = Date.now();
+        await step();
+        h.expect(Date.now() - t0 < ms, `${what} took ${Date.now() - t0} ms`);
+      };
+      for (const [name, body, first] of files) {
+        // through the real chooser: the preview comes up at once and the Safe Zone opens on the first tap
+        const file = write(h, name, body);
+        await quick(`${name}: the preview`, 2000, () => bringIn(page, file));
+        await quick(`${name}: the Safe Zone`, 1000, async () => {
+          await page.locator('.dq-top .dq-safe').click({ timeout: 1000 });
+          await page.waitForFunction(() => window.__daily?.route.name === 'safe', null, { timeout: 1000 });
+        });
+        await shelfOf(h, page);
+        // added, it keeps its words and reads at once, the Safe Zone still one tap away
+        const was = await everything(page);
+        await bringIn(page, file);
+        await page.getByRole('button', { name: 'Add as a new story' }).click();
+        await page.locator('.st-bring-said:not(:empty)').waitFor();
+        const story = (await everything(page)).find((s) => !was.some((w) => w.id === s.id));
+        h.expect(story?.chapters[0]?.text === first, `${name}: the first chapter came in as ${JSON.stringify(story?.chapters[0]?.text.slice(0, 40))}…`);
+        await quick(`${name}: the reading view`, 2000, async () => {
+          await page.evaluate((r) => window.__daily.go(r), { name: 'read', id: story.id });
+          await page.locator('.st-read-text').first().waitFor({ timeout: 2000 });
+        });
+        await quick(`${name}: the Safe Zone from the reading view`, 1000, async () => {
+          await page.locator('.dq-top .dq-safe').click({ timeout: 1000 });
+          await page.waitForFunction(() => window.__daily?.route.name === 'safe', null, { timeout: 1000 });
+        });
+        await shelfOf(h, page);
+      }
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** the preview fits at every size, text at 16 px or more, nothing past the edge */
   async 'story-bring-in-fits'(h) {
     for (const vp of [{ width: 390, height: 844 }, { width: 320, height: 568 }, { width: 844, height: 390 }, { width: 1280, height: 800 }]) {

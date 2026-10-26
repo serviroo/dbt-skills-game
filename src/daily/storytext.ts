@@ -13,16 +13,21 @@ export interface StoryText {
 
 /** What Download writes for Notes, so Notes come back as Notes and a chapter called "Notes" stays a chapter. */
 export const NOTES_HEAD = 'Notes for this story';
-const HEAD = /^(#{1,2})[ \t]+(.*?)[ \t]*$/;
+// only the mark at the start of a line is matched and the rest is trimmed, so a long run of spaces reads in one pass
+const HEAD = /^#{1,2}[ \t]/;
 const OWN_HEAD = /^(\\*#{1,2}[ \t])/;
 const escape = (text: string) => text.replace(/^(\\*#{1,2}[ \t])/gm, '\\$1');
 const unescape = (text: string) => text.replace(/^\\(\\*#{1,2}[ \t])/gm, '$1');
-const tidy = (lines: string[]) => lines.join('\n').replace(/^(?:[ \t]*\n)+/, '').replace(/\s+$/, '');
+const blank = (l: string) => !/[^ \t]/.test(l);
+const tidy = (lines: string[]) => {
+  const from = lines.findIndex((l) => !blank(l));
+  return from < 0 ? '' : lines.slice(from).join('\n').trimEnd();
+};
 
 export function storyToText(s: StoryText): string {
   const parts = [`# ${s.title}`];
-  for (const c of s.chapters) parts.push(`## ${c.title}`, escape(c.text.replace(/\s+$/, '')));
-  if (s.notes.trim()) parts.push(`## ${NOTES_HEAD}`, escape(s.notes.replace(/\s+$/, '')));
+  for (const c of s.chapters) parts.push(`## ${c.title}`, escape(c.text.trimEnd()));
+  if (s.notes.trim()) parts.push(`## ${NOTES_HEAD}`, escape(s.notes.trimEnd()));
   return `${parts.filter((x, i) => i === 0 || x !== '' || !parts[i - 1].startsWith('## ')).join('\n\n')}\n`;
 }
 
@@ -37,7 +42,7 @@ export function storyFromText(raw: string, fileName: string): StoryText {
   const named = fileName.replace(/\.(txt|text|md|markdown)$/i, '').replace(/[_]+/g, ' ').trim();
   const heads = lines.flatMap((l, i) => {
     const m = OWN_HEAD.test(l) && !l.startsWith('\\') ? HEAD.exec(l) : null;
-    return m ? [{ i, level: m[1].length, title: m[2].trim() }] : [];
+    return m ? [{ i, level: m[0].length - 1, title: l.slice(m[0].length).trim() }] : [];
   });
   const first = lines.findIndex((l) => l.trim());
   let title = named;
