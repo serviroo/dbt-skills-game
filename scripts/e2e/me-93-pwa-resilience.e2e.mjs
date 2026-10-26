@@ -325,7 +325,8 @@ export const scenarios = {
     };
     const offer = async (page, name) => {
       let navs = 0;
-      page.on('framenavigated', (f) => f === page.mainFrame() && navs++);
+      // a new document; the history entries the app writes as the player moves are not navigations away
+      page.on('load', () => navs++);
       await page.getByText('A new version of the Lantern is ready').waitFor({ timeout: 25000 }).catch(async (e) => { await shot(page, 'fail-' + name); throw e; });
       await sleep(2500);
       expect(navs === 0, 'the page reloaded without being asked');
@@ -389,7 +390,8 @@ export const scenarios = {
       await sleep(1500);
       await reachHub(page);
       let navigations = 0;
-      page.on('framenavigated', (f) => f === page.mainFrame() && navigations++);
+      // a new document; the history entries the app writes as the player moves are not navigations away
+      page.on('load', () => navigations++);
       const advance = async (i, screen) => {
         srv.use(vs[i].dir);
         expect(await update(page) === 'activated', `update ${i} did not activate`);

@@ -88,8 +88,9 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const swap = (...kids: (Node | null)[]) => {
     body.replaceChildren(...kids.filter((k): k is Node => !!k));
     drawn = [...body.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('textarea, input:not([type=range]):not([type=checkbox]):not([type=radio])')].map((f) => [f, f.value]);
+    // Back or Forward brings back what was typed; a step shown again going forward (Make the step smaller) starts empty
     drawn.forEach(([f, was], k) => {
-      const t = typed[idx]?.[k];
+      const t = replaying ? typed[idx]?.[k] : undefined;
       if (!t || t[0] !== was || t[1] === was) return;
       f.value = t[1];
       f.closest<HTMLElement>('.is-hidden')?.classList.remove('is-hidden');
