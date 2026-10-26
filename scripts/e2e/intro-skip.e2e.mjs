@@ -22,9 +22,9 @@ async function intro(h, from) {
 async function skip(h, page, tag) {
   const before = await page.evaluate(() => window.__audioLog.length);
   await page.locator('.ui-skip').click();
-  h.expect(await page.evaluate(() => window.__steps(() => !!document.querySelector('.rw'), 600)), `${tag}: the rewards never came after Skip`);
   const cam = () => page.evaluate(() => { const c = window.__stage.camera; return [...c.position.toArray(), ...c.quaternion.toArray(), c.fov].map((v) => v.toFixed(5)).join(' '); });
   const held = await cam();
+  h.expect(await page.evaluate(() => window.__steps(() => !!document.querySelector('.rw'), 600)), `${tag}: the rewards never came after Skip`);
   await page.evaluate(() => { let i = 0; return window.__steps(() => ++i > 30); });
   const now = await cam();
   h.expect(now === held, `${tag}: the camera kept moving behind the rewards after Skip (${held} -> ${now})`);
