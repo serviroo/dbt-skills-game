@@ -301,6 +301,55 @@ function beliefReview(a: Answers) {
   return `**${label}:** "${fullStop(cap(beliefOf(a)))}" ${answer}${step ? ` **One small step:** ${fullStop(cap(step))}` : ''} Beliefs loosen with practice, one small ask at a time.`;
 }
 
+const COPE_FEEL = ['Worry', 'Anger', 'Sadness', 'Shame', 'An urge to leave', 'An urge to snap', 'An urge to shut down', 'Not sure'];
+const COPE_PLAN = ['Slow breathing', 'Say what I need, calmly', 'Take a short break', 'Check the facts in my head', 'Ground myself with my senses'];
+const COPE_SNAG = ['They react badly', 'I freeze', 'It takes longer than I hoped', 'I get interrupted'];
+const lower1 = (t: string) => (/^I\b/.test(t) ? t : t.charAt(0).toLowerCase() + t.slice(1));
+const copeFeel = (a: Answers) => {
+  const f = (Array.isArray(a.feel) ? (a.feel as string[]) : []).filter((x) => x !== 'Not sure').map(lower1);
+  return f.length ? f.join(' and ') : 'whatever comes up';
+};
+const copePlan = (a: Answers) => lower1(s(a, 'plan', COPE_PLAN[0]).trim().replace(/[.!?]+$/, ''));
+const copeWords = (a: Answers) => s(a, 'words').trim();
+function copePicture(a: Answers) {
+  const what = s(a, 'what').trim().replace(/[.!?]+$/, '');
+  const words = copeWords(a);
+  return `Imagine you're there now${what ? `: ${what}` : ''}. Notice ${copeFeel(a)} starting. Then picture yourself using your plan: ${copePlan(a)}${words ? `, and saying "${words}"` : ''}. Words or sounds are fine if pictures don't come.`;
+}
+function copeSnag(a: Answers) {
+  const snag = s(a, 'snag', COPE_SNAG[0]).trim().replace(/[.!?]+$/, '');
+  return `Picture this happening: ${lower1(snag)}. See yourself staying with your plan anyway: ${copePlan(a)}. It doesn't have to go perfectly. Coping is the goal.`;
+}
+function copeReady(a: Answers) {
+  const what = s(a, 'what').trim();
+  const words = copeWords(a);
+  return `${what ? `**Coming up:** ${fullStop(cap(what))} ` : ''}**Might show up:** ${fullStop(cap(copeFeel(a)))} **Your plan:** ${fullStop(cap(copePlan(a)))} ${words ? `**Your words:** "${words}" ` : ''}**If it snags:** ${fullStop(cap(lower1(s(a, 'snag', COPE_SNAG[0]).trim())))} You've walked it once already, so the real one will feel a little more familiar.`;
+}
+
+const WILL_STEPS = ['Do the next small thing', 'Ask someone for help', 'Set a boundary', 'Step away from something harmful', 'Rest, then come back to it'];
+const willStep = (a: Answers) => s(a, 'step', WILL_STEPS[0]).trim().replace(/[.!?]+$/, '');
+function willOpen(a: Answers) {
+  const fact = s(a, 'fact').trim();
+  const how = s(a, 'how').trim();
+  return `${fact ? `**What's here:** ${fullStop(cap(fact))} ` : ''}**One willing step:** ${fullStop(cap(willStep(a)))} ${how ? `**First move:** ${fullStop(cap(how))} ` : ''}How ready do you feel?`;
+}
+
+const SMALL_FIRST: Record<string, string[]> = {
+  'Start a task I keep putting off': ['Open it and write one line', 'Set a timer for two minutes', 'Get out what I need'],
+  'Move my body a bit': ['Put my shoes on', 'Stand up and stretch once', 'Walk to the end of the street'],
+  'Reply to messages': ['Open one message', 'Reply to one person', 'Write one sentence back'],
+  'Tidy one corner': ['Clear one surface', 'Put five things away', 'Take one cup to the kitchen'],
+  'Practise a skill': ['Open this app', 'Do one slow breath', 'Read one skill card'],
+};
+const SMALL_ANY = ['Do the very first bit', 'Two minutes of it', 'Get out what I need'];
+const SMALLER = ['One minute of it', 'Only get things out', 'Only open it'];
+const smallAction = (a: Answers) => s(a, 'action', 'One helpful action').trim().replace(/[.!?]+$/, '');
+const firstSteps = (a: Answers) => (Object.hasOwn(SMALL_FIRST, smallAction(a)) ? SMALL_FIRST[smallAction(a)] : SMALL_ANY);
+const smallFirst = (a: Answers) => s(a, 'first', firstSteps(a)[0]).trim().replace(/[.!?]+$/, '');
+const smallReward = (a: Answers) => s(a, 'reward', 'A favourite song').trim().replace(/[.!?]+$/, '');
+const smallPlan = (a: Answers) =>
+  `**Helpful action:** ${fullStop(cap(smallAction(a)))} **First small step:** ${fullStop(cap(smallFirst(a)))} **Then, straight after:** ${fullStop(cap(smallReward(a)))} If this doesn't make the step happen more often, change the reward or make the step smaller. That isn't failing. It's shaping, and each small step counts.`;
+
 export const SKILLS: Skill[] = [
   // ---------------- Mindfulness (Sense) ----------------
   {
@@ -805,6 +854,56 @@ export const SKILLS: Skill[] = [
     ],
   },
   {
+    id: 'willingness',
+    sl: 'Open Path',
+    real: 'Willingness and Wilfulness',
+    module: 'dt',
+    minutes: '2 min',
+    card: "Notice when you're digging in, and choose one open, useful step.",
+    steps: [
+      { kind: 'intro', text: "Sometimes part of us digs in: refusing what's already here, or refusing the step that would help. That's human, and it's a moment to notice, not a label for you. Let's look for an open way through." },
+      {
+        id: 'stuck',
+        kind: 'choice',
+        key: 'stuck',
+        text: 'What are you digging in against?',
+        options: [...o('Something that already happened', "Something I can't change today", 'A step I know would help', 'Not sure'), { label: "It's all too much right now", go: 'too-much' }],
+      },
+      { id: 'fact', kind: 'input', key: 'fact', text: "Describe it plainly, the way a camera would see it. No judging yourself.", placeholder: 'Optional', skip: 'Skip' },
+      {
+        id: 'change',
+        kind: 'choice',
+        key: 'change',
+        text: 'Is any part of this yours to change?',
+        options: [
+          { label: 'Some of it', reply: "Then there's somewhere to put your energy." },
+          { label: 'Not right now', reply: "Then this part is about making room for what's here, not fixing it." },
+          { label: 'Not sure', reply: "That's okay. Being willing doesn't need certainty." },
+        ],
+      },
+      { id: 'hands', kind: 'timer', seconds: 20, visual: 'hands', text: 'If you like, rest your hands open, palms up, fingers loose. Breathe out slowly. Notice the digging in without fighting it.' },
+      {
+        id: 'step',
+        kind: 'choice',
+        key: 'step',
+        text: "What's one willing step from here?",
+        small: "Willing isn't the same as giving in. Saying no, stepping away from harm and asking for help can all be willing.",
+        options: o(...WILL_STEPS),
+        other: 'My own',
+      },
+      { id: 'how', kind: 'input', key: 'how', text: (a) => `How will you start "${willStep(a)}"? A first move is enough.`, placeholder: 'Optional', skip: 'Skip' },
+      { id: 'open', kind: 'choice', key: 'ready', text: willOpen, options: [{ label: 'Ready to try', go: 'ready' }, { label: 'Not ready yet', go: 'not-ready' }] },
+      { id: 'ready', kind: 'say', text: "Willingness is a choice you can make again and again, even when you don't like what's here. You picked an open step.", cta: 'Done', go: 'end' },
+      { id: 'not-ready', kind: 'say', text: "That's okay. Noticing the digging in is the first part, and you did that. The open path will still be there later.", cta: 'Done', go: 'end' },
+      {
+        id: 'too-much',
+        kind: 'say',
+        text: "Thanks for telling me. When it's all too much, you don't have to sort it out alone. Someone to talk to is one tap away.",
+        options: [{ label: 'People to talk to', go: 'safe:people' }, { label: 'Done', go: 'end' }],
+      },
+    ],
+  },
+  {
     id: 'urge-surf',
     sl: 'Wave Rider',
     real: 'Ride the Wave (Urge Surfing)',
@@ -830,8 +929,8 @@ export const SKILLS: Skill[] = [
       {
         id: 'long',
         kind: 'say',
-        text: 'Some waves are long. You stayed on the board the whole time, and that counts. You can stop here, ride another round, try TIPP, or open the Safe Zone.',
-        options: [{ label: 'Done', go: 'end' }, { label: 'Another round', go: 'ride' }, { label: 'TIPP', go: 'skill:tipp' }, { label: 'Safe Zone', go: 'safe' }],
+        text: "Some waves are long, and some climb before they fall. You stayed on the board, and that counts. If it's still climbing, you don't have to ride it alone: someone to talk to is one tap away.",
+        options: [{ label: 'People to talk to', go: 'safe:people' }, { label: 'Done', go: 'end' }, { label: 'Another round', go: 'ride' }, { label: 'TIPP', go: 'skill:tipp' }],
       },
     ],
   },
@@ -1128,6 +1227,32 @@ export const SKILLS: Skill[] = [
       { id: 'shoulders', kind: 'timer', seconds: 20, visual: 'glow', text: 'Now let your shoulders drop. Rehearsal done.', go: 'body' },
       { id: 'please', kind: 'checks', title: 'PLEASE. Body check', text: 'No grades. Only noticing.', rows: ['Body feeling okay, or looked after if it isn\'t?', 'Eaten something today?', 'Steered clear of things that knock your mood around?', 'Sleep okay?', 'Moved your body a little?'], go: 'body' },
       { id: 'body', kind: 'choice', key: 'now', text: 'Want to do one small thing for your body right now?', options: [{ label: 'Water', go: 'end' }, { label: 'A snack', go: 'end' }, { label: 'A stretch', go: 'end' }, { label: 'A few minutes outside', go: 'end' }, { label: 'Not now', go: 'end' }] },
+    ],
+  },
+  {
+    id: 'cope-ahead',
+    sl: 'Ready the Path',
+    real: 'Cope Ahead',
+    module: 'er',
+    minutes: '2 min',
+    card: 'Rehearse a hard moment before it comes, so your plan is ready.',
+    steps: [
+      { kind: 'intro', text: "Some moments go easier once you've walked them in your head. Pick something coming up that feels hard but manageable. Not a crisis: something you can practise for." },
+      { id: 'what', kind: 'input', key: 'what', text: "What's coming up? Stick to the facts: what's likely to happen, where, and with whom.", placeholder: 'Optional', skip: 'Keep it in my head' },
+      { id: 'feel', kind: 'choice', key: 'feel', multi: true, text: 'What might show up for you there? Pick any.', options: [...o(...COPE_FEEL), { label: 'This feels too much', go: 'too-much' }] },
+      { id: 'plan', kind: 'choice', key: 'plan', text: 'When it shows up, what will you do?', options: o(...COPE_PLAN), other: 'My own' },
+      { id: 'words', kind: 'input', key: 'words', text: 'What will you say, or tell yourself? Exact words help.', placeholder: 'My words (optional)', skip: 'Skip' },
+      { id: 'picture', kind: 'timer', seconds: 30, visual: 'drift', text: copePicture },
+      { id: 'snag', kind: 'choice', key: 'snag', text: 'Now add one snag. What might not go to plan?', options: o(...COPE_SNAG), other: 'My own' },
+      { id: 'snag-rehearse', kind: 'timer', seconds: 30, visual: 'drift', text: copeSnag },
+      { id: 'settle', kind: 'timer', seconds: 20, visual: 'glow', text: 'Let the scene go. Drop your shoulders, loosen your hands and breathe out slowly.' },
+      { id: 'ready', kind: 'say', text: copeReady, options: [{ label: 'Done', go: 'end' }, { label: 'Plan the words with DEAR MAN', go: 'skill:dear-man' }] },
+      {
+        id: 'too-much',
+        kind: 'say',
+        text: "That's okay. Some things are too big to rehearse on your own, and you don't have to. Someone to talk to is one tap away.",
+        options: [{ label: 'People to talk to', go: 'safe:people' }, { label: 'Done', go: 'end' }],
+      },
     ],
   },
   {
@@ -1491,6 +1616,38 @@ export const SKILLS: Skill[] = [
         text: "Then that isn't a myth to argue with. It's a real risk, and your safety comes first. You don't have to ask or say no face to face with someone who might hurt you. Someone to talk to is one tap away.",
         options: [{ label: 'People to talk to', go: 'safe:people' }, { label: 'Done', go: 'end' }],
       },
+    ],
+  },
+  {
+    id: 'reinforcement',
+    sl: 'Small Steps',
+    real: 'Reinforcement and Shaping',
+    module: 'ie',
+    minutes: '2 min',
+    card: 'Make a helpful action easier to repeat: a small first step, then a small reward.',
+    steps: [
+      { kind: 'intro', text: 'Actions that bring something good straight after tend to happen more. You can use that kindly on yourself: one small step, then one small reward.' },
+      { id: 'action', kind: 'choice', key: 'action', text: "Pick one helpful action you'd like to do more often.", options: [...o(...Object.keys(SMALL_FIRST)), { label: 'Not today', go: 'not-today' }], other: 'My own' },
+      { id: 'first', kind: 'choice', key: 'first', text: (a) => `Make the first step of "${smallAction(a)}" small enough to do even on a low day.`, options: (a) => o(...firstSteps(a)), other: 'My own' },
+      {
+        id: 'reward',
+        kind: 'choice',
+        key: 'reward',
+        text: 'Right after that step, what small, free good thing could you give yourself?',
+        small: 'Rest, food, care and people never have to be earned. Pick something extra.',
+        options: o('A favourite song', 'A cup of something warm', 'A few minutes outside', 'A message to a friend', 'A stretch break'),
+        other: 'My own',
+      },
+      {
+        id: 'link',
+        kind: 'choice',
+        key: 'link',
+        text: (a) => `A reward works best straight after the step, not hours later. Picture it now: ${lower1(smallFirst(a))}, then ${lower1(smallReward(a))}.`,
+        options: [{ label: 'Straight after, got it' }, { label: 'Make the step smaller', go: 'smaller' }],
+      },
+      { id: 'plan', kind: 'say', text: smallPlan, options: [{ label: 'Done', go: 'end' }, { label: 'Make the step smaller', go: 'smaller' }] },
+      { id: 'smaller', kind: 'choice', key: 'first', text: 'Smaller is smart. What tiny first step would be easy to start?', options: o(...SMALLER), other: 'My own', go: 'plan' },
+      { id: 'not-today', kind: 'say', text: "That's okay. Today can just be today. The idea will keep for another time.", cta: 'Done', go: 'end' },
     ],
   },
   {

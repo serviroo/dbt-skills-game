@@ -131,16 +131,21 @@ export const scenarios = {
         sk.steps.flatMap((st, i) => {
           if (st.kind !== 'say' || !st.options?.some((o) => /^(skill:|safe)/.test(o.go ?? ''))) return [];
           const go = st.options[0].go ?? '';
-          // the screen a "Higher" answer leads to
-          const higher = sk.steps.some((c) => c.kind === 'choice' && (typeof c.options === 'function' ? c.options({}) : c.options).some((o) => o.label === 'Higher' && o.go === st.id));
+          // the screen rising distress leads to: a "Higher" answer, or a branch that a climbing or unchanged pair of
+          // ratings reaches (Urge Surfing's before and after sliders)
+          const sliders = sk.steps.filter((c) => c.kind === 'slider').map((c) => c.key);
+          const pairs = sliders.flatMap((k, i) => sliders.slice(i + 1).flatMap((l) => [{ [k]: 2, [l]: 8 }, { [k]: 5, [l]: 5 }]));
+          const higher =
+            sk.steps.some((c) => c.kind === 'choice' && (typeof c.options === 'function' ? c.options({}) : c.options).some((o) => o.label === 'Higher' && o.go === st.id)) ||
+            sk.steps.some((c) => c.kind === 'branch' && pairs.some((a) => c.pick(a) === st.id));
           return [{ skill: sk.id, sl: sk.sl, step: st.id, where: `${sk.id} step ${i + 1} (${st.id})`, first: st.options[0].label, safe: /^safe/.test(go), talk: go === 'safe:people', higher }];
         }),
       ),
     );
     const bad = new Set();
     for (const x of exits) {
-      // DESIGN.md: a "Higher" answer brings "Talk to someone now" to the top
-      if (x.higher && !x.talk) bad.add(`${x.where}: after a "Higher" answer it leads with "${x.first}", not people to talk to`);
+      // DESIGN.md: distress that climbs (or doesn't move) brings "Talk to someone now" to the top
+      if (x.higher && !x.talk) bad.add(`${x.where}: after a rising answer it leads with "${x.first}", not people to talk to`);
       try {
         await toHub(h, page);
         const before = await skillEvents(h, page);

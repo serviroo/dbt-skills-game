@@ -57,8 +57,8 @@ export const exact = (t) => new RegExp(`^\\s*${t.replace(/[.*+?^${}()|[\]\\]/g, 
 export const has = (text, want) => plain(text).toLowerCase().includes(plain(want).toLowerCase());
 const skillEvents = async (h, page) => (JSON.parse((await h.ls(page, h.SAVE)) ?? 'null')?.events ?? []).filter((e) => e.k === 'skill');
 
-/** Opens a skill from the Skills list, the way a player finds it, and checks it sits under Interpersonal once. */
-export async function openFromList(h, page, sl, real) {
+/** Opens a skill from the Skills list, the way a player finds it, and checks it sits once under its module. */
+export async function openFromList(h, page, sl, real, module = 'Interpersonal') {
   await toHub(h, page);
   await page.locator('.dq-tile').filter({ hasText: 'All of them, any time' }).first().click();
   await page.locator('.dq-library').waitFor({ timeout: 10000 });
@@ -70,7 +70,7 @@ export async function openFromList(h, page, sl, real) {
     return found.map((r) => r.closest('section')?.querySelector('.dq-libsec-h')?.textContent ?? '');
   }, { sl, real });
   h.expect(rows.length === 1, `the Skills list shows ${rows.length} rows for ${sl} (${real}), not one`);
-  h.expect(rows[0]?.includes('Interpersonal'), `${sl} is listed under "${rows[0]}", not Interpersonal`);
+  h.expect(rows[0]?.includes(module), `${sl} is listed under "${rows[0]}", not ${module}`);
   await page.locator('[data-ask-row]').click();
   await page.locator('.dq-skill .dq-step-body > *').first().waitFor({ timeout: 10000 });
 }
