@@ -446,7 +446,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
   };
 
   // ally: name it, then it rises
-  const sheet = h('div', { class: 'dq-sheet is-hidden', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'dq-sheet-h' });
+  const sheet = h('div', { class: 'dq-sheet is-hidden', role: 'dialog', 'aria-modal': 'true' });
   let nameDone: (() => void) | null = null;
   const hideName = (focus: boolean) => {
     sheet.classList.add('is-hidden');
@@ -485,6 +485,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
         h('div', { class: 'dq-actions' }, btn('Rise', () => void go(), { kind: 'primary' }), btn('Back to drawing', () => hideName(true), { kind: 'link' })),
       ),
     );
+    sheet.setAttribute('aria-labelledby', 'dq-sheet-h');
     sheet.classList.remove('is-hidden');
     nameDone ??= app.sheet(() => hideName(true));
     if (!app.reduced()) animate(sheet.firstElementChild!, [{ opacity: 0, transform: 'translateY(16px)' }, { opacity: 1, transform: 'none' }], { duration: 380, easing: 'cubic-bezier(.16,1,.3,1)' });

@@ -1035,7 +1035,7 @@ export function settingsScreen(app: App): ScreenOut {
     if (fileIncomplete) parts.push(CRYSTAL_COPY.incompleteRestore);
     return parts.join(' ');
   };
-  const peek = h('section', { class: 'dq-peek is-hidden', 'aria-labelledby': 'dq-peek-h' });
+  const peek = h('section', { class: 'dq-peek is-hidden' });
   let pick = 0;
   let held: Peek | null = null;
   let gone = false;
@@ -1048,6 +1048,7 @@ export function settingsScreen(app: App): ScreenOut {
     document.removeEventListener('keydown', onKey);
     peek.classList.add('is-hidden');
     peek.replaceChildren();
+    peek.removeAttribute('aria-labelledby');
     if (open) document.dispatchEvent(new Event('crystal-closed'));
   };
   const cancel = () => {
@@ -1105,6 +1106,7 @@ export function settingsScreen(app: App): ScreenOut {
       p(PEEK_COPY.adds, 'dq-small'),
       h('div', { class: 'dq-actions' }, btn(PEEK_COPY.confirm, () => void confirm(), { kind: 'primary', ic: 'import' }), btn(PEEK_COPY.cancel, cancel, { kind: 'quiet' })),
     );
+    peek.setAttribute('aria-labelledby', head.id);
     peek.classList.remove('is-hidden');
     head.focus({ preventScroll: true });
     head.scrollIntoView({ block: 'start' });
