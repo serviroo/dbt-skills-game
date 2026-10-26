@@ -193,9 +193,11 @@ The live check opens a fresh browser profile at phone size. It checks the name p
 offline reload and launch, query links, the CSP and requests to other origins. Screenshots and a pass/fail report go
 in `artifacts/live/`. It exits with a non-zero status if a check fails.
 
-GitHub Pages builds on pushes to `main` and manual dispatches. Its build job runs the checks above before the deploy
-job can start. The build records `BUILD_ID` in a meta tag, using the commit SHA in Actions and the local HEAD
-(with `-dirty` for uncommitted changes) otherwise. After each deploy, check the published site against that build:
+GitHub Pages builds the newest commit on `main` once CI has passed on that exact commit, and `main` as it is on a
+manual dispatch. A CI run that ends after a newer commit reached `main` deploys nothing; the newer commit deploys when
+its own CI passes. The build job runs the checks above before the deploy job can start. The build records `BUILD_ID`
+in a meta tag, using the commit SHA in Actions and the local HEAD (with `-dirty` for uncommitted changes) otherwise.
+After each deploy, check the published site against that build:
 
 ```sh
 node scripts/live-check.mjs https://serviroo.github.io/dbt-skills-game/ --expect="$(git rev-parse HEAD)"
