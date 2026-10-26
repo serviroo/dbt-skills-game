@@ -126,16 +126,19 @@ async function active(page, d, sleep) {
 }
 
 /**
- * Asks the browser for the build the host now serves (d) and waits for the registration's newest worker to settle. It reads
- * the registration's state, not an updatefound event: a check the browser started on its own may have found d first, and
- * then no event comes. An update error fails the step. "activated" means d's cache is the current one.
+ * Asks the browser for the build the host now serves (d) and waits for the worker it found to settle. It holds the worker
+ * this check finds, even one that fails and leaves the registration before the check returns, and otherwise reads the
+ * registration: a check the browser started on its own may have found d first, and then no event comes. An update error
+ * fails the step. "activated" means d's cache is the current one.
  */
 const update = (page, d) =>
   page.evaluate(async ([meta, want]) => {
     const reg = await navigator.serviceWorker.getRegistration();
+    let found = null;
+    reg.addEventListener('updatefound', () => (found = reg.installing), { once: true });
     await reg.update();
-    // the check has settled: a build it found is installing or past it, otherwise the newest worker is the active one
-    const w = reg.installing ?? reg.waiting ?? reg.active;
+    // the check has settled: the worker it found, else one an earlier check found, else the active one
+    const w = found ?? reg.installing ?? reg.waiting ?? reg.active;
     const state = await new Promise((res) => {
       const done = () => (w.state === 'redundant' || w.state === 'activated') && res(w.state);
       w.addEventListener('statechange', done);
