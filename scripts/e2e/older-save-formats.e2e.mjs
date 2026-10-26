@@ -30,6 +30,9 @@ function parts(s) {
   return {
     events: Object.fromEntries((s.events ?? []).map((e) => [e.id, [e.k, e.xp, e.stat ?? null, e.skill ?? null, e.data ?? null]])),
     diary: Object.fromEntries(Object.entries(s.diary ?? {}).map(([d, e]) => [d, [e.emotions, e.urges, e.note]])),
+    // field times as stored; a day saved without them gets them from its save time when two copies merge
+    ft: Object.fromEntries(Object.entries(s.diary ?? {}).map(([d, e]) => [d, e.ft ?? {}])),
+    gone: Object.entries(s.gone ?? {}).sort(),
     lists: Object.fromEntries(['comfort', 'activities', 'reasons', 'people'].map((k) => [k, sorted(s.lists?.[k], (i) => [i.id, i.text ?? i.name, i.phone ?? null])])),
     maps: sorted(s.maps, (m) => [m.id, m.urge, m.p1, m.c1, m.p2, m.c2, m.choice]),
     lines: sorted(s.lines, (l) => [l.day, l.id, l.text]),
@@ -53,6 +56,9 @@ function lost(want, got, where) {
   const j = JSON.stringify;
   for (const [id, e] of Object.entries(want.events)) if (j(got.events[id]) !== j(e)) bad.push(`event ${id}: ${j(got.events[id])}, not ${j(e)}`);
   for (const [d, e] of Object.entries(want.diary)) if (j(got.diary[d]) !== j(e)) bad.push(`diary ${d}: ${j(got.diary[d])}, not ${j(e)}`);
+  for (const [d, ft] of Object.entries(want.ft)) for (const [k, v] of Object.entries(ft)) if (got.ft[d]?.[k] !== v) bad.push(`diary ${d} field time ${k}: ${got.ft[d]?.[k]}, not ${v}`);
+  // removals travel with a device save and its backup; a restore adds and never applies the file's removals
+  for (const g of want.gone) if (!got.gone.some((x) => j(x) === j(g))) bad.push(`removal ${j(g)} is gone`);
   for (const [k, l] of Object.entries(want.lists)) for (const i of l) if (!got.lists[k].some((x) => j(x) === j(i))) bad.push(`${k} item ${j(i)} is gone`);
   for (const k of ['maps', 'lines', 'art', 'stories', 'chapters', 'cards']) for (const i of want[k]) if (!got[k].some((x) => j(x) === j(i))) bad.push(`${k}: ${j(i)} is gone`);
   for (const [k, v] of Object.entries(want.choices)) {
@@ -83,6 +89,7 @@ async function shown(h, page) {
 async function matrix(h, file, kind) {
   const src = fixture(file);
   const want = parts(src);
+  const added = { ...want, gone: [] };
   const tag = file.replace(/^\.\.\//, '').replace(/\.json$/, '');
   const problems = [];
   // boot: a device save straight from storage, a Save Crystal through Restore on a clean device
@@ -95,14 +102,14 @@ async function matrix(h, file, kind) {
   }
   const booted = await savedOf(h, a.page);
   h.expect(booted && booted.v === 1, `${tag}: booting did not keep a version 1 save (${booted?.v})`);
-  problems.push(...lost({ ...want, art: [], stories: [], chapters: [], cards: [], preferences: null }, parts(booted), `${tag} booted`));
+  problems.push(...lost({ ...(kind === 'local' ? want : added), art: [], stories: [], chapters: [], cards: [], preferences: null }, parts(booted), `${tag} booted`));
   const before = await progress(a.page);
   const sees = await shown(h, a.page);
   const choice = (k) => want.choices[k] ?? DEFAULTS[k];
   if (sees.playerName !== choice('playerName') || sees.companion !== choice('companion') || sees.motion !== choice('motion')) problems.push(`${tag}: Settings shows ${JSON.stringify(sees)}`);
   await h.shot(a.page, `older-${tag}-settings-390x844`);
   const one = await crystal(h, a.page, `older-${tag}-backup`);
-  problems.push(...lost(want, parts(one), `${tag} backup`));
+  problems.push(...lost(kind === 'local' ? want : added, parts(one), `${tag} backup`));
   h.expect(!a.errors.length, `${tag}: ${a.errors.join('\n')}`);
   await a.ctx.close();
   // restored on a clean device, reloaded, backed up again
@@ -111,13 +118,13 @@ async function matrix(h, file, kind) {
   h.expect(/Restored/.test(await restore(h, b.page, one, `${tag}-backup.json`)), `${tag}: the backup was refused`);
   await b.page.reload();
   await h.reachHub(b.page);
-  problems.push(...lost({ ...want, art: [], stories: [], chapters: [], cards: [], preferences: null }, parts(await savedOf(h, b.page)), `${tag} restored`));
+  problems.push(...lost({ ...added, art: [], stories: [], chapters: [], cards: [], preferences: null }, parts(await savedOf(h, b.page)), `${tag} restored`));
   const after = await progress(b.page);
   if (after.xp < before.xp) problems.push(`${tag}: XP went from ${before.xp} to ${after.xp}`);
   for (const id of before.collection) if (!after.collection.includes(id)) problems.push(`${tag}: ${id} left the collection`);
   if (src.events?.some((e) => e.id === 'h-card-2') && JSON.stringify(after.card) !== JSON.stringify(before.card)) problems.push(`${tag}: today's card was ${JSON.stringify(before.card)}, is ${JSON.stringify(after.card)}`);
   const two = await crystal(h, b.page, `older-${tag}-backup-again`);
-  problems.push(...lost(want, parts(two), `${tag} backed up again`));
+  problems.push(...lost(added, parts(two), `${tag} backed up again`));
   h.expect(!b.errors.length, `${tag}: ${b.errors.join('\n')}`);
   await b.ctx.close();
   h.expect(!problems.length, problems.join('\n'));

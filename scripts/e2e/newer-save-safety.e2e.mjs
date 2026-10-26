@@ -23,6 +23,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const DAY = 864e5;
 const T = Date.now() - 2 * DAY;
 const D = dayKey(T);
+const TODAY = dayKey(Date.now());
 const YOU = JSON.stringify({ name: 'Robin', companion: 'Pip', nameAt: T, companionAt: T });
 
 /** A save from a newer build, version 3: everything a later build might add, at every depth, next to known data. */
@@ -40,7 +41,10 @@ export function newerSave() {
         { id: 'nq1', t: T + 3, day: D, k: 'quest', xp: 40, quest: { step: 2, of: 5 } },
         { id: 'nc1', t: T + 4, day: D, k: 'checkin', xp: 5, data: { feel: 'Calm', level: 2, sky: 'clear' } },
       ],
-      diary: { [D]: { day: D, emotions: { Joy: 3 }, urges: {}, note: 'A calm day', updatedAt: T, ft: { 'e:Joy': T, 'x:weather': T }, weather: { sky: 'clear' } } },
+      diary: {
+        [D]: { day: D, emotions: { Joy: 3 }, urges: {}, note: 'A calm day', updatedAt: T, ft: { 'e:Joy': T, 'x:weather': T }, weather: { sky: 'clear' } },
+        [TODAY]: { day: TODAY, emotions: { Joy: 2 }, urges: {}, note: '', updatedAt: T, ft: { 'e:Joy': T, 'x:tide': T }, tide: 'high' },
+      },
       lists: { comfort: [{ id: 'nc-tea', text: 'Tea', at: T, colour: 'teal' }], activities: [], reasons: [], people: [{ id: 'np-sam', name: 'Sam', phone: '0123', at: T, pronouns: 'they' }] },
       maps: [{ id: 'nm1', t: T, urge: 'Scroll', p1: 'Rest', c1: 'Late', p2: 'Sleep', c2: 'Bored', choice: 'wait', at: T, sketch: [1, 2] }],
       lines: [{ day: D, id: 'l1', tag: 'calm', text: 'One small step.', t: T, voice: 'soft' }],
@@ -70,6 +74,8 @@ export function newerParts(save, crystal = false) {
     checkinData: ev('nc1')?.data?.sky,
     diaryField: save.diary?.[D]?.weather,
     diaryTime: save.diary?.[D]?.ft?.['x:weather'],
+    todayField: save.diary?.[TODAY]?.tide,
+    todayTime: save.diary?.[TODAY]?.ft?.['x:tide'],
     item: save.lists?.comfort?.find((i) => i.id === 'nc-tea')?.colour,
     person: save.lists?.people?.find((p) => p.id === 'np-sam')?.pronouns,
     map: save.maps?.find((m) => m.id === 'nm1')?.sketch,
@@ -142,6 +148,14 @@ export const scenarios = {
     got = newerParts(after);
     h.expect(same(want, got), `changing the name lost newer values: ${diff(want, got)}`);
     h.expect(after.profile.playerName === 'Robin Vale' && after.profile.setAt.playerName > T, 'the name change was not stored');
+    // a rating changed in today's diary keeps what a newer build stored on the day
+    await page.evaluate(() => window.__daily.go({ name: 'diary' }));
+    await page.locator('[aria-label="Joy"] [role="radio"]').filter({ hasText: /^\s*4\s*$/ }).click();
+    await page.waitForFunction(([k, d]) => JSON.parse(localStorage.getItem(k) ?? 'null')?.diary?.[d]?.emotions?.Joy === 4, [h.SAVE, TODAY], { timeout: 10000 });
+    got = newerParts(await saveOf(h, page));
+    h.expect(same(want, got), `editing today's diary lost newer values: ${diff(want, got)}`);
+    await page.reload();
+    await h.reachHub(page);
     h.expect(['nv1', 'ns1', 'ns2', 'nc1'].every((id) => after.events.some((e) => e.id === id)), 'known progress was lost');
     h.expect(({}).polluted === undefined && !(await page.evaluate(() => ({}).polluted)), 'a stored "__proto__" field reached the object prototype');
     h.expect(JSON.stringify(after.garden).includes('"__proto__":{"polluted":1}'), 'a stored "__proto__" field was not kept as plain data');
@@ -174,18 +188,21 @@ export const scenarios = {
       const local = newerSave();
       local.v = localV;
       local.garden = { seeds: 'mine' };
-      local.events = [];
+      // the same records without what the newer build put on them, and one with this device's own value for it
+      local.events = local.events.filter((e) => e.id === 'nv1').map(({ glow, ...e }) => e);
+      local.lists.comfort[0].colour = 'blue';
       const t = await h.open({ [h.SAVE]: JSON.stringify(local), 'dbt.app.v1': h.SEEN, [h.YOU]: YOU });
       await h.reachHub(t.page);
       await restore(h, t.page, file);
       const s = await saveOf(h, t.page);
       h.expect(s.v === 3, `${label}: the restored save is v${s.v}, not v3`);
       h.expect(s.events.some((e) => e.id === 'ns1') && s.events.some((e) => e.id === 'nq1'), `${label}: restore did not add the file's progress`);
+      h.expect(same(s.events.find((e) => e.id === 'nv1')?.glow, { ring: 2 }), `${label}: an event both copies hold did not take the file's newer field`);
       await t.ctx.close();
-      return s.garden;
+      return [s.garden, s.lists.comfort.find((i) => i.id === 'nc-tea')?.colour];
     };
-    h.expect(same(await clash(1, 'older device'), file.garden), 'a value from the newer Save Crystal lost to an older save on this device');
-    h.expect(same(await clash(3, 'same version'), { seeds: 'mine' }), "restoring replaced this device's value from the same version");
+    h.expect(same(await clash(1, 'older device'), [file.garden, 'teal']), 'a value from the newer Save Crystal lost to an older save on this device');
+    h.expect(same(await clash(3, 'same version'), [{ seeds: 'mine' }, 'blue']), "restoring replaced this device's value from the same version");
   },
 
   async 'newer-tabs'(h) {

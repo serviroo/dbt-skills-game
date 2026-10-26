@@ -314,6 +314,30 @@ function adoptKept(into: State, from: State, theirsWin: boolean) {
     a.events.push(e);
   }
 }
+/**
+ * On records both copies hold (the same key), the fields this build doesn't read, by adoptKept's rule; inner does the
+ * same one level down (an event's data).
+ */
+function adoptRest<T extends object>(mine: T[], theirs: T[], keyOf: (x: T) => string, known: readonly string[], theirsWin: boolean, inner?: (m: T, t: T) => void) {
+  const map = new Map(theirs.map((x) => [keyOf(x), x]));
+  for (const m of mine) {
+    const t = map.get(keyOf(m));
+    if (!t || t === m) continue;
+    for (const [k, v] of restOf(t, known)) if (theirsWin || !own(m, k)) putOwn(m, k, v);
+    inner?.(m, t);
+  }
+}
+/** The fields a newer build stored on events this copy already has, and in their data. */
+function adoptEventRest(mine: Ev[], theirs: Ev[], theirsWin: boolean) {
+  adoptRest(mine, theirs, (e) => e.id, EV_KEYS, theirsWin, (m, t) => {
+    if (!isObj(t.data)) return;
+    const known: readonly string[] = (EV_DATA as Partial<Record<EvKind, readonly string[]>>)[m.k] ?? [];
+    for (const [k, v] of restOf(t.data, known)) {
+      if (!m.data) m.data = {};
+      if (theirsWin || !own(m.data, k)) putOwn(m.data, k, v);
+    }
+  });
+}
 /** The kept part of a copy in a form two copies can compare (see canon). */
 function keptCanon(s: State) {
   const k = s[KEPT];
@@ -427,7 +451,7 @@ export function fieldTimes(e: DiaryEntry | undefined): Record<string, number> {
  * One diary day from two copies, field by field: the value set later wins. On equal times a number beats a blank, then
  * the larger number, then the longer note. Commutative and associative, so copies merged in any order agree.
  */
-export function mergeEntry(a: DiaryEntry, b: DiaryEntry): DiaryEntry {
+export function mergeEntry(a: DiaryEntry, b: DiaryEntry, prefer?: 'a' | 'b'): DiaryEntry {
   const ft: Record<string, number> = {};
   const rows = (kind: DiaryKind) => {
     const out: Record<string, number | null> = {};
@@ -460,9 +484,10 @@ export function mergeEntry(a: DiaryEntry, b: DiaryEntry): DiaryEntry {
     ft.note = useB ? tb : ta;
   }
   const out: DiaryEntry = { day: a.day, emotions, urges, note, updatedAt: Math.max(a.updatedAt, b.updatedAt), ft };
-  // what a newer build stored on the day and its field times: the later-saved copy's, whichever way round they come
+  // what a newer build stored on the day and its field times: the copy the caller prefers (the stored copy for another
+  // tab, the newer save version for a restore), else the later-saved one, whichever way round they come
   const rest = (e: DiaryEntry) => JSON.stringify([restOf(e, ENTRY_KEYS), restOf(e.ft ?? {}, []).filter(([k]) => !isFieldKey(k))]);
-  const later = b.updatedAt !== a.updatedAt ? b.updatedAt > a.updatedAt : rest(b) > rest(a);
+  const later = prefer ? prefer === 'b' : b.updatedAt !== a.updatedAt ? b.updatedAt > a.updatedAt : rest(b) > rest(a);
   for (const e of later ? [a, b] : [b, a]) {
     for (const [k, v] of restOf(e, ENTRY_KEYS)) putOwn(out, k, v);
     if (e.ft) for (const [k, v] of Object.entries(e.ft)) if (!isFieldKey(k)) putOwn(ft, k, v);
@@ -869,18 +894,18 @@ export class Store {
   }
 
   /** Per field, the later-set value wins (see mergeEntry); a day only one copy has is taken whole. */
-  private mergeDiary(other: Record<string, DiaryEntry>) {
+  private mergeDiary(other: Record<string, DiaryEntry>, prefer: 'a' | 'b') {
     for (const [day, e] of Object.entries(other)) {
       const mine = this.state.diary[day];
-      this.state.diary[day] = mine ? mergeEntry(mine, e) : { ...e, emotions: { ...e.emotions }, urges: { ...e.urges }, ...(e.ft ? { ft: { ...e.ft } } : {}) };
+      this.state.diary[day] = mine ? mergeEntry(mine, e, prefer) : { ...e, emotions: { ...e.emotions }, urges: { ...e.urges }, ...(e.ft ? { ft: { ...e.ft } } : {}) };
     }
   }
 
   /** What only ever grows: events by id, diary per field, the newer line per day, raised flags, the later day flags. */
-  private absorbProgress(other: State) {
+  private absorbProgress(other: State, prefer: 'a' | 'b') {
     this.state.created = Math.min(this.state.created, other.created);
     if (this.addById(this.state.events, other.events)) this.state.events.sort((a, b) => a.t - b.t);
-    this.mergeDiary(other.diary);
+    this.mergeDiary(other.diary, prefer);
     const lines = new Map(this.state.lines.map((l) => [l.day, l]));
     for (const l of other.lines) {
       const mine = lines.get(l.day);
@@ -906,9 +931,10 @@ export class Store {
    * two copies that fold each other in end up holding the same thing. Arrays change in place: screens hold them.
    */
   private absorb(other: State) {
-    this.absorbProgress(other);
+    this.absorbProgress(other, 'b');
     // what a newer build stored: the stored copy's, never dropped
     adoptKept(this.state, other, true);
+    adoptEventRest(this.state.events, other.events, true);
     this.state.v = Math.max(this.state.v, other.v);
     const gone = { ...this.state.gone };
     for (const [id, t] of Object.entries(other.gone)) if (t > goneAt(gone, id)) setOwn(gone, id, t);
@@ -1094,10 +1120,15 @@ export class Store {
    */
   merge(other: State) {
     this.sync();
-    this.absorbProgress(other);
+    const newer = other.v > this.state.v;
+    this.absorbProgress(other, newer ? 'b' : 'a');
     // what a newer build stored, from both: on a clash the copy with the newer save version keeps its value, so a
     // value from an older build never replaces a newer one; on the same version this device's value stays
-    adoptKept(this.state, other, other.v > this.state.v);
+    adoptKept(this.state, other, newer);
+    adoptEventRest(this.state.events, other.events, newer);
+    for (const k of LIST_KEYS) adoptRest<Item | Person>(this.state.lists[k], other.lists[k], (x) => x.id, k === 'people' ? PERSON_KEYS : ITEM_KEYS, newer);
+    adoptRest(this.state.maps, other.maps, (m) => m.id, MAP_KEYS, newer);
+    adoptRest(this.state.lines, other.lines, (l) => `${l.day}\n${l.id}\n${l.t}`, LINE_KEYS, newer);
     this.state.v = Math.max(this.state.v, other.v);
     const bring = <T extends { id: string; at?: number }>(mine: T[], theirs: T[]) => {
       const seen = new Set(mine.map((x) => x.id));
@@ -1128,8 +1159,18 @@ export class Store {
     addRows('urgeRows', rowsOf('urges', other.settings.urgeRows), ROW_CAP.urges);
     const now = this.now();
     const blank = freshState(0);
+    // a choice either copy holds as a value this build can't use came from a newer build: like any field it doesn't
+    // read, the newer save version's value wins, with its change time
+    const raws = new Set<SetKey>();
+    for (const k of Object.keys(USABLE) as SetKey[]) {
+      if (!own(this.state[KEPT]?.raw ?? {}, k) && !own(other[KEPT]?.raw ?? {}, k)) continue;
+      raws.add(k);
+      if (!newer || !own(other.setAt, k)) continue;
+      putSet(this.state, k, getSet(other, k));
+      this.state.setAt[k] = Math.min(other.setAt[k] ?? now, now);
+    }
     for (const k of ['sound', 'motion', ...PROFILE_SET_KEYS] as SetKey[]) {
-      if (own(this.state.setAt, k)) continue;
+      if (own(this.state.setAt, k) || raws.has(k)) continue;
       if ((k === 'sound' || k === 'motion') && getSet(this.state, k) !== getSet(blank, k)) continue;
       const ov = getSet(other, k);
       const ft = own(other.setAt, k) ? other.setAt[k] : undefined;
