@@ -3,7 +3,7 @@ import type { AudioLike } from './director';
 
 export interface AudioEvent {
   t: number;
-  kind: 'play' | 'bed' | 'charge' | 'music' | 'duck' | 'hush';
+  kind: 'play' | 'bed' | 'charge' | 'music' | 'duck' | 'hush' | 'unhush';
   name: string;
   args: number[];
   opts?: Record<string, number>;
@@ -63,6 +63,10 @@ export function loggingAudio(inner?: AudioLike): AudioLike & { log: AudioEvent[]
     hush(from?: number, to?: number) {
       rec('hush', 'master', to !== undefined ? [to] : []);
       inner?.hush?.(from, to);
+    },
+    unhush() {
+      rec('unhush', 'master');
+      inner?.unhush?.();
     },
     duck(db: number, ramp: number) {
       rec('duck', 'master', [db, ramp]);

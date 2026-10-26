@@ -18,9 +18,13 @@ export interface AudioLike {
   chargeLoop?(): { set(c: number): void; release(): void; stop(): void };
   music?: { to(section: string, fade?: number, opts?: { at?: number; fadeOut?: number; hitAt?: number; standAt?: number }): void };
   hush?(from?: number, to?: number): void;
+  /** ends an open-ended hush */
+  unhush?(): void;
   duck?(db: number, ramp: number): void;
 }
 const NOAUDIO: AudioLike = { play: () => undefined };
+/** thrown by a beat's wait when the player skips, so the rest of that beat never runs */
+const SKIP = Symbol('skip');
 
 type Track = (lt: number, dt: number) => void;
 interface Shot {
@@ -117,13 +121,23 @@ export class Director {
     fn(0, 0);
   }
 
-  /** Skip: the beat in flight stops waiting, its moving parts land on their last frame and its pending cues stay silent. */
+  /** Skip: the beat in flight ends at its wait, its moving parts land on their last frame, its pending cues stay silent,
+   *  and the picture and sound are left as the rewards expect. */
   private skipNow() {
     if (this.skipped) return;
     this.skipped = true;
     for (const tr of this.tracks) tr.fn(tr.until, 0);
     this.tracks.clear();
+    this.lb.set(0);
+    this.neutralGrade();
+    this.audio.unhush?.();
+    this.audio.bed?.('vortex_roar')?.stop(1.5);
     this.resolveSkip();
+  }
+
+  /** Ends the beat in flight once the player has skipped. */
+  private stopIfSkipped() {
+    if (this.skipped) throw SKIP;
   }
 
   /** A cue `sec` from now on the beat clock, dropped if the player skips first. */
@@ -134,20 +148,31 @@ export class Director {
   }
 
   private async hold(sec: number) {
-    if (this.skipped) return;
+    this.stopIfSkipped();
     await Promise.race([wait(sec), this.skip]);
+    this.stopIfSkipped();
   }
 
-  /** Lantern window: opens, waits for their tap (auto-advance in capture mode or after a long idle). */
+  /** Lantern window: opens, waits for their tap (auto-advance in capture mode or after a long idle). Skip takes it down
+   *  at once, opening, waiting or closing. */
   private async window(spec: ConstructorParameters<typeof LanternWindow>[1], readSec: number) {
-    if (this.skipped) return;
+    this.stopIfSkipped();
     const win = new LanternWindow(lanternLayer(), { tapToContinue: true, ...spec });
-    await win.open();
-    if (params.capture) await wait(readSec);
-    else await Promise.race([win.waitForInput(Math.max(readSec + 8, 14)), this.skip]);
+    void this.skip.then(() => win.dismiss());
+    await Promise.race([win.open(), this.skip]);
+    if (params.capture) await this.hold(readSec);
+    else await win.waitForInput(Math.max(readSec + 8, 14));
     await win.close();
-    // a Skip leaves the window's tap listener waiting: end it, so a later tap plays no window sound
-    if (this.skipped) win.dismiss();
+    this.stopIfSkipped();
+  }
+
+  private neutralGrade() {
+    const g = this.stage.grade;
+    g.u('flashAmount').value = 0;
+    g.u('saturation').value = 1;
+    g.u('fade').value = 0;
+    g.u('gammaV').value = 1;
+    (g.u('flashColor').value as THREE.Color).set(1, 1, 1);
   }
 
   /* ======================================================================================= */
@@ -157,11 +182,15 @@ export class Director {
     const start = params.shot || '';
     const order = ['gate', 'windows', 'silhouette', 'awaken', 'chest', 'rewards'];
     const from = Math.max(0, order.indexOf(start));
-    if (from <= 0) await this.beatGate();
-    if (from <= 1) await this.beatWindows();
-    if (from <= 2) await this.beatSilhouette();
-    if (from <= 3) await this.beatAwaken();
-    if (from <= 4) await this.beatChest();
+    try {
+      if (from <= 0) await this.beatGate();
+      if (from <= 1) await this.beatWindows();
+      if (from <= 2) await this.beatSilhouette();
+      if (from <= 3) await this.beatAwaken();
+      if (from <= 4) await this.beatChest();
+    } catch (e) {
+      if (e !== SKIP) throw e;
+    }
     this.removeSkip?.();
     return this.beatRewards();
   }
@@ -333,7 +362,7 @@ export class Director {
     }
     awaken.group.visible = true;
     const { awakenSequence, HIT } = await import('./awaken-shots');
-    if (this.skipped) return;
+    this.stopIfSkipped();
     const seq = awakenSequence(this.stage, awaken as never, jw, cam);
     this.shot = null;
     this.track(16, (lt) => {
@@ -366,11 +395,7 @@ export class Director {
     stand?.stop(undefined, 0.04);
     this.audio.music?.to('reward', 3.5, { fadeOut: 0.04 });
     await this.window({ kind: 'notification', title: WINDOWS.army.title, html: WINDOWS.army.html }, 4.2);
-    this.stage.grade.u('flashAmount').value = 0;
-    this.stage.grade.u('saturation').value = 1;
-    this.stage.grade.u('fade').value = 0;
-    this.stage.grade.u('gammaV').value = 1;
-    (this.stage.grade.u('flashColor').value as THREE.Color).set(1, 1, 1);
+    this.neutralGrade();
   }
 
   /** Beats after the gate beat assume the gate is open behind him (matters when a beat is entered directly). */
@@ -412,23 +437,22 @@ export class Director {
     this.audio.play('chest_rise');
     this.track(1.9, (lt) => chest.setReveal(lt / 1.9));
     await this.hold(2.0);
-    if (this.skipped) return;
     // hold to charge (their pace)
     const holdMod = this.w.modules.chest;
     const loop = this.audio.chargeLoop?.();
-    if (holdMod?.holdToCharge && !params.capture) {
-      await holdMod.holdToCharge({
-        durationSec: 1.5,
-        until: this.skip,
-        onProgress: (c: number) => {
-          chest.setCharge(c);
-          loop?.set(c);
-        },
-        onRelease: () => loop?.release(),
-      });
-    } else {
-      await this.hold(0.8);
-      if (!this.skipped)
+    try {
+      if (holdMod?.holdToCharge && !params.capture) {
+        await holdMod.holdToCharge({
+          durationSec: 1.5,
+          until: this.skip,
+          onProgress: (c: number) => {
+            chest.setCharge(c);
+            loop?.set(c);
+          },
+          onRelease: () => loop?.release(),
+        });
+      } else {
+        await this.hold(0.8);
         await new Promise<void>((resolve) =>
           this.track(1.5, (lt) => {
             chest.setCharge(lt / 1.5);
@@ -436,9 +460,12 @@ export class Director {
             if (lt >= 1.5) resolve();
           }),
         );
+      }
+    } finally {
+      // the charge hum ends with the charge, also when Skip ends the beat
+      loop?.stop();
     }
-    loop?.stop();
-    if (this.skipped) return;
+    this.stopIfSkipped();
     // 200 ms hush, then the burst (visual leads the boom by 1-2 frames)
     this.audio.duck?.(-18, 0.05);
     await wait(0.2);

@@ -86,6 +86,7 @@ async function makeAudio(): Promise<AppAudio | null> {
       chargeLoop: () => e.chargeLoop(),
       music: { to: (s, f, o) => e.music.to(s as never, f, o) },
       hush: (from, to) => e.hush(from, to),
+      unhush: () => e.unhush(),
       duck: (db, r) => e.duck(db, r),
     };
     uiSounds.play = (c, o) => a.play(c, o);
