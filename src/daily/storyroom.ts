@@ -210,6 +210,10 @@ export function writeScreen(app: App, route: Route): ScreenOut {
   let pageId = '';
   let tab: 'page' | 'notes' = 'page';
   let cur: Open | null = null;
+  /** every tab switch and page open takes a number, and only the newest one's chapter reaches the editor, however
+   * slowly storage answers; `shown` is the number whose chapter the editor holds */
+  let picks = 0;
+  let shown = 0;
   let dirty = false;
   let saving: Promise<void> | null = null;
   let again = false;
@@ -551,9 +555,10 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     if ((e as KeyboardEvent).key === 'Enter') titleIn.blur();
   });
 
-  const load = async (id: string) => {
+  const load = async (id: string, n = ++picks) => {
     const c = await ss.chapter(id);
-    if (!c || !alive) return false;
+    if (!c || !alive || n !== picks) return false;
+    shown = n;
     let text = c.text;
     let bases = [c.rev];
     let recovered = false;
@@ -612,13 +617,17 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     return true;
   };
   const switchTab = async (to: 'page' | 'notes') => {
-    if (to === tab && cur) return syncSeg();
+    if (to === tab && cur && shown === picks) return syncSeg();
+    const n = ++picks;
     await flushAll();
+    if (n !== picks) return;
     tab = to;
-    await load(to === 'notes' ? notesId : pageId);
+    await load(to === 'notes' ? notesId : pageId, n);
   };
   const openPage = async (id: string) => {
+    const n = ++picks;
     await flushAll();
+    if (n !== picks) return;
     if (id !== pageId) {
       pageId = id;
       caret = null;
@@ -627,7 +636,7 @@ export function writeScreen(app: App, route: Route): ScreenOut {
       await loadCards();
     }
     tab = 'page';
-    await load(id);
+    await load(id, n);
     await refreshStory();
   };
 

@@ -211,6 +211,94 @@ export const scenarios = {
     }
   },
 
+  /** Page and Notes: the last tap wins, however slowly the story's storage answers, and words still saving are kept */
+  async 'story-tab-last-tap-wins'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await h.reachHub(page);
+      const { id, notes, first } = await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const { story, first } = await ss.create('Two Doors');
+        return { id: story.id, notes: story.notes, first: first.id };
+      });
+      await page.evaluate((r) => window.__daily.go(r), { name: 'write', id });
+      const pageBox = page.getByRole('textbox', { name: /^Page,/ });
+      await pageBox.waitFor();
+      // from here every chapter read and save waits until the test lets it through, one at a time in the order asked,
+      // as on a slow phone where storage answers after the next tap
+      await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const held = [];
+        for (const k of ['chapter', 'saveChapter']) {
+          const real = ss[k];
+          ss[k] = function (...a) {
+            let go, finish;
+            const done = new Promise((r) => (finish = r));
+            held.push({ what: `${k} ${a[0]?.id ?? a[0]}`, go: () => go(), done });
+            return new Promise((r) => (go = r)).then(() => real.apply(this, a)).finally(finish);
+          };
+        }
+        window.__held = () => held.map((x) => x.what);
+        window.__releaseOne = async () => {
+          const x = held.shift();
+          if (!x) return false;
+          x.go();
+          await x.done;
+          return true;
+        };
+      });
+      const waitHeld = (what, count = 1) => page.waitForFunction(([w, c]) => window.__held().filter((x) => x === w).length === c, [what, count], { timeout: 5000 });
+      const drain = async () => {
+        while (await page.evaluate(() => window.__releaseOne()));
+      };
+      const shown = () =>
+        page.evaluate(() => ({
+          seg: document.querySelector('.st-seg [aria-checked="true"]')?.textContent,
+          box: document.querySelector('.st-write .st-ta')?.getAttribute('aria-label'),
+          text: document.querySelector('.st-write .st-ta')?.value,
+        }));
+      const notesTab = page.getByRole('radio', { name: 'Show: Notes' });
+      const pageTab = page.getByRole('radio', { name: 'Show: Page' });
+      const WORDS = 'The fox kept watch.';
+
+      // typed words still saving: Notes, then Page before the save lands
+      await pageBox.fill(WORDS);
+      await notesTab.click();
+      await waitHeld(`saveChapter ${first}`);
+      await pageTab.click();
+      await drain();
+      let s = await shown();
+      h.expect(s.seg === 'Page' && /^Page,/.test(s.box) && s.text === WORDS, `Notes then Page while the page was saving left ${JSON.stringify(s)}`);
+      await storedIs(h, page, WORDS, 'Notes then Page while the page was saving');
+
+      // two reads in flight: Notes, then Page; the Notes read answering first must not bring Notes back
+      await notesTab.click();
+      await waitHeld(`chapter ${notes}`);
+      await pageTab.click();
+      await waitHeld(`chapter ${first}`);
+      await page.evaluate(() => window.__releaseOne());
+      s = await shown();
+      h.expect(s.seg === 'Page' && /^Page,/.test(s.box), `the Notes read answering after Page was tapped showed ${JSON.stringify(s)}`);
+      await drain();
+      s = await shown();
+      h.expect(s.seg === 'Page' && /^Page,/.test(s.box) && s.text === WORDS, `once both reads answered, the Story Room showed ${JSON.stringify(s)}`);
+
+      // Notes tapped again while its read is still out still opens Notes
+      await notesTab.click();
+      await waitHeld(`chapter ${notes}`);
+      await notesTab.click();
+      await waitHeld(`chapter ${notes}`, 2);
+      await drain();
+      s = await shown();
+      h.expect(s.seg === 'Notes' && s.box === 'Notes for this story', `Notes tapped twice while it loaded showed ${JSON.stringify(s)}`);
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** three sizes on the story text only, never under 16 px, no sideways scroll, kept after a reload and in a Save Crystal */
   async 'story-reading-size'(h) {
     const { ctx, page, errors } = await h.open(seed(h));
