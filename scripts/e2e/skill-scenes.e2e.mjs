@@ -124,6 +124,78 @@ function inStep(h, { s, num }, where) {
   h.expect(!b.done && sceneLeft > left - 1 - 0.1 && sceneLeft <= left + 0.1, `${where}: the scene is at ${b.e.toFixed(2)} of ${b.dur} s but the countdown says ${num}`);
 }
 
+/**
+ * one slow frame (here the first frame's fence says the GPU took 600 ms) lowers this scene only and for now: once its
+ * frames keep up it is back at the full pixel ratio, nothing is kept for the visit, and no change of ratio ever shows
+ * a blank frame, on a page running at 60 frames a second or held to 30. The page clock drives the frames, so this reads
+ * the same on any renderer.
+ */
+async function oneSlowFrame(h, hz) {
+  const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
+  await ctx.addInitScript(() => {
+    window.__blank = 0;
+    const P = WebGL2RenderingContext.prototype;
+    const make = P.fenceSync, get = P.getSyncParameter;
+    let first = null;
+    P.fenceSync = function (...args) {
+      const f = make.apply(this, args);
+      if (!first && this.canvas.closest?.('.dq-scene')) first = { f, at: performance.now() };
+      return f;
+    };
+    P.getSyncParameter = function (f, pname) {
+      if (first && f === first.f && pname === this.SYNC_STATUS && performance.now() - first.at < 600) return this.UNSIGNALED;
+      return get.call(this, f, pname);
+    };
+  });
+  await page.clock.install();
+  await page.reload();
+  await home(h, page);
+  await page.evaluate(() => window.__daily.go({ name: 'skill', id: 'wise-mind', entry: 'stone' }));
+  await page.locator('.dq-skill').getByRole('button', { name: 'Begin', exact: true }).first().click({ timeout: 10000 });
+  await page.locator('.dq-scene canvas').waitFor({ state: 'attached', timeout: 15000 });
+  await pauseSoon(page);
+  // a page held to 30 frames a second: every animation frame callback waits for the frame after the one it asked for
+  if (hz === 30) {
+    await page.evaluate(() => {
+      const raf = window.requestAnimationFrame.bind(window), caf = window.cancelAnimationFrame.bind(window);
+      const ids = new Map();
+      let n = 0;
+      window.requestAnimationFrame = (cb) => {
+        const id = ++n;
+        ids.set(id, raf(() => ids.set(id, raf((t) => (ids.delete(id), cb(t))))));
+        return id;
+      };
+      window.cancelAnimationFrame = (id) => (caf(ids.get(id)), ids.delete(id));
+    });
+  }
+  // every change of the canvas size has to come with a frame drawn at the new size before the page shows it
+  await page.evaluate(() => {
+    const c = document.querySelector('.dq-scene canvas');
+    new MutationObserver(() => {
+      if (Math.abs(c.width / c.parentElement.clientWidth - window.__scenes.dpr) > 0.02) window.__blank++;
+    }).observe(c, { attributes: true, attributeFilter: ['width'] });
+  });
+  const full = await page.evaluate(() => Math.min(window.devicePixelRatio, 2));
+  // the scene shows once its first frame is drawn: the page clock is stepped until then (600 ms at least)
+  for (const t0 = Date.now(); !(await page.locator('.dq-timer-stage.is-scene-live').count()); ) {
+    if (Date.now() - t0 > 30000) {
+      await h.shot(page, 'fail-one-slow-frame');
+      throw new Error('one slow frame: the 3D scene never came on screen');
+    }
+    await page.clock.runFor(100);
+  }
+  const low = await scenes(page);
+  h.expect(low.dpr < full, `${hz} fps: the slow first frame did not lower the scene (${low.dpr})`);
+  await page.clock.runFor(6000);
+  const back = await scenes(page);
+  const blank = await page.evaluate(() => window.__blank);
+  h.expect(blank === 0, `${hz} fps: a change of pixel ratio showed ${blank} blank frames`);
+  h.expect(back.dpr === full && !back.kept, `${hz} fps: one slow frame left the scene at ${back.dpr} (kept for the visit: ${back.kept}), not back at ${full}`);
+  console.log(`  one slow frame at ${hz} fps: ${low.dpr} for now, back to ${back.dpr}, kept ${back.kept ?? 'nothing'}`);
+  h.expect(!errors.length, errors.join('\n'));
+  await ctx.close();
+}
+
 export const scenarios = {
   /** the stone step is a live, drawn 3D scene at phone, sideways and desktop sizes, with the flat picture hidden */
   async 'scene-live'(h) {
@@ -349,7 +421,9 @@ export const scenarios = {
     await h.sleep(2000);
     const b = await scenes(page);
     const full = await page.evaluate(() => Math.min(window.devicePixelRatio, 2));
-    h.expect(b.frames - a.frames >= 20, `slow GPU: only ${b.frames - a.frames} frames in 2 s at pixel ratio ${b.dpr}`);
+    // left at the full ratio under this cost a scene draws about 5 frames in 2 s; stepped down it draws 14 or more even on
+    // one busy CPU (40 on CI, 61 on a GPU), so 12 tells the two apart without failing a loaded machine
+    h.expect(b.frames - a.frames >= 12, `slow GPU: only ${b.frames - a.frames} frames in 2 s at pixel ratio ${b.dpr}`);
     h.expect(b.dpr < full, `slow GPU: the scene still draws at the full pixel ratio ${b.dpr}`);
     inStep(h, await pair(page), 'slow');
     await drawn(h, page, 'slow');
@@ -397,61 +471,11 @@ export const scenarios = {
     }
   },
 
-  /**
-   * one slow frame (here the first frame's fence says the GPU took 600 ms) lowers this scene only and for now: once its
-   * frames keep up it is back at the full pixel ratio, nothing is kept for the visit, and no change of ratio ever shows
-   * a blank frame. The page clock drives the frames, so this reads the same on any renderer.
-   */
   async 'scene-one-slow-frame'(h) {
-    const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
-    await ctx.addInitScript(() => {
-      window.__blank = 0;
-      const P = WebGL2RenderingContext.prototype;
-      const make = P.fenceSync, get = P.getSyncParameter;
-      let first = null;
-      P.fenceSync = function (...args) {
-        const f = make.apply(this, args);
-        if (!first && this.canvas.closest?.('.dq-scene')) first = { f, at: performance.now() };
-        return f;
-      };
-      P.getSyncParameter = function (f, pname) {
-        if (first && f === first.f && pname === this.SYNC_STATUS && performance.now() - first.at < 600) return this.UNSIGNALED;
-        return get.call(this, f, pname);
-      };
-    });
-    await page.clock.install();
-    await page.reload();
-    await home(h, page);
-    await page.evaluate(() => window.__daily.go({ name: 'skill', id: 'wise-mind', entry: 'stone' }));
-    await page.locator('.dq-skill').getByRole('button', { name: 'Begin', exact: true }).first().click({ timeout: 10000 });
-    await page.locator('.dq-scene canvas').waitFor({ state: 'attached', timeout: 15000 });
-    await pauseSoon(page);
-    // every change of the canvas size has to come with a frame drawn at the new size before the page shows it
-    await page.evaluate(() => {
-      const c = document.querySelector('.dq-scene canvas');
-      new MutationObserver(() => {
-        if (Math.abs(c.width / c.parentElement.clientWidth - window.__scenes.dpr) > 0.02) window.__blank++;
-      }).observe(c, { attributes: true, attributeFilter: ['width'] });
-    });
-    const full = await page.evaluate(() => Math.min(window.devicePixelRatio, 2));
-    // the scene shows once its first frame is drawn: the page clock is stepped until then (600 ms at least)
-    for (const t0 = Date.now(); !(await page.locator('.dq-timer-stage.is-scene-live').count()); ) {
-      if (Date.now() - t0 > 30000) {
-        await h.shot(page, 'fail-one-slow-frame');
-        throw new Error('one slow frame: the 3D scene never came on screen');
-      }
-      await page.clock.runFor(100);
-    }
-    const low = await scenes(page);
-    h.expect(low.dpr < full, `the slow first frame did not lower the scene (${low.dpr})`);
-    await page.clock.runFor(6000);
-    const back = await scenes(page);
-    const blank = await page.evaluate(() => window.__blank);
-    h.expect(blank === 0, `a change of pixel ratio showed ${blank} blank frames`);
-    h.expect(back.dpr === full && !back.kept, `one slow frame left the scene at ${back.dpr} (kept for the visit: ${back.kept}), not back at ${full}`);
-    console.log(`  one slow frame: ${low.dpr} for now, back to ${back.dpr}, kept ${back.kept ?? 'nothing'}`);
-    h.expect(!errors.length, errors.join('\n'));
-    await ctx.close();
+    await oneSlowFrame(h, 60);
+  },
+  async 'scene-one-slow-frame-30fps'(h) {
+    await oneSlowFrame(h, 30);
   },
 
   /** a lost WebGL context shows the flat picture; when it comes back the scene draws again */

@@ -102,6 +102,8 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   let fenceRaf = 0;
   let gaps: number[] = [];
   let lastTick = -1;
+  /** how long the page's frames have kept up (not slow), and how long they have been comfortably fast */
+  let keptUp = 0;
   let goodFor = 0;
   /**
    * The context has finished drawing a frame. Until then the scene draws nothing more, stays hidden behind its flat
@@ -119,6 +121,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
     v.resize(size.x, size.y);
     gaps = [];
+    keptUp = 0;
     goodFor = 0;
     if (drawn && !lost && !evicted) draw(clock.now(), beatAt(clock.now()), still());
     return true;
@@ -176,6 +179,8 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
     const m = median(gaps);
     if (m * 1000 > SCENE.slowMs) {
       // sustained slowness: lower, and keep it for the visit
+      keptUp = 0;
+      goodFor = 0;
       const r = fit(m * 1000, 1000 / SCENE.fps);
       if (r < mine - 0.01) {
         deviceDpr.tooSlow = Math.min(deviceDpr.tooSlow, mine);
@@ -183,10 +188,13 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
         before = null;
         setRatio(r);
       }
-    } else if (m < 1 / 50) {
-      goodFor += dt;
+    } else {
+      // keeping up: a page held to 30 frames a second (a phone saving power, a browser's energy saver) keeps up too,
+      // since the scenes draw at most SCENE.fps. Climbing above a drop sustained slowness made needs it comfortably fast.
+      keptUp += dt;
+      goodFor = m < 1 / 50 ? goodFor + dt : 0;
       const top = Math.min(maxDpr, deviceDpr.tooSlow - 0.15);
-      if (before !== null && goodFor > 2) {
+      if (before !== null && keptUp > 2) {
         // the slow first frame was a one-off: back to where it was
         const r = before;
         before = null;
@@ -196,7 +204,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
         deviceDpr.now = r;
         setRatio(r);
       }
-    } else goodFor = 0;
+    }
     sceneStats.kept = Number.isNaN(deviceDpr.now) ? null : deviceDpr.now;
   }
 
