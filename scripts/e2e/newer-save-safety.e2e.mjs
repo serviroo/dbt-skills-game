@@ -280,7 +280,7 @@ export const scenarios = {
 
   async 'newer-tabs-same-item'(h) {
     const save = newerSave();
-    save.lists.comfort.find((i) => i.id === 'nc-tea').swatch = { hue: 1 };
+    save.lists.comfort.find((i) => i.id === 'nc-tea').swatch = { hue: 2 };
     const { ctx, page: a, errors } = await h.open({ [h.SAVE]: JSON.stringify(save), 'dbt.app.v1': h.SEEN, [h.YOU]: YOU });
     await h.reachHub(a);
     const b = await ctx.newPage();
@@ -290,7 +290,7 @@ export const scenarios = {
     // the other tab's stored copy of the item, added at the same time, holds another value one level down
     await b.evaluate((key) => {
       const s = JSON.parse(localStorage.getItem(key));
-      s.lists.comfort.find((i) => i.id === 'nc-tea').swatch = { hue: 2 };
+      s.lists.comfort.find((i) => i.id === 'nc-tea').swatch = { hue: 1 };
       localStorage.setItem(key, JSON.stringify(s));
     }, h.SAVE);
     await settings(h, a);
@@ -298,7 +298,7 @@ export const scenarios = {
     await a.waitForFunction((k) => JSON.parse(localStorage.getItem(k) ?? 'null')?.profile?.playerName === 'Robin Vale', h.SAVE, { timeout: 10000 });
     const s = await saveOf(h, a);
     const item = s.lists.comfort.find((i) => i.id === 'nc-tea');
-    h.expect(same(item?.swatch, { hue: 2 }) && item?.at === T, `the stored copy's value one level down was not kept: ${JSON.stringify(item)}`);
+    h.expect(same(item?.swatch, { hue: 1 }) && item?.at === T, `the stored copy's value one level down was not kept: ${JSON.stringify(item)}`);
     const want = newerParts(newerSave());
     const got = newerParts(s);
     h.expect(same(want, got), `two tabs holding the same item lost newer values: ${diff(want, got)}`);
