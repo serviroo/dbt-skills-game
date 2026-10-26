@@ -952,7 +952,14 @@ export class Store {
   private mergeDiary(other: Record<string, DiaryEntry>, prefer: 'a' | 'b') {
     for (const [day, e] of Object.entries(other)) {
       const mine = this.state.diary[day];
-      this.state.diary[day] = mine ? mergeEntry(mine, e, prefer) : { ...e, emotions: { ...e.emotions }, urges: { ...e.urges }, ...(e.ft ? { ft: { ...e.ft } } : {}) };
+      if (!mine) {
+        this.state.diary[day] = e;
+        continue;
+      }
+      const merged = mergeEntry(mine, e, prefer);
+      const f = flat(merged);
+      // an unchanged side keeps its object, so a newer save's stored form still reaches stored()
+      this.state.diary[day] = f === flat(mine) ? mine : f === flat(e) ? e : merged;
     }
   }
 
