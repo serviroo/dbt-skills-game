@@ -5,7 +5,7 @@
  *           No questions, no chips, no XP shown, exit any time, optional low hum (off by default).
  */
 import { animate } from '../ui/anim';
-import { WINDOW } from '../motion/tokens';
+import { SCORE, WINDOW } from '../motion/tokens';
 import { type Next } from '../content/dbt';
 import { CHECKIN } from '../content/daily-lines';
 import type { App, Route, ScreenOut } from './app';
@@ -118,10 +118,20 @@ function lowHum(scale: number) {
       breath.gain.setTargetAtTime(0.035 + s * 0.03, ctx.currentTime, 0.25);
       lp.frequency.setTargetAtTime(300 + s * 140, ctx.currentTime, 0.3);
     },
-    stop() {
+    /** A soft fade of about a second, or exact silence `ramp` seconds from now (the Safe Zone opening). */
+    stop(ramp?: number) {
       if (dead) return;
       dead = true;
-      breath.gain.setTargetAtTime(0, ctx.currentTime, 0.25);
+      const t = ctx.currentTime;
+      if (ramp !== undefined) {
+        breath.gain.cancelScheduledValues(t);
+        breath.gain.setValueAtTime(breath.gain.value, t);
+        breath.gain.linearRampToValueAtTime(0, t + ramp);
+        oscs.forEach((o) => o.stop(t + ramp));
+        oscs[0].onended = () => void ctx.close();
+        return;
+      }
+      breath.gain.setTargetAtTime(0, t, 0.25);
       setTimeout(() => {
         oscs.forEach((o) => o.stop());
         void ctx.close();
@@ -236,6 +246,10 @@ export function momentScreen(app: App, route: Route): ScreenOut {
       fades.forEach((a) => a.cancel());
       offVolume?.();
       hum?.stop();
+      hum = null;
+    },
+    silence: () => {
+      hum?.stop(SCORE.safeOutSec);
       hum = null;
     },
   };

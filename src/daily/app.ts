@@ -46,6 +46,8 @@ export interface ScreenOut {
   foot?: HTMLElement;
   leave?: () => void;
   after?: () => void;
+  /** The Safe Zone is opening: stop this screen's own sound at once (leave still follows). */
+  silence?: () => void;
 }
 export type ScreenFn = (app: App, route: Route) => ScreenOut;
 
@@ -385,6 +387,7 @@ export class App {
     dismissWindows();
     this.dropScrim?.();
     document.querySelectorAll('[data-fx]').forEach((n) => n.remove());
+    this.current?.silence?.();
   }
 
   private quietScore(on: boolean) {
