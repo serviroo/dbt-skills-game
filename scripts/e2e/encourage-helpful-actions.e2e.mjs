@@ -63,7 +63,7 @@ export const scenarios = {
     await tap(page, 'One minute of it');
     await sees(h, page, 'revised plan', { text: ['First small step: One minute of it.', 'Then, straight after: A chapter of a book.'], not: 'Walk to the end of the street' });
     await tap(page, 'Make the step smaller');
-    await sees(h, page, 'smaller again', { offers: ['Stand up once', 'Roll my shoulders', 'One minute of it', 'My own'] });
+    await sees(h, page, 'smaller again', { offers: ['Stand up once', 'Roll my shoulders', 'My own'] });
     await tap(page, 'Roll my shoulders');
     await sees(h, page, 'revised again', { text: 'First small step: Roll my shoulders.' });
     h.expect((await events(h, page)) === n, 'revising the plan added an event');
@@ -106,7 +106,7 @@ export const scenarios = {
       await look(h, page, problems, shots, at('05-link'));
       await tap(page, 'Make the step smaller');
       await look(h, page, problems, shots, at('06-smaller'));
-      await tap(page, 'One minute of it');
+      await tap(page, 'Open the messages app');
       await look(h, page, problems, shots, at('07-plan'));
       await tap(page, 'Done');
       await ended(h, page, at('end'), NAME);

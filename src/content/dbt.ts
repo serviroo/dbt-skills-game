@@ -347,9 +347,9 @@ const SMALL_ANY = ['Do the very first bit', 'Two minutes of it', 'Get out what I
 const SMALLER: Record<string, string[]> = {
   'Start a task I keep putting off': ['Just open it', 'Read the first line', 'One minute of it'],
   'Move my body a bit': ['Stand up once', 'Roll my shoulders', 'One minute of it'],
-  'Reply to messages': ['Open one message', 'Write one word back', 'One minute of it'],
+  'Reply to messages': ['Open the messages app', 'Pick which chat to look at', 'Think of one word to say'],
   'Tidy one corner': ['Put one thing away', 'Pick up one item', 'One minute of it'],
-  'Practise a skill': ['Take one slow breath', 'Read one line', 'One minute of it'],
+  'Practise a skill': ['Notice one breath', 'Read one line', 'Sit still for ten seconds'],
 };
 const SMALLER_ANY = ['One minute of it', 'Only get things out', 'Only open it'];
 /** Treats that really are extra: never rest, food, care or people. */
@@ -359,7 +359,8 @@ const smallAction = (a: Answers) => s(a, 'action', 'One helpful action').trim().
 const firstSteps = (a: Answers) => (Object.hasOwn(SMALL_FIRST, smallAction(a)) ? SMALL_FIRST[smallAction(a)] : SMALL_ANY);
 const smallFirst = (a: Answers) => s(a, 'first', firstSteps(a)[0]).trim().replace(/[.!?]+$/, '');
 const smallReward = (a: Answers) => s(a, 'reward', REWARDS[0]).trim().replace(/[.!?]+$/, '');
-const smallerSteps = (a: Answers) => (Object.hasOwn(SMALLER, smallAction(a)) ? SMALLER[smallAction(a)] : SMALLER_ANY);
+/** Smaller than the step already picked, so "smaller" never offers the same step again. */
+const smallerSteps = (a: Answers) => (Object.hasOwn(SMALLER, smallAction(a)) ? SMALLER[smallAction(a)] : SMALLER_ANY).filter((x) => x !== smallFirst(a));
 const smallPlan = (a: Answers) =>
   `**Helpful action:** ${fullStop(cap(smallAction(a)))} **First small step:** ${fullStop(cap(smallFirst(a)))} **Then, straight after:** ${fullStop(cap(smallReward(a)))} If this doesn't make the step happen more often, change the reward or make the step smaller. That isn't failing. It's shaping, and each small step counts.`;
 
