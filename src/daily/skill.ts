@@ -361,10 +361,14 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
           items.length ? null : p(s.empty, 'dq-small'),
           h('div', { class: `dq-opts ${stackable(opts) ? 'dq-opts--stack' : ''}` }, opts.map((o) => chip(o, () => pick(o)))),
           h('div', { class: 'dq-addrow' }, f.el, btn('Add and pick', () => {
-            const v = f.input.value.trim();
+            const v = f.input.value.trim().slice(0, 200);
             if (!v) return f.input.focus();
-            app.store.state.lists[s.list].push({ id: uid(), text: v.slice(0, 200), at: app.store.now() });
-            app.store.save();
+            // Back brings the typed text back: Add and pick again picks the one saved, as the comfort list does
+            const list = app.store.state.lists[s.list];
+            if (!list.some((x) => x.text === v)) {
+              list.push({ id: uid(), text: v, at: app.store.now() });
+              app.store.save();
+            }
             pick(v);
           }, { kind: 'quiet', ic: 'plus' })),
         );

@@ -800,6 +800,23 @@ export const scenarios = {
     await tap('Save');
     await page.locator('.dq-intro--end').waitFor();
     if ((await maps()) !== m0 + 1) problems.push(`Save, Back and Save again stored ${(await maps()) - m0} maps, not 1`);
+    await page.locator('.dq-top [aria-label="Leave this skill"]').click();
+    await onScreen(page, 'hub');
+
+    // Trade Places, Activities: Back from the timer brings the typed text back, and Add and pick again keeps the one item
+    const added = () => page.evaluate((k) => JSON.parse(localStorage.getItem(k)).lists.activities.filter((i) => i.text === 'Tidy my desk').length, h.SAVE);
+    const timer = page.locator('.dq-step-body', { hasText: 'gentle timer' });
+    await openSkill(page, 'Trade Places');
+    await tap('Begin');
+    await tap('Activities');
+    await typeInto(page, field(page), 'Tidy my desk');
+    await tap('Add and pick');
+    await timer.waitFor();
+    await back(page);
+    if ((await field(page).inputValue()) !== 'Tidy my desk') problems.push('Back to Activities did not bring the typed text back');
+    await tap('Add and pick');
+    await timer.waitFor();
+    if ((await added()) !== 1) problems.push(`Add and pick, Back and Add and pick again stored ${await added()} activities, not 1`);
     expect(!problems.length, problems.join('\n'));
     expect(!errors.length, errors.join('\n'));
   },
