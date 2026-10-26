@@ -3,15 +3,66 @@
 // while erasing is what a fresh render of the drawing shows.
 import { drawPage, pick } from './art-eraser-glow.e2e.mjs';
 
-/** One mouse stroke through points given as fractions of the page. */
-async function path(page, pts, steps = 14) {
+/** One mouse stroke through points given as fractions of the page (the finger still down when up is false). */
+async function path(page, pts, steps = 14, up = true) {
   const box = await page.locator('.dq-ink-live').boundingBox();
   const at = ([x, y]) => [box.x + box.width * x, box.y + box.height * y];
   await page.mouse.move(...at(pts[0]));
   await page.mouse.down();
   for (const p of pts.slice(1)) await page.mouse.move(...at(p), { steps });
-  await page.mouse.up();
+  if (up) await page.mouse.up();
 }
+
+/** Keeps copies of the ink and light layers' pixels in the page (copies: a canvas read back draws on the CPU after). */
+const keepLayers = (page, name) =>
+  page.evaluate((name) => {
+    window[name] = ['.dq-ink-ink', '.dq-ink-halo'].map((s) => {
+      const c = document.querySelector(s), d = Object.assign(document.createElement('canvas'), { width: c.width, height: c.height });
+      d.getContext('2d').drawImage(c, 0, 0);
+      return { w: d.width, h: d.height, d: d.getContext('2d').getImageData(0, 0, d.width, d.height).data };
+    });
+  }, name);
+
+/**
+ * How the two kept copies differ, per layer: the share of values (colour times alpha, as they land on the page) that
+ * are off. One is off when it is more than 32 from the other's at that pixel and outside what the other has within one
+ * pixel of it. A renderer may smooth the same edge with 8 samples in one batch and exactly in another (a step of 32),
+ * and its blur may differ a little with the size of the canvas it works on; a cut left out or made twice, ink left at
+ * the edge of a box, or light left on is far more than that.
+ */
+const offBetween = (page, a, b) =>
+  page.evaluate(([a, b]) => {
+    const flat = (d) => {
+      const o = new Uint8ClampedArray(d.length);
+      for (let i = 0; i < d.length; i += 4) {
+        for (let c = 0; c < 3; c++) o[i + c] = Math.round((d[i + c] * d[i + 3]) / 255);
+        o[i + 3] = d[i + 3];
+      }
+      return o;
+    };
+    return window[a].map(({ w, h, d }, k) => {
+      const x = flat(d), y = flat(window[b][k].d);
+      const within = (d, px, py, c, v) => {
+        let lo = 255, hi = 0;
+        for (let j = Math.max(0, py - 1); j <= Math.min(h - 1, py + 1); j++)
+          for (let i = Math.max(0, px - 1); i <= Math.min(w - 1, px + 1); i++) {
+            const u = d[(j * w + i) * 4 + c];
+            lo = Math.min(lo, u);
+            hi = Math.max(hi, u);
+          }
+        return v >= lo - 6 && v <= hi + 6;
+      };
+      let n = 0, top = 0;
+      for (let py = 0; py < h; py++)
+        for (let px = 0; px < w; px++)
+          for (let c = 0; c < 4; c++) {
+            const i = (py * w + px) * 4 + c, e = Math.abs(x[i] - y[i]);
+            top = Math.max(top, e);
+            if (e > 32 && !(within(y, px, py, c, x[i]) && within(x, px, py, c, y[i]))) n++;
+          }
+      return { share: +(n / x.length).toFixed(6), top };
+    });
+  }, [a, b]);
 
 /** The brightest pixel (r + g + b, or alpha for the ink layer) of a canvas in a box of logical page px. */
 const brightest = (page, sel, box, alpha) =>
@@ -78,39 +129,25 @@ export const scenarios = {
     const cdp = await ctx.newCDPSession(page);
     const from = await page.evaluate(() => window.__daily.ink.frames.length);
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
-    // one long stroke sweeping the page three times, as a player clearing a corner of a busy drawing would
-    await path(page, [[0.1, 0.15], [0.9, 0.3], [0.1, 0.5], [0.9, 0.7], [0.1, 0.85]], 30);
+    // one long stroke sweeping the page three times, as a player clearing a corner of a busy drawing would; the page is
+    // read while the finger is still down, so it is the eraser's own drawing as it goes, not the page kept after
+    await path(page, [[0.1, 0.15], [0.9, 0.3], [0.1, 0.5], [0.9, 0.7], [0.1, 0.85]], 30, false);
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
     const f = (await page.evaluate((n) => window.__daily.ink.frames.slice(n), from)).sort((a, b) => a - b);
     const q = (k) => f[Math.min(f.length - 1, Math.floor(f.length * k))];
     const took = { frames: f.length, median: +q(0.5).toFixed(1), p90: +q(0.9).toFixed(1), max: +f[f.length - 1].toFixed(1) };
     console.log('eraser frame work at 4x CPU slowdown, ms:', JSON.stringify(took));
-    // what the page showed when the finger lifted is what a fresh render of the drawing shows
-    const off = await page.evaluate(() => {
-      const pad = window.__daily.ink;
-      // read from copies: a canvas read back is drawn on the CPU from then on, and its redraw would differ in the last bit
-      const grab = () => ['.dq-ink-ink', '.dq-ink-halo'].map((s) => {
-        const c = document.querySelector(s), d = Object.assign(document.createElement('canvas'), { width: c.width, height: c.height });
-        d.getContext('2d').drawImage(c, 0, 0);
-        return d.getContext('2d').getImageData(0, 0, d.width, d.height).data;
-      });
-      const live = grab();
-      pad.redraw();
-      const fresh = grab();
-      return live.map((d, k) => {
-        let n = 0, top = 0;
-        for (let i = 0; i < d.length; i++) {
-          const e = Math.abs(d[i] - fresh[k][i]);
-          if (e > 6) n++;
-          top = Math.max(top, e);
-        }
-        return { share: n / d.length, top };
-      });
-    });
+    await keepLayers(page, '__live');
+    await page.mouse.up();
+    await page.evaluate(() => window.__daily.ink.redraw());
+    await keepLayers(page, '__fresh');
+    // what the page showed while erasing is what a fresh render of the drawing shows
+    const off = await offBetween(page, '__live', '__fresh');
     await h.shot(page, 'busy-erased-390x844');
     expect(f.length >= 20, `the eraser drew only ${f.length} frames`);
     expect(took.p90 <= 12, `erasing on a busy page stutters at 4x CPU slowdown: ${JSON.stringify(took)}`);
-    expect(off.every((o) => o.share < 0.002), `while erasing the page showed something other than the drawing it keeps: ${JSON.stringify(off)}`);
+    expect(off.every((o) => o.share < 0.0005), `while erasing the page showed something other than the drawing it keeps: ${JSON.stringify(off)}`);
     expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },

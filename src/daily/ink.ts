@@ -68,6 +68,8 @@ const canvas = (w: number, h: number) => {
 };
 const ctx2d = (c: HTMLCanvasElement) => c.getContext('2d')!;
 type Box = [number, number, number, number];
+/** A group of strokes' light (see InkPad.kept): its canvas and box on the halo, what it holds and whether it's ready. */
+type Group = { c: HTMLCanvasElement | null; box: Box | null; key: (Stroke | null)[] | null; ok: boolean };
 /** Replaces everything on g with the canvas from, or only what is in box b (canvas px). */
 const paste = (g: CanvasRenderingContext2D, from: HTMLCanvasElement, b?: Box) => {
   g.save();
@@ -167,25 +169,29 @@ function traceNear(g: CanvasRenderingContext2D, p: number[], s: number, ox: numb
   }
 }
 
+/** One pass of a stroke's light: line width and blur in canvas px, alpha, colour, and whether only its blur lands. */
+type Light = [number, number, number, string, boolean];
 /**
- * A stroke's light on the halo at scale s, as passes: line width and blur in canvas px, alpha and colour. A soft-glow
- * line glows three times: the soft edge of its bright core, its halo, and a wider, fainter breath of the same light,
- * as a light source does. All of it starts from a line an eraser can cut (see haloPass), so one pass takes it all
- * away. An eraser has none.
+ * A stroke's light on the halo at scale s, as passes. A soft-glow line is light alone, three blurs of one line no
+ * wider than the stroke: a tight bright glow around its core, its halo, and a wider, fainter breath of the same light,
+ * as a light source has. None of the line itself lands, so the light fades smoothly from the core at every size. All
+ * of it starts from a line an eraser can cut (see haloPass), so one pass takes it all away. An eraser has none.
  */
-function lights(st: Stroke, s: number): [number, number, number, string][] {
+function lights(st: Stroke, s: number): Light[] {
   if (st.m === 'erase' || !st.p.length) return [];
   const ink = INKS[st.i] ?? INKS[0];
-  if (st.m === 'glow')
+  if (st.m === 'glow') {
+    const w = Math.max(1, st.w * 1.2 * s);
     return [
-      [Math.max(1, Math.max(1.4, st.w * 0.26) * s), st.w * 1.5 * s, 1, ink.mid ?? ink.halo],
-      [Math.max(1, st.w * 1.2 * s), (st.w * 3.4 + 44) * s, 1, ink.halo],
-      [Math.max(1, st.w * 1.2 * s), (st.w * 5.5 + 72) * s, 0.75, ink.halo],
+      [w, (st.w * 0.7 + 4) * s, 1, ink.mid ?? ink.halo, true],
+      [w, (st.w * 2 + 28) * s, 0.9, ink.halo, true],
+      [w, (st.w * 3.6 + 56) * s, 0.55, ink.halo, true],
     ];
-  return [[Math.max(1, st.w * 1.25 * s), Math.max(4, (st.w * 2.2 + 26) * s), 1, ink.halo]];
+  }
+  return [[Math.max(1, st.w * 1.25 * s), Math.max(4, (st.w * 2.2 + 26) * s), 1, ink.halo, false]];
 }
-/** How far a stroke's light reaches from its points, in logical px (a blur has faded out at twice its size). */
-const reach = (st: Stroke, s: number) => Math.max(0, ...lights(st, s).map(([w, blur]) => (w / 2 + blur * 2 + 2) / s));
+/** How far a stroke's light reaches from its points, in logical px (a blur has faded out at 1.5 times its size). */
+const reach = (st: Stroke, s: number) => Math.max(0, ...lights(st, s).map(([w, blur]) => (w / 2 + blur * 1.5 + 2) / s));
 /** Half the widest line a stroke's light starts from, in logical px at the halo's scale. */
 const lineHalf = (st: Stroke) => Math.max(2, st.w * 0.65);
 /** Whether eraser stroke e (in box eb) may pass over the line stroke a (in box ab) takes its light from. */
@@ -222,48 +228,61 @@ export function haloPass(g: CanvasRenderingContext2D, st: Stroke, s: number, cut
   g.globalCompositeOperation = 'screen';
   g.lineCap = 'round';
   g.lineJoin = 'round';
-  // a cut line is drawn on a scratch canvas reaching past this one as far as its light does, so the light of a
-  // line partly off this canvas is all there; passes from the same line share one cut
+  // a cut line is drawn on a scratch canvas holding the part of the line whose light reaches this canvas (box r, in
+  // its px), so the light of a line partly off this canvas is all there; passes from the same line share one cut
   const W = g.canvas.width, H = g.canvas.height;
-  const M = cut?.length ? Math.ceil(Math.max(...passes.map(([w, blur]) => w / 2 + blur * 2))) + 2 : 0;
+  const M = cut?.length ? Math.ceil(Math.max(...passes.map(([w, blur]) => w / 2 + blur * 1.5))) + 2 : 0;
+  const lb = bounds(st.p), lw = Math.max(...passes.map(([w]) => w)) / 2 + 2;
+  const r: Box = [Math.floor(Math.max(-M, lb[0] * s - ox - lw)), Math.floor(Math.max(-M, lb[1] * s - oy - lw)), Math.ceil(Math.min(W + M, lb[2] * s - ox + lw)), Math.ceil(Math.min(H + M, lb[3] * s - oy + lw))];
+  const rw = r[2] - r[0], rh = r[3] - r[1];
+  if (cut?.length && (rw <= 0 || rh <= 0)) {
+    g.restore();
+    return;
+  }
+  // a pass whose blur alone lands draws its line this far to the left, off the canvas, and its blur back in place
+  const far = Math.ceil(Math.max(W, lb[2] * s - ox) + 2 * M + 2 * lw) + 2;
   let held = '';
-  for (const [w, blur, a, color] of passes) {
+  for (const [w, blur, a, color, only] of passes) {
     const [rgb, alpha] = solid(color);
+    const off = only ? far : 0;
     g.globalAlpha = a * alpha;
     g.lineWidth = w;
     g.shadowBlur = blur;
+    g.shadowOffsetX = off;
     g.strokeStyle = g.shadowColor = rgb;
     if (!cut?.length) {
-      trace(g, st.p, s, ox, oy);
+      trace(g, st.p, s, ox + off, oy);
       g.stroke();
       continue;
     }
-    // one scratch canvas, never smaller than any use of it, so it isn't made again for each one; cleared whole
+    // one scratch canvas, never smaller than any use of it, so it isn't made again for each one; only box r of it is
+    // used. A line whose blur alone lands may be any colour there, so passes from one line share one cut
     const c = (scratch ??= document.createElement('canvas'));
-    if (held !== `${w} ${rgb}`) {
-      held = `${w} ${rgb}`;
-      if (c.width < W + 2 * M || c.height < H + 2 * M) [c.width, c.height] = [Math.max(c.width, W + 2 * M), Math.max(c.height, H + 2 * M)];
+    const key = only ? `${w}` : `${w} ${rgb}`;
+    if (held !== key) {
+      held = key;
+      if (c.width < rw + 2 || c.height < rh + 2) [c.width, c.height] = [Math.max(c.width, rw + 2), Math.max(c.height, rh + 2)];
       const cg = ctx2d(c);
-      cg.clearRect(0, 0, c.width, c.height);
+      cg.clearRect(0, 0, rw + 2, rh + 2);
       cg.lineCap = 'round';
       cg.lineJoin = 'round';
       cg.strokeStyle = rgb;
       cg.lineWidth = w;
-      trace(cg, st.p, s, ox - M, oy - M);
+      trace(cg, st.p, s, ox + r[0], oy + r[1]);
       cg.stroke();
       // an opaque cut, so it takes the light out completely
       cg.globalCompositeOperation = 'destination-out';
       cg.strokeStyle = '#000';
-      // the scratch canvas covers this box of the page, in logical px
-      const box: Box = [(ox - M) / s, (oy - M) / s, (ox + W + M) / s, (oy + H + M) / s];
+      // the part of the scratch canvas in use covers this box of the page, in logical px
+      const box: Box = [(ox + r[0]) / s, (oy + r[1]) / s, (ox + r[2]) / s, (oy + r[3]) / s];
       for (const e of cut) {
         cg.lineWidth = e.w * ERASE * s;
-        traceNear(cg, e.p, s, ox - M, oy - M, box, (e.w * ERASE) / 2 + 2 / s);
+        traceNear(cg, e.p, s, ox + r[0], oy + r[1], box, (e.w * ERASE) / 2 + 2 / s);
         cg.stroke();
       }
       cg.globalCompositeOperation = 'source-over';
     }
-    g.drawImage(c, 0, 0, W + 2 * M, H + 2 * M, -M, -M, W + 2 * M, H + 2 * M);
+    g.drawImage(c, 0, 0, rw, rh, r[0] - off, r[1], rw, rh);
   }
   g.restore();
 }
@@ -396,8 +415,23 @@ export class InkPad {
   readonly H: number;
   inkIdx = 1;
   sizeIdx = 1;
-  tool: Tool = 'brush';
+  private picked: Tool = 'brush';
   strokes: Stroke[] = [];
+  /**
+   * The light of the strokes in groups of a few (see restAt), kept between eraser strokes while the eraser is the
+   * tool and made ahead of it a group at a time, so an eraser stroke reaching a stroke draws again only the light of
+   * its group, from its first reach on.
+   */
+  private kept: { size: number; groups: Group[] } = { size: 0, groups: [] };
+  private warming: (() => void) | null = null;
+  get tool() {
+    return this.picked;
+  }
+  set tool(t: Tool) {
+    this.picked = t;
+    if (t === 'erase') this.warmSoon();
+    else this.dropKept();
+  }
   /**
    * The eraser stroke in progress (see erase): the committed ink and light as they were when it started, the light of
    * the strokes it hasn't reached, each stroke's box, longest step, earlier cuts and the box its light fills on the
@@ -412,7 +446,7 @@ export class InkPad {
     cuts: (Stroke[] | undefined)[];
     lit: (Box | undefined)[];
     near: Map<number, HTMLCanvasElement>;
-    groups: { c: HTMLCanvasElement | null; box: Box | null; ok: boolean }[];
+    groups: Group[];
     size: number;
     done: number;
   } | null = null;
@@ -440,7 +474,7 @@ export class InkPad {
   private twoFinger: { t: number; moved: boolean } | null = null;
   private raf = 0;
   private offs: (() => void)[] = [];
-  /** frame times while drawing, for the perf check */
+  /** frame times while drawing (an eraser's, only those that erased more), for the perf check */
   readonly frames: number[] = [];
 
   constructor(readonly opts: PadOpts) {
@@ -559,6 +593,7 @@ export class InkPad {
       this.keepBefore();
       this.erase(this.cur.st);
     }
+    this.warmSoon();
   }
 
   private keepBefore() {
@@ -567,15 +602,91 @@ export class InkPad {
     paste(ctx2d(sp.ink), this.ink);
     paste(ctx2d(sp.halo), this.halo);
     paste(ctx2d(sp.rest), this.halo);
-    // strokes in groups of about the square root of their number: see restAt
-    const size = Math.max(8, Math.ceil(Math.sqrt(this.strokes.length)));
-    const groups = Array.from({ length: Math.ceil(this.strokes.length / size) }, () => ({ c: null, box: null, ok: false }));
-    this.er = { ...sp, box: this.strokes.map((s) => bounds(s.p)), step: this.strokes.map((s) => stepOf(s.p)), cuts: eraserCuts(this.strokes), lit: [], near: new Map(), groups, size, done: 0 };
+    const cuts = eraserCuts(this.strokes);
+    const groups = this.groupsNow(cuts);
+    this.er = { ...sp, box: this.strokes.map((s) => bounds(s.p)), step: this.strokes.map((s) => stepOf(s.p)), cuts, lit: [], near: new Map(), groups, size: this.kept.size, done: 0 };
   }
   /** Lets go of the eraser stroke in progress and the light it kept for the strokes it reached. */
   private letGo() {
-    for (const c of [...(this.er?.near.values() ?? []), ...(this.er?.groups.map((g) => g.c) ?? [])]) if (c) c.width = c.height = 0;
+    for (const c of this.er?.near.values() ?? []) c.width = c.height = 0;
+    // a group drawn without the strokes this one reached is made again, whole, for the next
+    for (const g of this.er?.groups ?? []) if (!g.key) g.ok = false;
     this.er = null;
+    this.warmSoon();
+  }
+  /** The kept groups for the strokes as they are now: one whose strokes or their cuts changed is made again. */
+  private groupsNow(cuts: (Stroke[] | undefined)[]) {
+    const n = this.strokes.length;
+    // a power of two, so adding strokes changes only the last group
+    const size = Math.max(4, 2 ** Math.round(Math.log2(Math.sqrt(n / 8))));
+    if (this.kept.size !== size) {
+      this.dropKept();
+      this.kept.size = size;
+    }
+    const kp = this.kept;
+    const count = Math.ceil(n / size);
+    while (kp.groups.length > count) {
+      const g = kp.groups.pop()!;
+      if (g.c) g.c.width = g.c.height = 0;
+    }
+    for (let k = 0; k < count; k++) {
+      const key = this.strokes.slice(k * size, (k + 1) * size).flatMap((st, j) => [st, ...(cuts[k * size + j] ?? []), null]);
+      const g = (kp.groups[k] ??= { c: null, box: null, key: null, ok: false });
+      if (!g.key || g.key.length !== key.length || g.key.some((v, j) => v !== key[j])) Object.assign(g, { key, box: null, ok: false });
+    }
+    return kp.groups;
+  }
+  /** Group k's box on the halo: where the light of its strokes falls (null for none). */
+  private groupBox(k: number) {
+    const g = this.kept.groups[k], size = this.kept.size;
+    const b = (g.box ??= this.strokes.slice(k * size, (k + 1) * size).reduce<Box | null>((a, st) => (lights(st, HALO).length ? join(a, this.lightBox(st)) : a), null));
+    return b && b[2] > b[0] && b[3] > b[1] ? b : null;
+  }
+  /** Draws group k's light again: of all its strokes, or only of those not in near (reached by an eraser stroke). */
+  private makeGroup(k: number, cuts: (Stroke[] | undefined)[], near?: Map<number, unknown>) {
+    const g = this.kept.groups[k], size = this.kept.size;
+    const gb = this.groupBox(k);
+    g.ok = true;
+    if (!gb) return;
+    const [w, h] = [gb[2] - gb[0], gb[3] - gb[1]];
+    const c = (g.c ??= canvas(w, h));
+    if (c.width !== w || c.height !== h) [c.width, c.height] = [w, h];
+    const cg = ctx2d(c);
+    cg.clearRect(0, 0, w, h);
+    for (let i = k * size; i < Math.min(this.strokes.length, (k + 1) * size); i++) {
+      if (near?.has(i)) g.key = null;
+      else haloPass(cg, this.strokes[i], HALO, cuts[i], gb[0], gb[1]);
+    }
+  }
+  /** Makes the kept light ahead of the eraser, in the time between frames, while the eraser is the tool. */
+  private warm = (idle?: IdleDeadline) => {
+    this.warming = null;
+    if (this.picked !== 'erase' || this.er) return;
+    const cuts = eraserCuts(this.strokes);
+    const groups = this.groupsNow(cuts);
+    const end = performance.now() + 4;
+    for (let k = groups.findIndex((g) => !g.ok); k >= 0; k = groups.findIndex((g) => !g.ok)) {
+      if (idle && !idle.didTimeout ? idle.timeRemaining() < 1 : performance.now() > end) return this.warmSoon();
+      this.makeGroup(k, cuts);
+    }
+  };
+  private warmSoon() {
+    if (this.warming || this.picked !== 'erase' || !this.strokes.length) return;
+    if (typeof requestIdleCallback === 'function') {
+      const id = requestIdleCallback(this.warm, { timeout: 250 });
+      this.warming = () => cancelIdleCallback(id);
+    } else {
+      const id = window.setTimeout(this.warm, 0);
+      this.warming = () => clearTimeout(id);
+    }
+  }
+  /** Lets go of the kept light (not while an eraser stroke uses it). */
+  private dropKept() {
+    this.warming?.();
+    this.warming = null;
+    if (this.er) return;
+    for (const g of this.kept.groups) if (g.c) g.c.width = g.c.height = 0;
+    this.kept = { size: 0, groups: [] };
   }
   /**
    * The light of the strokes the eraser stroke hasn't reached, drawn again in box b of the halo after it reaches more.
@@ -591,17 +702,9 @@ export class InkPad {
     g.fillRect(b[0], b[1], b[2] - b[0], b[3] - b[1]);
     g.globalCompositeOperation = 'screen';
     er.groups.forEach((grp, k) => {
-      const of = this.strokes.slice(k * er.size, (k + 1) * er.size).map((_, j) => k * er.size + j);
-      grp.box ??= of.reduce<Box | null>((a, i) => (lights(this.strokes[i], HALO).length ? join(a, this.litOf(i)) : a), null);
-      const gb = grp.box;
+      const gb = this.groupBox(k);
       if (!gb || !meets(gb, b)) return;
-      if (!grp.ok) {
-        const c = (grp.c ??= canvas(gb[2] - gb[0], gb[3] - gb[1]));
-        const cg = ctx2d(c);
-        cg.clearRect(0, 0, c.width, c.height);
-        for (const i of of) if (!er.near.has(i)) haloPass(cg, this.strokes[i], HALO, er.cuts[i], gb[0], gb[1]);
-        grp.ok = true;
-      }
+      if (!grp.ok) this.makeGroup(k, er.cuts, er.near);
       g.drawImage(grp.c!, gb[0], gb[1]);
     });
     g.restore();
@@ -609,6 +712,10 @@ export class InkPad {
   /** Box b of the page (logical px) on the halo, in its whole px. */
   private onHalo(b: Box): Box {
     return [Math.max(0, Math.floor(b[0] * HALO)), Math.max(0, Math.floor(b[1] * HALO)), Math.min(this.halo.width, Math.ceil(b[2] * HALO)), Math.min(this.halo.height, Math.ceil(b[3] * HALO))];
+  }
+  /** The box stroke st's light fills on the halo, in its px. */
+  private lightBox(st: Stroke) {
+    return this.onHalo(grow(bounds(st.p), reach(st, HALO)));
   }
   /** The box stroke i's light fills on the halo, in its px. */
   private litOf(i: number): Box {
@@ -618,6 +725,8 @@ export class InkPad {
   /** The committed ink cut by eraser stroke st from its copy, within box b (all of it without one). */
   private cutInk(st: Stroke, b?: Box) {
     const er = this.er!;
+    // in whole px, so nothing at the box's edge is part cut and part copied
+    if (b) b = [Math.floor(b[0]), Math.floor(b[1]), Math.ceil(b[2]), Math.ceil(b[3])];
     paste(this.ig, er.ink, b);
     this.ig.save();
     if (b) clip(this.ig, b);
@@ -679,9 +788,8 @@ export class InkPad {
       this.restAt(fresh);
     }
     for (const i of cut) {
-      const c = er.near.get(i)!, lb = this.litOf(i);
+      const c = er.near.get(i)!, lb = this.litOf(i), b = at.get(i)!;
       const g = ctx2d(c);
-      const b = at.get(i)!;
       const cb: Box = [b[0] - lb[0], b[1] - lb[1], b[2] - lb[0], b[3] - lb[1]];
       g.save();
       clip(g, cb);
@@ -819,8 +927,10 @@ export class InkPad {
     if (!c) return;
     const t0 = performance.now();
     if (c.st.m === 'erase') {
+      // only frames that erased more count: one with no new points does nothing
+      const done = this.er?.done;
       this.erase(c.st);
-      this.frames.push(performance.now() - t0);
+      if (this.er?.done !== done) this.frames.push(performance.now() - t0);
       if (this.frames.length > 2000) this.frames.splice(0, 1000);
       return;
     }
@@ -950,6 +1060,8 @@ export class InkPad {
     this.offs.forEach((f) => f());
     this.offs = [];
     this.letGo();
+    this.picked = 'brush';
+    this.dropKept();
     for (const c of [this.paper, this.halo, this.haloLive, this.ink, this.fx, this.live, this.spare?.ink, this.spare?.halo, this.spare?.rest]) {
       if (!c) continue;
       c.width = 1;
