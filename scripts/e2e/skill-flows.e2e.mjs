@@ -144,7 +144,7 @@ export const scenarios = {
     );
     const bad = new Set();
     for (const x of exits) {
-      // DESIGN.md: distress that climbs (or doesn't move) brings "Talk to someone now" to the top
+      // DESIGN.md principle 7: inside a skill, distress that climbs or doesn't move leads with people to talk to
       if (x.higher && !x.talk) bad.add(`${x.where}: after a rising answer it leads with "${x.first}", not people to talk to`);
       try {
         await toHub(h, page);
