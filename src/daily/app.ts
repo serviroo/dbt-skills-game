@@ -422,8 +422,13 @@ export class App {
   }
 
   /** A move inside the companion. `replace` swaps the visit for a new one; `replace` with `quiet` redraws it. */
+  /** Whether this build has the route's screen. A history entry can come from another version of the app. */
+  private known(route: Route) {
+    return Object.prototype.hasOwnProperty.call(this.screens, route.name);
+  }
+
   go(route: Route, o: { replace?: boolean; quiet?: boolean } = {}) {
-    if (!Object.prototype.hasOwnProperty.call(this.screens, route.name)) route = { name: 'hub' };
+    if (!this.known(route)) route = { name: 'hub' };
     // after clearing, Settings shows how it went; only the Safe Zone opens as ever
     if (cleared() && route.name !== 'safe') route = { name: 'settings' };
     this.show(route, { again: false, key: this.record(route, o) }, o);
@@ -450,7 +455,8 @@ export class App {
     const first = this.firstOfVisit();
     if (ROOMS.has(route.name)) {
       if (route.name === this.route.name && !o.replace) return same(route, this.route) ? this.visitKey : this.write('replace', { dq: 1, i: this.at, key: fresh(), route }).key;
-      for (let j = first - 1; j > 0; j--) {
+      // the Safe Zone is never gone back to: it always comes right after the screen it was opened from, so one Back returns there
+      for (let j = route.name === 'safe' ? 0 : first - 1; j > 0; j--) {
         const e = this.trail[j];
         if (!e || e.sheet || e.route.name !== route.name) continue;
         this.travel(j);
@@ -539,6 +545,7 @@ export class App {
 
   private land(e: Entry) {
     if (e.key === this.visitKey) return this.current?.moveTo?.(e.place);
+    if (!this.known(e.route)) return this.go({ name: 'hub' });
     this.show(e.route, { again: true, key: e.key, at: e.place });
   }
 
@@ -642,7 +649,7 @@ export class App {
     let to = this.firstOfVisit() - 1;
     while (to > 0 && this.trail[to]?.sheet) to--;
     const e = this.trail[to];
-    if (to <= 0 || !e) return this.go({ name: 'hub' });
+    if (to <= 0 || !e || !this.known(e.route)) return this.go({ name: 'hub' });
     this.closeSheets();
     this.travel(to);
     this.show(e.route, { again: true, key: e.key, at: e.place });

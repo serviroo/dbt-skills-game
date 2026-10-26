@@ -954,6 +954,8 @@ export function writeScreen(app: App, route: Route): ScreenOut {
   let cwDone: (() => void) | null = null;
   const openCw = () => {
     if (wide.matches) return modeBtns[0].focus();
+    // pressed again while open: it is already one sheet, so only focus moves into it
+    if (cwOpen) return cwHead.focus({ preventScroll: true });
     cwOpen = true;
     cwDone = app.sheet(closeCw);
     cw.classList.add('is-open');

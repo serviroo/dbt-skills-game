@@ -130,12 +130,19 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
     return e;
   };
 
+  /** What a tier step ranks: the picks it ranks from, without "Not this time". */
+  const tierItems = (s: Extract<Step, { kind: 'tier' }>) => {
+    const from = answers[s.from];
+    return (Array.isArray(from) ? from : typeof from === 'string' && from ? [from] : []).filter((x) => x !== 'Not this time');
+  };
+
   function show(i: number): void {
     clear();
     idx = i;
     if (box.classList.contains('is-complete')) complete(false);
     const s = sk.steps[i];
-    if (s.kind !== 'branch' && !replaying) visit.mark(i);
+    // a branch, or a tier step with nothing to rank, is passed straight through: never a place Back stops at
+    if (s.kind !== 'branch' && !(s.kind === 'tier' && !tierItems(s).length) && !replaying) visit.mark(i);
     const next = () => follow(s.go, i + 1);
     const titled = !!tx(s.title, answers);
     switch (s.kind) {
@@ -374,8 +381,7 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
         );
       }
       case 'tier': {
-        const from = answers[s.from];
-        const items = (Array.isArray(from) ? from : typeof from === 'string' && from ? [from] : []).filter((x) => x !== 'Not this time');
+        const items = tierItems(s);
         if (!items.length) return next();
         // ranks already given in this visit come back with the step
         const ranks: Record<string, string> = {};

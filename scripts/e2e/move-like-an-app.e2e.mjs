@@ -313,6 +313,15 @@ export const scenarios = {
     await settle(page);
     await page.locator('.st-cw-x').waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
     expect(!(await page.locator('.st-cw-x').isVisible()), 'Escape did not close the co-writer');
+    // Co-writer pressed again while it is open opens nothing more: one Back closes it, the next leaves the editor
+    await page.locator('.st-cwbtn').click();
+    await page.locator('.st-cw-x').waitFor({ state: 'visible' });
+    await page.locator('.st-cwbtn').focus();
+    await page.keyboard.press('Enter');
+    await settle(page);
+    await back(page);
+    await page.locator('.st-cw-x').waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
+    expect(!(await page.locator('.st-cw-x').isVisible()), 'Back after a second Co-writer press did not close the co-writer');
     await back(page);
     expect((await screenOf(page)) === 'stories', `Back from the editor went to ${await screenOf(page)}, not the Story Room`);
     await forward(page);
@@ -398,6 +407,16 @@ export const scenarios = {
     await onScreen(page, 'safe');
     await back(page);
     expect((await screenOf(page)) === 'hub', `Back from a Safe Zone opened on Home went to ${await screenOf(page)}`);
+
+    // Safe Zone, Give me a moment, then the Safe Zone again: one Back returns to the moment
+    await page.locator('.dq-top .dq-safe').click();
+    await onScreen(page, 'safe');
+    await page.getByRole('button', { name: 'Give me a moment' }).click();
+    await onScreen(page, 'moment');
+    await page.locator('.dq-top .dq-safe').click();
+    await onScreen(page, 'safe');
+    await back(page);
+    expect((await screenOf(page)) === 'moment', `Back from a Safe Zone opened on Give me a moment went to ${await screenOf(page)}`);
     expect(!errors.length, errors.join('\n'));
   },
 
@@ -712,6 +731,20 @@ export const scenarios = {
     expect(!problems.length, problems.join('\n'));
   },
 
+  'history-from-another-version': async (h) => {
+    const { page, errors } = await start(h);
+    const { expect } = h;
+    // an entry another version wrote for a screen this one doesn't have: Forward onto it lands on Home
+    await page.locator('.dq-tile').filter({ hasText: 'Settings' }).click();
+    await onScreen(page, 'settings');
+    await page.evaluate(() => history.replaceState({ ...history.state, route: { name: 'retired-room' } }, ''));
+    await back(page);
+    await onScreen(page, 'hub');
+    await forward(page);
+    expect((await screenOf(page)) === 'hub', `Forward onto a screen this version doesn't have showed ${await screenOf(page)}`);
+    expect(!errors.length, errors.join('\n'));
+  },
+
   'focus-shows': async (h) => {
     const { expect } = h;
     const problems = [];
@@ -817,6 +850,17 @@ export const scenarios = {
     await tap('Add and pick');
     await timer.waitFor();
     if ((await added()) !== 1) problems.push(`Add and pick, Back and Add and pick again stored ${await added()} activities, not 1`);
+    await page.locator('.dq-top [aria-label="Leave this skill"]').click();
+    await onScreen(page, 'hub');
+
+    // Flavour Tier List with nothing picked: the ranking step is passed over, so one Back returns to the timer
+    await openSkill(page, 'Flavour Tier List');
+    await tap('Begin');
+    await tap('Next');
+    await tap('Skip the timer');
+    await page.locator('.dq-step-body', { hasText: 'TIER LIST LOCKED' }).waitFor();
+    await back(page);
+    if (!(await page.locator('.dq-step-body', { hasText: 'Taste each one slowly' }).isVisible())) problems.push('one Back past an empty ranking step did not return to the timer');
     expect(!problems.length, problems.join('\n'));
     expect(!errors.length, errors.join('\n'));
   },
