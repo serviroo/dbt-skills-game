@@ -184,6 +184,104 @@ const ruleOf = (a: Answers) => s(a, 'myth', 'An old rule').trim();
 const patchOf = (a: Answers) => (Object.hasOwn(MYTHS, ruleOf(a)) ? MYTHS[ruleOf(a)] : undefined) ?? "Feelings aren't rules or verdicts. Every one makes sense somewhere, and you still get to choose what you do next.";
 const bothAnd = (a: Answers) => s(a, 'pair', "I'm doing my best, but I want to do better.").trim().replace(/,?\s+but\s+/i, ', and ');
 
+type Way = 'ask' | 'no';
+const wayOf = (a: Answers): Way => (a.way === 'no' ? 'no' : 'ask');
+/** What leans towards asking more firmly, or towards a firmer no, in two short groups rather than ten questions. */
+const LEAN: Record<Way, { them: string[]; now: string[] }> = {
+  ask: {
+    them: ["They're able to give it", 'I have a right to ask for this', 'Asking fits our roles', "It's a fair ask for our relationship", "I've given plenty to them too"],
+    now: ['It matters a lot to me', 'Asking fits who I want to be', 'It helps me in the long run', 'I know what I want and why', "It's a good time for them"],
+  },
+  no: {
+    them: ["I can't give what they want", "I don't owe them this", "It isn't their place to ask me", "It's too much to ask in our relationship", "I've done more than my share"],
+    now: ['Something else matters more', 'A yes would cost me my self-respect', 'A yes now would cause trouble later', "I'm not clear what I'd agree to", "It's a bad time for me to say yes"],
+  },
+};
+/**
+ * Ten ways to ask and ten ways to say no, softest first. Level k of one pairs with level k of the other. Each is
+ * [what to pick, its name, what it means, a line to try]. They're choices for the moment, not ranks.
+ */
+const LEVELS: Record<Way, [string, string, string, string][]> = {
+  ask: [
+    ["Don't ask or hint this time", 'Leave it for now', "Not asking is a real choice. It can fit when the timing is off or it matters less to you.", 'Not this time. I can come back to it.'],
+    ['Drop a small hint, let it go if missed', 'A small hint', "Mention it lightly. If they don't pick it up, you let it go.", "That looks good. I'd love to try it sometime."],
+    ['Hint clearly, and accept a no', 'A clear hint', 'Make the hint easy to notice. If they say no, you accept it.', "I've been hoping we could sort that out."],
+    ['Ask gently, and accept a no', 'A gentle ask', 'Ask, and leave them lots of room. If they say no, you accept it.', 'Would it be okay if...?'],
+    ['Ask clearly and kindly, accept a no', 'A plain ask', 'Ask clearly and kindly. If they say no, you take it with good grace.', "Could you...? It's okay if you can't."],
+    ['Ask with confidence, accept a no', 'A confident ask', "Ask like it's a fair request, because it is. If they say no, you accept it.", "I'd like you to... Can you do that?"],
+    ['Ask with confidence, ask again after a no', 'Ask again', 'Ask with confidence. If they say no, ask once more, calmly, before you let it go.', 'I hear you. It still matters to me. Could we try?'],
+    ['Ask firmly, and hold your ground', 'A firm ask', 'Ask firmly, and keep it on the table when they hesitate.', 'This matters to me. I am asking you to...'],
+    ['Ask firmly, and negotiate', 'Negotiate', 'Ask firmly and keep working at it. Offer a trade, or look for a middle way.', 'What if I..., and you...? Can we meet halfway?'],
+    ["Ask, and don't settle for no", "Don't settle for no", "Keep coming back to it calmly until it's sorted. This fits things you have a clear right to.", "I need this sorted. I'll keep asking until we find a way."],
+  ],
+  no: [
+    ['Do it before they even ask', 'Offer first', 'You do it before they ask. It fits when giving is easy and you want to.', "I'll take care of that for you."],
+    ['Say yes gladly', 'A glad yes', 'You say yes and do it without complaint.', 'Sure, happy to.'],
+    ['Say yes, even if not gladly', 'A quiet yes', "You do it, even though you'd rather not, and keep that to yourself.", "Okay, I'll do it."],
+    ["Say yes, and show you're unsure", 'An unsure yes', "You do it, and let them see you're unsure.", "I can, though I'm not sure about it."],
+    ["Say you'd rather not, then do it", 'A reluctant yes', "You say you'd rather not, then do it with good grace.", "I'd rather not, but I'll do it this time."],
+    ['Say no gently, open to changing your mind', 'A soft no', "You say no gently, and you're open to changing your mind.", "I don't think I can. Let me think about it."],
+    ['Say no clearly, willing to rethink it', 'A clear no', "You say no with confidence, and you're still willing to think again.", "No, not this time. I'll tell you if that changes."],
+    ["Say no firmly, and don't get talked round", 'A firm no', "You say no firmly, and you don't get talked round.", "No. I've thought about it, and my answer is no."],
+    ['Hold your no, and negotiate', 'No, with a trade', 'You hold your no, and look for a trade or middle ground if there is one.', "No, I can't do that. I could do something smaller instead."],
+    ["Don't do it. Your no stands", 'A final no', "You don't do it. Your no stands, however often it comes up.", "My answer is no, and it won't change."],
+  ],
+};
+function leanLine(a: Answers) {
+  const picked = [a.them, a.now].flatMap((v) => (Array.isArray(v) ? v : []));
+  const ask = wayOf(a) === 'ask';
+  const lean = picked.length
+    ? `**Leaning firmer:** ${picked.map((t) => fullStop(t)).join(' ')} These point the way. You make the call.`
+    : `Nothing you picked leans firmer, so a softer choice may fit. You make the call.`;
+  return `${lean} How firmly do you want to ${ask ? 'ask' : 'say no'}?`;
+}
+function levelPlan(a: Answers) {
+  const way = wayOf(a);
+  const k = Number(a.level);
+  const set = Number.isInteger(k) && k >= 1 && k <= 10;
+  const [, name, what, line] = LEVELS[way][(set ? k : way === 'ask' ? 5 : 6) - 1];
+  const about = s(a, 'what').trim();
+  const head = set ? `**${name}.** ${what}` : `**Not sure? Start in the middle: ${name.toLowerCase()}.** ${what}`;
+  const tell = way === 'ask' && k === 1 ? 'You might tell yourself' : 'You might say';
+  const firm = set && k >= (way === 'ask' ? 7 : 8) ? (way === 'ask' ? ' Firm means calm and steady, never pressure, threats or raised voices.' : " A firm no doesn't need a long reason. Short and calm is enough.") : '';
+  return `${about ? `**About:** ${fullStop(cap(about))} ` : ''}${head} **${tell}:** "${line}"${firm}`;
+}
+function askingClose(a: Answers) {
+  const line = s(a, 'line').trim();
+  const mine = line ? `**Your words:** "${line}" ` : '';
+  return wayOf(a) === 'ask'
+    ? `${mine}However firmly you ask, it's a choice for this moment, not a rank. Good words make a yes more likely, never certain, and a no back doesn't mean you got it wrong.`
+    : `${mine}However firmly you say no, it's a choice for this moment, not a rank. A yes can be kind, and so can a no.`;
+}
+const STEADY_UNSAFE = "Then your safety comes first. You don't have to ask or say no face to face with someone who might hurt you. Someone to talk to is one tap away.";
+
+/** Beliefs that keep people from asking or saying no, each with a fairer way to see it. */
+const ASK_BELIEFS: Record<string, string> = {
+  'They should know what I need without me saying it': 'Nobody can read minds, even people who care about you a lot. Saying it plainly gives them a fair chance to help.',
+  "If I ask, they'll like me less": "Most people don't mind a clear, kind request. And if someone is a bit disappointed for a while, you can get through that.",
+  "Other people's needs always come first": 'Their needs count, and so do yours. Looking after yourself is part of what lets you look after others.',
+  "If they might say no, there's no point asking": "A no answers one request. It isn't a verdict on you. Asking still shows what matters to you, and the next ask might land.",
+  "Needing help means I can't manage": 'Everyone needs things from other people. Asking is a skill, and using it takes some nerve.',
+  'Saying no makes me a bad friend': 'A no protects your time and energy, so your yes means something. You can care about someone and still say no.',
+};
+const UNSURE_BELIEF = "If they might say no, there's no point asking";
+const ASK_UNSAFE = 'Asking or saying no could get me hurt';
+const beliefOf = (a: Answers) => (a.belief === 'Not sure' ? UNSURE_BELIEF : s(a, 'belief', 'An old belief').trim());
+const builtIn = (a: Answers) => Object.hasOwn(ASK_BELIEFS, beliefOf(a));
+function beliefChallenge(a: Answers) {
+  const facts = Array.isArray(a.facts) ? a.facts : [];
+  const hard = facts.includes('Asking went badly before') ? ' Some asks really have gone badly, and that hurt. It doesn\'t mean every ask will.' : '';
+  const lead = a.belief === 'Not sure' ? '**Not sure is fine.** These beliefs often hide in the background. Here\'s one that gets in a lot of people\'s way. ' : '';
+  if (!builtIn(a)) return `**The belief:** "${fullStop(cap(beliefOf(a)))}" Beliefs like this usually start somewhere real. Is it true every single time? What would you say to a friend who believed it?${hard}`;
+  return `${lead}**The belief:** "${fullStop(beliefOf(a))}" **Another way to see it:** ${ASK_BELIEFS[beliefOf(a)]}${hard}`;
+}
+function beliefReview(a: Answers) {
+  const mine = s(a, 'mine').trim();
+  const step = s(a, 'try').trim();
+  const answer = mine ? fullStop(cap(mine)) : builtIn(a) ? ASK_BELIEFS[beliefOf(a)] : 'Still working on it, and that counts.';
+  return `**The belief:** "${fullStop(cap(beliefOf(a)))}" **Your answer to it:** ${answer}${step ? ` **One small step:** ${fullStop(cap(step))}` : ''} Beliefs loosen with practice, one small ask at a time.`;
+}
+
 export const SKILLS: Skill[] = [
   // ---------------- Mindfulness (Sense) ----------------
   {
@@ -1295,6 +1393,87 @@ export const SKILLS: Skill[] = [
         kind: 'say',
         text: "That's okay. Try this: which one would hurt most to lose? That one leads. Still a tie? Pick one for now. You can always change it.",
         options: [{ label: 'The result', go: 'result' }, { label: 'The relationship', go: 'bond-first' }, { label: 'My self-respect', go: 'self-first' }, { label: 'Done for now', go: 'end' }],
+      },
+    ],
+  },
+  {
+    id: 'asking-intensity',
+    sl: 'Steady Voice',
+    real: 'How Intensely to Ask or Say No',
+    module: 'ie',
+    minutes: '2 min',
+    card: 'Pick how firmly to ask or say no this time, from a soft hint to a firm no.',
+    steps: [
+      { kind: 'intro', text: "Some moments call for a soft hint. Others call for a firm ask or a clear no. Let's find how firmly you want to go this time. This only makes a plan. Nothing gets sent." },
+      {
+        id: 'way',
+        kind: 'choice',
+        key: 'way',
+        text: 'Which is it?',
+        options: [{ label: 'Asking for something', value: 'ask' }, { label: 'Saying no to something', value: 'no' }, { label: "I don't feel safe with them", go: 'unsafe' }],
+      },
+      {
+        id: 'what',
+        kind: 'input',
+        key: 'what',
+        text: (a) => (wayOf(a) === 'ask' ? 'What do you want to ask for? Something everyday works best.' : 'What are you being asked to do? Something everyday works best.'),
+        placeholder: 'Optional',
+        skip: 'Skip',
+      },
+      { id: 'them', kind: 'choice', key: 'them', multi: true, title: 'You and them', text: (a) => `Which of these are true? Pick any. Each one leans towards ${wayOf(a) === 'ask' ? 'asking more firmly' : 'a firmer no'}.`, options: (a) => o(...LEAN[wayOf(a)].them) },
+      { id: 'now', kind: 'choice', key: 'now', multi: true, title: 'This moment', text: 'And these? Pick any, or none.', options: (a) => o(...LEAN[wayOf(a)].now) },
+      {
+        id: 'level',
+        kind: 'choice',
+        key: 'level',
+        text: leanLine,
+        small: 'Softest first. Each one is a fair choice for the right moment, not a rank.',
+        options: (a) => LEVELS[wayOf(a)].map(([label], k) => ({ label, value: String(k + 1) })),
+      },
+      { id: 'plan', kind: 'say', text: levelPlan },
+      { id: 'rehearse', kind: 'input', key: 'line', text: 'Try it in your own words. Say it out loud if you can, or type it here. Nobody sees it.', placeholder: 'My words (optional)', skip: 'Skip', lines: 3 },
+      { id: 'close', kind: 'say', text: askingClose, options: [{ label: 'Done', go: 'end' }, { label: 'Plan it with DEAR MAN', go: 'skill:dear-man' }] },
+      { id: 'unsafe', kind: 'say', text: STEADY_UNSAFE, options: [{ label: 'People to talk to', go: 'safe:people' }, { label: 'Done', go: 'end' }] },
+    ],
+  },
+  {
+    id: 'interpersonal-myths',
+    sl: 'Room to Ask',
+    real: 'Myths in the Way of Interpersonal Effectiveness',
+    module: 'ie',
+    minutes: '2 min',
+    card: 'Old beliefs that stop you asking, with a fairer way to see them.',
+    steps: [
+      { kind: 'intro', text: "Sometimes the hard part of asking isn't the words. It's an old belief that says don't bother. Let's look at one and find a fairer way to see it." },
+      {
+        id: 'belief',
+        kind: 'choice',
+        key: 'belief',
+        text: 'Which belief gets in your way most?',
+        options: [...o(...Object.keys(ASK_BELIEFS)), { label: 'Not sure' }, { label: ASK_UNSAFE, go: 'unsafe' }],
+        other: 'A different one',
+      },
+      { id: 'facts', kind: 'choice', key: 'facts', multi: true, text: "Think of times you've asked or said no before. What fits? Pick any, or none.", options: o('Someone said yes', 'I said no and we were okay', 'Someone helped once they knew', 'Asking went badly before') },
+      {
+        id: 'challenge',
+        kind: 'choice',
+        key: 'fit',
+        title: '[Another way to see it]',
+        text: beliefChallenge,
+        options: [
+          { label: 'Rings true', reply: 'Good. Keep it handy for next time.' },
+          { label: 'Partly', reply: 'Partly is a real start. Old beliefs loosen slowly.' },
+          { label: "This doesn't fit", reply: "Thanks for being honest. You don't have to agree with it. Looking at it still counts." },
+        ],
+      },
+      { id: 'mine', kind: 'input', key: 'mine', text: (a) => (builtIn(a) ? 'Want to put it in your own words? What would you tell a friend who believed this?' : 'What would you tell a friend who believed this? Your own words are the ones that stick.'), placeholder: 'My answer (optional)', skip: 'Skip', lines: 3 },
+      { id: 'try', kind: 'input', key: 'try', text: 'One small ask or no to try this week? Keep it everyday, with someone who feels safe.', placeholder: 'My small step (optional)', skip: 'Skip' },
+      { id: 'review', kind: 'say', text: beliefReview, options: [{ label: 'Done', go: 'end' }, { label: 'Plan it with DEAR MAN', go: 'skill:dear-man' }] },
+      {
+        id: 'unsafe',
+        kind: 'say',
+        text: "Then that isn't a myth to argue with. It's a real risk, and your safety comes first. You don't have to ask or say no face to face with someone who might hurt you. Someone to talk to is one tap away.",
+        options: [{ label: 'People to talk to', go: 'safe:people' }, { label: 'Done', go: 'end' }],
       },
     ],
   },
