@@ -39,3 +39,13 @@ export const STORY_READ = {
   back: 'Back to writing',
   gone: 'This story isn’t on this device any more.',
 };
+
+/** Searching the shelf: every story, chapter and note, matched on this device. */
+export const STORY_FIND = {
+  label: 'Search your stories and notes',
+  none: 'Nothing matches that yet.',
+  found: (n: number) => `Found in ${n} ${n === 1 ? 'story' : 'stories'}`,
+  notes: 'Notes',
+  here: 'What you searched for is marked on the page.',
+  more:(n: number) => `and ${n} more ${n === 1 ? 'place' : 'places'} in this story`,
+};

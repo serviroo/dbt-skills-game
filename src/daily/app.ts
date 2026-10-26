@@ -30,8 +30,8 @@ export type Route =
   | { name: 'art' }
   | { name: 'draw'; kind: 'today' | 'ally'; id?: string; draft?: string }
   | { name: 'piece'; id: string }
-  | { name: 'stories' }
-  | { name: 'write'; id: string; ch?: string }
+  | { name: 'stories'; q?: string }
+  | { name: 'write'; id: string; ch?: string; find?: { q: string; at: number } }
   | { name: 'read'; id: string; ch?: string }
   | { name: 'lines' }
   | { name: 'ease'; next?: Next }

@@ -28,7 +28,7 @@ back after a long break is always fine.
 - Art room and Story Room: draw or write whatever you like. It all stays on your device. The Story Room's co-writer
   can ask you questions, toss in a what-if, suggest a next line or tidy up a messy bit. It's scripted and runs on your
   device too. Stuck on a blank page? Ask for a starting point. Read mode shows the whole story at the text size you
-  pick, and remembers it.
+  pick, and remembers it. Search finds any word in your stories and notes, even offline.
 - Save Crystal: a backup of your progress, stories, drawings (unfinished ones too) and choices. Restore keeps choices
   you already made on this device, including mute. If something could not be read, the file and the app say the backup
   is incomplete.
