@@ -20,6 +20,9 @@ import './scenes.css';
 
 const SCENES = {
   drift: () => import('./scenes/drift'),
+  wave: () => import('./scenes/wave'),
+  ring: () => import('./scenes/ring'),
+  tide: () => import('./scenes/tide'),
 } satisfies Record<string, () => Promise<{ build: BuildScene }>>;
 
 export type SceneKind = keyof typeof SCENES;
@@ -54,6 +57,9 @@ export interface SceneOpts {
   /** the game's motion setting; prefers-reduced-motion when left out */
   reduced?: () => boolean;
 }
+
+/** The player's accent colour as the companion shows it (set on <html> by the Wardrobe), or undefined for lantern blue. */
+export const playerAccent = () => getComputedStyle(document.documentElement).getPropertyValue('--acc-b').trim() || undefined;
 
 /**
  * No WebGL 2 here: the browser has none, or this device couldn't make a context once already. The flat picture then

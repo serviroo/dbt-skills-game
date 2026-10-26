@@ -14,6 +14,8 @@ export interface Vignette {
   resize(width: number, height: number): void;
   /** frees anything the scene made outside its scene graph (the graph itself is freed by the runtime) */
   dispose?(): void;
+  /** what the last pose looked like, in plain numbers (where the board is, how big the light is), for the E2E checks */
+  readonly probe?: Readonly<Record<string, number | string>>;
 }
 /** What a scene file exports as `build`: makes the scene, lit with `accent` as its rim colour. */
 export type BuildScene = (accent: THREE.Color) => Vignette;
@@ -81,15 +83,39 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
 
   /**
    * Fewer pixels on a slow device. A scene draws at the device's own pixel ratio until it is shown to be too slow: its
-   * second frame is timed to the end once (reading one pixel back waits for the GPU to finish it), and after that the
-   * page's frame rate is watched while it moves. Too slow, and it drops straight to the ratio that fits its budget, down
+   * first frame is timed without the page ever waiting for it (a fence goes in behind it and is looked at on the next
+   * animation frames, so this happens while the step opens, before anything is tapped), and after that the page's frame
+   * rate is watched while it moves. Too slow, and it drops straight to the ratio that fits its budget, down
    * to SCENE.minDpr; comfortably fast for a while, and it climbs back a step, never to a ratio already found too slow.
    */
   const minDpr = Math.min(lent.maxDpr, SCENE.minDpr);
   const ratio = () => (Number.isNaN(deviceDpr.now) ? lent.maxDpr : Math.min(lent.maxDpr, Math.max(minDpr, deviceDpr.now)));
-  const gl = renderer.getContext();
-  const px = new Uint8Array(4);
-  let timeIn = 2;
+  const gl = renderer.getContext() as WebGL2RenderingContext;
+  let timeIn = 1;
+  let fence: WebGLSync | null = null;
+  let fenceAt = 0;
+  let fenceBusy = 0;
+  let fenceRaf = 0;
+  /** looks at the first frame's fence once an animation frame: how long it was still drawing is what a frame costs here */
+  function checkFence() {
+    fenceRaf = 0;
+    if (!fence) return;
+    const now = performance.now();
+    if (gl.isContextLost()) {
+      fence = null;
+      return;
+    }
+    if (gl.getSyncParameter(fence, gl.SYNC_STATUS) !== gl.SIGNALED && now - fenceAt < 2000) {
+      fenceBusy = now;
+      fenceRaf = requestAnimationFrame(checkFence);
+      return;
+    }
+    gl.deleteSync(fence);
+    fence = null;
+    // at least this long: it was still drawing when last looked at; resizing clears the canvas, so it is drawn again
+    const ms = fenceBusy - fenceAt;
+    if (ms > BUDGET && slower(ms, BUDGET) && drawn) draw(clock.now(), beatAt(clock.now()), still());
+  }
   let gaps: number[] = [];
   let lastTick = -1;
   let goodFor = 0;
@@ -142,20 +168,17 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   }
   const draw = (t: number, b: Beat, calm: boolean) => {
     v.pose(b, calm);
-    // the first frame builds the shaders; the second, timed alone once the GPU has caught up, shows what a frame costs
+    renderer.render(v.scene, v.camera);
     if (!calm && --timeIn === 0) {
-      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
-      const t0 = performance.now();
-      renderer.render(v.scene, v.camera);
-      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
-      const ms = performance.now() - t0;
-      // resizing clears the canvas, so a frame that comes out too slow is drawn again, smaller
-      if (ms > BUDGET && slower(ms, BUDGET)) renderer.render(v.scene, v.camera);
-    } else renderer.render(v.scene, v.camera);
+      fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+      gl.flush();
+      fenceAt = fenceBusy = performance.now();
+      fenceRaf = requestAnimationFrame(checkFence);
+    }
     last = t;
     drawn = { ...b };
     sceneStats.frames++;
-    sceneStats.last = { kind: opts.kind, e: b.e, dur: b.dur, done: b.done, still: calm };
+    sceneStats.last = { kind: opts.kind, e: b.e, dur: b.dur, done: b.done, still: calm, probe: v.probe && { ...v.probe } };
     sceneStats.dpr = renderer.getPixelRatio();
     setLive(true);
   };
@@ -218,8 +241,8 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   // three.js rebuilds its GPU state on its own listener, added before this one; the scene then draws straight away
   const onRestored = () => {
     lost = false;
-    // the shaders are built again, so the second frame after this is timed again
-    timeIn = 2;
+    // a restored context may be slower or faster, so its first frame is timed again
+    timeIn = 1;
     resync();
   };
   canvas.addEventListener('webglcontextlost', onLost);
@@ -230,6 +253,9 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   return () => {
     sub?.();
     sub = null;
+    cancelAnimationFrame(fenceRaf);
+    if (fence && !gl.isContextLost()) gl.deleteSync(fence);
+    fence = null;
     io.disconnect();
     ro.disconnect();
     canvas.removeEventListener('webglcontextlost', onLost);

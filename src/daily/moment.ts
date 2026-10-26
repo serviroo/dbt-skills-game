@@ -13,6 +13,7 @@ import { icon, mothSVG } from './art';
 import { now, onFrame } from './clock';
 import { btn, h, toggle, typo } from './ui';
 import { isSkillId } from './store';
+import { mountScene, playerAccent } from '../scene/vignettes/host';
 
 export function goNext(app: App, n: Next, replace = false) {
   if (n.to === 'rest') return app.go({ name: 'rest' }, { replace });
@@ -158,6 +159,8 @@ export function momentScreen(app: App, route: Route): ScreenOut {
   const orb = sv('circle', { cx: 100, cy: 100, r: 60, fill: 'url(#dqmo-g)' });
   const line = sv('circle', { cx: 100, cy: 100, r: 52, fill: 'none', stroke: 'rgba(170,225,255,.7)', 'stroke-width': 1.2 });
   const echo = sv('circle', { cx: 100, cy: 100, r: 52, fill: 'none', stroke: 'rgba(124,200,255,.22)', 'stroke-width': 0.8 });
+  // the breathing light in 3D takes the place of the flat orb and its rings when it can; the ticks stay round it
+  for (const c of [orb, echo, line]) c.classList.add('dq-scene-flat');
   svg.append(defs, outer, tickPath, orb, echo, line);
 
   const words = h('p', { class: 'dq-mo-line', 'aria-live': 'polite' });
@@ -182,6 +185,9 @@ export function momentScreen(app: App, route: Route): ScreenOut {
   const done = btn('Done', () => app.back(), { kind: 'link', cls: 'dq-mo-done' });
 
   const t0 = now();
+  const stage = h('div', { class: 'dq-mo-stage' }, h('div', { class: 'dq-mo-halo', 'aria-hidden': 'true' }), svg);
+  // the same breath as the flat ring: both count from t0
+  const unmount = mountScene(stage, { kind: 'ring', accent: playerAccent(), reduced: () => app.reduced(), clock: { now, onFrame, beat: () => ({ e: now() - t0, dur: Infinity, started: true, done: false }) } });
   let shown = -1;
   let passes = 0;
   const fades: Animation[] = [];
@@ -222,7 +228,7 @@ export function momentScreen(app: App, route: Route): ScreenOut {
     'div',
     { class: 'dq-moment' },
     h('h1', { class: 'dq-sr', 'data-focus': '', text: 'Give me a moment' }),
-    h('div', { class: 'dq-mo-stage' }, h('div', { class: 'dq-mo-halo', 'aria-hidden': 'true' }), svg),
+    stage,
     words,
     h('div', { class: 'dq-mo-foot' }, after, h('div', { class: 'dq-mo-row' }, humToggle, done)),
   );
@@ -233,6 +239,7 @@ export function momentScreen(app: App, route: Route): ScreenOut {
     bubbles: [0.6, 0.3],
     leave: () => {
       stop();
+      unmount();
       fades.forEach((a) => a.cancel());
       offVolume?.();
       hum?.stop();
