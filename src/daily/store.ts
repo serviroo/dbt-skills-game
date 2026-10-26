@@ -405,24 +405,41 @@ function adoptRaw(into: State, from: State, restore?: { newer: boolean; now: num
  * On records both copies hold (the same key), the fields this build doesn't read, by adoptKept's rule; inner does the
  * same one level down (an event's data).
  */
-function adoptRest<T extends object>(mine: T[], theirs: T[], keyOf: (x: T) => string, known: readonly string[], theirsWin: boolean, inner?: (m: T, t: T) => void, when?: (m: T, t: T) => boolean) {
+function adoptRest<T extends object>(mine: T[], theirs: T[], keyOf: (x: T) => string, known: readonly string[], theirsWin: boolean, inner?: (m: T, t: T, raw?: Record<string, unknown>) => boolean, when?: (m: T, t: T) => boolean) {
   const map = new Map(theirs.map((x) => [keyOf(x), x]));
   for (const m of mine) {
     const t = map.get(keyOf(m));
     if (!t || t === m || (when && !when(m, t))) continue;
-    for (const [k, v] of restOf(t, known)) if (theirsWin || !own(m, k)) putOwn(m, k, v);
-    inner?.(m, t);
+    // a record kept as stored takes the same fields in its stored form, so its values past this build's limits are
+    // still what gets written (see AS_STORED)
+    const was = AS_STORED.get(m);
+    const raw = was && isObj(was.raw) && was.read === JSON.stringify(m) ? was.raw : undefined;
+    for (const [k, v] of restOf(t, known)) {
+      if (!(theirsWin || !own(m, k))) continue;
+      putOwn(m, k, v);
+      if (raw) putOwn(raw, k, v);
+    }
+    const whole = inner ? inner(m, t, raw) : true;
+    if (raw && whole) was!.read = JSON.stringify(m);
   }
 }
 /** The fields a newer build stored on events this copy already has, and in their data. */
 function adoptEventRest(mine: Ev[], theirs: Ev[], theirsWin: boolean) {
-  adoptRest(mine, theirs, (e) => e.id, EV_KEYS, theirsWin, (m, t) => {
-    if (!isObj(t.data)) return;
+  adoptRest(mine, theirs, (e) => e.id, EV_KEYS, theirsWin, (m, t, raw) => {
+    if (!isObj(t.data)) return true;
     const known: readonly string[] = (EV_DATA as Partial<Record<EvKind, readonly string[]>>)[m.k] ?? [];
+    // false when the stored form's data isn't an object to hold them: then the record is written as this build reads it
+    let whole = true;
     for (const [k, v] of restOf(t.data, known)) {
       if (!m.data) m.data = {};
-      if (theirsWin || !own(m.data, k)) putOwn(m.data, k, v);
+      if (!(theirsWin || !own(m.data, k))) continue;
+      putOwn(m.data, k, v);
+      if (!raw) continue;
+      if (raw.data === undefined) raw.data = {};
+      if (isObj(raw.data)) putOwn(raw.data, k, v);
+      else whole = false;
     }
+    return whole;
   });
 }
 /** The kept part of a copy in a form two copies can compare (see canon). */

@@ -9,6 +9,9 @@
 // newer-tabs: two open tabs change different known things at the same moment; both changes and every newer field stay.
 // newer-tabs-same-item: the stored copy of an item both tabs hold, added at the same time, differs one level down; the
 // stored copy's value is the one written back.
+// newer-limited-records: a newer Save Crystal (Restore) and a newer build in another tab each add or change a field
+// this build doesn't read on records it keeps as stored (XP past its cap, text past its length): the next write keeps
+// the record exactly as stored, with the new field, never the trimmed form this build reads.
 // newer-tabs-removals: in a list a newer build added (and among the records of a known list this build can't read), the
 // newer build in another tab removes one, changes one and adds one; this tab writes and keeps exactly that, never
 // showing the list. A Restore of an earlier Save Crystal brings the removed ones back, newer than their removal.
@@ -318,6 +321,56 @@ export const scenarios = {
     h.expect(same(want, got), `two tabs holding the same item lost newer values: ${diff(want, got)}`);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
+  },
+
+  async 'newer-limited-records'(h) {
+    const seed = { [h.SAVE]: JSON.stringify(newerSave()), 'dbt.app.v1': h.SEEN, [h.YOU]: YOU };
+    const limited = (save, glow, colour) => {
+      const want = newerSave();
+      const ev = want.events.find((e) => e.id === 'nx1');
+      const item = want.lists.comfort.find((i) => i.id === 'nc-long');
+      const at = (s) => [s.events.find((e) => e.id === 'nx1'), s.lists.comfort.find((i) => i.id === 'nc-long')];
+      const [gotEv, gotItem] = at(save);
+      return { want: { ev: { ...ev, glow }, item: { ...item, colour } }, got: { ev: gotEv, item: gotItem } };
+    };
+    // Restore: a Save Crystal from a newer version adds a field to the 800 XP event and to the 300-character item
+    {
+      const { ctx, page, errors } = await h.open(seed);
+      await h.reachHub(page);
+      const file = await crystal(h, page, 'limited-before');
+      file.schema += 1;
+      file.events.find((e) => e.id === 'nx1').glow = { ring: 3 };
+      file.lists.comfort.find((i) => i.id === 'nc-long').colour = 'amber';
+      h.expect(/Restored/.test(await restore(h, page, file, 'limited-newer.json')), 'the newer Save Crystal was not restored');
+      await rename(page, 'Robin Vale');
+      await page.waitForFunction((k) => JSON.parse(localStorage.getItem(k) ?? 'null')?.profile?.playerName === 'Robin Vale', h.SAVE, { timeout: 10000 });
+      const { want, got } = limited(await saveOf(h, page), { ring: 3 }, 'amber');
+      h.expect(same(want, got), `after a newer Save Crystal added fields, records kept as stored were written another way: ${diff(want, got)}`);
+      h.expect(!errors.length, errors.join('\n'));
+      await ctx.close();
+    }
+    // two tabs: a newer build in the other tab changes the event's field and adds one to the item
+    {
+      const { ctx, page: a, errors } = await h.open(seed);
+      await h.reachHub(a);
+      const b = await ctx.newPage();
+      b.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+      await b.goto(a.url());
+      await h.reachHub(b);
+      await b.evaluate((key) => {
+        const s = JSON.parse(localStorage.getItem(key));
+        s.events.find((e) => e.id === 'nx1').glow = { ring: 4 };
+        s.lists.comfort.find((i) => i.id === 'nc-long').colour = 'rose';
+        localStorage.setItem(key, JSON.stringify(s));
+      }, h.SAVE);
+      await settings(h, a);
+      await rename(a, 'Robin Vale');
+      await a.waitForFunction((k) => JSON.parse(localStorage.getItem(k) ?? 'null')?.profile?.playerName === 'Robin Vale', h.SAVE, { timeout: 10000 });
+      const { want, got } = limited(await saveOf(h, a), { ring: 4 }, 'rose');
+      h.expect(same(want, got), `after another tab added fields, records kept as stored were written another way: ${diff(want, got)}`);
+      h.expect(!errors.length, errors.join('\n'));
+      await ctx.close();
+    }
   },
 
   async 'newer-tabs-removals'(h) {
