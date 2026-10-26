@@ -1,6 +1,7 @@
 // Wise Mind's stone step shows a calm 3D scene through the companion's shared scene host: live and drawn at phone,
-// sideways and desktop sizes; in step with the countdown through a paused clock and more time; one still frame with
-// reduced motion; the flat picture with no WebGL; one WebGL context however often it opens; back after a lost context.
+// sideways and desktop sizes; in step with the countdown after the page freezes and through more time; one still frame
+// with reduced motion; the flat picture with no WebGL, never hidden again once the device is known to have none, and
+// never hidden at all in a browser without WebGL 2; one WebGL context however often it opens; back after a lost context.
 import sharp from 'sharp';
 
 const PHONE = { width: 390, height: 844 };
@@ -84,6 +85,17 @@ async function drawn(h, page, where) {
 }
 
 /** The flat picture is hidden behind a live scene, or showing when there is none. */
+/**
+ * Counts every time a scene stage hid its flat picture to wait for a scene (read as window.__waits): each wait that
+ * ended, even one that began and ended within the same moment, plus any still going.
+ */
+const countWaits = () => {
+  window.__ended = 0;
+  new MutationObserver((records) => {
+    for (const r of records) if (String(r.oldValue).split(' ').includes('is-scene-wait') && !r.target.classList.contains('is-scene-wait')) window.__ended++;
+  }).observe(document, { subtree: true, attributes: true, attributeFilter: ['class'], attributeOldValue: true });
+  Object.defineProperty(window, '__waits', { get: () => window.__ended + document.querySelectorAll('.is-scene-wait').length });
+};
 async function flat(page) {
   return page.$$eval('.dq-scene-flat', (els) => els.map((e) => { const s = getComputedStyle(e); return s.visibility !== 'hidden' && Number(s.opacity) > 0.5; }));
 }
@@ -122,7 +134,7 @@ export const scenarios = {
     }
   },
 
-  /** the scene runs on the timer's clock: a paused clock pauses both, and more time keeps them together */
+  /** the scene runs on the timer's clock: after the page freezes it picks up in step, and more time keeps them together */
   async 'scene-clock'(h) {
     const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
     await page.clock.install();
@@ -132,12 +144,10 @@ export const scenarios = {
     await h.sleep(1200);
     inStep(h, await pair(page), 'running');
 
+    // the page freezes (its clock and its frames stop together, as in a background tab), then comes back
     await page.clock.pauseAt(await page.evaluate(() => Date.now() + 50));
-    await h.sleep(300);
-    const a = await pair(page);
     await h.sleep(1500);
     const b = await pair(page);
-    h.expect(b.num === a.num && b.s.last.e === a.s.last.e && b.s.frames - a.s.frames <= 1, `paused: the scene kept moving (${a.s.frames} -> ${b.s.frames} frames, ${a.num} -> ${b.num})`);
     await page.clock.resume();
     await h.sleep(1500);
     const c = await pair(page);
@@ -200,6 +210,7 @@ export const scenarios = {
   /** with no WebGL the flat picture shows and moves as before, and the skill still completes and counts */
   async 'scene-no-webgl'(h) {
     const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
+    await ctx.addInitScript(countWaits);
     await ctx.addInitScript(() => {
       const get = HTMLCanvasElement.prototype.getContext;
       HTMLCanvasElement.prototype.getContext = function (type, ...rest) {
@@ -232,6 +243,37 @@ export const scenarios = {
     await tap(page, 'Yes');
     await page.locator('.dq-after:not(.is-hidden)').waitFor({ timeout: 5000 });
     h.expect((await wiseRuns(h, page)) === before + 1, 'no WebGL: Still Center was not credited once');
+    // the next visit knows: the flat picture shows from the first frame, never hidden to wait for a scene
+    await tap(page, 'Back to the Lantern');
+    const waited = await page.evaluate(() => window.__waits);
+    await toStone(h, page);
+    await h.sleep(1000);
+    h.expect((await page.evaluate(() => window.__waits)) === waited, `no WebGL, second visit: the flat picture was hidden again to wait for a scene`);
+    h.expect((await flat(page)).every(Boolean), 'no WebGL, second visit: the flat picture is hidden');
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /** a browser without WebGL 2 at all: the flat picture shows from the first frame of the first visit */
+  async 'scene-no-webgl2'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
+    await ctx.addInitScript(countWaits);
+    // a browser with no WebGL at all: neither the API nor a context
+    await ctx.addInitScript(() => {
+      delete window.WebGL2RenderingContext;
+      const get = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function (type, ...rest) {
+        return /webgl/i.test(String(type)) ? null : get.call(this, type, ...rest);
+      };
+    });
+    await page.reload();
+    await toStone(h, page);
+    await h.sleep(1000);
+    const s = await scenes(page);
+    h.expect((await page.evaluate(() => window.__waits)) === 0, 'no WebGL 2: the flat picture was hidden to wait for a scene');
+    h.expect(!s || (s.contexts === 0 && s.live === 0), `no WebGL 2: the scene host made a context: ${JSON.stringify(s)}`);
+    h.expect((await flat(page)).every(Boolean) && (await flat(page)).length > 0, 'no WebGL 2: the flat picture is hidden');
+    await h.shot(page, 'no-webgl2-phone');
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },

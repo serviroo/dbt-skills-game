@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { SCENE } from '../motion/tokens';
-import { sceneStats } from './stats';
+import { NO_WEBGL, sceneStats } from './stats';
 
 /**
  * One WebGL renderer for the companion's small 3D scenes, lent to one scene at a time. Its canvas moves into whichever
@@ -30,7 +30,7 @@ function create(): THREE.WebGLRenderer {
   const canvas = document.createElement('canvas');
   // asked for here first, so a device without WebGL 2 is a quiet "no" instead of an error from three.js
   const context = canvas.getContext('webgl2', { alpha: false, antialias: true, depth: true, stencil: false, premultipliedAlpha: true, preserveDrawingBuffer: false, powerPreference: 'default' });
-  if (!context) throw new Error('WebGL 2 is not available');
+  if (!context) throw Object.assign(new Error('WebGL 2 is not available'), { name: NO_WEBGL });
   const renderer = new THREE.WebGLRenderer({ canvas, context });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.AgXToneMapping;
@@ -57,9 +57,14 @@ function free() {
  * can't make a WebGL context.
  */
 export function lendRenderer(host: HTMLElement, onEvict: () => void): Lease {
-  if (shared?.renderer.getContext().isContextLost() && !shared.holder) {
-    window.clearTimeout(shared.idle);
-    drop(shared);
+  // a lost context is never lent: a scene still holding it stops, and a new renderer takes its place
+  if (shared?.renderer.getContext().isContextLost()) {
+    const s = shared;
+    const before = s.holder;
+    s.holder = null;
+    window.clearTimeout(s.idle);
+    before?.evict();
+    drop(s);
   }
   shared ??= { renderer: create(), holder: null, idle: 0 };
   const s = shared;
