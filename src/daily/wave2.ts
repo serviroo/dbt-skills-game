@@ -9,7 +9,7 @@ import { playerName } from '../core/you';
 import { CLASS_LINE, MOONFLOWER, TITLE_COPY, TITLES, type TitleId } from '../content/roster-lines';
 import type { App } from './app';
 import type { Store } from './store';
-import { h, typo } from './ui';
+import { h, radioKeys, typo } from './ui';
 import { plateClass } from './wardrobe';
 
 /** Every title the player has earned, oldest first, with when it was earned. Never shrinks: each rests on an event. */
@@ -63,7 +63,7 @@ export function wandererRows(app: App) {
   if (earned.length) {
     const cur = activeTitle(st)!;
     const label = h('span', { class: 'w2-title-t', text: TITLES[cur].name });
-    const list = h('div', { class: 'w2-title-list is-hidden', role: 'radiogroup', 'aria-label': TITLE_COPY.choose });
+    const list = radioKeys(h('div', { class: 'w2-title-list is-hidden', role: 'radiogroup', 'aria-label': TITLE_COPY.choose }), { manual: true });
     const toggleBtn = h('button', { type: 'button', class: 'w2-title-btn', 'aria-expanded': 'false', 'aria-label': `Title: ${TITLES[cur].name}. ${TITLE_COPY.choose}` }, label, h('span', { class: 'w2-title-chev', 'aria-hidden': 'true' }));
     const sync = () => {
       const now = activeTitle(st)!;
@@ -85,8 +85,10 @@ export function wandererRows(app: App) {
             st.touch('title');
             st.save();
             sync();
+            const inside = list.contains(document.activeElement);
             list.classList.add('is-hidden');
             toggleBtn.setAttribute('aria-expanded', 'false');
+            if (inside) toggleBtn.focus({ preventScroll: true });
           },
         }),
       );

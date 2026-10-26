@@ -11,7 +11,7 @@ import { artStore, revOf, type Draft, type DrawingMeta, type DrawingRec } from '
 import { canvasBlob, INKS, InkPad, PAGE, renderDrawing, SIZES, type Paper, type Stroke } from './ink';
 import { dayLabel } from './lines';
 import { uid } from './store';
-import { btn, chip, field, h, p, panel, shareOrSave, typo } from './ui';
+import { btn, chip, field, h, p, panel, radioKeys, shareOrSave, typo } from './ui';
 
 const store = (app: App) => artStore(app.store.key);
 const KEPT_APART = 'A newer copy of this drawing arrived, so this one was kept as its own page.';
@@ -371,7 +371,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
   const tools = h(
     'div',
     { class: 'dq-tools' },
-    h('div', { class: 'dq-tools-pick' }, h('div', { class: 'dq-inks', role: 'radiogroup', 'aria-label': 'Ink' }, inkBtns), h('div', { class: 'dq-sizes', role: 'radiogroup', 'aria-label': 'Size' }, sizeBtns)),
+    h('div', { class: 'dq-tools-pick' }, radioKeys(h('div', { class: 'dq-inks', role: 'radiogroup', 'aria-label': 'Ink' }, inkBtns)), radioKeys(h('div', { class: 'dq-sizes', role: 'radiogroup', 'aria-label': 'Size' }, sizeBtns))),
     acts,
     confirmRow,
     msg,
@@ -447,6 +447,13 @@ export function drawScreen(app: App, route: Route): ScreenOut {
 
   // ally: name it, then it rises
   const sheet = h('div', { class: 'dq-sheet is-hidden', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'dq-sheet-h' });
+  let nameDone: (() => void) | null = null;
+  const hideName = (focus: boolean) => {
+    sheet.classList.add('is-hidden');
+    nameDone?.();
+    nameDone = null;
+    if (focus) saveB.focus({ preventScroll: true });
+  };
   const nameSheet = () => {
     const f = field(ART.nameAsk, { value: rec?.name ?? '', placeholder: 'Shadow ally', max: 24, hideLabel: true, autocomplete: 'off' });
     const vi = app.store.visitIndex();
@@ -454,7 +461,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     const go = async () => {
       if (saving) return;
       const name = f.input.value.trim().slice(0, 24);
-      sheet.classList.add('is-hidden');
+      hideName(false);
       saving = true;
       const result = await persist(name || undefined).finally(() => (saving = false));
       if (!result) return;
@@ -475,15 +482,24 @@ export function drawScreen(app: App, route: Route): ScreenOut {
         p(ART.nameHint, 'dq-small'),
         f.el,
         h('div', { class: 'dq-opts dq-opts--names' }, ideas.map((n) => chip(n, () => ((f.input.value = n), f.input.focus())))),
-        h('div', { class: 'dq-actions' }, btn('Rise', () => void go(), { kind: 'primary' }), btn('Back to drawing', () => sheet.classList.add('is-hidden'), { kind: 'link' })),
+        h('div', { class: 'dq-actions' }, btn('Rise', () => void go(), { kind: 'primary' }), btn('Back to drawing', () => hideName(true), { kind: 'link' })),
       ),
     );
     sheet.classList.remove('is-hidden');
+    nameDone ??= app.sheet(() => hideName(true));
     if (!app.reduced()) animate(sheet.firstElementChild!, [{ opacity: 0, transform: 'translateY(16px)' }, { opacity: 1, transform: 'none' }], { duration: 380, easing: 'cubic-bezier(.16,1,.3,1)' });
     f.input.focus({ preventScroll: true });
   };
 
   const riseEl = h('div', { class: 'dq-rise is-hidden', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'A new shadow ally' });
+  let riseDone: (() => void) | null = null;
+  const hideRise = () => {
+    const inside = riseEl.contains(document.activeElement);
+    riseEl.classList.add('is-hidden');
+    riseDone?.();
+    riseDone = null;
+    if (inside) saveB.focus({ preventScroll: true });
+  };
   const rise = (saved: DrawingRec, xp: boolean) => {
     const art = renderDrawing(saved.strokes, 'ally', 720);
     art.className = 'dq-thumb';
@@ -505,13 +521,14 @@ export function drawScreen(app: App, route: Route): ScreenOut {
             const res = await saveImage(saved);
             riseMsg.textContent = savedText(res);
           }, { kind: 'quiet', ic: 'image' }),
-          btn('Keep drawing', () => riseEl.classList.add('is-hidden'), { kind: 'link' }),
+          btn('Keep drawing', hideRise, { kind: 'link' }),
         ),
         h('p', { class: 'dq-hint dq-rise-msg', 'aria-live': 'polite' }),
       ),
     );
     const riseMsg = riseEl.querySelector<HTMLElement>('.dq-rise-msg')!;
     riseEl.classList.remove('is-hidden');
+    riseDone ??= app.sheet(hideRise);
     app.sound('soft_chime');
     const still = app.reduced();
     const q = (s: string) => riseEl.querySelector<HTMLElement>(s)!;

@@ -8,7 +8,7 @@ import { RANKS } from '../content/daily-lines';
 import { playerName } from '../core/you';
 import type { App } from './app';
 import { cardBackSVG } from './art';
-import { h, panel } from './ui';
+import { h, panel, radioKeys } from './ui';
 import { icon } from './art';
 import type { Store } from './store';
 
@@ -146,15 +146,19 @@ function platePreview(id: string) {
 export function wardrobePanel(app: App) {
   const body = h('div', { class: 'w2-wardrobe' });
   const render = () => {
+    // a pick redraws the Wardrobe: focus stays on the look just picked
+    const on = body.contains(document.activeElement) ? { ...(document.activeElement as HTMLElement).dataset } : null;
     const group = (slot: Slot, title: string, pv: (id: string) => HTMLElement) =>
       h(
         'div',
         { class: `w2-wgroup w2-wgroup--${slot}` },
         h('h3', { class: 'dq-label w2-wgroup-t', text: title }),
-        h(
-          'div',
-          { class: 'w2-wopts', role: 'radiogroup', 'aria-label': title },
-          TABLE[slot].ids.map((id) => option(app, slot, id, pv(id), () => render())),
+        radioKeys(
+          h(
+            'div',
+            { class: 'w2-wopts', role: 'radiogroup', 'aria-label': title },
+            TABLE[slot].ids.map((id) => option(app, slot, id, pv(id), () => render())),
+          ),
         ),
       );
     body.replaceChildren(
@@ -164,6 +168,7 @@ export function wardrobePanel(app: App) {
       group('cardBack', WARDROBE_COPY.cardBack, backPreview),
       group('plate', WARDROBE_COPY.plate, platePreview),
     );
+    if (on?.slot) body.querySelector<HTMLElement>(`[data-slot="${on.slot}"][data-id="${on.id}"]`)?.focus({ preventScroll: true });
   };
   render();
   return panel({ title: WARDROBE_COPY.title, ic: icon('card'), cls: 'w2-wardrobe-p' }, body);

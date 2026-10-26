@@ -126,3 +126,9 @@ Every step is skippable. The lists are set up only when the player chooses to, a
 - Text contrast at least 4.5:1; body text sizes as above.
 - Nothing depends on sound.
 - Every control has a label a screen reader can read, and every tap target is at least 44 px.
+- Back and Forward (and a phone's back gesture) follow the companion. Back closes whatever is open on top first, and
+  coming back to a screen never credits it twice. Escape closes whatever is open on top too.
+- Every radio group is one Tab stop: arrow keys, Home and End move through it.
+- A hold ends when focus or the key leaves it, and never finishes later on its own.
+- The Safe Zone starts each screen at the top with "Talk to someone now" one Tab away, says each step politely to a
+  screen reader, and fits at 200% zoom on a 320 px phone.

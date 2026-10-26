@@ -1,7 +1,7 @@
 import { animate } from '../ui/anim';
 import { LOADOUT_COPY, MODULES, SKILL, type Answers, type Go, type Opt, type Step, type Txt } from '../content/dbt';
 import { SKILL_END } from '../content/daily-lines';
-import type { App, Route, ScreenOut } from './app';
+import type { App, Place, Route, ScreenOut, Visit } from './app';
 import { glyph, icon } from './art';
 import { isSkillId, uid } from './store';
 import { btn, chip, copyText, field, h, md, p, panel, segmented, typo } from './ui';
@@ -11,26 +11,62 @@ const tx = (t: Txt | undefined, a: Answers) => (t === undefined ? '' : typeof t 
 /** Long option labels read better as a stacked menu; short ones (Yes, Same, 5 min) stay inline. */
 const stackable = (labels: string[]) => labels.some((l) => l.length > 18) || (labels.length >= 3 && labels.reduce((n, l) => n + l.length, 0) / labels.length > 11);
 
-export function skillScreen(app: App, route: Route): ScreenOut {
+/**
+ * What a skill visit keeps when the player leaves it with Back or Forward, in memory only (never in history or
+ * storage). Coming back to the visit puts it all back, so nothing typed is lost and nothing is credited twice.
+ */
+export interface SkillKept {
+  answers: Answers;
+  /** per step, each field's [value as drawn, value as left]; put back only when the step draws the same value again */
+  typed: Record<number, [string, string][]>;
+  /** the end's "did this help" answer, so the end shows it answered */
+  fed: string | null;
+  /** the line shown above a step (a reply, "Saved on this device."), so it shows there again */
+  leads: Record<number, string>;
+}
+
+export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const r = route as Extract<Route, { name: 'skill' }>;
   const sk = SKILL[isSkillId(r.id) ? r.id : 'wise-mind'];
   const mod = MODULES[sk.module];
-  // opening a skill is practice: credited now, even if the player leaves on the first screen
-  app.store.skillEvent(sk.id);
-  const answers: Answers = {};
+  // opening a skill is practice: credited now, even if the player leaves on the first screen; coming back is not a second open
+  if (!visit.again) app.store.skillEvent(sk.id);
+  const kept = visit.again ? (visit.kept as SkillKept | undefined) : undefined;
+  const answers: Answers = { ...kept?.answers };
+  const typed: SkillKept['typed'] = { ...kept?.typed };
+  const leads: SkillKept['leads'] = { ...kept?.leads };
+  let fed = kept?.fed ?? null;
+  /** showing a place again for Back or Forward: it isn't marked, chimes or asks again */
+  let replaying = false;
   const stops: (() => void)[] = [];
   const ctx: Ctx = { sound: (c) => app.sound(c), reduced: () => app.reduced() };
   const stepsById = new Map<string, number>();
   sk.steps.forEach((s, i) => s.id && stepsById.set(s.id, i));
 
   const chipHead = h('header', { class: 'dq-chip' }, h('span', { class: 'dq-chip-ic', html: glyph(sk.module) }), h('h2', { class: 'dq-chip-t', text: typo(sk.sl) }), h('span', { class: 'dq-chip-sub', text: typo(sk.real) }));
+  /** The header says "Quest complete" on the end only: Back to a step shows the skill's own name again. */
+  const complete = (on: boolean) => {
+    chipHead.querySelector('.dq-chip-t')!.textContent = on ? 'Quest complete' : typo(sk.sl);
+    chipHead.querySelector('.dq-chip-sub')?.classList.toggle('is-hidden', on);
+    chipHead.querySelector('.dq-chip-ic')!.innerHTML = on ? icon('check') : glyph(sk.module);
+    box.classList.toggle('is-complete', on);
+  };
   const body = h('div', { class: 'dq-step-body' });
   const box = panel({ cls: `dq-stepbox dq-mod-${sk.module}` }, chipHead, body);
   const el = h('div', { class: 'dq-skill' }, h('h1', { class: 'dq-sr', text: `${sk.sl}: ${sk.real}` }), box);
   let lead = '';
   let idx = -1;
+  /** the step's fields as drawn, so what was typed in them comes back with the step */
+  let drawn: [HTMLInputElement | HTMLTextAreaElement, string][] = [];
+  const snap = () => {
+    if (idx < 0) return;
+    const t = drawn.map(([f, was]): [string, string] => [was, f.value]);
+    if (t.some(([was, now]) => was !== now)) typed[idx] = t;
+    else delete typed[idx];
+  };
 
   const clear = () => {
+    snap();
     stops.splice(0).forEach((f) => f());
     el.classList.remove('is-dim');
   };
@@ -51,6 +87,14 @@ export function skillScreen(app: App, route: Route): ScreenOut {
 
   const swap = (...kids: (Node | null)[]) => {
     body.replaceChildren(...kids.filter((k): k is Node => !!k));
+    drawn = [...body.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('textarea, input:not([type=range]):not([type=checkbox]):not([type=radio])')].map((f) => [f, f.value]);
+    drawn.forEach(([f, was], k) => {
+      const t = typed[idx]?.[k];
+      if (!t || t[0] !== was || t[1] === was) return;
+      f.value = t[1];
+      f.closest<HTMLElement>('.is-hidden')?.classList.remove('is-hidden');
+      f.dispatchEvent(new Event('input', { bubbles: true }));
+    });
     animate(body, app.reduced() ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], {
       duration: app.reduced() ? 180 : 360,
       easing: 'cubic-bezier(.16,1,.3,1)',
@@ -70,7 +114,11 @@ export function skillScreen(app: App, route: Route): ScreenOut {
 
   const head = (s: Step) => {
     const kids: Node[] = [];
-    if (lead) kids.push(h('p', { class: 'dq-lead', text: typo(lead) }));
+    if (!replaying) {
+      if (lead) leads[idx] = lead;
+      else delete leads[idx];
+    }
+    if (leads[idx]) kids.push(h('p', { class: 'dq-lead', text: typo(leads[idx]) }));
     lead = '';
     const title = tx(s.title, answers);
     if (title) kids.push(h('h3', { class: 'dq-step-t', 'data-focus': '', html: md(title) }));
@@ -85,7 +133,9 @@ export function skillScreen(app: App, route: Route): ScreenOut {
   function show(i: number): void {
     clear();
     idx = i;
+    if (box.classList.contains('is-complete')) complete(false);
     const s = sk.steps[i];
+    if (s.kind !== 'branch' && !replaying) visit.mark(i);
     const next = () => follow(s.go, i + 1);
     const titled = !!tx(s.title, answers);
     switch (s.kind) {
@@ -323,14 +373,20 @@ export function skillScreen(app: App, route: Route): ScreenOut {
         const from = answers[s.from];
         const items = (Array.isArray(from) ? from : typeof from === 'string' && from ? [from] : []).filter((x) => x !== 'Not this time');
         if (!items.length) return next();
+        // ranks already given in this visit come back with the step
         const ranks: Record<string, string> = {};
+        for (const x of Array.isArray(answers[s.key]) ? (answers[s.key] as string[]) : []) {
+          const cut = x.indexOf('|');
+          const [t, it] = [x.slice(0, cut), x.slice(cut + 1)];
+          if (cut > 0 && s.tiers.includes(t) && items.includes(it)) ranks[it] = t;
+        }
         const save = () => (answers[s.key] = items.filter((it) => ranks[it]).map((it) => `${ranks[it]}|${it}`));
         const rowsEl = items.map((it) =>
           h(
             'div',
             { class: 'dq-check ca-tier-row' },
             h('span', { class: 'dq-check-t', text: typo(it) }),
-            segmented(it, s.tiers, null, (v) => {
+            segmented(it, s.tiers, ranks[it] ?? null, (v) => {
               if (v === null) delete ranks[it];
               else ranks[it] = String(v);
               save();
@@ -412,7 +468,9 @@ export function skillScreen(app: App, route: Route): ScreenOut {
             if (v && !st.state.lists.comfort.some((c) => c.text === v)) st.state.lists.comfort.push({ id: uid(), text: v, at: st.now() });
           } else if (s.effect === 'saveMap') {
             const g = (k: string) => String(answers[k] ?? '').slice(0, 2000);
-            st.state.maps.push({ id: uid(), t: st.now(), urge: g('urge'), p1: g('p1'), c1: g('c1'), p2: g('p2'), c2: g('c2'), choice: g('mapChoice'), at: st.now() });
+            const m = { urge: g('urge'), p1: g('p1'), c1: g('c1'), p2: g('p2'), c2: g('c2'), choice: g('mapChoice') };
+            // Back to this step and Save again keeps the map already saved, as the comfort list does
+            if (!st.state.maps.some((x) => x.urge === m.urge && x.p1 === m.p1 && x.c1 === m.c1 && x.p2 === m.p2 && x.c2 === m.c2 && x.choice === m.choice)) st.state.maps.push({ id: uid(), t: st.now(), ...m, at: st.now() });
           }
           st.save();
           app.sound('check');
@@ -427,22 +485,24 @@ export function skillScreen(app: App, route: Route): ScreenOut {
   function showEnd(quiet = false) {
     clear();
     idx = sk.steps.length;
+    if (!replaying) visit.mark(quiet ? 'end:quiet' : 'end');
     if (!quiet) {
-      chipHead.querySelector('.dq-chip-t')!.textContent = 'Quest complete';
-      chipHead.querySelector('.dq-chip-sub')?.remove();
-      chipHead.querySelector('.dq-chip-ic')!.innerHTML = icon('check');
-      box.classList.add('is-complete');
-      app.sound('soft_chime');
+      complete(true);
+      if (!replaying) app.sound('soft_chime');
     }
     const reply = h('p', { class: 'dq-lead', 'aria-live': 'polite' });
     // a quiet end is the player saying "not now", so it doesn't offer a repeat; a repeat opens the same part they opened
     const again = quiet ? null : btn('Practise again', () => app.go({ name: 'skill', id: sk.id, entry: r.entry }, { replace: true }), { kind: 'quiet' });
-    const after = h('div', { class: 'dq-after is-hidden' }, h('div', { class: 'dq-actions dq-actions--stack' }, btn('Back to the Lantern', () => app.go({ name: 'hub' }), { kind: 'primary' }), again, btn('Another skill', () => app.go({ name: 'library' }), { kind: 'quiet' })));
-    const answer = (a: string) => {
-      app.store.add('feedback', 0, { skill: sk.id, data: { answer: a } });
+    const after = h('div', { class: 'dq-after is-hidden' }, h('div', { class: 'dq-actions dq-actions--stack' }, btn('Back to the Lantern', () => app.go({ name: 'hub' }), { kind: 'primary' }), again, btn('Another skill', () => app.go({ name: 'library' }, { replace: true }), { kind: 'quiet' })));
+    const answered = (a: string) => {
       reply.textContent = typo(SKILL_END.thanks[a]);
       ask.classList.add('is-hidden');
       after.classList.remove('is-hidden');
+    };
+    const answer = (a: string) => {
+      app.store.add('feedback', 0, { skill: sk.id, data: { answer: a } });
+      fed = a;
+      answered(a);
       after.querySelector<HTMLElement>('button')?.focus({ preventScroll: true });
     };
     const ask = h(
@@ -453,6 +513,7 @@ export function skillScreen(app: App, route: Route): ScreenOut {
       h('div', { class: 'dq-actions dq-actions--end' }, btn('Skip', () => answer('Skip'), { kind: 'link' })),
     );
     if (quiet) after.classList.remove('is-hidden');
+    else if (fed) answered(fed);
     swap(
       h('div', { class: 'dq-intro dq-intro--end' }, h('div', { class: 'dq-intro-name', 'data-focus': '', text: typo(sk.sl) }), h('div', { class: 'dq-intro-real', text: typo(sk.real) })),
       quiet ? h('p', { class: 'dq-text ca-quietend', text: typo(sk.loadout ? 'Not this time is a real answer. The move stays in your loadout.' : 'Not this time is a real answer. It keeps for another day.') }) : h('p', { class: 'dq-gain' }, h('span', { text: `${mod.statName} +1` }), h('span', { text: '+20 XP' })),
@@ -468,10 +529,25 @@ export function skillScreen(app: App, route: Route): ScreenOut {
     mode: 'skill',
     bubbles: [1.6, 0.6],
     leave: clear,
-    after: () => {
-      if (r.entry && stepsById.has(r.entry) && sk.steps[0].kind !== 'intro') show(stepsById.get(r.entry)!);
-      else show(0);
-      void idx;
+    // a revisit opens where the player was; a new visit, or one with no place yet, starts and marks the first step
+    after: () => open(visit.at, visit.again && visit.at !== undefined),
+    moveTo: (place) => open(place, true),
+    keep: (): SkillKept => {
+      snap();
+      return { answers: { ...answers }, typed: { ...typed }, fed, leads: { ...leads } };
     },
   };
+
+  /** Shows a place of this visit: a step number, 'end' or 'end:quiet'; none is where the skill starts. */
+  function open(place: Place | undefined, replay: boolean) {
+    replaying = replay;
+    try {
+      if (place === 'end' || place === 'end:quiet') showEnd(place === 'end:quiet');
+      else if (typeof place === 'number' && sk.steps[place]) show(place);
+      else if (r.entry && stepsById.has(r.entry) && sk.steps[0].kind !== 'intro') show(stepsById.get(r.entry)!);
+      else show(0);
+    } finally {
+      replaying = false;
+    }
+  }
 }

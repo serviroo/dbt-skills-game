@@ -633,10 +633,13 @@ export function writeScreen(app: App, route: Route): ScreenOut {
 
   // ---------- chapter sheet ----------
   let sheet: HTMLElement | null = null;
+  let sheetDone: (() => void) | null = null;
   const closeSheet = () => {
     if (!sheet) return;
     sheet.remove();
     sheet = null;
+    sheetDone?.();
+    sheetDone = null;
     if (chBtn.isConnected) chBtn.focus({ preventScroll: true });
   };
   const openChapters = async () => {
@@ -754,6 +757,7 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     });
     await render();
     el.append(wrap);
+    sheetDone = app.sheet(closeSheet);
     if (!app.reduced()) animate(body, [{ opacity: 0, transform: 'translateY(16px)' }, { opacity: 1, transform: 'none' }], { duration: 280, easing: 'cubic-bezier(.16,1,.3,1)' });
     list.querySelector<HTMLElement>('[aria-current="true"]')?.focus({ preventScroll: true });
   };
@@ -788,7 +792,10 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     const slug = titleIn.value.normalize('NFKD').replace(/[^\w\s-]/g, '').trim().toLowerCase().replace(/[\s_-]+/g, '-').slice(0, 60) || 'story';
     return { text: `${parts.join('\n').replace(/\s+$/, '')}\n`, name: `${slug}.txt` };
   };
+  let menuDone: (() => void) | null = null;
   const closeMenu = (focus = false) => {
+    menuDone?.();
+    menuDone = null;
     menu.classList.add('is-hidden');
     moreBtn.setAttribute('aria-expanded', 'false');
     if (focus) moreBtn.focus({ preventScroll: true });
@@ -807,6 +814,7 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     prepared = storyText();
     menu.classList.remove('is-hidden');
     moreBtn.setAttribute('aria-expanded', 'true');
+    menuDone = app.sheet(() => closeMenu(true));
     menu.querySelector<HTMLElement>('.st-menu-i')?.focus({ preventScroll: true });
   });
   on(document, 'pointerdown', (e) => {
@@ -943,9 +951,11 @@ export function writeScreen(app: App, route: Route): ScreenOut {
   // ---------- co-writer panel ----------
   const wide = matchMedia('(min-width: 1100px)');
   let cwOpen = false;
+  let cwDone: (() => void) | null = null;
   const openCw = () => {
     if (wide.matches) return modeBtns[0].focus();
     cwOpen = true;
+    cwDone = app.sheet(closeCw);
     cw.classList.add('is-open');
     cw.setAttribute('role', 'dialog');
     cw.setAttribute('aria-modal', 'false');
@@ -957,6 +967,8 @@ export function writeScreen(app: App, route: Route): ScreenOut {
   const closeCw = () => {
     if (!cwOpen) return;
     cwOpen = false;
+    cwDone?.();
+    cwDone = null;
     cw.classList.remove('is-open');
     cw.removeAttribute('role');
     cw.removeAttribute('aria-modal');
@@ -964,15 +976,11 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     el.classList.remove('is-cw-open');
     cwBtn.focus({ preventScroll: true });
   };
-  on(document, 'keydown', (e) => {
-    if ((e as KeyboardEvent).key !== 'Escape') return;
-    if (sheet) return closeSheet();
-    if (!menu.classList.contains('is-hidden')) return closeMenu(true);
-    if (cwOpen) closeCw();
-  });
   on(wide, 'change', () => {
     if (wide.matches && cwOpen) {
       cwOpen = false;
+      cwDone?.();
+      cwDone = null;
       cw.classList.remove('is-open');
       el.classList.remove('is-cw-open');
     }

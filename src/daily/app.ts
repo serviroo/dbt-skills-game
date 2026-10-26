@@ -37,6 +37,22 @@ export type Route =
   | { name: 'ease'; next?: Next }
   | { name: 'moment'; then?: string };
 
+/** Where a screen stands inside one visit: a skill's step number, or a named spot such as 'end'. */
+export type Place = number | string;
+
+/**
+ * One visit to a screen, as Back and Forward see it. `again` is true when the player comes back to a visit already
+ * made (Back, Forward, the Lantern button): nothing is credited a second time. `kept` is what the screen's keep() gave
+ * when the player last left this visit, held in memory only. `at` is the place to open on. The screen calls
+ * mark(place) when the player moves to a new place inside it, so Back steps back through those places.
+ */
+export interface Visit {
+  again: boolean;
+  kept?: unknown;
+  at?: Place;
+  mark(place: Place): void;
+}
+
 export interface ScreenOut {
   el: HTMLElement;
   title: string;
@@ -49,8 +65,30 @@ export interface ScreenOut {
   after?: () => void;
   /** The Safe Zone is opening: stop this screen's own sound at once (leave still follows). */
   silence?: () => void;
+  /** What this visit keeps for Back and Forward (answers, typed text). Memory only: never in history or storage. */
+  keep?: () => unknown;
+  /** Back or Forward moved inside this visit: show that place without marking it again. */
+  moveTo?: (place: Place | undefined) => void;
 }
-export type ScreenFn = (app: App, route: Route) => ScreenOut;
+export type ScreenFn = (app: App, route: Route, visit: Visit) => ScreenOut;
+
+/** One of the companion's entries in the browser's history: a route and a place, never anything typed. */
+interface Entry {
+  dq: 1;
+  /** position from the companion's first entry, which is always Home */
+  i: number;
+  /** one visit to a screen; its places and anything open over it share the key */
+  key: string;
+  route: Route;
+  place?: Place;
+  /** a window, sheet, menu or panel open over the screen */
+  sheet?: true;
+}
+const HOME: Entry = { dq: 1, i: 0, key: 'home', route: { name: 'hub' } };
+const isEntry = (s: unknown): s is Entry => !!s && typeof s === 'object' && (s as Entry).dq === 1 && Number.isInteger((s as Entry).i) && !!(s as Entry).route;
+/** Rooms a move goes back to when they are already behind the player, so moving around never grows history. */
+const ROOMS = new Set<Route['name']>(['library', 'art', 'stories', 'shadows', 'settings', 'diary', 'comfort', 'lines', 'safe', 'rest']);
+const same = (a: Route, b: Route) => JSON.stringify(a) === JSON.stringify(b);
 
 export interface DailyOpts {
   onReplay(): void;
@@ -75,7 +113,18 @@ export class App {
   /** keeps --dq-top and --dq-foot at the pinned bars' real heights (scroll-padding in daily.css) */
   private pins: ResizeObserver;
   route: Route = { name: 'hub' };
-  private stack: Route[] = [];
+  /** The companion's history entries from Home at 0, forward ones included; `at` is the one the player is on. */
+  private trail: Entry[] = [HOME];
+  private at = 0;
+  private visitKey = HOME.key;
+  private keyN = 0;
+  /** What each visit kept when the player left it, by visit key, in memory only. */
+  private kept = new Map<string, unknown>();
+  /** What is open over the screen, lowest first, each on its own history entry. */
+  private sheets: { i: number; close(): void }[] = [];
+  /** History calls wait while a history.go() is on its way; the popstate it brings is ours, not a Back press. */
+  private travelling = false;
+  private queue: (() => void)[] = [];
   private current: ScreenOut | null = null;
   private offs: (() => void)[] = [];
   /** numbers already shown on the status panel, so new gains count up once */
@@ -133,6 +182,17 @@ export class App {
     document.addEventListener('visibilitychange', vis);
     this.offs.push(() => document.removeEventListener('visibilitychange', vis));
     this.offs.push(onClear({ clear: () => this.afterClear() }));
+    const pop = (e: PopStateEvent) => this.popped(e.state);
+    window.addEventListener('popstate', pop);
+    this.offs.push(() => window.removeEventListener('popstate', pop));
+    // Escape closes what is open on top, like Back; a sheet that handles its own Escape stops it first
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented || !this.sheets.length) return;
+      e.preventDefault();
+      this.closeTop();
+    };
+    window.addEventListener('keydown', esc);
+    this.offs.push(() => window.removeEventListener('keydown', esc));
   }
 
   /** This game's data is being cleared (here or in another tab): windows close and every screen but the Safe Zone shows it. */
@@ -181,6 +241,18 @@ export class App {
   start() {
     const day = this.store.openDay();
     this.lastDay = this.store.today();
+    // Home is always the companion's first history entry. Opened again on a later one (a reload, the intro replayed),
+    // it goes back to that first entry: the page opens on Home and nothing is credited again.
+    const s: unknown = history.state;
+    if (isEntry(s) && s.i > 0) {
+      this.travelling = true;
+      try {
+        history.go(-s.i);
+      } catch {
+        this.travelling = false;
+      }
+    }
+    this.write('replace', HOME);
     this.greeting = true;
     this.go({ name: 'hub' }, { replace: true });
     this.greeting = false;
@@ -275,9 +347,16 @@ export class App {
     w.root.tabIndex = -1;
     void w.open();
     w.root.focus({ preventScroll: true });
+    // Back and Escape close it the usual way, with nothing chosen
+    let shut = false;
+    const done = this.sheet(() => {
+      shut = true;
+      w.cancel();
+    });
     const v = await w.waitForInput();
+    done();
     drop();
-    if (v !== DISMISSED) {
+    if (v !== DISMISSED || shut) {
       void w.close();
       if (before?.isConnected && !this.root.contains(document.activeElement)) before.focus({ preventScroll: true });
       await wait(this.reduced() ? 0.25 : 0.45);
@@ -342,22 +421,181 @@ export class App {
     });
   }
 
+  /** A move inside the companion. `replace` swaps the visit for a new one; `replace` with `quiet` redraws it. */
   go(route: Route, o: { replace?: boolean; quiet?: boolean } = {}) {
     if (!Object.prototype.hasOwnProperty.call(this.screens, route.name)) route = { name: 'hub' };
     // after clearing, Settings shows how it went; only the Safe Zone opens as ever
+    if (cleared() && route.name !== 'safe') route = { name: 'settings' };
+    this.show(route, { again: false, key: this.record(route, o) }, o);
+  }
+
+  /** Mirrors a move in the browser's history and returns the key of the visit it opens. */
+  private record(route: Route, o: { replace?: boolean; quiet?: boolean }) {
+    if (!this.current) return this.visitKey;
+    if (route.name === 'hub') {
+      if (this.route.name !== 'hub') {
+        this.closeSheets();
+        this.travel(0);
+      }
+      return HOME.key;
+    }
+    if (o.replace && o.quiet && route.name === this.route.name) return this.visitKey;
+    const fresh = () => `v${Date.now().toString(36)}${++this.keyN}`;
+    // what is open over the screen goes first, so the next screen takes its entry instead of stacking past it
+    if (this.sheets.length) {
+      const under = this.sheets[0].i - 1;
+      this.closeSheets();
+      this.travel(under);
+    }
+    const first = this.firstOfVisit();
+    if (ROOMS.has(route.name)) {
+      if (route.name === this.route.name && !o.replace) return same(route, this.route) ? this.visitKey : this.write('replace', { dq: 1, i: this.at, key: fresh(), route }).key;
+      for (let j = first - 1; j > 0; j--) {
+        const e = this.trail[j];
+        if (!e || e.sheet || e.route.name !== route.name) continue;
+        this.travel(j);
+        return same(route, e.route) ? e.key : this.write('replace', { ...e, key: fresh(), route, place: undefined }).key;
+      }
+    }
+    // a new visit in place of this one (Practise again, a skill that leads to another) drops this visit's places too
+    if (o.replace && first > 0) this.travel(first - 1);
+    return this.write('push', { dq: 1, i: this.at + 1, key: fresh(), route }).key;
+  }
+
+  /** Where the visit the player is on began: its places and anything open over it come after. */
+  private firstOfVisit() {
+    let f = this.at;
+    while (f > 0 && this.trail[f - 1]?.key === this.visitKey) f--;
+    return f;
+  }
+
+  private write(how: 'push' | 'replace', e: Entry) {
+    if (how === 'push') {
+      this.trail.splice(e.i, Infinity, e);
+      const live = new Set(this.trail.map((t) => t.key));
+      for (const k of this.kept.keys()) if (!live.has(k) && k !== this.visitKey) this.kept.delete(k);
+    } else this.trail[e.i] = e;
+    this.at = e.i;
+    this.later(() => {
+      try {
+        if (how === 'push') history.pushState(e, '');
+        else history.replaceState(e, '');
+      } catch {
+        /* Safari limits how often history changes: the screen is right, Back just has one stop fewer */
+      }
+    });
+    return e;
+  }
+
+  /**
+   * Moves through history to an entry already there, with no screen change of its own. Never before Home, the
+   * companion's first entry: nothing before it is ours, and a step past the start of history never brings a popstate.
+   */
+  private travel(to: number) {
+    to = Math.max(0, to);
+    const by = to - this.at;
+    this.at = to;
+    if (!by) return;
+    this.later(() => {
+      this.travelling = true;
+      try {
+        history.go(by);
+      } catch {
+        this.travelling = false;
+      }
+    });
+  }
+
+  private later(call: () => void) {
+    if (this.travelling) this.queue.push(call);
+    else call();
+  }
+
+  private popped(state: unknown) {
+    if (this.travelling) {
+      this.travelling = false;
+      while (!this.travelling && this.queue.length) this.queue.shift()!();
+      return;
+    }
+    if (isEntry(state)) this.arrive(state);
+  }
+
+  /** The player pressed Back or Forward (or the phone's back gesture) and history now stands on `s`. */
+  private arrive(s: Entry) {
+    const from = this.at;
+    this.trail[s.i] = s;
+    this.at = s.i;
+    this.closeSheets(s.i);
+    if (s.sheet && !this.sheets.some((x) => x.i === s.i)) {
+      // a sheet closed some other way left its entry: step over it the way the player was going
+      if (s.i > from) return this.travel(from);
+      let to = s.i - 1;
+      while (to > 0 && this.trail[to]?.sheet) to--;
+      this.travel(Math.max(0, to));
+      return this.land(this.trail[this.at] ?? HOME);
+    }
+    if (!s.sheet) this.land(s);
+  }
+
+  private land(e: Entry) {
+    if (e.key === this.visitKey) return this.current?.moveTo?.(e.place);
+    this.show(e.route, { again: true, key: e.key, at: e.place });
+  }
+
+  /** Marks a new place inside the visit on screen; a place already in this visit is gone back to, so loops don't stack. */
+  private mark(key: string, place: Place) {
+    const cur = this.trail[this.at];
+    if (key !== this.visitKey || this.sheets.length || !cur || cur.sheet || cur.key !== key || cur.place === place) return;
+    if (cur.place === undefined) return void this.write('replace', { ...cur, place });
+    for (let j = this.at - 1; j > 0 && this.trail[j]?.key === key; j--) if (this.trail[j].place === place) return this.travel(j);
+    this.write('push', { ...cur, i: this.at + 1, place });
+  }
+
+  /**
+   * Something opens over the screen (a window, a sheet, a menu, a panel): Back and Escape close it before anything
+   * else, calling `close`. Call the returned done() when it closes any other way.
+   */
+  sheet(close: () => void): () => void {
+    const cur = this.trail[this.at] ?? HOME;
+    const s = { i: this.at + 1, close };
+    this.sheets.push(s);
+    this.write('push', { dq: 1, i: s.i, key: this.visitKey, route: cur.route, place: cur.place, sheet: true });
+    return () => {
+      const k = this.sheets.indexOf(s);
+      if (k < 0) return;
+      this.sheets.splice(k, 1);
+      if (this.at === s.i) this.travel(s.i - 1);
+    };
+  }
+
+  private closeSheets(above = -1) {
+    while (this.sheets.length && this.sheets[this.sheets.length - 1].i > above) this.sheets.pop()!.close();
+  }
+
+  private closeTop() {
+    const s = this.sheets.pop();
+    if (!s) return;
+    s.close();
+    if (this.at === s.i) this.travel(s.i - 1);
+  }
+
+  /** Draws a screen. Every way in (a tap, Back, Forward, the Lantern button) comes through here. */
+  private show(route: Route, v: { again: boolean; key: string; at?: Place }, o: { quiet?: boolean } = {}) {
+    // Back, Forward and the Lantern button after clearing land on Settings too; only the Safe Zone opens as ever
     if (cleared() && route.name !== 'safe') route = { name: 'settings' };
     const safe = route.name === 'safe';
     const wasSafe = this.route.name === 'safe';
     const fromSkill = this.route.name === 'skill';
     if (safe) this.clearForSafe();
-    if (!o.replace && this.current) this.stack.push(this.route);
-    if (route.name === 'hub') this.stack = [];
+    if (this.current?.keep) this.kept.set(this.visitKey, this.current.keep());
     this.current?.leave?.();
     if (this.current?.foot) this.pins.unobserve(this.current.foot);
     if (route.name !== 'hub') this.toastEl.classList.remove('is-on');
     this.route = route;
+    const key = v.key;
+    this.visitKey = key;
     if (safe !== wasSafe) this.quietScore(safe);
-    const out = this.screens[route.name](this, route);
+    const out = this.screens[route.name](this, route, { again: v.again, kept: v.again ? this.kept.get(key) : undefined, at: v.at, mark: (p) => this.mark(key, p) });
     this.current = out;
     this.root.style.setProperty('--dq-foot', '0px');
     if (out.foot) this.pins.observe(out.foot);
@@ -399,9 +637,15 @@ export class App {
     }
   }
 
+  /** The Lantern button, a moment's Done, a removed story: back to where the player was before this visit. */
   back() {
-    const prev = this.stack.pop();
-    this.go(prev ?? { name: 'hub' }, { replace: true });
+    let to = this.firstOfVisit() - 1;
+    while (to > 0 && this.trail[to]?.sheet) to--;
+    const e = this.trail[to];
+    if (to <= 0 || !e) return this.go({ name: 'hub' });
+    this.closeSheets();
+    this.travel(to);
+    this.show(e.route, { again: true, key: e.key, at: e.place });
   }
 
   private renderTop(out: ScreenOut) {
