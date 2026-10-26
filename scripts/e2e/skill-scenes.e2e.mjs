@@ -789,26 +789,30 @@ export const scenarios = {
       await page.reload();
       // the clock waits on the ride's first moment, however slowly the page got there, so its start can be seen
       await toStep(h, page, 'urge-surf', 'ride', { pause: true });
-      // its first frame is posed at that moment; it shows once that frame is drawn, which needs the clock running
-      for (const t0 = Date.now(); !(await scenes(page))?.frames; ) {
-        if (Date.now() - t0 > 15000) throw new Error(`wave ${tag}: the scene never drew its first frame`);
-        await h.sleep(100);
+      // it shows once its first frame is drawn, which it looks for on animation frames: the stopped clock is stepped a
+      // frame at a time until then, so the ride starts from where the scene first shows however long the GPU took
+      for (const t0 = Date.now(); !(await page.locator('.dq-timer-stage.is-scene-live').count()); ) {
+        if (Date.now() - t0 > 30000) {
+          await h.shot(page, `fail-wave-${tag}`);
+          throw new Error(`wave ${tag}: the 3D scene never came on screen`);
+        }
+        await page.clock.runFor(16);
       }
       const first = (await scenes(page)).last;
       await page.clock.resume();
-      await live(h, page, `wave ${tag}`);
       await h.sleep(1200);
       await looks(h, page, tag, 'wave', vp);
       const seen = [first, await after(h, page, 0)];
       while (seen[seen.length - 1].probe.t < 34) seen.push(await after(h, page, 2500));
       const at = (a, b) => seen.filter((x) => x.probe.t >= a && x.probe.t <= b).map((x) => x.probe.board);
       const [start, crest, past] = [at(0, 4), at(12, 18), at(26, 34)];
-      h.expect(start.length && Math.max(...start) < 0.15, `wave ${tag}: the board is not low at the start: ${start}`);
-      h.expect(crest.length && Math.max(...crest) > 0.3, `wave ${tag}: the board never rose on the first crest: ${crest}`);
-      h.expect(past.length && Math.min(...past) < 0.15, `wave ${tag}: the board did not come back down after the crest: ${past}`);
+      const ride = seen.map((x) => `${x.probe.t.toFixed(1)}s ${x.probe.board.toFixed(2)}`).join(', ');
+      h.expect(start.length && Math.max(...start) < 0.15, `wave ${tag}: the board is not low at the start: ${ride}`);
+      h.expect(crest.length && Math.max(...crest) > 0.3, `wave ${tag}: the board never rose on the first crest: ${ride}`);
+      h.expect(past.length && Math.min(...past) < 0.15, `wave ${tag}: the board did not come back down after the crest: ${ride}`);
       const off = seen.filter((x) => Math.abs(x.probe.gap - 0.012) > 0.002);
       h.expect(!off.length, `wave ${tag}: the board left the surface at ${off.map((x) => x.probe.t.toFixed(1))}`);
-      console.log(`  wave ${tag}: board ${seen.map((x) => `${x.probe.t.toFixed(0)}s ${x.probe.board.toFixed(2)}`).join(', ')}`);
+      console.log(`  wave ${tag}: board ${ride}`);
       if (tag === 'phone') await keepsTime(h, page, 'wave');
       h.expect(!errors.length, errors.join('\n'));
       await ctx.close();
