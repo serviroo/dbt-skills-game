@@ -1332,6 +1332,7 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     title: STORY.title,
     mode: 'sub',
     bubbles: [0.9, 0.45],
+    foot: dock,
     // the screen's entry animation holds an identity transform, which would pin the fixed sheets to this element
     after: () => el.getAnimations().forEach((a) => void a.finished.then(() => a.cancel()).catch(() => undefined)),
     leave: () => {

@@ -1911,3 +1911,16 @@ export const SAFE = {
   close: ['This is here any time, on every screen.', "Go do your thing. This'll be here whenever."],
 };
 
+/** "Copy your lists", on Comfort and in the Safe Zone. */
+export const LISTS_COPY = {
+  open: 'Copy your lists',
+  therapist: 'For your therapist, if you want.',
+  local: 'Your lists as plain text. Nothing is uploaded, and sharing them is up to you.',
+  empty: 'Nothing in your lists yet.',
+  copy: 'Copy',
+  copied: 'Copied.',
+  failed: "Copying didn't work here. Select the text above to copy it.",
+  close: 'Close',
+  heads: { reasons: 'Things that are yours', comfort: 'Comfort kit', activities: 'Go-to activities', people: 'People' },
+};
+

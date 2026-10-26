@@ -8,8 +8,9 @@
 //   ref      aria-labelledby or aria-describedby naming an id that no element has
 //   hidden   a control a player can tab to that aria-hidden keeps from screen readers
 // Controls and images count when they are rendered, even see-through, since a screen reader still reads them. The
-// Safe Zone, the Save Crystal panel and the install hint are left out, as in layout-fit. Screens in ENFORCED fail the
-// run; every other screen passes and lists its problems on stdout and under `result` in report.json, as the todo list.
+// Safe Zone, the Save Crystal panel and the install hint are left out (layout-fit checks the Safe Zone too). Screens
+// in ENFORCED fail the run; every other screen passes and lists its problems on stdout and under `result` in
+// report.json, as the todo list.
 import { PAGE, SCREENS, SKIP, WALK, boot, forward, settle } from './layout-fit.e2e.mjs';
 
 const ENFORCED = ['home', 'skill', 'library', 'moment', 'diary', 'night-watch', 'wardrobe', 'art', 'draw', 'stories', 'write', 'settings', 'shadows'];

@@ -19,7 +19,9 @@ import { inventorySection, rosterSection, brambleNap } from './roster';
 import { wardrobePanel } from './wardrobe';
 import { DEFAULT_COMPANION, DEFAULT_NAME } from '../core/you';
 import { BESIDE } from '../core/stored-names';
+import { mayMentionTherapist } from '../core/session';
 import { exportPreferences, readCrystal, restorePreferences, type Peek } from './crystal';
+import { supportListsCopy } from './support-lists';
 
 const pageHead = (title: string, sub?: string) => h('header', { class: 'dq-pagehead' }, h('h1', { class: 'dq-h1', 'data-focus': '', text: title }), sub ? p(sub, 'dq-text dq-pagesub') : null);
 
@@ -498,7 +500,7 @@ export function diaryScreen(app: App): ScreenOut {
   refresh();
   const exportPanel = panel(
     { title: 'Export', ic: icon('export'), cls: 'dq-export' },
-    p('For your therapist, if you want. Plain text, and it only leaves this device if you send it.', 'dq-text'),
+    p(`${mayMentionTherapist() ? 'For your therapist, if you want. ' : ''}Plain text, and it only leaves this device if you send it.`, 'dq-text'),
     h('div', { class: 'dq-pace' }, h('span', { class: 'dq-label', text: 'Range' }), segmented('Range', [7, 14, 30], 7, (v) => {
       range = Number(v ?? 7);
       refresh();
@@ -699,10 +701,12 @@ export function comfortScreen(app: App): ScreenOut {
         ),
       )
     : null;
+  const lists = supportListsCopy(app);
   const el = h(
     'div',
     { class: 'dq-page dq-comfort' },
     pageHead('Comfort', 'Your own lists. They show up in the Safe Zone and in skills, right when you need them.'),
+    h('div', { class: 'dq-lists-row' }, lists.open, lists.box),
     h(
       'div',
       { class: 'dq-comfort-grid' },
@@ -713,7 +717,7 @@ export function comfortScreen(app: App): ScreenOut {
       mapsPanel,
     ),
   );
-  return { el, title: 'Comfort', mode: 'sub' };
+  return { el, title: 'Comfort', mode: 'sub', leave: lists.dispose };
 }
 
 // ---------------- Settings ----------------
@@ -935,7 +939,7 @@ export function settingsScreen(app: App): ScreenOut {
     status.textContent =
       r === 'big' ? 'That file is too big to be a Save Crystal. Nothing changed.' : r === 'unread' ? "That file couldn't be read. Nothing changed." : "That file doesn't look like a Save Crystal from this app. Nothing changed.";
   });
-  const showTherapist = !s.flags.therapistLineShown;
+  const showTherapist = !s.flags.therapistLineShown && mayMentionTherapist();
   if (showTherapist) {
     s.flags.therapistLineShown = true;
     st.save();

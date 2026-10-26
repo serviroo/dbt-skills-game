@@ -125,14 +125,6 @@
 }
 
 /* ---------- Safe Zone: lights up beside the dim default ---------- */
-.dq-sz-foot {
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 6px;
-}
-.dq-sz-foot .dq-sz-talk {
-  padding: 0 8px;
-}
 .ca-sz-light {
   display: inline-flex;
   flex: none;
@@ -193,13 +185,19 @@
 .dq-safezone.is-lit .dq-sz-t {
   color: #ffffff;
 }
-.dq-safezone.is-lit .dq-sz-foot {
-  background: linear-gradient(0deg, rgba(48, 72, 102, 0.97) 60%, rgba(48, 72, 102, 0));
+/* held sideways the page scrolls under the pinned foot (upright nothing does, and it has no backdrop) */
+@media (orientation: landscape) and (max-height: 500px) and (min-width: 540px) {
+  .dq-safezone.is-lit .dq-sz-foot {
+    background: linear-gradient(0deg, rgba(48, 72, 102, 0.97) 60%, rgba(48, 72, 102, 0));
+  }
+  .dq-safezone.is-lit .dq-sz-foot.is-top {
+    background: linear-gradient(180deg, rgba(48, 72, 102, 0.97) 60%, rgba(48, 72, 102, 0));
+  }
 }
 .dq-safezone.is-lit .dq-sz-talk {
   color: #ffffff;
 }
-.dq-safezone.is-lit .ca-sz-light {
+.dq.ca-szlit .ca-sz-light {
   background: rgba(70, 100, 136, 0.8);
   border-color: rgba(220, 238, 252, 0.6);
   color: #ffffff;
