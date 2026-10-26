@@ -313,8 +313,9 @@ function stored(s: State) {
 }
 /**
  * Takes what another copy kept from a newer build (see Kept), and the fields it holds that this build doesn't read.
- * A field both hold keeps this copy's value unless theirs wins: the stored copy when folding in another tab (this
- * build never changes them, so the latest write has the latest), the newer save version when restoring a Crystal.
+ * A field (or an event of a kind this build can't read) both hold keeps this copy's value unless theirs wins: the
+ * stored copy when folding in another tab (this build never changes them, so the latest write has the latest), the
+ * newer save version when restoring a Crystal.
  */
 function adoptKept(into: State, from: State, theirsWin: boolean) {
   const put = (dst: object, entries: [string, unknown][]) => {
@@ -336,11 +337,60 @@ function adoptKept(into: State, from: State, theirsWin: boolean) {
   const have = new Set(a.dropped.lines.map((x) => JSON.stringify(x)));
   for (const x of b.dropped.lines) if (!have.has(JSON.stringify(x))) a.dropped.lines.push(x);
   put(a.days, Object.entries(b.days));
-  const ids = new Set([...into.events.map((e) => e.id), ...a.events.map((e) => e.id)]);
+  const known = new Set(into.events.map((e) => e.id));
+  const at = new Map(a.events.map((e, i) => [e.id as string, i]));
   for (const e of b.events) {
-    if (ids.has(e.id as string)) continue;
-    ids.add(e.id as string);
-    a.events.push(e);
+    const id = e.id as string;
+    if (known.has(id)) continue;
+    const i = at.get(id);
+    if (i === undefined) {
+      at.set(id, a.events.length);
+      a.events.push(e);
+    } else if (theirsWin) a.events[i] = e;
+  }
+}
+/** Where each thing a copy keeps for a newer build lives (see Kept), so a later stored copy shows which it removed. */
+const KEPT_MAPS = { p: 'profile', pa: 'profileAt', sa: 'setAt', n: 'names', d: 'days', l: 'lists' } as const;
+function keptKeys(s: State): Set<string> {
+  const out = new Set<string>();
+  for (const [k] of extrasOf(s)) out.add(`x:${k}`);
+  for (const [k] of restOf(s.settings, SETTINGS_KEYS)) out.add(`s:${k}`);
+  for (const [k] of restOf(s.flags, FLAG_KEYS)) out.add(`f:${k}`);
+  const kp = s[KEPT];
+  if (!kp) return out;
+  for (const [p, f] of Object.entries(KEPT_MAPS)) for (const k of Object.keys(kp[f])) out.add(`${p}:${k}`);
+  for (const t of kp.titles) out.add(`t:${JSON.stringify(t)}`);
+  for (const e of kp.events) out.add(`e:${String(e.id)}`);
+  for (const [list, l] of Object.entries(kp.dropped)) for (const x of l) out.add(`r:${list}:${recordKey(list, x)}`);
+  for (const [name, l] of Object.entries(kp.lists)) if (Array.isArray(l)) for (const x of l) out.add(`lr:${JSON.stringify([name, recordKey(name, x)])}`);
+  return out;
+}
+/** A kept record's identity: its id, else its whole stored form. A line's id says which line it is, not which record, so lines go by form. */
+const recordKey = (list: string, x: unknown) => (list !== 'lines' && rawId(x)) || JSON.stringify(x);
+/** Removes what keptKeys named from a copy: a newer build removed them since this copy last read the save. */
+function forget(s: State, keys: string[]) {
+  const kp = s[KEPT];
+  const drop = (o: object, k: string) => void delete (o as Record<string, unknown>)[k];
+  for (const key of keys) {
+    const at = key.indexOf(':');
+    const kind = key.slice(0, at), name = key.slice(at + 1);
+    if (kind === 'x') drop(s, name);
+    else if (kind === 's') drop(s.settings, name);
+    else if (kind === 'f') drop(s.flags, name);
+    else if (!kp) continue;
+    else if (kind in KEPT_MAPS) drop(kp[KEPT_MAPS[kind as keyof typeof KEPT_MAPS]], name);
+    else if (kind === 't') kp.titles = kp.titles.filter((t) => JSON.stringify(t) !== name);
+    else if (kind === 'e') kp.events = kp.events.filter((e) => String(e.id) !== name);
+    else if (kind === 'r') {
+      const cut = name.indexOf(':');
+      const list = name.slice(0, cut) as keyof Kept['dropped'];
+      const id = name.slice(cut + 1);
+      if (own(kp.dropped, list)) kp.dropped[list] = kp.dropped[list].filter((x) => recordKey(list, x) !== id);
+    } else if (kind === 'lr') {
+      const [list, id] = JSON.parse(name) as [string, string];
+      const l = own(kp.lists, list) ? kp.lists[list] : undefined;
+      if (Array.isArray(l)) putOwn(kp.lists, list, l.filter((x) => recordKey(list, x) !== id));
+    }
   }
 }
 /** The id of a record in a list this build can't read ('' = none: such a record is matched by its whole stored form). */
@@ -447,7 +497,7 @@ function adoptEventRest(mine: Ev[], theirs: Ev[], theirsWin: boolean) {
 function keptCanon(s: State) {
   const k = s[KEPT];
   const sorted = (o: object | undefined) => (o ? Object.entries(o).sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0)) : []);
-  return [s.v, restOf(s.settings, SETTINGS_KEYS), restOf(s.flags, FLAG_KEYS), sorted(k?.profile), sorted(k?.profileAt), sorted(k?.setAt), sorted(k?.names), (k?.titles ?? []).map((t) => JSON.stringify(t)).sort(), (k?.events ?? []).map((e) => String(e.id)).sort(), k ? Object.values(k.dropped).map((l) => l.map((x) => JSON.stringify(x)).sort()) : [], sorted(k?.days), sorted(k?.lists).map(([key, l]) => [key, Array.isArray(l) ? l.map((x) => JSON.stringify(x)).sort() : l])];
+  return [s.v, restOf(s.settings, SETTINGS_KEYS), restOf(s.flags, FLAG_KEYS), sorted(k?.profile), sorted(k?.profileAt), sorted(k?.setAt), sorted(k?.names), (k?.titles ?? []).map((t) => JSON.stringify(t)).sort(), (k?.events ?? []).map((e) => JSON.stringify(e)).sort(), k ? Object.values(k.dropped).map((l) => l.map((x) => JSON.stringify(x)).sort()) : [], sorted(k?.days), sorted(k?.lists).map(([key, l]) => [key, Array.isArray(l) ? l.map((x) => JSON.stringify(x)).sort() : l])];
 }
 /** Each id once, the first kept. */
 function firstById<T extends { id: string }>(list: T[]) {
@@ -845,6 +895,11 @@ export class Store {
   private offClear: (() => void) | null = null;
   /** a save waiting out a clear's hold */
   private deferred = false;
+  /**
+   * What the stored copy this one last read or wrote kept for a newer build (see keptKeys), and its save version. A later
+   * stored copy of at least that version without one of them had it removed by the build that wrote it.
+   */
+  private keptBase: { v: number; keys: Set<string> } = { v: 0, keys: new Set() };
 
   constructor(
     readonly key = SAVE_KEY,
@@ -879,6 +934,7 @@ export class Store {
       this.took(raw, began);
     }
     this.state = st ?? freshState(clock());
+    this.keptBase = { v: this.state.v, keys: keptKeys(this.state) };
     const adopted = this.mirrorYou();
     if (initial || (adopted && !this.locked)) this.save();
     if (typeof window !== 'undefined') this.offClear = onClear({ clear: () => this.wipe() });
@@ -1089,6 +1145,7 @@ export class Store {
         const out = JSON.stringify(stored(this.state));
         localStorage.setItem(this.key, out);
         this.took(out, this.state.created);
+        this.keptBase = { v: this.state.v, keys: keptKeys(this.state) };
         this.saving = true;
       } catch {
         this.saving = false;
@@ -1154,6 +1211,13 @@ export class Store {
    * two copies that fold each other in end up holding the same thing. Arrays change in place: screens hold them.
    */
   private absorb(other: State) {
+    // what a newer build (this version or later) removed since this copy last read: never written back. An older build
+    // writes a lower version and drops what it can't read without meaning to, so nothing is removed for it.
+    if (other.v >= this.keptBase.v) {
+      const theirs = keptKeys(other);
+      forget(this.state, [...this.keptBase.keys].filter((k) => !theirs.has(k)));
+      this.keptBase = { v: other.v, keys: theirs };
+    }
     this.absorbProgress(other, 'b');
     // what a newer build stored: the stored copy's, never dropped
     adoptKept(this.state, other, true);
@@ -1179,6 +1243,13 @@ export class Store {
       if (ot > mt || (ot === mt && JSON.stringify(ov) > JSON.stringify(mv))) {
         putSet(this.state, k, Array.isArray(ov) ? [...ov] : ov);
         if (own(other.setAt, k)) this.state.setAt[k] = ot;
+        // the rows the other copy stored (past what this build shows) go with them, as that copy would write them
+        const now = getSet(this.state, k);
+        if (Array.isArray(ov) && Array.isArray(now)) {
+          const t = AS_STORED.get(ov);
+          if (t && t.read === JSON.stringify(ov)) twin(now, t.raw, true);
+          else AS_STORED.delete(now);
+        }
       }
     }
   }
