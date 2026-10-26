@@ -23,6 +23,10 @@ const SCENES = {
   wave: () => import('./scenes/wave'),
   ring: () => import('./scenes/ring'),
   tide: () => import('./scenes/tide'),
+  glow: () => import('./scenes/glow'),
+  hands: () => import('./scenes/hands'),
+  cold: () => import('./scenes/cold'),
+  thoughts: () => import('./scenes/thoughts'),
 } satisfies Record<string, () => Promise<{ build: BuildScene }>>;
 
 export type SceneKind = keyof typeof SCENES;
@@ -54,6 +58,8 @@ export interface SceneOpts {
   clock: SceneClock;
   /** the rim light's colour, lantern blue (#4FB8FF) when left out */
   accent?: string;
+  /** which version of the scene to show, for a scene that has more than one (the picture a player chose) */
+  variant?: string;
   /** the game's motion setting; prefers-reduced-motion when left out */
   reduced?: () => boolean;
 }

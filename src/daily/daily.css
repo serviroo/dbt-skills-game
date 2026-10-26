@@ -1827,15 +1827,18 @@ textarea.dq-input {
   font-variant-numeric: tabular-nums;
 }
 .dq-timer-svg--drift ~ .dq-timer-center,
-.dq-timer-svg--tide ~ .dq-timer-center {
+.dq-timer-svg--tide ~ .dq-timer-center,
+.dq-timer-svg--thoughts ~ .dq-timer-center {
   inset: auto 0 -36px;
 }
 .dq-timer-stage:has(.dq-timer-svg--drift),
-.dq-timer-stage:has(.dq-timer-svg--tide) {
+.dq-timer-stage:has(.dq-timer-svg--tide),
+.dq-timer-stage:has(.dq-timer-svg--thoughts) {
   margin-bottom: 36px;
 }
 .dq-timer-svg--drift ~ .dq-timer-center .dq-timer-num,
 .dq-timer-svg--tide ~ .dq-timer-center .dq-timer-num,
+.dq-timer-svg--thoughts ~ .dq-timer-center .dq-timer-num,
 .dq-timer-svg--hands ~ .dq-timer-center .dq-timer-num,
 .dq-timer-svg--cold ~ .dq-timer-center .dq-timer-num,
 .dq-timer-stage.is-wide .dq-timer-num {

@@ -244,6 +244,9 @@ export function skillScreen(app: App, route: Route): ScreenOut {
         const tv = timerView(ctx, {
           seconds: secs,
           visual: s.visual,
+          // a skill's own steps may show their calm 3D scene; nothing else asks for one (the Safe Zone never does)
+          scene: true,
+          variant: s.variant?.(answers),
           start: s.start,
           // every timer can take more time (principle 3): +15 s up to 30 s, +30 s above; extend: 0 keeps cold water about 30 s
           extend: s.extend === 0 ? undefined : secs <= 30 ? 15 : 30,

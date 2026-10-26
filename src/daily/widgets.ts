@@ -186,19 +186,73 @@ function frost() {
 }
 
 /**
+ * The flat picture for watching thoughts go by, in the picture the player chose: clouds drifting past the moon,
+ * pairs of headlights along a quiet road, or leaves carried down a stream. Returns what moves them, by seconds in.
+ */
+function thoughtsArt(g: SVGGElement, pic = 'clouds'): (e: number, still: boolean) => void {
+  const items: SVGGElement[] = [];
+  const add = (n: number, make: (i: number) => SVGElement[]) => {
+    for (let i = 0; i < n; i++) {
+      const it = sv('g') as SVGGElement;
+      it.append(...make(i));
+      items.push(it);
+      g.append(it);
+    }
+  };
+  if (pic === 'cars') {
+    // a road across the valley, seen from the hill; each pair of headlights takes 14 s to pass
+    g.append(sv('path', { d: 'M20 150Q100 112 180 128', fill: 'none', stroke: 'rgba(150,190,230,.24)', 'stroke-width': 8, 'stroke-linecap': 'round' }));
+    add(3, () => [sv('circle', { cx: -3.2, cy: 0, r: 1.9, fill: '#eaf6ff' }), sv('circle', { cx: 3.2, cy: 0, r: 1.9, fill: '#eaf6ff' })]);
+    return (e, still) =>
+      items.forEach((it, i) => {
+        const u = ((still ? 0.15 : e / 14) + i / 3) % 1, v = 1 - u;
+        const x = v * v * 20 + 2 * v * u * 100 + u * u * 180, y = v * v * 150 + 2 * v * u * 112 + u * u * 128;
+        it.setAttribute('transform', `translate(${x.toFixed(2)} ${(y - 1).toFixed(2)}) scale(${(0.8 + 0.4 * u).toFixed(3)})`);
+      });
+  }
+  if (pic === 'leaves') {
+    // a stream running down the picture between its banks; each leaf floats down in 16 s
+    g.append(
+      sv('path', { d: 'M52 20Q82 100 64 180', fill: 'none', stroke: 'rgba(150,190,230,.3)', 'stroke-width': 1.4 }),
+      sv('path', { d: 'M138 20Q168 100 150 180', fill: 'none', stroke: 'rgba(150,190,230,.3)', 'stroke-width': 1.4 }),
+    );
+    add(3, () => [sv('path', { d: 'M-7 0Q0 -5 7 0Q0 5 -7 0Z', fill: 'rgba(137,207,157,.4)', stroke: 'rgba(190,235,205,.65)', 'stroke-width': 0.9 })]);
+    return (e, still) =>
+      items.forEach((it, i) => {
+        const u = ((still ? 0.2 : e / 16) + i / 3) % 1;
+        const x = 104 + 14 * Math.sin(u * 5 + i) + 18 * (u - 0.5), y = 14 + 172 * u;
+        it.setAttribute('transform', `translate(${x.toFixed(2)} ${y.toFixed(2)}) rotate(${(40 + 35 * Math.sin(u * 6 + i * 2)).toFixed(1)})`);
+      });
+  }
+  // clouds drifting past the moon; each takes 20 s to cross
+  g.append(sv('circle', { cx: 136, cy: 64, r: 9, fill: 'rgba(230,241,255,.7)' }));
+  add(3, () => [
+    sv('path', { d: 'M-22 6Q-24 -4 -12 -4Q-10 -14 2 -12Q10 -18 18 -8Q28 -6 24 6Z', fill: 'rgba(160,190,225,.16)', stroke: 'rgba(190,220,250,.4)', 'stroke-width': 1 }),
+  ]);
+  return (e, still) =>
+    items.forEach((it, i) => {
+      const u = ((still ? 0.3 : e / 20) + i / 3) % 1;
+      it.setAttribute('transform', `translate(${(-6 + 212 * u).toFixed(2)} ${(78 + i * 30).toFixed(2)})`);
+    });
+}
+
+/**
  * Countdown with an optional visual. Waits for a tap when `start` is given; that tap brings `reveal` (the countdown
  * unless the caller names something further down) into view if it isn't, stopping clear of anything pinned.
  */
-export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; start?: string; extend?: number; big?: string; extra?: HTMLElement[]; peers?: HTMLElement[]; reveal?: HTMLElement; onStart?: () => void; onDone: () => void }) {
+export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; variant?: string; scene?: boolean; start?: string; extend?: number; big?: string; extra?: HTMLElement[]; peers?: HTMLElement[]; reveal?: HTMLElement; onStart?: () => void; onDone: () => void }) {
   let dur = opts.seconds;
   const visual = opts.visual ?? 'ring';
+  // the calm 3D scene comes only when the caller asks for it (a skill's steps); the Safe Zone never does
+  const scened = !!opts.scene && hasScene(visual);
+  let thoughts: ((e: number, still: boolean) => void) | null = null;
   const wide = visual === 'wave';
   const svg = sv('svg', { viewBox: wide ? '0 0 320 160' : '0 0 200 200', class: `dq-timer-svg dq-timer-svg--${visual}`, 'aria-hidden': 'true' }) as SVGSVGElement;
   const parts: Record<string, SVGElement> = {};
   if (!wide) {
-    const gradId = ringBase(svg, visual !== 'drift' && visual !== 'tide');
+    const gradId = ringBase(svg, visual !== 'drift' && visual !== 'tide' && visual !== 'thoughts');
     parts.orb = sv('circle', { cx: 100, cy: 100, r: 60, fill: `url(#${gradId})` });
-    if (hasScene(visual)) parts.orb.classList.add('dq-scene-flat');
+    if (scened) parts.orb.classList.add('dq-scene-flat');
     svg.append(parts.orb);
     parts.track = sv('circle', { cx: 100, cy: 100, r: 78, fill: 'none', stroke: 'rgba(125,150,197,.18)', 'stroke-width': 2 });
     parts.arc = sv('path', { d: '', class: 'dq-timer-arc', fill: 'none', stroke: visual === 'cold' ? '#bfe9ff' : '#4fb8ff', 'stroke-width': 2, 'stroke-linecap': 'round' });
@@ -211,15 +265,23 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
     const cp = sv('clipPath', { id: clip });
     cp.append(sv('circle', { cx: 100, cy: 100, r: 70 }));
     svg.append(cp);
-    const water = sv('g', { 'clip-path': `url(#${clip})`, class: 'dq-scene-flat' });
+    const water = sv('g', { 'clip-path': `url(#${clip})`, ...(scened ? { class: 'dq-scene-flat' } : {}) });
     water.append(sv('path', { d: 'M20 158Q60 146 100 152T180 150V200H20Z', fill: 'rgba(137,180,220,.14)' }));
     parts.rays = sv('g', { stroke: 'rgba(170,215,255,.12)', 'stroke-width': 1 });
     for (let i = 0; i < 5; i++) parts.rays.append(sv('path', { d: `M${50 + i * 25} 20L${40 + i * 25} 170` }));
     parts.stone = sv('ellipse', { cx: 100, cy: 50, rx: 9, ry: 5.5, fill: '#2a3a52', stroke: 'rgba(190,225,255,.6)', 'stroke-width': 1 });
     water.append(parts.rays, parts.stone);
     svg.append(water);
+  } else if (visual === 'thoughts') {
+    const clip = `dqc${++gid}`;
+    const cp = sv('clipPath', { id: clip });
+    cp.append(sv('circle', { cx: 100, cy: 100, r: 70 }));
+    svg.append(cp);
+    const g = sv('g', { 'clip-path': `url(#${clip})`, ...(scened ? { class: 'dq-scene-flat' } : {}) }) as SVGGElement;
+    thoughts = thoughtsArt(g, opts.variant);
+    svg.append(g);
   } else if (visual === 'tide') {
-    parts.tide = sv('g', { fill: 'none', 'stroke-linecap': 'round', ...(hasScene(visual) ? { class: 'dq-scene-flat' } : {}) });
+    parts.tide = sv('g', { fill: 'none', 'stroke-linecap': 'round', ...(scened ? { class: 'dq-scene-flat' } : {}) });
     for (let i = 0; i < 4; i++) parts.tide.append(sv('path', { d: '', stroke: `rgba(150,205,255,${0.6 - i * 0.12})`, 'stroke-width': 1.4 }));
     svg.append(parts.tide);
   } else if (visual === 'wave') {
@@ -227,15 +289,17 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
     parts.wave2 = sv('path', { d: '', fill: 'none', stroke: 'rgba(160,215,255,.25)', 'stroke-width': 1 });
     parts.board = sv('g');
     parts.board.append(sv('rect', { x: -13, y: -3, width: 26, height: 5, rx: 2.5, fill: '#cfe9ff' }), sv('circle', { cx: 0, cy: -8, r: 3.2, fill: '#89cf9d' }));
-    const sea = sv('g', hasScene(visual) ? { class: 'dq-scene-flat' } : {});
+    const sea = sv('g', scened ? { class: 'dq-scene-flat' } : {});
     sea.append(parts.wave2, parts.wave, parts.board);
     svg.append(sea);
   } else if (visual === 'hands') {
-    const g = sv('g', { transform: 'translate(0 -8)' });
+    const g = sv('g', { transform: 'translate(0 -8)', ...(scened ? { class: 'dq-scene-flat' } : {}) });
     g.append(palm(78, true), palm(122, false));
     svg.append(g);
   } else if (visual === 'cold') {
-    svg.append(frost());
+    const g = frost();
+    if (scened) g.classList.add('dq-scene-flat');
+    svg.append(g);
   }
   const num = h('div', { class: 'dq-timer-num' });
   const big = opts.big ? h('p', { class: 'dq-timer-big', text: typo(opts.big) }) : null;
@@ -250,9 +314,10 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
   // a visual with a 3D scene follows this countdown: the scene ticks only when the timer renders, with its beat
   const ticks = new Set<(t: number) => void>();
   let beat: Beat = { e: 0, dur, started: false, done: false };
-  const unmount = hasScene(visual)
+  const unmount = scened
     ? mountScene(stageEl, {
         kind: visual,
+        variant: opts.variant,
         // the breathing light is the player's own light, in their accent colour
         accent: visual === 'ring' ? playerAccent() : undefined,
         reduced: () => ctx.reduced(),
@@ -290,6 +355,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
       parts.stone.setAttribute('transform', `rotate(${(still ? 0 : Math.sin(e * 0.7) * 14 * (1 - p)).toFixed(2)} 100 ${(48 + k * 98).toFixed(2)})`);
       parts.rays.setAttribute('transform', `translate(${still ? 0 : (Math.sin(e * 0.3) * 6).toFixed(2)} 0)`);
     }
+    thoughts?.(e, still);
     if (parts.tide) {
       const kids = Array.from(parts.tide.children);
       kids.forEach((c, i) => {

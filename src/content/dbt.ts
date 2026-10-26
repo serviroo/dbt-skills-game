@@ -30,7 +30,7 @@ export interface Opt {
 
 export type ListId = 'comfort' | 'activities' | 'reasons';
 export type Effect = 'saveSoothe' | 'saveMap';
-export type Visual = 'ring' | 'drift' | 'wave' | 'tide' | 'hands' | 'cold' | 'glow';
+export type Visual = 'ring' | 'drift' | 'wave' | 'tide' | 'hands' | 'cold' | 'glow' | 'thoughts';
 
 interface Base {
   id?: string;
@@ -44,7 +44,7 @@ export type Step =
   | (Base & { kind: 'input'; text: Txt; key: string; placeholder?: string; fills?: string[]; skip?: string; cta?: string; lines?: number; prefix?: (a: Answers) => string })
   | (Base & { kind: 'slider'; text: Txt; key: string; min: number; max: number; ends?: [string, string]; words?: string[] })
   | (Base & { kind: 'breath'; text: Txt; inhale: number; exhale: number; rounds: number; alt?: [number, number]; words?: [string, string] })
-  | (Base & { kind: 'timer'; text: Txt; seconds: number | ((a: Answers) => number); start?: string; visual?: Visual; extend?: 0; small?: string; options?: Opt[]; big?: Txt; dim?: boolean })
+  | (Base & { kind: 'timer'; text: Txt; seconds: number | ((a: Answers) => number); start?: string; visual?: Visual; variant?: (a: Answers) => string; extend?: 0; small?: string; options?: Opt[]; big?: Txt; dim?: boolean })
   | (Base & { kind: 'hold'; text: Txt; seconds: number; label: string; done: string; tone?: 'heal' })
   | (Base & { kind: 'tier'; text: Txt; key: string; from: string; tiers: string[] })
   | (Base & { kind: 'count'; text: Txt; n: number; label: string })
@@ -486,7 +486,7 @@ export const SKILLS: Skill[] = [
       { kind: 'intro', text: "A busy or loud head is hard to be in. That's real. For a minute, you don't have to fix your thoughts or believe them. Only watch them go by." },
       { kind: 'choice', key: 'pic', text: 'Pick a picture for your thoughts.', options: [{ label: 'Clouds crossing the sky', value: 'clouds' }, { label: 'Cars on a quiet road', value: 'cars' }, { label: 'Leaves on a stream', value: 'leaves' }] },
       { kind: 'say', text: 'When a thought shows up, give it a plain label. "A worry." "A plan." "A memory." Then let it move on. No need to push it away or follow it.', cta: 'Ready' },
-      { id: 'watch', kind: 'timer', seconds: 60, visual: 'tide', text: (a) => `${THOUGHT_PICS[s(a, 'pic', 'clouds')] ?? THOUGHT_PICS.clouds} If you get pulled into one, that's normal. Step back and watch again.` },
+      { id: 'watch', kind: 'timer', seconds: 60, visual: 'thoughts', variant: (a) => (Object.hasOwn(THOUGHT_PICS, s(a, 'pic', 'clouds')) ? s(a, 'pic', 'clouds') : 'clouds'), text: (a) => `${THOUGHT_PICS[s(a, 'pic', 'clouds')] ?? THOUGHT_PICS.clouds} If you get pulled into one, that's normal. Step back and watch again.` },
       { kind: 'say', text: "Thoughts are only thoughts. They aren't facts, and they aren't orders. You can notice one without doing what it says." },
       {
         kind: 'choice',

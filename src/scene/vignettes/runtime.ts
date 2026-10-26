@@ -17,8 +17,8 @@ export interface Vignette {
   /** what the last pose looked like, in plain numbers (where the board is, how big the light is), for the E2E checks */
   readonly probe?: Readonly<Record<string, number | string>>;
 }
-/** What a scene file exports as `build`: makes the scene, lit with `accent` as its rim colour. */
-export type BuildScene = (accent: THREE.Color) => Vignette;
+/** What a scene file exports as `build`: makes the scene, lit with `accent` as its rim colour, in its `variant` if it has several. */
+export type BuildScene = (accent: THREE.Color, variant?: string) => Vignette;
 
 const STEP = 1 / SCENE.fps;
 /** the longest a scene's frame may take to draw, in ms */
@@ -59,7 +59,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   let lease: Lease | undefined;
   try {
     lease = lendRenderer(holder, evict);
-    vig = build(new THREE.Color(opts.accent ?? '#4fb8ff'));
+    vig = build(new THREE.Color(opts.accent ?? '#4fb8ff'), opts.variant);
   } catch (err) {
     if (vig) disposeTree(vig.scene);
     lease?.release();

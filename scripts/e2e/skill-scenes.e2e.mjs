@@ -5,7 +5,10 @@
 // The wave, the breathing light and the tide go through the same host: each is live and drawn at four screen sizes and
 // does what its picture promises (the board rides the swell, the light swells with the breath in the player's colour,
 // the water comes in and goes out), keeps to its timer's clock, stops on leaving, holds still with reduced motion and
-// leaves its flat picture with no WebGL.
+// leaves its flat picture with no WebGL. So do the glow, the open hands, the cool water and the drifting thoughts: the
+// glow swells slowly and leaves the step's line clear, the fingers end more open than they start and stay in the
+// window, the water ripples without changing the cold-water caution or its 30 s, each picture of thoughts shows its own
+// scene with things coming and going, and the Safe Zone's cold-water timer never shows a scene.
 import sharp from 'sharp';
 
 const PHONE = { width: 390, height: 844 };
@@ -62,10 +65,11 @@ async function toStone(h, page) {
 }
 
 /**
- * Home, then straight to one step of a skill (Begin on its intro goes to the step). With `pause` the page clock stops
- * the moment the step shows, so a check can see the step's first seconds however slowly the page draws.
+ * Home, then straight to one step of a skill (Begin on its intro goes to the step), tapping through `path` and `start`.
+ * With `pause` the page clock stops the moment the step shows, so a check can see the step's first seconds however
+ * slowly the page draws.
  */
-async function toStep(h, page, id, entry, { pause = false } = {}) {
+async function toStep(h, page, id, entry, { path = [], start = null, pause = false } = {}) {
   // the first-visit welcome opens a moment after Home appears, so a tap it covers goes back Home and tries again
   for (let i = 0; ; i++) {
     if (i) await page.evaluate(() => window.__daily.go({ name: 'hub' }));
@@ -78,7 +82,12 @@ async function toStep(h, page, id, entry, { pause = false } = {}) {
       if (i === 2) throw e;
     }
   }
+  for (const label of path) {
+    await h.sleep(400);
+    await tap(page, label);
+  }
   await page.locator('.dq-timer-stage').waitFor({ timeout: 10000 });
+  if (start) await tap(page, start);
   // a slow page can pass the moment asked for before the pause lands, so it asks a little ahead and again if it must
   for (let i = 0; pause; i++) {
     try {
@@ -90,6 +99,7 @@ async function toStep(h, page, id, entry, { pause = false } = {}) {
   }
   await page.locator('.dq-timer-stage').scrollIntoViewIfNeeded();
 }
+const overlap = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 
 async function live(h, page, where, stage = '.dq-timer-stage') {
   await page.locator(`${stage}.is-scene-live`).waitFor({ timeout: 15000 }).catch(async () => {
@@ -212,6 +222,17 @@ const hueOf = (hex) => {
   const hue = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
   return (hue * 60 + 360) % 360;
 };
+
+/** the second set of scenes: the step each lives on, and the part of its flat picture that moves without WebGL */
+const REST = [
+  { kind: 'glow', id: 'body-scan', entry: 'feet', flat: '.dq-timer-svg--glow circle.dq-scene-flat' },
+  { kind: 'hands', id: 'willing-hands', entry: 'hands', flat: null },
+  { kind: 'cold', id: 'tipp', entry: 'cold', start: 'Start 30 s', flat: null },
+  { kind: 'thoughts', id: 'mindful-thoughts', path: ['Leaves on a stream', 'Ready'], flat: '.dq-timer-svg--thoughts .dq-scene-flat g' },
+];
+const PICS = [['clouds', 'Clouds crossing the sky'], ['cars', 'Cars on a quiet road'], ['leaves', 'Leaves on a stream']];
+/** the cold-water caution exactly as it reads today; the scene must not change it */
+const COLD = 'Skip cold water if you have a heart or other medical condition, take a beta-blocker or other heart-slowing medicine, are allergic to cold, or have found eating hard lately, unless a doctor says it\u2019s okay.';
 
 /** the new scenes, the step each lives on, and how its flat picture moves without WebGL */
 const KINDS = [
@@ -644,6 +665,213 @@ export const scenarios = {
         const now = JSON.parse((await h.ls(page, h.SAVE)) ?? '{"events":[]}').events.filter((e) => e.k === 'skill' && e.skill === k.id).length;
         h.expect(now === before + 1, `no WebGL: Wave Rider was not credited once (${before} -> ${now})`);
       }
+      h.expect(!errors.length, errors.join('\n'));
+      await ctx.close();
+    }
+  },
+
+  /** the glow brightens and softens slowly, at most one swell in 4 s, at every size */
+  async 'glow-scene'(h) {
+    for (const [tag, vp] of VIEWS) {
+      const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
+      await page.clock.install();
+      await page.reload();
+      await toStep(h, page, 'body-scan', 'feet');
+      await live(h, page, `glow ${tag}`);
+      await h.sleep(1200);
+      await looks(h, page, tag, 'glow', vp);
+      if (tag === 'phone') {
+        const seen = [];
+        for (let i = 0; i < 22; i++) {
+          seen.push((await scenes(page)).last);
+          await h.sleep(400);
+        }
+        const light = seen.map((x) => x.probe.light);
+        h.expect(Math.max(...light) - Math.min(...light) > 0.03, `glow: the light does not change: ${light.map((x) => x.toFixed(3))}`);
+        const peaks = seen.filter((x, i) => i > 0 && i < seen.length - 1 && x.probe.light > seen[i - 1].probe.light && x.probe.light >= seen[i + 1].probe.light).map((x) => x.e);
+        h.expect(peaks.every((e, i) => !i || e - peaks[i - 1] >= 4), `glow: the light swells faster than once in 4 s, at ${peaks.map((e) => e.toFixed(1))}`);
+        await keepsTime(h, page, 'glow');
+      }
+      h.expect(!errors.length, errors.join('\n'));
+      await ctx.close();
+    }
+  },
+
+  /** over the glow, the step's own line (read it again) stays clear and readable */
+  async 'glow-read-again'(h) {
+    for (const [tag, vp] of [VIEWS[0], VIEWS[1]]) {
+      const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
+      await toStep(h, page, 'improve', 'enc', { path: ['This feeling will pass.'] });
+      await live(h, page, `read again ${tag}`);
+      await h.sleep(800);
+      const big = page.locator('.dq-timer-big');
+      h.expect((await big.textContent()).trim() === 'This feeling will pass.', `read again ${tag}: the line reads "${await big.textContent()}"`);
+      await big.scrollIntoViewIfNeeded();
+      const [b, win, size] = await Promise.all([big.boundingBox(), page.locator('.dq-scene').boundingBox(), big.evaluate((e) => parseFloat(getComputedStyle(e).fontSize))]);
+      h.expect(await big.evaluate((e) => e.checkVisibility()), `read again ${tag}: the line is hidden`);
+      h.expect(!overlap(b, win), `read again ${tag}: the glow covers the line`);
+      h.expect(size >= 16 && b.x >= 0 && b.x + b.width <= vp.width, `read again ${tag}: the line is ${size}px or cut off`);
+      await h.shot(page, `glow-read-again-${tag}`);
+      h.expect(!errors.length, errors.join('\n'));
+      await ctx.close();
+    }
+  },
+
+  /** the open hands: the fingers end less curled than they start, and the hands stay inside the window */
+  async 'hands-scene'(h) {
+    for (const [tag, vp] of VIEWS) {
+      const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
+      await page.clock.install();
+      await page.reload();
+      // the fingers are seen at the step's first moment, then near its end with time left to check the clock
+      await toStep(h, page, 'willing-hands', 'hands', { pause: true });
+      await live(h, page, `hands ${tag}`);
+      const a = (await scenes(page)).last;
+      await page.clock.resume();
+      await h.sleep(1200);
+      await looks(h, page, tag, 'hands', vp);
+      const b = await after(h, page, (16 - (await scenes(page)).last.e) * 1000);
+      h.expect(b.probe.curl < a.probe.curl - 0.2, `hands ${tag}: the fingers did not open (${a.e.toFixed(1)} s ${a.probe.curl.toFixed(2)}, ${b.e.toFixed(1)} s ${b.probe.curl.toFixed(2)})`);
+      h.expect(Math.max(a.probe.reach, b.probe.reach) < 0.95, `hands ${tag}: the hands reach out of the window (${a.probe.reach.toFixed(2)}, ${b.probe.reach.toFixed(2)})`);
+      console.log(`  hands ${tag}: curl ${a.probe.curl.toFixed(2)} -> ${b.probe.curl.toFixed(2)}, reach ${b.probe.reach.toFixed(2)}`);
+      if (tag === 'phone') await keepsTime(h, page, 'hands');
+      h.expect(!errors.length, errors.join('\n'));
+      await ctx.close();
+    }
+  },
+
+  /** cool water: the caution and the 30 s stay as they were, the caution stays clear of the scene, the water ripples */
+  async 'cold-scene'(h) {
+    for (const [tag, vp] of VIEWS) {
+      const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
+      await page.clock.install();
+      await page.reload();
+      await toStep(h, page, 'tipp', 'cold');
+      h.expect((await page.locator('.dq-timer-num').textContent()) === '30', `cold ${tag}: the timer is not 30 s`);
+      await tap(page, 'Start 30 s');
+      await live(h, page, `cold ${tag}`);
+      await h.sleep(1200);
+      await looks(h, page, tag, 'cold', vp);
+      h.expect(!(await page.locator('.dq-timer').getByRole('button', { name: /^\+\d+ s$/ }).count()), `cold ${tag}: the cold-water timer offers more time`);
+      const caution = page.locator('.dq-skill .dq-small').first();
+      h.expect((await caution.textContent()).trim() === COLD, `cold ${tag}: the caution changed: ${await caution.textContent()}`);
+      await caution.scrollIntoViewIfNeeded();
+      const [c, win] = await Promise.all([caution.boundingBox(), page.locator('.dq-scene').boundingBox()]);
+      h.expect(c.y >= 0 && c.y + c.height <= vp.height && c.x >= 0 && c.x + c.width <= vp.width && !overlap(c, win), `cold ${tag}: the caution is cut off or covered (${JSON.stringify(c)})`);
+      await h.shot(page, `cold-caution-${tag}`);
+      const seen = [await after(h, page, 0)];
+      for (let i = 0; i < 5; i++) seen.push(await after(h, page, 2000));
+      const fresh = seen.filter((x, i) => i && x.probe.newest >= 0 && x.probe.newest < seen[i - 1].probe.newest).length;
+      h.expect(fresh >= 1, `cold ${tag}: no new ripple in 10 s: ${seen.map((x) => x.probe.newest.toFixed(1))}`);
+      if (tag === 'phone') await keepsTime(h, page, 'cold');
+      h.expect(!errors.length, errors.join('\n'));
+      await ctx.close();
+    }
+    // the gentle cool-air step shows the same water
+    const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
+    await toStep(h, page, 'cool-air', 'air', { start: 'Start 30 s' });
+    await live(h, page, 'cool air');
+    await h.sleep(1200);
+    await looks(h, page, 'cool-air', 'cold', PHONE);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /** the Safe Zone's cold-water timer never shows a scene, even right after one was on screen */
+  async 'safe-zone-cold-no-scene'(h) {
+    for (const [tag, vp] of [VIEWS[0], VIEWS[1]]) {
+      const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
+      await toStep(h, page, 'cool-air', 'air', { start: 'Start 30 s' });
+      await live(h, page, `before the Safe Zone ${tag}`);
+      const before = await scenes(page);
+      await page.evaluate(() => window.__daily.go({ name: 'safe', at: 'cold' }));
+      await page.locator('.dq-sz .dq-timer-svg--cold').waitFor({ timeout: 10000 });
+      for (const when of ['waiting', 'counting']) {
+        if (when === 'counting') await page.getByRole('button', { name: 'Start 30 seconds', exact: true }).click();
+        await h.sleep(1500);
+        const s = await scenes(page);
+        h.expect(!(await page.locator('.dq-scene, .dq-scene canvas, .is-scene-wait, .is-scene-live').count()), `Safe Zone ${tag} (${when}): a scene is on the page`);
+        h.expect(s.live === 0 && s.frames === before.frames, `Safe Zone ${tag} (${when}): a scene drew (${JSON.stringify(s)})`);
+        h.expect(await page.locator('.dq-sz .dq-timer-svg--cold g').first().evaluate((g) => g.checkVisibility() && Number(getComputedStyle(g).opacity) === 1), `Safe Zone ${tag} (${when}): the plain picture is hidden`);
+      }
+      await h.shot(page, `safe-zone-cold-${tag}`);
+      h.expect(!errors.length, errors.join('\n'));
+      await ctx.close();
+    }
+  },
+
+  /** each picture of thoughts shows its own scene, with things coming in and going out and never piling up */
+  async 'thoughts-scene'(h) {
+    for (const [pic, label] of PICS) {
+      for (const [tag, vp] of pic === 'clouds' ? VIEWS : [VIEWS[0]]) {
+        const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
+        await page.clock.install();
+        await page.reload();
+        await toStep(h, page, 'mindful-thoughts', undefined, { path: [label, 'Ready'] });
+        await live(h, page, `${pic} ${tag}`);
+        await h.sleep(1200);
+        await looks(h, page, `${pic}-${tag}`, 'thoughts', vp);
+        const seen = [await after(h, page, 0)];
+        h.expect(seen[0].probe.pic === pic, `${pic} ${tag}: the scene shows ${seen[0].probe.pic}`);
+        while (seen[seen.length - 1].e < 40) seen.push(await after(h, page, 2000));
+        const last = seen[seen.length - 1].probe;
+        h.expect(last.came >= 2 && last.went >= 1, `${pic} ${tag}: things did not come and go (${JSON.stringify(last)})`);
+        h.expect(seen.every((x) => x.probe.now <= 4), `${pic} ${tag}: things piled up (${seen.map((x) => x.probe.now)})`);
+        if (tag === 'phone' && pic === 'clouds') await keepsTime(h, page, 'thoughts');
+        h.expect(!errors.length, errors.join('\n'));
+        await ctx.close();
+      }
+    }
+  },
+
+  /** with reduced motion the glow, the hands, the water and the thoughts each draw one still frame */
+  async 'rest-scenes-still'(h) {
+    for (const k of REST) {
+      const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await page.reload();
+      await toStep(h, page, k.id, k.entry, { path: k.path, start: k.start });
+      await live(h, page, `still ${k.kind}`);
+      await h.sleep(800);
+      const a = await scenes(page);
+      await h.sleep(2000);
+      const b = await scenes(page);
+      h.expect(a.last.kind === k.kind && a.last.still && b.frames === a.frames && b.frames <= 3, `reduced motion (${k.kind}): not one still frame (${a.frames} -> ${b.frames}, ${JSON.stringify(a.last)})`);
+      await drawn(h, page, `still ${k.kind}`);
+      await h.shot(page, `still-${k.kind}-phone`);
+      h.expect(!errors.length, errors.join('\n'));
+      await ctx.close();
+    }
+  },
+
+  /** with no WebGL each keeps its flat picture (each picture of thoughts its own), and the timer still finishes */
+  async 'rest-scenes-no-webgl'(h) {
+    const cases = [...REST.slice(0, 3), ...PICS.map(([pic, label]) => ({ kind: 'thoughts', pic, id: 'mindful-thoughts', path: [label, 'Ready'], flat: '.dq-timer-svg--thoughts .dq-scene-flat g' }))];
+    for (const k of cases) {
+      const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
+      await ctx.addInitScript(() => {
+        const get = HTMLCanvasElement.prototype.getContext;
+        HTMLCanvasElement.prototype.getContext = function (type, ...rest) {
+          return /webgl/i.test(String(type)) ? null : get.call(this, type, ...rest);
+        };
+      });
+      await page.clock.install();
+      await page.reload();
+      await toStep(h, page, k.id, k.entry, { path: k.path, start: k.start });
+      await h.sleep(1500);
+      const name = k.pic ?? k.kind;
+      const s = await scenes(page);
+      h.expect(s && s.contexts === 0 && s.live === 0 && !(await page.locator('.dq-scene').count()), `no WebGL (${name}): a scene was left on the page: ${JSON.stringify(s)}`);
+      const shown = await flat(page);
+      h.expect(shown.length > 0 && shown.every(Boolean), `no WebGL (${name}): the flat picture is hidden`);
+      if (k.flat) {
+        const d0 = await page.locator(k.flat).first().evaluate((e) => e.outerHTML);
+        await h.sleep(700);
+        h.expect(d0 !== (await page.locator(k.flat).first().evaluate((e) => e.outerHTML)), `no WebGL (${name}): the flat picture does not move`);
+      }
+      await h.shot(page, `no-webgl-${name}-phone`);
+      await page.clock.fastForward(91000);
+      await page.locator('.dq-timer-num', { hasText: 'Done' }).waitFor({ timeout: 5000 });
       h.expect(!errors.length, errors.join('\n'));
       await ctx.close();
     }
