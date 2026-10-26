@@ -1163,9 +1163,14 @@ export class Store {
     // read, the newer save version's value wins, with its change time
     const raws = new Set<SetKey>();
     for (const k of Object.keys(USABLE) as SetKey[]) {
-      if (!own(this.state[KEPT]?.raw ?? {}, k) && !own(other[KEPT]?.raw ?? {}, k)) continue;
+      const mine = own(this.state[KEPT]?.raw ?? {}, k);
+      if (!mine && !own(other[KEPT]?.raw ?? {}, k)) continue;
+      // otherwise the ordinary rule below decides, unless this device holds its own raw value
+      if (!newer || !own(other.setAt, k)) {
+        if (mine) raws.add(k);
+        continue;
+      }
       raws.add(k);
-      if (!newer || !own(other.setAt, k)) continue;
       putSet(this.state, k, getSet(other, k));
       this.state.setAt[k] = Math.min(other.setAt[k] ?? now, now);
     }
