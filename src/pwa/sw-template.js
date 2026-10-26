@@ -75,8 +75,8 @@ self.addEventListener('activate', (event) => {
 });
 
 async function fromCache(request) {
-  const own = await caches.open(CACHE);
-  return (await own.match(request, { ignoreVary: true })) || (await caches.match(request, { ignoreVary: true }));
+  // match, never open: opening would make the cache again after the player cleared this game's data
+  return (await caches.match(request, { cacheName: CACHE, ignoreVary: true })) || (await caches.match(request, { ignoreVary: true }));
 }
 
 self.addEventListener('fetch', (event) => {

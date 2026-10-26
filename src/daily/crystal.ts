@@ -1,7 +1,8 @@
 import { parsePrefs, savePrefs, type AudioLevels, type VolumeCtrl } from '../audio/prefs';
 import { AUDIO_KEY, BESIDE } from '../core/stored-names';
-import { cleanRec } from './artstore';
-import { cleanChapter, cleanStory, skippedCards, STORY_CAP, type Story } from './storystore';
+import { write } from '../core/cleared';
+import { artStore, cleanRec, skippedDrafts } from './artstore';
+import { cleanChapter, cleanStory, skippedCards, storyStore, STORY_CAP, type Story } from './storystore';
 import { isSkillId, normalize, type State, type Store } from './store';
 
 interface Preferences {
@@ -32,6 +33,96 @@ export function exportPreferences(store: Store, volume?: VolumeCtrl) {
     incomplete = true;
   }
   return { preferences, incomplete };
+}
+
+/** A copy of a save no version could read, kept beside the save (see Store.keepCopy): its key's ending, and its bytes. */
+interface UnreadSave {
+  at: string;
+  raw: string;
+}
+const UNREAD_AT = /^[0-9A-Za-z_-]{1,60}$/;
+/** Every copy this device keeps of a save it couldn't read, byte for byte, oldest first. */
+function exportUnread(store: Store): { saves: UnreadSave[]; incomplete: boolean } {
+  const kept = `${store.key}${BESIDE.unreadable}.`;
+  const saves: UnreadSave[] = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      const raw = k?.startsWith(kept) ? localStorage.getItem(k) : null;
+      if (k && raw !== null) saves.push({ at: k.slice(kept.length), raw });
+    }
+  } catch {
+    return { saves, incomplete: true };
+  }
+  return { saves: saves.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0)), incomplete: false };
+}
+
+/**
+ * Puts back the copies of unreadable saves a Save Crystal carries, byte for byte, each under the key it had. One already
+ * here is left as it is; another copy under the same key gets a key of its own. False when one couldn't be written.
+ */
+export function restoreUnread(raw: unknown, store: Store) {
+  if (!Array.isArray(raw)) return true;
+  const kept = `${store.key}${BESIDE.unreadable}.`;
+  let saved = true;
+  for (const x of raw) {
+    if (!object(x) || typeof x.at !== 'string' || !UNREAD_AT.test(x.at) || typeof x.raw !== 'string') continue;
+    const bytes = x.raw;
+    try {
+      let at = x.at;
+      for (let n = 2; ; n++) {
+        const here = localStorage.getItem(kept + at);
+        if (here === bytes) break;
+        if (here === null) {
+          const key = kept + at;
+          write(() => {
+            try {
+              localStorage.setItem(key, bytes);
+            } catch {
+              saved = false;
+            }
+          });
+          break;
+        }
+        at = `${x.at}-${n}`;
+      }
+    } catch {
+      saved = false;
+    }
+  }
+  return saved;
+}
+
+/** The Save Crystal of everything this device holds now, and what (if anything) couldn't be read into it. */
+export async function makeCrystal(store: Store, volume?: VolumeCtrl): Promise<{ json: string; missing: string }> {
+  volume?.flush();
+  const art = artStore(store.key);
+  const drawings = await art.exportAll();
+  const unfinished = await art.exportDrafts();
+  const { stories, chapters, cards, incomplete } = await storyStore(store.key).exportAll();
+  const choices = exportPreferences(store, volume);
+  // a save no version could read is kept beside this one: it goes in as it is, so clearing never loses it
+  const unread = exportUnread(store);
+  const missing = [store.readable && !unread.incomplete ? '' : 'progress', drawings.incomplete || unfinished.incomplete ? 'drawings' : '', incomplete ? 'stories' : '', choices.incomplete ? 'choices' : ''].filter(Boolean).join(' and ');
+  const json = store.exportJSON({ art: drawings.records, drafts: unfinished.drafts, stories: { stories, chapters, cards }, preferences: choices.preferences, ...(unread.saves.length ? { unreadSaves: unread.saves } : {}), incomplete: !!missing });
+  return { json, missing };
+}
+
+/**
+ * What a Save Crystal holds for the player, to tell whether two hold the same: without the moment it was made, the
+ * story revisions and the card ids (a copy recovered from unsaved words gets fresh ones every time it is read).
+ */
+export function crystalContent(json: string) {
+  const raw = JSON.parse(json) as Record<string, unknown>;
+  delete raw.exported;
+  const told = raw.stories;
+  if (object(told)) {
+    const bare = (xs: unknown, k: string) => (Array.isArray(xs) ? xs.map((x) => (object(x) ? { ...x, [k]: undefined } : x)) : xs);
+    told.stories = bare(told.stories, 'rev');
+    told.chapters = bare(told.chapters, 'rev');
+    if (object(told.cards)) told.cards = Object.fromEntries(Object.entries(told.cards).map(([k, v]) => [k, bare(v, 'id')]));
+  }
+  return JSON.stringify(raw);
 }
 
 export function restorePreferences(raw: unknown, store: Store, volume?: VolumeCtrl) {
@@ -67,11 +158,12 @@ export function restorePreferences(raw: unknown, store: Store, volume?: VolumeCt
       if (object(room)) {
         const next = { ...room };
         for (const k of ['aquarium', 'words'] as const) if (!Object.hasOwn(room, k) && typeof prefs.room[k] === 'boolean') next[k] = prefs.room[k];
-        if (JSON.stringify(next) !== JSON.stringify(room)) localStorage.setItem(`${store.key}${BESIDE.stealth}`, JSON.stringify(next));
+        if (JSON.stringify(next) !== JSON.stringify(room)) write(() => localStorage.setItem(`${store.key}${BESIDE.stealth}`, JSON.stringify(next)));
       }
     }
     if ((prefs.safeLight === 'up' || prefs.safeLight === 'dim') && localStorage.getItem(`${store.key}${BESIDE.safeLight}`) === null) {
-      localStorage.setItem(`${store.key}${BESIDE.safeLight}`, prefs.safeLight);
+      const light = prefs.safeLight;
+      write(() => localStorage.setItem(`${store.key}${BESIDE.safeLight}`, light));
     }
     return saved;
   } catch {
@@ -121,7 +213,7 @@ function peekAt(raw: Record<string, unknown>, data: State): Peek {
     else if (!stories.has(s.id) || s.updated > stories.get(s.id)!.updated) stories.set(s.id, s);
   }
   for (const x of rc.slice(0, maxCh)) if (!cleanChapter(x)) unreadable = true;
-  if (skippedCards(told.cards)) unreadable = true;
+  if (skippedCards(told.cards) || skippedDrafts(raw.drafts)) unreadable = true;
   const skills = new Set<string>();
   for (const e of data.events) if ((e.k === 'skill' || e.k === 'card') && isSkillId(e.skill)) skills.add(e.skill);
   return {

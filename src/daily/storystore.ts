@@ -12,6 +12,7 @@
 import type { App } from './app';
 import { connectionLost, uid, validDay } from './store';
 import { BESIDE, STORY_DB } from '../core/stored-names';
+import { canWrite, cleared, goneElsewhere, mayWrite, onClear, write } from '../core/cleared';
 
 export type CardMode = 'continue' | 'whatif' | 'polish' | 'questions';
 export interface Story {
@@ -201,11 +202,14 @@ export class StoryStore {
   private lastCopy = 0;
   private channel: BroadcastChannel | null = null;
   private listeners = new Set<() => void>();
+  /** Writes under way, so a clear's check waits for them. */
+  private writes = new Set<Promise<unknown>>();
 
   constructor(
     readonly name: string,
     readonly liveKey: string,
   ) {
+    onClear({ hold: () => Promise.allSettled([...this.writes]), clear: () => this.dispose() });
     if (typeof BroadcastChannel !== 'undefined') {
       try {
         this.channel = new BroadcastChannel(name);
@@ -225,6 +229,8 @@ export class StoryStore {
     return new Promise((resolve) => {
       try {
         if (typeof indexedDB === 'undefined') throw new Error('no idb');
+        // this game's data is being cleared: opening would make the database again
+        if (cleared()) return resolve(null);
         const open = indexedDB.open(this.name, STORY_DB.version);
         open.onupgradeneeded = () => {
           const db = open.result;
@@ -235,7 +241,11 @@ export class StoryStore {
         };
         open.onsuccess = () => {
           const db = open.result;
-          db.onversionchange = () => db.close();
+          db.onversionchange = (e) => {
+            db.close();
+            // deleted: another copy cleared this game's data
+            if (e.newVersion === null) goneElsewhere();
+          };
           resolve(db);
         };
         const fail = (retry: boolean) => {
@@ -256,6 +266,7 @@ export class StoryStore {
 
   /** One fresh connection in place of a lost one (callers that saw the same loss share it). True when there is one. */
   private async reconnect(old: IDBDatabase) {
+    if (cleared()) return false;
     if (!this.lost.has(old)) {
       this.lost.add(old);
       try {
@@ -274,6 +285,16 @@ export class StoryStore {
    * A read that still gets no answer counts in readFails.
    */
   private async tx<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>): Promise<{ v: T } | null> {
+    if (mode === 'readonly') return this.run(stores, mode, fn);
+    // a clear checking its Save Crystal holds writes; once it clears they never happen
+    if (!canWrite() && !(await mayWrite())) return null;
+    const job = this.run(stores, mode, fn);
+    this.writes.add(job);
+    void job.finally(() => this.writes.delete(job));
+    return job;
+  }
+
+  private async run<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>): Promise<{ v: T } | null> {
     let failed = false;
     for (let retry = true; ; retry = false) {
       const db = await this.db;
@@ -310,6 +331,22 @@ export class StoryStore {
     if (failed) this.persistent = false;
     if (mode === 'readonly' && (failed || this.unreadable)) this.readFails++;
     return null;
+  }
+
+  /** This game's data is being cleared: the database closes so it can go, and nothing stays in memory. */
+  private dispose() {
+    const db = this.db;
+    this.db = Promise.resolve(null);
+    void db.then((d) => d?.close());
+    try {
+      this.channel?.close();
+    } catch {
+      /* already closed */
+    }
+    this.channel = null;
+    for (const m of Object.values(this.mem)) m.clear();
+    for (const m of [this.cardImports, this.memBases, this.lastStory, this.removedHere, this.removedAt, this.seen]) m.clear();
+    this.drop();
   }
 
   private idbView(t: IDBTransaction): View {
@@ -722,12 +759,25 @@ export class StoryStore {
    * chapter holds, or LIVE_CAP mirrors already waiting): nothing is cut short or pushed out, the caller says so.
    */
   setLive(l: Live): boolean {
+    if (cleared()) return false;
     try {
       if (!isObj(l) || !validId(l.chapter) || typeof l.text !== 'string' || l.text.length > STORY_CAP.text) return false;
       const bases = (Array.isArray(l.bases) ? l.bases : []).filter(validId).slice(-64);
       const key = this.myLive(l.chapter);
       if (localStorage.getItem(key) === null && this.liveKeys().length >= LIVE_CAP) return false;
-      localStorage.setItem(key, JSON.stringify({ chapter: l.chapter, text: l.text, bases, t: fin(l.t) ? l.t : Date.now() }));
+      const out = JSON.stringify({ chapter: l.chapter, text: l.text, bases, t: fin(l.t) ? l.t : Date.now() });
+      if (!canWrite()) {
+        // a clear is checking its Save Crystal: the mirror is written once it lets go
+        write(() => {
+          try {
+            localStorage.setItem(key, out);
+          } catch {
+            /* the chapter's own save still holds the words */
+          }
+        });
+        return true;
+      }
+      localStorage.setItem(key, out);
       return true;
     } catch {
       return false;
@@ -847,7 +897,7 @@ export class StoryStore {
     try {
       if (!this.isLiveKey(key)) return;
       const l = this.readLive(key, chapterId);
-      if (l && (text === undefined || l.text === text)) localStorage.removeItem(key);
+      if (l && (text === undefined || l.text === text)) write(() => localStorage.removeItem(key));
     } catch {
       /* nothing to clear */
     }
@@ -984,24 +1034,65 @@ export class StoryStore {
    * only in memory on this device for now.
    */
   async importAll(raw: unknown): Promise<{ added: number; updated: number; unchanged: number; skipped: number; unsaved: number }> {
+    return (await this.bring(raw, false)).out;
+  }
+
+  /**
+   * What Restore would leave out of a Save Crystal's stories on this device as it is now: the same decisions importAll
+   * makes, with nothing written. all counts every entry it would skip. Apart from the ones the file itself can't give
+   * (unreadable, past a cap), here counts the ones that clash with this device (a page whose id belongs to another story
+   * here, cards past what a page holds next to the ones here) and lost the pages whose story is in neither the file nor
+   * this device, so all = file's own + here + lost.
+   */
+  async skips(raw: unknown): Promise<{ all: number; here: number; lost: number }> {
+    const { out, file, lost } = await this.bring(raw, true);
+    return { all: out.skipped, here: Math.max(0, out.skipped - file - lost), lost };
+  }
+
+  /** A view that reads through to base and keeps what a restore would write in memory, so a dry run decides alike. */
+  private dryView(base: View, over: { stories: Map<string, Story>; chapters: Map<string, Chapter> }): View {
+    return {
+      story: async (id) => over.stories.get(id) ?? base.story(id),
+      chapter: async (id) => over.chapters.get(id) ?? base.chapter(id),
+      versions: async (id) => {
+        const v = await base.versions(id);
+        const o = over.chapters.get(id);
+        return o ? { disk: o, mem: v.mem } : v;
+      },
+      taken: async (id) => over.chapters.has(id) || base.taken(id),
+      putStory: (s) => void over.stories.set(s.id, s),
+      putChapter: (c) => void over.chapters.set(c.id, c),
+    };
+  }
+
+  /**
+   * importAll, or with dry its decisions only. Dry runs only: file counts the entries skipped for the file's own sake,
+   * lost the pages skipped because their story is in neither the file nor this device.
+   */
+  private async bring(raw: unknown, dry: boolean) {
     const out = { added: 0, updated: 0, unchanged: 0, skipped: 0, unsaved: 0 };
-    if (!isObj(raw)) return out;
-    this.drop();
+    let file = 0;
+    let lost = 0;
+    /** skipped for the file's own sake: the cards a page's list can't give even with no cards here */
+    let fileCards = 0;
+    if (!isObj(raw)) return { out, file, lost };
+    if (!dry) this.drop();
+    const over = { stories: new Map<string, Story>(), chapters: new Map<string, Chapter>() };
     const rs = Array.isArray(raw.stories) ? raw.stories : [];
     const rc = Array.isArray(raw.chapters) ? raw.chapters : [];
     const maxCh = STORY_CAP.stories * (STORY_CAP.chapters + 2);
-    out.skipped += Math.max(0, rs.length - STORY_CAP.stories) + Math.max(0, rc.length - maxCh);
+    file += Math.max(0, rs.length - STORY_CAP.stories) + Math.max(0, rc.length - maxCh);
     const fileStories = new Map<string, Story>();
     for (const x of rs.slice(0, STORY_CAP.stories)) {
       const s = cleanStory(x);
-      if (!s) out.skipped++;
+      if (!s) file++;
       else if (!fileStories.has(s.id) || s.updated > fileStories.get(s.id)!.updated) fileStories.set(s.id, s);
     }
     const byStory = new Map<string, Map<string, Chapter>>();
     for (const x of rc.slice(0, maxCh)) {
       const c = cleanChapter(x);
       if (!c) {
-        out.skipped++;
+        file++;
         continue;
       }
       const m = byStory.get(c.story) ?? new Map<string, Chapter>();
@@ -1104,6 +1195,13 @@ export class StoryStore {
         if (changed) v.putStory(next);
         return { result: !local ? ('added' as const) : changed ? ('updated' as const) : ('unchanged' as const), n: skipped, written };
       };
+      if (dry) {
+        const r = await this.tx(['stories', 'chapters'], 'readonly', async (t) => merge(this.dryView(this.idbView(t), over)));
+        const res = r ? r.v : await merge(this.dryView(this.memView(), over));
+        out.skipped += res.n;
+        if (res.result === 'orphan') lost += res.n;
+        continue;
+      }
       const r = await this.tx(['stories', 'chapters'], 'readwrite', async (t) => merge(this.idbView(t)));
       const res = r ? r.v : await merge(this.memView());
       if (res.result === 'orphan') {
@@ -1131,17 +1229,33 @@ export class StoryStore {
     }
     if (isObj(raw.cards)) {
       const { lists, skipped } = cardLists(raw.cards);
-      out.skipped += skipped;
+      file += skipped;
+      // a dry run reads every card list here in one go: a file can name thousands of pages
+      const here = dry && lists.length
+        ? await this.tx(['cards'], 'readonly', async (t) => {
+            const store = t.objectStore('cards');
+            const [keys, values] = await Promise.all([req<IDBValidKey[]>(store.getAllKeys()), req<unknown[]>(store.getAll())]);
+            return new Map(keys.map((k, i) => [String(k), values[i]]));
+          })
+        : null;
       for (const [id, list] of lists) {
-        const r = await this.tx(['cards'], 'readwrite', async (t) => {
-          const store = t.objectStore('cards');
-          const disk = await req<unknown>(store.get(id));
+        const plan = (disk: unknown) => {
           const local = Array.isArray(disk) ? disk.map(cleanCard).filter((c): c is Card => !!c) : [];
           const memory = this.mem.cards.get(id);
           const pending = memory && !this.cardImports.has(id) ? { cards: memory, skipped: 0 } : mergeCards(local, memory ?? []);
-          const merged = mergeCards(pending.cards, list);
+          return { ...mergeCards(pending.cards, list), pendingSkipped: pending.skipped };
+        };
+        if (dry) {
+          const r = here && plan(here.v.get(id));
+          out.skipped += r ? r.skipped + r.pendingSkipped : mergeCards(await this.cards(id), list).skipped;
+          fileCards += mergeCards([], list).skipped;
+          continue;
+        }
+        const r = await this.tx(['cards'], 'readwrite', async (t) => {
+          const store = t.objectStore('cards');
+          const merged = plan(await req<unknown>(store.get(id)));
           store.put(merged.cards, id);
-          return { ...merged, pendingSkipped: pending.skipped };
+          return merged;
         });
         if (r) {
           if (r.v.pendingSkipped) out.unsaved++;
@@ -1161,8 +1275,10 @@ export class StoryStore {
         }
       }
     }
-    this.changed(wrote);
-    return out;
+    out.skipped += file;
+    if (!dry) this.changed(wrote);
+    // a card the file can't give counts once, as the file's (a list here can only add to what is left out)
+    return { out, file: file + Math.min(fileCards, out.skipped - file - lost), lost };
   }
 }
 

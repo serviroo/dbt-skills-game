@@ -21,4 +21,7 @@ export const STORY_DB = { version: 1, stores: ['stories', 'chapters', 'cards', '
 export const TAB_KEY = 'dbt.tab';
 export const CARE_KEY = 'dbt.story.care';
 
+/** The offline worker's caches: the names src/pwa/sw-template.js uses (scripts/check-stored-ids.mjs checks they match). */
+export const SW_CACHE = { prefix: 'dbt.precache.', meta: 'dbt.precache-meta' } as const;
+
 export const APP_ID = 'the-quiet-lantern';

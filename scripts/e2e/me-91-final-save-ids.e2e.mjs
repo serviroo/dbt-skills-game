@@ -82,6 +82,8 @@ export function seedStores(page, SAVE, now) {
   const day = dayOf(now - 5 * DAY);
   const t = now - 5 * DAY;
   const drawings = ids['art-paper'].map((kind, i) => ({ meta: { id: `draw-${kind}`, kind, day, t: t + i, updated: t + i, prompt: 'Draw a door to somewhere calm.', name: `Wisp ${i}`, n: 2, rev: `r${i}`, from: [`r9@${t}`] }, strokes: [{ i: 1, w: 6, p: [100, 100, 300, 320, 500, 410] }, { i: 2, w: 12, p: [40, 50, 60, 70] }] }));
+  // an unfinished drawing over the first page, with every field a draft keeps
+  const draft = { key: `edit:${drawings[0].meta.id}:tab-1`, kind: drawings[0].meta.kind, editId: drawings[0].meta.id, bases: [`r0@${t}`], base: t, prompt: 'Draw a door to somewhere calm.', strokes: [{ i: 2, w: 4, p: [120, 120, 200, 260] }], t: t + 50 };
   const story = {
     stories: [
       { id: 'tale-1', title: 'The Long Night', created: t, updated: t, rev: 's1', chapters: ['ch-1'], notes: 'ch-notes' },
@@ -96,7 +98,7 @@ export function seedStores(page, SAVE, now) {
   };
   const idb = ids['indexeddb-store'];
   return page.evaluate(
-    async ({ SAVE, drawings, story, day, t, artStores, storyStores, index, versions }) => {
+    async ({ SAVE, drawings, draft, story, day, t, artStores, storyStores, index, versions }) => {
       const open = (name, version, upgrade) =>
         new Promise((ok, bad) => {
           const r = indexedDB.open(name, version);
@@ -106,11 +108,12 @@ export function seedStores(page, SAVE, now) {
         });
       const done = (tx) => new Promise((ok, bad) => ((tx.oncomplete = ok), (tx.onerror = () => bad(tx.error))));
       const art = await open(`${SAVE}.art`, versions['.art'], (db) => artStores.forEach((s) => db.objectStoreNames.contains(s) || db.createObjectStore(s)));
-      let tx = art.transaction(['meta', 'strokes'], 'readwrite');
+      let tx = art.transaction(['meta', 'strokes', 'drafts'], 'readwrite');
       for (const d of drawings) {
         tx.objectStore('meta').put(d.meta, d.meta.id);
         tx.objectStore('strokes').put(d.strokes, d.meta.id);
       }
+      tx.objectStore('drafts').put(draft, draft.key);
       await done(tx);
       art.close();
       const tales = await open(`${SAVE}.story`, versions['.story'], (db) => {
@@ -129,6 +132,7 @@ export function seedStores(page, SAVE, now) {
     {
       SAVE,
       drawings,
+      draft,
       story,
       day,
       t,
@@ -137,7 +141,7 @@ export function seedStores(page, SAVE, now) {
       index: idb.find((x) => x.includes('/index:')).split('index:')[1],
       versions: Object.fromEntries(ids['indexeddb-version'].map((x) => x.split('@')).map(([k, v]) => [k, Number(v)])),
     },
-  ).then(() => ({ drawings, story }));
+  ).then(() => ({ drawings, draft, story }));
 }
 
 async function storedNamesOk(page, SAVE, expect) {
@@ -210,6 +214,7 @@ function content(c) {
     lines: c.lines,
     profile: { theme, accent, cardBack, plate, title, playerName, companion, region, names, titlesSeen: [...(titlesSeen ?? [])].sort() },
     art: byId((c.art ?? []).map(({ updated, rev, from, ...r }) => r)),
+    drafts: Object.fromEntries((c.drafts ?? []).map((d) => [d.key, d])),
     stories: byId((c.stories?.stories ?? []).map(({ updated, rev, ...s }) => s)),
     chapters: byId((c.stories?.chapters ?? []).map((x) => ({ id: x.id, story: x.story, kind: x.kind, title: x.title, text: x.text }))),
   };
@@ -220,7 +225,8 @@ export const scenarios = {
     const now = Date.now();
     const save = fullSave(now);
     const audio = JSON.stringify({ v: 1, master: 0.5, music: 0.25, sfx: 0.75, muted: true });
-    const a = await open({ [SAVE]: JSON.stringify(save), [YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: save.created, companionAt: save.created }), 'dbt.app.v1': SEEN, 'dbt.audio.v1': audio });
+    // a copy of a save no version could read, kept beside this one: every Save Crystal carries it as it is
+    const a = await open({ [SAVE]: JSON.stringify(save), [`${SAVE}.unreadable.${now - 5}`]: '{not a save', [YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: save.created, companionAt: save.created }), 'dbt.app.v1': SEEN, 'dbt.audio.v1': audio });
     await reachHub(a.page);
     const seeded = await seedStores(a.page, SAVE, now);
     await a.page.reload();
@@ -266,6 +272,7 @@ export const scenarios = {
     const cx = content(x);
     for (const d of seeded.drawings) expect(same(cx.art[d.meta.id]?.strokes, d.strokes) && cx.art[d.meta.id]?.name === d.meta.name, `drawing ${d.meta.id} not in the Save Crystal intact`);
     for (const c of seeded.story.chapters) expect(cx.chapters[c.id]?.text === c.text, `chapter ${c.id} not in the Save Crystal intact`);
+    expect(same(cx.drafts[seeded.draft.key], seeded.draft), 'the unfinished drawing is not in the Save Crystal intact: ' + JSON.stringify(cx.drafts[seeded.draft.key]));
     expect(ids['event-kind'].every((k) => x.events.some((e) => e.k === k)), 'an event kind is missing from the Save Crystal');
     expect(!a.errors.length, a.errors.join('\n'));
     await a.ctx.close();
@@ -290,9 +297,10 @@ export const scenarios = {
     expect(Object.entries(x.flags).filter(([k]) => !k.endsWith('Day') && k !== 'safeCredit').every(([k, v]) => y.flags[k] === v), 'restore lost progress flags');
     expect(y.flags.safeCredit === fresh.flags.safeCredit, 'restore changed device Safe Zone credit preference');
     expect(y.created === x.created, 'restore lost the first visit time');
+    expect(same(y.unreadSaves, x.unreadSaves) && same(x.unreadSaves, [{ at: String(now - 5), raw: '{not a save' }]), 'the unreadable save did not round-trip: ' + JSON.stringify([x.unreadSaves, y.unreadSaves]));
     expect(same(y.profile.setAt, x.profile.setAt), 'restore lost profile choice times');
     for (const k of ['emotionRows', 'urgeRows']) expect(x.settings[k].every((row) => y.settings[k].includes(row)), `restore lost ${k}`);
-    for (const part of ['events', 'diary', 'lists', 'maps', 'lines', 'profile', 'art', 'stories', 'chapters']) {
+    for (const part of ['events', 'diary', 'lists', 'maps', 'lines', 'profile', 'art', 'drafts', 'stories', 'chapters']) {
       const want = cx[part], got = cy[part];
       const missing = want && typeof want === 'object' && !Array.isArray(want) && part !== 'diary' && part !== 'profile' ? Object.keys(want).filter((k) => !same(want[k], got?.[k])) : same(want, got) ? [] : [part];
       expect(!missing.length, `${part} changed on the way through a fresh device: ${missing.slice(0, 5).join(', ')}\nbefore: ${JSON.stringify(missing.length && want[missing[0]] !== undefined ? want[missing[0]] : want)?.slice(0, 300)}\nafter:  ${JSON.stringify(missing.length && got?.[missing[0]] !== undefined ? got[missing[0]] : got)?.slice(0, 300)}`);

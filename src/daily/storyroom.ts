@@ -6,6 +6,7 @@ import { animate } from '../ui/anim';
 import { cowrite } from '../cowriter/local';
 import type { CowriteReq, CowriteRes, CowriteTurn } from '../cowriter/types';
 import { CARE_KEY } from '../core/stored-names';
+import { write } from '../core/cleared';
 import type { App, Route, ScreenOut } from './app';
 import { icon } from './art';
 import { dayDiff, dayKey } from './store';
@@ -1033,11 +1034,13 @@ export function writeScreen(app: App, route: Route): ScreenOut {
       /* private mode: the page's own flag keeps it to once */
     }
     cared = true;
-    try {
-      sessionStorage.setItem(CARE_KEY, '1');
-    } catch {
-      /* private mode: still show it this once */
-    }
+    write(() => {
+      try {
+        sessionStorage.setItem(CARE_KEY, '1');
+      } catch {
+        /* private mode: still show it this once */
+      }
+    });
     const box: HTMLElement = h(
       'div',
       { class: 'dq-panel st-care', role: 'note' },

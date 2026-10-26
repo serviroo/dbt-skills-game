@@ -1,6 +1,6 @@
 import { LOADOUT, LOADOUT_COPY, MODULES, MODULE_ORDER, SAFE, SKILL, SKILLS } from '../content/dbt';
 import { CRISIS_CHECKED } from '../content/crisis-lines';
-import { ABOUT, CRYSTAL_COPY, KEEP_COPY, PEEK_COPY } from '../content/daily-lines';
+import { ABOUT, CLEAR_COPY, CRYSTAL_COPY, KEEP_COPY, PEEK_COPY } from '../content/daily-lines';
 import type { App, ScreenOut } from './app';
 import { glyph, icon, mothSVG } from './art';
 import { skillCard } from './hub';
@@ -20,7 +20,10 @@ import { wardrobePanel } from './wardrobe';
 import { DEFAULT_COMPANION, DEFAULT_NAME } from '../core/you';
 import { BESIDE } from '../core/stored-names';
 import { mayMentionTherapist } from '../core/session';
-import { exportPreferences, readCrystal, restorePreferences, type Peek } from './crystal';
+import { canWrite, cleared, clearStatus, holdAll, onClearStatus, write } from '../core/cleared';
+import { siteUrl } from '../core/base';
+import { clearGame } from './clear';
+import { crystalContent, makeCrystal, readCrystal, restorePreferences, restoreUnread, type Peek } from './crystal';
 import { supportListsCopy } from './support-lists';
 
 const pageHead = (title: string, sub?: string) => h('header', { class: 'dq-pagehead' }, h('h1', { class: 'dq-h1', 'data-focus': '', text: title }), sub ? p(sub, 'dq-text dq-pagesub') : null);
@@ -40,11 +43,14 @@ function stealthPrefs(key: string) {
   }
 }
 function saveStealthPrefs(key: string, prefs: { aquarium: boolean; words: boolean }) {
-  try {
-    localStorage.setItem(`${key}${BESIDE.stealth}`, JSON.stringify(prefs));
-  } catch {
-    /* the room still works; the look resets next visit */
-  }
+  const out = JSON.stringify(prefs);
+  write(() => {
+    try {
+      localStorage.setItem(`${key}${BESIDE.stealth}`, out);
+    } catch {
+      /* the room still works; the look resets next visit */
+    }
+  });
 }
 
 const ST_IC = {
@@ -799,7 +805,47 @@ function browserKeeps() {
   return { el, stop };
 }
 
+/**
+ * Settings once this game's data is being cleared, here or in another tab: how it is going, then a way to start again.
+ * Every screen but the Safe Zone shows this (see App.go), and the Safe Zone stays one tap away in the top bar.
+ */
+function clearedScreen(): ScreenOut {
+  const head = h('h1', { class: 'dq-h1 dq-cleared-h', 'data-focus': '' });
+  const text = h('p', { class: 'dq-text', 'aria-live': 'polite' });
+  const note = p(CLEAR_COPY.againNote, 'dq-small');
+  const actions = h('div', { class: 'dq-actions' });
+  const el = h('div', { class: 'dq-page dq-cleared' }, h('section', { class: 'dq-cleared-card', 'aria-labelledby': 'dq-cleared-h' }, head, text, actions, note));
+  head.id = 'dq-cleared-h';
+  const lines: Record<ReturnType<typeof clearStatus>, string> = {
+    clearing: CLEAR_COPY.clearing,
+    waiting: CLEAR_COPY.waiting,
+    done: CLEAR_COPY.done,
+    failed: CLEAR_COPY.failed,
+    elsewhere: CLEAR_COPY.elsewhere,
+    'elsewhere-done': CLEAR_COPY.elsewhereDone,
+    'elsewhere-failed': CLEAR_COPY.failed,
+  };
+  const render = () => {
+    const now = clearStatus();
+    const done = now === 'done' || now === 'elsewhere-done';
+    const failed = now === 'failed' || now === 'elsewhere-failed';
+    head.textContent = typo(done ? CLEAR_COPY.doneTitle : failed ? CLEAR_COPY.failedTitle : CLEAR_COPY.clearingTitle);
+    // the line is a live region: nothing around it is marked busy, so each change is read out as it comes
+    text.textContent = typo(lines[now]);
+    note.classList.toggle('is-hidden', !done);
+    actions.classList.toggle('is-hidden', !done && !failed);
+    const lost = actions.contains(document.activeElement);
+    actions.replaceChildren(
+      ...(done ? [btn(CLEAR_COPY.again, () => location.assign(siteUrl('')), { kind: 'primary' })] : failed ? [btn(CLEAR_COPY.retry, () => void clearGame(), { kind: 'primary' })] : []),
+    );
+    if (lost) (actions.querySelector('button') ?? head).focus({ preventScroll: true });
+  };
+  render();
+  return { el, title: 'Cleared', mode: 'hub', leave: onClearStatus(render) };
+}
+
 export function settingsScreen(app: App): ScreenOut {
+  if (cleared()) return clearedScreen();
   const st = app.store;
   const s = st.state;
   const status = h('p', { class: 'dq-hint', 'aria-live': 'polite' });
@@ -810,6 +856,7 @@ export function settingsScreen(app: App): ScreenOut {
   const restore = async ({ raw, data, incomplete: fileIncomplete }: Peek) => {
     const { saving } = st.merge(data);
     const choicesSaved = restorePreferences((raw as { preferences?: unknown }).preferences, st, app.opts.volume);
+    const unreadBack = restoreUnread((raw as { unreadSaves?: unknown }).unreadSaves, st);
     app.applyMotion();
     app.applySound();
     app.root.querySelectorAll('.dq-settings [aria-label="Motion"] [role="radio"]').forEach((b, i) => b.setAttribute('aria-checked', String(['system', 'reduce', 'full'][i] === s.settings.motion)));
@@ -824,6 +871,15 @@ export function settingsScreen(app: App): ScreenOut {
     if (Array.isArray(rawArt) && rawArt.length) {
       try {
         art = await artStore(st.key).importAll(rawArt);
+      } catch {
+        artFailed = true;
+      }
+    }
+    const rawDrafts = (raw as { drafts?: unknown }).drafts;
+    let drafts: Awaited<ReturnType<ReturnType<typeof artStore>['importDrafts']>> | null = null;
+    if (Array.isArray(rawDrafts) && rawDrafts.length) {
+      try {
+        drafts = await artStore(st.key).importDrafts(rawDrafts);
       } catch {
         artFailed = true;
       }
@@ -845,7 +901,7 @@ export function settingsScreen(app: App): ScreenOut {
     const parts = [
       !saving
         ? `Restored for this visit. This device isn't saving right now, so keep the Save Crystal file.${counts ? ` Drawings: ${counts}.` : ''}${told ? ` Stories: ${told}.` : ''}`
-        : artFailed || talesFailed || art?.skipped || tales?.skipped || fileIncomplete
+        : artFailed || talesFailed || art?.skipped || drafts?.skipped || tales?.skipped || fileIncomplete
           ? 'Restored your progress and lists.'
           : `Restored. Everything in the file was added${too}. Nothing was removed.`,
     ];
@@ -853,9 +909,10 @@ export function settingsScreen(app: App): ScreenOut {
     if (talesFailed) parts.push("The stories in the file couldn't be added on this device; nothing was removed.");
     if (art?.unsaved) parts.push('Some drawings are here for this visit only; keep the Save Crystal file.');
     if (tales?.unsaved) parts.push('Some stories are here for this visit only; keep the Save Crystal file.');
-    if (art?.skipped) parts.push("A few drawings in the file couldn't be read and were left out.");
+    if (art?.skipped || drafts?.skipped) parts.push("A few drawings in the file couldn't be read and were left out.");
     if (tales?.skipped) parts.push(CRYSTAL_COPY.storySkipped);
     if (!choicesSaved) parts.push(CRYSTAL_COPY.choicesUnsaved);
+    if (!unreadBack) parts.push(CRYSTAL_COPY.unreadUnsaved);
     if (fileIncomplete) parts.push(CRYSTAL_COPY.incompleteRestore);
     return parts.join(' ');
   };
@@ -867,10 +924,12 @@ export function settingsScreen(app: App): ScreenOut {
     if (e.key === 'Escape' && held) (e.stopPropagation(), cancel());
   };
   const close = () => {
+    const open = held !== null;
     held = null;
     document.removeEventListener('keydown', onKey);
     peek.classList.add('is-hidden');
     peek.replaceChildren();
+    if (open) document.dispatchEvent(new Event('crystal-closed'));
   };
   const cancel = () => {
     const at = document.activeElement;
@@ -896,7 +955,8 @@ export function settingsScreen(app: App): ScreenOut {
     if (n === pick) status.textContent = said;
     notSaving.classList.toggle('is-hidden', st.saving);
   };
-  const show = (c: Peek, fileName: string) => {
+  const show = (c: Peek, fileName: string, { here, lost }: { here: number; lost: number }) => {
+    stopClear();
     held = c;
     document.addEventListener('keydown', onKey);
     const missing = typo(PEEK_COPY.notSaved);
@@ -917,7 +977,12 @@ export function settingsScreen(app: App): ScreenOut {
         row(PEEK_COPY.drawings, c.drawings, 'dq-num'),
         row(PEEK_COPY.stories, c.stories, 'dq-num'),
       ),
-      ...[c.incomplete && p(CRYSTAL_COPY.incompleteRestore, 'dq-small dq-peek-note'), c.unreadable && p(PEEK_COPY.unreadable, 'dq-small dq-peek-note')].filter((x) => !!x),
+      ...[
+        c.incomplete && p(CRYSTAL_COPY.incompleteRestore, 'dq-small dq-peek-note'),
+        c.unreadable && p(PEEK_COPY.unreadable, 'dq-small dq-peek-note'),
+        lost > 0 && p(lost === 1 ? PEEK_COPY.lostOne : PEEK_COPY.lost.replace('{n}', String(lost)), 'dq-small dq-peek-note dq-peek-lost'),
+        here > 0 && p(here === 1 ? PEEK_COPY.hereOne : PEEK_COPY.here.replace('{n}', String(here)), 'dq-small dq-peek-note dq-peek-here'),
+      ].filter((x) => !!x),
       p(PEEK_COPY.adds, 'dq-small'),
       h('div', { class: 'dq-actions' }, btn(PEEK_COPY.confirm, () => void confirm(), { kind: 'primary', ic: 'import' }), btn(PEEK_COPY.cancel, cancel, { kind: 'quiet' })),
     );
@@ -925,6 +990,8 @@ export function settingsScreen(app: App): ScreenOut {
     head.focus({ preventScroll: true });
     head.scrollIntoView({ block: 'start' });
   };
+  /** Every read of a chosen file ends with this, whether its preview showed, the file was turned down or a later choice took over. */
+  const settled = (name: string, outcome: 'shown' | 'refused' | 'dropped') => document.dispatchEvent(new CustomEvent('crystal-read', { detail: { name, outcome } }));
   file.addEventListener('change', async () => {
     const f = file.files?.[0];
     file.value = '';
@@ -933,14 +1000,135 @@ export function settingsScreen(app: App): ScreenOut {
     close();
     status.textContent = typo(PEEK_COPY.reading);
     const r = await readCrystal(f).catch(() => 'wrong' as const);
-    if (gone || n !== pick) return;
+    if (gone || n !== pick) return settled(f.name, 'dropped');
     if (typeof r !== 'string') {
+      // what Restore would leave out, as Restore itself decides (read only): pages whose story is nowhere, and clashes here
+      const told = r.raw.stories;
+      const none = { here: 0, lost: 0 };
+      const left = told && typeof told === 'object' ? await storyStore(st.key).skips(told).catch(() => none) : none;
+      if (gone || n !== pick) return settled(f.name, 'dropped');
       status.textContent = '';
-      return show(r, f.name);
+      show(r, f.name, left);
+      return settled(f.name, 'shown');
     }
     status.textContent =
       r === 'big' ? 'That file is too big to be a Save Crystal. Nothing changed.' : r === 'unread' ? "That file couldn't be read. Nothing changed." : "That file doesn't look like a Save Crystal from this app. Nothing changed.";
+    settled(f.name, 'refused');
   });
+  // back up, then clear this game's data: a Save Crystal first, then one confirmation
+  const clearBox = h('section', { class: 'dq-clear', 'aria-labelledby': 'dq-clear-h' });
+  /** what the Save Crystal just made holds (see crystalContent), while its confirmation is open */
+  let backup: string | null = null;
+  let clearRun = 0;
+  const onClearKey = (e: KeyboardEvent) => {
+    if (e.key === 'Escape' && backup) (e.stopPropagation(), keepAll());
+  };
+  const clearHead = (text: string) => h('h3', { class: 'dq-clear-h', id: 'dq-clear-h', tabindex: -1, text: typo(text) });
+  const startBtn = btn(CLEAR_COPY.start, () => void backUp(), { kind: 'quiet' });
+  const idle = [p(CLEAR_COPY.intro, 'dq-small'), h('div', { class: 'dq-actions' }, startBtn)];
+  /**
+   * Back to the one button: a confirmation (or a backup still being made) is dropped. The button is never moved while it
+   * is in place (moving it would drop focus). With refocus, focus that was in here, or lost to the page, comes back to it.
+   */
+  const stopClear = (refocus = false) => {
+    const at = document.activeElement;
+    const lost = refocus && (!at || at === document.body || clearBox.contains(at));
+    clearRun++;
+    backup = null;
+    document.removeEventListener('keydown', onClearKey);
+    startBtn.disabled = false;
+    startBtn.removeAttribute('aria-busy');
+    clearBox.removeAttribute('aria-busy');
+    clearBox.classList.remove('is-asking');
+    if (clearBox.children.length !== idle.length || idle.some((x, i) => clearBox.children[i] !== x)) clearBox.replaceChildren(...idle);
+    if (lost) startBtn.focus({ preventScroll: true });
+  };
+  const keepAll = () => {
+    stopClear(true);
+    status.textContent = typo(CLEAR_COPY.kept);
+  };
+  const ask = (b: string, head: HTMLElement, ...kids: HTMLElement[]) => {
+    backup = b;
+    clearBox.removeAttribute('aria-busy');
+    clearBox.classList.add('is-asking');
+    document.addEventListener('keydown', onClearKey);
+    clearBox.replaceChildren(head, ...kids);
+    head.focus({ preventScroll: true });
+    head.scrollIntoView({ block: 'start' });
+  };
+  const backUp = async () => {
+    // a Save Crystal preview gives way
+    if (held) {
+      pick++;
+      close();
+    }
+    stopClear(true);
+    const n = clearRun;
+    if (!canWrite()) return void (status.textContent = typo(CLEAR_COPY.busy));
+    startBtn.disabled = true;
+    startBtn.setAttribute('aria-busy', 'true');
+    status.textContent = typo(CLEAR_COPY.making);
+    const made = await makeCrystal(st, app.opts.volume).catch(() => null);
+    if (gone || n !== clearRun) return;
+    if (!made || made.missing) {
+      stopClear(true);
+      status.textContent = made ? typo(CLEAR_COPY.incomplete.replace('{items}', made.missing)) : typo(CLEAR_COPY.unmade);
+      return;
+    }
+    const name = `save-crystal-${st.today()}.json`;
+    // a share or download that started is all a page can know of: the confirmation asks them to check the file
+    const r = await shareOrSave(made.json, name, 'application/json').catch(() => 'failed' as const);
+    if (gone || n !== clearRun) return;
+    if (r !== 'saved' && r !== 'shared') {
+      stopClear(true);
+      status.textContent = typo(r === 'cancelled' ? CLEAR_COPY.cancelled : CLEAR_COPY.unmade);
+      return;
+    }
+    status.textContent = '';
+    ask(
+      crystalContent(made.json),
+      clearHead(CLEAR_COPY.title),
+      h('p', { class: 'dq-text dq-clear-file' }, `${typo(r === 'shared' ? CLEAR_COPY.shared : CLEAR_COPY.saved)} `, h('span', { class: 'dq-clear-fname', text: name }), '.'),
+      p(CLEAR_COPY.keep, 'dq-small'),
+      p(CLEAR_COPY.goes, 'dq-small'),
+      h('div', { class: 'dq-actions' }, btn(CLEAR_COPY.confirm, () => void clearAll(), { kind: 'primary' }), btn(CLEAR_COPY.cancel, keepAll, { kind: 'quiet' })),
+    );
+  };
+  const clearAll = async () => {
+    const b = backup;
+    if (!b) return;
+    const n = ++clearRun;
+    backup = null;
+    document.removeEventListener('keydown', onClearKey);
+    clearBox.querySelectorAll('button').forEach((x) => (x.disabled = true));
+    clearBox.setAttribute('aria-busy', 'true');
+    if (!canWrite()) {
+      stopClear(true);
+      return void (status.textContent = typo(CLEAR_COPY.busy));
+    }
+    status.textContent = typo(CLEAR_COPY.checking);
+    const hold = await holdAll();
+    // the Save Crystal must still hold everything this device has: another tab may have changed something since
+    const now = await makeCrystal(st, app.opts.volume).catch(() => null);
+    if (!now || now.missing || crystalContent(now.json) !== b) {
+      hold.release();
+      if (gone || n !== clearRun) return;
+      status.textContent = '';
+      ask(
+        b,
+        clearHead(CLEAR_COPY.changedTitle),
+        p(CLEAR_COPY.changed, 'dq-small'),
+        h('div', { class: 'dq-actions' }, btn(CLEAR_COPY.fresh, () => void backUp(), { kind: 'primary' }), btn(CLEAR_COPY.cancel, keepAll, { kind: 'quiet' })),
+      );
+      return;
+    }
+    // Settings was left during the check (the Safe Zone, say): nothing is cleared under the player
+    if (gone || n !== clearRun) return void hold.release();
+    // every open copy stops writing and shows how clearing goes (this screen too, see App.go)
+    hold.clear();
+    void clearGame();
+  };
+  stopClear();
   const showTherapist = !s.flags.therapistLineShown && mayMentionTherapist();
   if (showTherapist) {
     s.flags.therapistLineShown = true;
@@ -1020,19 +1208,15 @@ export function settingsScreen(app: App): ScreenOut {
       panel(
         { title: 'Your data', ic: icon('export') },
         p('**Saved only on this device.** No account, no tracking.', 'dq-text'),
-        p('A Save Crystal is a backup file of everything here, your stories and saved drawings included (an unfinished drawing is not, until you save it). Keep one somewhere safe; Restore adds it back without removing anything.', 'dq-small'),
+        p('A Save Crystal is a backup file of everything here, your stories and drawings included, unfinished ones too. Keep one somewhere safe; Restore adds it back without removing anything.', 'dq-small'),
         notSaving,
         keeps.el,
         h(
           'div',
           { class: 'dq-actions' },
           btn('Save Crystal', async () => {
-            app.opts.volume?.flush();
-            const art = await artStore(st.key).exportAll();
-            const { stories, chapters, cards, incomplete } = await storyStore(st.key).exportAll();
-            const choices = exportPreferences(st, app.opts.volume);
-            const missing = [art.incomplete ? 'drawings' : '', incomplete ? 'stories' : '', choices.incomplete ? 'choices' : ''].filter(Boolean).join(' and ');
-            const r = await shareOrSave(st.exportJSON({ art: art.records, stories: { stories, chapters, cards }, preferences: choices.preferences, incomplete: !!missing }), `save-crystal-${st.today()}.json`, 'application/json');
+            const { json, missing } = await makeCrystal(st, app.opts.volume);
+            const r = await shareOrSave(json, `save-crystal-${st.today()}.json`, 'application/json');
             const done = r === 'saved' ? 'Saved' : r === 'shared' ? 'Shared' : '';
             status.textContent = done && missing ? `${done}. ${CRYSTAL_COPY.incomplete.replace('{items}', missing)}` : r === 'saved' ? 'Save Crystal downloaded.' : r === 'shared' ? 'Save Crystal shared.' : '';
           }, { kind: 'quiet', ic: 'export' }),
@@ -1042,6 +1226,7 @@ export function settingsScreen(app: App): ScreenOut {
         file,
         peek,
         status,
+        clearBox,
       ),
       panel(
         { title: 'About', ic: icon('book') },
@@ -1062,6 +1247,9 @@ export function settingsScreen(app: App): ScreenOut {
       gone = true;
       pick++;
       close();
+      clearRun++;
+      backup = null;
+      document.removeEventListener('keydown', onClearKey);
       levels?.dispose();
     },
   };

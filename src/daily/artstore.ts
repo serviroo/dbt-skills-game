@@ -6,6 +6,7 @@
 import { canvasBlob, INKS, PAGE, renderDrawing, type Paper, type Stroke } from './ink';
 import { connectionLost, uid, validDay } from './store';
 import { ART_DB, BESIDE, TAB_KEY } from '../core/stored-names';
+import { canWrite, cleared, goneElsewhere, mayWrite, onClear, write as writeOut } from '../core/cleared';
 
 export interface DrawingMeta {
   id: string;
@@ -104,6 +105,31 @@ export function cleanRec(raw: unknown): DrawingRec | null {
   };
 }
 
+const DRAFT_KEY = 120;
+const DRAFT_CAP = 1000;
+/** An unfinished drawing as a Save Crystal carries it, or null when it can't be read or holds no strokes. */
+export function cleanDraft(raw: unknown): Draft | null {
+  if (!isObj(raw) || typeof raw.key !== 'string' || !raw.key || raw.key.length > DRAFT_KEY) return null;
+  const kind: Paper = raw.kind === 'ally' ? 'ally' : 'today';
+  const strokes = cleanStrokes(raw.strokes, kind);
+  if (!strokes?.length) return null;
+  // fields in the order a draft is stored in, so one read back from a file is the same draft
+  const d = { key: raw.key, kind } as Draft;
+  if (typeof raw.editId === 'string' && raw.editId && raw.editId.length <= 40) d.editId = raw.editId;
+  if (Array.isArray(raw.bases)) d.bases = raw.bases.filter((b): b is string => typeof b === 'string' && IDENT.test(b)).slice(-8);
+  if (fin(raw.base)) d.base = raw.base;
+  if (typeof raw.prompt === 'string') d.prompt = raw.prompt.slice(0, 120);
+  else if (raw.prompt === null) d.prompt = null;
+  d.strokes = strokes;
+  d.t = fin(raw.t) ? raw.t : 0;
+  return d;
+}
+/** Drafts from a file that can't be read: unreadable ones and any past the cap. */
+export function skippedDrafts(raw: unknown) {
+  if (!Array.isArray(raw)) return 0;
+  return Math.max(0, raw.length - DRAFT_CAP) + raw.slice(0, DRAFT_CAP).filter((x) => !cleanDraft(x)).length;
+}
+
 /** A page and the copies kept apart from it share this. */
 const family = (id: string) => id.split('~')[0].slice(0, 26);
 const landKey = (id: string, rev: string) => `${id}\n${rev}`;
@@ -147,8 +173,11 @@ export class ArtStore {
   /** The newest draft write per key; an older one finishing later must not put its draft back in memory. */
   private draftTurns = new Map<string, number>();
   private draftTurn = 0;
+  /** Writes under way, so a clear's check waits for them. */
+  private writes = new Set<Promise<unknown>>();
 
   constructor(readonly name: string) {
+    onClear({ hold: () => Promise.allSettled([...this.writes]), clear: () => this.dispose() });
     if (typeof BroadcastChannel !== 'undefined') {
       try {
         this.channel = new BroadcastChannel(name);
@@ -175,9 +204,12 @@ export class ArtStore {
     tab.ready = new Promise<void>((resolve) => {
       let timer = 0;
       const claim = () => {
-        try {
-          sessionStorage.setItem(TAB_KEY, tab.id);
-        } catch {}
+        const id = tab.id;
+        writeOut(() => {
+          try {
+            sessionStorage.setItem(TAB_KEY, id);
+          } catch {}
+        });
         this.announce({ type: 'tab-claim', id: tab.id, owner });
         clearTimeout(timer);
         timer = window.setTimeout(() => {
@@ -202,6 +234,25 @@ export class ArtStore {
     return tab;
   }
 
+  /** This game's data is being cleared: the database closes so it can go, and nothing stays in memory. */
+  private dispose() {
+    const db = this.db;
+    this.db = Promise.resolve(null);
+    void db.then((d) => d?.close());
+    try {
+      this.channel?.close();
+    } catch {
+      /* already closed */
+    }
+    this.channel = null;
+    for (const { url } of this.urls.values()) URL.revokeObjectURL(url);
+    this.urls.clear();
+    for (const m of Object.values(this.mem)) m.clear();
+    this.landed.clear();
+    this.draftTurns.clear();
+    this.drop();
+  }
+
   onRemove(fn: (id: string) => void) {
     this.removals.add(fn);
     return () => this.removals.delete(fn);
@@ -223,6 +274,8 @@ export class ArtStore {
     return new Promise((resolve) => {
       try {
         if (typeof indexedDB === 'undefined') throw new Error('no idb');
+        // this game's data is being cleared: opening would make the database again
+        if (cleared()) return resolve(null);
         const open = indexedDB.open(this.name, ART_DB.version);
         open.onupgradeneeded = () => {
           const db = open.result;
@@ -230,7 +283,11 @@ export class ArtStore {
         };
         open.onsuccess = () => {
           const db = open.result;
-          db.onversionchange = () => db.close();
+          db.onversionchange = (e) => {
+            db.close();
+            // deleted: another copy cleared this game's data
+            if (e.newVersion === null) goneElsewhere();
+          };
           resolve(db);
         };
         const fail = (retry: boolean) => {
@@ -251,6 +308,7 @@ export class ArtStore {
 
   /** One fresh connection in place of a lost one (callers that saw the same loss share it). True when there is one. */
   private async reconnect(old: IDBDatabase) {
+    if (cleared()) return false;
     if (!this.lost.has(old)) {
       this.lost.add(old);
       try {
@@ -268,6 +326,16 @@ export class ArtStore {
    * the fresh one, and so does a write that never started. A read that still gets no answer counts in readFails.
    */
   private async tx<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>, fallback: () => T): Promise<T> {
+    if (mode === 'readonly') return this.run(stores, mode, fn, fallback);
+    // a clear checking its Save Crystal holds writes; once it clears they never happen
+    if (!canWrite() && !(await mayWrite())) return fallback();
+    const job = this.run(stores, mode, fn, fallback);
+    this.writes.add(job);
+    void job.finally(() => this.writes.delete(job));
+    return job;
+  }
+
+  private async run<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>, fallback: () => T): Promise<T> {
     let failed = false;
     for (let retry = true; ; retry = false) {
       const db = await this.db;
@@ -542,16 +610,18 @@ export class ArtStore {
     return [...byKey.values()].filter((d) => d.strokes?.length).sort((a, b) => b.t - a.t);
   }
 
+  /** Whether an unfinished edit of saved drawing id stays one here (saved: it is stored): else it waits as a page of its own. */
+  private keepsEdit(id: string, saved: boolean) {
+    const m = this.mem.meta.get(id);
+    return saved || (!!m && !this.deleted.has(id) && !this.landed.has(landKey(m.id, revOf(m))));
+  }
+
   async putDraft(d: Draft) {
     const turn = ++this.draftTurn;
     this.draftTurns.set(d.key, turn);
     this.mem.drafts.set(d.key, d);
     await this.tx(['drafts', 'meta'], 'readwrite', async (t) => {
-      if (d.editId) {
-        const saved = await req(t.objectStore('meta').get(d.editId));
-        const m = this.mem.meta.get(d.editId);
-        if (!saved && (!m || this.deleted.has(d.editId) || this.landed.has(landKey(m.id, revOf(m))))) d = detached(d);
-      }
+      if (d.editId && !this.keepsEdit(d.editId, !!(await req(t.objectStore('meta').get(d.editId))))) d = detached(d);
       t.objectStore('drafts').put(d, d.key);
     }, () => {
       if (d.editId && this.deleted.has(d.editId)) d = detached(d);
@@ -595,11 +665,52 @@ export class ArtStore {
       const other = main === mem ? disk : mem;
       const base = `${family(id)}~${Math.max(0, Math.floor(other.updated)).toString(36)}`;
       let cid = base;
-      while (used.has(cid)) cid = `${base}${Math.random().toString(36).slice(2, 6)}`;
+      // numbered, not random, so the same drawings make the same Save Crystal
+      for (let n = 2; used.has(cid); n++) cid = `${base}${n.toString(36)}`;
       used.add(cid);
       out.push(plain({ ...other, id: cid }));
     }
     return { records: out.sort((a, b) => a.t - b.t), incomplete: this.readFails > fails };
+  }
+
+  /** Every unfinished drawing, for the Save Crystal, read fresh. incomplete: the stored ones couldn't all be read. */
+  async exportDrafts(): Promise<{ drafts: Draft[]; incomplete: boolean }> {
+    const fails = this.readFails;
+    const all = (await this.drafts()).map(cleanDraft).filter((d): d is Draft => !!d);
+    return { drafts: all.sort((a, b) => a.t - b.t || (a.key < b.key ? -1 : 1)), incomplete: this.readFails > fails };
+  }
+
+  /**
+   * Adds the unfinished drawings from a Save Crystal and never replaces one here: the same draft already here is left
+   * as it is, a different one under the same key comes in under a key of its own, so both wait in the Art room. A draft
+   * of a page that isn't here comes in as a fresh page (see putDraft). skipped counts the ones that can't be read.
+   */
+  async importDrafts(raw: unknown): Promise<{ added: number; skipped: number }> {
+    const out = { added: 0, skipped: skippedDrafts(raw) };
+    if (!Array.isArray(raw)) return out;
+    const here = new Map((await this.drafts()).map((d) => [d.key, cleanDraft(d)]));
+    const saved = new Set((await this.tx(['meta'], 'readonly', (t) => req(t.objectStore('meta').getAllKeys() as IDBRequest<IDBValidKey[]>), () => [] as IDBValidKey[])).map(String));
+    // what each draft draws and the saved drawing it edits, as it is (or would be) kept here ('' once that drawing isn't
+    // here, see putDraft), so one an earlier Restore put under a key of its own is recognised too
+    const drawn = (d: Draft) => `${d.kind}\n${d.editId && this.keepsEdit(d.editId, saved.has(d.editId)) ? d.editId : ''}\n${JSON.stringify(d.strokes)}`;
+    const held = new Set([...here.values()].filter((d): d is Draft => !!d).map(drawn));
+    for (const x of raw.slice(0, DRAFT_CAP)) {
+      const d = cleanDraft(x);
+      if (!d) continue;
+      const had = here.get(d.key);
+      if ((had && JSON.stringify(had.strokes) === JSON.stringify(d.strokes)) || held.has(drawn(d))) continue;
+      let key = d.key;
+      if (here.has(key)) {
+        const base = `${d.key.slice(0, DRAFT_KEY - 12)}~${Math.max(0, Math.floor(d.t)).toString(36)}`;
+        key = base;
+        for (let n = 2; here.has(key); n++) key = `${base}${n.toString(36)}`;
+      }
+      await this.putDraft({ ...d, key });
+      here.set(key, d);
+      held.add(drawn(d));
+      out.added++;
+    }
+    return out;
   }
 
   /** How many of these drawings exist on this device only in memory (no saved copy as new as the one in use). */

@@ -8,6 +8,8 @@ export const CRYSTAL_COPY = {
   incomplete: "This Save Crystal is incomplete. Some {items} couldn't be included. Keep your other backups and try again after reopening the app.",
   incompleteRestore: 'This Save Crystal was incomplete when it was made. Keep your other backups.',
   choicesUnsaved: "Some choices couldn't be saved on this device. Keep the Save Crystal file.",
+  /** a save no version could read, carried in the file as it was, couldn't be put back */
+  unreadUnsaved: "A copy of an unreadable save in the file couldn't be put back on this device. Keep the Save Crystal file.",
   storySkipped: "Some story pages or cards couldn't be added. Keep the Save Crystal file.",
 };
 
@@ -24,10 +26,51 @@ export const PEEK_COPY = {
   notSaved: 'Not saved in this file',
   adds: "Restore adds what's in this file to what's already here. Nothing here is removed, and choices you've made on this device stay as they are.",
   unreadable: "Some drawings or story pages in this file can't be read, so they won't be added.",
+  /** story pages or cards that don't fit next to the stories already here ({n} of them, more than one) */
+  here: "{n} story pages or cards in this file don't fit with the stories already on this device, so Restore will leave them out.",
+  hereOne: "1 story page or card in this file doesn't fit with the stories already on this device, so Restore will leave it out.",
+  /** story pages whose story is in neither the file nor this device ({n} of them, more than one) */
+  lost: "{n} story pages in this file belong to a story that isn't in the file or on this device, so Restore will leave them out.",
+  lostOne: "1 story page in this file belongs to a story that isn't in the file or on this device, so Restore will leave it out.",
   confirm: 'Restore this Save Crystal',
   cancel: 'Cancel',
   reading: 'Opening the file...',
   closed: 'Closed without restoring. Nothing changed.',
+};
+
+/** Settings > Your data: a Save Crystal first, then clearing this game's data from this device. */
+export const CLEAR_COPY = {
+  intro: "Starting over? Make a Save Crystal first, then clear this game's data from this device.",
+  start: 'Back up, then clear',
+  making: 'Making your Save Crystal...',
+  cancelled: 'No Save Crystal was saved, so nothing was cleared.',
+  unmade: "The Save Crystal couldn't be made, so nothing was cleared.",
+  incomplete: "The Save Crystal couldn't hold everything ({items}), so nothing was cleared. Try again after reopening the app.",
+  title: "Clear this game's data?",
+  saved: 'Your Save Crystal was downloaded as',
+  shared: 'Your Save Crystal was shared as',
+  keep: "Before you clear, check you can find that file. It's how you bring all of this back.",
+  goes: "Clearing removes your progress, names, choices, lists, diary, drawings (unfinished ones too), stories and offline files from this device. The Save Crystal file stays where you saved it.",
+  confirm: "Clear this game's data",
+  cancel: 'Keep everything',
+  kept: 'Nothing was cleared.',
+  checking: 'Checking your Save Crystal...',
+  changedTitle: 'Something changed',
+  changed: 'This device changed after that Save Crystal was made, maybe in another tab. Nothing was cleared. Make a fresh one first, so nothing new is lost.',
+  fresh: 'Make a fresh Save Crystal',
+  busy: "This game's data is being cleared in another tab, so nothing was done here.",
+  clearingTitle: 'Clearing',
+  clearing: "Clearing this game's data from this device...",
+  waiting: 'Almost done. The game is still open in another tab or window. Close it, and clearing finishes by itself.',
+  doneTitle: 'All clear',
+  done: "This game's data is gone from this device. Your Save Crystal is still where you saved it, and Restore brings everything back.",
+  elsewhere: "This game's data is being cleared from another tab or window.",
+  elsewhereDone: "This game's data was cleared from this device in another tab or window. A Save Crystal you made is still where you saved it.",
+  failedTitle: 'Not finished',
+  failed: "Some of this game's data couldn't be cleared and is still on this device.",
+  retry: 'Try again',
+  again: 'Start again',
+  againNote: 'Starting again opens the game fresh, intro and all. The offline files went too, so it needs a connection once.',
 };
 
 export const KEEP_COPY = {
