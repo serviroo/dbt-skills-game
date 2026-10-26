@@ -9,6 +9,8 @@ import { SCORE, WINDOW } from '../motion/tokens';
 import { holdAt } from '../audio/param';
 import { type Next } from '../content/dbt';
 import { CHECKIN } from '../content/daily-lines';
+import { write } from '../core/cleared';
+import { BESIDE, MOMENT_LENGTHS, type MomentLength } from '../core/stored-names';
 import type { App, Route, ScreenOut } from './app';
 import { icon, mothSVG } from './art';
 import { now, onFrame } from './clock';
@@ -148,6 +150,19 @@ function lowHum(scale: number) {
 }
 
 const LINE_S = 7;
+/** How long the ring takes to settle once a timed moment ends. */
+const SETTLE_S = 2.4;
+const LENGTH_S: Record<MomentLength, number> = { '1': 60, '3': 180, open: Infinity };
+const lengthKey = (key: string) => `${key}${BESIDE.momentLength}`;
+/** The length chosen on this device. None chosen means until the player is ready, as it was before the choice. */
+const readLength = (key: string): MomentLength => {
+  try {
+    const v = localStorage.getItem(lengthKey(key));
+    return (MOMENT_LENGTHS as readonly (string | null)[]).includes(v) ? (v as MomentLength) : 'open';
+  } catch {
+    return 'open';
+  }
+};
 
 export function momentScreen(app: App, route: Route): ScreenOut {
   const r = route as Extract<Route, { name: 'moment' }>;
@@ -198,14 +213,80 @@ export function momentScreen(app: App, route: Route): ScreenOut {
   humToggle.classList.add('dq-mo-hum');
   const done = btn('Done', () => app.back(), { kind: 'link', cls: 'dq-mo-done' });
 
+  // how long it lasts: a timed moment ends softly that long after it began or after the last change, never counted out
+  const LEN = CHECKIN.momentLength;
+  let length = readLength(st.key);
+  const group = `dqmo-len-${Math.random().toString(36).slice(2, 8)}`;
+  const lengthBox = h(
+    'fieldset',
+    { class: 'dq-mo-len', role: 'radiogroup', 'aria-labelledby': `${group}-l` },
+    h('legend', { id: `${group}-l`, class: 'dq-mo-len-l', text: LEN.legend }),
+    h(
+      'div',
+      { class: 'dq-mo-len-opts' },
+      MOMENT_LENGTHS.map((v) => {
+        const input = h('input', { type: 'radio', name: group, value: v, class: 'dq-mo-len-in', onchange: () => choose(v) });
+        input.checked = v === length;
+        return h('label', { class: 'dq-mo-len-o' }, input, h('span', { text: typo(LEN.options[v]) }));
+      }),
+    ),
+  );
+  const choose = (v: MomentLength) => {
+    length = v;
+    from = now();
+    arm();
+    write(() => {
+      try {
+        localStorage.setItem(lengthKey(st.key), v);
+      } catch {
+        /* stays for this visit only */
+      }
+    });
+  };
+
   const t0 = now();
+  let from = t0;
+  let endAt = -1;
   let shown = -1;
   let passes = 0;
   const fades: Animation[] = [];
-  const L = CHECKIN.moment;
+  const stage = h('div', { class: 'dq-mo-stage' }, h('div', { class: 'dq-mo-halo', 'aria-hidden': 'true' }), svg);
+  /** The chosen time has passed: the hum fades as when leaving, the ring settles, one calm line stays, and the way back is Done. */
+  const end = (t: number) => {
+    endAt = t;
+    hum?.stop();
+    hum = null;
+    const still = app.reduced();
+    const moving = document.activeElement instanceof HTMLElement && (lengthBox.contains(document.activeElement) || humToggle.contains(document.activeElement));
+    const quiet = [lengthBox, humToggle];
+    // out of reach at once, before the fade: a tap there now can't start a hum or change the length
+    quiet.forEach((x) => (x.inert = true));
+    lengthBox.disabled = true;
+    humToggle.querySelectorAll('input').forEach((i) => (i.disabled = true));
+    quiet.forEach((x) => animate(x, [{ opacity: 1 }, { opacity: 0 }], { duration: still ? WINDOW.reducedCloseMs : 900, easing: 'ease-in', fill: 'forwards' }));
+    setTimeout(() => quiet.forEach((x) => x.classList.add('is-gone')), still ? WINDOW.reducedCloseMs : 900);
+    if (moving) done.focus();
+    animate(stage, [{ opacity: 1 }, { opacity: 0.55 }], { duration: SETTLE_S * 1000, easing: 'ease-out', fill: 'forwards' });
+    fades.splice(0).forEach((a) => a.cancel());
+    words.textContent = typo(LEN.end);
+    fades.push(animate(words, still ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }], { duration: still ? WINDOW.reducedFadeMs : 1300, easing: 'cubic-bezier(.16,1,.3,1)', fill: 'both' }));
+    if (after?.classList.contains('is-hidden')) {
+      after.classList.remove('is-hidden');
+      animate(after, [{ opacity: 0 }, { opacity: 1 }], { duration: still ? WINDOW.reducedFadeMs : 1200 });
+    }
+  };
+  // frames stop while the phone is locked or the tab is hidden, so a timer ends the moment (and its hum) on time there too
+  let timer = 0;
+  const arm = () => {
+    clearTimeout(timer);
+    if (length !== 'open') timer = window.setTimeout(() => el.isConnected && endAt < 0 && end(now()), Math.max(0, (from + LENGTH_S[length] - now()) * 1000));
+  };
   const stop = onFrame((t) => {
     const e = t - t0;
-    const s = breath(e);
+    if (endAt < 0 && t - from >= LENGTH_S[length]) end(t);
+    // once ended, the breath settles to a slow exhale and the ring holds still
+    const settle = endAt < 0 ? 0 : ease((t - endAt) / SETTLE_S);
+    const s = breath(e) * (1 - settle);
     const still = app.reduced();
     const rr = still ? 64 : 44 + s * 32;
     line.setAttribute('r', rr.toFixed(2));
@@ -215,10 +296,12 @@ export function momentScreen(app: App, route: Route): ScreenOut {
     echo.setAttribute('r', (still ? 72 : rr + 6 + (1 - s) * 10).toFixed(2));
     echo.setAttribute('stroke-opacity', (still ? 0.5 : 0.15 + s * 0.35).toFixed(3));
     hum?.breathe(s);
-    // one line at a time: a beat of quiet first, then a new line every LINE_S seconds
+    if (settle >= 1) stop();
+    // one line at a time: a beat of quiet first, then a new line every LINE_S seconds; a timed moment skips the open-ended lines
     const k = Math.floor((e - 1.2) / LINE_S);
-    if (k >= 0 && k !== shown) {
+    if (endAt < 0 && k >= 0 && k !== shown) {
       shown = k;
+      const L = length === 'open' ? CHECKIN.moment : CHECKIN.moment.filter((l) => !CHECKIN.momentOpen.includes(l));
       const i = k % L.length;
       if (i === 0 && k > 0) passes++;
       words.textContent = typo(L[i]);
@@ -239,10 +322,11 @@ export function momentScreen(app: App, route: Route): ScreenOut {
     'div',
     { class: 'dq-moment' },
     h('h1', { class: 'dq-sr', 'data-focus': '', text: 'Give me a moment' }),
-    h('div', { class: 'dq-mo-stage' }, h('div', { class: 'dq-mo-halo', 'aria-hidden': 'true' }), svg),
+    stage,
     words,
-    h('div', { class: 'dq-mo-foot' }, after, h('div', { class: 'dq-mo-row' }, humToggle, done)),
+    h('div', { class: 'dq-mo-foot' }, after, lengthBox, h('div', { class: 'dq-mo-row' }, humToggle, done)),
   );
+  arm();
   return {
     el,
     title: 'Give me a moment',

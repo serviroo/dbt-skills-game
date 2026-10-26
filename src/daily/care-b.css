@@ -381,6 +381,7 @@
 .dq-mo-line {
   min-height: 3.2em;
   max-width: 22em;
+  text-wrap: balance;
   margin: 28px 12px 0 !important;
   font-size: 21px;
   font-weight: 300;
@@ -420,4 +421,116 @@
 }
 .dq-mo-next {
   width: 100%;
+}
+.dq-mo-len {
+  width: 100%;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.dq-mo-len-l {
+  float: left;
+  width: 100%;
+  margin: 0 0 6px;
+  padding: 0;
+  font: 400 16px/1.3 var(--font-ui);
+  color: var(--t-dim);
+  text-align: center;
+}
+.dq-mo-len-opts {
+  clear: both;
+  display: flex;
+  width: 100%;
+  border: 1px solid rgba(125, 150, 197, 0.45);
+  border-radius: 2px;
+  background: rgba(6, 16, 30, 0.6);
+}
+.dq-mo-len-o {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  font: 400 16px/1.2 var(--font-ui);
+  color: var(--t-body);
+  text-align: center;
+  border-left: 1px solid rgba(125, 150, 197, 0.22);
+  cursor: pointer;
+  transition:
+    background 0.18s,
+    color 0.18s;
+}
+.dq-mo-len-o:first-child {
+  border-left: 0;
+}
+.dq-mo-len-o:hover {
+  background: rgba(79, 184, 255, 0.1);
+}
+.dq-mo-len-o:has(:checked) {
+  color: #f0f9ff;
+  background: rgba(79, 184, 255, 0.24);
+  box-shadow: inset 0 0 0 1px rgba(143, 210, 255, 0.75);
+}
+.dq-mo-len-o:has(:focus-visible) {
+  outline: 2px solid #8fd2ff;
+  outline-offset: 2px;
+}
+.dq-mo-len-in {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+/* gone but still holding their place, so Done stays where the thumb left it */
+.dq-mo-foot .is-gone {
+  visibility: hidden;
+}
+/* short phones: a smaller ring so How long, the hum and Done stay on the first screen */
+@media (max-height: 700px) and (orientation: portrait) {
+  .dq-mo-stage {
+    width: min(300px, 74vw, 34dvh);
+    margin-top: max(12px, 4dvh);
+  }
+  .dq-mo-line {
+    margin-top: 18px !important;
+  }
+}
+/* sideways phones: the ring on the left, the line and the controls beside it */
+@media (max-height: 520px) and (orientation: landscape) {
+  .dq-moment {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: 1fr auto;
+    --mo-size: min(240px, 34vw, calc(100dvh - var(--chrome) - 24px));
+    column-gap: 40px;
+    align-items: center;
+    max-width: 760px;
+  }
+  .dq-mo-stage {
+    grid-row: 1 / span 2;
+    width: var(--mo-size);
+    margin: 0 0 0 calc(var(--mo-size) * 0.15);
+  }
+  /* the halo spreads 15% past the ring each side; the margin keeps it on the screen */
+  .dq-mo-halo {
+    width: 130%;
+  }
+  .dq-mo-line {
+    grid-column: 2;
+    align-self: end;
+    margin: 0 !important;
+  }
+  .dq-mo-foot {
+    grid-column: 2;
+    align-self: start;
+    margin-top: 0;
+    padding-top: 12px;
+  }
 }
