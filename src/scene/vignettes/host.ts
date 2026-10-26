@@ -9,11 +9,12 @@
  * This file loads with the companion and only decides and waits; the shared renderer, the loop and every three.js
  * object live in ./runtime and the scene files, fetched the first time a scene is needed. The flat picture stays
  * underneath: mark it `dq-scene-flat` and it hides while the scene loads (`is-scene-wait` on the stage, at most
- * SCENE.waitMs) and while it is live (`is-scene-live`), and shows with no WebGL, while the context is lost, and if
- * loading fails. Scenes draw only while on screen and the page is visible, at most SCENE.fps frames a second, and only
+ * SCENE.waitMs) and while it is live (`is-scene-live`), and shows with no WebGL (from the first frame, once this device
+ * is known to have none), while the context is lost, and if loading fails. Scenes draw only while on screen and the page is visible, at most SCENE.fps frames a second, and only
  * when their clock ticks; with reduced motion they draw one still frame.
  */
 import { SCENE } from '../../motion/tokens';
+import { NO_WEBGL } from '../stats';
 import type { BuildScene } from './runtime';
 import './scenes.css';
 
@@ -54,7 +55,14 @@ export interface SceneOpts {
   reduced?: () => boolean;
 }
 
+/**
+ * No WebGL 2 here: the browser has none, or this device couldn't make a context once already. The flat picture then
+ * shows from the first frame on every visit, as it would without the scenes, instead of hiding while a scene tries.
+ */
+let flatOnly = typeof WebGL2RenderingContext === 'undefined';
+
 export function mountScene(stage: HTMLElement, opts: SceneOpts): () => void {
+  if (flatOnly) return () => {};
   let gone = false;
   let off: (() => void) | null = null;
   stage.classList.add('is-scene-wait');
@@ -65,7 +73,10 @@ export function mountScene(stage: HTMLElement, opts: SceneOpts): () => void {
       if (gone) stop();
       else off = stop;
     })
-    .catch((err) => console.warn('[scene] the 3D scene did not start; the flat picture stays', err))
+    .catch((err) => {
+      if (err instanceof Error && err.name === NO_WEBGL) flatOnly = true;
+      console.warn('[scene] the 3D scene did not start; the flat picture stays', err);
+    })
     .finally(() => {
       if (!off) {
         clearTimeout(wait);

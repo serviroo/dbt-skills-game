@@ -69,7 +69,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   const still = () => (opts.reduced ? opts.reduced() : media.matches);
   let onScreen = false;
   let sized = false;
-  let lost = false;
+  let lost = renderer.getContext().isContextLost();
   let live = false;
   let sub: (() => void) | null = null;
   let last = -Infinity;

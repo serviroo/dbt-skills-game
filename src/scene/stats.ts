@@ -12,5 +12,8 @@ export interface SceneStats {
   left?: { geometries: number; textures: number; programs: number };
 }
 
+/** The name of the error the renderer throws when this device can't make a WebGL 2 context. */
+export const NO_WEBGL = 'NoWebGL';
+
 const w = window as unknown as { __scenes?: SceneStats };
 export const sceneStats: SceneStats = (w.__scenes ??= { live: 0, contexts: 0, frames: 0 });
