@@ -9,7 +9,12 @@ import { ACCENT_IDS, CARD_BACK_IDS, PLATE_IDS, SHADOW_IDS, THEME_IDS, TITLE_IDS,
 import { cleanName, readYou, writeYou } from '../core/you';
 import { APP_ID, BESIDE, SAVE_KEY, YOU_KEY } from '../core/stored-names';
 
+/**
+ * The save version this build writes. A save from a newer build is read too and keeps its higher number: this build
+ * uses what it knows and keeps the rest as stored (see Kept), so the newer build finds all of it when it comes back.
+ */
 export const SCHEMA = 1;
+/** The Save Crystal's own version. Its `schema` field holds the save version of the state inside (none before: 1). */
 const CRYSTAL_SCHEMA = 2;
 export const ROW_CAP = { emotions: 24, urges: 16 } as const;
 const DAY_TURN_HOURS = 6;
@@ -120,7 +125,25 @@ const LIST_KEYS = ['comfort', 'activities', 'reasons', 'people'] as const;
 const DAY_FLAGS = ['giftDay', 'cardDay', 'greetDay', 'checkinDay'] as const;
 const GONE_CAP = 1000;
 /** Top-level fields this build reads (and the ones only a Save Crystal carries); any other is kept as it was stored. */
-const KNOWN = new Set(['v', 'created', 'events', 'diary', 'lists', 'maps', 'lines', 'settings', 'flags', 'gone', 'setAt', 'profile', 'app', 'exported', 'art', 'stories', 'preferences', 'incomplete']);
+const KNOWN = new Set(['v', 'created', 'events', 'diary', 'lists', 'maps', 'lines', 'settings', 'flags', 'gone', 'setAt', 'profile', 'app', 'exported', 'schema', 'art', 'stories', 'preferences', 'incomplete']);
+/**
+ * What a newer build stored that this one can't use, kept as it was so every write, tab merge and Save Crystal carries
+ * it on. Unknown fields of the records this build rebuilds (events and their data, diary days and field times, list
+ * items, people, maps, lines, settings and flags) stay on those records. This holds the rest: unknown fields of the
+ * profile and of both change-time maps, names and titles for ids this build doesn't know, events of kinds it doesn't
+ * know (left out of progress), and choices stored as a value it can't use (the default shows; changing it here
+ * replaces it).
+ */
+export interface Kept {
+  profile: Record<string, unknown>;
+  profileAt: Record<string, unknown>;
+  setAt: Record<string, unknown>;
+  names: Record<string, unknown>;
+  titles: unknown[];
+  raw: Partial<Record<SetKey, unknown>>;
+  events: Record<string, unknown>[];
+}
+export const KEPT: unique symbol = Symbol('kept');
 export interface State {
   v: number;
   created: number;
@@ -135,6 +158,8 @@ export interface State {
   gone: Record<string, number>;
   /** When each choice was last changed here (missing = never, as in data saved before this existed). */
   setAt: Partial<Record<SetKey, number>>;
+  /** Not enumerable, so never spread or written as itself: stored() writes it back where it came from. */
+  [KEPT]?: Kept;
 }
 
 export function freshState(now = Date.now()): State {
@@ -197,14 +222,103 @@ const putOwn = (o: object, k: string, v: unknown) => Object.defineProperty(o, k,
 const setOwn = (g: Record<string, number>, id: string, t: number) => putOwn(g, id, t);
 /** Fields a newer build stored that this one doesn't read, by name. */
 const extrasOf = (s: object) => Object.entries(s).filter(([k]) => !KNOWN.has(k)).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+/** The fields of a record this build doesn't read, by name. */
+const restOf = (o: object, known: readonly string[]) => Object.entries(o).filter(([k]) => !known.includes(k)).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+/** Puts the fields of raw this build doesn't read back on the record it rebuilt from raw, as stored. */
+function keepRest<T extends object>(into: T, raw: Record<string, unknown>, known: readonly string[]): T {
+  for (const [k, v] of restOf(raw, known)) if (!own(into, k)) putOwn(into, k, v);
+  return into;
+}
+export function kept(s: State): Kept {
+  if (!s[KEPT]) Object.defineProperty(s, KEPT, { value: { profile: {}, profileAt: {}, setAt: {}, names: {}, titles: [], raw: {}, events: [] }, enumerable: false, writable: true, configurable: true });
+  return s[KEPT]!;
+}
+const EV_KEYS = ['id', 't', 'day', 'k', 'xp', 'stat', 'skill', 'data'];
+const ENTRY_KEYS = ['day', 'emotions', 'urges', 'note', 'updatedAt', 'ft'];
+const ITEM_KEYS = ['id', 'text', 'at'];
+const PERSON_KEYS = ['id', 'name', 'phone', 'at'];
+const MAP_KEYS = ['id', 't', 'urge', 'p1', 'c1', 'p2', 'c2', 'choice', 'at'];
+const LINE_KEYS = ['day', 'id', 'tag', 'text', 't'];
+const PROFILE_KEYS = ['theme', 'accent', 'cardBack', 'plate', 'title', 'playerName', 'companion', 'names', 'region', 'titlesSeen', 'setAt'];
+const REGION = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+/** Choices with a fixed set of values: one stored as anything else is kept (see Kept) and the default shows. */
+const USABLE: Partial<Record<SetKey, (v: unknown) => boolean>> = {
+  sound: (v) => typeof v === 'boolean',
+  motion: (v) => (MOTIONS as readonly unknown[]).includes(v),
+  theme: (v) => (THEME_IDS as readonly unknown[]).includes(v),
+  accent: (v) => (ACCENT_IDS as readonly unknown[]).includes(v),
+  cardBack: (v) => (CARD_BACK_IDS as readonly unknown[]).includes(v),
+  plate: (v) => (PLATE_IDS as readonly unknown[]).includes(v),
+  title: (v) => v === '' || (TITLE_IDS as readonly unknown[]).includes(v),
+  region: (v) => typeof v === 'string' && (v === '' || (v.length <= 24 && REGION.test(v))),
+};
+const BLANK = freshState(0);
+const SETTINGS_KEYS = Object.keys(BLANK.settings);
+const FLAG_KEYS = Object.keys(BLANK.flags);
 /** What is written to this device and into a Save Crystal: the wave 2 fields move out of settings, flags and setAt into profile. */
 function stored(s: State) {
   const { theme, accent, cardBack, plate, title, playerName, companion, names, region, ...settings } = s.settings;
   const { titlesSeen, ...flags } = s.flags;
-  const setAt: Record<string, number> = {};
-  const profileAt: Record<string, number> = {};
-  for (const [k, t] of Object.entries(s.setAt)) if (typeof t === 'number') ((PROFILE_SET_KEYS as string[]).includes(k) ? profileAt : setAt)[k] = t;
-  return { ...s, settings, flags, setAt, profile: { theme, accent, cardBack, plate, title, playerName, companion, names, region, titlesSeen, setAt: profileAt } };
+  const k = s[KEPT];
+  const as = <T>(key: SetKey, v: T) => (k && own(k.raw, key) ? k.raw[key] : v);
+  const setAt: Record<string, unknown> = { ...k?.setAt };
+  const profileAt: Record<string, unknown> = { ...k?.profileAt };
+  for (const [key, t] of Object.entries(s.setAt)) if (typeof t === 'number') putOwn((PROFILE_SET_KEYS as string[]).includes(key) ? profileAt : setAt, key, t);
+  return {
+    ...s,
+    events: k?.events.length ? [...s.events, ...k.events] : s.events,
+    settings: { ...settings, sound: as('sound', settings.sound), motion: as('motion', settings.motion) },
+    flags,
+    setAt,
+    profile: {
+      ...k?.profile,
+      theme: as('theme', theme),
+      accent: as('accent', accent),
+      cardBack: as('cardBack', cardBack),
+      plate: as('plate', plate),
+      title: as('title', title),
+      playerName,
+      companion,
+      names: { ...k?.names, ...names },
+      region: as('region', region),
+      titlesSeen: k?.titles.length ? [...titlesSeen, ...k.titles] : titlesSeen,
+      setAt: profileAt,
+    },
+  };
+}
+/**
+ * Takes what another copy kept from a newer build (see Kept), and the fields it holds that this build doesn't read.
+ * A field both hold keeps this copy's value unless theirs wins: the stored copy when folding in another tab (this
+ * build never changes them, so the latest write has the latest), the newer save version when restoring a Crystal.
+ */
+function adoptKept(into: State, from: State, theirsWin: boolean) {
+  const put = (dst: object, entries: [string, unknown][]) => {
+    for (const [k, v] of entries) if (theirsWin || !own(dst, k)) putOwn(dst, k, v);
+  };
+  put(into, extrasOf(from));
+  put(into.settings, restOf(from.settings, SETTINGS_KEYS));
+  put(into.flags, restOf(from.flags, FLAG_KEYS));
+  const b = from[KEPT];
+  if (!b) return;
+  const a = kept(into);
+  put(a.profile, Object.entries(b.profile));
+  put(a.profileAt, Object.entries(b.profileAt));
+  put(a.setAt, Object.entries(b.setAt));
+  put(a.names, Object.entries(b.names));
+  const titles = new Set(a.titles.map((t) => JSON.stringify(t)));
+  for (const t of b.titles) if (!titles.has(JSON.stringify(t))) a.titles.push(t);
+  const ids = new Set([...into.events.map((e) => e.id), ...a.events.map((e) => e.id)]);
+  for (const e of b.events) {
+    if (ids.has(e.id as string)) continue;
+    ids.add(e.id as string);
+    a.events.push(e);
+  }
+}
+/** The kept part of a copy in a form two copies can compare (see canon). */
+function keptCanon(s: State) {
+  const k = s[KEPT];
+  const sorted = (o: object | undefined) => (o ? Object.entries(o).sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0)) : []);
+  return [s.v, restOf(s.settings, SETTINGS_KEYS), restOf(s.flags, FLAG_KEYS), sorted(k?.profile), sorted(k?.profileAt), sorted(k?.setAt), sorted(k?.names), (k?.titles ?? []).map((t) => JSON.stringify(t)).sort(), (k?.events ?? []).map((e) => String(e.id)).sort()];
 }
 /** Each id once, the first kept. */
 function firstById<T extends { id: string }>(list: T[]) {
@@ -239,12 +353,22 @@ function prune<T extends { id: string; at?: number }>(list: T[], gone: Record<st
 }
 type SetVal = boolean | string | string[];
 const nameId = (k: SetKey) => (k.startsWith('name:') ? (k.slice(5) as ShadowId) : null);
+/** The choice as stored: a value this build can't use (see Kept) counts as itself, not as the default it shows. */
 function getSet(s: State, k: SetKey): SetVal {
+  const raw = s[KEPT]?.raw;
+  if (raw && own(raw, k)) return raw[k] as SetVal;
   const id = nameId(k);
   if (id) return own(s.settings.names, id) ? (s.settings.names[id] ?? '') : '';
   return k === 'safeCredit' ? s.flags.safeCredit : s.settings[k as Exclude<SetKey, NameKey | 'safeCredit'>];
 }
 function putSet(s: State, k: SetKey, v: SetVal) {
+  const usable = USABLE[k];
+  if (usable) {
+    const fits = usable(v);
+    if (fits) delete s[KEPT]?.raw[k];
+    else putOwn(kept(s).raw, k, v);
+    if (!fits) v = getSet(BLANK, k);
+  }
   const id = nameId(k);
   if (id) {
     if (typeof v === 'string' && v) s.settings.names[id] = v;
@@ -266,6 +390,7 @@ function canon(s: State) {
     SET_KEYS.map((k) => [getSet(s, k), s.setAt[k] ?? 0]),
     [s.flags.rankSeen, s.flags.wardenSeen, s.flags.therapistLineShown, ...DAY_FLAGS.map((k) => s.flags[k]), s.flags.questAsideDay, s.flags.questAsideAt, [...s.flags.titlesSeen].sort()],
     extrasOf(s),
+    keptCanon(s),
   ]);
 }
 export function validDay(d: unknown): d is string {
@@ -334,8 +459,17 @@ export function mergeEntry(a: DiaryEntry, b: DiaryEntry): DiaryEntry {
     note = useB ? b.note : a.note;
     ft.note = useB ? tb : ta;
   }
-  return { day: a.day, emotions, urges, note, updatedAt: Math.max(a.updatedAt, b.updatedAt), ft };
+  const out: DiaryEntry = { day: a.day, emotions, urges, note, updatedAt: Math.max(a.updatedAt, b.updatedAt), ft };
+  // what a newer build stored on the day and its field times: the later-saved copy's, whichever way round they come
+  const rest = (e: DiaryEntry) => JSON.stringify([restOf(e, ENTRY_KEYS), restOf(e.ft ?? {}, []).filter(([k]) => !isFieldKey(k))]);
+  const later = b.updatedAt !== a.updatedAt ? b.updatedAt > a.updatedAt : rest(b) > rest(a);
+  for (const e of later ? [a, b] : [b, a]) {
+    for (const [k, v] of restOf(e, ENTRY_KEYS)) putOwn(out, k, v);
+    if (e.ft) for (const [k, v] of Object.entries(e.ft)) if (!isFieldKey(k)) putOwn(ft, k, v);
+  }
+  return out;
 }
+const isFieldKey = (k: string) => k === 'note' || k.startsWith('e:') || k.startsWith('u:');
 
 /** True when a holds a field b lacks, a different value, or a later time for one. */
 function entryAhead(a: DiaryEntry, b: DiaryEntry) {
@@ -352,25 +486,42 @@ function entryAhead(a: DiaryEntry, b: DiaryEntry) {
 export function normalize(raw: unknown): State | null {
   if (!isObj(raw)) return null;
   if (raw.v !== undefined && typeof raw.v !== 'number') return null;
-  const v = typeof raw.v === 'number' ? raw.v : 0;
-  if (v > SCHEMA && (raw.app !== APP_ID || v > CRYSTAL_SCHEMA)) return null;
   if (!Array.isArray(raw.events)) return null;
   if (raw.app !== undefined && raw.app !== APP_ID) return null;
   const base = freshState(num(raw.created) ?? Date.now());
+  // A device save's v is its save version; a Crystal's v is the Crystal's own, with the save version in schema. A newer
+  // one than this build writes is read like any other and keeps its number, so it is never written back as older.
+  const saved = raw.app === APP_ID ? raw.schema : raw.v;
+  if (typeof saved === 'number' && Number.isFinite(saved) && saved > SCHEMA) base.v = saved;
   const kinds = EV_KINDS;
   const stats = Object.values(MODULES).map((m) => m.stat);
   if (Array.isArray(raw.events)) {
     const seen = new Set<string>();
     for (const e of raw.events) {
-      if (!isObj(e) || typeof e.id !== 'string' || seen.has(e.id) || !kinds.includes(e.k as EvKind) || typeof e.day !== 'string' || !validDay(e.day.slice(0, 10))) continue;
+      if (!isObj(e) || typeof e.id !== 'string' || seen.has(e.id)) continue;
+      // a kind a newer build added: kept whole, and left out of this build's progress
+      if (!kinds.includes(e.k as EvKind)) {
+        if (typeof e.k === 'string') {
+          seen.add(e.id);
+          kept(base).events.push(e);
+        }
+        continue;
+      }
+      if (typeof e.day !== 'string' || !validDay(e.day.slice(0, 10))) continue;
       const ev: Ev = { id: e.id, t: num(e.t) ?? 0, day: e.day.slice(0, 10), k: e.k as EvKind, xp: Math.max(0, Math.min(500, num(e.xp) ?? 0)) };
-      if (stats.includes(e.stat as StatId)) ev.stat = e.stat as StatId;
+      // a stat a newer build added stays on the event; derived() counts only the stats it knows
+      if (stats.includes(e.stat as StatId) || (own(e, 'stat') && e.stat !== undefined)) putOwn(ev, 'stat', e.stat);
       if (typeof e.skill === 'string') ev.skill = e.skill.slice(0, 40);
       if (isObj(e.data)) {
         const d: Ev['data'] = {};
-        for (const [k, val] of Object.entries(e.data)) if (['string', 'number', 'boolean'].includes(typeof val) || val === null) d[k.slice(0, 40)] = typeof val === 'string' ? val.slice(0, 400) : (val as number | boolean | null);
+        const known: readonly string[] = (EV_DATA as Partial<Record<EvKind, readonly string[]>>)[ev.k] ?? [];
+        for (const [k, val] of Object.entries(e.data)) {
+          if (!known.includes(k)) putOwn(d, k, val);
+          else if (['string', 'number', 'boolean'].includes(typeof val) || val === null) d[k] = typeof val === 'string' ? val.slice(0, 400) : (val as number | boolean | null);
+        }
         ev.data = d;
       }
+      keepRest(ev, e, EV_KEYS);
       seen.add(ev.id);
       base.events.push(ev);
     }
@@ -391,27 +542,29 @@ export function normalize(raw: unknown): State | null {
       if (isObj(e.ft)) {
         const ft: Record<string, number> = {};
         for (const [k, val] of Object.entries(e.ft)) {
-          if (k.length > 64 || num(val) === null) continue;
+          // a field time a newer build added, as stored
+          if (!isFieldKey(k)) putOwn(ft, k, val);
+          if (!isFieldKey(k) || k.length > 64 || num(val) === null) continue;
           const kind = k.startsWith('e:') ? 'emotions' : k.startsWith('u:') ? 'urges' : null;
           if (k === 'note' || (kind && own(entry[kind], k.slice(2)))) ft[k] = val as number;
         }
         if (Object.keys(ft).length) entry.ft = ft;
       }
-      base.diary[day] = entry;
+      base.diary[day] = keepRest(entry, e, ENTRY_KEYS);
     }
   }
-  const withAt = <T extends object>(o: T, raw: Record<string, unknown>): T => (num(raw.at) !== null ? { ...o, at: raw.at as number } : o);
-  const items = (x: unknown): Item[] => (Array.isArray(x) ? firstById(x.filter(isObj).map((i) => withAt({ id: str(i.id, 40) || uid(), text: str(i.text, 200) }, i)).filter((i) => i.text)) : []);
+  const withAt = <T extends object>(o: T, raw: Record<string, unknown>, known: readonly string[]): T => keepRest(num(raw.at) !== null ? { ...o, at: raw.at as number } : o, raw, known);
+  const items = (x: unknown): Item[] => (Array.isArray(x) ? firstById(x.filter(isObj).map((i) => withAt({ id: str(i.id, 40) || uid(), text: str(i.text, 200) }, i, ITEM_KEYS)).filter((i) => i.text)) : []);
   if (isObj(raw.lists)) {
     base.lists.comfort = items(raw.lists.comfort);
     base.lists.activities = items(raw.lists.activities);
     base.lists.reasons = items(raw.lists.reasons);
     base.lists.people = Array.isArray(raw.lists.people)
-      ? firstById(raw.lists.people.filter(isObj).map((p) => withAt({ id: str(p.id, 40) || uid(), name: str(p.name, 80), phone: str(p.phone, 40) }, p)).filter((p) => p.name))
+      ? firstById(raw.lists.people.filter(isObj).map((p) => withAt({ id: str(p.id, 40) || uid(), name: str(p.name, 80), phone: str(p.phone, 40) }, p, PERSON_KEYS)).filter((p) => p.name))
       : [];
   }
   if (Array.isArray(raw.maps)) {
-    base.maps = firstById(raw.maps.filter(isObj).map((m) => withAt({ id: str(m.id, 40) || uid(), t: num(m.t) ?? 0, urge: str(m.urge), p1: str(m.p1), c1: str(m.c1), p2: str(m.p2), c2: str(m.c2), choice: str(m.choice, 40) }, m)));
+    base.maps = firstById(raw.maps.filter(isObj).map((m) => withAt({ id: str(m.id, 40) || uid(), t: num(m.t) ?? 0, urge: str(m.urge), p1: str(m.p1), c1: str(m.c1), p2: str(m.p2), c2: str(m.c2), choice: str(m.choice, 40) }, m, MAP_KEYS)));
   }
   if (isObj(raw.gone)) base.gone = capGone(Object.entries(raw.gone).filter((e): e is [string, number] => !!e[0] && e[0].length <= 40 && num(e[1]) !== null));
   if (isObj(raw.setAt)) {
@@ -420,35 +573,40 @@ export function normalize(raw: unknown): State | null {
       const t = own(sa, k) ? num(sa[k]) : null;
       if (t !== null) base.setAt[k] = Math.max(0, t);
     }
+    for (const [k, val] of restOf(sa, BASE_SET_KEYS)) putOwn(kept(base).setAt, k, val);
   }
   if (isObj(raw.profile)) {
     const pf = raw.profile;
-    base.settings.theme = oneOf(pf.theme, THEME_IDS, 'classic');
-    base.settings.accent = oneOf(pf.accent, ACCENT_IDS, 'blue');
-    base.settings.cardBack = oneOf(pf.cardBack, CARD_BACK_IDS, 'ring');
-    base.settings.plate = oneOf(pf.plate, PLATE_IDS, 'plain');
-    base.settings.title = oneOf<TitleId | ''>(pf.title, TITLE_IDS, '');
+    for (const k of ['theme', 'accent', 'cardBack', 'plate', 'title', 'region'] as const) if (own(pf, k) && pf[k] !== undefined) putSet(base, k, pf[k] as SetVal);
     base.settings.playerName = cleanName(pf.playerName);
     base.settings.companion = cleanName(pf.companion);
-    base.settings.region = typeof pf.region === 'string' && pf.region.length <= 24 && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(pf.region) ? pf.region : '';
-    if (isObj(pf.names))
+    if (isObj(pf.names)) {
       for (const id of SHADOW_IDS) {
         const n = own(pf.names, id) ? cleanName(pf.names[id]) : '';
         if (n) base.settings.names[id] = n;
       }
-    if (Array.isArray(pf.titlesSeen)) base.flags.titlesSeen = TITLE_IDS.filter((t) => (pf.titlesSeen as unknown[]).includes(t));
-    if (isObj(pf.setAt))
+      for (const [id, n] of restOf(pf.names, SHADOW_IDS)) putOwn(kept(base).names, id, n);
+    }
+    if (Array.isArray(pf.titlesSeen)) {
+      base.flags.titlesSeen = TITLE_IDS.filter((t) => (pf.titlesSeen as unknown[]).includes(t));
+      const titles = kept(base).titles;
+      for (const t of pf.titlesSeen) if (!(TITLE_IDS as readonly unknown[]).includes(t) && !titles.some((x) => JSON.stringify(x) === JSON.stringify(t))) titles.push(t);
+    }
+    if (isObj(pf.setAt)) {
       for (const k of PROFILE_SET_KEYS) {
         const t = own(pf.setAt, k) ? num(pf.setAt[k]) : null;
         if (t !== null) base.setAt[k] = Math.max(0, t);
       }
+      for (const [k, val] of restOf(pf.setAt, PROFILE_SET_KEYS)) putOwn(kept(base).profileAt, k, val);
+    }
+    for (const [k, val] of restOf(pf, PROFILE_KEYS)) putOwn(kept(base).profile, k, val);
   }
   for (const [k, val] of extrasOf(raw)) putOwn(base, k, val);
   if (Array.isArray(raw.lines)) {
     const byDay = new Map<string, LineEntry>();
     for (const l of raw.lines) {
       if (!isObj(l) || !validDay(l.day) || !str(l.text, 200)) continue;
-      const e: LineEntry = { day: l.day, id: str(l.id, 12), tag: str(l.tag, 24), text: str(l.text, 200), t: num(l.t) ?? 0 };
+      const e: LineEntry = keepRest({ day: l.day, id: str(l.id, 12), tag: str(l.tag, 24), text: str(l.text, 200), t: num(l.t) ?? 0 }, l, LINE_KEYS);
       const had = byDay.get(e.day);
       if (!had || e.t >= had.t) byDay.set(e.day, e);
     }
@@ -456,12 +614,13 @@ export function normalize(raw: unknown): State | null {
   }
   if (isObj(raw.settings)) {
     const s = raw.settings;
-    if (typeof s.sound === 'boolean') base.settings.sound = s.sound;
-    base.settings.motion = oneOf(s.motion, MOTIONS, base.settings.motion);
+    for (const k of ['sound', 'motion'] as const) if (own(s, k) && s[k] !== undefined) putSet(base, k, s[k] as SetVal);
     if (Array.isArray(s.emotionRows)) base.settings.emotionRows = s.emotionRows.map((r) => str(r, 60)).filter(Boolean).slice(0, ROW_CAP.emotions);
     if (Array.isArray(s.urgeRows)) base.settings.urgeRows = s.urgeRows.map((r) => str(r, 60)).filter(Boolean).slice(0, ROW_CAP.urges);
+    keepRest(base.settings, s, SETTINGS_KEYS);
   }
   if (isObj(raw.flags)) {
+    keepRest(base.flags, raw.flags, FLAG_KEYS);
     const f = raw.flags;
     base.flags.rankSeen = Math.max(0, Math.min(5, num(f.rankSeen) ?? 0));
     base.flags.wardenSeen = f.wardenSeen === true;
@@ -748,8 +907,9 @@ export class Store {
    */
   private absorb(other: State) {
     this.absorbProgress(other);
-    // fields from a newer build: the stored copy's value, never dropped
-    for (const [k, v] of extrasOf(other)) putOwn(this.state, k, v);
+    // what a newer build stored: the stored copy's, never dropped
+    adoptKept(this.state, other, true);
+    this.state.v = Math.max(this.state.v, other.v);
     const gone = { ...this.state.gone };
     for (const [id, t] of Object.entries(other.gone)) if (t > goneAt(gone, id)) setOwn(gone, id, t);
     this.state.gone = Object.keys(gone).length > GONE_CAP ? capGone(Object.entries(gone)) : gone;
@@ -771,6 +931,8 @@ export class Store {
 
   /** Marks a choice as changed now (later than any change this copy made before, whatever the clock does). */
   touch(k: SetKey) {
+    // the choice now holds a value this build set, in place of one it couldn't use
+    delete this.state[KEPT]?.raw[k];
     this.state.setAt[k] = Math.max(this.now(), (this.state.setAt[k] ?? -Infinity) + 1);
   }
 
@@ -806,7 +968,7 @@ export class Store {
     const collection = new Set<string>();
     for (const e of this.state.events) {
       xp += Math.max(0, e.xp);
-      if (e.stat) stats[e.stat] += 1;
+      if (e.stat && own(stats, e.stat)) stats[e.stat] += 1;
       if (e.k === 'visit') days.add(e.day);
       if ((e.k === 'skill' || e.k === 'card') && isSkillId(e.skill)) collection.add(e.skill);
     }
@@ -933,6 +1095,10 @@ export class Store {
   merge(other: State) {
     this.sync();
     this.absorbProgress(other);
+    // what a newer build stored, from both: on a clash the copy with the newer save version keeps its value, so a
+    // value from an older build never replaces a newer one; on the same version this device's value stays
+    adoptKept(this.state, other, other.v > this.state.v);
+    this.state.v = Math.max(this.state.v, other.v);
     const bring = <T extends { id: string; at?: number }>(mine: T[], theirs: T[]) => {
       const seen = new Set(mine.map((x) => x.id));
       for (const x of theirs) {
@@ -979,6 +1145,6 @@ export class Store {
   /** The Save Crystal, from what is stored now. extra carries what lives outside this state (drawings from IndexedDB). */
   exportJSON(extra: Record<string, unknown> = {}) {
     this.sync();
-    return JSON.stringify({ app: APP_ID, exported: new Date(this.now()).toISOString(), ...stored(this.state), v: CRYSTAL_SCHEMA, ...extra });
+    return JSON.stringify({ app: APP_ID, exported: new Date(this.now()).toISOString(), ...stored(this.state), v: CRYSTAL_SCHEMA, schema: this.state.v, ...extra });
   }
 }
