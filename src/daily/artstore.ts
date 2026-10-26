@@ -3,7 +3,7 @@
  * an app switch. If IndexedDB is unavailable the session keeps drawings in memory and the Art room says so.
  * Backups carry the strokes, not images: a restore re-renders every thumbnail from them.
  */
-import { canvasBlob, INKS, PAGE, renderDrawing, type Paper, type Stroke } from './ink';
+import { canvasBlob, INKS, PAGE, plainStroke, renderDrawing, STROKE_MODES, type Paper, type Stroke, type StrokeMode } from './ink';
 import { connectionLost, uid, validDay } from './store';
 import { ART_DB, BESIDE, TAB_KEY } from '../core/stored-names';
 import { canWrite, cleared, goneElsewhere, mayWrite, onClear, write as writeOut } from '../core/cleared';
@@ -77,7 +77,10 @@ export function cleanStrokes(raw: unknown, kind: Paper): Stroke[] | null {
       p.push(Math.max(-w, Math.min(2 * w, x)), Math.max(-h, Math.min(2 * h, y)));
     }
     if (!p.length) continue;
-    out.push({ i: Math.max(0, Math.min(INKS.length - 1, Math.round(s.i))), w: Math.max(1, Math.min(400, s.w)), p });
+    const st: Stroke = { i: Math.max(0, Math.min(INKS.length - 1, Math.round(s.i))), w: Math.max(1, Math.min(400, s.w)), p };
+    // a tool from a newer build draws as the brush here
+    if (STROKE_MODES.includes(s.m as StrokeMode)) st.m = s.m as StrokeMode;
+    out.push(st);
   }
   return out;
 }
@@ -646,7 +649,7 @@ export class ArtStore {
     this.drop();
     const ids = (await this.list()).map((m) => m.id);
     const used = new Set(ids);
-    const plain = (r: DrawingRec): DrawingRec => ({ ...r, strokes: r.strokes.map((s) => ({ i: s.i, w: s.w, p: s.p })) });
+    const plain = (r: DrawingRec): DrawingRec => ({ ...r, strokes: r.strokes.map(plainStroke) });
     const out: DrawingRec[] = [];
     for (const id of ids) {
       const [m, s] = await this.tx(
