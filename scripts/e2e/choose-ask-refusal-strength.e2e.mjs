@@ -244,7 +244,7 @@ export const scenarios = {
         await openFromList(h, page, NAME, REAL);
         h.expect((await credits(h, page, ID)) === before.filter((e) => e.skill === ID).length + 1, `${where}: opening it did not credit it once`);
         const finish = k === 1 || k === 5 || k === 10;
-        const what = finish && k === 5 ? (way === 'ask' ? 'a lift to the shops' : 'covering a Saturday shift') : '';
+        const what = finish && k === 5 ? (way === 'ask' ? 'a lift to the shops <b>soon</b>' : 'covering a Saturday shift') : '';
         await toLevels(h, page, way, where, what);
         if (finish && k === 10) {
           await toggle(page, LEAN[way][0]);
@@ -262,6 +262,7 @@ export const scenarios = {
         const firm = k >= (way === 'ask' ? 7 : 8);
         h.expect(has(plan.text, way === 'ask' ? 'never pressure, threats or raised voices' : "doesn't need a long reason") === firm, `${where}: the firmness note is ${firm ? 'missing' : 'shown on a soft level'}`);
         if (what) h.expect(has(plan.text, `About: ${what.charAt(0).toUpperCase()}${what.slice(1)}.`), `${where}: the plan does not show what it's about`);
+        h.expect((await page.locator('.dq-step-body b', { hasText: /^soon$/ }).count()) === 0, `${where}: typed markup became a page element`);
         // the other direction's meaning for this level never shows here
         h.expect(!has(plan.text, LEVELS[way === 'ask' ? 'no' : 'ask'][k - 1][2]), `${where}: the plan shows the other direction's meaning`);
         if (!finish) {

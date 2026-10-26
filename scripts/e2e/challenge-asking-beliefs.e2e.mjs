@@ -100,9 +100,10 @@ export const scenarios = {
     const ch = await sees(h, page, 'own, challenge', { text: [`The belief: "${OWN_BELIEF}."`, 'Beliefs like this usually start somewhere real. Is it true every single time? What would you say to a friend who believed it?', "Some asks really have gone badly, and that hurt. It doesn't mean every ask will."], not: 'Another way to see it:' });
     for (const [, c] of PAIRS) h.expect(!has(ch.text, c), 'own: a built-in challenge pretends to answer a belief of your own');
     h.expect((await page.locator('.dq-step-body img').count()) === 0 && !(await page.evaluate(() => window.__pwned)), 'own: the typed belief became a page element');
+    await sees(h, page, 'own, challenge answers', { offers: ['Let me answer it', 'Not sure yet', 'This is about my safety'] });
     await h.shot(page, 'beliefs-own-challenge-390x844');
-    await tap(page, "This doesn't fit");
-    await sees(h, page, 'own, mine', { text: ["Thanks for being honest. You don't have to agree with it.", 'What would you tell a friend who believed this?'] });
+    await tap(page, 'Let me answer it');
+    await sees(h, page, 'own, mine', { text: ["Good. Answer it the way you'd answer a friend.", 'What would you tell a friend who believed this?'], not: 'Keep it handy' });
     await field(page).fill(OWN_ANSWER);
     await tap(page, 'Next');
     await field(page).fill(OWN_STEP);
@@ -116,7 +117,8 @@ export const scenarios = {
     // a belief of your own, left without an answer, and "Not sure"
     await openFromList(h, page, NAME, REAL);
     await toChallenge(h, page, 'own blank', { own: 'Asking for things is rude' });
-    await tap(page, 'Partly');
+    await tap(page, 'Not sure yet');
+    await sees(h, page, 'own blank, mine', { text: "That's okay. It can stay open, and you can still take one small step." });
     await tap(page, 'Skip');
     await tap(page, 'Skip');
     await sees(h, page, 'own blank, review', { text: ['The belief: "Asking for things is rude."', 'Your answer to it: Still working on it, and that counts.'], not: 'One small step:' });
@@ -146,13 +148,20 @@ export const scenarios = {
     await h.reachHub(page);
     const before = await credits(h, page, ID);
     await openFromList(h, page, NAME, REAL);
+    // a belief of your own about real danger has a safety route too
+    await toChallenge(h, page, 'own unsafe', { own: 'If I say no to him he will get angry' });
+    await tap(page, 'This is about my safety');
+    await sees(h, page, 'own unsafe', { offers: ['People to talk to', 'Done'] });
+    await peopleFirst(h, page, 'own unsafe');
+    await toHub(h, page);
+    await openFromList(h, page, NAME, REAL);
     await tap(page, 'Begin');
     await tap(page, UNSAFE);
     await sees(h, page, 'unsafe', { text: "Then that isn't a myth to argue with. It's a real risk, and your safety comes first.", offers: ['People to talk to', 'Done'] });
     await h.shot(page, 'beliefs-unsafe-390x844');
     await peopleFirst(h, page, 'unsafe');
     await toHub(h, page);
-    h.expect((await credits(h, page, ID)) - before === 1, 'the safety path did not credit it once');
+    h.expect((await credits(h, page, ID)) - before === 2, 'two openings with safety paths did not credit it twice');
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },

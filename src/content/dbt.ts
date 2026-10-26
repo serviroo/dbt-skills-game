@@ -264,6 +264,16 @@ const ASK_BELIEFS: Record<string, string> = {
   "Needing help means I can't manage": 'Everyone needs things from other people. Asking is a skill, and using it takes some nerve.',
   'Saying no makes me a bad friend': 'A no protects your time and energy, so your yes means something. You can care about someone and still say no.',
 };
+const FIT_BUILT_IN: Opt[] = [
+  { label: 'Rings true', reply: 'Good. Keep it handy for next time.' },
+  { label: 'Partly', reply: 'Partly is a real start. Old beliefs loosen slowly.' },
+  { label: "This doesn't fit", reply: "Thanks for being honest. You don't have to agree with it. Looking at it still counts." },
+];
+const FIT_OWN: Opt[] = [
+  { label: 'Let me answer it', reply: "Good. Answer it the way you'd answer a friend." },
+  { label: 'Not sure yet', reply: "That's okay. It can stay open, and you can still take one small step." },
+  { label: 'This is about my safety', go: 'unsafe' },
+];
 const UNSURE_BELIEF = "If they might say no, there's no point asking";
 const ASK_UNSAFE = 'Asking or saying no could get me hurt';
 const beliefOf = (a: Answers) => (a.belief === 'Not sure' ? UNSURE_BELIEF : s(a, 'belief', 'An old belief').trim());
@@ -1468,11 +1478,8 @@ export const SKILLS: Skill[] = [
         key: 'fit',
         title: '[Another way to see it]',
         text: beliefChallenge,
-        options: [
-          { label: 'Rings true', reply: 'Good. Keep it handy for next time.' },
-          { label: 'Partly', reply: 'Partly is a real start. Old beliefs loosen slowly.' },
-          { label: "This doesn't fit", reply: "Thanks for being honest. You don't have to agree with it. Looking at it still counts." },
-        ],
+        // a belief the player wrote gets no verdict to agree with: answering it, leaving it open, or a safety route
+        options: (a) => (builtIn(a) ? FIT_BUILT_IN : FIT_OWN),
       },
       { id: 'mine', kind: 'input', key: 'mine', text: (a) => (builtIn(a) ? 'Want to put it in your own words? What would you tell a friend who believed this?' : 'What would you tell a friend who believed this? Your own words are the ones that stick.'), placeholder: 'My answer (optional)', skip: 'Skip', lines: 3 },
       { id: 'try', kind: 'input', key: 'try', text: 'One small ask or no to try this week? Keep it everyday, with someone who feels safe.', placeholder: 'My small step (optional)', skip: 'Skip' },
