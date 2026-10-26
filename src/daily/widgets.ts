@@ -3,7 +3,7 @@
  * seek and capture cleanly. Reduced motion keeps the pacing (numbers, words, fades) and drops movement.
  */
 import { COOL, type Skill, type Visual } from '../content/dbt';
-import { hasScene, mountScene, type Beat } from '../scene/vignettes/host';
+import { hasScene, mountScene, playerAccent, type Beat } from '../scene/vignettes/host';
 import { onFrame, now, backInSight } from './clock';
 import { btn, h, p, typo } from './ui';
 
@@ -206,7 +206,9 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
     if (hasScene(visual)) parts.orb.classList.add('dq-scene-flat');
     svg.append(parts.orb);
     parts.track = sv('circle', { cx: 100, cy: 100, r: 78, fill: 'none', stroke: 'rgba(125,150,197,.18)', 'stroke-width': 2 });
-    parts.arc = sv('path', { d: '', fill: 'none', stroke: visual === 'cold' ? '#bfe9ff' : '#4fb8ff', 'stroke-width': 2, 'stroke-linecap': 'round' });
+    parts.arc = sv('path', { d: '', class: 'dq-timer-arc', fill: 'none', stroke: visual === 'cold' ? '#bfe9ff' : '#4fb8ff', 'stroke-width': 2, 'stroke-linecap': 'round' });
+    // the breathing light is in the player's accent colour, and so is the countdown round it
+    if (visual === 'ring') parts.arc.style.stroke = 'var(--blue, #4fb8ff)';
     svg.append(parts.track, parts.arc);
   }
   if (visual === 'drift') {
@@ -222,7 +224,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
     water.append(parts.rays, parts.stone);
     svg.append(water);
   } else if (visual === 'tide') {
-    parts.tide = sv('g', { fill: 'none', 'stroke-linecap': 'round' });
+    parts.tide = sv('g', { fill: 'none', 'stroke-linecap': 'round', ...(hasScene(visual) ? { class: 'dq-scene-flat' } : {}) });
     for (let i = 0; i < 4; i++) parts.tide.append(sv('path', { d: '', stroke: `rgba(150,205,255,${0.6 - i * 0.12})`, 'stroke-width': 1.4 }));
     svg.append(parts.tide);
   } else if (visual === 'wave') {
@@ -230,7 +232,9 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
     parts.wave2 = sv('path', { d: '', fill: 'none', stroke: 'rgba(160,215,255,.25)', 'stroke-width': 1 });
     parts.board = sv('g');
     parts.board.append(sv('rect', { x: -13, y: -3, width: 26, height: 5, rx: 2.5, fill: '#cfe9ff' }), sv('circle', { cx: 0, cy: -8, r: 3.2, fill: '#89cf9d' }));
-    svg.append(parts.wave2, parts.wave, parts.board);
+    const sea = sv('g', hasScene(visual) ? { class: 'dq-scene-flat' } : {});
+    sea.append(parts.wave2, parts.wave, parts.board);
+    svg.append(sea);
   } else if (visual === 'hands') {
     const g = sv('g', { transform: 'translate(0 -8)' });
     g.append(palm(78, true), palm(122, false));
@@ -254,6 +258,8 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
   const unmount = hasScene(visual)
     ? mountScene(stageEl, {
         kind: visual,
+        // the breathing light is the player's own light, in their accent colour
+        accent: visual === 'ring' ? playerAccent() : undefined,
         reduced: () => ctx.reduced(),
         onMotion: (fn) => ctx.onMotion(fn),
         clock: {

@@ -31,3 +31,16 @@
   visibility: hidden;
   transition: opacity var(--dq-scene-fade, 700ms) ease-out, visibility 0s linear var(--dq-scene-fade, 700ms);
 }
+/* the wide wave frame: the scene fills it and fades out at the sides, and a little at the top and bottom */
+.is-wide > .dq-scene {
+  inset: 0;
+  border-radius: 0;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 13%, #000 87%, transparent), linear-gradient(transparent, #000 9%, #000 88%, transparent);
+  -webkit-mask-composite: source-in;
+  mask-image: linear-gradient(90deg, transparent, #000 13%, #000 87%, transparent), linear-gradient(transparent, #000 9%, #000 88%, transparent);
+  mask-composite: intersect;
+}
+/* the countdown sits on the breathing light: a soft shade under its figures keeps them clear on the brightest breath */
+.is-scene-live .dq-timer-svg--ring ~ .dq-timer-center .dq-timer-num {
+  text-shadow: 0 0 16px rgba(7, 8, 15, 0.55), 0 1px 3px rgba(7, 8, 15, 0.5);
+}

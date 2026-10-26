@@ -14,6 +14,8 @@ export interface Vignette {
   resize(width: number, height: number): void;
   /** frees anything the scene made outside its scene graph (the graph itself is freed by the runtime) */
   dispose?(): void;
+  /** what the last pose looked like, in plain numbers (where the board is, how big the light is), for the E2E checks */
+  readonly probe?: Readonly<Record<string, number | string>>;
 }
 /** What a scene file exports as `build`: makes the scene, lit with `accent` as its rim colour, from its mount options. */
 export type BuildScene = (accent: THREE.Color, opts: SceneOpts) => Vignette;
@@ -230,7 +232,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
     last = t;
     drawn = { ...b };
     sceneStats.frames++;
-    sceneStats.last = { kind: opts.kind, e: b.e, dur: b.dur, done: b.done, still: calm };
+    sceneStats.last = { kind: opts.kind, e: b.e, dur: b.dur, done: b.done, still: calm, probe: v.probe && { ...v.probe } };
     sceneStats.dpr = renderer.getPixelRatio();
     if (ready) setLive(true);
   };

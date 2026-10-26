@@ -16,6 +16,7 @@ import { icon, mothSVG } from './art';
 import { now, onFrame } from './clock';
 import { btn, h, toggle, typo } from './ui';
 import { isSkillId } from './store';
+import { mountScene, playerAccent } from '../scene/vignettes/host';
 
 export function goNext(app: App, n: Next, replace = false) {
   if (n.to === 'rest') return app.go({ name: 'rest' }, { replace });
@@ -270,6 +271,8 @@ export function momentView(app: App, o: { done: () => void; then?: string; hum?:
   const orb = sv('circle', { cx: 100, cy: 100, r: 60, fill: 'url(#dqmo-g)' });
   const line = sv('circle', { cx: 100, cy: 100, r: 52, fill: 'none', stroke: 'rgba(170,225,255,.7)', 'stroke-width': 1.2 });
   const echo = sv('circle', { cx: 100, cy: 100, r: 52, fill: 'none', stroke: 'rgba(124,200,255,.22)', 'stroke-width': 0.8 });
+  // the breathing light in 3D takes the place of the flat orb and its rings when it can; the ticks stay round it
+  for (const c of [orb, echo, line]) c.classList.add('dq-scene-flat');
   svg.append(defs, outer, tickPath, orb, echo, line);
 
   const words = h('p', { class: 'dq-mo-line', 'aria-live': 'polite' });
@@ -336,6 +339,8 @@ export function momentView(app: App, o: { done: () => void; then?: string; hum?:
   let passes = 0;
   const fades: Animation[] = [];
   const stage = h('div', { class: 'dq-mo-stage' }, h('div', { class: 'dq-mo-halo', 'aria-hidden': 'true' }), svg);
+  // the same breath as the flat ring: both count from t0
+  const unmount = mountScene(stage, { kind: 'ring', accent: playerAccent(), reduced: () => app.reduced(), clock: { now, onFrame, beat: () => ({ e: now() - t0, dur: Infinity, started: true, done: false }) } });
   /** The chosen time has passed: the hum fades as when leaving, the ring settles, one calm line stays, and the way back is Done. */
   const end = (t: number) => {
     endAt = t;
@@ -411,6 +416,7 @@ export function momentView(app: App, o: { done: () => void; then?: string; hum?:
     foot,
     leave: () => {
       stop();
+      unmount();
       fades.forEach((a) => a.cancel());
       offVolume?.();
       hum?.stop();
