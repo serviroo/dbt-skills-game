@@ -29,7 +29,9 @@ function returning(xp = 0) {
 const levels = (o) => JSON.stringify({ v: 1, master: 0.8, music: 0.6, sfx: 0.7, muted: false, ...o });
 
 // Runs before the app: every gain that feeds a speaker also feeds an analyser, read every 10 ms. Each read is cut into
-// 128-frame render quanta keyed by their frame index, so each speaker's output is known quantum by quantum.
+// 128-frame render quanta keyed by their frame index, so each speaker's output is known quantum by quantum. The
+// analyser holds the last 32768 frames (about 0.7 s), so a page busy for longer than a read's 10 ms (a slow CI machine
+// drawing Home in software) still loses nothing: the next read covers the quanta it missed.
 const recorder = () => {
   const Q = 128;
   const connect = AudioNode.prototype.connect;
@@ -38,13 +40,13 @@ const recorder = () => {
     const out = connect.call(this, dest, ...rest);
     if (dest instanceof AudioDestinationNode && this instanceof GainNode && !taps.some((t) => t.node === this)) {
       const a = this.context.createAnalyser();
-      a.fftSize = 2048;
+      a.fftSize = 32768;
       connect.call(this, a);
       taps.push({ node: this, a, q: new Map() });
     }
     return out;
   };
-  const buf = new Float32Array(2048);
+  const buf = new Float32Array(32768);
   setInterval(() => {
     for (const tap of taps) {
       const c = tap.a.context;
@@ -52,7 +54,10 @@ const recorder = () => {
       tap.a.getFloatTimeDomainData(buf);
       const n = buf.length / Q;
       const end = Math.round((c.currentTime * c.sampleRate) / Q);
-      for (let j = 0; j < n; j++) {
+      // the quanta since the last read, plus two again (the clock and the analyser can be a quantum apart)
+      const from = tap.end === undefined ? 0 : Math.max(0, n - (end - tap.end) - 2);
+      tap.end = end;
+      for (let j = from; j < n; j++) {
         let peak = 0;
         let ss = 0;
         for (let k = j * Q; k < (j + 1) * Q; k++) {
