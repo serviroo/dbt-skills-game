@@ -11,6 +11,13 @@ import { NO_WEBGL, sceneStats } from './stats';
 const DPR_TOUCH = 1.5;
 const DPR_FINE = 2;
 
+/**
+ * The pixel ratio this device's scenes draw at, once one of them found the full ratio too slow, and the lowest ratio
+ * found too slow so far (never climbed back to). Kept for the whole visit, across scenes and renderers: the device
+ * doesn't get faster. See runtime.
+ */
+export const deviceDpr = { now: NaN, tooSlow: Infinity };
+
 interface Shared {
   renderer: THREE.WebGLRenderer;
   holder: { evict: () => void } | null;
