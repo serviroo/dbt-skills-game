@@ -102,7 +102,75 @@ async function buttons(h, page, ids, where) {
   return got.btns;
 }
 
+
+/**
+ * Holds the n-th read of the stories store from now on: a write transaction on the same stores is started just before it
+ * and kept busy, so the read waits behind it until window.__release(). window.__held says the hold is on,
+ * window.__readDone that the held read has finished.
+ */
+const holdRead = () => {
+  const make = IDBDatabase.prototype.transaction;
+  window.__hold = 0;
+  IDBDatabase.prototype.transaction = function (stores, mode, ...rest) {
+    const names = [].concat(stores);
+    if (names.includes('stories') && mode !== 'readwrite') {
+      if (window.__hold > 0 && --window.__hold === 0) {
+        const block = make.call(this, names, 'readwrite');
+        const store = block.objectStore(names[0]);
+        let on = true;
+        window.__release = () => (on = false);
+        const spin = () => {
+          if (on) store.get('held').onsuccess = spin;
+        };
+        spin();
+        window.__held = true;
+        const t = make.call(this, stores, mode, ...rest);
+        t.addEventListener('complete', () => (window.__readDone = true));
+        return t;
+      }
+    }
+    return make.call(this, stores, mode, ...rest);
+  };
+};
+
 export const scenarios = {
+
+  /**
+   * The chapter list loads from IndexedDB before its sheet opens. Left in that moment (here for the Safe Zone), the sheet
+   * never opens: the sheet layer outlives the page, so a late one would cover "Talk to someone now".
+   */
+  async 'sheet-after-leaving'(h) {
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', PHONE);
+    await ctx.addInitScript(holdRead);
+    await page.reload();
+    await h.reachHub(page);
+    await page.evaluate(() => window.__daily.go({ name: 'stories' }));
+    await page.getByRole('button', { name: 'New story', exact: true }).first().click({ timeout: 10000 });
+    await page.locator('.st-chbtn').waitFor({ timeout: 10000 });
+    // Chapters reads the story twice: once to bring the screen up to date, then for the list itself, which is held
+    await page.evaluate(() => (window.__hold = 2));
+    await page.locator('.st-chbtn').click();
+    await page.waitForFunction(() => window.__held === true, null, { timeout: 10000 });
+    h.expect(!(await page.locator('.st-sheet').count()), 'the chapter list opened before its read was let go');
+    await page.locator('.dq-safe').click();
+    const talk = page.getByRole('button', { name: 'Talk to someone now', exact: true });
+    await talk.waitFor({ timeout: 10000 });
+    await page.evaluate(() => window.__release());
+    await page.waitForFunction(() => window.__readDone === true, null, { timeout: 10000 });
+    // the read's answer has come back; whatever it was going to open has had its turn
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    const sheets = await page.locator('.st-sheet').count();
+    const hit = await talk.evaluate((b) => {
+      const r = b.getBoundingClientRect();
+      const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return !!at && b.contains(at);
+    });
+    await h.shot(page, 'sheet-after-leaving');
+    h.expect(sheets === 0 && hit, `after leaving for the Safe Zone the chapter list opened over it (${sheets} sheets, "Talk to someone now" can be tapped: ${hit})`);
+    h.expect((await page.evaluate(() => window.__daily.route.name)) === 'safe', 'the Safe Zone did not stay open');
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
   /** the camp is live and drawn at phone, sideways and desktop sizes, with everyone on day 30 and Sable alone on day 1 */
   async 'camp-live'(h) {
     const runs = [['phone-day30', PHONE, 30, ALL], ['side-day30', SIDE, 30, ALL], ['desk-day30', DESK, 30, ALL], ['phone-day1', PHONE, 1, ['sable']], ['side-day1', SIDE, 1, ['sable']]];

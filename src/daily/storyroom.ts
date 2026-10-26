@@ -1100,6 +1100,9 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
       if (e.key === 'Escape') (e.stopPropagation(), closeSheet());
     });
     await render();
+    // the player may have left while the list loaded (Back, the Safe Zone), or opened it again: the sheet layer outlives
+    // this screen, so a late sheet would open over the next one, and its Back entry would land on the next screen too
+    if (!alive || sheet !== wrap) return;
     app.sheetLayer.append(wrap);
     sheetDone = app.sheet(closeSheet);
     if (!app.reduced()) animate(body, [{ opacity: 0, transform: 'translateY(16px)' }, { opacity: 1, transform: 'none' }], { duration: 280, easing: 'cubic-bezier(.16,1,.3,1)' });
