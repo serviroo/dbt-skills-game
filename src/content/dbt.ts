@@ -305,11 +305,13 @@ const COPE_FEEL = ['Worry', 'Anger', 'Sadness', 'Shame', 'An urge to leave', 'An
 const COPE_PLAN = ['Slow breathing', 'Say what I need, calmly', 'Take a short break', 'Check the facts in my head', 'Ground myself with my senses'];
 const COPE_SNAG = ['They react badly', 'I freeze', 'It takes longer than I hoped', 'I get interrupted'];
 const lower1 = (t: string) => (/^I\b/.test(t) ? t : t.charAt(0).toLowerCase() + t.slice(1));
+/** Lowercases one of our own options for the middle of a sentence; words the player typed stay as typed. */
+const lowerIf = (t: string, ours: readonly string[]) => (ours.includes(t) ? lower1(t) : t);
 const copeFeel = (a: Answers) => {
   const f = (Array.isArray(a.feel) ? (a.feel as string[]) : []).filter((x) => x !== 'Not sure').map(lower1);
   return f.length ? f.join(' and ') : 'whatever comes up';
 };
-const copePlan = (a: Answers) => lower1(s(a, 'plan', COPE_PLAN[0]).trim().replace(/[.!?]+$/, ''));
+const copePlan = (a: Answers) => lowerIf(s(a, 'plan', COPE_PLAN[0]).trim().replace(/[.!?]+$/, ''), COPE_PLAN);
 const copeWords = (a: Answers) => s(a, 'words').trim();
 function copePicture(a: Answers) {
   const what = s(a, 'what').trim().replace(/[.!?]+$/, '');
@@ -318,12 +320,12 @@ function copePicture(a: Answers) {
 }
 function copeSnag(a: Answers) {
   const snag = s(a, 'snag', COPE_SNAG[0]).trim().replace(/[.!?]+$/, '');
-  return `Picture this happening: ${lower1(snag)}. See yourself staying with your plan anyway: ${copePlan(a)}. It doesn't have to go perfectly. Coping is the goal.`;
+  return `Picture this happening: ${lowerIf(snag, COPE_SNAG)}. See yourself staying with your plan anyway: ${copePlan(a)}. It doesn't have to go perfectly. Coping is the goal. Words are fine if pictures don't come.`;
 }
 function copeReady(a: Answers) {
   const what = s(a, 'what').trim();
   const words = copeWords(a);
-  return `${what ? `**Coming up:** ${fullStop(cap(what))} ` : ''}**Might show up:** ${fullStop(cap(copeFeel(a)))} **Your plan:** ${fullStop(cap(copePlan(a)))} ${words ? `**Your words:** "${words}" ` : ''}**If it snags:** ${fullStop(cap(lower1(s(a, 'snag', COPE_SNAG[0]).trim())))} You've walked it once already, so the real one will feel a little more familiar.`;
+  return `${what ? `**Coming up:** ${fullStop(cap(what))} ` : ''}**Might show up:** ${fullStop(cap(copeFeel(a)))} **Your plan:** ${fullStop(cap(copePlan(a)))} ${words ? `**Your words:** "${words}" ` : ''}**If it snags:** ${fullStop(cap(s(a, 'snag', COPE_SNAG[0]).trim()))} You've walked it once already, so the real one may feel a little more familiar.`;
 }
 
 const WILL_STEPS = ['Do the next small thing', 'Ask someone for help', 'Set a boundary', 'Step away from something harmful', 'Rest, then come back to it'];
@@ -342,11 +344,22 @@ const SMALL_FIRST: Record<string, string[]> = {
   'Practise a skill': ['Open this app', 'Do one slow breath', 'Read one skill card'],
 };
 const SMALL_ANY = ['Do the very first bit', 'Two minutes of it', 'Get out what I need'];
-const SMALLER = ['One minute of it', 'Only get things out', 'Only open it'];
+const SMALLER: Record<string, string[]> = {
+  'Start a task I keep putting off': ['Just open it', 'Read the first line', 'One minute of it'],
+  'Move my body a bit': ['Stand up once', 'Roll my shoulders', 'One minute of it'],
+  'Reply to messages': ['Open one message', 'Write one word back', 'One minute of it'],
+  'Tidy one corner': ['Put one thing away', 'Pick up one item', 'One minute of it'],
+  'Practise a skill': ['Take one slow breath', 'Read one line', 'One minute of it'],
+};
+const SMALLER_ANY = ['One minute of it', 'Only get things out', 'Only open it'];
+/** Treats that really are extra: never rest, food, care or people. */
+const REWARDS = ['A favourite song', 'A few minutes of a show I like', 'A chapter of a book', 'A round of a game I like', 'Time on a hobby'];
+const OUR_STEPS = [...Object.values(SMALL_FIRST).flat(), ...SMALL_ANY, ...Object.values(SMALLER).flat(), ...SMALLER_ANY];
 const smallAction = (a: Answers) => s(a, 'action', 'One helpful action').trim().replace(/[.!?]+$/, '');
 const firstSteps = (a: Answers) => (Object.hasOwn(SMALL_FIRST, smallAction(a)) ? SMALL_FIRST[smallAction(a)] : SMALL_ANY);
 const smallFirst = (a: Answers) => s(a, 'first', firstSteps(a)[0]).trim().replace(/[.!?]+$/, '');
-const smallReward = (a: Answers) => s(a, 'reward', 'A favourite song').trim().replace(/[.!?]+$/, '');
+const smallReward = (a: Answers) => s(a, 'reward', REWARDS[0]).trim().replace(/[.!?]+$/, '');
+const smallerSteps = (a: Answers) => (Object.hasOwn(SMALLER, smallAction(a)) ? SMALLER[smallAction(a)] : SMALLER_ANY);
 const smallPlan = (a: Answers) =>
   `**Helpful action:** ${fullStop(cap(smallAction(a)))} **First small step:** ${fullStop(cap(smallFirst(a)))} **Then, straight after:** ${fullStop(cap(smallReward(a)))} If this doesn't make the step happen more often, change the reward or make the step smaller. That isn't failing. It's shaping, and each small step counts.`;
 
@@ -1635,19 +1648,19 @@ export const SKILLS: Skill[] = [
         key: 'reward',
         text: 'Right after that step, what small, free good thing could you give yourself?',
         small: 'Rest, food, care and people never have to be earned. Pick something extra.',
-        options: o('A favourite song', 'A cup of something warm', 'A few minutes outside', 'A message to a friend', 'A stretch break'),
+        options: o(...REWARDS),
         other: 'My own',
       },
       {
         id: 'link',
         kind: 'choice',
         key: 'link',
-        text: (a) => `A reward works best straight after the step, not hours later. Picture it now: ${lower1(smallFirst(a))}, then ${lower1(smallReward(a))}.`,
+        text: (a) => `A reward works best straight after the step, not hours later. Picture it now, or say it in words: ${lowerIf(smallFirst(a), OUR_STEPS)}, then ${lowerIf(smallReward(a), REWARDS)}.`,
         options: [{ label: 'Straight after, got it' }, { label: 'Make the step smaller', go: 'smaller' }],
       },
       { id: 'plan', kind: 'say', text: smallPlan, options: [{ label: 'Done', go: 'end' }, { label: 'Make the step smaller', go: 'smaller' }] },
-      { id: 'smaller', kind: 'choice', key: 'first', text: 'Smaller is smart. What tiny first step would be easy to start?', options: o(...SMALLER), other: 'My own', go: 'plan' },
-      { id: 'not-today', kind: 'say', text: "That's okay. Today can just be today. The idea will keep for another time.", cta: 'Done', go: 'end' },
+      { id: 'smaller', kind: 'choice', key: 'first', text: 'Smaller is smart. What tiny first step would be easy to start?', options: (a) => o(...smallerSteps(a)), other: 'My own', go: 'plan' },
+      { id: 'not-today', kind: 'say', text: "That's okay. Today can just be today. The idea will keep for another time.", cta: 'Done', go: 'end:quiet' },
     ],
   },
   {

@@ -73,7 +73,7 @@ export const scenarios = {
     await page.locator('.dq-step-body .dq-other input').fill('Count five things I can see');
     await tap(page, 'Use this');
     await tap(page, 'Skip');
-    await sees(h, page, 'picture', { text: ["Imagine you're there now. Notice whatever comes up starting.", 'using your plan: count five things I can see.'], not: ['saying', 'undefined'] });
+    await sees(h, page, 'picture', { text: ["Imagine you're there now. Notice whatever comes up starting.", 'using your plan: Count five things I can see.'], not: ['saying', 'undefined'] });
     await tap(page, 'Next');
     await tap(page, 'They react badly');
     await tap(page, 'Next');

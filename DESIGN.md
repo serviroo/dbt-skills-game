@@ -111,7 +111,7 @@ whole time:
 
 1. Calm the body: cold water (with its caution), paced breathing (in 4, out 6), squeeze and release, an optional
    minute of movement.
-2. "Is it even a little lower?" A "Higher" answer brings "Talk to someone now" to the top.
+2. "Is it even a little lower?" A "Higher" answer, or a rating that stays the same or climbs, brings "Talk to someone now" to the top.
 3. STOP: stop, step back, notice, next step. One line per tap.
 4. The player's reasons, people (call or text buttons) and comfort kit, each with a kind empty state.
 5. Crisis lines for the player's region, with the local emergency number first when they say they might not be safe.
