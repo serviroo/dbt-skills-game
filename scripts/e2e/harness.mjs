@@ -16,6 +16,17 @@ const SAVE = 'dbt.lantern.v1';
 const YOU = 'dbt.you.v1';
 const SEEN = JSON.stringify({ seenCutscene: true });
 
+// The app's day turns at 6 a.m. local time (src/daily/store.ts). Scenarios seed a save for today and later check what
+// the app made of it, so no run may cross that hour, and in UTC, CI's zone, runs near 06:00 did. These scripts and every
+// page they open use a fixed-offset zone where the run starts between 6 and 7 p.m., at least 11 hours from the turn.
+// Set before any scenario file is imported and works out its days. east: hours ahead of UTC (Etc/GMT-5 is UTC+5).
+const ZONE = (() => {
+  let east = 18 - new Date().getUTCHours();
+  if (east > 14) east -= 24;
+  return east ? `Etc/GMT${east > 0 ? '-' : '+'}${Math.abs(east)}` : 'Etc/GMT';
+})();
+process.env.TZ = ZONE;
+
 /** Starts Vite on the first free port from 5290. If another run takes the port first, Vite exits and the next port is tried. */
 async function serve(host) {
   for (let port = 5290; port < 5390; port++) {
@@ -61,6 +72,9 @@ export async function startHarness(flags = {}) {
   const out = path.join(root, 'artifacts/e2e', new Date().toISOString().replace(/[:.]/g, '-'));
   fs.mkdirSync(out, { recursive: true });
   const browser = await launch(flags);
+  // every context keeps the scripts' zone, also when the browser runs on another machine (--ws)
+  const newContext = browser.newContext.bind(browser);
+  browser.newContext = (o = {}) => newContext({ timezoneId: ZONE, ...o });
   let server;
   let renderer;
   try {
@@ -74,6 +88,7 @@ export async function startHarness(flags = {}) {
     throw e;
   }
   console.log('renderer:', renderer);
+  console.log('zone:', ZONE, new Date().toTimeString().slice(0, 5));
 
   const trail = new WeakMap();
   const urlOf = (u) => {
@@ -182,5 +197,5 @@ export async function startHarness(flags = {}) {
     }
   })());
 
-  return { browser, server, out, flags, shared: {}, renderer, open, evidence, shot, ls, youOf, deepFind, deepDrop, expect, sleep, reachHub, openSettings, SAVE, YOU, SEEN, stop };
+  return { browser, server, out, flags, shared: {}, renderer, zone: ZONE, open, evidence, shot, ls, youOf, deepFind, deepDrop, expect, sleep, reachHub, openSettings, SAVE, YOU, SEEN, stop };
 }
