@@ -3,6 +3,7 @@ import { DISMISSED, LanternWindow, windowSounds } from '../ui/lantern-window';
 import { animate, el, finished, uiNow, wait } from '../ui/anim';
 import { params } from '../core/params';
 import { INSTALL_HINT_KEY } from '../core/stored-names';
+import { write } from '../core/cleared';
 
 const SHARE = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 9.5H6.8a1.3 1.3 0 0 0-1.3 1.3v8.4a1.3 1.3 0 0 0 1.3 1.3h10.4a1.3 1.3 0 0 0 1.3-1.3v-8.4a1.3 1.3 0 0 0-1.3-1.3h-1.7M12 14.5V3.2M8.4 6.6 12 3l3.6 3.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 const ADD = `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.8" y="3.8" width="16.4" height="16.4" rx="4" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`;
@@ -31,11 +32,13 @@ function seen(): boolean | null {
 }
 
 function remember() {
-  try {
-    localStorage.setItem(INSTALL_HINT_KEY, 'dismissed');
-  } catch {
-    /* private mode: the check above already kept the hint away */
-  }
+  write(() => {
+    try {
+      localStorage.setItem(INSTALL_HINT_KEY, 'dismissed');
+    } catch {
+      /* private mode: the check above already kept the hint away */
+    }
+  });
 }
 
 const frame = () => new Promise<number>((r) => requestAnimationFrame(r));

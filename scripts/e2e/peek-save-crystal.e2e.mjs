@@ -94,8 +94,25 @@ const UNION = {
 const card = (id, t, mode = 'continue', text = `Words on ${id}.`) => ({ id, mode, text, t });
 const withCards = (cards) => crystal({ stories: { ...crystal().stories, cards } });
 
+/**
+ * What the app says as it goes: every chosen file's read ends with a crystal-read event (shown, turned down or dropped
+ * for a later choice) and a preview that closes says crystal-closed. Checks that nothing happened wait for these, never
+ * for a fixed time.
+ */
+const listen = (ctx) =>
+  ctx.addInitScript(() => {
+    window.__chosen = 0;
+    window.__reads = [];
+    window.__closed = 0;
+    document.addEventListener('change', (e) => e.target?.type === 'file' && e.target.files?.length && window.__chosen++, true);
+    document.addEventListener('crystal-read', (e) => window.__reads.push(e.detail));
+    document.addEventListener('crystal-closed', () => window.__closed++);
+  });
+/** Every file chosen so far has been read to the end. */
+const settled = (page) => page.waitForFunction(() => window.__reads.length === window.__chosen);
+
 async function boot(h, viewport) {
-  const opened = await h.open(here(h), '?mute', viewport);
+  const opened = await h.open(here(h), '?mute', viewport, listen);
   const { page } = opened;
   page.on('dialog', (d) => {
     opened.errors.push('dialog: ' + d.message());
@@ -148,7 +165,10 @@ const rows = (page) => page.$$eval('.dq-peek:not(.is-hidden) .dq-peek-row', (rs)
 async function choose(page, file) {
   await page.locator('input[type=file]').setInputFiles(file);
   await peekOpen(page).waitFor({ timeout: 15000 });
+  await page.evaluate(() => (window.__openedAt = window.__closed));
 }
+/** The preview chose() opened has closed: its own crystal-closed, not an earlier one. */
+const dropped = (page) => page.waitForFunction(() => window.__closed > window.__openedAt);
 const statusText = (page) => page.locator('.dq-settings .dq-hint[aria-live]').textContent();
 const exact = (h, got, want, what) => h.expect(JSON.stringify(got) === JSON.stringify(want), `${what}: ${JSON.stringify(got)} (want ${JSON.stringify(want)})`);
 
@@ -165,8 +185,9 @@ const holdReads = (page) =>
   });
 const waitHeld = (page, name) => page.waitForFunction((n) => window.__held.some((x) => x.name === n), name);
 const release = async (h, page, name) => {
+  const before = await page.evaluate((n) => window.__reads.filter((r) => r.name === n).length, name);
   await page.evaluate((n) => window.__release(n), name);
-  await h.sleep(400);
+  await page.waitForFunction(([n, k]) => window.__reads.filter((r) => r.name === n).length > k, [name, before]);
 };
 
 async function stored(page) {
@@ -198,8 +219,7 @@ export const scenarios = {
     try {
       const before = await snapshot(page);
       await page.locator('input[type=file]').setInputFiles(asFile(crystal()));
-      await page.waitForFunction(() => !!document.querySelector('.dq-peek:not(.is-hidden)') || /^(?!Opening)\S/.test(document.querySelector('.dq-settings .dq-hint[aria-live]')?.textContent ?? ''), null, { timeout: 15000 });
-      await h.sleep(600);
+      await settled(page);
       await same(h, page, before, 'choosing a Save Crystal');
       await peekOpen(page).waitFor();
       exact(h, await rows(page), SOURCE_ROWS, 'preview rows');
@@ -365,7 +385,7 @@ export const scenarios = {
       await choose(page, asFile(crystal()));
       h.expect((await page.locator('.dq-peek').count()) === 1, 'choosing the same file twice made two previews');
       exact(h, await rows(page), SOURCE_ROWS, 'the same file chosen again');
-      await h.sleep(400);
+      await settled(page);
       await same(h, page, before, 'every preview above');
 
       const a = asFile(crystal({ profile: { playerName: 'Ash' }, events: [{ id: 'only-a', k: 'skill', skill: 'tipp', xp: 20, t: 1, day: '2026-03-12' }] }), 'a.json');
@@ -502,7 +522,7 @@ export const scenarios = {
         exact(h, await rows(page), SOURCE_ROWS, `rows with ${what}`);
         h.expect(await warned(), `no notice before Restore for ${what}`);
       }
-      await h.sleep(400);
+      await settled(page);
       await same(h, page, before, 'previewing files with cards');
 
       const mixed = withCards({ 'file-page': [card('file-keep', 5, 'continue', 'A card to keep.'), card('file-newer', 9, 'whatif', 'Newer words.'), card('file-odd', 6, 'damaged-mode', 'Words in an unreadable card.')] });
@@ -516,6 +536,70 @@ export const scenarios = {
       h.expect(/Some story pages or cards couldn.t be added\. Keep the Save Crystal file\./.test(await statusText(page)), 'Restore did not say a card was left out: ' + (await statusText(page)));
       exact(h, await stored(page), UNION, 'after Restore');
       exact(h, await cardsHere(), [['file-keep', 'continue', 'A card to keep.', 5], ['file-newer', 'whatif', 'Newer words.', 9], ['here-card', 'polish', 'A card made here.', 4]], 'cards after Restore');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  /** pages and cards Restore would leave out because of what is already here: the preview says exactly how many */
+  async 'peek-warns-what-restore-leaves-out'(h) {
+    const { ctx, page, errors } = await boot(h);
+    try {
+      const notice = () => page.locator('.dq-peek:not(.is-hidden) .dq-peek-here');
+      const lostNote = () => page.locator('.dq-peek:not(.is-hidden) .dq-peek-lost');
+      await choose(page, asFile(crystal()));
+      h.expect(!(await notice().count()) && !(await lostNote().count()), 'a file that fits next to what is here warns that Restore leaves something out');
+      await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+
+      // a story here whose page holds twelve cards, as many as a page can
+      const local = await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const s = storyStore(window.__daily.store.key);
+        const { story, first } = await s.create('Shore story');
+        await s.putCards(first.id, Array.from({ length: 12 }, (_, i) => ({ id: `here-k${i}`, mode: 'continue', text: `Card ${i} made here.`, t: i + 1 })));
+        return { story: story.id, page: first.id };
+      });
+      const told = {
+        stories: [{ id: 'file-story', title: 'The lighthouse', created: 200, updated: 210, rev: 'r2', chapters: ['file-page', local.page], notes: '' }],
+        chapters: [
+          { id: 'file-page', story: 'file-story', kind: 'page', title: 'Shore', text: 'File page words.', updated: 210, rev: 'r2' },
+          // the id of the page here, in another story
+          { id: local.page, story: 'file-story', kind: 'page', title: 'Borrowed', text: 'Words on a page id taken here.', updated: 220, rev: 'r1' },
+          // a page whose story is neither in the file nor here
+          { id: 'file-lost', story: 'file-elsewhere', kind: 'page', title: 'Lost', text: 'Words whose story is nowhere.', updated: 230, rev: 'r1' },
+        ],
+        // two more cards for the page that already holds twelve, and one for a page of the file
+        cards: { [local.page]: [card('file-k1', 50, 'whatif', 'One card too many.'), card('file-k2', 51, 'polish', 'Two cards too many.')], 'file-page': [card('file-k3', 52)] },
+      };
+      const before = await snapshot(page);
+      await choose(page, asFile(crystal({ stories: told }), 'crystal-that-collides.json'));
+      await settled(page);
+      await same(h, page, before, 'previewing a file whose pages collide with the ones here');
+      const said = (await notice().textContent()) ?? '';
+      const m = /^(\d+) story pages or cards in this file don.t fit with the stories already on this device, so Restore will leave them out\.$/.exec(said);
+      h.expect(m, 'no notice of what Restore leaves out: ' + said);
+      // the page whose story is nowhere is the file's gap, told apart from the clashes with what is here
+      const gap = (await lostNote().count()) ? ((await lostNote().textContent()) ?? '') : '';
+      h.expect(/^1 story page in this file belongs to a story that isn.t in the file or on this device, so Restore will leave it out\.$/.test(gap), 'no separate notice for the page whose story is in neither the file nor this device: ' + JSON.stringify(gap));
+      h.expect(Number(m[1]) === 3, `the notice about this device counts ${m[1]} pages or cards, want 3 (the page whose id is taken here and two cards past what that page holds)`);
+      h.expect(!(await page.locator('.dq-peek:not(.is-hidden) .dq-peek-note', { hasText: /can.t be read/ }).count()), 'a readable file says it can not be read');
+      await notice().scrollIntoViewIfNeeded();
+      await h.shot(page, 'leaves-out-preview');
+
+      await page.getByRole('button', { name: CONFIRM }).click();
+      await page.waitForFunction(() => /^Restored/.test(document.querySelector('.dq-settings .dq-hint[aria-live]')?.textContent ?? ''));
+      // what the file brought that is not here now, counted from what is stored
+      const left = await page.evaluate(async (file) => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const all = await storyStore(window.__daily.store.key).exportAll();
+        const pages = file.chapters.filter((c) => !all.chapters.some((x) => x.text === c.text && x.story === c.story)).map((c) => c.id);
+        const cards = Object.entries(file.cards).flatMap(([id, list]) => list.filter((c) => !(all.cards[id] ?? []).some((x) => x.id === c.id)).map((c) => c.id));
+        return { pages, cards, here: (all.cards[file.chapters[1].id] ?? []).length };
+      }, told);
+      exact(h, left, { pages: [local.page, 'file-lost'], cards: ['file-k1', 'file-k2'], here: 12 }, 'what Restore left out');
+      h.expect(Number(m[1]) + 1 === left.pages.length + left.cards.length, `the preview said ${m[1]} + 1 would be left out, Restore left out ${left.pages.length + left.cards.length}`);
+      h.expect(/Some story pages or cards couldn.t be added/.test(await statusText(page)), 'Restore did not say pages or cards were left out');
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();
@@ -545,7 +629,7 @@ export const scenarios = {
         h.expect(/Closed without restoring\. Nothing changed\./.test(await statusText(page)), `Escape did not say nothing changed ${how}`);
         exact(h, await focus(), { at, inside: false }, `focus after Escape ${how}`);
         exact(h, await route(page), 'settings', `screen after Escape ${how}`);
-        await h.sleep(400);
+        await dropped(page);
         await same(h, page, before, `Escape ${how}`);
       };
 

@@ -26,8 +26,11 @@ back after a long break is always fine.
 - Art room and Story Room: draw or write whatever you like. It all stays on your device. The Story Room's co-writer
   can ask you questions, toss in a what-if, suggest a next line or tidy up a messy bit. It's scripted and runs on your
   device too.
-- Save Crystal: a backup of your progress, stories, saved drawings and choices. Restore keeps choices you already made
-  on this device, including mute. If something could not be read, the file and the app say the backup is incomplete.
+- Save Crystal: a backup of your progress, stories, drawings (unfinished ones too) and choices. Restore keeps choices
+  you already made on this device, including mute. If something could not be read, the file and the app say the backup
+  is incomplete.
+- Starting over: Settings makes a Save Crystal first, then clears this game's data from the device after one
+  confirmation. Nothing else the browser keeps for other sites or apps is touched.
 
 ## How the practice works
 
@@ -42,7 +45,8 @@ no AI chat in the game.
 
 Everything is saved in your browser (localStorage and IndexedDB) on your own device. No accounts, no analytics, no
 tracking and no third-party requests. Clearing site data or uninstalling removes it, so keep a Save Crystal if you
-care about your progress.
+care about your progress. Settings > Your data can also back you up and then clear this game's data from the device:
+its saves, drawings, stories, offline files and offline worker, and nothing else.
 
 ## Running it
 

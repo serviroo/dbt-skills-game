@@ -10,6 +10,7 @@ import type { VolumeCtrl } from './audio/prefs';
 import { volumeButton, type VolumeButton } from './ui/volume';
 import { readYou } from './core/you';
 import { APP_KEY } from './core/stored-names';
+import { write } from './core/cleared';
 import { SCORE } from './motion/tokens';
 
 const dailyMods = import.meta.glob('./daily/index.ts');
@@ -29,11 +30,14 @@ function load(): AppState {
   }
 }
 function save(s: AppState) {
-  try {
-    localStorage.setItem(APP_KEY, JSON.stringify(s));
-  } catch {
-    /* storage blocked: the intro still plays, it just shows again next time */
-  }
+  const out = JSON.stringify(s);
+  write(() => {
+    try {
+      localStorage.setItem(APP_KEY, out);
+    } catch {
+      /* storage blocked: the intro still plays, it just shows again next time */
+    }
+  });
 }
 
 type Engine = import('./audio/engine').AudioEngine;

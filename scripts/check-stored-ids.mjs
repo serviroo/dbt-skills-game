@@ -56,6 +56,9 @@ async function collect() {
     const prefs = await load('src/audio/prefs.ts');
     const sw = fs.readFileSync(path.join(root, 'src/pwa/sw-template.js'), 'utf8');
     const swName = (k) => sw.match(new RegExp(`^const ${k} = '([^']+)';`, 'm'))?.[1];
+    // names the worker no longer declares are reported below as missing sw-cache ids
+    const [prefix, meta] = [swName('PREFIX'), swName('META')];
+    if ((prefix && prefix !== names.SW_CACHE.prefix) || (meta && meta !== names.SW_CACHE.meta)) throw new Error('SW_CACHE in src/core/stored-names.ts no longer matches the cache names in src/pwa/sw-template.js.');
 
     const t = Date.UTC(2026, 9, 20, 12);
     const day = store.dayKey(t);
@@ -80,7 +83,8 @@ async function collect() {
     const rec = art.cleanRec({ id: 'a1', kind: 'ally', day, t, updated: t, prompt: 'p', name: 'n', rev: 'r1', from: ['r0@1'], strokes: [{ i: 0, w: 4, p: [1, 2, 3, 4] }] });
     const tale = story.cleanStory({ id: 's1', title: 'T', created: t, updated: t, rev: 'r1', chapters: ['c1'], notes: 'c2', removed: t });
     const chapter = story.cleanChapter({ id: 'c1', story: 's1', kind: 'page', title: 'C', text: 'x', updated: t, rev: 'r1' });
-    const crystal = JSON.parse(st.exportJSON({ art: [rec], stories: { stories: [tale], chapters: [chapter] } }));
+    const draft = art.cleanDraft({ key: 'edit:a1:t1', kind: 'ally', editId: 'a1', bases: ['r1@1'], base: t, prompt: 'p', strokes: [{ i: 0, w: 4, p: [1, 2, 3, 4] }], t });
+    const crystal = JSON.parse(st.exportJSON({ art: [rec], drafts: [draft], stories: { stories: [tale], chapters: [chapter] }, unreadSaves: [{ at: String(t), raw: '{' }] }));
     const card = story.cleanCard({ id: 'k1', mode: story.CARD_MODES[0], text: 'x', t, sel: { start: 0, end: 1, text: 'x' } });
     you.writeYou({ name: 'Kit', companion: 'Lumen', nameAt: t, companionAt: t });
     prefs.savePrefs({ master: 1, music: 1, sfx: 1, muted: false });

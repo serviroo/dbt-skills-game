@@ -6,6 +6,7 @@
 import { animate } from '../ui/anim';
 import { SAFE } from '../content/dbt';
 import { BESIDE } from '../core/stored-names';
+import { write } from '../core/cleared';
 import { REGIONS, regionById, regionFromLocale, type CrisisLine } from '../content/crisis-lines';
 import type { App, Route, ScreenOut } from './app';
 import { icon } from './art';
@@ -79,11 +80,14 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   };
   lightBtn.addEventListener('click', () => {
     lit = !lit;
-    try {
-      localStorage.setItem(lightKey(st.key), lit ? 'up' : 'dim');
-    } catch {
-      /* stays for this visit only */
-    }
+    const light = lit ? 'up' : 'dim';
+    write(() => {
+      try {
+        localStorage.setItem(lightKey(st.key), light);
+      } catch {
+        /* stays for this visit only */
+      }
+    });
     applyLight();
   });
   const foot = h('div', { class: 'dq-sz-foot' }, talkLink);

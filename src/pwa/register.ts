@@ -1,9 +1,14 @@
 import { siteUrl } from '../core/base';
 import { params } from '../core/params';
+import { canWrite, cleared, mayWrite } from '../core/cleared';
 
 const UPDATE_CHECK_MS = 60 * 60 * 1000;
 const listeners = new Set<() => void>();
 let updateReady = false;
+let registering: Promise<unknown> = Promise.resolve();
+
+/** Settles once a registration under way has finished, so clearing this game's data can't race it. */
+export const registration = () => registering;
 
 /**
  * Installs the offline service worker (built app only; skipped in dev, ?lab and ?capture).
@@ -23,17 +28,19 @@ export function registerSW(): void {
     controlled = true;
   });
   const start = () => {
-    sw.register(siteUrl('sw.js'), { scope: siteUrl(''), updateViaCache: 'none' })
-      .then((reg) => {
-        // iOS resumes Home Screen apps instead of relaunching them, so also look for updates when the player comes back
-        let last = Date.now();
-        document.addEventListener('visibilitychange', () => {
-          if (document.visibilityState !== 'visible' || Date.now() - last < UPDATE_CHECK_MS) return;
-          last = Date.now();
-          reg.update().catch(() => {});
-        });
-      })
-      .catch(() => {});
+    registering = (async () => {
+      // this game's data is being cleared: its offline files don't come back until the game is opened afresh
+      if (!(await mayWrite())) return;
+      const reg = await sw.register(siteUrl('sw.js'), { scope: siteUrl(''), updateViaCache: 'none' });
+      if (cleared()) return void (await reg.unregister());
+      // iOS resumes Home Screen apps instead of relaunching them, so also look for updates when the player comes back
+      let last = Date.now();
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible' || Date.now() - last < UPDATE_CHECK_MS || !canWrite()) return;
+        last = Date.now();
+        reg.update().catch(() => {});
+      });
+    })().catch(() => {});
   };
   if (document.readyState === 'complete') start();
   else window.addEventListener('load', start, { once: true });

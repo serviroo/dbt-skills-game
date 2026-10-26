@@ -2701,6 +2701,13 @@ textarea.dq-input {
   margin-top: 12px;
   font-size: 16px;
 }
+/* how a Save Crystal, a Restore or a clear went: read as body text, so never under 16px */
+.dq-settings .dq-panel .dq-hint {
+  font-size: 16px;
+}
+.dq-settings .dq-panel .dq-hint:not(:empty) {
+  margin-top: 12px;
+}
 .dq-settings .dq-setting-h {
   font-size: 16px;
 }
@@ -2766,6 +2773,67 @@ textarea.dq-input {
   .dq-peek .dq-actions .dq-btn {
     width: 100%;
   }
+}
+
+/* Settings > Your data: back up, then clear this game's data */
+.dq-clear {
+  margin-top: 18px;
+  border-top: 1px solid rgba(62, 100, 133, 0.32);
+}
+.dq-clear.is-asking {
+  padding: 16px;
+  border: 1px solid rgba(79, 184, 255, 0.32);
+  border-radius: 12px;
+  background: rgba(79, 184, 255, 0.05);
+}
+.dq-clear-h {
+  margin: 0;
+  scroll-margin-top: calc(var(--safe-top) + 84px);
+  font-size: 19px;
+  font-weight: 500;
+  color: var(--t-title);
+}
+.dq-clear-h:focus {
+  outline: none;
+}
+.dq-settings .dq-panel .dq-clear-file {
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+.dq-clear-fname {
+  color: var(--t-title);
+}
+@media (max-width: 559px) {
+  .dq-clear.is-asking .dq-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .dq-clear.is-asking .dq-actions .dq-btn {
+    width: 100%;
+  }
+}
+
+/* after clearing: how it went, then a way to start again */
+.dq-page.dq-cleared {
+  max-width: 560px;
+  padding-top: clamp(8px, 6vh, 64px);
+}
+.dq-cleared-card {
+  padding: 22px 20px;
+  border: 1px solid rgba(79, 184, 255, 0.32);
+  border-radius: 14px;
+  background: rgba(79, 184, 255, 0.05);
+}
+.dq-cleared-h:focus {
+  outline: none;
+}
+.dq-cleared .dq-text {
+  margin-top: 12px;
+  font-size: 17px;
+}
+.dq-cleared .dq-small {
+  margin-top: 14px;
+  font-size: 16px;
 }
 
 @media (min-width: 900px) {

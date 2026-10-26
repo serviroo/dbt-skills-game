@@ -4,6 +4,7 @@
  */
 import type { AudioEngine, UserLevels } from './engine';
 import { AUDIO_KEY } from '../core/stored-names';
+import { write } from '../core/cleared';
 
 export type AudioLevels = UserLevels;
 
@@ -33,11 +34,14 @@ export function loadPrefs(): AudioLevels & { fresh: boolean } {
 }
 
 export function savePrefs(p: AudioLevels) {
-  try {
-    localStorage.setItem(AUDIO_KEY, JSON.stringify({ v: 1, master: unit(p.master), music: unit(p.music), sfx: unit(p.sfx), muted: p.muted === true }));
-  } catch {
-    /* storage blocked or full: the levels still hold for this visit */
-  }
+  const out = JSON.stringify({ v: 1, master: unit(p.master), music: unit(p.music), sfx: unit(p.sfx), muted: p.muted === true });
+  write(() => {
+    try {
+      localStorage.setItem(AUDIO_KEY, out);
+    } catch {
+      /* storage blocked or full: the levels still hold for this visit */
+    }
+  });
 }
 
 export interface VolumeCtrl {

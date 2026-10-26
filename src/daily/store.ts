@@ -8,6 +8,7 @@ import { DAILY_GIFTS, WARDEN_XP, RANK_XP, RANKS, STAT_BASE, TODAY_LINES, type Da
 import { ACCENT_IDS, CARD_BACK_IDS, PLATE_IDS, SHADOW_IDS, THEME_IDS, TITLE_IDS, type AccentId, type CardBackId, type PlateId, type ShadowId, type ThemeId, type TitleId } from '../content/roster-lines';
 import { cleanName, readYou, writeYou } from '../core/you';
 import { APP_ID, BESIDE, SAVE_KEY, YOU_KEY } from '../core/stored-names';
+import { begunOf, canWrite, cleared, goneElsewhere, onClear, replacedBy, sawStored, write } from '../core/cleared';
 
 /**
  * The save version this build writes. A save from a newer build is read too and keeps its higher number: this build
@@ -125,7 +126,7 @@ const LIST_KEYS = ['comfort', 'activities', 'reasons', 'people'] as const;
 const DAY_FLAGS = ['giftDay', 'cardDay', 'greetDay', 'checkinDay'] as const;
 const GONE_CAP = 1000;
 /** Top-level fields this build reads (and the ones only a Save Crystal carries); any other is kept as it was stored. */
-const KNOWN = new Set(['v', 'created', 'events', 'diary', 'lists', 'maps', 'lines', 'settings', 'flags', 'gone', 'setAt', 'profile', 'app', 'exported', 'schema', 'art', 'stories', 'preferences', 'incomplete']);
+const KNOWN = new Set(['v', 'created', 'events', 'diary', 'lists', 'maps', 'lines', 'settings', 'flags', 'gone', 'setAt', 'profile', 'app', 'exported', 'schema', 'art', 'drafts', 'stories', 'preferences', 'incomplete', 'unreadSaves']);
 /**
  * What a newer build stored that this one can't use, kept as it was so every write, tab merge and Save Crystal carries
  * it on. Unknown fields of the records this build rebuilds (events and their data, diary days and field times, list
@@ -841,6 +842,9 @@ export class Store {
   saving = true;
   private locked = false;
   private lastRaw: string | null = null;
+  private offClear: (() => void) | null = null;
+  /** a save waiting out a clear's hold */
+  private deferred = false;
 
   constructor(
     readonly key = SAVE_KEY,
@@ -857,10 +861,12 @@ export class Store {
         this.locked = true;
         this.saving = false;
       }
-      this.lastRaw = raw;
+      let began: number | null = null;
       if (raw !== null) {
         try {
-          st = normalize(JSON.parse(raw));
+          const o: unknown = JSON.parse(raw);
+          began = begunOf(o);
+          st = normalize(o);
         } catch {
           st = null;
         }
@@ -870,15 +876,44 @@ export class Store {
           this.saving = false;
         }
       }
+      this.took(raw, began);
     }
     this.state = st ?? freshState(clock());
     const adopted = this.mirrorYou();
     if (initial || (adopted && !this.locked)) this.save();
+    if (typeof window !== 'undefined') this.offClear = onClear({ clear: () => this.wipe() });
     if (!this.locked && typeof window !== 'undefined') {
       window.addEventListener('storage', this.onStorage);
       window.addEventListener('pageshow', this.onShow);
       document.addEventListener('visibilitychange', this.onShow);
     }
+  }
+
+  /** False when what is stored couldn't be read into this copy, so a Save Crystal made now can't hold it. */
+  get readable() {
+    return !this.locked;
+  }
+
+  /** The stored copy this one last read or wrote, and when that save was begun (its created field). */
+  private took(raw: string | null, began: number | null) {
+    this.lastRaw = raw;
+    if (raw !== null && this.key === SAVE_KEY) sawStored(raw, began);
+  }
+
+  /**
+   * True when a stored copy begun at `began` is a different save from the one this copy read: this game's data was
+   * cleared in another copy and a new game began since. It is never folded in; the page reloads into it instead.
+   */
+  private replaced(began: number | null) {
+    return this.key === SAVE_KEY && replacedBy(began);
+  }
+
+  /** This game's data is being cleared: nothing it held stays in memory, and it never writes again. */
+  private wipe() {
+    this.locked = true;
+    this.lastRaw = null;
+    this.state = freshState(this.clock());
+    this.dispose();
   }
 
   /** Back in view (or back from the page cache): storage events may have been missed meanwhile, so read what is stored. */
@@ -900,20 +935,25 @@ export class Store {
       return;
     }
     let other: State | null = null;
+    let began: number | null = null;
     try {
-      other = normalize(JSON.parse(e.newValue));
+      const o: unknown = JSON.parse(e.newValue);
+      began = begunOf(o);
+      other = normalize(o);
     } catch {
       other = null;
     }
-    if (!other) return;
+    if (!other || this.replaced(began)) return;
     this.absorb(other);
-    this.lastRaw = e.newValue;
+    this.took(e.newValue, began);
     if (this.mirrorYou() || this.holdsMoreThan(other)) this.save();
     else this.listeners.forEach((f) => f());
   };
 
   dispose() {
     if (typeof window === 'undefined') return;
+    this.offClear?.();
+    this.offClear = null;
     window.removeEventListener('storage', this.onStorage);
     window.removeEventListener('pageshow', this.onShow);
     document.removeEventListener('visibilitychange', this.onShow);
@@ -925,10 +965,12 @@ export class Store {
     try {
       const cur = localStorage.getItem(this.key);
       if (cur === null || cur === this.lastRaw) return false;
-      const other = normalize(JSON.parse(cur));
-      if (!other) return false;
+      const o: unknown = JSON.parse(cur);
+      const other = normalize(o);
+      const began = begunOf(o);
+      if (!other || this.replaced(began)) return false;
       this.absorb(other);
-      this.lastRaw = cur;
+      this.took(cur, began);
       if (this.mirrorYou()) this.save();
       return true;
     } catch {
@@ -984,6 +1026,7 @@ export class Store {
   }
 
   private keepCopy(raw: string) {
+    if (!canWrite()) return false;
     try {
       localStorage.setItem(`${this.key}${BESIDE.unreadable}.${Date.now()}`, raw);
       return true;
@@ -1010,14 +1053,31 @@ export class Store {
    * and `saving` turns false.
    */
   save() {
+    if (!canWrite()) {
+      // a clear is checking its Save Crystal: this write goes ahead once the clear lets go (never, once it clears)
+      if (!cleared() && !this.deferred) {
+        this.deferred = true;
+        write(() => {
+          this.deferred = false;
+          this.save();
+        });
+      }
+      this.listeners.forEach((f) => f());
+      return;
+    }
     if (this.locked) this.mirrorYou();
     else {
       try {
         const cur = localStorage.getItem(this.key);
+        // the save this copy read or wrote is gone: another copy cleared this game's data and this one missed it
+        if (cur === null && this.lastRaw !== null && this.key === SAVE_KEY) return goneElsewhere();
         if (cur !== null && cur !== this.lastRaw) {
           let other: State | null = null;
           try {
-            other = normalize(JSON.parse(cur));
+            const o: unknown = JSON.parse(cur);
+            // a new game begun after this game's data was cleared elsewhere: this copy's old progress stays out of it
+            if (this.replaced(begunOf(o))) return;
+            other = normalize(o);
           } catch {
             other = null;
           }
@@ -1028,7 +1088,7 @@ export class Store {
         this.mirrorYou();
         const out = JSON.stringify(stored(this.state));
         localStorage.setItem(this.key, out);
-        this.lastRaw = out;
+        this.took(out, this.state.created);
         this.saving = true;
       } catch {
         this.saving = false;

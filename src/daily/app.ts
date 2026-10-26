@@ -1,5 +1,6 @@
 import { companionName, playerName } from '../core/you';
 import { params } from '../core/params';
+import { cleared, onClear } from '../core/cleared';
 import { animate } from '../ui/anim';
 import { WINDOW } from '../motion/tokens';
 import { DISMISSED, dismissWindows, LanternWindow, lanternLayer, windowSounds, type WindowSpec } from '../ui/lantern-window';
@@ -128,6 +129,14 @@ export class App {
     };
     document.addEventListener('visibilitychange', vis);
     this.offs.push(() => document.removeEventListener('visibilitychange', vis));
+    this.offs.push(onClear({ clear: () => this.afterClear() }));
+  }
+
+  /** This game's data is being cleared (here or in another tab): windows close and every screen but the Safe Zone shows it. */
+  private afterClear() {
+    this.clearForSafe();
+    this.toastEl.classList.remove('is-on');
+    if (this.route.name !== 'safe') this.go({ name: 'settings' }, { replace: true });
   }
 
   reduced() {
@@ -332,6 +341,8 @@ export class App {
 
   go(route: Route, o: { replace?: boolean; quiet?: boolean } = {}) {
     if (!Object.prototype.hasOwnProperty.call(this.screens, route.name)) route = { name: 'hub' };
+    // after clearing, Settings shows how it went; only the Safe Zone opens as ever
+    if (cleared() && route.name !== 'safe') route = { name: 'settings' };
     const safe = route.name === 'safe';
     const wasSafe = this.route.name === 'safe';
     const fromSkill = this.route.name === 'skill';
