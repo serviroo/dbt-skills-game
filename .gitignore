@@ -20,3 +20,6 @@ wrangler.toml
 # test output
 artifacts/
 qa/out/
+
+# images being redrawn by scripts/icons.mjs
+.icons-*/

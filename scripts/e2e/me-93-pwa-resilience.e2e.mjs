@@ -210,6 +210,9 @@ async function startIntro(page, sleep) {
   await page.getByRole('button', { name: 'Skip' }).click({ timeout: 20000 });
 }
 
+// pwa-preview-retries-raced-port swaps net.createServer for the whole process, so nothing else here may make a server then.
+export const serial = true;
+
 export const scenarios = {
 
   async 'pwa-broken-deploy-kept-out'(h) {

@@ -76,7 +76,7 @@ export async function boot(h, viewport, o = {}) {
 
 const home = (page) => page.waitForFunction(() => window.__daily?.route.name === 'hub' && !!document.querySelector('.dq-tile') && !document.querySelector('.dq-sw'), null, { timeout: 30000 });
 
-/** Waits until the screen stops changing: no DOM changes for 400 ms (at most 4 s), then no finite animation running. */
+/** Waits until the screen stops changing: no DOM changes for 400 ms (at most 4 s), then no animation running that ends within 3 s. */
 export const settle = (page) =>
   page.evaluate(async () => {
     await new Promise((done) => {
@@ -94,8 +94,15 @@ export const settle = (page) =>
       quiet = setTimeout(end, 400);
       mo.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
     });
-    const finite = document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity);
-    await Promise.race([Promise.all(finite.map((a) => a.finished.catch(() => {}))), new Promise((r) => setTimeout(r, 3000))]);
+    // One that runs longer (the closed chest's shine, 29.5 s on a first visit) is still running after the 3 s, as a
+    // looping one is, so waiting for it only adds 3 s to every check; a paused one never ends either.
+    const ending = document.getAnimations().filter((a) => {
+      const t = a.effect?.getComputedTiming();
+      if (!t || t.endTime === Infinity || a.playState !== 'running' || !a.playbackRate) return false;
+      const left = a.playbackRate > 0 ? t.endTime - (a.currentTime ?? 0) : a.currentTime ?? 0;
+      return left / Math.abs(a.playbackRate) <= 3000;
+    });
+    await Promise.race([Promise.all(ending.map((a) => a.finished.catch(() => {}))), new Promise((r) => setTimeout(r, 3000))]);
   });
 
 /** Every problem on the screen as it is now, inside `scope` and outside `skip`. */

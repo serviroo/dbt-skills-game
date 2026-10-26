@@ -1,6 +1,7 @@
 // Shared setup for the E2E scenario files: a Playwright Chromium, a Vite dev server on a free port, the artifacts
-// folder and the helpers every scenario uses. scripts/e2e.mjs calls startHarness(flags) once and passes the result,
-// h, to each scenario. h.stop() closes the browser and stops only the dev server this process started.
+// folder and the helpers every scenario uses. scripts/e2e.mjs calls startHarness(flags) once, plus h.more() for each
+// extra browser it runs scenarios in side by side, and passes one of these, h, to each scenario. h.stop() closes every
+// browser and stops only the dev server this process started.
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -38,7 +39,11 @@ async function serve(host) {
     let spawnError;
     child.once('error', (e) => { spawnError = e; });
     const gone = () => spawnError || child.exitCode !== null || child.signalCode !== null;
+    let stopping = false;
+    // a server that goes away mid-run fails every scenario after it with "connection refused"; say why it went
+    child.once('exit', (code, signal) => stopping || console.error(`dev server exited (code ${code}, signal ${signal}):\n${log.slice(-3000)}`));
     const stop = () => new Promise((res) => {
+      stopping = true;
       if (gone()) return res();
       const timer = setTimeout(() => child.kill('SIGKILL'), 5000);
       child.once('exit', () => { clearTimeout(timer); res(); });
@@ -163,7 +168,6 @@ export async function startHarness(flags = {}) {
   const host = flags.host ?? '127.0.0.1';
   const out = path.join(root, 'artifacts/e2e', new Date().toISOString().replace(/[:.]/g, '-'));
   fs.mkdirSync(out, { recursive: true });
-  const browser = await launch(flags);
   let server;
   let renderer;
   const trail = new WeakMap();
@@ -195,16 +199,28 @@ export async function startHarness(flags = {}) {
     t?.life.push({ t: Date.now() - t.t0, ev, ...extra });
   };
 
-  // every context keeps the scripts' zone, also when the browser runs on another machine (--ws), and every page in it is
-  // followed for evidence()
-  const newContext = browser.newContext.bind(browser);
-  browser.newContext = async (o = {}) => {
-    const t0 = Date.now();
-    const ctx = await newContext({ timezoneId: ZONE, ...o });
-    await ctx.addInitScript(pageTrail);
-    ctx.on('page', (page) => track(page, t0));
-    return ctx;
+  // every browser this run starts, so stop() closes them all, also one still starting
+  const browsers = [];
+  const launches = [];
+  const start = () => {
+    const p = launch(flags).then((browser) => {
+      // every context keeps the scripts' zone, also when the browser runs on another machine (--ws), and every page in it is
+      // followed for evidence()
+      const newContext = browser.newContext.bind(browser);
+      browser.newContext = async (o = {}) => {
+        const t0 = Date.now();
+        const ctx = await newContext({ timezoneId: ZONE, ...o });
+        await ctx.addInitScript(pageTrail);
+        ctx.on('page', (page) => track(page, t0));
+        return ctx;
+      };
+      browsers.push(browser);
+      return browser;
+    });
+    launches.push(p);
+    return p;
   };
+  const browser = await start();
   try {
     server = await serve(host);
     const p = await (await browser.newContext()).newPage();
@@ -260,7 +276,7 @@ export async function startHarness(flags = {}) {
    * A fresh, isolated browser profile at phone size, optionally seeded with localStorage before the app runs. `device`
    * adds context options for the kind of device, such as hasTouch for a touch-first phone.
    */
-  async function open(seed = {}, query = '?mute', viewport = { width: 390, height: 844 }, prepare, device = {}) {
+  const opener = (browser) => async function open(seed = {}, query = '?mute', viewport = { width: 390, height: 844 }, prepare, device = {}) {
     const ctx = await browser.newContext({ viewport, deviceScaleFactor: 2, acceptDownloads: true, serviceWorkers: 'block', ...device, ...(flags.media === 'true' ? { recordVideo: { dir: out, size: viewport } } : {}) });
     await ctx.addInitScript((s) => {
       if (sessionStorage.getItem('e2e-seeded')) return;
@@ -274,7 +290,7 @@ export async function startHarness(flags = {}) {
     page.on('console', (m) => m.type() === 'error' && !/WebGL|GPU stall|AudioContext/i.test(m.text()) && errors.push('console: ' + m.text().slice(0, 300)));
     await page.goto(server.url + '/' + query);
     return { ctx, page, errors };
-  }
+  };
   /**
    * What a page showed, saved as <name>.json and <name>.png: its state (route, windows, name prompt, title, visibility,
    * the 3D stage's frames), its console, and one timeline of the scenario's notes, the page's load events and what
@@ -307,11 +323,11 @@ export async function startHarness(flags = {}) {
     for (const s of [now, later]) if (s) delete s.trail;
     fs.writeFileSync(path.join(out, name + '.json'), JSON.stringify({ t: now.t, state: now, later, shot, errors: errors.map(clean), console: logs, timeline, life }, null, 2));
   }
-  /** evidence() for every page still open, as <prefix>-1, -2, ... in the order the pages opened */
-  async function evidenceAll(prefix) {
+  /** evidence() for every page still open in this browser, as <prefix>-1, -2, ... in the order the pages opened */
+  const allEvidence = (browser) => async function evidenceAll(prefix) {
     const pages = browser.contexts().flatMap((c) => c.pages());
     await Promise.all(pages.map((p, i) => evidence(p, `${prefix}-${i + 1}`).catch((e) => console.log(`evidence ${prefix}-${i + 1}: ${e?.message ?? e}`))));
-  }
+  };
   const shot = (page, name) => page.screenshot({ path: path.join(out, name + '.png') });
   const ls = (page, k) => page.evaluate((key) => localStorage.getItem(key), k);
   const youOf = async (page) => JSON.parse((await ls(page, YOU)) ?? 'null');
@@ -356,11 +372,20 @@ export async function startHarness(flags = {}) {
   let stopping;
   const stop = () => (stopping ??= (async () => {
     try {
-      await browser.close();
+      await Promise.allSettled(launches);
+      const failed = (await Promise.allSettled(browsers.map((b) => b.close()))).find((r) => r.status === 'rejected');
+      if (failed) throw failed.reason;
     } finally {
       await server.stop();
     }
   })());
 
-  return { browser, server, out, flags, shared: {}, renderer, zone: ZONE, open, evidence, evidenceAll, note, leaves, shot, ls, youOf, deepFind, deepDrop, expect, sleep, reachHub, openSettings, SAVE, YOU, SEEN, stop };
+  const shared = {};
+  const lane = (browser) => ({ browser, server, out, flags, shared, renderer, zone: ZONE, open: opener(browser), evidence, evidenceAll: allEvidence(browser), note, leaves, shot, ls, youOf, deepFind, deepDrop, expect, sleep, reachHub, openSettings, SAVE, YOU, SEEN, stop, more });
+  /** Another browser on the same dev server, so scenarios can run side by side: its own profiles, the same `shared`. */
+  async function more() {
+    if (stopping) throw new Error('the harness is stopping');
+    return lane(await start());
+  }
+  return lane(browser);
 }

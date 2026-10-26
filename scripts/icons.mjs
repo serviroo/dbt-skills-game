@@ -215,13 +215,22 @@ async function draw(j, n) {
     }
   }
 }
+// Each image is finished in a folder beside the output, then renamed into place, so a build copying public/ while
+// another build redraws the images (the E2E scenarios build side by side) never takes a half-written one.
+let parts;
 const write = (rel, dataUrl) => {
   const file = path.join(outDir, rel);
+  if (!parts) {
+    parts = fs.mkdtempSync(path.join(path.dirname(outDir), '.icons-'));
+    process.once('exit', () => fs.rmSync(parts, { recursive: true, force: true }));
+  }
+  const part = path.join(parts, rel.replaceAll('/', '_'));
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, Buffer.from(dataUrl.split(',')[1], 'base64'));
+  fs.writeFileSync(part, Buffer.from(dataUrl.split(',')[1], 'base64'));
   try {
-    execFileSync('magick', [file, '-strip', '-define', 'png:compression-level=9', '-define', 'png:compression-filter=5', 'PNG24:' + file]);
+    execFileSync('magick', [part, '-strip', '-define', 'png:compression-level=9', '-define', 'png:compression-filter=5', 'PNG24:' + part]);
   } catch {}
+  fs.renameSync(part, file);
   return fs.statSync(file).size;
 };
 const jobs = [];
