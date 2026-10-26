@@ -146,3 +146,15 @@ export const GATE = {
   fov: 30,
   handheld: 0.3,
 } as const;
+
+/** The small calm 3D scenes in the companion (src/scene/vignettes) and the renderer they share. */
+export const SCENE = {
+  /** longest the flat picture stays hidden while a scene loads, so a quick load fades straight into 3D */
+  waitMs: 900,
+  /** a scene fades in over its flat picture once its first frame is on screen */
+  fadeMs: 700,
+  /** the scenes move slowly, so 30 frames a second is plenty and spares the battery */
+  fps: 30,
+  /** the shared renderer is kept this long after the last scene leaves, then its context is released */
+  idleMs: 15000,
+} as const;
