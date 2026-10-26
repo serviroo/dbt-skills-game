@@ -27,7 +27,6 @@ async function skip(h, page, tag) {
   const after = await page.evaluate((n) => window.__audioLog.slice(n).map((e) => `${e.kind} ${e.name}`), before);
   const bars = await page.evaluate(() => [...document.querySelectorAll('.lb')].map((b) => parseFloat(b.style.height) || 0));
   h.expect(bars.every((v) => v === 0), `${tag}: the letterbox stayed over the rewards (${bars.join(', ')} vh)`);
-  await h.shot(page, `intro-skip-${tag}`);
   return after;
 }
 

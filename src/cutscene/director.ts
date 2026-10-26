@@ -131,6 +131,7 @@ export class Director {
     this.lb.set(0);
     this.neutralGrade();
     this.audio.unhush?.();
+    this.audio.duck?.(0, 0.03);
     this.audio.bed?.('vortex_roar')?.stop(1.5);
     this.resolveSkip();
   }
@@ -468,7 +469,7 @@ export class Director {
     this.stopIfSkipped();
     // 200 ms hush, then the burst (visual leads the boom by 1-2 frames)
     this.audio.duck?.(-18, 0.05);
-    await wait(0.2);
+    await this.hold(0.2);
     this.audio.duck?.(0, 0.02);
     this.cue(1 / 30, () => this.audio.play('chest_burst'));
     this.track(2.4, (lt) => chest.setOpen(clamp(lt / 1.6)));
