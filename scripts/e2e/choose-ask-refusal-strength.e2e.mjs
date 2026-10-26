@@ -184,6 +184,19 @@ export async function look(h, page, problems, shots, name) {
   shots.push(name);
 }
 
+/** Everything this origin holds on the device: local and session storage and every IndexedDB store, as text. */
+export const everything = (page) =>
+  page.evaluate(async () => {
+    const out = [JSON.stringify(Object.entries(localStorage)), JSON.stringify(Object.entries(sessionStorage))];
+    for (const { name } of await indexedDB.databases()) {
+      const db = await new Promise((ok, no) => { const r = indexedDB.open(name); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+      for (const store of db.objectStoreNames)
+        out.push(JSON.stringify(await new Promise((ok) => { const q = db.transaction(store).objectStore(store).getAll(); q.onsuccess = () => ok(q.result); q.onerror = () => ok(null); })));
+      db.close();
+    }
+    return out.join('\n');
+  });
+
 /** Records any request that leaves this page's own server. */
 export function offsite(page) {
   const out = [];
@@ -261,7 +274,7 @@ export const scenarios = {
           await page.locator('.dq-step-body textarea, .dq-step-body input').first().fill(own);
           await tap(page, 'Next');
         } else await tap(page, k === 1 ? 'Skip' : 'Next');
-        const close = await sees(h, page, `${where}, close`, { text: `However firmly you ${way === 'ask' ? 'ask' : 'say no'}, it's a choice for this moment, not a rank.`, offers: ['Done', 'Plan it with DEAR MAN'] });
+        const close = await sees(h, page, `${where}, close`, { text: way === 'ask' ? "However firmly you ask, it's a choice for this moment, not a rank." : "Yes or no, and however firmly, it's a choice for this moment, not a rank.", offers: ['Done', 'Plan it with DEAR MAN'] });
         h.expect(has(close.text, `Your words: "${own}"`) === !!own, `${where}: own words ${own ? 'missing from' : 'invented on'} the close screen`);
         if (way === 'ask') h.expect(has(close.text, 'make a yes more likely, never certain'), `${where}: the close screen promises more than words can`);
         await tap(page, 'Done');
@@ -292,7 +305,7 @@ export const scenarios = {
     h.expect(taps <= 12, `the first-option walk took ${taps} taps, more than 12`);
     await toHub(h, page);
     h.expect((await credits(h, page, ID)) - before === 1, 'the first-option walk did not credit it once');
-    const stored = JSON.stringify(await page.evaluate(() => Object.fromEntries(Object.keys(localStorage).map((k) => [k, localStorage.getItem(k)]))));
+    const stored = await everything(page);
     h.expect(!stored.includes('lift to the shops') && !stored.includes('bins out on Thursdays'), 'typed words were stored');
     h.expect(!away.length, `requests left the page: ${away.join(', ')}`);
     h.expect(!dialogs.length, `a browser dialog opened: ${dialogs.join('; ')}`);

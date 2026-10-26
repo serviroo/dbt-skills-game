@@ -3,7 +3,7 @@
 // beliefs-pairs: every built-in belief shows its own challenge and no other, and the review keeps it as the answer.
 // Opening credits it once and finishing adds nothing.
 // beliefs-own-words: a belief of your own gets a scripted reflection, not a pretend reply; your own answer and small
-// step show literally, markup and all, and never become page elements. "Not sure", "This doesn't fit" and "Asking
+// step show as typed, and HTML in them stays text, never page elements. "Not sure", "This doesn't fit" and "Asking
 // went badly before" all reach a warm review. Nothing typed is stored or sent.
 // beliefs-safety: "Asking or saying no could get me hurt" leads with people to talk to and opens the Safe Zone talk
 // screen.
@@ -12,7 +12,7 @@
 // beliefs-sizes: every screen at 390x844, 320x568, 844x390 and 1280x800, with the long real name and a multiline
 // answer: nothing sticks out sideways or clips, and the Safe Zone button stays on screen.
 import { credits, returning, toHub } from './skill-check.e2e.mjs';
-import { ended, has, keyTap, leave, look, offsite, openFromList, peopleFirst, plain, screen, sees, SIZES, tap, toggle } from './choose-ask-refusal-strength.e2e.mjs';
+import { ended, everything, has, keyTap, leave, look, offsite, openFromList, peopleFirst, plain, screen, sees, SIZES, tap, toggle } from './choose-ask-refusal-strength.e2e.mjs';
 
 const ID = 'interpersonal-myths';
 const NAME = 'Room to Ask';
@@ -69,7 +69,10 @@ export const scenarios = {
       await tap(page, 'Skip');
       await sees(h, page, `${where}, try`, { text: 'One small ask or no to try this week?' });
       await tap(page, 'Next');
-      await sees(h, page, `${where}, review`, { text: [`The belief: "${belief}."`, `Your answer to it: ${challenge}`, 'Beliefs loosen with practice, one small ask at a time.'], not: 'One small step:', offers: ['Done', 'Plan it with DEAR MAN'] });
+      // the review keeps to what was said on the challenge: a reframe the player didn't agree with is not their answer
+      const answer = [`Your answer to it: ${challenge}`, `Another way to see it, in part: ${challenge}`, 'Your answer to it: Not settled yet. You looked at it honestly, and that counts.'][i % 3];
+      const review = await sees(h, page, `${where}, review`, { text: [`The belief: "${belief}."`, answer, 'Beliefs loosen with practice, one small ask at a time.'], not: 'One small step:', offers: ['Done', 'Plan it with DEAR MAN'] });
+      if (i % 3 === 2) h.expect(!has(review.text, challenge), `${where}: the review shows the reframe the player said doesn't fit`);
       await tap(page, 'Done');
       await ended(h, page, where, NAME);
       await toHub(h, page);
@@ -125,12 +128,12 @@ export const scenarios = {
     await tap(page, 'Rings true');
     await tap(page, 'Skip');
     await tap(page, 'Skip');
-    await sees(h, page, 'not sure, review', { text: [`Your answer to it: ${PAIRS[3][1]}`] });
+    await sees(h, page, 'not sure, review', { text: [`A belief to watch for: "${PAIRS[3][0]}."`, `Your answer to it: ${PAIRS[3][1]}`], not: 'The belief:' });
     await tap(page, 'Done');
     await ended(h, page, 'not sure', NAME);
     await toHub(h, page);
     h.expect((await credits(h, page, ID)) - before === 3, `three walks credited it ${(await credits(h, page, ID)) - before} times, not three`);
-    const stored = JSON.stringify(await page.evaluate(() => Object.fromEntries(Object.keys(localStorage).map((k) => [k, localStorage.getItem(k)]))));
+    const stored = await everything(page);
     h.expect(!stored.includes('burden') && !stored.includes('pick a film') && !stored.includes('rude'), 'typed words were stored');
     h.expect(!away.length, `requests left the page: ${away.join(', ')}`);
     h.expect(!errors.length, errors.join('\n'));

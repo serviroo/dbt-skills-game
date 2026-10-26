@@ -251,7 +251,7 @@ function askingClose(a: Answers) {
   const mine = line ? `**Your words:** "${line}" ` : '';
   return wayOf(a) === 'ask'
     ? `${mine}However firmly you ask, it's a choice for this moment, not a rank. Good words make a yes more likely, never certain, and a no back doesn't mean you got it wrong.`
-    : `${mine}However firmly you say no, it's a choice for this moment, not a rank. A yes can be kind, and so can a no.`;
+    : `${mine}Yes or no, and however firmly, it's a choice for this moment, not a rank. A yes can be kind, and so can a no.`;
 }
 const STEADY_UNSAFE = "Then your safety comes first. You don't have to ask or say no face to face with someone who might hurt you. Someone to talk to is one tap away.";
 
@@ -278,8 +278,16 @@ function beliefChallenge(a: Answers) {
 function beliefReview(a: Answers) {
   const mine = s(a, 'mine').trim();
   const step = s(a, 'try').trim();
-  const answer = mine ? fullStop(cap(mine)) : builtIn(a) ? ASK_BELIEFS[beliefOf(a)] : 'Still working on it, and that counts.';
-  return `**The belief:** "${fullStop(cap(beliefOf(a)))}" **Your answer to it:** ${answer}${step ? ` **One small step:** ${fullStop(cap(step))}` : ''} Beliefs loosen with practice, one small ask at a time.`;
+  const fit = s(a, 'fit');
+  // the review keeps to what the player said: a reframe they didn't agree with is never shown as their answer
+  let answer: string;
+  if (mine) answer = `**Your answer to it:** ${fullStop(cap(mine))}`;
+  else if (!builtIn(a)) answer = '**Your answer to it:** Still working on it, and that counts.';
+  else if (fit === "This doesn't fit") answer = '**Your answer to it:** Not settled yet. You looked at it honestly, and that counts.';
+  else if (fit === 'Partly') answer = `**Another way to see it, in part:** ${ASK_BELIEFS[beliefOf(a)]}`;
+  else answer = `**Your answer to it:** ${ASK_BELIEFS[beliefOf(a)]}`;
+  const label = a.belief === 'Not sure' ? 'A belief to watch for' : 'The belief';
+  return `**${label}:** "${fullStop(cap(beliefOf(a)))}" ${answer}${step ? ` **One small step:** ${fullStop(cap(step))}` : ''} Beliefs loosen with practice, one small ask at a time.`;
 }
 
 export const SKILLS: Skill[] = [
