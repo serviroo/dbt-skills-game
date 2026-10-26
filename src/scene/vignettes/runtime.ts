@@ -80,39 +80,67 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   let drawn: Beat | null = null;
 
   /**
-   * Fewer pixels on a slow device. A scene draws at the device's own pixel ratio until it is shown to be too slow: its
-   * second frame is timed to the end once (reading one pixel back waits for the GPU to finish it), and after that the
-   * page's frame rate is watched while it moves. Too slow, and it drops straight to the ratio that fits its budget, down
-   * to SCENE.minDpr; comfortably fast for a while, and it climbs back a step, never to a ratio already found too slow.
+   * Fewer pixels on a slow device. A scene draws at the device's own pixel ratio until it is shown to be too slow. Its
+   * first frame is timed without the page ever waiting for it (a fence goes in behind it and is looked at on the next
+   * animation frames, so this happens while the step opens, before anything is tapped); one slow frame lowers this
+   * scene only, and it comes back to full once its frames show the device keeps up. While it moves, the page's frame
+   * rate is watched: only that sustained slowness lowers the ratio for the rest of the visit, down to SCENE.minDpr.
+   * Comfortably fast for a while, it climbs back a step, never to a ratio sustained slowness already ruled out.
+   * Every change of ratio redraws at once, since resizing clears the canvas.
    */
-  const minDpr = Math.min(lent.maxDpr, SCENE.minDpr);
-  const ratio = () => (Number.isNaN(deviceDpr.now) ? lent.maxDpr : Math.min(lent.maxDpr, Math.max(minDpr, deviceDpr.now)));
-  const gl = renderer.getContext();
-  const px = new Uint8Array(4);
-  let timeIn = 2;
+  const maxDpr = lent.maxDpr;
+  const minDpr = Math.min(maxDpr, SCENE.minDpr);
+  let mine = Number.isNaN(deviceDpr.now) ? maxDpr : Math.min(maxDpr, Math.max(minDpr, deviceDpr.now));
+  /** the ratio before a drop made on one timed frame alone, to come back to once frames keep up */
+  let before: number | null = null;
+  const gl = renderer.getContext() as WebGL2RenderingContext;
+  let timeIn = 1;
+  let fence: WebGLSync | null = null;
+  let fenceAt = 0;
+  let fenceBusy = 0;
+  let fenceRaf = 0;
   let gaps: number[] = [];
   let lastTick = -1;
   let goodFor = 0;
-  /** draws at pixel ratio r from now on; false when the scene has no size yet */
+  /** draws at pixel ratio r from now on, the current frame straight away; false when the scene has no size yet */
   function setRatio(r: number) {
-    deviceDpr.now = r;
+    mine = r;
     const w = holder.clientWidth, h = holder.clientHeight;
     if (!w || !h) return false;
-    renderer.setPixelRatio(ratio());
+    renderer.setPixelRatio(r);
     renderer.setSize(w, h, false);
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
     v.resize(size.x, size.y);
     gaps = [];
     goodFor = 0;
+    if (drawn && !lost && !evicted) draw(clock.now(), beatAt(clock.now()), still());
     return true;
   }
-  /** steps down to the ratio that would fit `ms` into the budget; true when it changed */
-  function slower(ms: number, budget: number) {
-    const now = ratio();
-    const r = Math.max(minDpr, now * Math.min(0.85, Math.max(0.4, Math.sqrt(budget / ms))));
-    if (r > now - 0.01) return false;
-    deviceDpr.tooSlow = Math.min(deviceDpr.tooSlow, now);
-    return setRatio(r);
+  /** the ratio that would fit `ms` into `budget` */
+  const fit = (ms: number, budget: number) => Math.max(minDpr, mine * Math.min(0.85, Math.max(0.4, Math.sqrt(budget / ms))));
+  /** looks at the first frame's fence once an animation frame: how long it was still drawing is what a frame costs here */
+  function checkFence() {
+    fenceRaf = 0;
+    if (!fence) return;
+    const now = performance.now();
+    if (gl.isContextLost()) {
+      fence = null;
+      return;
+    }
+    if (gl.getSyncParameter(fence, gl.SYNC_STATUS) !== gl.SIGNALED && now - fenceAt < 2000) {
+      fenceBusy = now;
+      fenceRaf = requestAnimationFrame(checkFence);
+      return;
+    }
+    gl.deleteSync(fence);
+    fence = null;
+    // at least this long: it was still drawing when last looked at. One frame only lowers this scene, for now.
+    const ms = fenceBusy - fenceAt;
+    const r = ms > BUDGET ? fit(ms, BUDGET) : mine;
+    if (r < mine - 0.01) {
+      before ??= mine;
+      setRatio(r);
+    }
   }
   /** called on every frame of the clock while the scene moves: how far apart the page's frames are */
   function watch(t: number) {
@@ -125,11 +153,29 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
     if (gaps.length < 3) return;
     const m = median(gaps);
     if (m * 1000 > SCENE.slowMs) {
-      if (slower(m * 1000, 1000 / SCENE.fps)) draw(t, beatAt(t), false);
-    } else if (m < 1 / 50 && ratio() < Math.min(lent.maxDpr, deviceDpr.tooSlow - 0.15)) {
+      // sustained slowness: lower, and keep it for the visit
+      const r = fit(m * 1000, 1000 / SCENE.fps);
+      if (r < mine - 0.01) {
+        deviceDpr.tooSlow = Math.min(deviceDpr.tooSlow, mine);
+        deviceDpr.now = r;
+        before = null;
+        setRatio(r);
+      }
+    } else if (m < 1 / 50) {
       goodFor += dt;
-      if (goodFor > 5) setRatio(Math.min(lent.maxDpr, deviceDpr.tooSlow - 0.15, ratio() + 0.15));
+      const top = Math.min(maxDpr, deviceDpr.tooSlow - 0.15);
+      if (before !== null && goodFor > 2) {
+        // the slow first frame was a one-off: back to where it was
+        const r = before;
+        before = null;
+        setRatio(r);
+      } else if (before === null && goodFor > 5 && mine < top) {
+        const r = Math.min(top, mine + 0.15);
+        deviceDpr.now = r;
+        setRatio(r);
+      }
     } else goodFor = 0;
+    sceneStats.kept = Number.isNaN(deviceDpr.now) ? null : deviceDpr.now;
   }
 
   const beatAt = (t: number): Beat => clock.beat?.() ?? { e: t, dur: Infinity, started: true, done: false };
@@ -142,16 +188,13 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   }
   const draw = (t: number, b: Beat, calm: boolean) => {
     v.pose(b, calm);
-    // the first frame builds the shaders; the second, timed alone once the GPU has caught up, shows what a frame costs
+    renderer.render(v.scene, v.camera);
     if (!calm && --timeIn === 0) {
-      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
-      const t0 = performance.now();
-      renderer.render(v.scene, v.camera);
-      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
-      const ms = performance.now() - t0;
-      // resizing clears the canvas, so a frame that comes out too slow is drawn again, smaller
-      if (ms > BUDGET && slower(ms, BUDGET)) renderer.render(v.scene, v.camera);
-    } else renderer.render(v.scene, v.camera);
+      fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+      gl.flush();
+      fenceAt = fenceBusy = performance.now();
+      fenceRaf = requestAnimationFrame(checkFence);
+    }
     last = t;
     drawn = { ...b };
     sceneStats.frames++;
@@ -200,7 +243,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   const ro = new ResizeObserver(() => {
     const w = holder.clientWidth, h = holder.clientHeight;
     if (!w || !h || evicted) return;
-    renderer.setPixelRatio(ratio());
+    renderer.setPixelRatio(mine);
     renderer.setSize(w, h, false);
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
     v.resize(size.x, size.y);
@@ -218,8 +261,8 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   // three.js rebuilds its GPU state on its own listener, added before this one; the scene then draws straight away
   const onRestored = () => {
     lost = false;
-    // the shaders are built again, so the second frame after this is timed again
-    timeIn = 2;
+    // a restored context may be slower or faster, so its first frame is timed again
+    timeIn = 1;
     resync();
   };
   canvas.addEventListener('webglcontextlost', onLost);
@@ -230,6 +273,9 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   return () => {
     sub?.();
     sub = null;
+    cancelAnimationFrame(fenceRaf);
+    if (fence && !gl.isContextLost()) gl.deleteSync(fence);
+    fence = null;
     io.disconnect();
     ro.disconnect();
     canvas.removeEventListener('webglcontextlost', onLost);

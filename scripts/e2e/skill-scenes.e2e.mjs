@@ -55,6 +55,17 @@ async function toStone(h, page) {
   await page.locator('.dq-timer-stage').scrollIntoViewIfNeeded();
 }
 
+/** Stops the page clock a moment from now; a slow page can pass a moment asked for too soon, so it asks again. */
+async function pauseSoon(page) {
+  for (let i = 0; ; i++) {
+    try {
+      return await page.clock.pauseAt(await page.evaluate(() => Date.now() + 250));
+    } catch (e) {
+      if (i === 4) throw e;
+    }
+  }
+}
+
 async function live(h, page, where) {
   await page.locator('.dq-timer-stage.is-scene-live').waitFor({ timeout: 15000 }).catch(async () => {
     await h.shot(page, `fail-${where}`);
@@ -145,7 +156,7 @@ export const scenarios = {
     inStep(h, await pair(page), 'running');
 
     // the page freezes (its clock and its frames stop together, as in a background tab), then comes back
-    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 50));
+    await pauseSoon(page);
     await h.sleep(1500);
     const b = await pair(page);
     await page.clock.resume();
@@ -341,6 +352,95 @@ export const scenarios = {
     await drawn(h, page, 'slow');
     await h.shot(page, 'slow-gpu-desk');
     console.log(`  slow GPU: pixel ratio ${b.dpr}, ${b.frames - a.frames} frames in 2 s`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /**
+   * the scene never makes the page wait for the GPU (no read-back or finish on its context), so tapping Start on a step
+   * with a scene scrolls the scene into view straight away, at the small and sideways sizes where it has to move
+   */
+  async 'scene-never-waits'(h) {
+    for (const vp of [SIDE, { width: 320, height: 568 }]) {
+      const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
+      await ctx.addInitScript(() => {
+        window.__gpuWaits = 0;
+        const P = WebGL2RenderingContext.prototype;
+        for (const name of ['readPixels', 'finish', 'clientWaitSync']) {
+          const call = P[name];
+          P[name] = function (...args) {
+            if (this.canvas.closest?.('.dq-scene')) window.__gpuWaits++;
+            return call.apply(this, args);
+          };
+        }
+      });
+      await page.reload();
+      await home(h, page);
+      await page.evaluate(() => window.__daily.go({ name: 'skill', id: 'cope-ahead', entry: 'picture' }));
+      await page.locator('.dq-skill').getByRole('button', { name: 'Begin', exact: true }).first().click({ timeout: 10000 });
+      await page.locator('.dq-timer-svg--drift').waitFor({ timeout: 10000 });
+      await live(h, page, `never waits ${vp.width}x${vp.height}`);
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await h.sleep(300);
+      await tap(page, 'Start 30 s');
+      await h.sleep(900);
+      const box = await page.locator('.dq-timer-stage').boundingBox();
+      h.expect(box.y >= -1 && box.y + box.height <= vp.height + 1, `${vp.width}x${vp.height}: 900 ms after Start the scene is still off screen (${Math.round(box.y)}..${Math.round(box.y + box.height)})`);
+      await h.sleep(1500);
+      const waits = await page.evaluate(() => window.__gpuWaits);
+      h.expect(waits === 0 && (await scenes(page)).frames > 3, `${vp.width}x${vp.height}: the scene made the page wait for the GPU ${waits} times`);
+      h.expect(!errors.length, errors.join('\n'));
+      await ctx.close();
+    }
+  },
+
+  /**
+   * one slow frame (here the first frame's fence says the GPU took 600 ms) lowers this scene only and for now: once its
+   * frames keep up it is back at the full pixel ratio, nothing is kept for the visit, and no change of ratio ever shows
+   * a blank frame. The page clock drives the frames, so this reads the same on any renderer.
+   */
+  async 'scene-one-slow-frame'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
+    await ctx.addInitScript(() => {
+      window.__blank = 0;
+      const P = WebGL2RenderingContext.prototype;
+      const make = P.fenceSync, get = P.getSyncParameter;
+      let first = null;
+      P.fenceSync = function (...args) {
+        const f = make.apply(this, args);
+        if (!first && this.canvas.closest?.('.dq-scene')) first = { f, at: performance.now() };
+        return f;
+      };
+      P.getSyncParameter = function (f, pname) {
+        if (first && f === first.f && pname === this.SYNC_STATUS && performance.now() - first.at < 600) return this.UNSIGNALED;
+        return get.call(this, f, pname);
+      };
+    });
+    await page.clock.install();
+    await page.reload();
+    await home(h, page);
+    await page.evaluate(() => window.__daily.go({ name: 'skill', id: 'wise-mind', entry: 'stone' }));
+    await page.locator('.dq-skill').getByRole('button', { name: 'Begin', exact: true }).first().click({ timeout: 10000 });
+    await page.locator('.dq-timer-svg--drift').waitFor({ timeout: 10000 });
+    await pauseSoon(page);
+    await live(h, page, 'one slow frame');
+    // every change of the canvas size has to come with a frame drawn at the new size before the page shows it
+    await page.evaluate(() => {
+      const c = document.querySelector('.dq-scene canvas');
+      new MutationObserver(() => {
+        if (Math.abs(c.width / c.parentElement.clientWidth - window.__scenes.dpr) > 0.02) window.__blank++;
+      }).observe(c, { attributes: true, attributeFilter: ['width'] });
+    });
+    const full = await page.evaluate(() => Math.min(window.devicePixelRatio, 2));
+    await page.clock.runFor(700);
+    const low = await scenes(page);
+    h.expect(low.dpr < full, `the slow first frame did not lower the scene (${low.dpr})`);
+    await page.clock.runFor(6000);
+    const back = await scenes(page);
+    const blank = await page.evaluate(() => window.__blank);
+    h.expect(blank === 0, `a change of pixel ratio showed ${blank} blank frames`);
+    h.expect(back.dpr === full && !back.kept, `one slow frame left the scene at ${back.dpr} (kept for the visit: ${back.kept}), not back at ${full}`);
+    console.log(`  one slow frame: ${low.dpr} for now, back to ${back.dpr}, kept ${back.kept ?? 'nothing'}`);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },
