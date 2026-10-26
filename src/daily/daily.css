@@ -2541,6 +2541,129 @@ textarea.dq-input {
   height: 18px;
   color: var(--t-dim);
 }
+/* finding a skill: search, three filters, a quiet count */
+.dq-libfind {
+  display: grid;
+  gap: 10px;
+  margin: 4px 0 0;
+}
+.dq-libf {
+  display: grid;
+  grid-template-columns: 3.6em minmax(0, 1fr);
+  align-items: center;
+  column-gap: 12px;
+}
+.dq-libf-l {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--t-dim);
+}
+.dq-libf-in {
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+.dq-libf-in::-webkit-search-cancel-button {
+  cursor: pointer;
+}
+.dq-libbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  column-gap: 12px;
+  min-height: 44px;
+  margin: 6px 2px 0;
+}
+.dq-libcount {
+  margin: 0;
+  font-size: 16px;
+  color: var(--t-dim);
+}
+.dq-libreset {
+  margin-left: auto;
+  font-size: 16px;
+}
+.dq-libempty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 26px 18px 22px;
+  text-align: center;
+  border: 1px solid;
+  border-color: var(--hl) var(--hs) var(--hs) var(--hl);
+  background: linear-gradient(180deg, var(--plate-a), var(--plate-b));
+}
+.dq-libempty-t {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--t-title);
+}
+.dq-libempty .dq-small {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+.dq-libempty .dq-btn {
+  font-size: 16px;
+}
+@media (min-width: 640px) {
+  .dq-libfind {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 22px;
+  }
+}
+/* pinning: a separate button beside each row, mint once it's yours */
+.dq-libitem {
+  display: flex;
+  align-items: stretch;
+}
+.dq-libitem .dq-librow {
+  flex: 1;
+  min-width: 0;
+}
+.dq-librow-n,
+.dq-librow-r {
+  overflow-wrap: anywhere;
+}
+.dq-libpin {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 52px;
+  min-height: 48px;
+  padding: 0;
+  color: var(--t-dim);
+  background: none;
+  border: 0;
+  border-left: 1px solid rgba(62, 100, 133, 0.3);
+  cursor: pointer;
+  transition:
+    background 0.18s,
+    color 0.18s;
+}
+.dq-libpin .dq-ic {
+  width: 22px;
+  height: 22px;
+}
+.dq-libpin:hover {
+  color: var(--t-title);
+  background: rgba(79, 184, 255, 0.07);
+}
+.dq-libpin[aria-pressed='true'] {
+  color: var(--mint);
+}
+.dq-libpin[aria-pressed='true'] path,
+.dq-libsec--fav .dq-libsec-ic path {
+  fill-rule: nonzero;
+}
+.dq-librow:focus-visible,
+.dq-libpin:focus-visible {
+  outline-offset: -3px;
+}
+.dq-libsec--fav .dq-libsec-ic {
+  color: var(--mint);
+}
 
 .dq-diary-grid,
 .dq-comfort-grid,

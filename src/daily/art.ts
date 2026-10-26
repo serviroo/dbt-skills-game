@@ -183,6 +183,8 @@ const ICON: Record<string, string> = {
   up: '<path d="M12 18.5V5.8M6.8 11L12 5.8l5.2 5.2"/>',
   down: '<path d="M12 5.5v12.7M6.8 13L12 18.2l5.2-5.2"/>',
   chevdown: '<path d="M6.5 9.5L12 15l5.5-5.5"/>',
+  // drawn as a filled outline (evenodd), not a stroke: fill-rule nonzero turns it solid
+  star: '<path fill="currentColor" stroke="none" fill-rule="evenodd" d="M12 3.4 14.23 9.23 20.46 9.55 15.61 13.47 17.23 19.5 12 16.1 6.77 19.5 8.39 13.47 3.54 9.55 9.77 9.23zM12 7.73 13.15 10.72 16.35 10.89 13.86 12.9 14.69 16 12 14.25 9.31 16 10.14 12.9 7.65 10.89 10.85 10.72z"/>',
   share: '<path d="M12 14.5V4.5M8.2 8.3L12 4.5l3.8 3.8"/><path d="M7.5 10.5H6.5c-.6 0-1 .4-1 1v7.2c0 .6.4 1 1 1h11c.6 0 1-.4 1-1v-7.2c0-.6-.4-1-1-1h-1"/>',
   ally: '<path d="M12 4.2c1.9 0 3.2 1.5 3.2 3.4 0 1.4-.7 2.4-1.6 3l3.6 3.4-1.1 6.2H7.9l-1.1-6.2 3.6-3.4c-.9-.6-1.6-1.6-1.6-3 0-1.9 1.3-3.4 3.2-3.4z"/><path d="M10.6 7.4h.01M13.4 7.4h.01" stroke-width="2.2"/>',
 };

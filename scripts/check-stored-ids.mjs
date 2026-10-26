@@ -19,7 +19,7 @@ class MemoryStorage {
 }
 globalThis.localStorage = new MemoryStorage();
 
-const MAPS = { diary: '<day>', 'diary.<day>.emotions': '<row>', 'diary.<day>.urges': '<row>', 'diary.<day>.ft': '<field>', gone: '<id>', 'profile.names': '<shadow>' };
+const MAPS = { diary: '<day>', 'diary.<day>.emotions': '<row>', 'diary.<day>.urges': '<row>', 'diary.<day>.ft': '<field>', gone: '<id>', 'profile.names': '<shadow>', skillPins: '<skill>' };
 function paths(o, at = '', out = new Set()) {
   if (Array.isArray(o)) {
     if (!o.length) out.add(`${at}[]`);
@@ -72,6 +72,7 @@ async function collect() {
     s.maps.push({ id: 'm1', t, urge: 'u', p1: 'a', c1: 'b', p2: 'c', c2: 'd', choice: 'e', at: t });
     s.lines.push({ day, id: lines.TODAY_LINES.low[0].id, tag: 'STATUS', text: 'x', t });
     s.gone.g1 = t;
+    s.skillPins[dbt.SKILLS[0].id] = { pinned: true, at: t };
     s.settings.names[shadow] = 'Ash';
     s.flags.titlesSeen.push(roster.TITLE_IDS[0]);
     for (const k of [...Object.keys(s.settings).filter((k) => k !== 'names'), 'safeCredit', `name:${shadow}`]) s.setAt[k] = t;
@@ -106,7 +107,7 @@ async function collect() {
       'you-field': json(names.YOU_KEY),
       'audio-field': json(names.AUDIO_KEY),
       'stored-interface-field': [
-        ...['Ev', 'Item', 'Person', 'SavedMap', 'DiaryEntry', 'LineEntry', 'Settings', 'Flags', 'State'].flatMap((type) => interfaceFields('src/daily/store.ts', type)),
+        ...['Ev', 'Item', 'Person', 'SavedMap', 'DiaryEntry', 'LineEntry', 'Settings', 'Flags', 'SkillPin', 'State'].flatMap((type) => interfaceFields('src/daily/store.ts', type)),
         ...['DrawingMeta', 'Draft'].flatMap((type) => interfaceFields('src/daily/artstore.ts', type)),
         ...['Story', 'Chapter', 'Card', 'Live'].flatMap((type) => interfaceFields('src/daily/storystore.ts', type)),
         ...interfaceFields('src/cowriter/types.ts', 'Cred'),

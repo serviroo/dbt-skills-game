@@ -126,7 +126,7 @@ const LIST_KEYS = ['comfort', 'activities', 'reasons', 'people'] as const;
 const DAY_FLAGS = ['giftDay', 'cardDay', 'greetDay', 'checkinDay'] as const;
 const GONE_CAP = 1000;
 /** Top-level fields this build reads (and the ones only a Save Crystal carries); any other is kept as it was stored. */
-const KNOWN = new Set(['v', 'created', 'events', 'diary', 'lists', 'maps', 'lines', 'settings', 'flags', 'gone', 'setAt', 'profile', 'app', 'exported', 'schema', 'art', 'drafts', 'stories', 'preferences', 'incomplete', 'unreadSaves']);
+const KNOWN = new Set(['v', 'created', 'events', 'diary', 'lists', 'maps', 'lines', 'settings', 'flags', 'gone', 'setAt', 'profile', 'app', 'exported', 'schema', 'art', 'drafts', 'stories', 'preferences', 'incomplete', 'unreadSaves', 'skillPins']);
 /**
  * What a newer build stored that this one can't use, kept as it was so every write, tab merge and Save Crystal carries
  * it on. Unknown fields of the records this build rebuilds (events and their data, diary days and field times, list
@@ -148,8 +148,15 @@ export interface Kept {
   days: Record<string, unknown>;
   /** Lists a newer build added next to the four this one knows, by name, as stored. Never shown or changed here. */
   lists: Record<string, unknown>;
+  /** Pin records of a newer save this build can't read, by skill id, as stored. Pinning that skill here replaces one. */
+  pins: Record<string, unknown>;
 }
 export const KEPT: unique symbol = Symbol('kept');
+/** One pin decision in the Skills list: pinned to Your favourites or not, and when it was made. */
+export interface SkillPin {
+  pinned: boolean;
+  at: number;
+}
 export interface State {
   v: number;
   created: number;
@@ -164,6 +171,8 @@ export interface State {
   gone: Record<string, number>;
   /** When each choice was last changed here (missing = never, as in data saved before this existed). */
   setAt: Partial<Record<SetKey, number>>;
+  /** Pin decisions by skill id. An unpin stays as pinned: false, so an older copy can't bring the pin back. */
+  skillPins: Record<string, SkillPin>;
   /** Not enumerable, so never spread or written as itself: stored() writes it back where it came from. */
   [KEPT]?: Kept;
 }
@@ -195,6 +204,7 @@ export function freshState(now = Date.now()): State {
     flags: { rankSeen: 0, wardenSeen: false, giftDay: '', cardDay: '', greetDay: '', safeCredit: false, therapistLineShown: false, checkinDay: '', questAsideDay: '', questAsideAt: 0, titlesSeen: [] },
     gone: {},
     setAt: {},
+    skillPins: {},
   };
 }
 
@@ -236,7 +246,7 @@ function keepRest<T extends object>(into: T, raw: Record<string, unknown>, known
   return into;
 }
 export function kept(s: State): Kept {
-  if (!s[KEPT]) Object.defineProperty(s, KEPT, { value: { profile: {}, profileAt: {}, setAt: {}, names: {}, titles: [], raw: {}, events: [], dropped: { lines: [], maps: [], comfort: [], activities: [], reasons: [], people: [] }, days: {}, lists: {} }, enumerable: false, writable: true, configurable: true });
+  if (!s[KEPT]) Object.defineProperty(s, KEPT, { value: { profile: {}, profileAt: {}, setAt: {}, names: {}, titles: [], raw: {}, events: [], dropped: { lines: [], maps: [], comfort: [], activities: [], reasons: [], people: [] }, days: {}, lists: {}, pins: {} }, enumerable: false, writable: true, configurable: true });
   return s[KEPT]!;
 }
 /**
@@ -259,6 +269,7 @@ const ITEM_KEYS = ['id', 'text', 'at'];
 const PERSON_KEYS = ['id', 'name', 'phone', 'at'];
 const MAP_KEYS = ['id', 't', 'urge', 'p1', 'c1', 'p2', 'c2', 'choice', 'at'];
 const LINE_KEYS = ['day', 'id', 'tag', 'text', 't'];
+const PIN_KEYS = ['pinned', 'at'];
 const PROFILE_KEYS = ['theme', 'accent', 'cardBack', 'plate', 'title', 'playerName', 'companion', 'names', 'region', 'titlesSeen', 'setAt'];
 const REGION = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 /** Choices with a fixed set of values: one stored as anything else is kept (see Kept) and the default shows. */
@@ -292,6 +303,7 @@ function stored(s: State) {
     lists: { ...Object.fromEntries(LIST_KEYS.map((key) => [key, back<Item | Person>(s.lists[key], k?.dropped[key])])), ...k?.lists },
     maps: back(s.maps, k?.dropped.maps),
     lines: back(s.lines, k?.dropped.lines),
+    skillPins: { ...k?.pins, ...Object.fromEntries(Object.entries(s.skillPins).map(([id, p]) => [id, asStored(p)])) },
     settings: { ...settings, emotionRows: asStored(settings.emotionRows), urgeRows: asStored(settings.urgeRows), sound: as('sound', settings.sound), motion: as('motion', settings.motion) },
     flags,
     setAt,
@@ -350,7 +362,7 @@ function adoptKept(into: State, from: State, theirsWin: boolean) {
   }
 }
 /** Where each thing a copy keeps for a newer build lives (see Kept), so a later stored copy shows which it removed. */
-const KEPT_MAPS = { p: 'profile', pa: 'profileAt', sa: 'setAt', n: 'names', d: 'days', l: 'lists' } as const;
+const KEPT_MAPS = { p: 'profile', pa: 'profileAt', sa: 'setAt', n: 'names', d: 'days', l: 'lists', pi: 'pins' } as const;
 function keptKeys(s: State): Set<string> {
   const out = new Set<string>();
   for (const [k] of extrasOf(s)) out.add(`x:${k}`);
@@ -497,7 +509,7 @@ function adoptEventRest(mine: Ev[], theirs: Ev[], theirsWin: boolean) {
 function keptCanon(s: State) {
   const k = s[KEPT];
   const sorted = (o: object | undefined) => (o ? Object.entries(o).sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0)) : []);
-  return [s.v, restOf(s.settings, SETTINGS_KEYS), restOf(s.flags, FLAG_KEYS), sorted(k?.profile), sorted(k?.profileAt), sorted(k?.setAt), sorted(k?.names), (k?.titles ?? []).map((t) => JSON.stringify(t)).sort(), (k?.events ?? []).map((e) => JSON.stringify(e)).sort(), k ? Object.values(k.dropped).map((l) => l.map((x) => JSON.stringify(x)).sort()) : [], sorted(k?.days), sorted(k?.lists).map(([key, l]) => [key, Array.isArray(l) ? l.map((x) => JSON.stringify(x)).sort() : l])];
+  return [s.v, restOf(s.settings, SETTINGS_KEYS), restOf(s.flags, FLAG_KEYS), sorted(k?.profile), sorted(k?.profileAt), sorted(k?.setAt), sorted(k?.names), (k?.titles ?? []).map((t) => JSON.stringify(t)).sort(), (k?.events ?? []).map((e) => JSON.stringify(e)).sort(), k ? Object.values(k.dropped).map((l) => l.map((x) => JSON.stringify(x)).sort()) : [], sorted(k?.days), sorted(k?.lists).map(([key, l]) => [key, Array.isArray(l) ? l.map((x) => JSON.stringify(x)).sort() : l]), sorted(k?.pins)];
 }
 /** Each id once, the first kept. */
 function firstById<T extends { id: string }>(list: T[]) {
@@ -569,6 +581,7 @@ function canon(s: State) {
     Object.entries(s.gone).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
     SET_KEYS.map((k) => [getSet(s, k), s.setAt[k] ?? 0]),
     [s.flags.rankSeen, s.flags.wardenSeen, s.flags.therapistLineShown, ...DAY_FLAGS.map((k) => s.flags[k]), s.flags.questAsideDay, s.flags.questAsideAt, [...s.flags.titlesSeen].sort()],
+    Object.entries(s.skillPins).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).map(([id, p]) => [id, flat(p)]),
     extrasOf(s),
     keptCanon(s),
   ]);
@@ -586,6 +599,10 @@ const fromBig = (b: bigint) => (b > SAFE ? b.toString() : Number(b));
 const stamp = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) && x > 0 ? fromBig(BigInt(Math.floor(x))) : typeof x === 'string' && /^\d+$/.test(x) ? fromBig(BigInt(x)) : 0);
 const oneOf = <T extends string>(x: unknown, list: readonly T[], fallback: T): T => (typeof x === 'string' && (list as readonly string[]).includes(x) ? (x as T) : fallback);
 export const isSkillId = (id: unknown): id is string => typeof id === 'string' && Object.prototype.hasOwnProperty.call(SKILL, id);
+/** The latest time a Date can hold: a later stamp is read as this, so one more change still counts as later. */
+const PIN_AT_MAX = 8.64e15;
+/** Whether their pin decision replaces mine: the later one wins, and at the same time an unpin does, in every copy. */
+const pinWins = (theirs: SkillPin, mine: SkillPin | undefined) => !mine || theirs.at > mine.at || (theirs.at === mine.at && mine.pinned && !theirs.pinned);
 
 type DiaryKind = 'emotions' | 'urges';
 const own = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
@@ -827,6 +844,13 @@ export function normalize(raw: unknown): State | null {
     for (const [k, val] of restOf(pf, PROFILE_KEYS)) putOwn(kept(base).profile, k, val);
   }
   for (const [k, val] of extrasOf(raw)) putOwn(base, k, val);
+  if (isObj(raw.skillPins))
+    for (const [id, p] of Object.entries(raw.skillPins)) {
+      // pins for skills this build doesn't know are kept too (a newer build's skills), never shown
+      if (id.length <= 40 && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(id) && isObj(p) && typeof p.pinned === 'boolean' && num(p.at) !== null)
+        putOwn(base.skillPins, id, twin(keepRest({ pinned: p.pinned, at: Math.min(PIN_AT_MAX, Math.max(0, p.at as number)) }, p, PIN_KEYS), p, newer));
+      else if (newer) putOwn(kept(base).pins, id, p);
+    }
   if (Array.isArray(raw.lines)) {
     const byDay = new Map<string, LineEntry>();
     for (const l of raw.lines) {
@@ -1219,6 +1243,7 @@ export class Store {
       this.keptBase = { v: other.v, keys: theirs };
     }
     this.absorbProgress(other, 'b');
+    this.absorbPins(other, true);
     // what a newer build stored: the stored copy's, never dropped
     adoptKept(this.state, other, true);
     adoptEventRest(this.state.events, other.events, true);
@@ -1252,6 +1277,60 @@ export class Store {
         }
       }
     }
+  }
+
+  /**
+   * Each skill's pin on its own (see pinWins), so a pin here and an unpin of another skill elsewhere both stay. A pin
+   * record this build can't read (see Kept) counts by its stored time, and on equal times theirsWin decides, as for
+   * anything else a newer build stored; so do the fields a newer build put on a record both copies hold (see adoptRest).
+   */
+  private absorbPins(other: State, theirsWin: boolean) {
+    const pins = this.state.skillPins;
+    const mineKept = this.state[KEPT]?.pins ?? {}, theirKept = other[KEPT]?.pins ?? {};
+    const same: [SkillPin, SkillPin][] = [];
+    for (const id of new Set([...Object.keys(other.skillPins), ...Object.keys(theirKept)])) {
+      const t = own(other.skillPins, id) ? other.skillPins[id] : undefined;
+      const m = own(pins, id) ? pins[id] : undefined;
+      const mineAt = m ? m.at : own(mineKept, id) ? rawAt(mineKept[id]) : -Infinity;
+      if (t && m && !pinWins(t, m)) {
+        if (t.at === m.at && t.pinned === m.pinned) same.push([m, t]);
+        continue;
+      }
+      // with a record this build can't read on either side, the later stored time wins
+      const theirAt = t ? t.at : rawAt(theirKept[id]);
+      if (!(t && m) && (theirAt < mineAt || (theirAt === mineAt && !theirsWin))) continue;
+      if (t) {
+        putOwn(pins, id, t);
+        if (own(mineKept, id)) delete mineKept[id];
+      } else {
+        putOwn(kept(this.state).pins, id, theirKept[id]);
+        delete pins[id];
+      }
+    }
+    const key = new Map(same.flatMap(([m, t], i) => [[m, String(i)], [t, String(i)]] as [SkillPin, string][]));
+    adoptRest(same.map(([m]) => m), same.map(([, t]) => t), (p) => key.get(p) ?? '', PIN_KEYS, theirsWin);
+  }
+
+  /** Whether the player pinned this skill to Your favourites. */
+  pinned(id: string) {
+    return own(this.state.skillPins, id) && this.state.skillPins[id].pinned;
+  }
+
+  /**
+   * Pins a skill to Your favourites or unpins it, later than any decision another open copy stored for it, and saves.
+   * It replaces a record a newer build stored that this one can't read. A choice, not practice: nothing is credited.
+   */
+  pinSkill(id: string, on: boolean) {
+    if (!isSkillId(id)) return;
+    this.sync();
+    const k = this.state[KEPT];
+    const raw = k && own(k.pins, id) ? k.pins[id] : undefined;
+    const old = (own(this.state.skillPins, id) ? this.state.skillPins[id] : isObj(raw) ? raw : {}) as Record<string, unknown>;
+    const was = own(this.state.skillPins, id) ? this.state.skillPins[id].at : raw !== undefined ? rawAt(raw) : -Infinity;
+    if (raw !== undefined) delete k!.pins[id];
+    // the fields a newer build put on the record stay on it
+    putOwn(this.state.skillPins, id, keepRest({ pinned: on, at: Math.max(this.now(), was + 1) }, old, PIN_KEYS));
+    this.save();
   }
 
   /** Marks a choice as changed now (later than any change this copy made before, whatever the clock does). */
@@ -1423,6 +1502,8 @@ export class Store {
     this.sync();
     const newer = other.v > this.state.v;
     this.absorbProgress(other, newer ? 'b' : 'a');
+    // pins per skill as between open copies, so the file's older pin never undoes a newer unpin here
+    this.absorbPins(other, newer);
     // what a newer build stored, from both: on a clash the copy with the newer save version keeps its value, so a
     // value from an older build never replaces a newer one; on the same version this device's value stays
     adoptKept(this.state, other, newer);

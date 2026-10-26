@@ -78,6 +78,8 @@ export function newerSave() {
       flags: { rankSeen: 0, wardenSeen: false, giftDay: D, cardDay: '', greetDay: D, safeCredit: false, therapistLineShown: false, checkinDay: D, questAsideDay: '', questAsideAt: 0, bloomSeen: true },
       gone: {},
       setAt: { motion: T, haptics: T },
+      // pins: a field a newer build put on one, a skill this build doesn't know, one it can't read, one past its limits
+      skillPins: { 'wise-mind': { pinned: true, at: T, folder: 'calm' }, 'future-skill': { pinned: true, at: T }, stop: { pinned: 'soon', at: T }, tipp: { pinned: false, at: 9e15 } },
       profile: {
         theme: 'aurora', accent: 'blue', cardBack: 'ring', plate: 'plain', title: 'star-sage', playerName: 'Robin', companion: 'Pip',
         names: { sable: 'Ash', moonling: 'Fern' }, region: 'gb', titlesSeen: ['self-healer', 'future-title'],
@@ -117,6 +119,8 @@ export function newerParts(save, crystal = false) {
     titleSeen: save.profile?.titlesSeen?.includes('future-title'),
     profileAt: [save.profile?.setAt?.['name:moonling'], save.profile?.setAt?.aura],
     profile: save.profile?.aura,
+    pinField: save.skillPins?.['wise-mind']?.folder,
+    pinSkill: save.skillPins?.['future-skill'],
   };
 }
 
@@ -130,6 +134,8 @@ export function newerRecords(save, rows = true) {
     noText: save.lists?.comfort?.find((i) => i.id === 'nc-pic'),
     lines: save.lines?.filter((l) => l.day === D).sort((a, b) => (a.id < b.id ? -1 : 1)),
     oddDay: save.diary?.someday,
+    oddPin: save.skillPins?.stop,
+    farPin: save.skillPins?.tipp,
     ...(rows ? { rows: save.settings?.emotionRows } : {}),
   };
 }

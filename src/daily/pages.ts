@@ -1,4 +1,5 @@
-import { LOADOUT, LOADOUT_COPY, MODULES, MODULE_ORDER, SAFE, SKILL, SKILLS } from '../content/dbt';
+import { LOADOUT, LOADOUT_COPY, MODULES, MODULE_ORDER, SAFE, SKILL, SKILLS, type Skill } from '../content/dbt';
+import { LABEL_SECONDS, LIBRARY_COPY, NEEDS, TIMES, TOPICS } from '../content/skill-library';
 import { CRISIS_CHECKED } from '../content/crisis-lines';
 import { ABOUT, CLEAR_COPY, CRYSTAL_COPY, KEEP_COPY, PEEK_COPY } from '../content/daily-lines';
 import type { App, ScreenOut } from './app';
@@ -276,28 +277,146 @@ export function shadowsScreen(app: App): ScreenOut {
 }
 
 // ---------------- Library ----------------
+/** What the player is looking for in the Skills list. Kept for this visit (so it is still there after a skill), never saved. */
+const finding = { q: '', need: '', topic: '', time: '' };
+type Finding = typeof finding;
+/** Every skill once, in the order the list shows them: the loadout, then each module. */
+const CATALOGUE = [...LOADOUT, ...MODULE_ORDER.flatMap((m) => SKILLS.filter((s) => s.module === m && !s.loadout).map((s) => s.id))];
+/** Text as a search compares it: any case, any quote marks, hyphens as spaces, runs of space as one. */
+const fold = (t: string) => t.toLowerCase().replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[-‐‑–]/g, ' ').replace(/\s+/g, ' ').trim();
+const ownKey = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
+
+/** Whether a skill fits everything chosen: its need, topic and time, and every word typed, in either of its names. */
+function fits(s: Skill, f: Finding) {
+  if (f.need && !NEEDS.find((n) => n.id === f.need)?.skills.includes(s.id)) return false;
+  if (f.topic && s.module !== f.topic) return false;
+  if (f.time) {
+    const secs = ownKey(LABEL_SECONDS, s.minutes) ? LABEL_SECONDS[s.minutes] : null;
+    const upTo = TIMES.find((t) => t.id === f.time)?.upTo;
+    if (upTo === undefined ? secs !== null : secs === null || secs > upTo) return false;
+  }
+  const hay = fold(`${s.sl} ${s.real}`);
+  return fold(f.q)
+    .split(' ')
+    .every((w) => hay.includes(w));
+}
+
+/** The nearest box that scrolls the page. */
+const scrollerOf = (el: HTMLElement) => {
+  for (let e = el.parentElement; e; e = e.parentElement) if (/auto|scroll/.test(getComputedStyle(e).overflowY) && e.scrollHeight > e.clientHeight) return e;
+  return document.scrollingElement as HTMLElement | null;
+};
+
 export function libraryScreen(app: App): ScreenOut {
-  const row = (s: (typeof SKILLS)[number]) => h('li', {}, h('button', { type: 'button', class: 'dq-librow', onclick: () => app.go({ name: 'skill', id: s.id }) }, h('span', { class: 'dq-librow-n', text: typo(s.sl) }), h('span', { class: 'dq-librow-r', text: typo(s.real) }), h('span', { class: 'dq-librow-m', text: s.minutes }), h('span', { class: 'dq-librow-c', html: icon('chev') })));
+  const st = app.store;
+  const C = LIBRARY_COPY;
+  const tag = Math.random().toString(36).slice(2, 7);
+  const search = h('input', { id: `lib-q-${tag}`, class: 'dq-input dq-libf-in', type: 'search', placeholder: C.searchHint, maxlength: 60, autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', enterkeyhint: 'search' });
+  search.value = finding.q;
+  search.addEventListener('input', () => {
+    finding.q = search.value;
+    render();
+  });
+  const picks: Record<'need' | 'topic' | 'time', HTMLSelectElement> = {} as Record<'need' | 'topic' | 'time', HTMLSelectElement>;
+  const pick = (key: 'need' | 'topic' | 'time', label: string, all: string, opts: { id: string; label: string }[]) => {
+    const id = `lib-${key}-${tag}`;
+    const sel = h('select', { id, class: 'dq-input dq-select dq-libf-in' }, h('option', { value: '', text: all }), opts.map((o) => h('option', { value: o.id, text: o.label })));
+    sel.value = opts.some((o) => o.id === finding[key]) ? finding[key] : '';
+    finding[key] = sel.value;
+    sel.addEventListener('change', () => {
+      finding[key] = sel.value;
+      render();
+    });
+    picks[key] = sel;
+    return h('div', { class: 'dq-libf' }, h('label', { for: id, class: 'dq-libf-l', text: label }), sel);
+  };
+  const count = h('p', { class: 'dq-libcount', role: 'status' });
+  const clearAll = () => {
+    Object.assign(finding, { q: '', need: '', topic: '', time: '' });
+    search.value = '';
+    for (const sel of Object.values(picks)) sel.value = '';
+    render();
+    search.focus();
+  };
+  const showAll = btn(C.showAll, clearAll, { kind: 'link', cls: 'dq-libreset' });
+  const results = h('div', { class: 'dq-libresults' });
+
+  const row = (s: Skill) => {
+    const on = st.pinned(s.id);
+    return h(
+      'li',
+      { class: 'dq-libitem', 'data-skill': s.id },
+      h('button', { type: 'button', class: 'dq-librow', onclick: () => app.go({ name: 'skill', id: s.id }) }, h('span', { class: 'dq-librow-n', text: typo(s.sl) }), h('span', { class: 'dq-librow-r', text: typo(s.real) }), h('span', { class: 'dq-librow-m', text: s.minutes }), h('span', { class: 'dq-librow-c', html: icon('chev') })),
+      h('button', { type: 'button', class: 'dq-libpin', 'aria-pressed': String(on), 'aria-label': C.pin(typo(s.sl), typo(s.real)), html: icon('star'), onclick: (e: Event) => pin(s.id, !on, e.currentTarget as HTMLElement) }),
+    );
+  };
+  const section = (cls: string, ic: string, title: string, sub: string, ids: string[]) =>
+    ids.length ? h('section', { class: `dq-libsec ${cls}` }, h('h2', { class: 'dq-libsec-h' }, h('span', { class: 'dq-libsec-ic', html: ic }), h('span', { text: title }), h('span', { class: 'dq-libsec-s', text: sub })), h('ul', { class: 'dq-liblist' }, ids.map((id) => row(SKILL[id])))) : null;
+  const pinsNow = () => CATALOGUE.filter((id) => st.pinned(id)).join(' ');
+  let pinsShown = '';
+
+  /**
+   * Draws the list for what is chosen. When a row the player is on moves (pinned, unpinned, here or in another open
+   * copy), the same control on the same skill keeps focus and stays where it was on screen.
+   */
+  function render(keep?: { id: string; pin: boolean; top: number }) {
+    const at = document.activeElement instanceof HTMLElement && results.contains(document.activeElement) ? document.activeElement : null;
+    const item = at?.closest<HTMLElement>('.dq-libitem');
+    if (!keep && at && item?.dataset.skill) keep = { id: item.dataset.skill, pin: at.classList.contains('dq-libpin'), top: at.getBoundingClientRect().top };
+    const shown = new Set(SKILLS.filter((s) => fits(s, finding)).map((s) => s.id));
+    const free = (id: string) => shown.has(id) && !st.pinned(id);
+    pinsShown = pinsNow();
+    results.replaceChildren(
+      ...[
+        section('dq-libsec--fav', icon('star'), C.favourites, C.favouritesSub, CATALOGUE.filter((id) => shown.has(id) && st.pinned(id))),
+        section('dq-libsec--loadout', icon('comfort'), LOADOUT_COPY.title, LOADOUT_COPY.sub, LOADOUT.filter(free)),
+        ...MODULE_ORDER.map((mid) => section(`dq-mod-${mid}`, glyph(mid), MODULES[mid].name, MODULES[mid].statName, CATALOGUE.filter((id) => SKILL[id].module === mid && !SKILL[id].loadout && free(id)))),
+        shown.size ? null : h('div', { class: 'dq-libempty' }, h('p', { class: 'dq-libempty-t', text: C.empty }), p(C.emptySub, 'dq-small'), btn(C.clear, clearAll, { kind: 'quiet' })),
+      ].filter((x): x is HTMLElement => !!x),
+    );
+    const filtered = !!(fold(finding.q) || finding.need || finding.topic || finding.time);
+    const said = filtered ? C.some(shown.size, SKILLS.length) : C.all(SKILLS.length);
+    if (count.textContent !== said) count.textContent = said;
+    showAll.classList.toggle('is-hidden', !filtered);
+    if (!keep) return;
+    const to = results.querySelector<HTMLElement>(`[data-skill="${keep.id}"] ${keep.pin ? '.dq-libpin' : '.dq-librow'}`);
+    if (!to) return;
+    to.focus({ preventScroll: true });
+    const box = scrollerOf(to);
+    if (box) box.scrollTop += to.getBoundingClientRect().top - keep.top;
+  }
+  let pinning = false;
+  const pin = (id: string, on: boolean, from: HTMLElement) => {
+    const top = from.getBoundingClientRect().top;
+    pinning = true;
+    try {
+      st.pinSkill(id, on);
+    } finally {
+      pinning = false;
+    }
+    render({ id, pin: true, top });
+  };
+  const off = st.onChange(() => {
+    if (!pinning && pinsNow() !== pinsShown) render();
+  });
+
   const el = h(
     'div',
     { class: 'dq-page dq-library' },
-    pageHead('Skills', 'Any skill, any time. Each one counts the moment you open it.'),
-    h('section', { class: 'dq-libsec dq-libsec--loadout' }, h('h2', { class: 'dq-libsec-h' }, h('span', { class: 'dq-libsec-ic', html: icon('comfort') }), h('span', { text: LOADOUT_COPY.title }), h('span', { class: 'dq-libsec-s', text: LOADOUT_COPY.sub })), h('ul', { class: 'dq-liblist' }, LOADOUT.map((id) => row(SKILL[id])))),
-    MODULE_ORDER.map((mid) => {
-      const m = MODULES[mid];
-      return h(
-        'section',
-        { class: `dq-libsec dq-mod-${mid}` },
-        h('h2', { class: 'dq-libsec-h' }, h('span', { class: 'dq-libsec-ic', html: glyph(mid) }), h('span', { text: m.name }), h('span', { class: 'dq-libsec-s', text: m.statName })),
-        h(
-          'ul',
-          { class: 'dq-liblist' },
-          SKILLS.filter((s) => s.module === mid && !s.loadout).map(row),
-        ),
-      );
-    }),
+    pageHead(C.title, C.sub),
+    h(
+      'div',
+      { class: 'dq-libfind', role: 'search', 'aria-label': C.find },
+      h('div', { class: 'dq-libf' }, h('label', { for: search.id, class: 'dq-libf-l', text: C.search }), search),
+      pick('need', C.need, C.needAll, NEEDS),
+      pick('topic', C.topic, C.topicAll, TOPICS),
+      pick('time', C.time, C.timeAll, TIMES),
+    ),
+    h('div', { class: 'dq-libbar' }, count, showAll),
+    results,
   );
-  return { el, title: 'Skills', mode: 'sub' };
+  render();
+  return { el, title: C.title, mode: 'sub', leave: () => off() };
 }
 
 // ---------------- Diary card ----------------

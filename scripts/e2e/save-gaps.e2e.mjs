@@ -1,8 +1,8 @@
 // The last ways a newer save could lose data in this build, and a Restore racing a newer file pick.
 // gaps-newer-tab-removes: a newer build in another tab removes things this build can't read (a top-level field, events
-// of a kind it doesn't know, a diary day, records, a list, a second line, a name, a title, profile, settings, flags and
-// change-time fields); this tab writes without them. An older build that drops them (it writes a lower version) never
-// removes them: this tab writes them back.
+// of a kind it doesn't know, a diary day, records, a list, a second line, a name, a title, profile, settings, flags,
+// change-time fields and a pin record); this tab writes without them. An older build that drops them (it writes a lower
+// version) never removes them: this tab writes them back.
 // gaps-tab-rows: a newer build in another tab changes the diary rows (more than this build shows); this tab takes the
 // change and writes every row as stored, never the ones it shows.
 // gaps-kept-events: an event of a kind this build doesn't know is updated by a newer build in another tab, and by a
@@ -73,6 +73,7 @@ export const scenarios = {
       delete s.profile.names.moonling;
       delete s.profile.setAt['name:moonling'];
       s.profile.titlesSeen = s.profile.titlesSeen.filter((t) => t !== 'future-title');
+      delete s.skillPins.stop;
       return s;
     };
     const gone = (s) => ({
@@ -89,6 +90,7 @@ export const scenarios = {
       profileAt: [s.profile.setAt.aura, s.profile.setAt['name:moonling']],
       name: s.profile.names.moonling,
       title: s.profile.titlesSeen.includes('future-title') || undefined,
+      pin: s.skillPins?.stop,
     });
     // a newer build (same version) removes them: they stay removed
     {
@@ -124,6 +126,7 @@ export const scenarios = {
         delete s.settings.haptics;
         delete s.flags.bloomSeen;
         delete s.profile.aura;
+        delete s.skillPins.stop;
         s.v = 1;
         return s;
       });
@@ -132,6 +135,7 @@ export const scenarios = {
       const want = newerParts(newerSave());
       const got = newerParts(s);
       h.expect(same(want, got), `an older build's write took newer values away: ${Object.keys(want).filter((k) => !same(want[k], got[k])).join(', ')}`);
+      h.expect(same(s.skillPins?.stop, newerSave().skillPins.stop), `an older build's write took a pin record away: ${JSON.stringify(s.skillPins?.stop)}`);
       h.expect(!errors.length, errors.join('\n'));
       await ctx.close();
     }
