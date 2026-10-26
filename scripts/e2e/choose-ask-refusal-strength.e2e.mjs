@@ -197,10 +197,12 @@ export const everything = (page) =>
     return out.join('\n');
   });
 
-/** Records any request that leaves this page's own server. */
+/** Records any request that leaves this page's own server; out.all keeps every request's URL and body, own server too. */
 export function offsite(page) {
   const out = [];
+  out.all = [];
   page.on('request', (r) => {
+    out.all.push(`${r.url()} ${r.postData() ?? ''}`);
     const u = new URL(r.url());
     if (!['http:', 'https:', 'ws:', 'wss:'].includes(u.protocol)) return;
     if (u.origin !== new URL(page.url()).origin) out.push(r.url());
@@ -308,6 +310,7 @@ export const scenarios = {
     const stored = await everything(page);
     h.expect(!stored.includes('lift to the shops') && !stored.includes('bins out on Thursdays'), 'typed words were stored');
     h.expect(!away.length, `requests left the page: ${away.join(', ')}`);
+    h.expect(!away.all.some((r) => /lift to the shops|lift%20to%20the%20shops|bins out on Thursdays/.test(r)), 'typed words went out in a request');
     h.expect(!dialogs.length, `a browser dialog opened: ${dialogs.join('; ')}`);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();

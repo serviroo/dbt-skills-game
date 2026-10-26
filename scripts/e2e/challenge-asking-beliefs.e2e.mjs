@@ -136,6 +136,7 @@ export const scenarios = {
     const stored = await everything(page);
     h.expect(!stored.includes('burden') && !stored.includes('pick a film') && !stored.includes('rude'), 'typed words were stored');
     h.expect(!away.length, `requests left the page: ${away.join(', ')}`);
+    h.expect(!away.all.some((r) => /burden|pick( |%20)a( |%20)film|rude|care( |%20)about( |%20)me/i.test(r)), 'typed words went out in a request');
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },
