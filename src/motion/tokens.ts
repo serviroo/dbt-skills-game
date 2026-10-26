@@ -157,4 +157,10 @@ export const SCENE = {
   fps: 30,
   /** the shared renderer is kept this long after the last scene leaves, then its context is released */
   idleMs: 15000,
+  /** the share of a frame (at fps) a scene may take to draw; slower than this and it draws fewer pixels */
+  budget: 0.6,
+  /** the page counts as struggling when its frames come further apart than this */
+  slowMs: 50,
+  /** the fewest device pixels per CSS pixel a scene drops to on a slow device; the scenes are soft, so it barely shows */
+  minDpr: 0.75,
 } as const;

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { SCENE } from '../../motion/tokens';
-import { lendRenderer } from '../lease';
+import { deviceDpr, lendRenderer, type Lease } from '../lease';
 import { sceneStats } from '../stats';
 import type { Beat, SceneOpts } from './host';
 
@@ -19,6 +19,9 @@ export interface Vignette {
 export type BuildScene = (accent: THREE.Color) => Vignette;
 
 const STEP = 1 / SCENE.fps;
+/** the longest a scene's frame may take to draw, in ms */
+const BUDGET = (1000 / SCENE.fps) * SCENE.budget;
+const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[xs.length >> 1];
 
 /** Frees every geometry, material and texture under `root`. */
 function disposeTree(root: THREE.Object3D) {
@@ -51,7 +54,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
     setLive(false);
     sync();
   };
-  let lease;
+  let lease: Lease | undefined;
   try {
     lease = lendRenderer(holder, evict);
     vig = build(new THREE.Color(opts.accent ?? '#4fb8ff'));
@@ -62,7 +65,8 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
     throw err;
   }
   const v = vig;
-  const { renderer, canvas } = lease;
+  const lent = lease;
+  const { renderer, canvas } = lent;
 
   const { clock } = opts;
   const media = matchMedia('(prefers-reduced-motion: reduce)');
@@ -75,6 +79,59 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   let last = -Infinity;
   let drawn: Beat | null = null;
 
+  /**
+   * Fewer pixels on a slow device. A scene draws at the device's own pixel ratio until it is shown to be too slow: its
+   * second frame is timed to the end once (reading one pixel back waits for the GPU to finish it), and after that the
+   * page's frame rate is watched while it moves. Too slow, and it drops straight to the ratio that fits its budget, down
+   * to SCENE.minDpr; comfortably fast for a while, and it climbs back a step, never to a ratio already found too slow.
+   */
+  const minDpr = Math.min(lent.maxDpr, SCENE.minDpr);
+  const ratio = () => (Number.isNaN(deviceDpr.now) ? lent.maxDpr : Math.min(lent.maxDpr, Math.max(minDpr, deviceDpr.now)));
+  const gl = renderer.getContext();
+  const px = new Uint8Array(4);
+  let timeIn = 2;
+  let gaps: number[] = [];
+  let lastTick = -1;
+  let goodFor = 0;
+  /** draws at pixel ratio r from now on; false when the scene has no size yet */
+  function setRatio(r: number) {
+    deviceDpr.now = r;
+    const w = holder.clientWidth, h = holder.clientHeight;
+    if (!w || !h) return false;
+    renderer.setPixelRatio(ratio());
+    renderer.setSize(w, h, false);
+    const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+    v.resize(size.x, size.y);
+    gaps = [];
+    goodFor = 0;
+    return true;
+  }
+  /** steps down to the ratio that would fit `ms` into the budget; true when it changed */
+  function slower(ms: number, budget: number) {
+    const now = ratio();
+    const r = Math.max(minDpr, now * Math.min(0.85, Math.max(0.4, Math.sqrt(budget / ms))));
+    if (r > now - 0.01) return false;
+    deviceDpr.tooSlow = Math.min(deviceDpr.tooSlow, now);
+    return setRatio(r);
+  }
+  /** called on every frame of the clock while the scene moves: how far apart the page's frames are */
+  function watch(t: number) {
+    const dt = t - lastTick;
+    lastTick = t;
+    // the first frame back, or a page that was frozen or in the background, says nothing about speed
+    if (dt <= 0 || dt > 1.5) return;
+    gaps.push(dt);
+    if (gaps.length > 5) gaps.shift();
+    if (gaps.length < 3) return;
+    const m = median(gaps);
+    if (m * 1000 > SCENE.slowMs) {
+      if (slower(m * 1000, 1000 / SCENE.fps)) draw(t, beatAt(t), false);
+    } else if (m < 1 / 50 && ratio() < Math.min(lent.maxDpr, deviceDpr.tooSlow - 0.15)) {
+      goodFor += dt;
+      if (goodFor > 5) setRatio(Math.min(lent.maxDpr, deviceDpr.tooSlow - 0.15, ratio() + 0.15));
+    } else goodFor = 0;
+  }
+
   const beatAt = (t: number): Beat => clock.beat?.() ?? { e: t, dur: Infinity, started: true, done: false };
   function setLive(on: boolean) {
     if (on === live) return;
@@ -85,15 +142,26 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   }
   const draw = (t: number, b: Beat, calm: boolean) => {
     v.pose(b, calm);
-    renderer.render(v.scene, v.camera);
+    // the first frame builds the shaders; the second, timed alone once the GPU has caught up, shows what a frame costs
+    if (!calm && --timeIn === 0) {
+      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      const t0 = performance.now();
+      renderer.render(v.scene, v.camera);
+      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      const ms = performance.now() - t0;
+      // resizing clears the canvas, so a frame that comes out too slow is drawn again, smaller
+      if (ms > BUDGET && slower(ms, BUDGET)) renderer.render(v.scene, v.camera);
+    } else renderer.render(v.scene, v.camera);
     last = t;
     drawn = { ...b };
     sceneStats.frames++;
     sceneStats.last = { kind: opts.kind, e: b.e, dur: b.dur, done: b.done, still: calm };
+    sceneStats.dpr = renderer.getPixelRatio();
     setLive(true);
   };
   const tick = (t: number) => {
     const b = beatAt(t);
+    if (!still()) watch(t);
     if (still()) {
       draw(t, b, true);
       sub?.();
@@ -107,6 +175,8 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   function sync() {
     const can = onScreen && sized && !lost && !evicted && !document.hidden;
     if (can && !sub) {
+      lastTick = -1;
+      gaps = [];
       const t = clock.now();
       const calm = still();
       draw(t, beatAt(t), calm);
@@ -130,7 +200,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   const ro = new ResizeObserver(() => {
     const w = holder.clientWidth, h = holder.clientHeight;
     if (!w || !h || evicted) return;
-    renderer.setPixelRatio(lease.maxDpr);
+    renderer.setPixelRatio(ratio());
     renderer.setSize(w, h, false);
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
     v.resize(size.x, size.y);
@@ -148,6 +218,8 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   // three.js rebuilds its GPU state on its own listener, added before this one; the scene then draws straight away
   const onRestored = () => {
     lost = false;
+    // the shaders are built again, so the second frame after this is timed again
+    timeIn = 2;
     resync();
   };
   canvas.addEventListener('webglcontextlost', onLost);
@@ -167,7 +239,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
     setLive(false);
     v.dispose?.();
     disposeTree(v.scene);
-    lease.release();
+    lent.release();
     holder.remove();
     const mem = renderer.info.memory;
     sceneStats.left = { geometries: mem.geometries, textures: mem.textures, programs: renderer.info.programs?.length ?? 0 };

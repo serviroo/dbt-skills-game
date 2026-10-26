@@ -8,6 +8,8 @@ export interface SceneStats {
   frames: number;
   /** the beat the last frame was drawn for */
   last?: { kind: string; e: number; dur: number; done: boolean; still: boolean };
+  /** the pixel ratio the last frame was drawn at: below the device's own when the device couldn't keep up */
+  dpr?: number;
   /** what the shared renderer still held on the GPU after the last scene left (all zero when it cleaned up) */
   left?: { geometries: number; textures: number; programs: number };
 }
