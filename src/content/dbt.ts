@@ -270,9 +270,9 @@ const FIT_BUILT_IN: Opt[] = [
   { label: "This doesn't fit", reply: "Thanks for being honest. You don't have to agree with it. Looking at it still counts." },
 ];
 const FIT_OWN: Opt[] = [
+  { label: 'This is about my safety', go: 'unsafe' },
   { label: 'Let me answer it', reply: "Good. Answer it the way you'd answer a friend." },
   { label: 'Not sure yet', reply: "That's okay. It can stay open, and you can still take one small step." },
-  { label: 'This is about my safety', go: 'unsafe' },
 ];
 const UNSURE_BELIEF = "If they might say no, there's no point asking";
 const ASK_UNSAFE = 'Asking or saying no could get me hurt';
@@ -282,7 +282,8 @@ function beliefChallenge(a: Answers) {
   const facts = Array.isArray(a.facts) ? a.facts : [];
   const hard = facts.includes('Asking went badly before') ? ' Some asks really have gone badly, and that hurt. It doesn\'t mean every ask will.' : '';
   const lead = a.belief === 'Not sure' ? '**Not sure is fine.** These beliefs often hide in the background. Here\'s one that gets in a lot of people\'s way. ' : '';
-  if (!builtIn(a)) return `**The belief:** "${fullStop(cap(beliefOf(a)))}" Beliefs like this usually start somewhere real. Is it true every single time? What would you say to a friend who believed it?${hard}`;
+  // a belief the player wrote may be about real danger: safety comes before any question about it
+  if (!builtIn(a)) return `**The belief:** "${fullStop(cap(beliefOf(a)))}" If this is about someone who might hurt you, it isn't a myth to question. Your safety comes first, and the safety choice below is there for that. Otherwise, beliefs like this usually start somewhere real. Is it true every single time? What would you say to a friend who believed it?${hard}`;
   return `${lead}**The belief:** "${fullStop(beliefOf(a))}" **Another way to see it:** ${ASK_BELIEFS[beliefOf(a)]}${hard}`;
 }
 function beliefReview(a: Answers) {

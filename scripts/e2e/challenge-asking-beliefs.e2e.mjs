@@ -100,7 +100,7 @@ export const scenarios = {
     const ch = await sees(h, page, 'own, challenge', { text: [`The belief: "${OWN_BELIEF}."`, 'Beliefs like this usually start somewhere real. Is it true every single time? What would you say to a friend who believed it?', "Some asks really have gone badly, and that hurt. It doesn't mean every ask will."], not: 'Another way to see it:' });
     for (const [, c] of PAIRS) h.expect(!has(ch.text, c), 'own: a built-in challenge pretends to answer a belief of your own');
     h.expect((await page.locator('.dq-step-body img').count()) === 0 && !(await page.evaluate(() => window.__pwned)), 'own: the typed belief became a page element');
-    await sees(h, page, 'own, challenge answers', { offers: ['Let me answer it', 'Not sure yet', 'This is about my safety'] });
+    await sees(h, page, 'own, challenge answers', { text: "If this is about someone who might hurt you, it isn't a myth to question. Your safety comes first", offers: ['This is about my safety', 'Let me answer it', 'Not sure yet'] });
     await h.shot(page, 'beliefs-own-challenge-390x844');
     await tap(page, 'Let me answer it');
     await sees(h, page, 'own, mine', { text: ["Good. Answer it the way you'd answer a friend.", 'What would you tell a friend who believed this?'], not: 'Keep it handy' });
