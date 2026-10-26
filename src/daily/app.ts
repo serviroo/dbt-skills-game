@@ -32,6 +32,7 @@ export type Route =
   | { name: 'piece'; id: string }
   | { name: 'stories' }
   | { name: 'write'; id: string; ch?: string }
+  | { name: 'read'; id: string; ch?: string }
   | { name: 'lines' }
   | { name: 'ease'; next?: Next }
   | { name: 'moment'; then?: string };

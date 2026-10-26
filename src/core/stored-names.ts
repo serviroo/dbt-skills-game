@@ -13,10 +13,15 @@ export const BESIDE = {
   unreadable: '.unreadable',
   stealth: '.stealth',
   safeLight: '.safe-light',
+  readSize: '.read-size',
 } as const;
 
 export const ART_DB = { version: 1, stores: ['meta', 'strokes', 'thumbs', 'drafts'] } as const;
 export const STORY_DB = { version: 1, stores: ['stories', 'chapters', 'cards', 'days'], chapterIndex: 'story' } as const;
+
+/** The Story Room's reading text sizes, stored beside a save under BESIDE.readSize. Nothing stored reads as the first. */
+export const READ_SIZES = ['regular', 'large', 'largest'] as const;
+export type ReadSize = (typeof READ_SIZES)[number];
 
 export const TAB_KEY = 'dbt.tab';
 export const CARE_KEY = 'dbt.story.care';
