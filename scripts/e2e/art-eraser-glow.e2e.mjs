@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /** Taps into the Art room from Home and opens a blank Draw today page. */
-async function drawPage(h, page) {
+export async function drawPage(h, page) {
   page.setDefaultTimeout(15000);
   for (let i = 0; ; i++) {
     await h.reachHub(page);
@@ -22,23 +22,36 @@ async function drawPage(h, page) {
   await page.waitForFunction(() => window.__daily?.ink && !document.querySelector('.dq-ink-stage')?.inert);
 }
 /** A mouse stroke between two points given as fractions of the page. */
-async function line(page, a, b) {
+export async function line(page, a, b) {
   const box = await page.locator('.dq-ink-live').boundingBox();
   await page.mouse.move(box.x + box.width * a[0], box.y + box.height * a[1]);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width * b[0], box.y + box.height * b[1], { steps: 14 });
   await page.mouse.up();
 }
-const pick = (page, name) => page.getByRole('radio', { name, exact: true }).click();
+export const pick = (page, name) => page.getByRole('radio', { name, exact: true }).click();
 const checked = async (page, name) => (await page.getByRole('radio', { name, exact: true }).getAttribute('aria-checked')) === 'true';
-const strokes = (page) => page.evaluate(() => window.__daily.ink.strokes.map((s) => s.m ?? 'brush'));
+export const strokes = (page) => page.evaluate(() => window.__daily.ink.strokes.map((s) => s.m ?? 'brush'));
 /** How much ink the page shows at a point (alpha of the committed ink layer, 0 to 255). */
-const inkAt = (page, x, y) => page.evaluate(([x, y]) => document.querySelector('.dq-ink-ink').getContext('2d').getImageData(x, y, 1, 1).data[3], [x, y]);
+export const inkAt = (page, x, y) => page.evaluate(([x, y]) => document.querySelector('.dq-ink-ink').getContext('2d').getImageData(x, y, 1, 1).data[3], [x, y]);
 /** Brightness (r + g + b) at points of the drawing as it is saved and exported. */
 const renderAt = (page, pts) => page.evaluate((pts) => {
   const g = window.__daily.ink.render(1200).getContext('2d');
   return pts.map(([x, y]) => g.getImageData(x, y, 1, 1).data.slice(0, 3).reduce((a, b) => a + b, 0));
 }, pts);
+/** Each stroke of drawing id as this device stores it. */
+const storedStrokes = (page, id) =>
+  page.evaluate(async (id) => {
+    const { artStore } = await import('/src/daily/artstore.ts');
+    const as = artStore(window.__daily.store.key);
+    id ??= (await as.list())[0].id;
+    const db = await new Promise((ok, bad) => Object.assign(indexedDB.open(as.name), { onsuccess: (e) => ok(e.target.result), onerror: bad }));
+    const s = await new Promise((ok, bad) => Object.assign(db.transaction('strokes').objectStore('strokes').get(id), { onsuccess: (e) => ok(e.target.result), onerror: bad }));
+    db.close();
+    return s;
+  }, id);
+/** A tool's stroke is stored with an empty p (a build from before tools skips it) and its points in q. */
+const toolShape = (strokes) => strokes.every((s) => (s.m ? s.p.length === 0 && s.q?.length >= 2 : s.p.length >= 2 && !('q' in s)));
 const xp = (page) => page.evaluate(() => window.__daily.store.state.events.reduce((a, e) => a + (e.xp || 0), 0));
 
 /** A brush line at 40% down, a soft-glow line at 70%, and an eraser cutting the brush line in the middle. */
@@ -91,6 +104,13 @@ export const scenarios = {
     expect(Math.abs(paper - paper0) < 6, 'the soft glow lit the far side of the page');
     await pick(page, 'Eraser');
     expect(await checked(page, 'Eraser') && (await page.locator('.dq-tools').getAttribute('data-tool')) === 'erase', 'the Eraser did not become the tool');
+    // the inks stay at full strength while erasing: tapping one goes back to painting, so none looks switched off
+    const strength = await page.evaluate(() => [...document.querySelectorAll('.dq-swatch-dot')].map((d) => {
+      let o = 1;
+      for (let e = d; e && !e.classList.contains('dq-tools'); e = e.parentElement) o *= +getComputedStyle(e).opacity;
+      return o;
+    }));
+    expect(strength.length === 5 && strength.every((o) => o === 1), 'while erasing the inks fade as if they could not be tapped: ' + strength);
     const inkBefore = [await inkAt(page, 600, 640), await inkAt(page, 300, 640), await inkAt(page, 900, 640)];
     expect(inkBefore.every((a) => a > 200), 'the brush line is not where the eraser will pass: ' + inkBefore);
     const lit = await renderAt(page, [[600, 640], [300, 600], [600, 950], [600, 1120]]);
@@ -132,12 +152,8 @@ export const scenarios = {
     // saved with each stroke's tool; the brush stroke keeps exactly the shape it always had
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await page.getByText('Saved in your Art room.').waitFor();
-    const rec = await page.evaluate(async () => {
-      const { artStore } = await import('/src/daily/artstore.ts');
-      const as = artStore(window.__daily.store.key);
-      return as.get((await as.list())[0].id);
-    });
-    expect(JSON.stringify(rec.strokes.map((s) => Object.keys(s))) === '[["i","w","p"],["i","w","p","m"],["i","w","p","m"]]' && rec.strokes[1].m === 'glow' && rec.strokes[2].m === 'erase', 'the saved strokes lost their tools: ' + JSON.stringify(rec.strokes.map((s) => ({ ...s, p: s.p.length }))));
+    const rec = await storedStrokes(page);
+    expect(JSON.stringify(rec.map((s) => Object.keys(s))) === '[["i","w","p"],["i","w","p","m","q"],["i","w","p","m","q"]]' && rec[1].m === 'glow' && rec[2].m === 'erase' && toolShape(rec), 'the saved strokes lost their tools or their stored shape: ' + JSON.stringify(rec.map((s) => ({ ...s, p: s.p.length, q: s.q?.length }))));
     // the Safe Zone stays one tap away
     const safe = page.getByRole('button', { name: /Safe Zone/ }).first();
     const sb = await safe.boundingBox();
@@ -166,11 +182,13 @@ export const scenarios = {
       const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', vp);
       await drawPage(h, page);
       await drawAndErase(h, page);
-      const named = await page.evaluate(() => [...document.querySelectorAll('.dq-pen-n')].map((n) => {
+      const named = await page.evaluate(() => [...document.querySelectorAll('.dq-pen-n, .dq-swatch-n')].map((n) => {
         const r = n.getBoundingClientRect();
         return { t: n.textContent, w: r.width, h: r.height, right: r.right, bottom: r.bottom, size: parseFloat(getComputedStyle(n).fontSize) };
       }));
-      h.expect(named.length === 3 && named.every((n) => n.w > 20 && n.h > 10 && n.right <= vp.width && n.bottom <= vp.height && n.size >= 13), `${tag}: the tool names are not shown: ${JSON.stringify(named)}`);
+      // a phone's text is 16 px at least
+      const least = vp.height < 500 ? 16 : 14;
+      h.expect(named.length === 8 && named.every((n) => n.w > 10 && n.h > 10 && n.right <= vp.width && n.bottom <= vp.height && n.size >= least), `${tag}: the tool and ink names are not shown at ${least} px or more: ${JSON.stringify(named)}`);
       const over = await page.evaluate(() => document.scrollingElement.scrollWidth);
       h.expect(over <= vp.width, `${tag}: the page scrolls sideways`);
       await h.shot(page, `erased-${tag}`);
@@ -195,27 +213,55 @@ export const scenarios = {
     const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
     const art = raw.art?.[0];
     expect(art && JSON.stringify(art.strokes.map((s) => s.m ?? 'brush')) === '["brush","glow","erase"]', 'the Save Crystal lost the strokes\' tools: ' + JSON.stringify(art?.strokes.map((s) => s.m)));
+    expect(toolShape(art.strokes), 'the Save Crystal stores a tool\'s stroke in a shape a build from before tools would paint: ' + JSON.stringify(art.strokes.map((s) => ({ ...s, p: s.p.length, q: s.q?.length }))));
     expect(!a.errors.length, a.errors.join('\n'));
     await a.ctx.close();
 
     const b = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute');
     await h.reachHub(b.page);
-    // an old stroke has no tool and stays a brush stroke; a tool this build doesn't know draws as the brush
-    const clean = await b.page.evaluate(async () => {
-      const { cleanStrokes } = await import('/src/daily/artstore.ts');
-      return cleanStrokes([{ i: 1, w: 3, p: [1, 2, 3, 4] }, { i: 1, w: 3, p: [1, 2], m: 'smudge' }, { i: 2, w: 9, p: [5, 6], m: 'glow' }], 'today');
-    });
-    expect(JSON.stringify(clean) === JSON.stringify([{ i: 1, w: 3, p: [1, 2, 3, 4] }, { i: 1, w: 3, p: [1, 2] }, { i: 2, w: 9, p: [5, 6], m: 'glow' }]), 'old or unknown strokes did not read safely: ' + JSON.stringify(clean));
+    // an old stroke has no tool and stays a brush stroke. What a newer build stored (a tool, a field or an ink this
+    // build doesn't know) is kept exactly as stored, and a stroke this build can't draw draws nothing. What an older
+    // build leaves of a tool's stroke (no points) is dropped.
+    const newer = [{ i: 1, w: 3, p: [1, 2, 3, 4] }, { i: 1, w: 3, p: [], m: 'smudge', q: [1, 2] }, { i: 2, w: 9, p: [], m: 'glow', q: [5, 6] }, { i: 1, w: 3, p: [7, 8], o: 0.5 }, { i: 9, w: 3, p: [1, 2] }];
+    const clean = await b.page.evaluate(async (newer) => {
+      const { cleanStrokes, storedStroke } = await import('/src/daily/artstore.ts');
+      const read = cleanStrokes([...newer, { i: 1, w: 3, p: [] }], 'today');
+      return { read, back: read.map(storedStroke) };
+    }, newer);
+    expect(JSON.stringify(clean.read) === JSON.stringify([{ i: 1, w: 3, p: [1, 2, 3, 4] }, { i: 1, w: 3, p: [] }, { i: 2, w: 9, p: [5, 6], m: 'glow' }, { i: 1, w: 3, p: [7, 8] }, { i: 4, w: 3, p: [1, 2] }]), 'old or newer strokes did not read safely: ' + JSON.stringify(clean.read));
+    expect(JSON.stringify(clean.back) === JSON.stringify(newer), 'strokes a newer build stored are not written back as they were: ' + JSON.stringify(clean.back));
+    // the file also carries a field and a tool from a newer build; both come through a restore, a Save Crystal and an edit
+    const smudge = { i: 1, w: 12, p: [], m: 'smudge', q: [100, 100, 200, 200] };
+    raw.art[0] = { ...art, glaze: { k: 1 }, strokes: [...art.strokes, smudge], n: art.strokes.length + 1 };
     await b.page.evaluate(() => window.__daily.go({ name: 'settings' }, { quiet: true }));
     await b.page.locator('input[type=file]').setInputFiles({ name: 'crystal.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(raw)) });
     await b.page.getByRole('button', { name: 'Restore this Save Crystal' }).click();
     await b.page.waitForFunction(() => /Restored/.test(document.querySelector('.dq-settings .dq-hint[aria-live]')?.textContent ?? ''));
     await b.page.evaluate((id) => window.__daily.go({ name: 'draw', kind: 'today', id }), art.id);
     await b.page.locator('.dq-ink-live').waitFor();
-    await b.page.waitForFunction(() => window.__daily?.ink?.strokes.length === 3 && !document.querySelector('.dq-ink-stage')?.inert);
-    expect(JSON.stringify(await strokes(b.page)) === '["brush","glow","erase"]', 'the restored drawing lost its tools');
+    await b.page.waitForFunction(() => window.__daily?.ink?.strokes.length === 4 && !document.querySelector('.dq-ink-stage')?.inert);
+    expect(JSON.stringify(await strokes(b.page)) === '["brush","glow","erase","brush"]', 'the restored drawing lost its tools');
     expect((await inkAt(b.page, 600, 640)) === 0 && (await inkAt(b.page, 300, 640)) > 200, 'the restored drawing does not show the cut');
+    expect((await inkAt(b.page, 150, 150)) === 0, 'a stroke from a tool this build does not know was painted');
     await h.shot(b.page, 'restored');
+    // an edit here keeps the newer build's field and stroke
+    await line(b.page, [0.7, 0.85], [0.9, 0.9]);
+    await b.page.getByRole('button', { name: 'Save', exact: true }).click();
+    let edited = [];
+    for (let i = 0; i < 75 && edited?.length !== 5; i++) {
+      await h.sleep(200);
+      edited = await storedStrokes(b.page, art.id);
+    }
+    const meta = await b.page.evaluate(async (id) => (await (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).list()).find((m) => m.id === id), art.id);
+    expect(edited.length === 5 && JSON.stringify(edited[3]) === JSON.stringify(smudge) && toolShape(edited.filter((s) => s !== edited[3])), 'an edit here changed the stroke from the newer build: ' + JSON.stringify(edited.map((s) => ({ ...s, p: s.p.length, q: s.q?.length }))));
+    expect(JSON.stringify(meta?.glaze) === '{"k":1}', 'an edit here dropped the drawing\'s field from the newer build: ' + JSON.stringify(meta));
+    await b.page.evaluate(() => window.__daily.go({ name: 'settings' }, { quiet: true }));
+    const out = b.page.waitForEvent('download');
+    await b.page.getByRole('button', { name: 'Save Crystal', exact: true }).click();
+    const file2 = path.join(h.out, 'art-tools-crystal-again.json');
+    await (await out).saveAs(file2);
+    const again = JSON.parse(fs.readFileSync(file2, 'utf8')).art?.find((r) => r.id === art.id);
+    expect(JSON.stringify(again?.glaze) === '{"k":1}' && JSON.stringify(again?.strokes[3]) === JSON.stringify(smudge), 'the next Save Crystal lost what the newer build stored: ' + JSON.stringify({ glaze: again?.glaze, s3: again?.strokes[3] }));
     expect(!b.errors.length, b.errors.join('\n'));
     await b.ctx.close();
   },

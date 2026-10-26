@@ -82,9 +82,9 @@ export function fullSave(now) {
 export function seedStores(page, SAVE, now) {
   const day = dayOf(now - 5 * DAY);
   const t = now - 5 * DAY;
-  const drawings = ids['art-paper'].map((kind, i) => ({ meta: { id: `draw-${kind}`, kind, day, t: t + i, updated: t + i, prompt: 'Draw a door to somewhere calm.', name: `Wisp ${i}`, n: 2 + ids['stroke-mode'].length, rev: `r${i}`, from: [`r9@${t}`] }, strokes: [{ i: 1, w: 6, p: [100, 100, 300, 320, 500, 410] }, { i: 2, w: 12, p: [40, 50, 60, 70] }, ...ids['stroke-mode'].map((m, k) => ({ i: 3, w: 8, p: [200 + k * 40, 600, 260 + k * 40, 700], m }))] }));
+  const drawings = ids['art-paper'].map((kind, i) => ({ meta: { id: `draw-${kind}`, kind, day, t: t + i, updated: t + i, prompt: 'Draw a door to somewhere calm.', name: `Wisp ${i}`, n: 2 + ids['stroke-mode'].length, rev: `r${i}`, from: [`r9@${t}`] }, strokes: [{ i: 1, w: 6, p: [100, 100, 300, 320, 500, 410] }, { i: 2, w: 12, p: [40, 50, 60, 70] }, ...ids['stroke-mode'].map((m, k) => ({ i: 3, w: 8, p: [], m, q: [200 + k * 40, 600, 260 + k * 40, 700] }))] }));
   // an unfinished drawing over the first page, with every field a draft keeps
-  const draft = { key: `edit:${drawings[0].meta.id}:tab-1`, kind: drawings[0].meta.kind, editId: drawings[0].meta.id, bases: [`r0@${t}`], base: t, prompt: 'Draw a door to somewhere calm.', strokes: [{ i: 2, w: 4, p: [120, 120, 200, 260] }, ...ids['stroke-mode'].map((m, k) => ({ i: 2, w: 4, p: [300 + k * 40, 120, 340 + k * 40, 260], m }))], t: t + 50 };
+  const draft = { key: `edit:${drawings[0].meta.id}:tab-1`, kind: drawings[0].meta.kind, editId: drawings[0].meta.id, bases: [`r0@${t}`], base: t, prompt: 'Draw a door to somewhere calm.', strokes: [{ i: 2, w: 4, p: [120, 120, 200, 260] }, ...ids['stroke-mode'].map((m, k) => ({ i: 2, w: 4, p: [], m, q: [300 + k * 40, 120, 340 + k * 40, 260] }))], t: t + 50 };
   const story = {
     stories: [
       { id: 'tale-1', title: 'The Long Night', created: t, updated: t, rev: 's1', chapters: ['ch-1'], notes: 'ch-notes' },

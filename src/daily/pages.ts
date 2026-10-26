@@ -1021,7 +1021,7 @@ export function settingsScreen(app: App): ScreenOut {
         talesFailed = true;
       }
     }
-    const counts = art && (art.added || art.kept || !art.unsaved) ? `${art.added} new${art.kept ? `, ${art.kept} kept as ${art.kept === 1 ? 'its own page' : 'their own pages'} so nothing was replaced` : ''}` : '';
+    const counts = art && (art.added || art.updated || art.kept || !art.unsaved) ? `${art.added} new${art.updated ? `, ${art.updated} updated` : ''}${art.kept ? `, ${art.kept} kept as ${art.kept === 1 ? 'its own page' : 'their own pages'} so nothing was replaced` : ''}` : '';
     const told = tales && (tales.added || tales.updated) ? `${tales.added} new${tales.updated ? `, ${tales.updated} updated` : ''}` : '';
     const too = counts && told ? `, drawings (${counts}) and stories (${told}) too` : counts ? `, drawings too (${counts})` : told ? `, stories too (${told})` : '';
     const parts = [

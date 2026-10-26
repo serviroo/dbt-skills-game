@@ -7,8 +7,8 @@ import { ALLY_NAMES, ART, ART_PROMPTS } from '../content/daily-lines';
 import { playerName } from '../core/you';
 import type { App, Route, ScreenOut } from './app';
 import { icon } from './art';
-import { artStore, revOf, type Draft, type DrawingMeta, type DrawingRec } from './artstore';
-import { canvasBlob, INKS, InkPad, PAGE, plainStroke, renderDrawing, SIZES, TOOLS, type Paper, type Stroke, type Tool } from './ink';
+import { artStore, extrasOf, revOf, type Draft, type DrawingMeta, type DrawingRec } from './artstore';
+import { canvasBlob, INKS, InkPad, PAGE, renderDrawing, SIZES, TOOLS, type Paper, type Stroke, type Tool } from './ink';
 import { dayLabel } from './lines';
 import { uid } from './store';
 import { btn, chip, field, h, p, panel, radioKeys, shareOrSave, typo } from './ui';
@@ -401,6 +401,8 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     recId = id;
     const snap = pad.strokes;
     const next: DrawingRec = {
+      // fields a newer build stored on the drawing stay on it
+      ...(rec ? extrasOf(rec) : {}),
       id,
       kind,
       day: rec?.day ?? app.store.today(),
@@ -409,7 +411,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
       prompt: kind === 'today' ? (prompt ?? undefined) : undefined,
       name: kind === 'ally' ? (name ?? rec?.name) : undefined,
       n: pad.strokes.length,
-      strokes: pad.strokes.map(plainStroke),
+      strokes: pad.strokes.slice(),
     };
     storing = true;
     const res = await as.put(first ? next : { ...next, bases: bases ?? [], after: rec?.updated }).finally(() => (storing = false));

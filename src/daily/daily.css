@@ -4234,9 +4234,6 @@ textarea.dq-input {
   background: none;
   box-shadow: inset 0 0 0 1.5px #c5dcf2;
 }
-.dq-tools[data-tool='erase'] .dq-swatch-dot {
-  opacity: 0.45;
-}
 .dq-swatch-n,
 .dq-pen-n,
 .dq-size-n,
@@ -4702,7 +4699,7 @@ textarea.dq-input {
     height: auto;
     clip-path: none;
     white-space: normal;
-    font-size: 13px;
+    font-size: 16px;
     line-height: 1.1;
     text-align: center;
     color: var(--t-body);
@@ -4734,7 +4731,7 @@ textarea.dq-input {
     width: auto;
     height: auto;
     clip-path: none;
-    font-size: 13px;
+    font-size: 16px;
     color: var(--t-body);
   }
   .dq-pen[aria-checked='true'] .dq-pen-n {
