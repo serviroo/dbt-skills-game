@@ -154,7 +154,7 @@ export function restorePreferences(raw: unknown, store: Store, volume?: VolumeCt
     const levels = parsePrefs(audioRaw);
     let changed = false;
     if (audio) {
-      for (const k of ['master', 'music', 'sfx'] as const) {
+      for (const k of ['master', 'music', 'sfx', 'hum'] as const) {
         if (typeof destination[k] !== 'number' || !Number.isFinite(destination[k])) { levels[k] = audio[k]; changed = true; }
       }
       if (typeof destination.muted !== 'boolean') { levels.muted ||= audio.muted; changed = true; }

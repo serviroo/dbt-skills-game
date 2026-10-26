@@ -357,3 +357,17 @@
 .dq.is-windowed header.dq-top .dq-top-end > .vol {
   pointer-events: auto;
 }
+
+/* a short screen (a phone held sideways): the sliders sit two by two, so the whole control stays on screen */
+@media (max-height: 500px) {
+  .vol-pop {
+    width: min(440px, calc(100vw - 28px));
+  }
+  .vol-sl--compact {
+    grid-template-columns: 1fr 1fr;
+    column-gap: 20px;
+  }
+  .vol-sl--compact .vol-mute {
+    grid-column: 1 / -1;
+  }
+}

@@ -290,15 +290,18 @@ export const scenarios = {
     h.expect(!errors.length, errors.join('\n'));
   },
 
-  async 'effects-zero-silences-hum'(h) {
+  // the hum has its own level: Hum at 0 silences it, and Effects at 0 leaves it playing
+  async 'hum-zero-silences-hum'(h) {
     const { page, errors } = await openMoment(h);
     await turnOn(h, page);
-    await checkGain(h, page, 'before-effects-zero', false);
+    await checkGain(h, page, 'before-hum-zero', false);
     const controls = await soundControls(page);
+    await controls.getByRole('slider', { name: 'Hum', exact: true }).fill('0');
+    await checkGain(h, page, 'hum-zero-silences-hum', true);
+    await controls.getByRole('slider', { name: 'Hum', exact: true }).fill('100');
+    await checkGain(h, page, 'hum-restored', false);
     await controls.getByRole('slider', { name: 'Effects', exact: true }).fill('0');
-    await checkGain(h, page, 'effects-zero-silences-hum', true);
-    await controls.getByRole('slider', { name: 'Effects', exact: true }).fill('100');
-    await checkGain(h, page, 'effects-restored', false);
+    await checkGain(h, page, 'effects-zero-keeps-hum', false);
     h.expect(!errors.length, errors.join('\n'));
   },
 

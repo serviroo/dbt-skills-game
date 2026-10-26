@@ -21,6 +21,7 @@ back after a long break is always fine.
   and a link to crisis lines on every screen: the US, Canada, the UK, Ireland, Australia, New Zealand and India,
   picked from your device language and changeable in one tap.
 - Give me a moment: a one-tap check-in when you just need to breathe, for about a minute, three, or until you're ready.
+  It has an optional low hum with its own volume.
 - Diary card: a plain-text card of what you practised, made for sharing with a therapist if you want to.
 - Your name and your companion's: the game asks what to call you the first time (or skip it and stay "Player"), and
   you can change both any time in Settings. Pick an accent colour in the Wardrobe.

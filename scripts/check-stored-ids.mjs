@@ -88,7 +88,7 @@ async function collect() {
     const crystal = JSON.parse(st.exportJSON({ art: [rec], drafts: [draft], stories: { stories: [tale], chapters: [chapter] }, unreadSaves: [{ at: String(t), raw: '{' }] }));
     const card = story.cleanCard({ id: 'k1', mode: story.CARD_MODES[0], text: 'x', t, sel: { start: 0, end: 1, text: 'x' } });
     you.writeYou({ name: 'Kit', companion: 'Lumen', nameAt: t, companionAt: t });
-    prefs.savePrefs({ master: 1, music: 1, sfx: 1, muted: false });
+    prefs.savePrefs({ master: 1, music: 1, sfx: 1, hum: 1, muted: false });
     const json = (k) => Object.keys(JSON.parse(localStorage.getItem(k) ?? '{}'));
 
     return {

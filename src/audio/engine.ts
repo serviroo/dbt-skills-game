@@ -7,7 +7,7 @@ import { CUES } from './cues';
 import { BED_NAMES, startBed, startCharge, type BedHandle, type BedName, type ChargeHandle } from './beds';
 import { Music, SECTIONS, type Section, type SectionOpts } from './music';
 import { clipCurve, makeCrackle, makeIR, makeNoise, dB, type Ctx } from './dsp';
-import { holdAt } from './param';
+import { holdAt, taper } from './param';
 import { Voice, type Lib } from './voice';
 
 export type { BedHandle, BedName, ChargeHandle, Section, SectionOpts };
@@ -61,12 +61,6 @@ export interface UserLevels {
   sfx: number;
   muted: boolean;
 }
-
-/** Slider position (0..1) to gain: a squared taper, so the middle of the slider sounds like the middle. */
-const taper = (p: number) => {
-  const x = Number.isFinite(p) ? Math.max(0, Math.min(1, p)) : 1;
-  return x * x;
-};
 
 /** Cues the score makes room for. */
 const UI_DUCK = new Set<string>(['ui_open', 'reward_chime', 'level_resolve', 'letter_open']);
