@@ -103,7 +103,9 @@ export const RANK = {
 
 export const SCORE = {
   inSec: 3,
-  safeOutSec: 1.5,
+  /** Safe Zone in: a click-free ramp to exact silence, shorter than one 60 Hz frame */
+  safeOutSec: 0.015,
+  /** Safe Zone out: the score fades back in */
   safeBackSec: 3,
 } as const;
 

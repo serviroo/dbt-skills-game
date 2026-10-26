@@ -7,6 +7,7 @@ import { CUES } from './cues';
 import { BED_NAMES, startBed, startCharge, type BedHandle, type BedName, type ChargeHandle } from './beds';
 import { Music, SECTIONS, type Section, type SectionOpts } from './music';
 import { clipCurve, makeCrackle, makeIR, makeNoise, dB, type Ctx } from './dsp';
+import { holdAt } from './param';
 import { Voice, type Lib } from './voice';
 
 export type { BedHandle, BedName, ChargeHandle, Section, SectionOpts };
@@ -91,7 +92,11 @@ export class AudioEngine {
   private musUser: GainNode;
   private musRoomIn: GainNode;
   private musHallIn: GainNode;
-  private safeQuiet: GainNode[];
+  /** The Safe Zone's gate: the last stage before the speaker level, so the score, effects, beds and echo all pass it. */
+  private safe: GainNode;
+  private isQuiet = false;
+  /** The shared room and hall echo, each behind its own return level; leaving the Safe Zone swaps in empty ones. */
+  private echo!: { room: ConvolverNode; hall: ConvolverNode; out: GainNode[] };
   private userMaster = 1;
   private bedBus: GainNode;
   private hushBeds: GainNode;
@@ -161,7 +166,8 @@ export class AudioEngine {
     clip.oversample = '2x';
     this.volume = C.createGain();
     this.volume.gain.value = this.masterTarget();
-    pre.connect(hp).connect(lim).connect(undo).connect(clip).connect(this.volume).connect(C.destination);
+    this.safe = C.createGain();
+    pre.connect(hp).connect(lim).connect(undo).connect(clip).connect(this.safe).connect(this.volume).connect(C.destination);
 
     this.duckG = C.createGain();
     this.yieldG = C.createGain();
@@ -180,24 +186,17 @@ export class AudioEngine {
     this.musUser = level(musLevel);
     this.musRoomIn = level(musLevel);
     this.musHallIn = level(musLevel);
-    this.safeQuiet = [C.createGain(), C.createGain(), C.createGain(), C.createGain()];
     this.sfx = C.createGain();
-    this.sfx.connect(this.safeQuiet[3]).connect(this.sfxUser).connect(pre);
+    this.sfx.connect(this.sfxUser).connect(pre);
 
-    const room = C.createConvolver();
-    room.normalize = false;
-    room.buffer = makeIR(C, this.seedN + 1, { rt60: 0.9, length: 1.1, preDelay: 0.008, damp0: 11000, damp1: 3500, early: 0.03, onset: 0.004 });
-    const hall = C.createConvolver();
-    hall.normalize = false;
-    hall.buffer = makeIR(C, this.seedN + 2, { rt60: 3.2, length: 3.6, preDelay: 0.024, damp0: 12000, damp1: 2000, early: 0.07, onset: 0.03 });
     this.hushRoom = C.createGain();
     this.hushHall = C.createGain();
-    room.connect(this.hushRoom).connect(this.safeQuiet[1]).connect(pre);
-    hall.connect(this.hushHall).connect(this.safeQuiet[2]).connect(pre);
-    this.sfxRoomIn.connect(room);
-    this.sfxHallIn.connect(hall);
-    this.musRoomIn.connect(room);
-    this.musHallIn.connect(hall);
+    this.hushRoom.connect(pre);
+    this.hushHall.connect(pre);
+    this.freshEcho(
+      makeIR(C, this.seedN + 1, { rt60: 0.9, length: 1.1, preDelay: 0.008, damp0: 11000, damp1: 3500, early: 0.03, onset: 0.004 }),
+      makeIR(C, this.seedN + 2, { rt60: 3.2, length: 3.6, preDelay: 0.024, damp0: 12000, damp1: 2000, early: 0.07, onset: 0.03 }),
+    );
 
     this.bedBus = C.createGain();
     this.hushBeds = C.createGain();
@@ -225,7 +224,7 @@ export class AudioEngine {
     this.shelf = shelf;
     this.uiDuck = C.createGain();
     this.focus = C.createGain();
-    musicIn.connect(mlp).connect(shelf).connect(air).connect(mlevel).connect(this.uiDuck).connect(this.focus).connect(this.hushMusic).connect(this.safeQuiet[0]).connect(this.musUser).connect(this.duckG);
+    musicIn.connect(mlp).connect(shelf).connect(air).connect(mlevel).connect(this.uiDuck).connect(this.focus).connect(this.hushMusic).connect(this.musUser).connect(this.duckG);
 
     this.lib = {
       ctx: C,
@@ -376,9 +375,9 @@ export class AudioEngine {
     for (const g of [this.sfxUser, this.bedUser, this.sfxRoomIn, this.sfxHallIn]) g.gain.setTargetAtTime(s, t, tau);
   }
 
-  /** Current output gains (QA): master after scene level and mute, the Music / Effects levels, and the score's quiet level. */
+  /** Current output gains (QA): master after scene level and mute, the Music / Effects levels, and the Safe Zone's gate. */
   get levels() {
-    return { master: this.volume.gain.value, music: this.musUser.gain.value, sfx: this.sfxUser.gain.value, score: this.safeQuiet[0].gain.value };
+    return { master: this.volume.gain.value, music: this.musUser.gain.value, sfx: this.sfxUser.gain.value, score: this.safe.gain.value };
   }
 
   /** QA: the Effects bus or the score's input, to feed a test tone through the real graph. */
@@ -397,6 +396,8 @@ export class AudioEngine {
       console.warn('[audio] unknown cue', cue);
       return { stop() {}, end: at };
     }
+    // nothing starts inside the Safe Zone, so nothing can be left sounding when the player steps out
+    if (this.isQuiet) return { stop() {}, end: at };
     const detune = opts.detune ?? (opts.index !== undefined ? opts.index * 50 : 0);
     const v = new Voice(this.lib, at, this.sfx, { gain: (opts.gain ?? 1) * dB(def.gainDb ?? 0), pan: opts.pan, detune, room: def.room, hall: def.hall }, this.nextSeed());
     try {
@@ -535,12 +536,50 @@ export class AudioEngine {
     this.hushV = null;
   }
 
-  /** Fades the score, effects and the shared room and hall echo out (on) or back in, as the Safe Zone does. Music, Effects and Master levels are left alone. */
+  /**
+   * The Safe Zone. On: the speakers reach exact silence `sec` after `at` (a click-free linear ramp), and under that same
+   * ramp every cue still sounding stops and the echo's return closes; no new cue starts. Off: the closed echo, with
+   * whatever still rang in it, is swapped for an empty one, so nothing from before the visit can return, and the score
+   * fades back in (time constant sec / 4). Music, Effects and Master levels are left alone.
+   */
   quiet(on: boolean, sec: number, at = this.ctx.currentTime) {
-    for (const g of this.safeQuiet) {
-      g.gain.cancelScheduledValues(at);
-      g.gain.setTargetAtTime(on ? 0 : 1, at, Math.max(0.003, sec / 4));
+    this.isQuiet = on;
+    if (!on) this.freshEcho(this.echo.room.buffer!, this.echo.hall.buffer!);
+    for (const p of on ? [this.safe.gain, ...this.echo.out.map((g) => g.gain)] : [this.safe.gain]) {
+      holdAt(p, at);
+      if (on) p.linearRampToValueAtTime(0, at + sec);
+      else p.setTargetAtTime(1, at, Math.max(0.003, sec / 4));
     }
+    if (!on) return;
+    for (const v of this.active) v.stop(at, sec);
+    this.active.clear();
+    for (const c of this.named.values()) c.stop(at, sec);
+    this.named.clear();
+    this.charge?.stop(at, sec);
+  }
+
+  /** Wires an empty room and hall echo with these responses in place of the current one, which is dropped with its tail. */
+  private freshEcho(roomIR: AudioBuffer, hallIR: AudioBuffer) {
+    const old = this.echo;
+    const make = (ir: AudioBuffer, sends: GainNode[], hush: GainNode, prev?: ConvolverNode) => {
+      const c = this.ctx.createConvolver();
+      c.normalize = false;
+      c.buffer = ir;
+      const out = this.ctx.createGain();
+      for (const s of sends) {
+        if (prev) s.disconnect(prev);
+        s.connect(c);
+      }
+      c.connect(out).connect(hush);
+      return { c, out };
+    };
+    const room = make(roomIR, [this.sfxRoomIn, this.musRoomIn], this.hushRoom, old?.room);
+    const hall = make(hallIR, [this.sfxHallIn, this.musHallIn], this.hushHall, old?.hall);
+    this.echo = { room: room.c, hall: hall.c, out: [room.out, hall.out] };
+    if (!old) return;
+    old.room.disconnect();
+    old.hall.disconnect();
+    for (const g of old.out) g.disconnect();
   }
 
   /** Duck beds + score together (e.g. -3 dB as the gate dims for the first window). */
