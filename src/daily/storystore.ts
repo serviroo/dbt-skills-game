@@ -139,6 +139,24 @@ function mergeCards(local: Card[], incoming: unknown[]) {
   return { cards: [...merged.values()], skipped };
 }
 
+function cardLists(x: Record<string, unknown>) {
+  const maxCh = STORY_CAP.stories * (STORY_CAP.chapters + 2);
+  const entries = Object.entries(x);
+  const lists: [string, unknown[]][] = [];
+  let skipped = Math.max(0, entries.length - maxCh);
+  for (const [id, list] of entries.slice(0, maxCh)) {
+    if (validId(id) && Array.isArray(list)) lists.push([id, list]);
+    else skipped++;
+  }
+  return { lists, skipped };
+}
+
+export function skippedCards(x: unknown) {
+  if (!isObj(x)) return 0;
+  const { lists, skipped } = cardLists(x);
+  return lists.reduce((n, [, list]) => n + mergeCards([], list).skipped, skipped);
+}
+
 function req<T>(r: IDBRequest) {
   return new Promise<T>((ok, bad) => {
     r.onsuccess = () => ok(r.result as T);
@@ -1112,13 +1130,9 @@ export class StoryStore {
       if (!r || this.mem.stories.has(sid) || [...this.mem.chapters.values()].some((m) => m.story === sid)) out.unsaved++;
     }
     if (isObj(raw.cards)) {
-      const entries = Object.entries(raw.cards);
-      out.skipped += Math.max(0, entries.length - maxCh);
-      for (const [id, list] of entries.slice(0, maxCh)) {
-        if (!validId(id) || !Array.isArray(list)) {
-          out.skipped++;
-          continue;
-        }
+      const { lists, skipped } = cardLists(raw.cards);
+      out.skipped += skipped;
+      for (const [id, list] of lists) {
         const r = await this.tx(['cards'], 'readwrite', async (t) => {
           const store = t.objectStore('cards');
           const disk = await req<unknown>(store.get(id));

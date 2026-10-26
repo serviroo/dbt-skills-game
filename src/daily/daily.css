@@ -2604,6 +2604,70 @@ textarea.dq-input {
 .dq-settings .dq-setting-h {
   font-size: 16px;
 }
+.dq-peek {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid rgba(79, 184, 255, 0.32);
+  border-radius: 12px;
+  background: rgba(79, 184, 255, 0.05);
+}
+.dq-peek-h {
+  margin: 0;
+  scroll-margin-top: calc(var(--safe-top) + 84px);
+  font-size: 19px;
+  font-weight: 500;
+  color: var(--t-title);
+}
+.dq-peek-h:focus {
+  outline: none;
+}
+.dq-peek-file {
+  margin: 4px 0 12px;
+  font-size: 16px;
+  color: var(--t-dim);
+  overflow-wrap: anywhere;
+}
+.dq-peek-list {
+  margin: 0;
+}
+.dq-peek-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(62, 100, 133, 0.32);
+}
+.dq-peek-row dt {
+  flex: 1 0 auto;
+  max-width: 100%;
+  font-size: 16px;
+  color: var(--t-dim);
+}
+.dq-peek-row dd {
+  max-width: 100%;
+  margin: 0 0 0 auto;
+  font-size: 17px;
+  color: var(--t-title);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.dq-peek-row dd.is-missing {
+  font-size: 16px;
+  color: var(--t-dim);
+}
+.dq-settings .dq-panel .dq-peek-note {
+  color: var(--t-title);
+}
+@media (max-width: 559px) {
+  .dq-peek .dq-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .dq-peek .dq-actions .dq-btn {
+    width: 100%;
+  }
+}
 
 @media (min-width: 900px) {
   .dq-page {

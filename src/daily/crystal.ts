@@ -1,6 +1,8 @@
 import { parsePrefs, savePrefs, type AudioLevels, type VolumeCtrl } from '../audio/prefs';
 import { AUDIO_KEY, BESIDE } from '../core/stored-names';
-import type { Store } from './store';
+import { cleanRec } from './artstore';
+import { cleanChapter, cleanStory, skippedCards, STORY_CAP, type Story } from './storystore';
+import { isSkillId, normalize, type State, type Store } from './store';
 
 interface Preferences {
   audio?: AudioLevels & { v: 1 };
@@ -75,4 +77,83 @@ export function restorePreferences(raw: unknown, store: Store, volume?: VolumeCt
   } catch {
     return false;
   }
+}
+
+export interface Peek {
+  raw: Record<string, unknown>;
+  data: State;
+  name: string;
+  began: number | null;
+  made: number | null;
+  skills: number;
+  diaryDays: number;
+  drawings: number;
+  stories: number;
+  incomplete: boolean;
+  unreadable: boolean;
+}
+
+const stamp = (x: unknown) => (typeof x === 'number' && x > 0 && Number.isFinite(new Date(x).getTime()) ? x : null);
+const isoStamp = (x: unknown) => {
+  if (typeof x !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(x)) return null;
+  const t = Date.parse(x);
+  return t > 0 && new Date(t).toISOString().slice(0, 19) === x.slice(0, 19) ? t : null;
+};
+
+function peekAt(raw: Record<string, unknown>, data: State): Peek {
+  let unreadable = false;
+  const art = Array.isArray(raw.art) ? raw.art : [];
+  const drawings = new Set<string>();
+  for (const x of art.slice(0, 10000)) {
+    const r = cleanRec(x);
+    if (r) drawings.add(r.id);
+    else unreadable = true;
+  }
+  const told = object(raw.stories) ? raw.stories : {};
+  const rs = Array.isArray(told.stories) ? told.stories : [];
+  const rc = Array.isArray(told.chapters) ? told.chapters : [];
+  const maxCh = STORY_CAP.stories * (STORY_CAP.chapters + 2);
+  if (art.length > 10000 || rs.length > STORY_CAP.stories || rc.length > maxCh) unreadable = true;
+  const stories = new Map<string, Story>();
+  for (const x of rs.slice(0, STORY_CAP.stories)) {
+    const s = cleanStory(x);
+    if (!s) unreadable = true;
+    else if (!stories.has(s.id) || s.updated > stories.get(s.id)!.updated) stories.set(s.id, s);
+  }
+  for (const x of rc.slice(0, maxCh)) if (!cleanChapter(x)) unreadable = true;
+  if (skippedCards(told.cards)) unreadable = true;
+  const skills = new Set<string>();
+  for (const e of data.events) if ((e.k === 'skill' || e.k === 'card') && isSkillId(e.skill)) skills.add(e.skill);
+  return {
+    raw,
+    data,
+    name: data.settings.playerName,
+    began: stamp(raw.created),
+    made: isoStamp(raw.exported),
+    skills: skills.size,
+    diaryDays: Object.keys(data.diary).length,
+    drawings: drawings.size,
+    stories: [...stories.values()].filter((s) => !s.removed).length,
+    incomplete: raw.incomplete === true,
+    unreadable,
+  };
+}
+
+export async function readCrystal(f: File): Promise<Peek | 'big' | 'unread' | 'wrong'> {
+  if (f.size > 80 * 1024 * 1024) return 'big';
+  let text: string;
+  try {
+    text = await f.text();
+  } catch {
+    return 'unread';
+  }
+  let raw: unknown = null;
+  let data: State | null = null;
+  try {
+    raw = JSON.parse(text);
+    data = normalize(raw);
+  } catch {
+    data = null;
+  }
+  return data && object(raw) ? peekAt(raw, data) : 'wrong';
 }

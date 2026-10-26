@@ -29,6 +29,7 @@ async function crystal(h, page, name) {
 async function restore(page, raw) {
   await go(page, 'settings');
   await page.locator('input[type=file]').setInputFiles({ name: 'crystal.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(raw)) });
+  await page.getByRole('button', { name: 'Restore this Save Crystal' }).click();
   await page.waitForFunction(() => /Restored/.test(document.querySelector('.dq-settings .dq-hint[aria-live]')?.textContent ?? ''));
 }
 const cleanRevs = (x) => {
@@ -635,12 +636,18 @@ export const scenarios = {
         };
       });
       const raw = JSON.parse(fs.readFileSync(fixture, 'utf8'));
-      await page.locator('input[type=file]').setInputFiles({ name: 'crystal.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(raw)) });
+      const crystalFile = { name: 'crystal.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(raw)) };
+      await page.locator('input[type=file]').setInputFiles(crystalFile);
       await page.evaluate(() => {
         window.__daily.go({ name: 'safe' }, { quiet: true });
         window.__daily.go({ name: 'settings' }, { quiet: true });
         window.releaseRestore();
       });
+      await page.waitForFunction(() => File.prototype.text.name === 'text');
+      await h.sleep(500);
+      h.expect(await page.evaluate(() => window.__daily.store.state.settings.playerName === '' && !document.querySelector('.dq-peek:not(.is-hidden)')), 'A file read that settled after leaving Settings still opened or restored the Save Crystal.');
+      await page.locator('input[type=file]').setInputFiles(crystalFile);
+      await page.getByRole('button', { name: 'Restore this Save Crystal' }).click();
       await page.waitForFunction(() => window.__daily.store.state.settings.playerName === 'Kit');
       h.expect(!await page.getByRole('switch', { name: /^Sound/ }).isChecked(), 'Returning to Settings during a file read left the new Sound switch stale.');
       h.expect(await page.getByRole('radio', { name: 'Motion: Reduced', exact: true }).getAttribute('aria-checked') === 'true', 'Returning during restore left the new Motion choice stale.');
