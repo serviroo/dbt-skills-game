@@ -160,7 +160,9 @@ const hear = (page, i, from, to) =>
     [i, from, to, SILENT_PEAK, SILENT_RMS],
   );
 const silent = (x) => x.peak < SILENT_PEAK && x.rms < SILENT_RMS;
-const fmt = (x) => `${x.rms.toExponential(1)}/${x.peak.toExponential(1)}`;
+// a stalled recorder must not pass for silence: every stretch judged silent has to be at least 90% read
+const covered = (x) => x.cover >= 0.9;
+const fmt = (x) => `${x.rms.toExponential(1)}/${x.peak.toExponential(1)}, ${(x.cover * 100).toFixed(0)}% read`;
 const quietAt = (x, t) => (x.quietFrom === null ? 'never' : `${((x.quietFrom - t) * 1000).toFixed(1)} ms after the tap`);
 
 function step() {
@@ -206,7 +208,7 @@ async function entryCase(h, c, { viewport = TALL, reduced = false, tag, shots = 
     const inside = await hear(page, 0, tIn + WITHIN, tIn + 1.2);
     const start = await hear(page, 0, tIn, tIn + 1.2);
     c.ok(pre.rms > 1e-3, `${tag}: the score and cues were not audible before the tap (${fmt(pre)}), so silence proves nothing`);
-    c.ok(inside.cover > 0.9, `${tag}: the reads covered only ${(inside.cover * 100).toFixed(0)}% of the first second inside`);
+    c.ok(covered(inside), `${tag}: the reads covered only ${(inside.cover * 100).toFixed(0)}% of the first second inside`);
     c.ok(silent(inside), `${tag}: sound still reaches the speakers ${WITHIN * 1000} ms to 1.2 s after the tap (RMS/peak ${fmt(inside)}; silent from ${quietAt(start, tIn)})`);
     c.ok(at.route === 'safe' && at.talkOnTop && at.windows === 0, `${tag}: help was not on screen in the same tap (${at.route}, talk on top ${at.talkOnTop}, ${at.windows} windows)`);
     c.ok((await scoreGate(page)) === 0, `${tag}: the Safe Zone's score gate is ${await scoreGate(page)}, not exactly 0`);
@@ -225,6 +227,17 @@ async function entryCase(h, c, { viewport = TALL, reduced = false, tag, shots = 
   } finally {
     await ctx.close();
   }
+}
+
+/** Home, then Give me a moment with the low hum on and audible for 2.5 s; n is the hum's speaker tap. */
+async function humOn(h) {
+  const { ctx, page, errors } = await boot(h, { prefs: levels({ master: 1, music: 0, sfx: 1 }) });
+  await page.getByRole('button', { name: 'Give me a moment', exact: true }).click();
+  const n = await page.evaluate(() => window.__taps.length);
+  await page.getByRole('switch', { name: 'Low hum', exact: true }).check();
+  await page.waitForFunction((n) => window.__taps.length > n && window.__taps.at(-1).a.context.state === 'running', n, { timeout: 10000 });
+  await h.sleep(2500);
+  return { ctx, page, errors, n };
 }
 
 export const scenarios = {
@@ -261,13 +274,14 @@ export const scenarios = {
       c.ok(pre.rms > 1e-3, `quick: the cues were not audible before the first tap (${fmt(pre)})`);
       for (const [i, [a, b]] of visits.entries()) {
         const x = await hear(page, 0, a + WITHIN, b);
+        c.ok(covered(x), `quick: the reads covered only ${(x.cover * 100).toFixed(0)}% of visit ${i + 1} past ${WITHIN * 1000} ms`);
         c.ok(silent(x), `quick: visit ${i + 1} (${((b - a) * 1000).toFixed(0)} ms) was not silent past ${WITHIN * 1000} ms (RMS/peak ${fmt(x)})`);
       }
       const gaps = [];
       for (let i = 0; i < visits.length; i++) gaps.push(await hear(page, 0, visits[i][1], visits[i + 1]?.[0] ?? tOut + 2.5));
       const asked = await page.evaluate((t) => window.__asks.filter((x) => x.at >= t), visits[0][0]);
       c.ok(asked.length === 0, `quick: the app asked for ${asked.map((x) => x.cue).join(', ')} after the first tap, so silence would prove nothing`);
-      c.ok(gaps.at(-1).cover > 0.9, `quick: the reads covered only ${(gaps.at(-1).cover * 100).toFixed(0)}% after the last visit`);
+      for (const [i, g] of gaps.entries()) c.ok(covered(g), `quick: the reads covered only ${(g.cover * 100).toFixed(0)}% of the time after visit ${i + 1}`);
       c.ok(gaps.every(silent), `quick: cues or their echo from before the Safe Zone came back outside (RMS/peak after each visit: ${gaps.map(fmt).join(' ')})`);
       c.ok(!errors.length, `quick: page errors: ${errors.join(' | ')}`);
       console.log(`quick: before ${fmt(pre)} | visits ${visits.map(([a, b]) => ((b - a) * 1000).toFixed(0) + ' ms').join(', ')} | after each ${gaps.map(fmt).join(' ')}`);
@@ -298,7 +312,7 @@ export const scenarios = {
       c.ok(at.prefs === prefs && after.prefs === prefs, `mute: stored levels changed ${prefs} -> ${at.prefs} -> ${after.prefs}`);
       c.ok(at.volume === before.volume && after.volume === before.volume, `mute: their levels changed ${before.volume} -> ${after.volume}`);
       c.ok((await userGains(page)) === gains, `mute: engine levels changed ${gains} -> ${await userGains(page)}`);
-      c.ok(silent(out), `mute: sound reached the speakers while muted (${fmt(out)})`);
+      c.ok(covered(out) && silent(out), `mute: sound reached the speakers while muted, or the reads missed it (${fmt(out)})`);
       c.ok((await scoreGate(page)) > 0.9, `mute: the Safe Zone gate did not open again outside (${await scoreGate(page)}), so unmuting would stay silent`);
       c.ok(!errors.length, `mute: page errors: ${errors.join(' | ')}`);
       c.end();
@@ -309,15 +323,9 @@ export const scenarios = {
 
   /** Give me a moment's low hum (its own audio context) stops within WITHIN of the tap, not over a second-long fade. */
   async 'moment-hum-stops-at-once'(h) {
-    const prefs = levels({ master: 1, music: 0, sfx: 1 });
-    const { ctx, page, errors } = await boot(h, { prefs });
+    const { ctx, page, errors, n } = await humOn(h);
     const c = step();
     try {
-      await page.getByRole('button', { name: 'Give me a moment', exact: true }).click();
-      const n = await page.evaluate(() => window.__taps.length);
-      await page.getByRole('switch', { name: 'Low hum', exact: true }).check();
-      await page.waitForFunction((n) => window.__taps.length > n && window.__taps.at(-1).a.context.state === 'running', n, { timeout: 10000 });
-      await h.sleep(2500);
       const m = await enter(page);
       const tIn = m.at[n];
       await page.waitForFunction((n) => window.__taps[n].a.context.state === 'closed', n, { timeout: 5000 }).catch(() => {});
@@ -328,11 +336,37 @@ export const scenarios = {
       const start = await hear(page, n, tIn, end);
       c.ok(pre.rms > 1e-4, `hum: the hum was not audible before the tap (${fmt(pre)})`);
       c.ok(state === 'closed', `hum: the hum's audio is still ${state} a few seconds into the Safe Zone`);
-      c.ok(end <= tIn + WITHIN || (silent(inside) && inside.cover > 0.8), `hum: the hum played on until ${((end - tIn) * 1000).toFixed(0)} ms after the tap (RMS/peak past ${WITHIN * 1000} ms ${fmt(inside)}, silent from ${quietAt(start, tIn)})`);
-      const eng = await hear(page, 0, m.at[0] + WITHIN, (await now(page)) - 0.05);
-      c.ok(silent(eng), `hum: the engine is not silent inside (${fmt(eng)})`);
+      c.ok(end <= tIn + WITHIN || (covered(inside) && silent(inside)), `hum: the hum played on until ${((end - tIn) * 1000).toFixed(0)} ms after the tap (RMS/peak past ${WITHIN * 1000} ms ${fmt(inside)}, silent from ${quietAt(start, tIn)})`);
+      await until(page, 0, m.at[0] + 0.5);
+      const eng = await hear(page, 0, m.at[0] + WITHIN, m.at[0] + 0.5);
+      c.ok(covered(eng) && silent(eng), `hum: the engine is not silent inside, or the reads missed it (${fmt(eng)})`);
       c.ok(!errors.length, `hum: page errors: ${errors.join(' | ')}`);
       console.log(`hum: before ${fmt(pre)} | its audio ended ${((end - tIn) * 1000).toFixed(1)} ms after the tap`);
+      c.end();
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  /**
+   * The hum's audio is suspended when the Safe Zone opens (a phone call took the audio, say): its oscillators never
+   * reach their end, and it is still closed, silently, instead of staying open.
+   */
+  async 'suspended-hum-still-closes'(h) {
+    const { ctx, page, errors, n } = await humOn(h);
+    const c = step();
+    try {
+      await page.evaluate((n) => window.__taps[n].a.context.suspend(), n);
+      const held = await page.evaluate((n) => window.__taps[n].a.context.currentTime, n);
+      const m = await enter(page);
+      const t0 = Date.now();
+      await page.waitForFunction((n) => window.__taps[n].a.context.state === 'closed', n, { timeout: 3000, polling: 20 }).catch(() => {});
+      const ms = Date.now() - t0;
+      const { state, end } = await page.evaluate((n) => ({ state: window.__taps[n].a.context.state, end: window.__taps[n].a.context.currentTime }), n);
+      c.ok(state === 'closed', `suspended: the hum's audio is still ${state} 3 s into the Safe Zone`);
+      c.ok(end === held && m.at[n] === held, `suspended: the hum's clock moved while suspended (${held} -> ${end}), so it may have played`);
+      c.ok(!errors.length, `suspended: page errors: ${errors.join(' | ')}`);
+      console.log(`suspended: the hum's audio closed about ${ms} ms after the tap, still suspended`);
       c.end();
     } finally {
       await ctx.close();
@@ -390,9 +424,10 @@ export const scenarios = {
         c.ok(before.windows > 0, `${kind}: no window was opening before the tap`);
         c.ok(pre.rms > 1e-3, `${kind}: the window's chime was not audible before the tap (${fmt(pre)})`);
         c.ok(inside.route === 'safe' && inside.windows === 0 && !inside.scrim && inside.fx === 0 && !inside.toast && inside.talkOnTop, `${kind}: something surfaced over the Safe Zone (${JSON.stringify({ w: inside.windows, scrim: inside.scrim, fx: inside.fx, toast: inside.toast, talk: inside.talkOnTop })})`);
+        c.ok(covered(visit), `${kind}: the reads covered only ${(visit.cover * 100).toFixed(0)}% of the visit past ${WITHIN * 1000} ms`);
         c.ok(silent(visit), `${kind}: the visit (${((b.at[0] - a.at[0]) * 1000).toFixed(0)} ms) was not silent past ${WITHIN * 1000} ms (${fmt(visit)})`);
         c.ok(asked.length === 0, `${kind}: sound was asked for after the tap: ${asked.join(', ')}`);
-        c.ok(silent(out) && out.cover > 0.9, `${kind}: the chime or its echo came back outside (${fmt(out)}, ${(out.cover * 100).toFixed(0)}% covered)`);
+        c.ok(covered(out) && silent(out), `${kind}: the chime or its echo came back outside, or the reads missed it (${fmt(out)})`);
         c.ok(after.windows === 0 && after.hint === 0 && !after.scrim && after.fx === 0 && !after.toast, `${kind}: a window, toast or effect came back after leaving`);
         c.ok(r.kept(after), `${kind}: the interrupted ${kind} was not kept (${JSON.stringify({ rankSeen: after.rankSeen, progress: after.progress, gift: after.gift })})`);
         c.ok(after.progress === before.progress, `${kind}: progress changed ${before.progress} -> ${after.progress}`);

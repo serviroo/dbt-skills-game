@@ -6,6 +6,7 @@
  */
 import { animate } from '../ui/anim';
 import { SCORE, WINDOW } from '../motion/tokens';
+import { holdAt } from '../audio/param';
 import { type Next } from '../content/dbt';
 import { CHECKIN } from '../content/daily-lines';
 import type { App, Route, ScreenOut } from './app';
@@ -124,11 +125,17 @@ function lowHum(scale: number) {
       dead = true;
       const t = ctx.currentTime;
       if (ramp !== undefined) {
-        breath.gain.cancelScheduledValues(t);
-        breath.gain.setValueAtTime(breath.gain.value, t);
+        holdAt(breath.gain, t);
         breath.gain.linearRampToValueAtTime(0, t + ramp);
         oscs.forEach((o) => o.stop(t + ramp));
-        oscs[0].onended = () => void ctx.close();
+        // closed once the oscillators end; the timer covers a suspended context (a call came in), where they never do
+        let open = true;
+        const close = () => {
+          if (open) void ctx.close();
+          open = false;
+        };
+        oscs[0].onended = close;
+        setTimeout(close, ramp * 1000 + 250);
         return;
       }
       breath.gain.setTargetAtTime(0, t, 0.25);

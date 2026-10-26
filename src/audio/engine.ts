@@ -7,6 +7,7 @@ import { CUES } from './cues';
 import { BED_NAMES, startBed, startCharge, type BedHandle, type BedName, type ChargeHandle } from './beds';
 import { Music, SECTIONS, type Section, type SectionOpts } from './music';
 import { clipCurve, makeCrackle, makeIR, makeNoise, dB, type Ctx } from './dsp';
+import { holdAt } from './param';
 import { Voice, type Lib } from './voice';
 
 export type { BedHandle, BedName, ChargeHandle, Section, SectionOpts };
@@ -545,8 +546,7 @@ export class AudioEngine {
     this.isQuiet = on;
     if (!on) this.freshEcho(this.echo.room.buffer!, this.echo.hall.buffer!);
     for (const p of on ? [this.safe.gain, ...this.echo.out.map((g) => g.gain)] : [this.safe.gain]) {
-      p.cancelScheduledValues(at);
-      p.setValueAtTime(p.value, at);
+      holdAt(p, at);
       if (on) p.linearRampToValueAtTime(0, at + sec);
       else p.setTargetAtTime(1, at, Math.max(0.003, sec / 4));
     }
