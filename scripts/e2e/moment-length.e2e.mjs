@@ -35,8 +35,8 @@ function listenForHum() {
   };
 }
 
-async function openMoment(h, seed = {}, viewport) {
-  const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN, ...seed }, '?mute', viewport, async (c) => {
+async function openMoment(h, seed = {}, viewport, query = '?mute') {
+  const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN, ...seed }, query, viewport, async (c) => {
     await c.clock.install();
     await c.addInitScript(listenForHum);
   });
@@ -289,6 +289,21 @@ export const scenarios = {
     h.expect((await h.ls(b.page, KEPT_LENGTH)) === '1', 'restoring again replaced the length this device chose');
     h.expect(!b.errors.length, b.errors.join('\n'));
     await b.ctx.close();
+  },
+
+  /** with reduced motion a timed moment's end goes to its finished state with only a short soft fade, the ring too */
+  async 'reduced-motion-end'(h) {
+    const { ctx, page, errors } = await openMoment(h, {}, undefined, '?mute&reduced');
+    await pause(page);
+    await radio(page, '1 minute').check();
+    await page.clock.fastForward(61000);
+    await page.locator('.dq-mo-line', { hasText: END }).waitFor({ timeout: 5000 });
+    const long = await page.evaluate(() =>
+      [...document.querySelectorAll('.dq-moment, .dq-moment *')].flatMap((e) => e.getAnimations().map((a) => [e.className.baseVal ?? e.className, a.effect.getComputedTiming().duration])).filter(([, ms]) => ms > 200),
+    );
+    h.expect(!long.length, 'with reduced motion the end still runs long animations: ' + JSON.stringify(long));
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
   },
 
   /** choices a newer build stored beside the save that this one doesn't offer (a length, a Safe Zone light, a reading

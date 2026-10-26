@@ -266,7 +266,7 @@ export function momentScreen(app: App, route: Route): ScreenOut {
     quiet.forEach((x) => animate(x, [{ opacity: 1 }, { opacity: 0 }], { duration: still ? WINDOW.reducedCloseMs : 900, easing: 'ease-in', fill: 'forwards' }));
     setTimeout(() => quiet.forEach((x) => x.classList.add('is-gone')), still ? WINDOW.reducedCloseMs : 900);
     if (moving) done.focus();
-    animate(stage, [{ opacity: 1 }, { opacity: 0.55 }], { duration: SETTLE_S * 1000, easing: 'ease-out', fill: 'forwards' });
+    animate(stage, [{ opacity: 1 }, { opacity: 0.55 }], { duration: still ? WINDOW.reducedFadeMs : SETTLE_S * 1000, easing: 'ease-out', fill: 'forwards' });
     fades.splice(0).forEach((a) => a.cancel());
     words.textContent = typo(LEN.end);
     fades.push(animate(words, still ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }], { duration: still ? WINDOW.reducedFadeMs : 1300, easing: 'cubic-bezier(.16,1,.3,1)', fill: 'both' }));
