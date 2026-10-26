@@ -1,5 +1,5 @@
-// Skip in the intro ends the scene in flight: nothing more of it plays or moves, the letterbox and any hush before the
-// hit are gone, and the rewards come next. Steps the real intro frame by frame in ?capture, so every run checks the
+// Skip in the intro ends the scene in flight: nothing more of it plays or moves, every sound it started stops, the
+// letterbox and any hush before the hit are gone, and the rewards come next. Steps the real intro frame by frame in ?capture, so every run checks the
 // same frames, and reads what the scene asked of the audio from the capture's audio log.
 
 /** The intro from `from` on, stepped 1/15 s at a time, with Skip on screen (the intro was seen before). */
@@ -27,6 +27,24 @@ async function skip(h, page, tag) {
   const after = await page.evaluate((n) => window.__audioLog.slice(n).map((e) => `${e.kind} ${e.name}`), before);
   const bars = await page.evaluate(() => [...document.querySelectorAll('.lb')].map((b) => parseFloat(b.style.height) || 0));
   h.expect(bars.every((v) => v === 0), `${tag}: the letterbox stayed over the rewards (${bars.join(', ')} vh)`);
+  // every sound, bed, charge hum and score section the cut scene started before Skip is stopped at the press
+  const playing = await page.evaluate((n) => {
+    const log = window.__audioLog;
+    const left = new Map();
+    for (const e of log.slice(0, n)) {
+      if (e.kind === 'play') left.set(`sound ${e.name}`, (left.get(`sound ${e.name}`) ?? 0) + 1);
+      if (e.kind === 'stop' && left.get(`sound ${e.name}`)) left.set(`sound ${e.name}`, left.get(`sound ${e.name}`) - 1);
+      if (e.kind === 'bed') left.set(`bed ${e.name}`, e.args[0] > 0 ? 1 : 0);
+      if (e.kind === 'charge' && e.name !== 'set') left.set('charge hum', e.name === 'stop' ? 0 : 1);
+      if (e.kind === 'music') left.set('score', e.name === 'stop' ? 0 : 1);
+    }
+    for (const e of log.slice(n)) {
+      const k = e.kind === 'stop' ? `sound ${e.name}` : e.kind === 'bed' && e.args[0] === 0 ? `bed ${e.name}` : e.kind === 'charge' && e.name === 'stop' ? 'charge hum' : e.kind === 'music' && e.name === 'stop' ? 'score' : null;
+      if (k && left.get(k)) left.set(k, left.get(k) - 1);
+    }
+    return [...left].filter(([, c]) => c > 0).map(([k]) => k);
+  }, before);
+  h.expect(!playing.length, `${tag}: still playing over the rewards after Skip: ${playing.join(', ')}`);
   return after;
 }
 
@@ -51,6 +69,17 @@ export const scenarios = {
     h.expect(after.includes('unhush master'), `the hush before the hit held over the rewards: ${after.join(', ')}`);
     const late = after.filter((e) => /^play (awaken_hit|riser|soldier_ignite|stand_swell)$/.test(e));
     h.expect(!late.length, `the skipped awaken scene still played on after Skip: ${late.join(', ')}`);
+    h.expect(!errors.length, errors.join('\n'));
+  },
+
+  /** Skip late in the awaken scene, under the stand-up swell, its loudest sound: it and the roar stop at the press */
+  async 'skip-late-in-awaken'(h) {
+    const { page, errors } = await intro(h, 'awaken');
+    h.expect(await page.evaluate(() => window.__steps(() => window.__audioLog.some((e) => e.kind === 'play' && e.name === 'stand_swell'))), 'the awaken scene never reached the stand-up swell');
+    // about 12 s in: the swell is 1.2 s old and runs for 7 s
+    await page.evaluate(() => { let i = 0; return window.__steps(() => ++i > 18); });
+    const after = await skip(h, page, 'late-awaken');
+    h.expect(after.includes('stop stand_swell'), `the stand-up swell played on over the rewards: ${after.join(', ')}`);
     h.expect(!errors.length, errors.join('\n'));
   },
 

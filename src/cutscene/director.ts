@@ -16,13 +16,18 @@ export interface AudioLike {
   play(cue: string, opts?: Record<string, number>): unknown;
   bed?(name: string): { level(v: number, ramp?: number): void; stop(ramp?: number): void } | undefined;
   chargeLoop?(): { set(c: number): void; release(): void; stop(): void };
-  music?: { to(section: string, fade?: number, opts?: { at?: number; fadeOut?: number; hitAt?: number; standAt?: number }): void };
+  music?: {
+    to(section: string, fade?: number, opts?: { at?: number; fadeOut?: number; hitAt?: number; standAt?: number }): void;
+    /** fades out whatever section plays */
+    stop?(fade?: number): void;
+  };
   hush?(from?: number, to?: number): void;
   /** ends an open-ended hush */
   unhush?(): void;
   duck?(db: number, ramp: number): void;
 }
 const NOAUDIO: AudioLike = { play: () => undefined };
+type Sound = { stop(at?: number, ramp?: number): void };
 /** thrown by a beat's wait when the player skips, so the rest of that beat never runs */
 const SKIP = Symbol('skip');
 
@@ -57,7 +62,31 @@ export class Director {
   private readonly skip = new Promise<void>((r) => (this.resolveSkip = r));
   private baseBloom = 1.15;
 
-  constructor(readonly stage: Stage, readonly audio: AudioLike = NOAUDIO) {}
+  readonly audio: AudioLike;
+  /** every sound, charge hum and bed the cut scene starts, so Skip can stop whatever still plays */
+  private sounds = new Set<Sound>();
+  private beds = new Set<string>();
+
+  constructor(readonly stage: Stage, audio: AudioLike = NOAUDIO) {
+    this.audio = this.keeping(audio);
+  }
+
+  /** The cut scene's audio, holding on to everything it starts. */
+  private keeping(a: AudioLike): AudioLike {
+    const keep = <T>(h: T) => {
+      if (typeof (h as Partial<Sound> | undefined)?.stop === 'function') this.sounds.add(h as Sound);
+      return h;
+    };
+    return {
+      play: (cue, opts) => keep(a.play(cue, opts)),
+      bed: a.bed && ((name) => (this.beds.add(name), a.bed!(name))),
+      chargeLoop: a.chargeLoop && (() => keep(a.chargeLoop!())),
+      music: a.music,
+      hush: a.hush && ((from, to) => a.hush!(from, to)),
+      unhush: a.unhush && (() => a.unhush!()),
+      duck: a.duck && ((db, ramp) => a.duck!(db, ramp)),
+    };
+  }
 
   async init() {
     this.w = await buildWorld(this.stage);
@@ -128,11 +157,15 @@ export class Director {
     this.skipped = true;
     for (const tr of this.tracks) tr.fn(tr.until, 0);
     this.tracks.clear();
-    this.lb.set(0);
-    this.neutralGrade();
+    // every sound the cut scene started stops here; the rewards bring their own
+    for (const s of this.sounds) s.stop(undefined, 0.04);
+    this.sounds.clear();
+    for (const b of this.beds) this.audio.bed?.(b)?.stop(0.04);
+    this.audio.music?.stop?.(0.04);
     this.audio.unhush?.();
     this.audio.duck?.(0, 0.03);
-    this.audio.bed?.('vortex_roar')?.stop(1.5);
+    this.lb.set(0);
+    this.neutralGrade();
     this.resolveSkip();
   }
 
@@ -441,32 +474,28 @@ export class Director {
     // hold to charge (their pace)
     const holdMod = this.w.modules.chest;
     const loop = this.audio.chargeLoop?.();
-    try {
-      if (holdMod?.holdToCharge && !params.capture) {
-        await holdMod.holdToCharge({
-          durationSec: 1.5,
-          until: this.skip,
-          onProgress: (c: number) => {
-            chest.setCharge(c);
-            loop?.set(c);
-          },
-          onRelease: () => loop?.release(),
-        });
-      } else {
-        await this.hold(0.8);
-        await new Promise<void>((resolve) =>
-          this.track(1.5, (lt) => {
-            chest.setCharge(lt / 1.5);
-            loop?.set(lt / 1.5);
-            if (lt >= 1.5) resolve();
-          }),
-        );
-      }
-    } finally {
-      // the charge hum ends with the charge, also when Skip ends the beat
-      loop?.stop();
+    if (holdMod?.holdToCharge && !params.capture) {
+      await holdMod.holdToCharge({
+        durationSec: 1.5,
+        until: this.skip,
+        onProgress: (c: number) => {
+          chest.setCharge(c);
+          loop?.set(c);
+        },
+        onRelease: () => loop?.release(),
+      });
+    } else {
+      await this.hold(0.8);
+      await new Promise<void>((resolve) =>
+        this.track(1.5, (lt) => {
+          chest.setCharge(lt / 1.5);
+          loop?.set(lt / 1.5);
+          if (lt >= 1.5) resolve();
+        }),
+      );
     }
     this.stopIfSkipped();
+    loop?.stop();
     // 200 ms hush, then the burst (visual leads the boom by 1-2 frames)
     this.audio.duck?.(-18, 0.05);
     await this.hold(0.2);
