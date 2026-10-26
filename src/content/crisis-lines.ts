@@ -1,9 +1,9 @@
 /**
- * Crisis lines by country, checked 2026-10-23 against each service's own site, or an official government page where
- * that was the source that could be read (emergency numbers, India's 181). A number that couldn't be confirmed from one
- * of those is left out, and so is a cost or name the source didn't state.
+ * Crisis lines by country, checked 2026-10-23 (Singapore, South Africa and Malta 2026-10-25) against each service's own
+ * site, or an official government page where that was the source that could be read (emergency numbers, India's 181). A
+ * number that couldn't be confirmed from one of those is left out, and so is a cost or name the source didn't state.
  */
-export type RegionId = 'us' | 'ca' | 'uk' | 'ie' | 'au' | 'nz' | 'in' | 'elsewhere';
+export type RegionId = 'us' | 'ca' | 'uk' | 'ie' | 'au' | 'nz' | 'in' | 'sg' | 'za' | 'mt' | 'elsewhere';
 
 export interface CrisisLine {
   name: string;
@@ -16,6 +16,8 @@ export interface Region {
   name: string;
   /** Emergency numbers, first one shown first. Empty for "Somewhere else". */
   emergency: string[];
+  /** What an emergency number covers when it isn't everything, shown under its "Call <number>" button. */
+  emergencyNotes?: Record<string, string>;
   lines: CrisisLine[];
 }
 
@@ -98,10 +100,47 @@ export const REGIONS: Region[] = [
       { name: 'Women Helpline', how: 'For women. Call 181, toll-free, 24 hours, in every state except West Bengal.', links: [{ label: 'Call 181', href: 'tel:181' }] },
     ],
   },
+  {
+    id: 'sg',
+    name: 'Singapore',
+    emergency: ['995', '999'],
+    emergencyNotes: { '995': 'Ambulance or fire.', '999': 'Police.' },
+    lines: [
+      {
+        name: 'Samaritans of Singapore (SOS)',
+        how: 'Call 1767, toll-free, or message CareText on WhatsApp at +65\u00a09151\u00a01767. Free, confidential support, 24/7.',
+        links: [
+          { label: 'Call 1767', href: 'tel:1767' },
+          { label: 'WhatsApp', href: 'https://wa.me/6591511767', note: 'Needs the internet and a WhatsApp account. Your usual data rates may apply.' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'za',
+    name: 'South Africa',
+    emergency: ['112', '10177'],
+    emergencyNotes: { '112': 'From a cellphone.', '10177': 'Ambulance.' },
+    lines: [
+      { name: 'SADAG Suicide Crisis Helpline', how: 'Call 0800 567 567. Toll-free, confidential, 24/7.', links: [{ label: 'Call', href: 'tel:0800567567' }] },
+    ],
+  },
+  {
+    id: 'mt',
+    name: 'Malta',
+    emergency: ['112'],
+    lines: [
+      {
+        name: 'Richmond Foundation',
+        how: 'Call 1770. Free from local landlines and mobiles, and confidential.',
+        links: [{ label: 'Call 1770', href: 'tel:1770', note: 'Monday to Friday 8am to 8pm and Saturday 8am to 4pm, Malta time. Closed on Sundays and public holidays.' }],
+      },
+    ],
+  },
   { id: 'elsewhere', name: 'Somewhere else', emergency: [], lines: [] },
 ];
 
-const BY_COUNTRY: Record<string, RegionId> = { US: 'us', CA: 'ca', GB: 'uk', UK: 'uk', IE: 'ie', AU: 'au', NZ: 'nz', IN: 'in' };
+const BY_COUNTRY: Record<string, RegionId> = { US: 'us', CA: 'ca', GB: 'uk', UK: 'uk', IE: 'ie', AU: 'au', NZ: 'nz', IN: 'in', SG: 'sg', ZA: 'za', MT: 'mt' };
 
 /** The first device language whose country has lines here (en-GB gives the UK), else "Somewhere else". */
 export function regionFromLocale(langs: readonly string[]): RegionId {

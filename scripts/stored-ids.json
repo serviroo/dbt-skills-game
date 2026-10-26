@@ -37,7 +37,7 @@
     "stealth-field": ["aquarium","words"],
     "sw-record": ["current","previous","versions"],
     "ink-index": ["0:ice","1:system","2:violet","3:mint","4:shadow"],
-    "region": ["us","ca","uk","ie","au","nz","in","elsewhere"]
+    "region": ["us","ca","uk","ie","au","nz","in","elsewhere","sg","za","mt"]
   },
   "migrations-format": "{ \"kind\": \"<kind above>\", \"from\": \"<old id>\", \"to\": \"<new id, or null when it is retired>\", \"since\": \"<first release that reads it, e.g. 2026-11-02>\" }. The entry says the rename is handled; the code that reads the old id and turns it into the new one ships in the same change.",
   "migrations": []
