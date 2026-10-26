@@ -13,7 +13,7 @@
 // report.json, as the todo list.
 import { PAGE, SCREENS, SKIP, WALK, boot, forward, settle } from './layout-fit.e2e.mjs';
 
-const ENFORCED = ['home', 'skill', 'library', 'moment', 'diary', 'night-watch', 'wardrobe', 'art', 'draw', 'stories', 'write', 'settings', 'shadows'];
+const ENFORCED = ['home', 'skill', 'library', 'moment', 'diary', 'night-watch', 'wardrobe', 'art', 'draw', 'stories', 'write', 'read', 'settings', 'shadows'];
 
 const SIZE = { width: 390, height: 844 };
 const CONTROLS = 'button, a[href], input:not([type=hidden]), select, textarea, [role=button], [role=link], [role=switch], [role=radio], [role=checkbox], [role=tab], [role=slider]';

@@ -203,6 +203,7 @@
   border-color: rgba(var(--acc-hi), 0.8);
 }
 :root[data-dq-accent]:not([data-dq-accent='blue']) .dq-seg-b[aria-checked='true'],
+:root[data-dq-accent]:not([data-dq-accent='blue']) .dq-seg-b[aria-pressed='true'],
 :root[data-dq-accent]:not([data-dq-accent='blue']) .dq-opt[aria-pressed='true'],
 :root[data-dq-accent]:not([data-dq-accent='blue']) .w2-wopt[aria-checked='true'] {
   border-color: var(--acc-a);

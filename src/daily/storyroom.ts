@@ -5,7 +5,8 @@
 import { animate } from '../ui/anim';
 import { cowrite } from '../cowriter/local';
 import type { CowriteReq, CowriteRes, CowriteTurn } from '../cowriter/types';
-import { CARE_KEY } from '../core/stored-names';
+import { BESIDE, CARE_KEY, READ_SIZES, type ReadSize } from '../core/stored-names';
+import { STORY_READ, STORY_START } from '../content/story-lines';
 import { write } from '../core/cleared';
 import type { App, Route, ScreenOut } from './app';
 import { icon } from './art';
@@ -45,6 +46,14 @@ let cared = false;
 
 const store = (app: App) => storyStore(app.store.key);
 const rid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+const shuffled = <T>(xs: readonly T[]) => {
+  const out = [...xs];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+};
 const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -225,6 +234,24 @@ export function writeScreen(app: App, route: Route): ScreenOut {
   const moreWrap = h('div', { class: 'st-morewrap' }, moreBtn, menu);
   const note = h('p', { class: 'st-note', role: 'status', 'aria-live': 'polite' });
 
+  // ---- a starting point: one scripted line at a time, written to the page only on Use this ----
+  const starts = shuffled(STORY_START.prompts);
+  let startAt = 0;
+  const startT = h('p', { class: 'st-start-t', 'aria-live': 'polite' });
+  const startBox = h(
+    'div',
+    { class: 'st-start-box is-hidden', id: `st-start-${rid()}` },
+    startT,
+    h('div', { class: 'st-start-acts' }, btn(STORY_START.another, () => showStart(startAt + 1), { kind: 'ghost', ic: 'shuffle', cls: 'dq-btn--sm' }), btn(STORY_START.use, () => void useStart(), { kind: 'primary', cls: 'dq-btn--sm' })),
+  );
+  const startBtn = h(
+    'button',
+    { type: 'button', class: 'st-start-tg', 'aria-expanded': 'false', 'aria-controls': startBox.id, onclick: () => (startBox.classList.contains('is-hidden') ? showStart(startAt) : closeStart()) },
+    h('span', { class: 'st-start-ic', 'aria-hidden': 'true', html: icon('pencil') }),
+    h('span', { text: STORY_START.ask }),
+  );
+  const start = h('div', { class: 'st-start' }, startBtn, startBox);
+
   // ---- the page ----
   const ta = h('textarea', { class: 'st-ta', maxlength: STORY_CAP.text, spellcheck: 'true', autocapitalize: 'sentences', autocomplete: 'off', 'aria-label': 'Your page', placeholder: 'Start anywhere.', rows: 8 }) as HTMLTextAreaElement;
   const frame = h('div', { class: 'dq-panel st-frame' }, h('span', { class: 'dq-hairbar', 'aria-hidden': 'true' }), ta);
@@ -276,7 +303,7 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     cardsEl,
   );
 
-  const main = h('div', { class: 'st-main' }, titleIn, h('div', { class: 'st-bar' }, chBtn, seg, moreWrap), note, frame, dock);
+  const main = h('div', { class: 'st-main' }, titleIn, h('div', { class: 'st-bar' }, chBtn, seg, moreWrap), note, start, frame, dock);
   const el = h('div', { class: 'st-write' }, h('h1', { class: 'dq-sr', 'data-focus': '', text: 'Your story' }), main, cw);
 
   // ---------- save state ----------
@@ -544,6 +571,8 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     ta.placeholder = tab === 'notes' ? 'Characters, places, anything you want to remember.' : 'Start anywhere.';
     ta.setAttribute('aria-label', tab === 'notes' ? 'Notes for this story' : `Page, ${c.title}`);
     frame.classList.toggle('is-notes', tab === 'notes');
+    start.classList.toggle('is-hidden', tab === 'notes');
+    if (tab === 'notes') closeStart();
     const hh = hist.get(c.id);
     if (hh) hh.base = { text, s: text.length, e: text.length };
     syncSeg();
@@ -762,6 +791,7 @@ export function writeScreen(app: App, route: Route): ScreenOut {
   const item = (ic: string, label: string, fn: () => void) => h('button', { type: 'button', role: 'menuitem', class: 'st-menu-i', onclick: () => (closeMenu(), fn()) }, h('span', { class: 'st-menu-ic', html: icon(ic) }), h('span', { text: label }));
   const nav = navigator as Omit<Navigator, 'share'> & { share?: (d: ShareData) => Promise<void> };
   menu.append(
+    item('book', STORY_READ.open, () => void openRead()),
     item('export', 'Download story', () => void download()),
     ...(typeof nav.share === 'function' ? [item('share', 'Share', () => void share())] : []),
     item('trash', 'Remove story', () => void removeStory()),
@@ -785,6 +815,13 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     else if (k === 'ArrowDown') (e.preventDefault(), items[(i + 1) % items.length]?.focus());
     else if (k === 'ArrowUp') (e.preventDefault(), items[(i - 1 + items.length) % items.length]?.focus());
   });
+  const openRead = async () => {
+    await flushAll();
+    if (!alive) return;
+    // back from reading lands on the chapter they were on
+    r.ch = pageId || undefined;
+    app.go({ name: 'read', id: storyId, ch: pageId || undefined });
+  };
   const download = async () => {
     const { text, name } = await (prepared ?? storyText());
     const r2 = await shareOrSave(text, name, 'text/plain');
@@ -1074,6 +1111,25 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     caret = end;
     return b + pre + piece + post + a;
   };
+  const showStart = (i: number) => {
+    startAt = i % starts.length;
+    startT.textContent = starts[startAt];
+    startBox.classList.remove('is-hidden');
+    startBtn.setAttribute('aria-expanded', 'true');
+    // above the pinned dock, so Use this is never under it on a phone held sideways
+    startBox.scrollIntoView({ block: 'nearest' });
+  };
+  const closeStart = () => {
+    startBox.classList.add('is-hidden');
+    startBtn.setAttribute('aria-expanded', 'false');
+  };
+  const useStart = async () => {
+    if ((await insertText(starts[startAt])) === null) return;
+    closeStart();
+    // the next time they ask, a line they haven't seen yet
+    startAt = (startAt + 1) % starts.length;
+    ta.focus();
+  };
   const replaceSel = async (s: Sel | undefined, t: string) => {
     await toPage();
     const text = ta.value;
@@ -1347,6 +1403,89 @@ export function writeScreen(app: App, route: Route): ScreenOut {
       closeMenu();
       if (sheet) sheet.remove();
       offs.forEach((f) => f());
+    },
+  };
+}
+
+// ---------------- reading ----------------
+const sizeKey = (app: App) => `${app.store.key}${BESIDE.readSize}`;
+/** The reading size chosen on this device. Nothing stored, or a size this version doesn't know, reads as the first. */
+function storedSize(app: App): ReadSize {
+  try {
+    const v = localStorage.getItem(sizeKey(app));
+    return READ_SIZES.find((x) => x === v) ?? READ_SIZES[0];
+  } catch {
+    return READ_SIZES[0];
+  }
+}
+
+/** The story to read straight through, every chapter in order, at the text size they pick. Nothing here changes it. */
+export function readScreen(app: App, route: Route): ScreenOut {
+  const r = route as Extract<Route, { name: 'read' }>;
+  const ss = store(app);
+  let alive = true;
+  const title = h('h1', { class: 'dq-h1', 'data-focus': '' });
+  const sub = h('p', { class: 'dq-text dq-pagesub' });
+  const sizeL = h('span', { class: 'st-read-tools-l', id: `st-size-${rid()}`, text: STORY_READ.size });
+  const sizeBtns = READ_SIZES.map((v) => h('button', { type: 'button', class: `dq-seg-b st-size-b st-size-b--${v}`, 'aria-label': STORY_READ.sizes[v], 'aria-pressed': 'false', onclick: () => setSize(v, true), text: 'A' }));
+  const tools = h('div', { class: 'st-read-tools' }, sizeL, h('div', { class: 'dq-seg st-size', role: 'group', 'aria-labelledby': sizeL.id }, sizeBtns));
+  const body = h('div', { class: 'st-read-body' });
+  const page = h('article', { class: 'dq-panel st-read', 'aria-label': 'Your story' }, h('span', { class: 'dq-hairbar', 'aria-hidden': 'true' }), body);
+  const el = h(
+    'div',
+    { class: 'st-reader' },
+    h('header', { class: 'dq-pagehead st-head' }, h('div', { class: 'st-head-row' }, title), sub),
+    tools,
+    page,
+    h('div', { class: 'dq-actions st-read-acts' }, btn(STORY_READ.back, () => app.back(), { kind: 'quiet', ic: 'pencil' })),
+  );
+  const setSize = (v: ReadSize, keep = false) => {
+    page.dataset.size = v;
+    sizeBtns.forEach((b, i) => b.setAttribute('aria-pressed', String(READ_SIZES[i] === v)));
+    if (keep)
+      write(() => {
+        try {
+          localStorage.setItem(sizeKey(app), v);
+        } catch {
+          /* storage blocked or full: the size still holds while this screen is open */
+        }
+      });
+  };
+  setSize(storedSize(app));
+
+  const init = async () => {
+    const s = await ss.story(r.id);
+    if (!alive) return;
+    if (!s || s.removed) {
+      title.textContent = STORY.title;
+      tools.remove();
+      body.replaceChildren(h('p', { class: 'st-read-empty', text: STORY_READ.gone }));
+      return;
+    }
+    title.textContent = shownTitle(s.title);
+    sub.textContent = storyMeta(app, s);
+    // what this copy holds but couldn't store yet reads as it is in the editor
+    const chs = await Promise.all(s.chapters.map(async (id) => ss.unsaved(id) ?? (await ss.chapter(id))));
+    if (!alive) return;
+    const secs = chs.flatMap((c, i) =>
+      c && c.text.trim()
+        ? [h('section', { class: 'st-read-ch', 'data-id': c.id }, h('h2', { class: 'st-read-ch-h', text: c.title.trim() || `Chapter ${i + 1}` }), h('div', { class: 'st-read-text', text: c.text.replace(/\s+$/, '') }))]
+        : [],
+    );
+    if (!secs.length) return body.replaceChildren(h('p', { class: 'st-read-empty', text: STORY_READ.empty }));
+    body.replaceChildren(...secs);
+    const at = secs.findIndex((x) => x.dataset.id === r.ch);
+    if (at > 0) secs[at].scrollIntoView({ block: 'start' });
+  };
+  void init();
+
+  return {
+    el,
+    title: STORY.title,
+    mode: 'sub',
+    bubbles: [0.9, 0.45],
+    leave: () => {
+      alive = false;
     },
   };
 }

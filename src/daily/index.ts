@@ -14,7 +14,7 @@ import { App, type DailyOpts } from './app';
 import { hubScreen } from './hub';
 import { comfortScreen, diaryScreen, libraryScreen, restScreen, settingsScreen, shadowsScreen } from './pages';
 import { artScreen, drawScreen, pieceScreen } from './artroom';
-import { storiesScreen, writeScreen } from './storyroom';
+import { readScreen, storiesScreen, writeScreen } from './storyroom';
 import { linesScreen } from './lines';
 import { easeScreen, momentScreen } from './moment';
 import { safeScreen } from './safe';
@@ -39,6 +39,7 @@ export function mountDaily(root: HTMLElement, opts: DailyOpts): { unmount(): voi
     piece: pieceScreen,
     stories: storiesScreen,
     write: writeScreen,
+    read: readScreen,
     lines: linesScreen,
     ease: easeScreen,
     moment: momentScreen,

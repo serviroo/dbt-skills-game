@@ -19,7 +19,7 @@
 // `result` in report.json, as the todo list.
 import { fullSave, seedStores } from './me-91-final-save-ids.e2e.mjs';
 
-const ENFORCED = ['library', 'draw', 'skill', 'home', 'diary', 'night-watch', 'wardrobe', 'art', 'stories', 'moment', 'write', 'settings', 'shadows', 'safe-zone'];
+const ENFORCED = ['library', 'draw', 'skill', 'home', 'diary', 'night-watch', 'wardrobe', 'art', 'stories', 'moment', 'write', 'read', 'settings', 'shadows', 'safe-zone'];
 
 const SIZES = [
   { width: 390, height: 844 },
@@ -46,6 +46,7 @@ export const SCREENS = {
   draw: { route: { name: 'draw', kind: 'today' }, also: [{ at: 'shadow ally', route: { name: 'draw', kind: 'ally' } }], sizes: [{ width: 568, height: 320 }, { width: 360, height: 740 }, { width: 375, height: 667 }], shown: '.dq-swatch-n', page: '.dq-draw-frame', clear: '.dq-tool--clear', saved: { button: '.dq-save', msg: '.dq-tools-msg', keep: ['.dq-prompt', '.dq-tools'] } },
   stories: { route: { name: 'stories' } },
   write: { route: { name: 'write', id: 'tale-1' } },
+  read: { route: { name: 'read', id: 'tale-1' } },
   settings: { route: { name: 'settings' }, skip: ['.w2-wardrobe-p'] },
   shadows: { route: { name: 'shadows' }, skip: ['.w2-roster'] },
 };

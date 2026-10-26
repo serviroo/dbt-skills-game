@@ -7,7 +7,7 @@ import { createServer } from 'vite';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const flags = Object.fromEntries(process.argv.slice(2).filter((a) => a.startsWith('--')).map((a) => { const [k, v = 'true'] = a.slice(2).split('='); return [k, v]; }));
 const snapPath = path.resolve(root, flags.snapshot ?? 'scripts/stored-ids.json');
-const KEBAB = new Set(['skill', 'stat', 'event-kind', 'shadow', 'title', 'theme', 'accent', 'card-back', 'plate', 'motion', 'art-paper', 'chapter-kind', 'region']);
+const KEBAB = new Set(['read-size', 'skill', 'stat', 'event-kind', 'shadow', 'title', 'theme', 'accent', 'card-back', 'plate', 'motion', 'art-paper', 'chapter-kind', 'region']);
 
 class MemoryStorage {
   #m = new Map();
@@ -130,6 +130,7 @@ async function collect() {
       plate: [...roster.PLATE_IDS],
       region: crisis.REGIONS.map((r) => r.id),
       motion: [...store.MOTIONS],
+      'read-size': [...names.READ_SIZES],
       'art-paper': Object.keys(ink.PAGE),
       'chapter-kind': [...story.CHAPTER_KINDS],
       'cowriter-card-mode': [...story.CARD_MODES],

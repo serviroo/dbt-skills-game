@@ -1,5 +1,5 @@
 import { parsePrefs, savePrefs, type AudioLevels, type VolumeCtrl } from '../audio/prefs';
-import { AUDIO_KEY, BESIDE } from '../core/stored-names';
+import { AUDIO_KEY, BESIDE, READ_SIZES, type ReadSize } from '../core/stored-names';
 import { write } from '../core/cleared';
 import { artStore, cleanRec, skippedDrafts } from './artstore';
 import { cleanChapter, cleanStory, skippedCards, storyStore, STORY_CAP, type Story } from './storystore';
@@ -9,8 +9,10 @@ interface Preferences {
   audio?: AudioLevels & { v: 1 };
   room?: { aquarium: boolean; words: boolean };
   safeLight?: 'up' | 'dim';
+  readSize?: ReadSize;
 }
 const object = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
+const readSize = (x: unknown): x is ReadSize => (READ_SIZES as readonly unknown[]).includes(x);
 
 export function exportPreferences(store: Store, volume?: VolumeCtrl) {
   const key = store.key;
@@ -29,6 +31,8 @@ export function exportPreferences(store: Store, volume?: VolumeCtrl) {
     }
     const light = localStorage.getItem(`${key}${BESIDE.safeLight}`);
     if (light === 'up' || light === 'dim') preferences.safeLight = light;
+    const size = localStorage.getItem(`${key}${BESIDE.readSize}`);
+    if (readSize(size)) preferences.readSize = size;
   } catch {
     incomplete = true;
   }
@@ -164,6 +168,10 @@ export function restorePreferences(raw: unknown, store: Store, volume?: VolumeCt
     if ((prefs.safeLight === 'up' || prefs.safeLight === 'dim') && localStorage.getItem(`${store.key}${BESIDE.safeLight}`) === null) {
       const light = prefs.safeLight;
       write(() => localStorage.setItem(`${store.key}${BESIDE.safeLight}`, light));
+    }
+    if (readSize(prefs.readSize) && localStorage.getItem(`${store.key}${BESIDE.readSize}`) === null) {
+      const size = prefs.readSize;
+      write(() => localStorage.setItem(`${store.key}${BESIDE.readSize}`, size));
     }
     return saved;
   } catch {

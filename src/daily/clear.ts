@@ -16,7 +16,7 @@ const SESSION = [TAB_KEY, CARE_KEY];
 /** A localStorage key this game wrote: its own keys, each save, and what is kept beside a save under its name. */
 function gameKey(k: string) {
   if (KEYS.includes(k) || SAVES.includes(k)) return true;
-  return SAVES.some((s) => k === `${s}${BESIDE.stealth}` || k === `${s}${BESIDE.safeLight}` || k.startsWith(`${s}${BESIDE.unreadable}.`) || k.startsWith(`${s}${BESIDE.storyLive}.`));
+  return SAVES.some((s) => k === `${s}${BESIDE.stealth}` || k === `${s}${BESIDE.safeLight}` || k === `${s}${BESIDE.readSize}` || k.startsWith(`${s}${BESIDE.unreadable}.`) || k.startsWith(`${s}${BESIDE.storyLive}.`));
 }
 const gameCache = (n: string) => n.startsWith(SW_CACHE.prefix) || n === SW_CACHE.meta;
 
