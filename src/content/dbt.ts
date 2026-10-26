@@ -344,12 +344,13 @@ const SMALL_FIRST: Record<string, string[]> = {
   'Practise a skill': ['Open this app', 'Do one slow breath', 'Read one skill card'],
 };
 const SMALL_ANY = ['Do the very first bit', 'Two minutes of it', 'Get out what I need'];
+/** Each action's smaller steps, from larger to smaller: "smaller" only ever offers the ones after the current step. */
 const SMALLER: Record<string, string[]> = {
-  'Start a task I keep putting off': ['Just open it', 'Read the first line', 'One minute of it'],
-  'Move my body a bit': ['Stand up once', 'Roll my shoulders', 'One minute of it'],
-  'Reply to messages': ['Open the messages app', 'Pick which chat to look at', 'Think of one word to say'],
-  'Tidy one corner': ['Put one thing away', 'Pick up one item', 'One minute of it'],
-  'Practise a skill': ['Notice one breath', 'Read one line', 'Sit still for ten seconds'],
+  'Start a task I keep putting off': ['One minute of it', 'Read the first line', 'Just open it'],
+  'Move my body a bit': ['One minute of it', 'Stand up once', 'Roll my shoulders'],
+  'Reply to messages': ['Think of one word to say', 'Pick which chat to look at', 'Open the messages app'],
+  'Tidy one corner': ['One minute of it', 'Put one thing away', 'Look at the corner for a moment'],
+  'Practise a skill': ['Read one line', 'Sit still for ten seconds', 'Notice one breath'],
 };
 const SMALLER_ANY = ['One minute of it', 'Only get things out', 'Only open it'];
 /** Treats that really are extra: never rest, food, care or people. */
@@ -359,8 +360,12 @@ const smallAction = (a: Answers) => s(a, 'action', 'One helpful action').trim().
 const firstSteps = (a: Answers) => (Object.hasOwn(SMALL_FIRST, smallAction(a)) ? SMALL_FIRST[smallAction(a)] : SMALL_ANY);
 const smallFirst = (a: Answers) => s(a, 'first', firstSteps(a)[0]).trim().replace(/[.!?]+$/, '');
 const smallReward = (a: Answers) => s(a, 'reward', REWARDS[0]).trim().replace(/[.!?]+$/, '');
-/** Smaller than the step already picked, so "smaller" never offers the same step again. */
-const smallerSteps = (a: Answers) => (Object.hasOwn(SMALLER, smallAction(a)) ? SMALLER[smallAction(a)] : SMALLER_ANY).filter((x) => x !== smallFirst(a));
+/** Only steps smaller than the one already picked; none once it's the smallest. */
+function smallerSteps(a: Answers) {
+  const list = Object.hasOwn(SMALLER, smallAction(a)) ? SMALLER[smallAction(a)] : SMALLER_ANY;
+  const at = list.indexOf(smallFirst(a));
+  return at < 0 ? list : list.slice(at + 1);
+}
 const smallPlan = (a: Answers) =>
   `**Helpful action:** ${fullStop(cap(smallAction(a)))} **First small step:** ${fullStop(cap(smallFirst(a)))} **Then, straight after:** ${fullStop(cap(smallReward(a)))} If this doesn't make the step happen more often, change the reward or make the step smaller. That isn't failing. It's shaping, and each small step counts.`;
 
@@ -1657,10 +1662,12 @@ export const SKILLS: Skill[] = [
         kind: 'choice',
         key: 'link',
         text: (a) => `A reward works best straight after the step, not hours later. Picture it now, or say it in words: ${lowerIf(smallFirst(a), OUR_STEPS)}, then ${lowerIf(smallReward(a), REWARDS)}.`,
-        options: [{ label: 'Straight after, got it' }, { label: 'Make the step smaller', go: 'smaller' }],
+        options: [{ label: 'Straight after, got it' }, { label: 'Make the step smaller', go: 'shrink' }],
       },
-      { id: 'plan', kind: 'say', text: smallPlan, options: [{ label: 'Done', go: 'end' }, { label: 'Make the step smaller', go: 'smaller' }] },
+      { id: 'plan', kind: 'say', text: smallPlan, options: [{ label: 'Done', go: 'end' }, { label: 'Make the step smaller', go: 'shrink' }] },
+      { id: 'shrink', kind: 'branch', pick: (a) => (smallerSteps(a).length ? 'smaller' : 'smallest') },
       { id: 'smaller', kind: 'choice', key: 'first', text: 'Smaller is smart. What tiny first step would be easy to start?', options: (a) => o(...smallerSteps(a)), other: 'My own', go: 'plan' },
+      { id: 'smallest', kind: 'say', text: "That's already about as small as a step gets, and small is the point. Keep it, and let the reward do its work.", cta: 'Back to my plan', go: 'plan' },
       { id: 'not-today', kind: 'say', text: "That's okay. Today can just be today. The idea will keep for another time.", cta: 'Done', go: 'end:quiet' },
     ],
   },
