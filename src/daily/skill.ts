@@ -39,7 +39,7 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
   /** showing a place again for Back or Forward: it isn't marked, chimes or asks again */
   let replaying = false;
   const stops: (() => void)[] = [];
-  const ctx: Ctx = { sound: (c) => app.sound(c), reduced: () => app.reduced() };
+  const ctx: Ctx = { sound: (c) => app.sound(c), reduced: () => app.reduced(), buzz: (k) => app.buzz(k) };
   const stepsById = new Map<string, number>();
   sk.steps.forEach((s, i) => s.id && stepsById.set(s.id, i));
 
@@ -296,8 +296,13 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
       }
       case 'timer': {
         const secs = typeof s.seconds === 'function' ? s.seconds(answers) : s.seconds;
-        const nextBtn = btn('Next', next, { kind: 'quiet' });
-        const go = (o: Opt) => () => follow(o.go, i + 1);
+        // moving on while it runs skips the timer: the same soft double pulse as its end, but not on the way to the Safe Zone
+        const leave = (go: Go | undefined) => () => {
+          if (tv.running() && !go?.startsWith('safe')) ctx.buzz?.('end');
+          follow(go, i + 1);
+        };
+        const nextBtn = btn('Next', leave(s.go), { kind: 'quiet' });
+        const go = (o: Opt) => leave(o.go);
         const peers = s.options?.filter((o) => o.instead).map((o) => btn(o.label, go(o), { kind: 'primary' })) ?? [];
         const tv = timerView(ctx, {
           seconds: secs,

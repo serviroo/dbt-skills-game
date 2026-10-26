@@ -47,6 +47,8 @@ export function loadoutArt(id: Skill['art']) {
 export interface Ctx {
   sound(cue: string): void;
   reduced(): boolean;
+  /** A timer's start or end buzz; a screen without one (the Safe Zone) never buzzes. */
+  buzz?(kind: 'start' | 'end'): void;
 }
 
 const NS = 'http://www.w3.org/2000/svg';
@@ -296,6 +298,8 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
       stop?.();
       stop = null;
       ctx.sound('check');
+      // a countdown that ran out well before this frame ended out of sight (frames stop on a hidden page): no late buzz
+      if (t - t0 - dur < 1) ctx.buzz?.('end');
       opts.onDone();
     }
   };
@@ -316,6 +320,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
       );
     }
     opts.onStart?.();
+    ctx.buzz?.('start');
     stop = onFrame(render);
   };
   const tapped = () => {
@@ -325,7 +330,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
   if (opts.start) actions.append(btn(opts.start, tapped, { kind: 'primary' }), ...extra);
   else begin();
   render(now());
-  return { el, stop: () => stop?.(), begin, started: () => t0 >= 0 };
+  return { el, stop: () => stop?.(), begin, started: () => t0 >= 0, running: () => t0 >= 0 && !finished };
 }
 
 /** Press and hold. Letting go early simply drains the ring back; nothing is lost. */

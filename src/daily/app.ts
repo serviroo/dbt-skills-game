@@ -2,7 +2,7 @@ import { companionName, playerName } from '../core/you';
 import { params } from '../core/params';
 import { cleared, onClear } from '../core/cleared';
 import { animate } from '../ui/anim';
-import { WINDOW } from '../motion/tokens';
+import { BUZZ, WINDOW } from '../motion/tokens';
 import { DISMISSED, dismissWindows, LanternWindow, lanternLayer, windowSounds, type WindowSpec } from '../ui/lantern-window';
 import { revealRank } from '../ui/rank-reveal';
 import { isHeavy, MODULE_ORDER, MODULES, type Next, type StatId } from '../content/dbt';
@@ -228,6 +228,21 @@ export class App {
       this.opts.sound?.play(cue);
     } catch {
       /* sound is optional */
+    }
+  }
+
+  /** Vibration has its own switch, shown only where the browser can vibrate. */
+  canBuzz() {
+    return typeof navigator.vibrate === 'function';
+  }
+
+  /** A skill timer's buzz when the player turned it on (Mute is about sound): never in the Safe Zone or out of sight. */
+  buzz(kind: keyof typeof BUZZ) {
+    if (this.route.name === 'safe' || !this.store.state.settings.vibrate || document.visibilityState !== 'visible' || !this.canBuzz()) return;
+    try {
+      navigator.vibrate([...BUZZ[kind]]);
+    } catch {
+      /* vibration is optional */
     }
   }
 
