@@ -157,6 +157,8 @@ export class Director {
     this.skipped = true;
     for (const tr of this.tracks) tr.fn(tr.until, 0);
     this.tracks.clear();
+    // the camera holds where Skip found it: no shot, sway or shake moves it behind the rewards
+    this.shot = null;
     // every sound the cut scene started stops here; the rewards bring their own
     for (const s of this.sounds) s.stop(undefined, 0.04);
     this.sounds.clear();

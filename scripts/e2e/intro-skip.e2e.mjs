@@ -23,7 +23,11 @@ async function skip(h, page, tag) {
   const before = await page.evaluate(() => window.__audioLog.length);
   await page.locator('.ui-skip').click();
   h.expect(await page.evaluate(() => window.__steps(() => !!document.querySelector('.rw'), 600)), `${tag}: the rewards never came after Skip`);
+  const cam = () => page.evaluate(() => { const c = window.__stage.camera; return [...c.position.toArray(), ...c.quaternion.toArray(), c.fov].map((v) => v.toFixed(5)).join(' '); });
+  const held = await cam();
   await page.evaluate(() => { let i = 0; return window.__steps(() => ++i > 30); });
+  const now = await cam();
+  h.expect(now === held, `${tag}: the camera kept moving behind the rewards after Skip (${held} -> ${now})`);
   const after = await page.evaluate((n) => window.__audioLog.slice(n).map((e) => `${e.kind} ${e.name}`), before);
   const bars = await page.evaluate(() => [...document.querySelectorAll('.lb')].map((b) => parseFloat(b.style.height) || 0));
   h.expect(bars.every((v) => v === 0), `${tag}: the letterbox stayed over the rewards (${bars.join(', ')} vh)`);
