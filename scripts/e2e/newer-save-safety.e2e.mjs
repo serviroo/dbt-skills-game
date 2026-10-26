@@ -153,7 +153,13 @@ export async function restore(h, page, raw, name = 'crystal.json') {
   await page.locator('input[type=file]').setInputFiles({ name, mimeType: 'application/json', buffer: Buffer.from(typeof raw === 'string' ? raw : JSON.stringify(raw)) });
   const confirm = page.getByRole('button', { name: 'Restore this Save Crystal' });
   const said = page.locator('.dq-settings [aria-live]').filter({ hasText: /Restored|Nothing changed/ });
-  await Promise.race([confirm.waitFor({ timeout: 15000 }).then(() => confirm.click()), said.first().waitFor({ timeout: 15000 })]);
+  // whichever comes first wins; the other wait is disarmed so it can never tap Restore on a later file's preview
+  let settled = false;
+  await Promise.race([
+    confirm.waitFor({ timeout: 15000 }).then(() => (settled ? null : confirm.click()), () => {}),
+    said.first().waitFor({ timeout: 15000 }),
+  ]);
+  settled = true;
   await said.first().waitFor({ timeout: 15000 });
   return (await said.first().textContent()).trim();
 }
