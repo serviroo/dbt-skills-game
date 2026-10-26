@@ -403,9 +403,11 @@ export function diaryScreen(app: App): ScreenOut {
   const writeTouched = () => {
     st.sync();
     const cur = s.diary[today];
-    const ft = fieldTimes(cur);
-    const at = Math.max(st.now(), Math.max(cur?.updatedAt ?? -Infinity, ...Object.values(ft)) + 1);
-    const e: DiaryEntry = { day: today, emotions: { ...cur?.emotions }, urges: { ...cur?.urges }, note: cur?.note ?? '', updatedAt: cur?.updatedAt ?? 0, ft };
+    const known = fieldTimes(cur);
+    const at = Math.max(st.now(), Math.max(cur?.updatedAt ?? -Infinity, ...Object.values(known)) + 1);
+    // what a newer build stored on the day and its field times stays as it was; only the fields edited here change
+    const ft = { ...cur?.ft, ...known };
+    const e: DiaryEntry = { ...cur, day: today, emotions: { ...cur?.emotions }, urges: { ...cur?.urges }, note: cur?.note ?? '', updatedAt: cur?.updatedAt ?? 0, ft };
     for (const { kind, name } of touched.values()) {
       e[kind][name] = draft[kind][name] ?? null;
       ft[fieldKey(kind, name)] = at;

@@ -1,0 +1,25 @@
+{
+  "v": 1,
+  "created": 1792550000000,
+  "events": [
+    {
+      "id": "s-visit",
+      "t": 1792550000000,
+      "day": "2026-10-21",
+      "k": "visit",
+      "xp": 10
+    }
+  ],
+  "lists": {
+    "comfort": [
+      {
+        "id": "s-comfort",
+        "text": "Music"
+      }
+    ]
+  },
+  "settings": {
+    "sound": true,
+    "motion": "full"
+  }
+}

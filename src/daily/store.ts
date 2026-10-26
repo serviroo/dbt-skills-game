@@ -9,7 +9,12 @@ import { ACCENT_IDS, CARD_BACK_IDS, PLATE_IDS, SHADOW_IDS, THEME_IDS, TITLE_IDS,
 import { cleanName, readYou, writeYou } from '../core/you';
 import { APP_ID, BESIDE, SAVE_KEY, YOU_KEY } from '../core/stored-names';
 
+/**
+ * The save version this build writes. A save from a newer build is read too and keeps its higher number: this build
+ * uses what it knows and keeps the rest as stored (see Kept), so the newer build finds all of it when it comes back.
+ */
 export const SCHEMA = 1;
+/** The Save Crystal's own version. Its `schema` field holds the save version of the state inside (none before: 1). */
 const CRYSTAL_SCHEMA = 2;
 export const ROW_CAP = { emotions: 24, urges: 16 } as const;
 const DAY_TURN_HOURS = 6;
@@ -120,7 +125,30 @@ const LIST_KEYS = ['comfort', 'activities', 'reasons', 'people'] as const;
 const DAY_FLAGS = ['giftDay', 'cardDay', 'greetDay', 'checkinDay'] as const;
 const GONE_CAP = 1000;
 /** Top-level fields this build reads (and the ones only a Save Crystal carries); any other is kept as it was stored. */
-const KNOWN = new Set(['v', 'created', 'events', 'diary', 'lists', 'maps', 'lines', 'settings', 'flags', 'gone', 'setAt', 'profile', 'app', 'exported', 'art', 'stories', 'preferences', 'incomplete']);
+const KNOWN = new Set(['v', 'created', 'events', 'diary', 'lists', 'maps', 'lines', 'settings', 'flags', 'gone', 'setAt', 'profile', 'app', 'exported', 'schema', 'art', 'stories', 'preferences', 'incomplete']);
+/**
+ * What a newer build stored that this one can't use, kept as it was so every write, tab merge and Save Crystal carries
+ * it on. Unknown fields of the records this build rebuilds (events and their data, diary days and field times, list
+ * items, people, maps, lines, settings and flags) stay on those records. This holds the rest: unknown fields of the
+ * profile and of both change-time maps, names and titles for ids this build doesn't know, events of kinds it doesn't
+ * know (left out of progress), lists it doesn't know (joined by id like the lists it knows, never shown), and choices
+ * stored as a value it can't use (the default shows; changing it here replaces it).
+ */
+export interface Kept {
+  profile: Record<string, unknown>;
+  profileAt: Record<string, unknown>;
+  setAt: Record<string, unknown>;
+  names: Record<string, unknown>;
+  titles: unknown[];
+  raw: Partial<Record<SetKey, unknown>>;
+  events: Record<string, unknown>[];
+  /** Records of a newer save this build can't read (no text, a broken day, a second line for a day), as stored. */
+  dropped: Record<'lines' | 'maps' | (typeof LIST_KEYS)[number], unknown[]>;
+  days: Record<string, unknown>;
+  /** Lists a newer build added next to the four this one knows, by name, as stored. Never shown or changed here. */
+  lists: Record<string, unknown>;
+}
+export const KEPT: unique symbol = Symbol('kept');
 export interface State {
   v: number;
   created: number;
@@ -135,6 +163,8 @@ export interface State {
   gone: Record<string, number>;
   /** When each choice was last changed here (missing = never, as in data saved before this existed). */
   setAt: Partial<Record<SetKey, number>>;
+  /** Not enumerable, so never spread or written as itself: stored() writes it back where it came from. */
+  [KEPT]?: Kept;
 }
 
 export function freshState(now = Date.now()): State {
@@ -197,14 +227,226 @@ const putOwn = (o: object, k: string, v: unknown) => Object.defineProperty(o, k,
 const setOwn = (g: Record<string, number>, id: string, t: number) => putOwn(g, id, t);
 /** Fields a newer build stored that this one doesn't read, by name. */
 const extrasOf = (s: object) => Object.entries(s).filter(([k]) => !KNOWN.has(k)).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+/** The fields of a record this build doesn't read, by name. */
+const restOf = (o: object, known: readonly string[]) => Object.entries(o).filter(([k]) => !known.includes(k)).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+/** Puts the fields of raw this build doesn't read back on the record it rebuilt from raw, as stored. */
+function keepRest<T extends object>(into: T, raw: Record<string, unknown>, known: readonly string[]): T {
+  for (const [k, v] of restOf(raw, known)) if (!own(into, k)) putOwn(into, k, v);
+  return into;
+}
+export function kept(s: State): Kept {
+  if (!s[KEPT]) Object.defineProperty(s, KEPT, { value: { profile: {}, profileAt: {}, setAt: {}, names: {}, titles: [], raw: {}, events: [], dropped: { lines: [], maps: [], comfort: [], activities: [], reasons: [], people: [] }, days: {}, lists: {} }, enumerable: false, writable: true, configurable: true });
+  return s[KEPT]!;
+}
+/**
+ * For a save newer than this build: each record as it was stored, and what this build read from it. stored() writes the
+ * stored form back for as long as this build hasn't changed the record, so its own trimming and limits (XP per event,
+ * text length, diary rows) never reach a newer build's data.
+ */
+const AS_STORED = new WeakMap<object, { raw: unknown; read: string }>();
+function twin<T extends object>(rec: T, raw: unknown, on: boolean): T {
+  if (on) AS_STORED.set(rec, { raw, read: JSON.stringify(rec) });
+  return rec;
+}
+const asStored = <T>(rec: T): T => {
+  const t = rec && typeof rec === 'object' ? AS_STORED.get(rec as object) : undefined;
+  return (t && t.read === JSON.stringify(rec) ? t.raw : rec) as T;
+};
+const EV_KEYS = ['id', 't', 'day', 'k', 'xp', 'stat', 'skill', 'data'];
+const ENTRY_KEYS = ['day', 'emotions', 'urges', 'note', 'updatedAt', 'ft'];
+const ITEM_KEYS = ['id', 'text', 'at'];
+const PERSON_KEYS = ['id', 'name', 'phone', 'at'];
+const MAP_KEYS = ['id', 't', 'urge', 'p1', 'c1', 'p2', 'c2', 'choice', 'at'];
+const LINE_KEYS = ['day', 'id', 'tag', 'text', 't'];
+const PROFILE_KEYS = ['theme', 'accent', 'cardBack', 'plate', 'title', 'playerName', 'companion', 'names', 'region', 'titlesSeen', 'setAt'];
+const REGION = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+/** Choices with a fixed set of values: one stored as anything else is kept (see Kept) and the default shows. */
+const USABLE: Partial<Record<SetKey, (v: unknown) => boolean>> = {
+  sound: (v) => typeof v === 'boolean',
+  motion: (v) => (MOTIONS as readonly unknown[]).includes(v),
+  theme: (v) => (THEME_IDS as readonly unknown[]).includes(v),
+  accent: (v) => (ACCENT_IDS as readonly unknown[]).includes(v),
+  cardBack: (v) => (CARD_BACK_IDS as readonly unknown[]).includes(v),
+  plate: (v) => (PLATE_IDS as readonly unknown[]).includes(v),
+  title: (v) => v === '' || (TITLE_IDS as readonly unknown[]).includes(v),
+  region: (v) => typeof v === 'string' && (v === '' || (v.length <= 24 && REGION.test(v))),
+};
+const BLANK = freshState(0);
+const SETTINGS_KEYS = Object.keys(BLANK.settings);
+const FLAG_KEYS = Object.keys(BLANK.flags);
 /** What is written to this device and into a Save Crystal: the wave 2 fields move out of settings, flags and setAt into profile. */
 function stored(s: State) {
   const { theme, accent, cardBack, plate, title, playerName, companion, names, region, ...settings } = s.settings;
   const { titlesSeen, ...flags } = s.flags;
-  const setAt: Record<string, number> = {};
-  const profileAt: Record<string, number> = {};
-  for (const [k, t] of Object.entries(s.setAt)) if (typeof t === 'number') ((PROFILE_SET_KEYS as string[]).includes(k) ? profileAt : setAt)[k] = t;
-  return { ...s, settings, flags, setAt, profile: { theme, accent, cardBack, plate, title, playerName, companion, names, region, titlesSeen, setAt: profileAt } };
+  const k = s[KEPT];
+  const as = <T>(key: SetKey, v: T) => (k && own(k.raw, key) ? k.raw[key] : v);
+  const setAt: Record<string, unknown> = { ...k?.setAt };
+  const profileAt: Record<string, unknown> = { ...k?.profileAt };
+  for (const [key, t] of Object.entries(s.setAt)) if (typeof t === 'number') putOwn((PROFILE_SET_KEYS as string[]).includes(key) ? profileAt : setAt, key, t);
+  const back = <T>(l: T[], extra?: unknown[]) => (extra?.length ? [...l.map(asStored), ...extra] : l.map(asStored));
+  return {
+    ...s,
+    events: back(s.events, k?.events),
+    diary: { ...k?.days, ...Object.fromEntries(Object.entries(s.diary).map(([d, e]) => [d, asStored(e)])) },
+    lists: { ...Object.fromEntries(LIST_KEYS.map((key) => [key, back<Item | Person>(s.lists[key], k?.dropped[key])])), ...k?.lists },
+    maps: back(s.maps, k?.dropped.maps),
+    lines: back(s.lines, k?.dropped.lines),
+    settings: { ...settings, emotionRows: asStored(settings.emotionRows), urgeRows: asStored(settings.urgeRows), sound: as('sound', settings.sound), motion: as('motion', settings.motion) },
+    flags,
+    setAt,
+    profile: {
+      ...k?.profile,
+      theme: as('theme', theme),
+      accent: as('accent', accent),
+      cardBack: as('cardBack', cardBack),
+      plate: as('plate', plate),
+      title: as('title', title),
+      playerName,
+      companion,
+      names: { ...k?.names, ...names },
+      region: as('region', region),
+      titlesSeen: k?.titles.length ? [...titlesSeen, ...k.titles] : titlesSeen,
+      setAt: profileAt,
+    },
+  };
+}
+/**
+ * Takes what another copy kept from a newer build (see Kept), and the fields it holds that this build doesn't read.
+ * A field both hold keeps this copy's value unless theirs wins: the stored copy when folding in another tab (this
+ * build never changes them, so the latest write has the latest), the newer save version when restoring a Crystal.
+ */
+function adoptKept(into: State, from: State, theirsWin: boolean) {
+  const put = (dst: object, entries: [string, unknown][]) => {
+    for (const [k, v] of entries) if (theirsWin || !own(dst, k)) putOwn(dst, k, v);
+  };
+  put(into, extrasOf(from));
+  put(into.settings, restOf(from.settings, SETTINGS_KEYS));
+  put(into.flags, restOf(from.flags, FLAG_KEYS));
+  const b = from[KEPT];
+  if (!b) return;
+  const a = kept(into);
+  put(a.profile, Object.entries(b.profile));
+  put(a.profileAt, Object.entries(b.profileAt));
+  put(a.setAt, Object.entries(b.setAt));
+  put(a.names, Object.entries(b.names));
+  const titles = new Set(a.titles.map((t) => JSON.stringify(t)));
+  for (const t of b.titles) if (!titles.has(JSON.stringify(t))) a.titles.push(t);
+  // lines have no ids: each stored form once; records of a list join by id (see joinRaw)
+  const have = new Set(a.dropped.lines.map((x) => JSON.stringify(x)));
+  for (const x of b.dropped.lines) if (!have.has(JSON.stringify(x))) a.dropped.lines.push(x);
+  put(a.days, Object.entries(b.days));
+  const ids = new Set([...into.events.map((e) => e.id), ...a.events.map((e) => e.id)]);
+  for (const e of b.events) {
+    if (ids.has(e.id as string)) continue;
+    ids.add(e.id as string);
+    a.events.push(e);
+  }
+}
+/** The id of a record in a list this build can't read ('' = none: such a record is matched by its whole stored form). */
+const rawId = (x: unknown) => (isObj(x) && typeof x.id === 'string' && x.id ? x.id : '');
+const rawAt = (x: unknown) => (isObj(x) ? (num(x.at) ?? 0) : 0);
+/**
+ * Joins their list of records this build can't read into mine (a new list), by the rules of the lists it knows: by id,
+ * mine keep their order and theirs not seen here are appended. On a tab merge (theirsWin) their copy of a record wins
+ * unless mine was added later, as this build never changes such records; on a restore the file's copy wins only when
+ * it is from a newer save version (not when mine was added later), and one removed here comes back newer than its
+ * removal. A record without an id is kept once per stored form.
+ */
+function joinRaw(mine: unknown[], theirs: unknown[], theirsWin: boolean, restore?: { gone: Record<string, number>; now: number }) {
+  const out = [...mine];
+  const idx = new Map<string, number>();
+  const forms = new Set<string>();
+  out.forEach((x, i) => {
+    const id = rawId(x);
+    if (!id) forms.add(JSON.stringify(x));
+    else if (!idx.has(id)) idx.set(id, i);
+  });
+  for (const x of theirs) {
+    const id = rawId(x);
+    if (!id) {
+      const f = JSON.stringify(x);
+      if (!forms.has(f)) (forms.add(f), out.push(x));
+      continue;
+    }
+    const i = idx.get(id);
+    if (i !== undefined) {
+      if (theirsWin && rawAt(x) >= rawAt(out[i])) out[i] = x;
+      continue;
+    }
+    idx.set(id, out.length);
+    const g = restore ? goneAt(restore.gone, id) : -Infinity;
+    out.push(isObj(x) && g >= rawAt(x) ? { ...x, at: Math.max(restore!.now, g + 1) } : x);
+  }
+  return out;
+}
+/** What a removal at least as new as its add hides, left out (see prune). */
+const pruneRaw = (l: unknown[], gone: Record<string, number>) => l.filter((x) => !rawId(x) || goneAt(gone, rawId(x)) < rawAt(x));
+/**
+ * Lists a newer build added, and the records of the known lists this build can't read, joined from another copy (see
+ * joinRaw). On a tab merge every removal applies to them as to the lists this build knows; a restore applies none. A
+ * list stored as something other than a list is taken whole, by adoptKept's rule.
+ */
+function adoptRaw(into: State, from: State, restore?: { newer: boolean; now: number }) {
+  const b = from[KEPT];
+  if (!into[KEPT] && !b) return;
+  const k = kept(into);
+  const theirsWin = restore ? restore.newer : true;
+  const back = restore && { gone: into.gone, now: restore.now };
+  const settle = (l: unknown[]) => (restore ? l : pruneRaw(l, into.gone));
+  for (const key of ['comfort', 'activities', 'reasons', 'people', 'maps'] as const) k.dropped[key] = settle(b ? joinRaw(k.dropped[key], b.dropped[key], theirsWin, back) : k.dropped[key]);
+  for (const [key, l] of Object.entries(b?.lists ?? {})) {
+    const m = own(k.lists, key) ? k.lists[key] : undefined;
+    if (Array.isArray(m) && Array.isArray(l)) putOwn(k.lists, key, joinRaw(m, l, theirsWin, back));
+    else if (m === undefined || theirsWin) putOwn(k.lists, key, l);
+  }
+  for (const [key, l] of Object.entries(k.lists)) if (Array.isArray(l)) putOwn(k.lists, key, settle(l));
+}
+/**
+ * On records both copies hold (the same key), the fields this build doesn't read, by adoptKept's rule; inner does the
+ * same one level down (an event's data).
+ */
+function adoptRest<T extends object>(mine: T[], theirs: T[], keyOf: (x: T) => string, known: readonly string[], theirsWin: boolean, inner?: (m: T, t: T, raw?: Record<string, unknown>) => boolean, when?: (m: T, t: T) => boolean) {
+  const map = new Map(theirs.map((x) => [keyOf(x), x]));
+  for (const m of mine) {
+    const t = map.get(keyOf(m));
+    if (!t || t === m || (when && !when(m, t))) continue;
+    // a record kept as stored takes the same fields in its stored form, so its values past this build's limits are
+    // still what gets written (see AS_STORED)
+    const was = AS_STORED.get(m);
+    const raw = was && isObj(was.raw) && was.read === JSON.stringify(m) ? was.raw : undefined;
+    for (const [k, v] of restOf(t, known)) {
+      if (!(theirsWin || !own(m, k))) continue;
+      putOwn(m, k, v);
+      if (raw) putOwn(raw, k, v);
+    }
+    const whole = inner ? inner(m, t, raw) : true;
+    if (raw && whole) was!.read = JSON.stringify(m);
+  }
+}
+/** The fields a newer build stored on events this copy already has, and in their data. */
+function adoptEventRest(mine: Ev[], theirs: Ev[], theirsWin: boolean) {
+  adoptRest(mine, theirs, (e) => e.id, EV_KEYS, theirsWin, (m, t, raw) => {
+    if (!isObj(t.data)) return true;
+    const known: readonly string[] = (EV_DATA as Partial<Record<EvKind, readonly string[]>>)[m.k] ?? [];
+    // false when the stored form's data isn't an object to hold them: then the record is written as this build reads it
+    let whole = true;
+    for (const [k, v] of restOf(t.data, known)) {
+      if (!m.data) m.data = {};
+      if (!(theirsWin || !own(m.data, k))) continue;
+      putOwn(m.data, k, v);
+      if (!raw) continue;
+      if (raw.data === undefined) raw.data = {};
+      if (isObj(raw.data)) putOwn(raw.data, k, v);
+      else whole = false;
+    }
+    return whole;
+  });
+}
+/** The kept part of a copy in a form two copies can compare (see canon). */
+function keptCanon(s: State) {
+  const k = s[KEPT];
+  const sorted = (o: object | undefined) => (o ? Object.entries(o).sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0)) : []);
+  return [s.v, restOf(s.settings, SETTINGS_KEYS), restOf(s.flags, FLAG_KEYS), sorted(k?.profile), sorted(k?.profileAt), sorted(k?.setAt), sorted(k?.names), (k?.titles ?? []).map((t) => JSON.stringify(t)).sort(), (k?.events ?? []).map((e) => String(e.id)).sort(), k ? Object.values(k.dropped).map((l) => l.map((x) => JSON.stringify(x)).sort()) : [], sorted(k?.days), sorted(k?.lists).map(([key, l]) => [key, Array.isArray(l) ? l.map((x) => JSON.stringify(x)).sort() : l])];
 }
 /** Each id once, the first kept. */
 function firstById<T extends { id: string }>(list: T[]) {
@@ -217,7 +459,8 @@ function capGone(entries: [string, number][]) {
   for (const [id, t] of entries.sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).slice(0, GONE_CAP)) setOwn(g, id, t);
   return g;
 }
-const flat = (x: object) => JSON.stringify(x, Object.keys(x).sort());
+/** A record as text with keys sorted at every depth, so two copies of the same thing always read the same. */
+const flat = (x: object) => JSON.stringify(x, (_k, v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : v));
 const atOf = (x: { at?: number }) => x.at ?? 0;
 /** Each id once: mine keep their order, theirs not seen here are appended; on both sides the later-added copy wins. */
 function unionInto<T extends { id: string; at?: number }>(mine: T[], theirs: T[]) {
@@ -239,12 +482,22 @@ function prune<T extends { id: string; at?: number }>(list: T[], gone: Record<st
 }
 type SetVal = boolean | string | string[];
 const nameId = (k: SetKey) => (k.startsWith('name:') ? (k.slice(5) as ShadowId) : null);
+/** The choice as stored: a value this build can't use (see Kept) counts as itself, not as the default it shows. */
 function getSet(s: State, k: SetKey): SetVal {
+  const raw = s[KEPT]?.raw;
+  if (raw && own(raw, k)) return raw[k] as SetVal;
   const id = nameId(k);
   if (id) return own(s.settings.names, id) ? (s.settings.names[id] ?? '') : '';
   return k === 'safeCredit' ? s.flags.safeCredit : s.settings[k as Exclude<SetKey, NameKey | 'safeCredit'>];
 }
 function putSet(s: State, k: SetKey, v: SetVal) {
+  const usable = USABLE[k];
+  if (usable) {
+    const fits = usable(v);
+    if (fits) delete s[KEPT]?.raw[k];
+    else putOwn(kept(s).raw, k, v);
+    if (!fits) v = getSet(BLANK, k);
+  }
   const id = nameId(k);
   if (id) {
     if (typeof v === 'string' && v) s.settings.names[id] = v;
@@ -266,6 +519,7 @@ function canon(s: State) {
     SET_KEYS.map((k) => [getSet(s, k), s.setAt[k] ?? 0]),
     [s.flags.rankSeen, s.flags.wardenSeen, s.flags.therapistLineShown, ...DAY_FLAGS.map((k) => s.flags[k]), s.flags.questAsideDay, s.flags.questAsideAt, [...s.flags.titlesSeen].sort()],
     extrasOf(s),
+    keptCanon(s),
   ]);
 }
 export function validDay(d: unknown): d is string {
@@ -302,7 +556,7 @@ export function fieldTimes(e: DiaryEntry | undefined): Record<string, number> {
  * One diary day from two copies, field by field: the value set later wins. On equal times a number beats a blank, then
  * the larger number, then the longer note. Commutative and associative, so copies merged in any order agree.
  */
-export function mergeEntry(a: DiaryEntry, b: DiaryEntry): DiaryEntry {
+export function mergeEntry(a: DiaryEntry, b: DiaryEntry, prefer?: 'a' | 'b'): DiaryEntry {
   const ft: Record<string, number> = {};
   const rows = (kind: DiaryKind) => {
     const out: Record<string, number | null> = {};
@@ -334,7 +588,39 @@ export function mergeEntry(a: DiaryEntry, b: DiaryEntry): DiaryEntry {
     note = useB ? b.note : a.note;
     ft.note = useB ? tb : ta;
   }
-  return { day: a.day, emotions, urges, note, updatedAt: Math.max(a.updatedAt, b.updatedAt), ft };
+  const out: DiaryEntry = { day: a.day, emotions, urges, note, updatedAt: Math.max(a.updatedAt, b.updatedAt), ft };
+  // what a newer build stored on the day and its field times: the copy the caller prefers (the stored copy for another
+  // tab, the newer save version for a restore), else the later-saved one, whichever way round they come
+  const rest = (e: DiaryEntry) => JSON.stringify([restOf(e, ENTRY_KEYS), restOf(e.ft ?? {}, []).filter(([k]) => !isFieldKey(k))]);
+  const later = prefer ? prefer === 'b' : b.updatedAt !== a.updatedAt ? b.updatedAt > a.updatedAt : rest(b) > rest(a);
+  for (const e of later ? [a, b] : [b, a]) {
+    for (const [k, v] of restOf(e, ENTRY_KEYS)) putOwn(out, k, v);
+    if (e.ft) for (const [k, v] of Object.entries(e.ft)) if (!isFieldKey(k)) putOwn(ft, k, v);
+  }
+  return out;
+}
+const isFieldKey = (k: string) => k === 'note' || k.startsWith('e:') || k.startsWith('u:');
+/** What this build reads of a diary day, each field with the time it counts from: nothing a newer build added. */
+const entryRead = (e: DiaryEntry) => flat({ day: e.day, emotions: e.emotions, urges: e.urges, note: e.note, updatedAt: e.updatedAt, times: fieldTimes(e) });
+/**
+ * A merged diary day that differs from one copy only in fields a newer build added takes that copy's stored form with
+ * the merged fields laid on it, so a day past this build's limits (a longer note, rows past 5) is still written as
+ * stored (see AS_STORED). A day whose known fields came from both copies is this build's own, written as it reads it.
+ */
+function keepStoredDay(merged: DiaryEntry, ...copies: DiaryEntry[]): DiaryEntry {
+  const read = entryRead(merged);
+  for (const c of copies) {
+    const t = AS_STORED.get(c);
+    if (!t || !isObj(t.raw) || t.read !== JSON.stringify(c) || entryRead(c) !== read) continue;
+    const raw = JSON.parse(JSON.stringify(t.raw)) as Record<string, unknown>;
+    for (const [k, v] of restOf(merged, ENTRY_KEYS)) putOwn(raw, k, v);
+    const times = Object.entries(merged.ft ?? {}).filter(([k]) => !isFieldKey(k));
+    if (times.length && raw.ft === undefined) raw.ft = {};
+    if (times.length && !isObj(raw.ft)) continue;
+    for (const [k, v] of times) putOwn(raw.ft as object, k, v);
+    return twin(merged, raw, true);
+  }
+  return merged;
 }
 
 /** True when a holds a field b lacks, a different value, or a later time for one. */
@@ -352,32 +638,60 @@ function entryAhead(a: DiaryEntry, b: DiaryEntry) {
 export function normalize(raw: unknown): State | null {
   if (!isObj(raw)) return null;
   if (raw.v !== undefined && typeof raw.v !== 'number') return null;
-  const v = typeof raw.v === 'number' ? raw.v : 0;
-  if (v > SCHEMA && (raw.app !== APP_ID || v > CRYSTAL_SCHEMA)) return null;
   if (!Array.isArray(raw.events)) return null;
   if (raw.app !== undefined && raw.app !== APP_ID) return null;
   const base = freshState(num(raw.created) ?? Date.now());
+  // A device save's v is its save version; a Crystal's v is the Crystal's own, with the save version in schema. A newer
+  // one than this build writes is read like any other and keeps its number, so it is never written back as older.
+  const saved = raw.app === APP_ID ? raw.schema : raw.v;
+  if (typeof saved === 'number' && Number.isFinite(saved) && saved > SCHEMA) base.v = saved;
+  const newer = base.v > SCHEMA;
   const kinds = EV_KINDS;
   const stats = Object.values(MODULES).map((m) => m.stat);
   if (Array.isArray(raw.events)) {
     const seen = new Set<string>();
     for (const e of raw.events) {
-      if (!isObj(e) || typeof e.id !== 'string' || seen.has(e.id) || !kinds.includes(e.k as EvKind) || typeof e.day !== 'string' || !validDay(e.day.slice(0, 10))) continue;
+      if (!isObj(e) || typeof e.id !== 'string' || seen.has(e.id)) continue;
+      // a kind a newer build added: kept whole, and left out of this build's progress
+      if (!kinds.includes(e.k as EvKind)) {
+        if (typeof e.k === 'string') {
+          seen.add(e.id);
+          kept(base).events.push(e);
+        }
+        continue;
+      }
+      if (typeof e.day !== 'string' || !validDay(e.day.slice(0, 10))) {
+        // in a newer save, an event this build can't read is kept whole too
+        if (newer) {
+          seen.add(e.id);
+          kept(base).events.push(e);
+        }
+        continue;
+      }
       const ev: Ev = { id: e.id, t: num(e.t) ?? 0, day: e.day.slice(0, 10), k: e.k as EvKind, xp: Math.max(0, Math.min(500, num(e.xp) ?? 0)) };
-      if (stats.includes(e.stat as StatId)) ev.stat = e.stat as StatId;
+      // a stat a newer build added stays on the event; derived() counts only the stats it knows
+      if (stats.includes(e.stat as StatId) || (own(e, 'stat') && e.stat !== undefined)) putOwn(ev, 'stat', e.stat);
       if (typeof e.skill === 'string') ev.skill = e.skill.slice(0, 40);
       if (isObj(e.data)) {
         const d: Ev['data'] = {};
-        for (const [k, val] of Object.entries(e.data)) if (['string', 'number', 'boolean'].includes(typeof val) || val === null) d[k.slice(0, 40)] = typeof val === 'string' ? val.slice(0, 400) : (val as number | boolean | null);
+        const known: readonly string[] = (EV_DATA as Partial<Record<EvKind, readonly string[]>>)[ev.k] ?? [];
+        for (const [k, val] of Object.entries(e.data)) {
+          if (!known.includes(k)) putOwn(d, k, val);
+          else if (['string', 'number', 'boolean'].includes(typeof val) || val === null) d[k] = typeof val === 'string' ? val.slice(0, 400) : (val as number | boolean | null);
+        }
         ev.data = d;
       }
+      keepRest(ev, e, EV_KEYS);
       seen.add(ev.id);
-      base.events.push(ev);
+      base.events.push(twin(ev, e, newer));
     }
   }
   if (isObj(raw.diary)) {
     for (const [day, e] of Object.entries(raw.diary)) {
-      if (!isObj(e) || !validDay(day)) continue;
+      if (!isObj(e) || !validDay(day)) {
+        if (newer) putOwn(kept(base).days, day, e);
+        continue;
+      }
       const rows = (r: unknown) => {
         const out: Record<string, number | null> = {};
         if (isObj(r))
@@ -391,27 +705,40 @@ export function normalize(raw: unknown): State | null {
       if (isObj(e.ft)) {
         const ft: Record<string, number> = {};
         for (const [k, val] of Object.entries(e.ft)) {
-          if (k.length > 64 || num(val) === null) continue;
+          // a field time a newer build added, as stored
+          if (!isFieldKey(k)) putOwn(ft, k, val);
+          if (!isFieldKey(k) || k.length > 64 || num(val) === null) continue;
           const kind = k.startsWith('e:') ? 'emotions' : k.startsWith('u:') ? 'urges' : null;
           if (k === 'note' || (kind && own(entry[kind], k.slice(2)))) ft[k] = val as number;
         }
         if (Object.keys(ft).length) entry.ft = ft;
       }
-      base.diary[day] = entry;
+      base.diary[day] = twin(keepRest(entry, e, ENTRY_KEYS), e, newer);
     }
   }
-  const withAt = <T extends object>(o: T, raw: Record<string, unknown>): T => (num(raw.at) !== null ? { ...o, at: raw.at as number } : o);
-  const items = (x: unknown): Item[] => (Array.isArray(x) ? firstById(x.filter(isObj).map((i) => withAt({ id: str(i.id, 40) || uid(), text: str(i.text, 200) }, i)).filter((i) => i.text)) : []);
+  const withAt = <T extends object>(o: T, raw: Record<string, unknown>, known: readonly string[]): T => keepRest(num(raw.at) !== null ? { ...o, at: raw.at as number } : o, raw, known);
+  /** A list of records; in a newer save, one this build can't read is kept as stored. */
+  const listOf = <T extends { id: string }>(x: unknown, make: (i: Record<string, unknown>) => T, ok: (r: T) => boolean, key: keyof Kept['dropped']): T[] => {
+    if (!Array.isArray(x)) return [];
+    const out: T[] = [];
+    for (const i of x) {
+      const r = isObj(i) ? make(i) : null;
+      if (r && ok(r)) out.push(twin(r, i, newer && isObj(i) && i.id === r.id));
+      else if (newer) kept(base).dropped[key].push(i);
+    }
+    return firstById(out);
+  };
+  const item = (i: Record<string, unknown>): Item => withAt({ id: str(i.id, 40) || uid(), text: str(i.text, 200) }, i, ITEM_KEYS);
   if (isObj(raw.lists)) {
-    base.lists.comfort = items(raw.lists.comfort);
-    base.lists.activities = items(raw.lists.activities);
-    base.lists.reasons = items(raw.lists.reasons);
-    base.lists.people = Array.isArray(raw.lists.people)
-      ? firstById(raw.lists.people.filter(isObj).map((p) => withAt({ id: str(p.id, 40) || uid(), name: str(p.name, 80), phone: str(p.phone, 40) }, p)).filter((p) => p.name))
-      : [];
+    base.lists.comfort = listOf(raw.lists.comfort, item, (i) => !!i.text, 'comfort');
+    base.lists.activities = listOf(raw.lists.activities, item, (i) => !!i.text, 'activities');
+    base.lists.reasons = listOf(raw.lists.reasons, item, (i) => !!i.text, 'reasons');
+    base.lists.people = listOf(raw.lists.people, (p) => withAt({ id: str(p.id, 40) || uid(), name: str(p.name, 80), phone: str(p.phone, 40) }, p, PERSON_KEYS), (p) => !!p.name, 'people');
+    // a list a newer build added: kept as stored, never shown here
+    for (const [k, l] of restOf(raw.lists, LIST_KEYS)) putOwn(kept(base).lists, k, l);
   }
   if (Array.isArray(raw.maps)) {
-    base.maps = firstById(raw.maps.filter(isObj).map((m) => withAt({ id: str(m.id, 40) || uid(), t: num(m.t) ?? 0, urge: str(m.urge), p1: str(m.p1), c1: str(m.c1), p2: str(m.p2), c2: str(m.c2), choice: str(m.choice, 40) }, m)));
+    base.maps = listOf(raw.maps, (m) => withAt({ id: str(m.id, 40) || uid(), t: num(m.t) ?? 0, urge: str(m.urge), p1: str(m.p1), c1: str(m.c1), p2: str(m.p2), c2: str(m.c2), choice: str(m.choice, 40) }, m, MAP_KEYS), () => true, 'maps');
   }
   if (isObj(raw.gone)) base.gone = capGone(Object.entries(raw.gone).filter((e): e is [string, number] => !!e[0] && e[0].length <= 40 && num(e[1]) !== null));
   if (isObj(raw.setAt)) {
@@ -420,48 +747,61 @@ export function normalize(raw: unknown): State | null {
       const t = own(sa, k) ? num(sa[k]) : null;
       if (t !== null) base.setAt[k] = Math.max(0, t);
     }
+    for (const [k, val] of restOf(sa, BASE_SET_KEYS)) putOwn(kept(base).setAt, k, val);
   }
   if (isObj(raw.profile)) {
     const pf = raw.profile;
-    base.settings.theme = oneOf(pf.theme, THEME_IDS, 'classic');
-    base.settings.accent = oneOf(pf.accent, ACCENT_IDS, 'blue');
-    base.settings.cardBack = oneOf(pf.cardBack, CARD_BACK_IDS, 'ring');
-    base.settings.plate = oneOf(pf.plate, PLATE_IDS, 'plain');
-    base.settings.title = oneOf<TitleId | ''>(pf.title, TITLE_IDS, '');
+    for (const k of ['theme', 'accent', 'cardBack', 'plate', 'title', 'region'] as const) if (own(pf, k) && pf[k] !== undefined) putSet(base, k, pf[k] as SetVal);
     base.settings.playerName = cleanName(pf.playerName);
     base.settings.companion = cleanName(pf.companion);
-    base.settings.region = typeof pf.region === 'string' && pf.region.length <= 24 && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(pf.region) ? pf.region : '';
-    if (isObj(pf.names))
+    if (isObj(pf.names)) {
       for (const id of SHADOW_IDS) {
         const n = own(pf.names, id) ? cleanName(pf.names[id]) : '';
         if (n) base.settings.names[id] = n;
       }
-    if (Array.isArray(pf.titlesSeen)) base.flags.titlesSeen = TITLE_IDS.filter((t) => (pf.titlesSeen as unknown[]).includes(t));
-    if (isObj(pf.setAt))
+      for (const [id, n] of restOf(pf.names, SHADOW_IDS)) putOwn(kept(base).names, id, n);
+    }
+    if (Array.isArray(pf.titlesSeen)) {
+      base.flags.titlesSeen = TITLE_IDS.filter((t) => (pf.titlesSeen as unknown[]).includes(t));
+      const titles = kept(base).titles;
+      for (const t of pf.titlesSeen) if (!(TITLE_IDS as readonly unknown[]).includes(t) && !titles.some((x) => JSON.stringify(x) === JSON.stringify(t))) titles.push(t);
+    }
+    if (isObj(pf.setAt)) {
       for (const k of PROFILE_SET_KEYS) {
         const t = own(pf.setAt, k) ? num(pf.setAt[k]) : null;
         if (t !== null) base.setAt[k] = Math.max(0, t);
       }
+      for (const [k, val] of restOf(pf.setAt, PROFILE_SET_KEYS)) putOwn(kept(base).profileAt, k, val);
+    }
+    for (const [k, val] of restOf(pf, PROFILE_KEYS)) putOwn(kept(base).profile, k, val);
   }
   for (const [k, val] of extrasOf(raw)) putOwn(base, k, val);
   if (Array.isArray(raw.lines)) {
     const byDay = new Map<string, LineEntry>();
     for (const l of raw.lines) {
-      if (!isObj(l) || !validDay(l.day) || !str(l.text, 200)) continue;
-      const e: LineEntry = { day: l.day, id: str(l.id, 12), tag: str(l.tag, 24), text: str(l.text, 200), t: num(l.t) ?? 0 };
+      if (!isObj(l) || !validDay(l.day) || !str(l.text, 200)) {
+        if (newer) kept(base).dropped.lines.push(l);
+        continue;
+      }
+      const e: LineEntry = twin(keepRest({ day: l.day, id: str(l.id, 12), tag: str(l.tag, 24), text: str(l.text, 200), t: num(l.t) ?? 0 }, l, LINE_KEYS), l, newer);
       const had = byDay.get(e.day);
-      if (!had || e.t >= had.t) byDay.set(e.day, e);
+      if (!had || e.t >= had.t) {
+        // a newer save's second line for a day is kept as stored
+        if (had && newer) kept(base).dropped.lines.push(AS_STORED.get(had)?.raw ?? had);
+        byDay.set(e.day, e);
+      } else if (newer) kept(base).dropped.lines.push(l);
     }
     base.lines = [...byDay.values()].sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
   }
   if (isObj(raw.settings)) {
     const s = raw.settings;
-    if (typeof s.sound === 'boolean') base.settings.sound = s.sound;
-    base.settings.motion = oneOf(s.motion, MOTIONS, base.settings.motion);
-    if (Array.isArray(s.emotionRows)) base.settings.emotionRows = s.emotionRows.map((r) => str(r, 60)).filter(Boolean).slice(0, ROW_CAP.emotions);
-    if (Array.isArray(s.urgeRows)) base.settings.urgeRows = s.urgeRows.map((r) => str(r, 60)).filter(Boolean).slice(0, ROW_CAP.urges);
+    for (const k of ['sound', 'motion'] as const) if (own(s, k) && s[k] !== undefined) putSet(base, k, s[k] as SetVal);
+    if (Array.isArray(s.emotionRows)) base.settings.emotionRows = twin(s.emotionRows.map((r) => str(r, 60)).filter(Boolean).slice(0, ROW_CAP.emotions), s.emotionRows, newer);
+    if (Array.isArray(s.urgeRows)) base.settings.urgeRows = twin(s.urgeRows.map((r) => str(r, 60)).filter(Boolean).slice(0, ROW_CAP.urges), s.urgeRows, newer);
+    keepRest(base.settings, s, SETTINGS_KEYS);
   }
   if (isObj(raw.flags)) {
+    keepRest(base.flags, raw.flags, FLAG_KEYS);
     const f = raw.flags;
     base.flags.rankSeen = Math.max(0, Math.min(5, num(f.rankSeen) ?? 0));
     base.flags.wardenSeen = f.wardenSeen === true;
@@ -710,18 +1050,25 @@ export class Store {
   }
 
   /** Per field, the later-set value wins (see mergeEntry); a day only one copy has is taken whole. */
-  private mergeDiary(other: Record<string, DiaryEntry>) {
+  private mergeDiary(other: Record<string, DiaryEntry>, prefer: 'a' | 'b') {
     for (const [day, e] of Object.entries(other)) {
       const mine = this.state.diary[day];
-      this.state.diary[day] = mine ? mergeEntry(mine, e) : { ...e, emotions: { ...e.emotions }, urges: { ...e.urges }, ...(e.ft ? { ft: { ...e.ft } } : {}) };
+      if (!mine) {
+        this.state.diary[day] = e;
+        continue;
+      }
+      const merged = mergeEntry(mine, e, prefer);
+      const f = flat(merged);
+      // an unchanged side keeps its object, so a newer save's stored form still reaches stored()
+      this.state.diary[day] = f === flat(mine) ? mine : f === flat(e) ? e : keepStoredDay(merged, mine, e);
     }
   }
 
   /** What only ever grows: events by id, diary per field, the newer line per day, raised flags, the later day flags. */
-  private absorbProgress(other: State) {
+  private absorbProgress(other: State, prefer: 'a' | 'b') {
     this.state.created = Math.min(this.state.created, other.created);
     if (this.addById(this.state.events, other.events)) this.state.events.sort((a, b) => a.t - b.t);
-    this.mergeDiary(other.diary);
+    this.mergeDiary(other.diary, prefer);
     const lines = new Map(this.state.lines.map((l) => [l.day, l]));
     for (const l of other.lines) {
       const mine = lines.get(l.day);
@@ -747,18 +1094,25 @@ export class Store {
    * two copies that fold each other in end up holding the same thing. Arrays change in place: screens hold them.
    */
   private absorb(other: State) {
-    this.absorbProgress(other);
-    // fields from a newer build: the stored copy's value, never dropped
-    for (const [k, v] of extrasOf(other)) putOwn(this.state, k, v);
+    this.absorbProgress(other, 'b');
+    // what a newer build stored: the stored copy's, never dropped
+    adoptKept(this.state, other, true);
+    adoptEventRest(this.state.events, other.events, true);
+    // the line this copy keeps for a day (absorbProgress), when the other copy holds the same one
+    adoptRest(this.state.lines, other.lines, (l) => `${l.day}\n${l.id}\n${l.t}`, LINE_KEYS, true);
+    this.state.v = Math.max(this.state.v, other.v);
     const gone = { ...this.state.gone };
     for (const [id, t] of Object.entries(other.gone)) if (t > goneAt(gone, id)) setOwn(gone, id, t);
     this.state.gone = Object.keys(gone).length > GONE_CAP ? capGone(Object.entries(gone)) : gone;
     for (const k of LIST_KEYS) {
       unionInto<Item | Person>(this.state.lists[k], other.lists[k]);
+      adoptRest<Item | Person>(this.state.lists[k], other.lists[k], (x) => x.id, k === 'people' ? PERSON_KEYS : ITEM_KEYS, true, undefined, (m, t) => atOf(m) === atOf(t));
       prune<Item | Person>(this.state.lists[k], this.state.gone);
     }
     unionInto(this.state.maps, other.maps);
+    adoptRest(this.state.maps, other.maps, (m) => m.id, MAP_KEYS, true, undefined, (m, t) => atOf(m) === atOf(t));
     prune(this.state.maps, this.state.gone);
+    adoptRaw(this.state, other);
     for (const k of SET_KEYS) {
       const mt = this.state.setAt[k] ?? 0, ot = other.setAt[k] ?? 0;
       const mv = getSet(this.state, k), ov = getSet(other, k);
@@ -771,6 +1125,8 @@ export class Store {
 
   /** Marks a choice as changed now (later than any change this copy made before, whatever the clock does). */
   touch(k: SetKey) {
+    // the choice now holds a value this build set, in place of one it couldn't use
+    delete this.state[KEPT]?.raw[k];
     this.state.setAt[k] = Math.max(this.now(), (this.state.setAt[k] ?? -Infinity) + 1);
   }
 
@@ -806,10 +1162,12 @@ export class Store {
     const collection = new Set<string>();
     for (const e of this.state.events) {
       xp += Math.max(0, e.xp);
-      if (e.stat) stats[e.stat] += 1;
+      if (e.stat && own(stats, e.stat)) stats[e.stat] += 1;
       if (e.k === 'visit') days.add(e.day);
       if ((e.k === 'skill' || e.k === 'card') && isSkillId(e.skill)) collection.add(e.skill);
     }
+    // events this build can't read still carry their XP, so a newer save never shows less
+    for (const e of this.state[KEPT]?.events ?? []) xp += typeof e.xp === 'number' && Number.isFinite(e.xp) ? Math.max(0, Math.min(500, e.xp)) : 0;
     const rank = rankFor(xp);
     return { xp, rank, warden: xp >= WARDEN_XP, nextAt: rank < RANKS.length - 1 ? RANK_XP[rank + 1] : xp < WARDEN_XP ? WARDEN_XP : null, stats, visitDays: [...days].sort(), collection };
   }
@@ -921,18 +1279,27 @@ export class Store {
   }
 
   /**
-   * Union merge for Restore: imported data can only add. Events, list items, people and maps by id (duplicates inside
-   * the file count once; one removed here comes back, newer than its removal), diary per field, the newer line per day,
-   * and the diary rows the file uses, and the titles the file has seen. The Wardrobe picks, the equipped title, each
-   * shadow's name and the crisis-line country come from the file only where this device has no change time for that
-   * choice (the player never set it here), so a new device gets them back; one the player made here, a cleared name
-   * included, always wins. A choice taken from the file takes the file's change time too, never later than this
-   * device's now (now when the file has none), so another open copy doesn't see it as older than its own default.
-   * Explicit sound and motion choices stay on this device, and the file's removals are not applied.
+   * Union merge for Restore: imported data can only add. Events, list items, people and maps by id, in lists a newer
+   * build added too (duplicates inside the file count once; one removed here comes back, newer than its removal), diary
+   * per field, the newer line per day, and the diary rows the file uses, and the titles the file has seen. The Wardrobe
+   * picks, the equipped title, each shadow's name and the crisis-line country come from the file only where this device
+   * has no change time for that choice (the player never set it here), so a new device gets them back; one the player
+   * made here, a cleared name included, always wins. A choice taken from the file takes the file's change time too,
+   * never later than this device's now (now when the file has none), so another open copy doesn't see it as older than
+   * its own default. Explicit sound and motion choices stay on this device, and the file's removals are not applied.
    */
   merge(other: State) {
     this.sync();
-    this.absorbProgress(other);
+    const newer = other.v > this.state.v;
+    this.absorbProgress(other, newer ? 'b' : 'a');
+    // what a newer build stored, from both: on a clash the copy with the newer save version keeps its value, so a
+    // value from an older build never replaces a newer one; on the same version this device's value stays
+    adoptKept(this.state, other, newer);
+    adoptEventRest(this.state.events, other.events, newer);
+    for (const k of LIST_KEYS) adoptRest<Item | Person>(this.state.lists[k], other.lists[k], (x) => x.id, k === 'people' ? PERSON_KEYS : ITEM_KEYS, newer);
+    adoptRest(this.state.maps, other.maps, (m) => m.id, MAP_KEYS, newer);
+    adoptRest(this.state.lines, other.lines, (l) => `${l.day}\n${l.id}\n${l.t}`, LINE_KEYS, newer);
+    this.state.v = Math.max(this.state.v, other.v);
     const bring = <T extends { id: string; at?: number }>(mine: T[], theirs: T[]) => {
       const seen = new Set(mine.map((x) => x.id));
       for (const x of theirs) {
@@ -944,6 +1311,7 @@ export class Store {
     };
     for (const k of LIST_KEYS) bring<Item | Person>(this.state.lists[k], other.lists[k]);
     bring(this.state.maps, other.maps);
+    adoptRaw(this.state, other, { newer, now: this.now() });
     const rowsOf = (kind: 'emotions' | 'urges', named: string[]) => {
       const names = new Set(named);
       for (const e of Object.values(other.diary)) for (const k of Object.keys(e[kind])) names.add(k);
@@ -962,8 +1330,24 @@ export class Store {
     addRows('urgeRows', rowsOf('urges', other.settings.urgeRows), ROW_CAP.urges);
     const now = this.now();
     const blank = freshState(0);
+    // a choice either copy holds as a value this build can't use came from a newer build: like any field it doesn't
+    // read, the newer save version's value wins, with its change time
+    const raws = new Set<SetKey>();
+    for (const k of Object.keys(USABLE) as SetKey[]) {
+      const mine = own(this.state[KEPT]?.raw ?? {}, k);
+      if (!mine && !own(other[KEPT]?.raw ?? {}, k)) continue;
+      // otherwise the ordinary rule below decides, unless this device holds its own raw value
+      if (!newer || !own(other.setAt, k)) {
+        if (mine) raws.add(k);
+        continue;
+      }
+      raws.add(k);
+      putSet(this.state, k, getSet(other, k));
+      // later than this device's own change, so no other open copy undoes it
+      this.state.setAt[k] = own(this.state.setAt, k) ? Math.max(now, (this.state.setAt[k] ?? 0) + 1) : Math.min(other.setAt[k] ?? now, now);
+    }
     for (const k of ['sound', 'motion', ...PROFILE_SET_KEYS] as SetKey[]) {
-      if (own(this.state.setAt, k)) continue;
+      if (own(this.state.setAt, k) || raws.has(k)) continue;
       if ((k === 'sound' || k === 'motion') && getSet(this.state, k) !== getSet(blank, k)) continue;
       const ov = getSet(other, k);
       const ft = own(other.setAt, k) ? other.setAt[k] : undefined;
@@ -979,6 +1363,6 @@ export class Store {
   /** The Save Crystal, from what is stored now. extra carries what lives outside this state (drawings from IndexedDB). */
   exportJSON(extra: Record<string, unknown> = {}) {
     this.sync();
-    return JSON.stringify({ app: APP_ID, exported: new Date(this.now()).toISOString(), ...stored(this.state), v: CRYSTAL_SCHEMA, ...extra });
+    return JSON.stringify({ app: APP_ID, exported: new Date(this.now()).toISOString(), ...stored(this.state), v: CRYSTAL_SCHEMA, schema: this.state.v, ...extra });
   }
 }

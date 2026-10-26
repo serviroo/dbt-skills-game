@@ -1,0 +1,32 @@
+{
+  "created": 1792550000000,
+  "events": [
+    {
+      "id": "s-visit",
+      "t": 1792550000000,
+      "day": "2026-10-21",
+      "k": "visit",
+      "xp": 10
+    },
+    {
+      "id": "s-skill",
+      "t": 1792550000000,
+      "day": "2026-10-21",
+      "k": "skill",
+      "xp": 20,
+      "stat": "sense",
+      "skill": "wise-mind"
+    }
+  ],
+  "diary": {
+    "2026-10-21": {
+      "day": "2026-10-21",
+      "emotions": {
+        "Joy": 2
+      },
+      "urges": {},
+      "note": "Short note.",
+      "updatedAt": 1792550000000
+    }
+  }
+}

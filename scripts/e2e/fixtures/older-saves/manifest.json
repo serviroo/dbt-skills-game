@@ -1,0 +1,15 @@
+{
+  "about": "Every save format The Lantern has written, one small synthetic file each (no real player's data). Rebuilt from each commit's stored(), freshState() and exportJSON() in src/daily/store.ts, and from the Save Crystal export in src/daily/pages.ts. older-save-formats.e2e.mjs boots each one, backs it up, restores it on a clean device and backs it up again.",
+  "fixtures": [
+    { "file": "local-8761293.json", "kind": "local", "writer": "8761293", "wrote": "save version 1: events (card events with the card's skill, or none for a special card, and no data), diary with field times, lists with add times, removals, maps, lines, settings, flags, setAt, and profile with the Wardrobe, title, names, titlesSeen and their change times" },
+    { "file": "local-8761293.json", "kind": "local", "writer": "0530e1e", "wrote": "the same shape: 0530e1e moved storage names into core/stored-names.ts and typed MOTIONS and EV_DATA, but stored() and freshState() did not change, so it has no file of its own" },
+    { "file": "crystal-v1-8761293.json", "kind": "crystal", "writer": "8761293", "wrote": "Save Crystal v1: app, exported, the save (v 1), art (one drawing without a revision, one with), stories without cards" },
+    { "file": "../crystal-v1.json", "kind": "crystal", "writer": "8761293", "wrote": "the Save Crystal v1 kept since 0530e1e for me-94, checked here too" },
+    { "file": "crystal-v2-88dffba.json", "kind": "crystal", "writer": "88dffba", "wrote": "Save Crystal v2: as v1 plus story cards, preferences (audio levels, room, Safe Zone light) and incomplete; the save inside stays version 1" },
+    { "file": "local-60adf11.json", "kind": "local", "writer": "60adf11", "wrote": "adds profile.region and profile.setAt.region" },
+    { "file": "local-7e3bb09.json", "kind": "local", "writer": "7e3bb09", "wrote": "card events record data.slot, and special cards data.special instead of no skill" },
+    { "file": "local-6ee8c03.json", "kind": "local", "writer": "6ee8c03", "wrote": "adds flags.questAsideDay and flags.questAsideAt" },
+    { "file": "sparse-unversioned.json", "kind": "local", "writer": "synthetic", "wrote": "no version, only events and one diary day: everything else must load as defaults" },
+    { "file": "sparse-no-profile.json", "kind": "local", "writer": "synthetic", "wrote": "version 1 without profile, flags, setAt, maps or lines, and a list item without an add time" }
+  ]
+}

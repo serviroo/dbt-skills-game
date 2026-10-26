@@ -1,0 +1,376 @@
+{
+  "app": "the-quiet-lantern",
+  "exported": "2026-10-22T02:33:30.000Z",
+  "v": 1,
+  "created": 1792463600000,
+  "events": [
+    {
+      "id": "h-visit-1",
+      "t": 1792550000000,
+      "day": "2026-10-21",
+      "k": "visit",
+      "xp": 10
+    },
+    {
+      "id": "h-skill-1",
+      "t": 1792550001000,
+      "day": "2026-10-21",
+      "k": "skill",
+      "xp": 20,
+      "stat": "stamina",
+      "skill": "stop"
+    },
+    {
+      "id": "h-checkin-1",
+      "t": 1792550002000,
+      "day": "2026-10-21",
+      "k": "checkin",
+      "xp": 5,
+      "data": {
+        "feel": "Calm",
+        "level": 2
+      }
+    },
+    {
+      "id": "h-feedback-1",
+      "t": 1792550003000,
+      "day": "2026-10-21",
+      "k": "feedback",
+      "xp": 0,
+      "data": {
+        "answer": "A bit"
+      }
+    },
+    {
+      "id": "h-diary-1",
+      "t": 1792550004000,
+      "day": "2026-10-21",
+      "k": "diary",
+      "xp": 5
+    },
+    {
+      "id": "h-art-1",
+      "t": 1792550005000,
+      "day": "2026-10-21",
+      "k": "art",
+      "xp": 5,
+      "data": {
+        "kind": "today"
+      }
+    },
+    {
+      "id": "h-rest-1",
+      "t": 1792550006000,
+      "day": "2026-10-21",
+      "k": "rest",
+      "xp": 5,
+      "data": {
+        "title": "Quiet hour",
+        "quiet": true
+      }
+    },
+    {
+      "id": "h-line-1",
+      "t": 1792550007000,
+      "day": "2026-10-21",
+      "k": "line",
+      "xp": 0,
+      "data": {
+        "id": "d3"
+      }
+    },
+    {
+      "id": "h-safe-1",
+      "t": 1792550008000,
+      "day": "2026-10-21",
+      "k": "safe",
+      "xp": 0
+    },
+    {
+      "id": "h-story-1",
+      "t": 1792550009000,
+      "day": "2026-10-21",
+      "k": "story",
+      "xp": 5
+    },
+    {
+      "id": "h-visit-2",
+      "t": 1792636400000,
+      "day": "2026-10-22",
+      "k": "visit",
+      "xp": 10
+    },
+    {
+      "id": "h-skill-2",
+      "t": 1792636401000,
+      "day": "2026-10-22",
+      "k": "skill",
+      "xp": 20,
+      "stat": "agility",
+      "skill": "dear-man"
+    },
+    {
+      "id": "h-card-1",
+      "t": 1792550000500,
+      "day": "2026-10-21",
+      "k": "card",
+      "xp": 0,
+      "skill": "wise-mind"
+    },
+    {
+      "id": "h-card-2",
+      "t": 1792636400500,
+      "day": "2026-10-22",
+      "k": "card",
+      "xp": 0
+    }
+  ],
+  "diary": {
+    "2026-10-21": {
+      "day": "2026-10-21",
+      "emotions": {
+        "Joy": 3,
+        "Sadness": null
+      },
+      "urges": {
+        "Urge to give up on today": 1
+      },
+      "note": "A slow walk helped.",
+      "updatedAt": 1792550004000,
+      "ft": {
+        "e:Joy": 1792550004000,
+        "e:Sadness": 1792550003500,
+        "u:Urge to give up on today": 1792550004000,
+        "note": 1792550004000
+      }
+    },
+    "2026-10-22": {
+      "day": "2026-10-22",
+      "emotions": {
+        "Calm": 4
+      },
+      "urges": {},
+      "note": "",
+      "updatedAt": 1792636402000
+    }
+  },
+  "lists": {
+    "comfort": [
+      {
+        "id": "h-comfort-tea",
+        "text": "Warm tea",
+        "at": 1792550000100
+      }
+    ],
+    "activities": [
+      {
+        "id": "h-act-walk",
+        "text": "A short walk",
+        "at": 1792550000200
+      }
+    ],
+    "reasons": [
+      {
+        "id": "h-reason-cat",
+        "text": "Feeding the cat",
+        "at": 1792550000300
+      }
+    ],
+    "people": [
+      {
+        "id": "h-person-sam",
+        "name": "Sam",
+        "phone": "0123 456 789",
+        "at": 1792550000400
+      }
+    ]
+  },
+  "maps": [
+    {
+      "id": "h-map-1",
+      "t": 1792550000600,
+      "urge": "Scroll all night",
+      "p1": "Feels easy",
+      "c1": "Tired tomorrow",
+      "p2": "Sleep",
+      "c2": "Bored",
+      "choice": "Sleep",
+      "at": 1792550000600
+    }
+  ],
+  "lines": [
+    {
+      "day": "2026-10-21",
+      "id": "d3",
+      "tag": "calm",
+      "text": "One small step is enough.",
+      "t": 1792550007000
+    }
+  ],
+  "settings": {
+    "sound": false,
+    "motion": "reduce",
+    "emotionRows": [
+      "Joy",
+      "Sadness",
+      "Calm"
+    ],
+    "urgeRows": [
+      "Urge to give up on today",
+      "Urge to scroll"
+    ]
+  },
+  "flags": {
+    "rankSeen": 1,
+    "wardenSeen": false,
+    "giftDay": "2026-10-22",
+    "cardDay": "2026-10-22",
+    "greetDay": "2026-10-22",
+    "safeCredit": true,
+    "therapistLineShown": true,
+    "checkinDay": "2026-10-21"
+  },
+  "gone": {
+    "h-comfort-old": 1792550000900
+  },
+  "setAt": {
+    "sound": 1792550000010,
+    "motion": 1792550000011,
+    "emotionRows": 1792550000012,
+    "urgeRows": 1792550000013,
+    "safeCredit": 1792550000014
+  },
+  "profile": {
+    "theme": "night",
+    "accent": "violet",
+    "cardBack": "gate",
+    "plate": "ticks",
+    "title": "self-healer",
+    "playerName": "Robin",
+    "companion": "Pip",
+    "names": {
+      "sable": "Ash",
+      "bramble": "Moss"
+    },
+    "titlesSeen": [
+      "self-healer",
+      "professional-lurker"
+    ],
+    "setAt": {
+      "theme": 1792550000020,
+      "accent": 1792550000021,
+      "cardBack": 1792550000022,
+      "plate": 1792550000023,
+      "title": 1792550000024,
+      "playerName": 1792550000025,
+      "companion": 1792550000026,
+      "name:sable": 1792550000027,
+      "name:bramble": 1792550000028
+    }
+  },
+  "art": [
+    {
+      "id": "h-draw-1",
+      "kind": "today",
+      "day": "2026-10-21",
+      "t": 1792550005000,
+      "updated": 1792550005000,
+      "prompt": "Something that felt calm",
+      "n": 2,
+      "strokes": [
+        {
+          "i": 1,
+          "w": 6,
+          "p": [
+            100,
+            100,
+            140,
+            160,
+            220,
+            180
+          ]
+        },
+        {
+          "i": 3,
+          "w": 12,
+          "p": [
+            300,
+            400,
+            310,
+            420
+          ]
+        }
+      ]
+    },
+    {
+      "id": "h-draw-2",
+      "kind": "ally",
+      "day": "2026-10-22",
+      "t": 1792636405000,
+      "updated": 1792636406000,
+      "name": "Brave",
+      "n": 2,
+      "rev": "r2",
+      "from": [],
+      "strokes": [
+        {
+          "i": 1,
+          "w": 6,
+          "p": [
+            100,
+            100,
+            140,
+            160,
+            220,
+            180
+          ]
+        },
+        {
+          "i": 3,
+          "w": 12,
+          "p": [
+            300,
+            400,
+            310,
+            420
+          ]
+        }
+      ]
+    }
+  ],
+  "stories": {
+    "stories": [
+      {
+        "id": "h-story",
+        "title": "The Lantern Path",
+        "created": 1792550009000,
+        "updated": 1792550009500,
+        "rev": "r1",
+        "chapters": [
+          "h-chapter-1"
+        ],
+        "notes": "h-notes"
+      }
+    ],
+    "chapters": [
+      {
+        "id": "h-chapter-1",
+        "story": "h-story",
+        "kind": "page",
+        "title": "At the gate",
+        "text": "The moth waited by the gate until the light came back.",
+        "updated": 1792550009500,
+        "rev": "r1"
+      },
+      {
+        "id": "h-notes",
+        "story": "h-story",
+        "kind": "notes",
+        "title": "Notes",
+        "text": "Remember the bridge.",
+        "updated": 1792550009400,
+        "rev": "r1"
+      }
+    ]
+  }
+}
