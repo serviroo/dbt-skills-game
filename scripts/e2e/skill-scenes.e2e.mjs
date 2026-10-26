@@ -339,12 +339,14 @@ async function slowGpu(h, late) {
 }
 
 /** A live scene of this kind, drawn, alone in its window, over its hidden flat picture and inside its stage and the screen. */
-async function looks(h, page, tag, kind, vp, stage = '.dq-timer-stage') {
-  // it keeps drawing; how fast is checked on the real clock (scene-live, scene-slow-gpu), since these run on a fake one
+async function looks(h, page, tag, kind, vp, stage = '.dq-timer-stage', { stopped = false } = {}) {
+  // it keeps drawing; how fast is checked on the real clock (scene-live, scene-slow-gpu). On a stopped page clock the
+  // clock is run half a second instead, so the scene's own time moves only that much however slowly the page draws.
   const s0 = await scenes(page);
-  await h.sleep(1500);
+  if (stopped) await page.clock.runFor(500);
+  else await h.sleep(1500);
   const s = await scenes(page);
-  h.expect(s.live === 1 && s.contexts === 1 && s.frames - s0.frames >= 3, `${kind} ${tag}: ${s.frames - s0.frames} frames in 1.5 s, ${JSON.stringify(s)}`);
+  h.expect(s.live === 1 && s.contexts === 1 && s.frames - s0.frames >= 3, `${kind} ${tag}: ${s.frames - s0.frames} frames in ${stopped ? '0.5 s of page time' : '1.5 s'}, ${JSON.stringify(s)}`);
   h.expect(s.last.kind === kind && !s.last.still, `${kind} ${tag}: expected a moving ${kind} scene, got ${JSON.stringify(s.last)}`);
   h.expect((await page.locator('.dq-scene canvas').count()) === 1, `${kind} ${tag}: expected one canvas in the scene window`);
   h.expect((await flat(page)).every((on) => !on), `${kind} ${tag}: the flat picture still shows over the 3D scene`);
@@ -358,9 +360,24 @@ async function looks(h, page, tag, kind, vp, stage = '.dq-timer-stage') {
 
 /** The scene's probe after jumping the page clock forward `ms` and letting a few frames draw. */
 async function after(h, page, ms) {
+  // the page clock is stopped: the jump runs the next animation frame once, which draws the scene at the new moment
   if (ms > 0) await page.clock.fastForward(Math.round(ms));
-  await h.sleep(160);
   return (await scenes(page)).last;
+}
+
+/**
+ * Waits, with the page clock stopped, until the scene shows: it shows once its first frame is drawn, which it looks for
+ * on animation frames, so the clock is stepped a frame at a time until then. The scene's time then starts from where it
+ * first shows, however long the GPU took, and moves only when a check moves it.
+ */
+async function showsStopped(h, page, where, stage = '.dq-timer-stage') {
+  for (const t0 = Date.now(); !(await page.locator(`${stage}.is-scene-live`).count()); ) {
+    if (Date.now() - t0 > 30000) {
+      await h.shot(page, `fail-${where.replace(/\W+/g, '-')}`);
+      throw new Error(`${where}: the 3D scene never came on screen`);
+    }
+    await page.clock.runFor(16);
+  }
 }
 
 /** The page freezes and comes back: the scene picks up in step with the countdown. Then leaving frees it. */
@@ -371,7 +388,7 @@ async function keepsTime(h, page, kind) {
   await page.clock.resume();
   await h.sleep(1500);
   const c = await pair(page);
-  h.expect(c.s.frames > b.s.frames + 10 && c.s.last.e > b.s.last.e + 1, `${kind} resumed: the scene did not move on (${b.s.frames} -> ${c.s.frames} frames)`);
+  h.expect(c.s.frames > b.s.frames + 10 && c.s.last.e > b.s.last.e + 1, `${kind} resumed: the scene did not move on (${b.s.frames} -> ${c.s.frames} frames, ${b.s.last.e.toFixed(2)} -> ${c.s.last.e.toFixed(2)} s)`);
   inStep(h, c, `${kind} resumed`);
   await page.getByRole('button', { name: 'Leave this skill' }).click();
   await page.locator('.dq-timer-stage').waitFor({ state: 'detached', timeout: 5000 });
@@ -789,19 +806,9 @@ export const scenarios = {
       await page.reload();
       // the clock waits on the ride's first moment, however slowly the page got there, so its start can be seen
       await toStep(h, page, 'urge-surf', 'ride', { pause: true });
-      // it shows once its first frame is drawn, which it looks for on animation frames: the stopped clock is stepped a
-      // frame at a time until then, so the ride starts from where the scene first shows however long the GPU took
-      for (const t0 = Date.now(); !(await page.locator('.dq-timer-stage.is-scene-live').count()); ) {
-        if (Date.now() - t0 > 30000) {
-          await h.shot(page, `fail-wave-${tag}`);
-          throw new Error(`wave ${tag}: the 3D scene never came on screen`);
-        }
-        await page.clock.runFor(16);
-      }
+      await showsStopped(h, page, `wave ${tag}`);
       const first = (await scenes(page)).last;
-      await page.clock.resume();
-      await h.sleep(1200);
-      await looks(h, page, tag, 'wave', vp);
+      await looks(h, page, tag, 'wave', vp, undefined, { stopped: true });
       const seen = [first, await after(h, page, 0)];
       while (seen[seen.length - 1].probe.t < 34) seen.push(await after(h, page, 2500));
       const at = (a, b) => seen.filter((x) => x.probe.t >= a && x.probe.t <= b).map((x) => x.probe.board);
@@ -825,10 +832,10 @@ export const scenarios = {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
       await page.clock.install();
       await page.reload();
-      await toStep(h, page, 'sense-up', 'only-this');
-      await live(h, page, `ring ${tag}`);
-      await h.sleep(1200);
-      await looks(h, page, tag, 'ring', vp);
+      // the clock stays stopped while the breath is read, so the 30 s timer still runs when the pause is checked
+      await toStep(h, page, 'sense-up', 'only-this', { pause: true });
+      await showsStopped(h, page, `ring ${tag}`);
+      await looks(h, page, tag, 'ring', vp, undefined, { stopped: true });
       // one breath: in for 4 s, out for 6; the countdown keeps going round it
       const a = await after(h, page, 0);
       // start from the beginning of a breath: the next one, if this one is already well under way
@@ -897,10 +904,9 @@ export const scenarios = {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
       await page.clock.install();
       await page.reload();
-      await toStep(h, page, 'current-emotion', 'watch');
-      await live(h, page, `tide ${tag}`);
-      await h.sleep(1200);
-      await looks(h, page, tag, 'tide', vp);
+      await toStep(h, page, 'current-emotion', 'watch', { pause: true });
+      await showsStopped(h, page, `tide ${tag}`);
+      await looks(h, page, tag, 'tide', vp, undefined, { stopped: true });
       // two seconds at a time: a jump that long reads as a pause, not as a slow device
       const edge = [(await after(h, page, 0)).probe.shore];
       for (let i = 0; i < 10; i++) edge.push((await after(h, page, 2000)).probe.shore);
