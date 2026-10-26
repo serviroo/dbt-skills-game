@@ -107,10 +107,13 @@ export async function startHarness(flags = {}) {
     trail.set(page, { t0, life, errors });
   }
 
-  /** A fresh, isolated browser profile at phone size, optionally seeded with localStorage before the app runs. */
-  async function open(seed = {}, query = '?mute', viewport = { width: 390, height: 844 }, prepare) {
+  /**
+   * A fresh, isolated browser profile at phone size, optionally seeded with localStorage before the app runs. `device`
+   * adds context options for the kind of device, such as hasTouch for a touch-first phone.
+   */
+  async function open(seed = {}, query = '?mute', viewport = { width: 390, height: 844 }, prepare, device = {}) {
     const t0 = Date.now();
-    const ctx = await browser.newContext({ viewport, deviceScaleFactor: 2, acceptDownloads: true, serviceWorkers: 'block', ...(flags.media === 'true' ? { recordVideo: { dir: out, size: viewport } } : {}) });
+    const ctx = await browser.newContext({ viewport, deviceScaleFactor: 2, acceptDownloads: true, serviceWorkers: 'block', ...device, ...(flags.media === 'true' ? { recordVideo: { dir: out, size: viewport } } : {}) });
     await ctx.addInitScript((s) => {
       if (sessionStorage.getItem('e2e-seeded')) return;
       sessionStorage.setItem('e2e-seeded', '1');

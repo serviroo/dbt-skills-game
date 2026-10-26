@@ -231,9 +231,12 @@ export class App {
     }
   }
 
-  /** Vibration has its own switch, shown only where the browser can vibrate. */
+  /**
+   * Vibration has its own switch, shown only where a buzz can really happen: a touch-first device whose browser can
+   * vibrate. Desktop Chrome and Edge have navigator.vibrate too, but nothing there buzzes.
+   */
   canBuzz() {
-    return typeof navigator.vibrate === 'function';
+    return typeof navigator.vibrate === 'function' && matchMedia('(pointer: coarse)').matches;
   }
 
   /** A skill timer's buzz when the player turned it on (Mute is about sound): never in the Safe Zone or out of sight. */

@@ -1,14 +1,15 @@
-// The optional buzz for skill timers: off by default, its own Settings switch (shown only where the browser can
-// vibrate), one short pulse as a timer starts and a soft double pulse as it ends or is skipped. Nothing every second,
-// on more time, while the page is out of sight, inside the Safe Zone or in the intro, and the choice survives a reload.
+// The optional buzz for skill timers: off by default, its own Settings switch (shown only on a touch-first device whose
+// browser can vibrate), one short pulse as a timer starts and a soft double pulse as it ends or is skipped. Nothing
+// every second, on more time, while the page is out of sight, inside the Safe Zone or in the intro, and the choice
+// survives a reload.
 
 const START = JSON.stringify([40]);
 const END = JSON.stringify([40, 120, 40]);
 const SWITCH = 'Vibrate when a timer starts or ends';
 
 /**
- * navigator.vibrate records each pattern instead of buzzing (or is missing, as on most desktops), and __hide puts the
- * page out of sight the way a switched tab or a locked phone does.
+ * navigator.vibrate records each pattern instead of buzzing (or is missing, as on iPhone Safari), and __hide puts
+ * the page out of sight the way a switched tab or a locked phone does.
  */
 const device = ({ vibrates = true, clock = true } = {}) => async (ctx) => {
   if (clock) await ctx.clock.install();
@@ -25,6 +26,8 @@ const device = ({ vibrates = true, clock = true } = {}) => async (ctx) => {
     };
   }, vibrates);
 };
+/** A phone: touch first, so Settings offers the switch. `touch: false` is a desktop, where a vibrate call does nothing. */
+const open = (h, { touch = true, ...o } = {}) => h.open({ 'dbt.app.v1': h.SEEN }, '?mute', { width: 390, height: 844 }, device(o), { hasTouch: touch });
 /** The buzzes since the last look. */
 const buzzes = async (page) => JSON.stringify(await page.evaluate(() => window.__buzz.splice(0)));
 const none = '[]';
@@ -60,7 +63,7 @@ async function wiseMind(h, page) {
 export const scenarios = {
   /** a player who never touched the switch feels nothing, start to end */
   async 'vibration-off-by-default'(h) {
-    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', { width: 390, height: 844 }, device());
+    const { ctx, page, errors } = await open(h);
     await wiseMind(h, page);
     await page.clock.runFor(21000);
     h.expect((await timer(page).textContent()).trim() === 'Done', 'the Wise Mind timer did not finish');
@@ -77,7 +80,7 @@ export const scenarios = {
 
   /** the switch is a real, readable switch at phone widths, and the choice is saved and comes back after a reload */
   async 'vibration-switch-and-reload'(h) {
-    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', { width: 390, height: 844 }, device({ clock: false }));
+    const { ctx, page, errors } = await open(h, { clock: false });
     await turnOn(h, page);
     await h.openSettings(page);
     const sw = page.getByRole('switch', { name: SWITCH });
@@ -123,7 +126,7 @@ export const scenarios = {
 
   /** one start pulse, one end pulse; nothing every second, on more time or after it ends; moving on early is a skip */
   async 'vibration-timer-start-end'(h) {
-    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', { width: 390, height: 844 }, device());
+    const { ctx, page, errors } = await open(h);
     await turnOn(h, page);
     await wiseMind(h, page);
     let got = await buzzes(page);
@@ -164,7 +167,7 @@ export const scenarios = {
 
   /** no buzz in the Safe Zone: not when it opens over a running timer, and not for its own cool-water timer */
   async 'vibration-not-in-safe-zone'(h) {
-    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', { width: 390, height: 844 }, device());
+    const { ctx, page, errors } = await open(h);
     await turnOn(h, page);
     await wiseMind(h, page);
     h.expect((await buzzes(page)) === only(START), 'the timer did not give one start pulse');
@@ -185,7 +188,7 @@ export const scenarios = {
 
   /** out of sight: pausing and coming back is not a start, an end out of sight is felt by no one, and no late buzz */
   async 'vibration-not-while-hidden'(h) {
-    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', { width: 390, height: 844 }, device());
+    const { ctx, page, errors } = await open(h);
     await turnOn(h, page);
     await wiseMind(h, page);
     h.expect((await buzzes(page)) === only(START), 'the timer did not give one start pulse');
@@ -217,7 +220,7 @@ export const scenarios = {
 
   /** the intro never buzzes, even with the switch on */
   async 'vibration-not-in-intro'(h) {
-    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', { width: 390, height: 844 }, device({ clock: false }));
+    const { ctx, page, errors } = await open(h, { clock: false });
     await turnOn(h, page);
     await page.goto(h.server.url + '/?fresh&mute');
     await h.sleep(2500);
@@ -241,11 +244,37 @@ export const scenarios = {
 
   /** where the browser can't vibrate there is no switch at all, not a dead one */
   async 'vibration-switch-hidden-without-support'(h) {
-    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', { width: 390, height: 844 }, device({ vibrates: false, clock: false }));
+    const { ctx, page, errors } = await open(h, { vibrates: false, clock: false });
     await h.openSettings(page);
     h.expect(await page.locator('.dq-settings [aria-label="Motion"]').isVisible(), 'Settings lost the Motion choice beside it');
     h.expect((await page.getByRole('switch', { name: SWITCH }).count()) === 0, 'Settings shows a vibration switch on a browser that cannot vibrate');
     h.expect(!(await page.getByText(SWITCH).count()), 'Settings mentions vibration on a browser that cannot vibrate');
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /** desktop Chrome and Edge have navigator.vibrate, but nothing there buzzes: no dead switch, and an "on" brought from a phone asks for nothing */
+  async 'vibration-switch-hidden-on-desktop'(h) {
+    const { ctx, page, errors } = await open(h, { touch: false });
+    await page.waitForFunction(() => !!window.__daily, null, { timeout: 30000 });
+    h.expect(await page.evaluate(() => typeof navigator.vibrate === 'function' && !matchMedia('(pointer: coarse)').matches), 'this browser is not a desktop with navigator.vibrate, so it proves nothing');
+    await page.evaluate(() => {
+      const a = window.__daily;
+      a.store.state.settings.vibrate = true;
+      a.store.touch('vibrate');
+      a.store.save();
+    });
+    await wiseMind(h, page);
+    await page.clock.runFor(21000);
+    h.expect((await timer(page).textContent()).trim() === 'Done', 'the Wise Mind timer did not finish');
+    const got = await buzzes(page);
+    h.expect(got === none, `a desktop was asked to vibrate: ${got}`);
+    await page.clock.resume();
+    await page.evaluate(() => window.__daily.go({ name: 'hub' }));
+    await h.openSettings(page);
+    h.expect(await page.locator('.dq-settings [aria-label="Motion"]').isVisible(), 'Settings lost the Motion choice beside it');
+    h.expect((await page.getByRole('switch', { name: SWITCH }).count()) === 0, 'Settings shows a vibration switch on a desktop, where nothing buzzes');
+    h.expect(!(await page.getByText(SWITCH).count()), 'Settings mentions vibration on a desktop');
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },

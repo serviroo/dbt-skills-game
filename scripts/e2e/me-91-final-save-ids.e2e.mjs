@@ -58,10 +58,10 @@ export function fullSave(now) {
     },
     maps: [{ id: 'map-1', t: t0, urge: 'Quit', p1: 'Rest', c1: 'Guilt', p2: 'Pride', c2: 'Tired', choice: 'Wait', at: t0 }],
     lines: ids.line.map((id, i) => ({ day: dayOf(t0 + i * DAY), id, tag: 'STATUS', text: `Line ${id}`, t: t0 + i * DAY })),
-    settings: { sound: false, motion: 'reduce', emotionRows: ['Sadness', 'Joy'], urgeRows: ['Urge to give up on today'] },
+    settings: { sound: false, motion: 'reduce', vibrate: true, emotionRows: ['Sadness', 'Joy'], urgeRows: ['Urge to give up on today'] },
     flags: { rankSeen: 5, wardenSeen: true, giftDay: today, cardDay: today, greetDay: today, safeCredit: false, therapistLineShown: true, checkinDay: today },
     gone: { 'c-old': t0 },
-    setAt: { sound: t0, motion: t0, emotionRows: t0, urgeRows: t0, safeCredit: t0 },
+    setAt: { sound: t0, motion: t0, vibrate: t0, emotionRows: t0, urgeRows: t0, safeCredit: t0 },
     skillPins: { [ids.skill[0]]: { pinned: true, at: t0 }, [ids.skill[1]]: { pinned: false, at: t0 } },
     profile: {
       theme: last(ids.theme),
@@ -241,7 +241,7 @@ export const scenarios = {
     for (const k of ['theme', 'accent', 'cardBack', 'plate', 'title', 'playerName', 'companion', 'region']) expect(kept.profile[k] === save.profile[k], `profile.${k} reset to ${kept.profile[k]}`);
     expect(same(kept.profile.names, save.profile.names), 'a shadow name was dropped: ' + JSON.stringify(kept.profile.names));
     expect(ids.title.every((x) => kept.profile.titlesSeen.includes(x)), 'a title was dropped: ' + kept.profile.titlesSeen);
-    expect(kept.settings.motion === 'reduce' && kept.settings.sound === false, 'sound or motion reset');
+    expect(kept.settings.motion === 'reduce' && kept.settings.sound === false && kept.settings.vibrate === true, 'sound, motion or vibration reset');
     expect(same(kept.lines.map((l) => l.id).sort(), [...ids.line].sort()), 'a line id was dropped');
     expect((await ls(a.page, 'dbt.audio.v1')) === audio, 'audio levels reset');
     expect((await youOf(a.page))?.name === 'Kit', 'names mirror lost');
@@ -290,7 +290,7 @@ export const scenarios = {
     const y = await exportCrystal(b.page, openSettings, path.join(out, 'me91-crystal-y.json'));
     await storedNamesOk(b.page, SAVE, expect);
     const cy = content(y);
-    expect(y.settings.sound === x.settings.sound && y.settings.motion === x.settings.motion, 'restore onto a fresh device did not bring back sound and motion');
+    expect(y.settings.sound === x.settings.sound && y.settings.motion === x.settings.motion && x.settings.vibrate === true && y.settings.vibrate === true, 'restore onto a fresh device did not bring back sound, motion and vibration');
     expect(save.events.every((e) => same(cx.events[e.id], e)), 'the first export changed an event field');
     expect(same(x.gone, save.gone) && Object.entries(save.setAt).every(([k, v]) => x.setAt[k] === v), 'the first export lost removal or setting times');
     expect(x.flags.safeCredit === save.flags.safeCredit && x.setAt.safeCredit === save.setAt.safeCredit, 'visiting the Safe Zone changed its credit choice');
@@ -351,7 +351,7 @@ export const scenarios = {
     expect(s.diary[dayOf(t0)]?.note === 'old note' && s.lists.comfort[0]?.text === 'Blanket', 'old diary or list lost');
     const p = s.profile;
     expect(p && p.theme === ids.theme[0] && p.accent === ids.accent[0] && p.cardBack === ids['card-back'][0] && p.plate === ids.plate[0] && p.title === '' && same(p.names, {}), 'missing profile did not get defaults: ' + JSON.stringify(p));
-    expect(Array.isArray(s.lines) && Array.isArray(s.maps) && s.gone && typeof s.setAt === 'object', 'missing fields did not get defaults');
+    expect(Array.isArray(s.lines) && Array.isArray(s.maps) && s.gone && typeof s.setAt === 'object' && s.settings.vibrate === false, 'missing fields did not get defaults');
     expect(!errors.length, errors.join('\n'));
   },
 

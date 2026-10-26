@@ -298,7 +298,7 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
         const secs = typeof s.seconds === 'function' ? s.seconds(answers) : s.seconds;
         // moving on while it runs skips the timer: the same soft double pulse as its end, but not on the way to the Safe Zone
         const leave = (go: Go | undefined) => () => {
-          if (tv.running() && !go?.startsWith('safe')) ctx.buzz?.('end');
+          if (tv.running() && go !== 'safe' && !go?.startsWith('safe:')) ctx.buzz?.('end');
           follow(go, i + 1);
         };
         const nextBtn = btn('Next', leave(s.go), { kind: 'quiet' });
