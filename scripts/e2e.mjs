@@ -69,7 +69,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, onSignal);
 let failed = 0;
 try {
   h = await startHarness(flags);
-  report = { url: h.server.url, browser: flags.ws ? 'remote ' + flags.ws : 'local', scenarios: [], renderer: h.renderer };
+  report = { url: h.server.url, browser: flags.ws ? 'remote ' + flags.ws : 'local', scenarios: [], renderer: h.renderer, zone: h.zone };
   for (const { name, file, run } of pick) {
     if (interrupted) break;
     const t = Date.now();
