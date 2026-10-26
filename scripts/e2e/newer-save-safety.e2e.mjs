@@ -9,6 +9,9 @@
 // newer-tabs: two open tabs change different known things at the same moment; both changes and every newer field stay.
 // newer-tabs-same-item: the stored copy of an item both tabs hold, added at the same time, differs one level down; the
 // stored copy's value is the one written back.
+// newer-tabs-removals: in a list a newer build added (and among the records of a known list this build can't read), the
+// newer build in another tab removes one, changes one and adds one; this tab writes and keeps exactly that, never
+// showing the list. A Restore of an earlier Save Crystal brings the removed ones back, newer than their removal.
 // old-crystal-unknown-choice: a version 1 Save Crystal holding a choice this build can't use, with no change time, is
 // restored on a clean device and keeps that choice.
 // newer-bad-files: a file from another app, a broken file and a cancelled preview change nothing at all.
@@ -55,10 +58,12 @@ export function newerSave() {
         someday: { day: 'someday', emotions: { Joy: 1 }, urges: {}, note: 'Kept for later', updatedAt: T },
       },
       lists: {
-        comfort: [{ id: 'nc-tea', text: 'Tea', at: T, colour: 'teal' }, { id: 'nc-long', text: 'Slow tea by the window. '.repeat(13).slice(0, 300), at: T }],
+        comfort: [{ id: 'nc-tea', text: 'Tea', at: T, colour: 'teal' }, { id: 'nc-long', text: 'Slow tea by the window. '.repeat(13).slice(0, 300), at: T }, { id: 'nc-pic', picture: 'sun', at: T }],
         activities: [],
         reasons: [],
         people: [{ id: 'np-sam', name: 'Sam', phone: '0123', at: T, pronouns: 'they' }],
+        // a fifth list, which this build doesn't have
+        places: [{ id: 'npl-park', text: 'The park', at: T, pin: { x: 2 } }, { id: 'npl-cafe', text: 'The cafe', at: T }, 'A place with no id'],
       },
       maps: [{ id: 'nm1', t: T, urge: 'Scroll', p1: 'Rest', c1: 'Late', p2: 'Sleep', c2: 'Bored', choice: 'wait', at: T, sketch: [1, 2] }],
       lines: [
@@ -95,6 +100,7 @@ export function newerParts(save, crystal = false) {
     todayTime: save.diary?.[TODAY]?.ft?.['x:tide'],
     item: save.lists?.comfort?.find((i) => i.id === 'nc-tea')?.colour,
     person: save.lists?.people?.find((p) => p.id === 'np-sam')?.pronouns,
+    places: save.lists?.places,
     map: save.maps?.find((m) => m.id === 'nm1')?.sketch,
     line: save.lines?.find((l) => l.day === D)?.voice,
     motion: save.settings?.motion,
@@ -117,6 +123,7 @@ export function newerRecords(save, rows = true) {
     bigXp: ev('nx1'),
     noDay: ev('nd1'),
     longText: save.lists?.comfort?.find((i) => i.id === 'nc-long'),
+    noText: save.lists?.comfort?.find((i) => i.id === 'nc-pic'),
     lines: save.lines?.filter((l) => l.day === D).sort((a, b) => (a.id < b.id ? -1 : 1)),
     oddDay: save.diary?.someday,
     ...(rows ? { rows: save.settings?.emotionRows } : {}),
@@ -236,6 +243,7 @@ export const scenarios = {
       // the same records without what the newer build put on them, and one with this device's own value for it
       local.events = local.events.filter((e) => e.id === 'nv1').map(({ glow, ...e }) => e);
       local.lists.comfort[0].colour = 'blue';
+      local.lists.places[0].pin = 'mine';
       const t = await h.open({ [h.SAVE]: JSON.stringify(local), 'dbt.app.v1': h.SEEN, [h.YOU]: YOU });
       await h.reachHub(t.page);
       await restore(h, t.page, file);
@@ -244,10 +252,10 @@ export const scenarios = {
       h.expect(s.events.some((e) => e.id === 'ns1') && s.events.some((e) => e.id === 'nq1'), `${label}: restore did not add the file's progress`);
       h.expect(same(s.events.find((e) => e.id === 'nv1')?.glow, { ring: 2 }), `${label}: an event both copies hold did not take the file's newer field`);
       await t.ctx.close();
-      return [s.garden, s.lists.comfort.find((i) => i.id === 'nc-tea')?.colour];
+      return [s.garden, s.lists.comfort.find((i) => i.id === 'nc-tea')?.colour, s.lists.places?.find((i) => i.id === 'npl-park')?.pin, s.lists.places?.length];
     };
-    h.expect(same(await clash(1, 'older device'), [file.garden, 'teal']), 'a value from the newer Save Crystal lost to an older save on this device');
-    h.expect(same(await clash(3, 'same version'), [{ seeds: 'mine' }, 'blue']), "restoring replaced this device's value from the same version");
+    h.expect(same(await clash(1, 'older device'), [file.garden, 'teal', { x: 2 }, 3]), 'a value from the newer Save Crystal lost to an older save on this device');
+    h.expect(same(await clash(3, 'same version'), [{ seeds: 'mine' }, 'blue', 'mine', 3]), "restoring replaced this device's value from the same version");
   },
 
   async 'newer-tabs'(h) {
@@ -302,6 +310,56 @@ export const scenarios = {
     const want = newerParts(newerSave());
     const got = newerParts(s);
     h.expect(same(want, got), `two tabs holding the same item lost newer values: ${diff(want, got)}`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  async 'newer-tabs-removals'(h) {
+    const { ctx, page: a, errors } = await h.open({ [h.SAVE]: JSON.stringify(newerSave()), 'dbt.app.v1': h.SEEN, [h.YOU]: YOU });
+    await h.reachHub(a);
+    const file = await crystal(h, a, 'removals-before');
+    const b = await ctx.newPage();
+    b.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+    await b.goto(a.url());
+    await h.reachHub(b);
+    // the newer build in the other tab, as it would store it: a place and a picture-only comfort record removed (each
+    // leaving its removal time), a place changed, a place added
+    const R = T + 10;
+    const theirs = await b.evaluate(([key, R]) => {
+      const s = JSON.parse(localStorage.getItem(key));
+      s.lists.places = (s.lists.places ?? []).filter((p) => p.id !== 'npl-park');
+      for (const p of s.lists.places) if (p.id === 'npl-cafe') p.hours = 'late';
+      s.lists.places.push({ id: 'npl-lake', text: 'The lake', at: R });
+      s.lists.comfort = s.lists.comfort.filter((i) => i.id !== 'nc-pic');
+      s.gone = { ...s.gone, 'npl-park': R, 'nc-pic': R };
+      localStorage.setItem(key, JSON.stringify(s));
+      return s;
+    }, [h.SAVE, R]);
+    await settings(h, a);
+    await rename(a, 'Robin Vale');
+    await a.waitForFunction((k) => JSON.parse(localStorage.getItem(k) ?? 'null')?.profile?.playerName === 'Robin Vale', h.SAVE, { timeout: 10000 });
+    const s = await saveOf(h, a);
+    h.expect(!s.lists.comfort.some((i) => i.id === 'nc-pic'), 'a comfort record the other tab removed came back');
+    h.expect(same(s.lists.places, theirs.lists.places), `the other tab's places were not kept exactly: ${JSON.stringify(s.lists.places)}`);
+    h.expect(s.gone['npl-park'] === R && s.gone['nc-pic'] === R, `the other tab's removals were not kept: ${JSON.stringify(s.gone)}`);
+    // never shown here
+    await a.evaluate(() => window.__daily.go({ name: 'comfort' }));
+    await a.locator('.dq-h1', { hasText: 'Comfort' }).waitFor({ timeout: 10000 });
+    const shown = await a.evaluate(() => document.body.innerText);
+    h.expect(!/The (park|cafe|lake)|A place with no id/.test(shown), 'a list this build does not have is shown');
+    await h.shot(a, 'newer-removals-comfort-390x844');
+    await a.evaluate(() => window.__daily.go({ name: 'hub' }));
+    // a Restore brings back what was removed here, every field as in the file, newer than its removal
+    h.expect(/Restored/.test(await restore(h, a, file, 'removals-before.json')), 'the earlier Save Crystal was not restored');
+    await a.reload();
+    await h.reachHub(a);
+    const back = await saveOf(h, a);
+    const park = back.lists.places.find((p) => p.id === 'npl-park');
+    const pic = back.lists.comfort.find((i) => i.id === 'nc-pic');
+    const parkFile = file.lists.places.find((p) => p.id === 'npl-park');
+    h.expect(park && park.at > R && same({ ...park, at: T }, parkFile), `a Restore did not bring the removed place back newer than its removal: ${JSON.stringify(park)}`);
+    h.expect(pic && pic.at > R && pic.picture === 'sun', `a Restore did not bring the removed comfort record back: ${JSON.stringify(pic)}`);
+    h.expect(same(back.lists.places.map((p) => p.id ?? p), ['npl-cafe', 'A place with no id', 'npl-lake', 'npl-park']) && back.lists.places[0].hours === 'late', `after the Restore the places are ${JSON.stringify(back.lists.places)}`);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },

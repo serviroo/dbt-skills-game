@@ -131,8 +131,8 @@ const KNOWN = new Set(['v', 'created', 'events', 'diary', 'lists', 'maps', 'line
  * it on. Unknown fields of the records this build rebuilds (events and their data, diary days and field times, list
  * items, people, maps, lines, settings and flags) stay on those records. This holds the rest: unknown fields of the
  * profile and of both change-time maps, names and titles for ids this build doesn't know, events of kinds it doesn't
- * know (left out of progress), and choices stored as a value it can't use (the default shows; changing it here
- * replaces it).
+ * know (left out of progress), lists it doesn't know (joined by id like the lists it knows, never shown), and choices
+ * stored as a value it can't use (the default shows; changing it here replaces it).
  */
 export interface Kept {
   profile: Record<string, unknown>;
@@ -145,6 +145,8 @@ export interface Kept {
   /** Records of a newer save this build can't read (no text, a broken day, a second line for a day), as stored. */
   dropped: Record<'lines' | 'maps' | (typeof LIST_KEYS)[number], unknown[]>;
   days: Record<string, unknown>;
+  /** Lists a newer build added next to the four this one knows, by name, as stored. Never shown or changed here. */
+  lists: Record<string, unknown>;
 }
 export const KEPT: unique symbol = Symbol('kept');
 export interface State {
@@ -233,7 +235,7 @@ function keepRest<T extends object>(into: T, raw: Record<string, unknown>, known
   return into;
 }
 export function kept(s: State): Kept {
-  if (!s[KEPT]) Object.defineProperty(s, KEPT, { value: { profile: {}, profileAt: {}, setAt: {}, names: {}, titles: [], raw: {}, events: [], dropped: { lines: [], maps: [], comfort: [], activities: [], reasons: [], people: [] }, days: {} }, enumerable: false, writable: true, configurable: true });
+  if (!s[KEPT]) Object.defineProperty(s, KEPT, { value: { profile: {}, profileAt: {}, setAt: {}, names: {}, titles: [], raw: {}, events: [], dropped: { lines: [], maps: [], comfort: [], activities: [], reasons: [], people: [] }, days: {}, lists: {} }, enumerable: false, writable: true, configurable: true });
   return s[KEPT]!;
 }
 /**
@@ -286,7 +288,7 @@ function stored(s: State) {
     ...s,
     events: back(s.events, k?.events),
     diary: { ...k?.days, ...Object.fromEntries(Object.entries(s.diary).map(([d, e]) => [d, asStored(e)])) },
-    lists: Object.fromEntries(LIST_KEYS.map((key) => [key, back<Item | Person>(s.lists[key], k?.dropped[key])])),
+    lists: { ...Object.fromEntries(LIST_KEYS.map((key) => [key, back<Item | Person>(s.lists[key], k?.dropped[key])])), ...k?.lists },
     maps: back(s.maps, k?.dropped.maps),
     lines: back(s.lines, k?.dropped.lines),
     settings: { ...settings, emotionRows: asStored(settings.emotionRows), urgeRows: asStored(settings.urgeRows), sound: as('sound', settings.sound), motion: as('motion', settings.motion) },
@@ -329,10 +331,9 @@ function adoptKept(into: State, from: State, theirsWin: boolean) {
   put(a.names, Object.entries(b.names));
   const titles = new Set(a.titles.map((t) => JSON.stringify(t)));
   for (const t of b.titles) if (!titles.has(JSON.stringify(t))) a.titles.push(t);
-  for (const key of Object.keys(b.dropped) as (keyof Kept['dropped'])[]) {
-    const have = new Set(a.dropped[key].map((x) => JSON.stringify(x)));
-    for (const x of b.dropped[key]) if (!have.has(JSON.stringify(x))) a.dropped[key].push(x);
-  }
+  // lines have no ids: each stored form once; records of a list join by id (see joinRaw)
+  const have = new Set(a.dropped.lines.map((x) => JSON.stringify(x)));
+  for (const x of b.dropped.lines) if (!have.has(JSON.stringify(x))) a.dropped.lines.push(x);
   put(a.days, Object.entries(b.days));
   const ids = new Set([...into.events.map((e) => e.id), ...a.events.map((e) => e.id)]);
   for (const e of b.events) {
@@ -340,6 +341,65 @@ function adoptKept(into: State, from: State, theirsWin: boolean) {
     ids.add(e.id as string);
     a.events.push(e);
   }
+}
+/** The id of a record in a list this build can't read ('' = none: such a record is matched by its whole stored form). */
+const rawId = (x: unknown) => (isObj(x) && typeof x.id === 'string' && x.id ? x.id : '');
+const rawAt = (x: unknown) => (isObj(x) ? (num(x.at) ?? 0) : 0);
+/**
+ * Joins their list of records this build can't read into mine (a new list), by the rules of the lists it knows: by id,
+ * mine keep their order and theirs not seen here are appended. On a tab merge (theirsWin) their copy of a record wins
+ * unless mine was added later, as this build never changes such records; on a restore the file's copy wins only when
+ * it is from a newer save version (not when mine was added later), and one removed here comes back newer than its
+ * removal. A record without an id is kept once per stored form.
+ */
+function joinRaw(mine: unknown[], theirs: unknown[], theirsWin: boolean, restore?: { gone: Record<string, number>; now: number }) {
+  const out = [...mine];
+  const idx = new Map<string, number>();
+  const forms = new Set<string>();
+  out.forEach((x, i) => {
+    const id = rawId(x);
+    if (!id) forms.add(JSON.stringify(x));
+    else if (!idx.has(id)) idx.set(id, i);
+  });
+  for (const x of theirs) {
+    const id = rawId(x);
+    if (!id) {
+      const f = JSON.stringify(x);
+      if (!forms.has(f)) (forms.add(f), out.push(x));
+      continue;
+    }
+    const i = idx.get(id);
+    if (i !== undefined) {
+      if (theirsWin && rawAt(x) >= rawAt(out[i])) out[i] = x;
+      continue;
+    }
+    idx.set(id, out.length);
+    const g = restore ? goneAt(restore.gone, id) : -Infinity;
+    out.push(isObj(x) && g >= rawAt(x) ? { ...x, at: Math.max(restore!.now, g + 1) } : x);
+  }
+  return out;
+}
+/** What a removal at least as new as its add hides, left out (see prune). */
+const pruneRaw = (l: unknown[], gone: Record<string, number>) => l.filter((x) => !rawId(x) || goneAt(gone, rawId(x)) < rawAt(x));
+/**
+ * Lists a newer build added, and the records of the known lists this build can't read, joined from another copy (see
+ * joinRaw). On a tab merge every removal applies to them as to the lists this build knows; a restore applies none. A
+ * list stored as something other than a list is taken whole, by adoptKept's rule.
+ */
+function adoptRaw(into: State, from: State, restore?: { newer: boolean; now: number }) {
+  const b = from[KEPT];
+  if (!into[KEPT] && !b) return;
+  const k = kept(into);
+  const theirsWin = restore ? restore.newer : true;
+  const back = restore && { gone: into.gone, now: restore.now };
+  const settle = (l: unknown[]) => (restore ? l : pruneRaw(l, into.gone));
+  for (const key of ['comfort', 'activities', 'reasons', 'people', 'maps'] as const) k.dropped[key] = settle(b ? joinRaw(k.dropped[key], b.dropped[key], theirsWin, back) : k.dropped[key]);
+  for (const [key, l] of Object.entries(b?.lists ?? {})) {
+    const m = own(k.lists, key) ? k.lists[key] : undefined;
+    if (Array.isArray(m) && Array.isArray(l)) putOwn(k.lists, key, joinRaw(m, l, theirsWin, back));
+    else if (m === undefined || theirsWin) putOwn(k.lists, key, l);
+  }
+  for (const [key, l] of Object.entries(k.lists)) if (Array.isArray(l)) putOwn(k.lists, key, settle(l));
 }
 /**
  * On records both copies hold (the same key), the fields this build doesn't read, by adoptKept's rule; inner does the
@@ -369,7 +429,7 @@ function adoptEventRest(mine: Ev[], theirs: Ev[], theirsWin: boolean) {
 function keptCanon(s: State) {
   const k = s[KEPT];
   const sorted = (o: object | undefined) => (o ? Object.entries(o).sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0)) : []);
-  return [s.v, restOf(s.settings, SETTINGS_KEYS), restOf(s.flags, FLAG_KEYS), sorted(k?.profile), sorted(k?.profileAt), sorted(k?.setAt), sorted(k?.names), (k?.titles ?? []).map((t) => JSON.stringify(t)).sort(), (k?.events ?? []).map((e) => String(e.id)).sort(), k ? Object.values(k.dropped).map((l) => l.map((x) => JSON.stringify(x)).sort()) : [], sorted(k?.days)];
+  return [s.v, restOf(s.settings, SETTINGS_KEYS), restOf(s.flags, FLAG_KEYS), sorted(k?.profile), sorted(k?.profileAt), sorted(k?.setAt), sorted(k?.names), (k?.titles ?? []).map((t) => JSON.stringify(t)).sort(), (k?.events ?? []).map((e) => String(e.id)).sort(), k ? Object.values(k.dropped).map((l) => l.map((x) => JSON.stringify(x)).sort()) : [], sorted(k?.days), sorted(k?.lists).map(([key, l]) => [key, Array.isArray(l) ? l.map((x) => JSON.stringify(x)).sort() : l])];
 }
 /** Each id once, the first kept. */
 function firstById<T extends { id: string }>(list: T[]) {
@@ -635,6 +695,8 @@ export function normalize(raw: unknown): State | null {
     base.lists.activities = listOf(raw.lists.activities, item, (i) => !!i.text, 'activities');
     base.lists.reasons = listOf(raw.lists.reasons, item, (i) => !!i.text, 'reasons');
     base.lists.people = listOf(raw.lists.people, (p) => withAt({ id: str(p.id, 40) || uid(), name: str(p.name, 80), phone: str(p.phone, 40) }, p, PERSON_KEYS), (p) => !!p.name, 'people');
+    // a list a newer build added: kept as stored, never shown here
+    for (const [k, l] of restOf(raw.lists, LIST_KEYS)) putOwn(kept(base).lists, k, l);
   }
   if (Array.isArray(raw.maps)) {
     base.maps = listOf(raw.maps, (m) => withAt({ id: str(m.id, 40) || uid(), t: num(m.t) ?? 0, urge: str(m.urge), p1: str(m.p1), c1: str(m.c1), p2: str(m.p2), c2: str(m.c2), choice: str(m.choice, 40) }, m, MAP_KEYS), () => true, 'maps');
@@ -1009,6 +1071,7 @@ export class Store {
     unionInto(this.state.maps, other.maps);
     adoptRest(this.state.maps, other.maps, (m) => m.id, MAP_KEYS, true, undefined, (m, t) => atOf(m) === atOf(t));
     prune(this.state.maps, this.state.gone);
+    adoptRaw(this.state, other);
     for (const k of SET_KEYS) {
       const mt = this.state.setAt[k] ?? 0, ot = other.setAt[k] ?? 0;
       const mv = getSet(this.state, k), ov = getSet(other, k);
@@ -1175,14 +1238,14 @@ export class Store {
   }
 
   /**
-   * Union merge for Restore: imported data can only add. Events, list items, people and maps by id (duplicates inside
-   * the file count once; one removed here comes back, newer than its removal), diary per field, the newer line per day,
-   * and the diary rows the file uses, and the titles the file has seen. The Wardrobe picks, the equipped title, each
-   * shadow's name and the crisis-line country come from the file only where this device has no change time for that
-   * choice (the player never set it here), so a new device gets them back; one the player made here, a cleared name
-   * included, always wins. A choice taken from the file takes the file's change time too, never later than this
-   * device's now (now when the file has none), so another open copy doesn't see it as older than its own default.
-   * Explicit sound and motion choices stay on this device, and the file's removals are not applied.
+   * Union merge for Restore: imported data can only add. Events, list items, people and maps by id, in lists a newer
+   * build added too (duplicates inside the file count once; one removed here comes back, newer than its removal), diary
+   * per field, the newer line per day, and the diary rows the file uses, and the titles the file has seen. The Wardrobe
+   * picks, the equipped title, each shadow's name and the crisis-line country come from the file only where this device
+   * has no change time for that choice (the player never set it here), so a new device gets them back; one the player
+   * made here, a cleared name included, always wins. A choice taken from the file takes the file's change time too,
+   * never later than this device's now (now when the file has none), so another open copy doesn't see it as older than
+   * its own default. Explicit sound and motion choices stay on this device, and the file's removals are not applied.
    */
   merge(other: State) {
     this.sync();
@@ -1207,6 +1270,7 @@ export class Store {
     };
     for (const k of LIST_KEYS) bring<Item | Person>(this.state.lists[k], other.lists[k]);
     bring(this.state.maps, other.maps);
+    adoptRaw(this.state, other, { newer, now: this.now() });
     const rowsOf = (kind: 'emotions' | 'urges', named: string[]) => {
       const names = new Set(named);
       for (const e of Object.values(other.diary)) for (const k of Object.keys(e[kind])) names.add(k);
