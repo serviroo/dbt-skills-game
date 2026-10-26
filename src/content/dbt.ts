@@ -881,7 +881,7 @@ export const SKILLS: Skill[] = [
           { label: 'Not sure', reply: "That's okay. Being willing doesn't need certainty." },
         ],
       },
-      { id: 'hands', kind: 'timer', seconds: 20, visual: 'hands', text: 'If you like, rest your hands open, palms up, fingers loose. Breathe out slowly. Notice the digging in without fighting it.' },
+      { id: 'hands', kind: 'timer', seconds: 20, start: 'Start 20 s', visual: 'hands', text: 'If you like, rest your hands open, palms up, fingers loose. Breathe out slowly. Notice the digging in without fighting it.' },
       {
         id: 'step',
         kind: 'choice',
@@ -1242,10 +1242,10 @@ export const SKILLS: Skill[] = [
       { id: 'feel', kind: 'choice', key: 'feel', multi: true, text: 'What might show up for you there? Pick any.', options: [...o(...COPE_FEEL), { label: 'This feels too much', go: 'too-much' }] },
       { id: 'plan', kind: 'choice', key: 'plan', text: 'When it shows up, what will you do?', options: o(...COPE_PLAN), other: 'My own' },
       { id: 'words', kind: 'input', key: 'words', text: 'What will you say, or tell yourself? Exact words help.', placeholder: 'My words (optional)', skip: 'Skip' },
-      { id: 'picture', kind: 'timer', seconds: 30, visual: 'drift', text: copePicture },
+      { id: 'picture', kind: 'timer', seconds: 30, start: 'Start 30 s', visual: 'drift', text: copePicture },
       { id: 'snag', kind: 'choice', key: 'snag', text: 'Now add one snag. What might not go to plan?', options: o(...COPE_SNAG), other: 'My own' },
-      { id: 'snag-rehearse', kind: 'timer', seconds: 30, visual: 'drift', text: copeSnag },
-      { id: 'settle', kind: 'timer', seconds: 20, visual: 'glow', text: 'Let the scene go. Drop your shoulders, loosen your hands and breathe out slowly.' },
+      { id: 'snag-rehearse', kind: 'timer', seconds: 30, start: 'Start 30 s', visual: 'drift', text: copeSnag },
+      { id: 'settle', kind: 'timer', seconds: 20, start: 'Start 20 s', visual: 'glow', text: 'Let the scene go. Drop your shoulders, loosen your hands and breathe out slowly.' },
       { id: 'ready', kind: 'say', text: copeReady, options: [{ label: 'Done', go: 'end' }, { label: 'Plan the words with DEAR MAN', go: 'skill:dear-man' }] },
       {
         id: 'too-much',

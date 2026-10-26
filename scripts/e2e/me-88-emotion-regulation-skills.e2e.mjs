@@ -76,7 +76,9 @@ async function tap(page, label) {
 /** Taps an answer and waits for the next step's own prompt, so a repeated label (Skip) lands on its own step each time. */
 async function stepTo(page, label, next) {
   await tap(page, label);
-  await page.locator('.dq-skill .dq-step-body').filter({ hasText: next }).first().waitFor({ timeout: 5000 });
+  // the screen sets curly apostrophes
+  const want = new RegExp(next.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/'/g, "['\u2019]"));
+  await page.locator('.dq-skill .dq-step-body').filter({ hasText: want }).first().waitFor({ timeout: 5000 });
 }
 
 async function checkScreen(h, page, name, see) {
