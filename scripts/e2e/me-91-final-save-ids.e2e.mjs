@@ -12,7 +12,7 @@ const dayOf = (ms) => {
   const d = new Date(ms - 6 * 3600e3);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
-const MAPS = { diary: '<day>', 'diary.<day>.emotions': '<row>', 'diary.<day>.urges': '<row>', 'diary.<day>.ft': '<field>', gone: '<id>', 'profile.names': '<shadow>' };
+const MAPS = { diary: '<day>', 'diary.<day>.emotions': '<row>', 'diary.<day>.urges': '<row>', 'diary.<day>.ft': '<field>', gone: '<id>', 'profile.names': '<shadow>', skillPins: '<skill>' };
 function paths(o, at = '', out = new Set()) {
   if (Array.isArray(o)) {
     if (!o.length) out.add(`${at}[]`);
@@ -62,6 +62,7 @@ export function fullSave(now) {
     flags: { rankSeen: 5, wardenSeen: true, giftDay: today, cardDay: today, greetDay: today, safeCredit: false, therapistLineShown: true, checkinDay: today },
     gone: { 'c-old': t0 },
     setAt: { sound: t0, motion: t0, emotionRows: t0, urgeRows: t0, safeCredit: t0 },
+    skillPins: { [ids.skill[0]]: { pinned: true, at: t0 }, [ids.skill[1]]: { pinned: false, at: t0 } },
     profile: {
       theme: last(ids.theme),
       accent: last(ids.accent),
@@ -298,6 +299,8 @@ export const scenarios = {
     expect(y.flags.safeCredit === fresh.flags.safeCredit, 'restore changed device Safe Zone credit preference');
     expect(y.created === x.created, 'restore lost the first visit time');
     expect(same(y.unreadSaves, x.unreadSaves) && same(x.unreadSaves, [{ at: String(now - 5), raw: '{not a save' }]), 'the unreadable save did not round-trip: ' + JSON.stringify([x.unreadSaves, y.unreadSaves]));
+    const pins = (o) => JSON.stringify(Object.entries(o ?? {}).sort((p, q) => (p[0] < q[0] ? -1 : 1)));
+    expect(pins(x.skillPins) === pins(save.skillPins) && pins(y.skillPins) === pins(x.skillPins), `pins changed on the way through: ${pins(save.skillPins)} then ${pins(x.skillPins)} then ${pins(y.skillPins)}`);
     expect(same(y.profile.setAt, x.profile.setAt), 'restore lost profile choice times');
     for (const k of ['emotionRows', 'urgeRows']) expect(x.settings[k].every((row) => y.settings[k].includes(row)), `restore lost ${k}`);
     for (const part of ['events', 'diary', 'lists', 'maps', 'lines', 'profile', 'art', 'drafts', 'stories', 'chapters']) {

@@ -162,7 +162,10 @@ that doesn't exist fails the run.
 - `skill-answers-rotate`: what the player typed or picked stays when the phone turns sideways and back.
 
 To add a skill, add its object to `SKILLS` in `src/content/dbt.ts` (`id`, `sl`, `real`, `module`, `minutes`, `card`,
-`steps`); the Skills list shows it under its module. Freeze its id with `npm run check:ids -- --update`, run
+`steps`); the Skills list shows it under its module. Add its id to every need it honestly fits in `NEEDS` in
+`src/content/skill-library.ts` (`find-skills` fails for a skill under no need), and use a `minutes` label from
+`LABEL_SECONDS` there if it takes a set time (any other label shows under No set time). Freeze its id with
+`npm run check:ids -- --update`, run
 `node scripts/e2e.mjs --file=skill-check --skills=<id>` and `node scripts/e2e.mjs --file=skill-flows`, and add the id
 to `ENFORCED` once it passes. Give it its own E2E file for the paths it adds.
 
