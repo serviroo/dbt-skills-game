@@ -1,14 +1,15 @@
 /* The quiet Lantern: the same material as the cutscene's windows, turned down to night-light level. */
 
-/* the sky's two glows, registered so a change of mood cross-fades (src/daily/sky.ts); the initial values are night */
+/* the sky's two glows, registered so a change of mood cross-fades (src/daily/sky.ts); the initial values are night.
+   They don't inherit, so each frame of a fade restyles only the elements that paint the sky (.dq and the top bar) */
 @property --sky-hi {
   syntax: '<color>';
-  inherits: true;
+  inherits: false;
   initial-value: rgba(20, 52, 92, 0.42);
 }
 @property --sky-lo {
   syntax: '<color>';
-  inherits: true;
+  inherits: false;
   initial-value: rgba(16, 38, 70, 0.35);
 }
 
@@ -134,6 +135,8 @@
 
 /* ---------- top bar ---------- */
 .dq-top {
+  /* the sky glow doesn't inherit (see @property above); the top bar hands it to its shade itself */
+  --sky-hi: inherit;
   position: sticky;
   top: 0;
   z-index: 6;
@@ -146,6 +149,7 @@
 }
 .dq-top::after {
   content: '';
+  --sky-hi: inherit;
   position: absolute;
   inset: 0 0 calc(-1 * var(--top-shade));
   z-index: -1;

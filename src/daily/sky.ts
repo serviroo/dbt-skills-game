@@ -23,11 +23,11 @@ export class Sky {
     private readonly reduced: () => boolean,
   ) {}
 
-  /** Home opened or closed. `fadeMs` is how long the sky takes to come in or go back to night (0 for at once). */
+  /** Every screen opening or closing. `fadeMs` is how long the sky takes to come in or go back to night (0 for at
+   *  once, which also lands any fade still running from the screen before). */
   set(home: boolean, fadeMs: number) {
-    if (home === !!this.watch) return;
-    if (home) this.watch = window.setInterval(() => this.paint(moodAt(new Date()), SKY.driftMs), SKY.checkMs);
-    else {
+    if (home && !this.watch) this.watch = window.setInterval(() => this.paint(moodAt(new Date()), SKY.driftMs), SKY.checkMs);
+    if (!home && this.watch) {
       clearInterval(this.watch);
       this.watch = 0;
     }
@@ -35,9 +35,13 @@ export class Sky {
   }
 
   private paint(mood: Mood | null, ms: number) {
-    if ((mood ?? undefined) === this.root.dataset.sky) return;
-    this.root.style.setProperty('--sky-ms', `${this.reduced() ? 0 : ms}ms`);
-    if (mood) this.root.dataset.sky = mood;
-    else delete this.root.dataset.sky;
+    const fade = this.reduced() ? 0 : ms;
+    if ((mood ?? undefined) !== this.root.dataset.sky) {
+      this.root.style.setProperty('--sky-ms', `${fade}ms`);
+      if (mood) this.root.dataset.sky = mood;
+      else delete this.root.dataset.sky;
+    }
+    // a running transition keeps the duration it started with, so "at once" finishes it rather than waiting it out
+    if (!fade) for (const a of this.root.getAnimations()) if (a instanceof CSSTransition && a.transitionProperty.startsWith('--sky-')) a.finish();
   }
 }

@@ -234,6 +234,55 @@ async function crossEight(h, page) {
   await page.clock.fastForward(left);
 }
 
+const NIGHT = [
+  [20, 52, 92, 0.42],
+  [16, 38, 70, 0.35],
+];
+const isNight = (s) => s.mood === null && !s.fading && SKY_PROPS.every((_, i) => dist(rgba(s.glow[i]), NIGHT[i]) < 1);
+
+/** In the page: reads the sky, makes one move (`how`: 'tap' clicks `arg`, 'history' goes `arg` steps), then reads the
+ *  sky again in the same task as the screen the move opened, before any frame of it is drawn. So `after` is exactly
+ *  what that screen's first frame shows, and `before` says whether a fade was still running when the move came. */
+const moveAndRead = (page, how, arg) =>
+  page.evaluate(
+    ([how, arg, props]) => {
+      const root = document.querySelector('.dq');
+      const read = () => {
+        const cs = getComputedStyle(root);
+        return {
+          mood: root.dataset.sky ?? null,
+          screen: root.dataset.screen,
+          glow: props.map((p) => cs.getPropertyValue(p).trim()),
+          fading: document.getAnimations().filter((a) => props.includes(a.transitionProperty)).length,
+        };
+      };
+      const before = read();
+      if (how === 'tap') {
+        document.querySelector(arg).click();
+        return { before, after: read() };
+      }
+      // the app's own popstate listener came first, so this one reads the screen it has just drawn
+      return new Promise((done) => {
+        // a Back or Forward with nowhere to go never fires popstate; say so instead of waiting forever
+        setTimeout(() => done({ before, after: { ...read(), stuck: true } }), 3000);
+        addEventListener('popstate', () => done({ before, after: read() }), { once: true });
+        history.go(arg);
+      });
+    },
+    [how, arg, SKY_PROPS],
+  );
+
+/** The Safe Zone opened by `move` while the sky was still fading: night from its first frame and still night after. */
+async function safeAtOnce(h, page, move, what) {
+  const { before, after } = await move();
+  h.expect(before.fading > 0, `${what}: the sky had stopped fading before the move, so this proves nothing: ` + JSON.stringify(before));
+  h.expect(after.screen === 'safe' && isNight(after), `${what}: the Safe Zone opened mid-fade: ` + JSON.stringify(after));
+  await h.sleep(300);
+  const later = await skyOf(page);
+  h.expect(isNight(later), `${what}: the Safe Zone's sky moved after it opened: ` + JSON.stringify(later));
+  return { from: before.glow[0], first: after.glow[0] };
+}
+
 export const scenarios = {
   /** each mood at its hour: the attribute, the painted sky, AA text at three sizes and the Safe Zone button */
   async 'home-sky-moods'(h) {
@@ -375,5 +424,67 @@ export const scenarios = {
     await shot(page, 'safe-zone-at-dusk');
     expect(!errors.length, errors.join('\n'));
     await ctx.close();
+  },
+
+  /** Home, then another screen, then the Safe Zone before the sky is back to night: the Safe Zone's first frame is
+   *  already night at dawn, day and dusk, not the rest of the fade */
+  async 'home-sky-safe-mid-fade'(h) {
+    const { expect } = h;
+    const seen = {};
+    const bad = [];
+    // every mood runs even when one fails, so a failure says which moods it reaches
+    for (const mood of ['dawn', 'day', 'dusk']) {
+      const { ctx, page, errors } = await home(h, at(...MOODS[mood]));
+      await settle(h, page);
+      expect((await skyOf(page)).mood === mood, `Home is not ${mood}: ` + JSON.stringify(await skyOf(page)));
+      await page.locator('.dq-momentbtn').click();
+      await page.locator('.dq[data-screen="moment"]').waitFor({ timeout: 10000 });
+      try {
+        seen[mood] = await safeAtOnce(h, page, () => moveAndRead(page, 'tap', SAFE), `${mood}, Give me a moment then the Safe Zone`);
+        expect(!errors.length, errors.join('\n'));
+      } catch (e) {
+        bad.push(e.message);
+      }
+      await ctx.close();
+    }
+    expect(!bad.length, bad.join('\n'));
+    return seen;
+  },
+
+  /** the other ways into the Safe Zone while the sky moves: Forward through history while it fades back to night,
+   *  the Safe Zone button while Home's sky is still coming in, and while the hour turns on an open Home */
+  async 'home-sky-safe-mid-fade-routes'(h) {
+    const { expect } = h;
+    const seen = {};
+    let { ctx, page, errors } = await home(h, at(...MOODS.dusk));
+    await settle(h, page);
+    await page.getByRole('button', { name: /Settings/ }).first().click();
+    await page.locator('.dq[data-screen="settings"]').waitFor({ timeout: 10000 });
+    await page.locator(SAFE).first().click();
+    await page.locator('.dq[data-screen="safe"]').waitFor({ timeout: 10000 });
+    for (let i = 0; i < 2; i++) await moveAndRead(page, 'history', -1);
+    await calm(h, page);
+    await settle(h, page);
+    expect((await skyOf(page)).mood === 'dusk', 'Back did not bring Home at dusk: ' + JSON.stringify(await skyOf(page)));
+    // Forward to Settings starts the fade back to night; Forward again lands in the Safe Zone in the middle of it
+    const toSettings = await moveAndRead(page, 'history', 1);
+    expect(toSettings.after.screen === 'settings', 'Forward did not open Settings: ' + JSON.stringify(toSettings.after));
+    seen.forward = await safeAtOnce(h, page, () => moveAndRead(page, 'history', 1), 'Forward into the Safe Zone');
+    // Back twice to Home, whose sky starts coming in, and the Safe Zone button straight away
+    await moveAndRead(page, 'history', -1);
+    const toHome = await moveAndRead(page, 'history', -1);
+    expect(toHome.after.screen === 'hub', 'Back did not reach Home: ' + JSON.stringify(toHome.after));
+    seen.homeFadingIn = await safeAtOnce(h, page, () => moveAndRead(page, 'tap', SAFE), 'the Safe Zone while Home fades in');
+    expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+
+    ({ ctx, page, errors } = await home(h, at(7, 58, 0)));
+    await settle(h, page);
+    await crossEight(h, page);
+    for (const end = Date.now() + 5000; !(await skyOf(page)).fading; await h.sleep(50)) expect(Date.now() < end, 'dawn never started drifting into day');
+    seen.drift = await safeAtOnce(h, page, () => moveAndRead(page, 'tap', SAFE), 'the Safe Zone while the hour turns');
+    expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+    return seen;
   },
 };
