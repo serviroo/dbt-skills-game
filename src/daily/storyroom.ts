@@ -151,31 +151,38 @@ export function storiesScreen(app: App): ScreenOut {
     const s = fitted(storyFromText(raw, f.name));
     if (!s.chapters.some((c) => c.text.trim()) && !s.notes.trim()) return oops(STORY_IMPORT.empty);
     if (s.chapters.length > STORY_CAP.chapters) return oops(STORY_IMPORT.tooMany);
-    const same = (await ss.list()).some((x) => x.title.trim().toLowerCase() === s.title.toLowerCase());
+    offer(s, (await ss.list()).some((x) => x.title.trim().toLowerCase() === s.title.toLowerCase()));
+  };
+  /** what the file holds, before anything is added; after a write this device couldn't make, it says so and Add tries again */
+  const offer = (s: StoryText, same: boolean, notSaved = false) => {
     bringing = s;
     const more = s.chapters.length - SHOWN;
     showBring(
       STORY_IMPORT.ask(s.title),
       [
+        notSaved ? h('p', { class: 'st-bring-fail', role: 'alert', text: STORY_IMPORT.notSaved }) : null,
         p(STORY_IMPORT.count(s.chapters.length, !!s.notes.trim()), 'dq-text st-bring-t'),
         h('ol', { class: 'st-bring-list' }, [...s.chapters.slice(0, SHOWN).map((c) => shownLine(c.title, c.text)), ...(s.notes.trim() ? [shownLine('Notes', s.notes)] : [])]),
         more > 0 ? p(STORY_IMPORT.more(more), 'dq-small st-bring-more') : null,
         same ? p(STORY_IMPORT.same, 'dq-small st-bring-same') : null,
         p(STORY_IMPORT.privacy, 'dq-small st-bring-p'),
       ],
-      [btn(STORY_IMPORT.add, () => void add(), { kind: 'primary', ic: 'plus' }), btn(STORY_IMPORT.cancel, () => closeBring(), { kind: 'quiet' })],
+      [btn(STORY_IMPORT.add, () => void add(same), { kind: 'primary', ic: 'plus' }), btn(STORY_IMPORT.cancel, () => closeBring(), { kind: 'quiet' })],
     );
   };
-  const add = async () => {
+  const add = async (same: boolean) => {
     const s = bringing;
     // one tap adds it once
     if (!s) return;
     bringing = null;
+    let kept;
     try {
-      await ss.createFrom(s);
+      kept = await ss.createFrom(s);
     } catch (e) {
       return oops(e instanceof RangeError && /stories/.test(e.message) ? STORY_IMPORT.full : STORY_IMPORT.tooMany);
     }
+    // not written to this device: it stays off the shelf, and the file's story stays here to add again
+    if (!kept) return offer(s, same, true);
     closeBring(false);
     bringSaid.textContent = STORY_IMPORT.added(s.title);
     // the newest story is first on the shelf
@@ -281,10 +288,13 @@ function fitted(s: StoryText): StoryText {
     const named = () => (part === 1 ? name : `${name.slice(0, STORY_CAP.chapterTitle - 6)} (${part})`).slice(0, STORY_CAP.chapterTitle);
     while (text.length > STORY_CAP.text) {
       let cut = text.lastIndexOf('\n\n', STORY_CAP.text);
-      if (cut < STORY_CAP.text / 2) cut = text.lastIndexOf(' ', STORY_CAP.text);
+      const between = cut >= STORY_CAP.text / 2;
+      if (!between) cut = text.lastIndexOf(' ', STORY_CAP.text);
       if (cut <= 0) cut = STORY_CAP.text;
       chapters.push({ title: named(), text: text.slice(0, cut).trimEnd() });
-      text = text.slice(cut).trimStart();
+      const rest = text.slice(cut);
+      // between paragraphs the break becomes the new chapter, and the next paragraph keeps its indent
+      text = between ? rest.slice(rest.lastIndexOf('\n', rest.length - rest.trimStart().length) + 1) : rest.trimStart();
       part++;
     }
     chapters.push({ title: named(), text });

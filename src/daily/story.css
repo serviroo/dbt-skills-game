@@ -62,6 +62,14 @@
 .st-bring-t {
   margin: 0;
 }
+.st-bring-fail {
+  margin: 0 0 12px;
+  padding: 8px 0 8px 12px;
+  border-left: 2px solid #4fb8ff;
+  font-size: 16px;
+  line-height: 1.5;
+  color: #e6f1ff;
+}
 .st-bring-list {
   display: flex;
   flex-direction: column;

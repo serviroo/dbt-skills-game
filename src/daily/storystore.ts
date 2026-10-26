@@ -500,8 +500,11 @@ export class StoryStore {
     return { story: { ...story, chapters: [...story.chapters] }, first: { ...first } };
   }
 
-  /** A new story with its chapters and notes, written in one go (all of it or none), next to every story already here. */
-  async createFrom(s: { title: string; chapters: { title: string; text: string }[]; notes: string }): Promise<Story> {
+  /**
+   * A new story with its chapters and notes, written in one go (all of it or none), next to every story already here.
+   * Null when this device couldn't write it: then nothing is kept, not even in memory, so it never looks saved.
+   */
+  async createFrom(s: { title: string; chapters: { title: string; text: string }[]; notes: string }): Promise<Story | null> {
     if ((await this.allStories()).length >= STORY_CAP.stories) throw new RangeError('This device already holds as many stories as it can.');
     if (!s.chapters.length || s.chapters.length > STORY_CAP.chapters) throw new RangeError('A story holds 1 to 300 chapters.');
     const now = this.stamp();
@@ -513,12 +516,9 @@ export class StoryStore {
       t.objectStore('stories').put(story);
       for (const c of [...chs, notes]) t.objectStore('chapters').put(c);
     });
-    if (r) this.lastStory.set(sid, story);
-    else {
-      this.mem.stories.set(sid, story);
-      for (const c of [...chs, notes]) this.mem.chapters.set(c.id, c);
-    }
-    this.changed(!!r);
+    if (!r) return null;
+    this.lastStory.set(sid, story);
+    this.changed(true);
     return { ...story, chapters: [...story.chapters] };
   }
 

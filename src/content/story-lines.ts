@@ -41,6 +41,7 @@ export const STORY_IMPORT = {
   close: 'Close',
   more: (n: number) => `and ${n} more ${n === 1 ? 'chapter' : 'chapters'}`,
   added: (title: string) => `“${title}” is on your shelf now.`,
+  notSaved: 'This device couldn’t save it just now, so it isn’t on your shelf yet. Your file is still safe. You can try again.',
   tooBig: 'That file is too big to bring in. A story file can be up to 1 MB.',
   notText: 'That file isn’t plain text. Try a .txt or .md file, like the ones Download story makes.',
   empty: 'That file has no words in it yet.',

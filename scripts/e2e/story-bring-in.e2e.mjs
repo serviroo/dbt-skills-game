@@ -173,9 +173,9 @@ export const scenarios = {
       // a download from before headings: Chapter lines and Notes on their own
       r = await added('older.txt', 'Old Night\n\nChapter 1\n\nIt was dark.\n\nVery dark.\n\nChapter 2\n\nThen light.\n\nNotes\n\nRemember the owl.\n');
       h.expect(r.story.title === 'Old Night' && JSON.stringify(r.story.chapters) === JSON.stringify([{ title: 'Chapter 1', text: 'It was dark.\n\nVery dark.' }, { title: 'Chapter 2', text: 'Then light.' }]) && r.story.notes === 'Remember the owl.', `older.txt came in as ${JSON.stringify(r.story)}`);
-      // a chapter longer than one chapter holds goes on in the next, nothing lost
+      // a chapter longer than one chapter holds goes on in the next, nothing lost, indents kept
       const para = 'The waves came in and went out again, over and over, all through the long grey afternoon.';
-      const long = Array.from({ length: 6000 }, () => para).join('\n\n');
+      const long = Array.from({ length: 6000 }, (_, i) => (i ? '  ' : '') + para).join('\n\n');
       r = await added('long.txt', `# Long Tide\n\n${long}\n`);
       h.expect(r.p.count === '2 chapters', `long.txt preview says ${r.p.count}`);
       h.expect(r.story.chapters.map((c) => c.title).join('|') === 'Chapter 1|Chapter 1 (2)' && r.story.chapters.every((c) => c.text.length <= 400000), `long.txt split as ${r.story.chapters.map((c) => `${c.title} ${c.text.length}`)}`);
@@ -250,6 +250,119 @@ export const scenarios = {
         });
         await shelfOf(h, page);
       }
+
+      // the co-writer reads up to 4,000 characters before the words: long runs there answer every mode in under 50 ms
+      const cases = [
+        ['blank lines', 'Once.\n' + '\n'.repeat(4000) + 'She ', 'smiled'],
+        ['lines of one space', 'Once.\n' + ' \n'.repeat(4000) + 'She ', 'smiled'],
+        ['spaces', 'Once. ' + ' '.repeat(4000) + 'She ', 'smiled'],
+        ['quote marks', 'Once. ' + '"'.repeat(4000) + ' She ', 'smiled'],
+        ['stops', 'Once' + '?!'.repeat(2000) + ' she ', 'smiled' + '?!'.repeat(590) + 'x'],
+      ];
+      const asked = await Promise.race([
+        page
+          .evaluate(async (list) => {
+            const { cowrite } = await import('/src/cowriter/local.ts');
+            const out = [];
+            for (const [what, before, selection] of list)
+              for (const mode of ['polish', 'continue', 'whatif', 'questions']) {
+                const t0 = performance.now();
+                const res = await cowrite({ mode, title: 'Gap', before, selection, after: ' at the sea.', notes: '', steer: '', history: [] });
+                out.push({ what, mode, ms: performance.now() - t0, kind: res.kind });
+              }
+            return out;
+          }, cases)
+          .catch(() => null),
+        h.sleep(10000).then(() => null),
+      ]);
+      h.expect(asked, 'the co-writer froze the page for more than 10 s');
+      fs.writeFileSync(path.join(h.out, 'spaces-cowriter-timing.json'), JSON.stringify(asked, null, 1));
+      for (const a of asked) h.expect(a.ms < 50, `${a.mode} after 4,000 ${a.what}: ${Math.round(a.ms)} ms`);
+
+      // in the real page: a story brought in with 4,000 blank lines, a word picked, Polish, then the Safe Zone on the first tap
+      const was = await everything(page);
+      await bringIn(page, write(h, 'blank-lines.txt', `Once.\n${'\n'.repeat(4000)}She smiled at the sea.\n`));
+      await page.getByRole('button', { name: 'Add as a new story' }).click();
+      await page.locator('.st-bring-said:not(:empty)').waitFor();
+      const story = (await everything(page)).find((x) => !was.some((w) => w.id === x.id));
+      const ch = await page.evaluate(async (id) => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        return (await storyStore(window.__daily.store.key).list()).find((x) => x.id === id).chapters[0];
+      }, story.id);
+      await page.evaluate((r) => window.__daily.go(r), { name: 'write', id: story.id, ch });
+      const ta = page.locator('.st-write .st-ta');
+      await ta.waitFor();
+      await ta.evaluate((el) => {
+        const at = el.value.indexOf('smiled');
+        el.focus();
+        el.setSelectionRange(at, at + 'smiled'.length);
+        el.dispatchEvent(new Event('select'));
+      });
+      if (!(await page.evaluate(() => matchMedia('(min-width: 1100px)').matches)) && !(await page.locator('.st-cw.is-open').count())) {
+        await page.locator('.st-cwbtn').click();
+        await page.locator('.st-cw.is-open').waitFor();
+      }
+      await page.locator('.st-cw .st-mode--polish').click();
+      await quick('Polish after 4,000 blank lines', 2000, async () => {
+        await page.locator('.st-cw .st-ask').click();
+        await page.locator('.st-cards > .st-batch:first-child .st-card').first().waitFor({ timeout: 2000 });
+      });
+      const card = await page.locator('.st-cards > .st-batch:first-child .st-card-t').first().textContent();
+      h.expect(card === 'smiled', `Polish came back as ${JSON.stringify(card)}`);
+      await quick('the Safe Zone after Polish', 1000, async () => {
+        await page.locator('.dq-top .dq-safe').click({ timeout: 1000 });
+        await page.waitForFunction(() => window.__daily?.route.name === 'safe', null, { timeout: 1000 });
+      });
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  /** a story this device can't save says so plainly, stays off the shelf, keeps the file's story in the panel, and Add tries again */
+  async 'story-bring-in-not-saved'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await h.reachHub(page);
+      await shelfOf(h, page);
+      const shown = await bringIn(page, write(h, 'the-harbour.md', '# The Harbour\n\n## Snow\n\nSnow fell on the harbour.\n\n## Thaw\n\nThe ice let go of the boats.\n'));
+      // every write of a story fails, the way a full or blocked store fails it
+      await page.evaluate(() => {
+        const put = IDBObjectStore.prototype.put;
+        window.__put = put;
+        IDBObjectStore.prototype.put = function (...a) {
+          if (this.name === 'stories') throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+          return put.apply(this, a);
+        };
+      });
+      await page.getByRole('button', { name: 'Add as a new story' }).click();
+      const fail = page.locator('.st-bring-box:not(.is-hidden) .st-bring-fail');
+      await fail.waitFor({ timeout: 5000 });
+      const now = await page.evaluate(() => ({
+        head: document.querySelector('.st-bring-h')?.textContent,
+        chapters: [...document.querySelectorAll('.st-bring-ch')].map((c) => [c.querySelector('.st-bring-ct').textContent, c.querySelector('.st-bring-cx')?.textContent ?? '']),
+        said: document.querySelector('.st-bring-said').textContent,
+        rows: [...document.querySelectorAll('.st-row')].map((r) => r.textContent),
+        role: document.querySelector('.st-bring-fail').getAttribute('role'),
+        text: document.querySelector('.st-bring-fail').textContent,
+      }));
+      await h.shot(page, 'not-saved');
+      h.expect(now.role === 'alert' && /couldn’t save it/.test(now.text) && /isn’t on your shelf/.test(now.text), 'the failed write was not said plainly: ' + JSON.stringify(now.text));
+      h.expect(now.head === shown.head && JSON.stringify(now.chapters) === JSON.stringify(shown.chapters), 'the panel lost the file’s story: ' + JSON.stringify(now));
+      h.expect(!now.said && !now.rows.some((r) => r.includes('The Harbour')), 'the shelf shows the story as saved: ' + JSON.stringify(now));
+      h.expect(!(await everything(page)).some((x) => x.title === 'The Harbour'), 'the store holds the story as if it were saved');
+      h.expect(await page.getByRole('button', { name: 'Add as a new story' }).isVisible(), 'there is no way to try again');
+
+      // once writes work again, Add saves it, and it is still there after a reload
+      await page.evaluate(() => (IDBObjectStore.prototype.put = window.__put));
+      await page.getByRole('button', { name: 'Add as a new story' }).click();
+      await page.locator('.st-bring-said:not(:empty)').waitFor();
+      h.expect((await page.locator('.st-bring-said').textContent()) === '“The Harbour” is on your shelf now.', 'the retry did not say it was added');
+      h.expect(await page.locator('.st-bring-box').evaluate((b) => b.classList.contains('is-hidden')), 'the panel stayed open after the story was added');
+      await page.reload();
+      await page.waitForFunction(() => !!window.__daily);
+      const back = (await everything(page)).filter((x) => x.title === 'The Harbour');
+      h.expect(back.length === 1 && JSON.stringify(back[0].chapters.map((c) => c.title)) === '["Snow","Thaw"]' && /Snow fell/.test(back[0].chapters[0].text) && /ice let go/.test(back[0].chapters[1].text), 'after a reload the story is not on this device once: ' + JSON.stringify(back));
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();
