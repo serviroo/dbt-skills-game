@@ -230,6 +230,12 @@ export const scenarios = {
       .then(() => true, () => false);
     h.expect(saved, `the name typed in the card was not saved: ${await h.ls(page, h.SAVE)}`.slice(0, 400));
     h.expect(await page.evaluate(() => document.activeElement?.dataset.shadow === 'anvil'), "closing the card did not return focus to Anvil's button");
+    // Back closes an open card first and stays on the camp, like every other sheet
+    await page.mouse.click(anvil.cx, anvil.cy);
+    await card.waitFor({ timeout: 5000 });
+    await page.goBack({ waitUntil: 'commit' });
+    const closed = await card.waitFor({ state: 'detached', timeout: 5000 }).then(() => true, () => false);
+    h.expect(closed && (await page.evaluate(() => window.__daily.route.name)) === 'shadows', `Back with a card open ${closed ? 'left the camp for ' + (await page.evaluate(() => window.__daily.route.name)) : 'did not close the card'}`);
     // the keyboard: Tab-reachable buttons, Enter opens; the close button and the backdrop close
     await page.locator('.w2-camp-hit[data-shadow="sable"]').focus();
     await page.keyboard.press('Enter');
