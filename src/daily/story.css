@@ -1010,9 +1010,13 @@
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
-.st-start-tg:hover,
+.st-start-tg:hover:not(:disabled),
 .st-start-tg[aria-expanded='true'] {
   color: #e6f1ff;
+}
+.st-start-tg:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 .st-start-ic {
   display: grid;

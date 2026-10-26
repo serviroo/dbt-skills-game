@@ -222,6 +222,9 @@ export function writeScreen(app: App, route: Route): ScreenOut {
   let caret: number | null = null;
   let sel: Sel | null = null;
   const hist = new Map<string, Hist>();
+  let pageIn!: () => void;
+  /** settles once the first page is in the editor: nothing that edits the page runs before there is one */
+  const pageLoaded = new Promise<void>((done) => (pageIn = done));
 
   // ---- head: title, chapter bar ----
   const titleIn = h('input', { class: 'st-title', type: 'text', maxlength: 120, placeholder: STORY.untitled, 'aria-label': 'Story title', autocomplete: 'off', autocapitalize: 'words', spellcheck: 'true', enterkeyhint: 'done' });
@@ -246,7 +249,7 @@ export function writeScreen(app: App, route: Route): ScreenOut {
   );
   const startBtn = h(
     'button',
-    { type: 'button', class: 'st-start-tg', 'aria-expanded': 'false', 'aria-controls': startBox.id, onclick: () => (startBox.classList.contains('is-hidden') ? showStart(startAt) : closeStart()) },
+    { type: 'button', class: 'st-start-tg', 'aria-expanded': 'false', 'aria-controls': startBox.id, disabled: true, onclick: () => (startBox.classList.contains('is-hidden') ? showStart(startAt) : closeStart()) },
     h('span', { class: 'st-start-ic', 'aria-hidden': 'true', html: icon('pencil') }),
     h('span', { text: STORY_START.ask }),
   );
@@ -566,6 +569,8 @@ export function writeScreen(app: App, route: Route): ScreenOut {
       } else keep.push(l);
     }
     cur = { id: c.id, kind: c.kind, title: c.title, bases };
+    pageIn();
+    startBtn.disabled = false;
     tab = c.kind === 'notes' ? 'notes' : 'page';
     ta.value = text;
     ta.placeholder = tab === 'notes' ? 'Characters, places, anything you want to remember.' : 'Start anywhere.';
@@ -1094,6 +1099,7 @@ export function writeScreen(app: App, route: Route): ScreenOut {
   };
   const persistCards = () => void ss.putCards(pageId, cards);
   const toPage = async () => {
+    await pageLoaded;
     if (tab !== 'page') await switchTab('page');
   };
   const insertText = async (t: string) => {

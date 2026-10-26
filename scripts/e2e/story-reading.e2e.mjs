@@ -156,6 +156,61 @@ export const scenarios = {
     }
   },
 
+  /** while the page is still loading, a starting point can't be used and a card's Insert waits: nothing throws or is lost */
+  async 'story-edits-wait-for-the-page'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await h.reachHub(page);
+      const id = await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const { story, first } = await ss.create('Slow Night');
+        await ss.putCards(first.id, [{ id: 'slow-card', mode: 'continue', text: 'The kettle began to hum.', t: Date.now() }]);
+        // the page's chapter read waits until the test lets it through, as a slow IndexedDB open would
+        const real = ss.chapter;
+        let go;
+        const gate = new Promise((done) => (go = done));
+        ss.chapter = async function (...a) {
+          await gate;
+          return real.apply(this, a);
+        };
+        window.__letPageIn = () => {
+          ss.chapter = real;
+          go();
+        };
+        return story.id;
+      });
+      await page.evaluate((r) => window.__daily.go(r), { name: 'write', id });
+      const ask = page.getByRole('button', { name: 'Need a starting point?' });
+      await ask.waitFor();
+      await h.sleep(300);
+      h.expect((await page.getByRole('textbox', { name: 'Your page' }).count()) === 1, 'the page loaded before the test let it');
+
+      // taps while loading
+      await ask.click({ force: true, timeout: 3000 }).catch(() => {});
+      const use = page.getByRole('button', { name: 'Use this', exact: true });
+      if (await use.isVisible()) await use.click({ timeout: 3000 }).catch(() => {});
+      h.expect(await ask.isDisabled(), 'the starting point is live before the page has loaded');
+      await page.getByRole('button', { name: 'Co-writer', exact: true }).click();
+      const insert = page.locator('.st-card', { hasText: 'The kettle began to hum.' }).getByRole('button', { name: 'Insert', exact: true });
+      await insert.click({ timeout: 5000 });
+      await h.shot(page, 'loading-390x844');
+      await h.sleep(300);
+      h.expect(!errors.length, `tapping while the page loads broke something:\n${errors.join('\n')}`);
+
+      // once the page is in, the control comes on and the waiting Insert lands
+      await page.evaluate(() => window.__letPageIn());
+      await page.getByRole('textbox', { name: /^Page,/ }).waitFor();
+      await page.waitForFunction(() => document.querySelector('.st-write .st-ta')?.value === 'The kettle began to hum.', null, { timeout: 5000 }).catch(() => {});
+      h.expect((await ta(page).inputValue()) === 'The kettle began to hum.', `the Insert tapped while loading was lost: ${JSON.stringify(await ta(page).inputValue())}`);
+      h.expect(await ask.isEnabled(), 'the starting point did not come on once the page loaded');
+      await storedIs(h, page, 'The kettle began to hum.', 'the Insert tapped while loading');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** three sizes on the story text only, never under 16 px, no sideways scroll, kept after a reload and in a Save Crystal */
   async 'story-reading-size'(h) {
     const { ctx, page, errors } = await h.open(seed(h));
