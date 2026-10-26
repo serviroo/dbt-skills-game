@@ -555,6 +555,11 @@ export class LanternWindow {
     answer?.(DISMISSED);
   }
 
+  /** Ends the wait for input as dismissed (Back, Escape) and leaves the window up for the usual close. */
+  cancel() {
+    this.resolveTap?.(DISMISSED);
+  }
+
   destroy() {
     live.delete(this);
     this.gone = true;

@@ -77,8 +77,45 @@ export function toggle(label: string, on: boolean, change: (v: boolean) => void,
   );
 }
 
+/**
+ * Keys for a radio group, like any app: the group is one Tab stop (the checked radio, else the first that can be
+ * picked), arrows move through it and wrap, Home and End go to the ends, and locked radios are skipped. Moving picks
+ * as it goes; with `manual` (a group whose pick also does something, such as opening a screen) it only moves, and
+ * Space or Enter picks. Taps work as before.
+ */
+export function radioKeys(group: HTMLElement, o: { manual?: boolean } = {}) {
+  const radios = () => [...group.querySelectorAll<HTMLButtonElement>('[role=radio]')].filter((r) => r.closest('[role=radiogroup]') === group);
+  const usable = (r: HTMLButtonElement) => !r.disabled && r.getAttribute('aria-disabled') !== 'true';
+  const stop = (to?: HTMLButtonElement) => {
+    const rs = radios();
+    to ??= rs.find((r) => r === document.activeElement) ?? rs.find((r) => r.getAttribute('aria-checked') === 'true' && usable(r)) ?? rs.find(usable);
+    rs.forEach((r) => (r.tabIndex = r === to ? 0 : -1));
+  };
+  group.addEventListener('keydown', (e) => {
+    const k = e.key;
+    const by = k === 'ArrowRight' || k === 'ArrowDown' ? 1 : k === 'ArrowLeft' || k === 'ArrowUp' ? -1 : 0;
+    if ((!by && k !== 'Home' && k !== 'End') || e.altKey || e.ctrlKey || e.metaKey) return;
+    const rs = radios().filter(usable);
+    const from = rs.indexOf(e.target as HTMLButtonElement);
+    if (from < 0) return;
+    e.preventDefault();
+    const to = k === 'Home' ? rs[0] : k === 'End' ? rs[rs.length - 1] : rs[(from + by + rs.length) % rs.length];
+    if (to === e.target) return;
+    stop(to);
+    to.focus();
+    if (!o.manual && to.getAttribute('aria-checked') !== 'true') to.click();
+  });
+  // leaving the group puts its Tab stop back on the checked radio
+  group.addEventListener('focusout', (e) => {
+    if (!group.contains(e.relatedTarget as Node | null)) stop(radios().find((r) => r.getAttribute('aria-checked') === 'true' && usable(r)) ?? radios().find(usable));
+  });
+  new MutationObserver(() => stop()).observe(group, { subtree: true, childList: true, attributes: true, attributeFilter: ['aria-checked', 'disabled'] });
+  stop();
+  return group;
+}
+
 /** Segmented single choice (radio semantics). value null = nothing chosen. */
-export function segmented(name: string, values: (string | number)[], value: string | number | null, change: (v: string | number | null) => void, opts: { allowClear?: boolean; labels?: string[]; cls?: string } = {}) {
+export function segmented(name: string, values: (string | number)[], value: string | number | null, change: (v: string | number | null) => void, opts: { allowClear?: boolean; labels?: string[]; cls?: string; manual?: boolean } = {}) {
   const wrap = h('div', { class: `dq-seg ${opts.cls ?? ''}`, role: 'radiogroup', 'aria-label': name });
   let cur = value;
   const btns = values.map((v, i) => {
@@ -99,7 +136,7 @@ export function segmented(name: string, values: (string | number)[], value: stri
   const sync = () => btns.forEach((b, i) => b.setAttribute('aria-checked', String(values[i] === cur)));
   sync();
   wrap.append(...btns);
-  return wrap;
+  return radioKeys(wrap, { manual: opts.manual });
 }
 
 export function field(label: string, opts: { value?: string; placeholder?: string; lines?: number; type?: string; oninput?: (v: string) => void; max?: number; hideLabel?: boolean; autocomplete?: string; inputmode?: string } = {}) {

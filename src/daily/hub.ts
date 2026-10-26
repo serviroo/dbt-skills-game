@@ -301,7 +301,7 @@ function checkinPanel(app: App) {
           st.save();
           if (isHeavy(feel, level)) return app.go({ name: 'ease', next: suggestFor(feel, level, st.quest().skill).next });
           render();
-        }, { allowClear: true, cls: 'dq-seg--10' }))
+        }, { allowClear: true, cls: 'dq-seg--10', manual: true }))
       : null;
     const s = suggestFor(feel, null, st.quest().skill);
     // Numb gets no label echoed back; the two newest answers get their own first line

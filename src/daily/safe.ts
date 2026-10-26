@@ -71,12 +71,14 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   const talkLink = h('button', { type: 'button', class: 'dq-sz-talk', onclick: () => show('talk') }, h('span', { html: icon('phone') }), h('span', { text: 'Talk to someone now' }));
   const box = panel({ title: 'Safe Zone', ic: icon('safe'), cls: 'dq-sz' }, body);
   let lit = readLight(st.key);
-  const lightBtn = h('button', { type: 'button', class: 'ca-sz-light', 'aria-pressed': String(lit), title: SAFE.light.hint }, h('span', { class: 'ca-sz-light-ic', 'aria-hidden': 'true' }), h('span', { class: 'ca-sz-light-t' }));
+  const lightBtn = h('button', { type: 'button', class: 'ca-sz-light', title: SAFE.light.hint }, h('span', { class: 'ca-sz-light-ic', 'aria-hidden': 'true' }), h('span', { class: 'ca-sz-light-t' }));
   const applyLight = () => {
     el.classList.toggle('is-lit', lit);
     app.root.classList.toggle('ca-szlit', lit);
-    lightBtn.setAttribute('aria-pressed', String(lit));
-    lightBtn.querySelector('.ca-sz-light-t')!.textContent = lit ? SAFE.light.down : SAFE.light.up;
+    const said = lit ? SAFE.light.down : SAFE.light.up;
+    lightBtn.querySelector('.ca-sz-light-t')!.textContent = said;
+    // its name stays when a zoomed phone shows only the icon
+    lightBtn.setAttribute('aria-label', said);
   };
   lightBtn.addEventListener('click', () => {
     lit = !lit;
@@ -91,7 +93,16 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     applyLight();
   });
   const foot = h('div', { class: 'dq-sz-foot' }, talkLink);
-  const el = h('div', { class: 'dq-safezone' }, h('h1', { class: 'dq-sr', text: 'Safe Zone' }), box, foot);
+  // every screen starts at the top: one Tab from there reaches "Talk to someone now", wherever it shows
+  const top = h('h1', { class: 'dq-sr', 'data-focus': '', text: 'Safe Zone' });
+  // each step's heading is said politely as it shows
+  const live = h('p', { class: 'dq-sr', role: 'status', 'aria-live': 'polite' });
+  const el = h('div', { class: 'dq-safezone' }, top, foot, box, live);
+  const say = (t: string) => {
+    live.textContent = '';
+    const id = setTimeout(() => (live.textContent = t), 100);
+    stops.push(() => clearTimeout(id));
+  };
   applyLight();
 
   const nextOf = (at: At) => FLOW[Math.min(FLOW.length - 1, FLOW.indexOf(at) + 1)];
@@ -104,15 +115,12 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     foot.classList.toggle('is-talk', at === 'talk');
     talkLink.classList.toggle('is-strong', (higher || danger) && at !== 'talk');
     // once it's higher, or they might not be safe, "Talk to someone now" moves above the screen for the rest of the visit
-    if ((higher || danger) && !foot.classList.contains('is-top')) {
-      foot.classList.add('is-top');
-      el.insertBefore(foot, box);
-    }
+    if (higher || danger) foot.classList.add('is-top');
     // upright the body fades in; held sideways the body is display: contents, so its two halves fade instead
     for (const e of [body, ...halves]) animate(e, [{ opacity: 0 }, { opacity: 1 }], { duration: app.reduced() ? 160 : 520, easing: 'ease-out' });
-    const f = body.querySelector<HTMLElement>('[data-focus]');
-    f?.setAttribute('tabindex', '-1');
-    f?.focus({ preventScroll: true });
+    top.setAttribute('tabindex', '-1');
+    top.focus({ preventScroll: true });
+    say(body.querySelector('.dq-sz-t')?.textContent ?? '');
     // upright only the body scrolls, held sideways the whole page does
     body.scrollTo({ top: 0 });
     app.root.scrollTo({ top: 0 });
@@ -210,11 +218,14 @@ export function safeScreen(app: App, route: Route): ScreenOut {
         const more = btn('Next line', () => {
           if (k < lines.length) {
             lines[k].classList.remove('is-hidden');
+            say(lines[k].textContent ?? '');
             animate(lines[k], [{ opacity: 0 }, { opacity: 1 }], { duration: app.reduced() ? 120 : 600 });
             k++;
           }
           if (k >= lines.length) {
+            const had = document.activeElement === more;
             more.remove();
+            if (had) nb.focus({ preventScroll: true });
             nb.classList.replace('dq-btn--quiet', 'dq-btn--primary');
           }
         }, { kind: 'primary' });
@@ -238,7 +249,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
               { class: 'dq-person' },
               h('span', { class: 'dq-person-n', text: x.name }),
               x.phone
-                ? h('span', { class: 'dq-person-acts' }, h('a', { class: 'dq-btn dq-btn--quiet', href: telHref(x.phone), html: `<span class="dq-btn-ic">${icon('phone')}</span><span>Call</span>` }), h('a', { class: 'dq-btn dq-btn--quiet', href: smsHref(x.phone.replace(/[^\d+]/g, '')), html: `<span class="dq-btn-ic">${icon('text')}</span><span>Text</span>` }))
+                ? h('span', { class: 'dq-person-acts' }, h('a', { class: 'dq-btn dq-btn--quiet', href: telHref(x.phone), 'aria-label': `Call ${x.name}`, html: `<span class="dq-btn-ic">${icon('phone')}</span><span>Call</span>` }), h('a', { class: 'dq-btn dq-btn--quiet', href: smsHref(x.phone.replace(/[^\d+]/g, '')), 'aria-label': `Text ${x.name}`, html: `<span class="dq-btn-ic">${icon('text')}</span><span>Text</span>` }))
                 : null,
             ),
           ),
@@ -268,15 +279,16 @@ export function safeScreen(app: App, route: Route): ScreenOut {
       }
       case 'talk': {
         const region = regionOf(app);
-        const action = (l: CrisisLine['links'][number], noteId?: string) => {
+        // each button says which line it calls, so a screen reader names it in full: "Call 116 123, Samaritans"
+        const action = (line: CrisisLine, l: CrisisLine['links'][number], noteId?: string) => {
           const web = l.href.startsWith('https:');
           const href = web ? l.href : l.href.startsWith('sms:') ? smsHref(l.href.slice(4), l.body) : telHref(l.href.slice(4));
-          return h('a', { class: 'dq-btn dq-btn--quiet dq-res-a', href, target: web ? '_blank' : null, rel: web ? 'noopener noreferrer' : null, 'aria-describedby': noteId, html: `<span class="dq-btn-ic">${icon(l.href.startsWith('tel:') ? 'phone' : 'text')}</span><span>${l.label}</span>` });
+          return h('a', { class: 'dq-btn dq-btn--quiet dq-res-a', href, target: web ? '_blank' : null, rel: web ? 'noopener noreferrer' : null, 'aria-label': `${l.label}, ${line.name}`, 'aria-describedby': noteId, html: `<span class="dq-btn-ic">${icon(l.href.startsWith('tel:') ? 'phone' : 'text')}</span><span>${l.label}</span>` });
         };
         const noted = (line: CrisisLine) =>
           line.links.map((l) => {
             const id = l.note ? `dq-res-note-${uid()}` : undefined;
-            return h('div', { class: 'dq-res-act' }, action(l, id), l.note ? h('p', { id, class: 'dq-res-note', text: typo(l.note) }) : null);
+            return h('div', { class: 'dq-res-act' }, action(line, l, id), l.note ? h('p', { id, class: 'dq-res-note', text: typo(l.note) }) : null);
           });
         // a lead line takes the place of the row's how, right under its name: it says who to call when the player might
         // not be safe
@@ -286,7 +298,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
             { class: `dq-res ${lead ? 'is-first' : ''}` },
             h('div', { class: 'dq-res-n', text: line.name }),
             lead ?? null,
-            line.links.some((l) => l.note) ? h('div', { class: 'dq-res-acts dq-res-acts--notes' }, noted(line)) : h('div', { class: 'dq-res-acts' }, line.links.map((l) => action(l))),
+            line.links.some((l) => l.note) ? h('div', { class: 'dq-res-acts dq-res-acts--notes' }, noted(line)) : h('div', { class: 'dq-res-acts' }, line.links.map((l) => action(line, l))),
             lead ? null : h('p', { class: 'dq-res-how', text: typo(line.how) }),
           );
         const rows = region.lines.map((line) => row(line));

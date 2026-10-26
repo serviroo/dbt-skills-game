@@ -153,7 +153,7 @@
   border: 1.5px solid #cfe0f1;
   box-shadow: inset -5px -2px 0 0 rgba(207, 224, 241, 0.75);
 }
-.ca-sz-light[aria-pressed='true'] .ca-sz-light-ic {
+.dq.ca-szlit .ca-sz-light-ic {
   background: #f3e6c4;
   border-color: #f3e6c4;
   box-shadow: 0 0 10px rgba(243, 230, 196, 0.6);

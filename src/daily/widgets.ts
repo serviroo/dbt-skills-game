@@ -359,6 +359,7 @@ export function holdButton(ctx: Ctx, opts: { seconds: number; label: string; don
     if (v >= 1 && !done) {
       done = true;
       holding = false;
+      unwatch();
       label.textContent = typo(opts.done);
       b.classList.add('is-done');
       if (heal && !ctx.reduced()) b.classList.add('ca-healed');
@@ -379,11 +380,24 @@ export function holdButton(ctx: Ctx, opts: { seconds: number; label: string; don
     hint.textContent = '';
     last = now();
     stop ??= onFrame(loop);
+    // a hold ends when the key or finger can no longer be on it: the window loses focus or the page is hidden
+    window.addEventListener('blur', release);
+    window.addEventListener('pagehide', release);
+    document.addEventListener('visibilitychange', onHidden);
+  };
+  const unwatch = () => {
+    window.removeEventListener('blur', release);
+    window.removeEventListener('pagehide', release);
+    document.removeEventListener('visibilitychange', onHidden);
   };
   const release = () => {
+    unwatch();
     if (done || !holding) return;
     holding = false;
     if (v < 1) hint.textContent = 'Hold a little longer when you want. No rush.';
+  };
+  const onHidden = () => {
+    if (document.visibilityState === 'hidden') release();
   };
   b.addEventListener('pointerdown', (e) => {
     e.preventDefault();
@@ -403,7 +417,15 @@ export function holdButton(ctx: Ctx, opts: { seconds: number; label: string; don
   b.addEventListener('keyup', (e) => {
     if (e.key === ' ' || e.key === 'Enter') release();
   });
-  return { el, stop: () => stop?.() };
+  // Tab or Shift+Tab mid-hold: the key comes up somewhere else, so focus leaving ends the hold
+  b.addEventListener('blur', release);
+  return {
+    el,
+    stop: () => {
+      unwatch();
+      stop?.();
+    },
+  };
 }
 
 /** Paired muscle relaxation: tighten on the in-breath (5 s), let go on the out-breath (10 s). */

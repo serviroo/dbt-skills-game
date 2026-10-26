@@ -3,7 +3,7 @@ import { animate } from '../ui/anim';
 import { LINE_COPY } from '../content/daily-lines';
 import type { App, ScreenOut } from './app';
 import { icon } from './art';
-import { btn, h, p, panel, typo } from './ui';
+import { btn, h, p, panel, radioKeys, typo } from './ui';
 import type { LineEntry } from './store';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -58,6 +58,7 @@ export function linePanel(app: App) {
         historyBtn(),
       ),
     );
+    radioKeys(body.querySelector<HTMLElement>('.dq-lines-opts')!, { manual: true });
   };
 
   const choose = (l: ReturnType<typeof st.lineOffer>[number], from?: HTMLElement) => {

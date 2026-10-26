@@ -2054,6 +2054,8 @@ textarea.dq-input {
   --pad: 24px;
   max-width: 600px;
   margin: 6px auto 0;
+  /* a long word wraps instead of running off a narrow or zoomed screen */
+  overflow-wrap: break-word;
   --chrome: calc(112px + var(--safe-top) + var(--safe-bottom));
   min-height: calc(100dvh - var(--chrome));
   display: flex;
@@ -2144,6 +2146,8 @@ textarea.dq-input {
   border: 1px solid rgba(160, 200, 235, 0.55);
 }
 .dq-sz-foot {
+  /* first in the page order, so one Tab from the top reaches it; shown under the frame, pinned to the bottom */
+  order: 1;
   position: sticky;
   bottom: 0;
   z-index: 2;
@@ -2154,8 +2158,9 @@ textarea.dq-input {
 }
 /* upright and on a desktop the Safe Zone is one screen tall, like the drawing page: only its words and choices scroll,
    inside the frame, and the foot sits under the frame, so nothing ever rests or scrolls under "Talk to someone now".
-   Held sideways the page scrolls and the foot sits beside the choices (below). */
-@media not all and (orientation: landscape) and (max-height: 500px) and (min-width: 540px) {
+   Held sideways the page scrolls and the foot sits beside the choices (below). A screen under 361px tall (a phone at
+   200% zoom) has no room for a frame that scrolls inside, so there the page scrolls and the foot pins to the bottom. */
+@media (orientation: portrait) and (min-height: 361px), (min-height: 501px), (max-width: 539px) and (min-height: 361px) {
   .dq[data-screen='safe'] {
     overflow: hidden;
     display: flex;
@@ -2323,6 +2328,7 @@ textarea.dq-input {
 }
 /* after "Higher" or "I might not be safe" the foot moves above the frame and stays there for the visit */
 .dq-sz-foot.is-top {
+  order: 0;
   top: var(--dq-top, 0px);
   bottom: auto;
   padding: 0 0 12px;
@@ -2343,6 +2349,54 @@ textarea.dq-input {
 .dq-sz .dq-lists-copy .dq-pre,
 .dq-sz .dq-lists-copy .dq-hint {
   font-size: 20px;
+}
+/* a phone zoomed to 200% (260 CSS pixels wide or less): the Safe Zone gives its words the room, so every call and text
+   button fits; the label already says Call or Text, so the icon steps aside. Its top bar keeps Leave in words and its
+   two tools as icons, each still named for a screen reader, so all three stay on one line */
+@media (max-width: 260px) {
+  .dq[data-screen='safe'] .dq-top {
+    gap: 4px;
+    padding-right: max(8px, var(--safe-right));
+    padding-left: max(8px, var(--safe-left));
+  }
+  .dq[data-screen='safe'] .dq-back {
+    padding: 0 6px 0 4px;
+  }
+  .dq[data-screen='safe'] .dq-back span:first-child,
+  .dq .ca-sz-light-t {
+    display: none;
+  }
+  .dq .ca-sz-light {
+    justify-content: center;
+    width: 44px;
+    padding: 0;
+  }
+  /* the helpline address is one long word in a tap-sized box: it breaks where it must */
+  .dq-sz .dq-small .dq-a {
+    overflow-wrap: anywhere;
+  }
+  .dq-sz {
+    --pad: 12px;
+  }
+  .dq-person,
+  .dq-res {
+    padding: 10px 8px;
+  }
+  .dq-sz .dq-btn {
+    padding: 0 10px;
+  }
+  .dq-res-a .dq-btn-ic,
+  .dq-person-acts .dq-btn-ic,
+  .dq-sz-talk > span:first-child {
+    display: none;
+  }
+  /* the pinned bar holds two or three lines here: solid behind them, fading only above, so no words show through */
+  .dq .dq-sz-foot {
+    background: linear-gradient(0deg, #07080f calc(100% - 8px), rgba(7, 8, 15, 0));
+  }
+  .dq .dq-safezone.is-lit .dq-sz-foot {
+    background: linear-gradient(0deg, #304866 calc(100% - 8px), rgba(48, 72, 102, 0));
+  }
 }
 .dq-person-add {
   display: flex;

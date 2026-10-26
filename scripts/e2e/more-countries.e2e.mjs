@@ -465,7 +465,7 @@ export const scenarios = {
       });
       await talk(b.page);
       expectClean(h, 'before the tap', b, await read(b.page));
-      const [tab] = await Promise.all([b.ctx.waitForEvent('page'), b.page.getByRole('link', { name: 'WhatsApp', exact: true }).click()]);
+      const [tab] = await Promise.all([b.ctx.waitForEvent('page'), b.page.getByRole('link', { name: /^WhatsApp, / }).click()]);
       await tab.waitForLoadState();
       h.expect(tab.url() === 'https://wa.me/6591511767', `the tap opened ${tab.url()}`);
       h.expect((await tab.evaluate(() => window.opener)) === null, 'the WhatsApp tab can reach back to the app');
