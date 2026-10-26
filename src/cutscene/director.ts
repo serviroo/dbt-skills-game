@@ -48,6 +48,9 @@ export class Director {
   private handheld = 0.6;
   skipped = false;
   private removeSkip: (() => void) | null = null;
+  private resolveSkip: () => void = () => {};
+  /** resolves when the player taps Skip, so whatever the beat in flight is waiting on ends there */
+  private readonly skip = new Promise<void>((r) => (this.resolveSkip = r));
   private baseBloom = 1.15;
 
   constructor(readonly stage: Stage, readonly audio: AudioLike = NOAUDIO) {}
@@ -114,9 +117,25 @@ export class Director {
     fn(0, 0);
   }
 
+  /** Skip: the beat in flight stops waiting, its moving parts land on their last frame and its pending cues stay silent. */
+  private skipNow() {
+    if (this.skipped) return;
+    this.skipped = true;
+    for (const tr of this.tracks) tr.fn(tr.until, 0);
+    this.tracks.clear();
+    this.resolveSkip();
+  }
+
+  /** A cue `sec` from now on the beat clock, dropped if the player skips first. */
+  private cue(sec: number, fn: () => void) {
+    wait(sec).then(() => {
+      if (!this.skipped) fn();
+    });
+  }
+
   private async hold(sec: number) {
     if (this.skipped) return;
-    await wait(sec);
+    await Promise.race([wait(sec), this.skip]);
   }
 
   /** Lantern window: opens, waits for their tap (auto-advance in capture mode or after a long idle). */
@@ -125,14 +144,16 @@ export class Director {
     const win = new LanternWindow(lanternLayer(), { tapToContinue: true, ...spec });
     await win.open();
     if (params.capture) await wait(readSec);
-    else await win.waitForInput(Math.max(readSec + 8, 14));
+    else await Promise.race([win.waitForInput(Math.max(readSec + 8, 14)), this.skip]);
     await win.close();
+    // a Skip leaves the window's tap listener waiting: end it, so a later tap plays no window sound
+    if (this.skipped) win.dismiss();
   }
 
   /* ======================================================================================= */
 
   async play(opts: { skippable?: boolean } = {}): Promise<'replay' | 'enter'> {
-    if (opts.skippable) this.removeSkip = skipButton(() => (this.skipped = true));
+    if (opts.skippable) this.removeSkip = skipButton(() => this.skipNow());
     const start = params.shot || '';
     const order = ['gate', 'windows', 'silhouette', 'awaken', 'chest', 'rewards'];
     const from = Math.max(0, order.indexOf(start));
@@ -160,10 +181,10 @@ export class Director {
     gate.setDim(1);
     gate.openAt(t0 + GATE.crackSec);
     this.audio.music?.to('intro', GATE.musicFadeSec);
-    wait(GATE.airSec).then(() => this.audio.play('gate_air'));
-    wait(GATE.crackSfxSec).then(() => this.audio.play('gate_crack'));
-    wait(GATE.swellSec).then(() => this.audio.play('gate_swell'));
-    wait(GATE.humSec).then(() => this.audio.bed?.('gate_hum')?.level(GATE.humLevel, GATE.humFadeSec));
+    this.cue(GATE.airSec, () => this.audio.play('gate_air'));
+    this.cue(GATE.crackSfxSec, () => this.audio.play('gate_crack'));
+    this.cue(GATE.swellSec, () => this.audio.play('gate_swell'));
+    this.cue(GATE.humSec, () => this.audio.bed?.('gate_hum')?.level(GATE.humLevel, GATE.humFadeSec));
     await this.hold(GATE.holdSec);
     this.track(GATE.dimSec, (lt) => gate.setDim(lerp(1, GATE.dimTo, ease.outCubic(lt / GATE.dimSec))));
     await this.hold(GATE.dimSec);
@@ -189,7 +210,7 @@ export class Director {
       },
       5.6,
     );
-    wait(LEVEL.ringSec).then(() => this.audio.play('level_ring'));
+    this.cue(LEVEL.ringSec, () => this.audio.play('level_ring'));
     await levelWin;
     if (this.skipped) return;
     await this.hold(0.1);
@@ -312,6 +333,7 @@ export class Director {
     }
     awaken.group.visible = true;
     const { awakenSequence, HIT } = await import('./awaken-shots');
+    if (this.skipped) return;
     const seq = awakenSequence(this.stage, awaken as never, jw, cam);
     this.shot = null;
     this.track(16, (lt) => {
@@ -319,25 +341,25 @@ export class Director {
       aura?.setIntensity(lerp(0.45, 0.9, smoothstep(HIT + 0.6, HIT + 3, lt)) * (1 - 0.5 * smoothstep(HIT + 8, HIT + 10, lt)));
     });
     // sound, scheduled against the same beat clock (visuals lead by one frame)
-    wait(1.85).then(() => this.audio.play('whoosh', { gain: 0.6 }));
-    wait(3.48).then(() => {
+    this.cue(1.85, () => this.audio.play('whoosh', { gain: 0.6 }));
+    this.cue(3.48, () => {
       this.audio.play('awaken_voice');
       awakenWord('AWAKEN', 0.42);
     });
-    wait(HIT - 0.75).then(() => {
+    this.cue(HIT - 0.75, () => {
       if (this.audio.hush) this.audio.hush();
       else this.audio.duck?.(-22, 0.06);
       this.audio.bed?.('aura_bed')?.level(0.05, 0.1);
     });
-    wait(HIT + 1 / 30).then(() => {
+    this.cue(HIT + 1 / 30, () => {
       if (!this.audio.hush) this.audio.duck?.(0, 0.03);
       this.audio.play('awaken_hit');
     });
-    wait(HIT + 0.09).then(() => this.audio.play('riser'));
-    wait(HIT + 0.77).then(() => this.audio.bed?.('vortex_roar')?.level(0.8, 0.2));
-    wait(HIT + 4.15).then(() => this.audio.play('soldier_ignite'));
+    this.cue(HIT + 0.09, () => this.audio.play('riser'));
+    this.cue(HIT + 0.77, () => this.audio.bed?.('vortex_roar')?.level(0.8, 0.2));
+    this.cue(HIT + 4.15, () => this.audio.play('soldier_ignite'));
     let stand: { stop(at?: number, ramp?: number): void } | undefined;
-    wait(HIT + 6.0).then(() => (stand = this.audio.play('stand_swell') as typeof stand));
+    this.cue(HIT + 6.0, () => (stand = this.audio.play('stand_swell') as typeof stand));
     await this.hold(HIT + 9.84);
     // hard audio cut, the army window over the kneeling army
     this.audio.bed?.('vortex_roar')?.level(0.25, 0.04);
@@ -390,12 +412,14 @@ export class Director {
     this.audio.play('chest_rise');
     this.track(1.9, (lt) => chest.setReveal(lt / 1.9));
     await this.hold(2.0);
+    if (this.skipped) return;
     // hold to charge (their pace)
     const holdMod = this.w.modules.chest;
     const loop = this.audio.chargeLoop?.();
     if (holdMod?.holdToCharge && !params.capture) {
       await holdMod.holdToCharge({
         durationSec: 1.5,
+        until: this.skip,
         onProgress: (c: number) => {
           chest.setCharge(c);
           loop?.set(c);
@@ -403,21 +427,23 @@ export class Director {
         onRelease: () => loop?.release(),
       });
     } else {
-      await wait(0.8);
-      await new Promise<void>((resolve) =>
-        this.track(1.5, (lt) => {
-          chest.setCharge(lt / 1.5);
-          loop?.set(lt / 1.5);
-          if (lt >= 1.5) resolve();
-        }),
-      );
+      await this.hold(0.8);
+      if (!this.skipped)
+        await new Promise<void>((resolve) =>
+          this.track(1.5, (lt) => {
+            chest.setCharge(lt / 1.5);
+            loop?.set(lt / 1.5);
+            if (lt >= 1.5) resolve();
+          }),
+        );
     }
     loop?.stop();
+    if (this.skipped) return;
     // 200 ms hush, then the burst (visual leads the boom by 1-2 frames)
     this.audio.duck?.(-18, 0.05);
     await wait(0.2);
     this.audio.duck?.(0, 0.02);
-    wait(1 / 30).then(() => this.audio.play('chest_burst'));
+    this.cue(1 / 30, () => this.audio.play('chest_burst'));
     this.track(2.4, (lt) => chest.setOpen(clamp(lt / 1.6)));
     await this.hold(0.8);
     await this.window({ kind: 'reward', title: WINDOWS.unlocked.title, html: WINDOWS.unlocked.html }, 1.8);
@@ -425,7 +451,6 @@ export class Director {
 
   /* ---------------------------------------------------------------- beats 7-8: rewards, letter, end card */
   private async beatRewards(): Promise<'replay' | 'enter'> {
-    this.skipped = false;
     this.stage.grade.u('flashAmount').value = 0;
     this.audio.music?.to('reward', 1.5);
     await rewardCards(REWARDS);

@@ -2,7 +2,7 @@ import type { Stage } from './core/stage';
 import { params } from './core/params';
 import { endCard, letterView, namePrompt, rewardCards, showTitle, uiSounds } from './ui/cutscene-ui';
 import { lanternMessage, windowSounds, type WindowKind } from './ui/lantern-window';
-import { useRealClock } from './ui/anim';
+import { useRealClock, useStageClock } from './ui/anim';
 import type { AudioLike } from './cutscene/director';
 import { loggingAudio } from './cutscene/audio-log';
 import { INTRO, NEW_VERSION, REWARDS } from './content/intro';
@@ -175,9 +175,14 @@ async function playWithoutStage(audio: AppAudio | null, state: AppState) {
 
 async function playIntro(stage: Stage, audio: AppAudio | null, state: AppState) {
   stage.paused = false;
+  // the title and name prompt are DOM only: one still frame of the empty scene behind them, the 3D frames start with
+  // the cinematic
+  if (!params.capture) stage.step(0);
   mountCutsceneVolume(audio);
   await showTitle(() => audio?.unlock?.());
   await askNames();
+  useStageClock(stage);
+  stage.start();
   const { playCutscene } = await import('./cutscene/director').catch(offerReload);
   let choice: 'replay' | 'enter';
   try {
