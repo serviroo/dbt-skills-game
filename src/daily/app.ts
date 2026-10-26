@@ -2,13 +2,14 @@ import { companionName, playerName } from '../core/you';
 import { params, setMotion } from '../core/params';
 import { cleared, onClear } from '../core/cleared';
 import { animate } from '../ui/anim';
-import { BUZZ, BUZZ_GAP, WINDOW } from '../motion/tokens';
+import { BUZZ, BUZZ_GAP, SKY, WINDOW } from '../motion/tokens';
 import { DISMISSED, dismissWindows, LanternWindow, lanternLayer, windowSounds, type WindowSpec } from '../ui/lantern-window';
 import { revealRank } from '../ui/rank-reveal';
 import { isHeavy, MODULE_ORDER, MODULES, type Next, type StatId } from '../content/dbt';
 import { RANK_UP, RANKS, SAFE_CREDIT } from '../content/daily-lines';
 import { icon } from './art';
 import { Bubbles, scratchTexture } from './bubbles';
+import { Sky } from './sky';
 import { wait } from './clock';
 import type { InkPad } from './ink';
 import { dayDiff, Store, type State } from './store';
@@ -124,6 +125,7 @@ export class App {
   private view: HTMLElement;
   private scrim: HTMLElement;
   private toastEl: HTMLElement;
+  private sky: Sky;
   /** keeps --dq-top and --dq-foot at the pinned bars' real heights (scroll-padding in daily.css) */
   private pins: ResizeObserver;
   route: Route = { name: 'hub' };
@@ -164,6 +166,7 @@ export class App {
     this.store = new Store(opts.storageKey, opts.now, opts.initialState);
     this.root = h('div', { class: 'dq', 'data-mode': 'hub' }) as HTMLDivElement;
     this.root.style.setProperty('--dq-scratch', `url(${scratchTexture()})`);
+    this.sky = new Sky(this.root, () => this.reduced());
     this.bubbles = new Bubbles(() => this.reduced());
     this.top = h('header', { class: 'dq-top' });
     this.view = h('main', { class: 'dq-view', id: 'dq-main' });
@@ -692,6 +695,8 @@ export class App {
     if (out.foot) this.pins.observe(out.foot);
     this.root.dataset.mode = out.mode;
     this.root.dataset.screen = route.name;
+    // only Home's sky follows the clock; the Safe Zone gets the night sky back at once
+    this.sky.set(route.name === 'hub', safe ? 0 : SKY.fadeMs);
     this.renderTop(out);
     this.view.replaceChildren(out.el);
     this.root.scrollTop = 0;
@@ -776,6 +781,7 @@ export class App {
 
   destroy() {
     this.current?.leave?.();
+    this.sky.set(false, 0);
     this.pins.disconnect();
     this.volBtn?.dispose();
     this.store.dispose();

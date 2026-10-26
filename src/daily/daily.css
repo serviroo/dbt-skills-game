@@ -1,5 +1,17 @@
 /* The quiet Lantern: the same material as the cutscene's windows, turned down to night-light level. */
 
+/* the sky's two glows, registered so a change of mood cross-fades (src/daily/sky.ts); the initial values are night */
+@property --sky-hi {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: rgba(20, 52, 92, 0.42);
+}
+@property --sky-lo {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: rgba(16, 38, 70, 0.35);
+}
+
 .dq {
   --plate-a: rgba(9, 22, 40, 0.88);
   --plate-b: rgba(5, 13, 25, 0.9);
@@ -18,6 +30,9 @@
   --pad: 18px;
   /* how far the top bar's shade runs below it */
   --top-shade: 10px;
+  /* the night sky, which every screen but Home keeps whatever the time */
+  --sky-hi: rgba(20, 52, 92, 0.42);
+  --sky-lo: rgba(16, 38, 70, 0.35);
   position: fixed;
   inset: 0;
   z-index: 10;
@@ -30,9 +45,12 @@
   -webkit-overflow-scrolling: touch;
   pointer-events: auto;
   background:
-    radial-gradient(120% 60% at 50% -10%, rgba(20, 52, 92, 0.42), transparent 60%),
-    radial-gradient(90% 50% at 50% 115%, rgba(16, 38, 70, 0.35), transparent 70%),
+    radial-gradient(120% 60% at 50% -10%, var(--sky-hi), transparent 60%),
+    radial-gradient(90% 50% at 50% 115%, var(--sky-lo), transparent 70%),
     #07080f;
+  transition:
+    --sky-hi var(--sky-ms, 0ms) ease-in-out,
+    --sky-lo var(--sky-ms, 0ms) ease-in-out;
   color: var(--t-body);
   font-family: var(--font-ui);
   font-size: 17px;
@@ -44,6 +62,19 @@
   user-select: none;
   scrollbar-width: thin;
   scrollbar-color: rgba(125, 150, 197, 0.35) transparent;
+}
+/* Home's sky by the clock: lantern blue lifts for the day, a soft warm horizon for dawn and dusk, night as above */
+.dq[data-sky='dawn'] {
+  --sky-hi: rgba(92, 112, 170, 0.46);
+  --sky-lo: rgba(226, 150, 140, 0.34);
+}
+.dq[data-sky='day'] {
+  --sky-hi: rgba(64, 140, 210, 0.5);
+  --sky-lo: rgba(40, 96, 186, 0.34);
+}
+.dq[data-sky='dusk'] {
+  --sky-hi: rgba(66, 62, 136, 0.5);
+  --sky-lo: rgba(214, 112, 72, 0.36);
 }
 .dq::-webkit-scrollbar {
   width: 8px;
@@ -120,7 +151,7 @@
   z-index: -1;
   pointer-events: none;
   --vig: radial-gradient(130% 90vh at 50% 45vh, transparent 55%, rgba(3, 4, 9, 0.55) 100%);
-  --glow: radial-gradient(120% 60vh at 50% -10vh, rgba(20, 52, 92, 0.42), transparent 60%);
+  --glow: radial-gradient(120% 60vh at 50% -10vh, var(--sky-hi), transparent 60%);
   background: var(--vig), var(--glow), #07080f;
   -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - var(--top-shade)), transparent);
   mask-image: linear-gradient(180deg, #000 calc(100% - var(--top-shade)), transparent);
@@ -128,7 +159,7 @@
 @supports (height: 1dvh) {
   .dq-top::after {
     --vig: radial-gradient(130% 90dvh at 50% 45dvh, transparent 55%, rgba(3, 4, 9, 0.55) 100%);
-    --glow: radial-gradient(120% 60dvh at 50% -10dvh, rgba(20, 52, 92, 0.42), transparent 60%);
+    --glow: radial-gradient(120% 60dvh at 50% -10dvh, var(--sky-hi), transparent 60%);
   }
 }
 .dq-top > :last-child {
