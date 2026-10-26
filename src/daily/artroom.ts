@@ -685,7 +685,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     mode: 'sub',
     bubbles: [0, 0],
     after: () => {
-      app.root.append(sheet, riseEl);
+      app.sheetLayer.append(sheet, riseEl);
       ro.observe(fit.parentElement!);
       ro.observe(el);
       layout();

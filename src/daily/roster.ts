@@ -4,6 +4,11 @@
  * distinct visit days on each render; only their names are stored (settings.names, one setAt per shadow).
  */
 import { animate } from '../ui/anim';
+import { mountScene } from '../scene/vignettes/host';
+import type { CampHit, CampInput } from '../scene/watch/camp';
+import '../scene/watch/camp.css';
+import { icon } from './art';
+import { now, onFrame } from './clock';
 import { INVENTORY, ROSTER, ROSTER_COPY, type ShadowDef, type ShadowId } from '../content/roster-lines';
 import type { App } from './app';
 import { cleanName, type Store } from './store';
@@ -170,7 +175,7 @@ function namedPanel(app: App, s: ShadowDef, onName: (id: ShadowId, v: string) =>
     'article',
     { class: `w2-sh w2-sh--${s.id}`, 'data-shadow': s.id, 'aria-label': `${s.name}, ${s.role}` },
     h('div', { class: 'w2-sh-stage' }, h('span', { class: 'w2-sh-floor', 'aria-hidden': 'true' }), h('div', { class: 'w2-sh-art', html: shadowSVG(s.id, { size: 96 }) })),
-    h('h3', { class: 'w2-sh-n', text: s.name }),
+    h('h3', { class: 'w2-sh-n', id: `w2h-${s.id}`, text: s.name }),
     h('p', { class: 'w2-sh-role', text: s.role }),
     nick,
     h('p', { class: 'w2-sh-idle', text: typo(s.idle) }),
@@ -179,11 +184,61 @@ function namedPanel(app: App, s: ShadowDef, onName: (id: ShadowId, v: string) =>
   return { el, input, nick };
 }
 
-/** The full-width roster on the Shadows screen: tall panels for the ones who arrived, quiet outlines for the rest. */
+/**
+ * The camp above the roster: the 3D scene through the companion's scene host, with a labelled button laid over each
+ * watcher who has arrived (so a tap, the keyboard and a screen reader all reach them). It shows only while the scene is
+ * loading or running (a lost context leaves its room until it comes back); with no WebGL or a failed load it takes no
+ * room and the roster under it is the Watch.
+ */
+function campStage(app: App, arrived: ShadowDef[], open: (id: ShadowId, from: HTMLButtonElement) => void) {
+  const btns = new Map<ShadowId, HTMLButtonElement>();
+  const hits = h('div', { class: 'w2-camp-hits', role: 'group', 'aria-label': ROSTER_COPY.campLabel });
+  for (const s of arrived) {
+    const b = h('button', { type: 'button', class: 'w2-camp-hit', 'data-shadow': s.id, 'aria-label': `${s.name}, ${s.role}`, 'aria-haspopup': 'dialog' }, h('span', { class: 'w2-camp-tag', 'aria-hidden': 'true', text: s.name }));
+    b.addEventListener('click', () => open(s.id, b));
+    btns.set(s.id, b);
+    hits.append(b);
+  }
+  const stage = h('div', { class: 'w2-camp' }, hits, h('p', { class: 'w2-camp-hint', text: ROSTER_COPY.campHint }));
+  const pct = (n: number) => `${(n * 100).toFixed(2)}%`;
+  const shown = new Map<ShadowId, { x: number; y: number; w: number; h: number; z: string }>();
+  /** a change smaller than about a pixel: what a slow GPU's step down in resolution does to the framing */
+  const near = (a: number, b: number) => Math.abs(a - b) < 0.002;
+  const input: CampInput = {
+    ids: arrived.map((s) => s.id),
+    // called when the frame changes (its size or shape), never per frame: an idle camp does no style work
+    onHits(list: CampHit[]) {
+      // nearer figures sit on top, so a tap where two overlap goes to the one in front
+      const order = [...list].sort((a, b) => b.depth - a.depth);
+      for (const { id, x, y, w, h: ht } of list) {
+        const b = btns.get(id);
+        if (!b) continue;
+        const z = String(1 + order.findIndex((o) => o.id === id));
+        const was = shown.get(id);
+        if (was && was.z === z && near(was.x, x) && near(was.y, y) && near(was.w, w) && near(was.h, ht)) continue;
+        shown.set(id, { x, y, w, h: ht, z });
+        b.style.setProperty('--x', pct(x));
+        b.style.setProperty('--y', pct(y));
+        b.style.setProperty('--w', pct(w));
+        b.style.setProperty('--h', pct(ht));
+        b.style.zIndex = z;
+      }
+    },
+  };
+  const unmount = mountScene(stage, { kind: 'camp', clock: { now, onFrame }, reduced: () => app.reduced(), waitMs: Infinity, input });
+  return { stage, unmount };
+}
+
+/**
+ * The full-width roster on the Shadows screen: the camp, then tall panels for the ones who arrived and quiet outlines
+ * for the rest. Tapping a watcher in camp opens their own panel, name field and all, in a sheet over the page; the
+ * top bar (and the Safe Zone in it) stays above the sheet and reachable. `leave` closes the sheet and takes the camp
+ * down.
+ */
 export function rosterSection(app: App) {
   const st = app.store;
   const n = visitCount(st);
-  const live = new Map<ShadowId, { input: HTMLInputElement; nick: HTMLElement }>();
+  const live = new Map<ShadowId, { el: HTMLElement; input: HTMLInputElement; nick: HTMLElement }>();
   const onName = (id: ShadowId, raw: string) => {
     const v = cleanName(raw);
     const cur = st.state.settings.names[id] ?? '';
@@ -199,11 +254,13 @@ export function rosterSection(app: App) {
     }
   };
   const panels: HTMLElement[] = [];
+  const arrived: ShadowDef[] = [];
   for (const s of ROSTER) {
     if (n >= s.at) {
       const p = namedPanel(app, s, onName);
       live.set(s.id, p);
       panels.push(p.el);
+      arrived.push(s);
     } else if (!s.hidden)
       panels.push(
         h(
@@ -215,10 +272,56 @@ export function rosterSection(app: App) {
         ),
       );
   }
+
+  // the card sheet: the watcher's own panel moves into it while it is open, and back to its place in the row after
+  let sheet: { wrap: HTMLElement; panel: HTMLElement; spot: Comment; from: HTMLButtonElement; inert: HTMLElement[] } | null = null;
+  // Back and Escape close an open card before anything else (see App.sheet)
+  let cardDone: (() => void) | null = null;
+  const closeCard = (refocus = true) => {
+    if (!sheet) return;
+    const { wrap, panel, spot, from, inert } = sheet;
+    sheet = null;
+    cardDone?.();
+    cardDone = null;
+    // a name still being typed is kept before the field moves
+    const field = panel.querySelector('input');
+    if (field && document.activeElement === field) field.blur();
+    spot.replaceWith(panel);
+    wrap.remove();
+    for (const e of inert) e.inert = false;
+    if (refocus && from.isConnected) from.focus({ preventScroll: true });
+  };
+  const openCard = (id: ShadowId, from: HTMLButtonElement) => {
+    const p = live.get(id);
+    const page = el.closest<HTMLElement>('.dq-page');
+    if (!p || !page) return;
+    closeCard(false);
+    const spot = document.createComment(id);
+    p.el.replaceWith(spot);
+    const x = h('button', { type: 'button', class: 'dq-icbtn w2-camp-x', 'aria-label': ROSTER_COPY.closeCard, html: icon('close'), onclick: () => closeCard() });
+    const card = h('div', { class: 'w2-camp-card', role: 'dialog', 'aria-labelledby': `w2h-${id}` }, x, p.el);
+    const wrap = h('div', { class: 'dq-sheet w2-camp-sheet' }, card);
+    wrap.addEventListener('click', (e) => e.target === wrap && closeCard());
+    wrap.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') (e.stopPropagation(), closeCard());
+    });
+    // the sheet goes in the app's sheet layer, outside the page, so it is on screen from the first tap; the page rests
+    // behind it while the top bar (Back, the Safe Zone) stays live above it
+    const inert = page.inert ? [] : [page];
+    for (const c of inert) c.inert = true;
+    app.sheetLayer.append(wrap);
+    sheet = { wrap, panel: p.el, spot, from, inert };
+    cardDone = app.sheet(() => closeCard());
+    if (!app.reduced()) animate(card, [{ opacity: 0, transform: 'translateY(16px)' }, { opacity: 1, transform: 'none' }], { duration: 280, easing: 'cubic-bezier(.16,1,.3,1)' });
+    x.focus({ preventScroll: true });
+  };
+
+  const camp = arrived.length ? campStage(app, arrived, openCard) : null;
   const el = h(
     'section',
     { class: 'w2-roster', 'aria-labelledby': 'w2-roster-h' },
     h('h2', { class: 'dq-sec-h', id: 'w2-roster-h' }, h('span', { text: ROSTER_COPY.title }), h('span', { class: 'dq-sec-sub', text: ROSTER_COPY.sub })),
+    camp?.stage ?? null,
     h('div', { class: 'w2-roster-row' }, panels),
   );
   // names set in another open copy show up here, without touching a field the player is typing in
@@ -231,7 +334,13 @@ export function rosterSection(app: App) {
       if (document.activeElement !== p.input && cleanName(p.input.value) !== v) p.input.value = v;
     }
   });
-  return el;
+  return {
+    el,
+    leave() {
+      closeCard(false);
+      camp?.unmount();
+    },
+  };
 }
 
 let pebbleN = 0;

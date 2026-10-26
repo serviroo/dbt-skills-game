@@ -1,0 +1,163 @@
+/* The Night Watch's camp above the roster (rosterSection in src/daily/roster.ts; the scene is ./camp.ts). It takes room
+   only while its scene loads or runs, so with no WebGL the roster sits where it always did. The scene fills the
+   stage edge to edge and fades out at the top and bottom into the page; a button lies over each watcher. */
+.w2-camp {
+  position: relative;
+  display: none;
+  /* nothing in the camp (a button at the edge, a name under it) ever widens the page */
+  overflow-x: clip;
+  height: clamp(260px, min(108vw, 80vh), 520px);
+  margin: 0 -14px;
+}
+/* shown while the scene loads, and for as long as it is mounted (a lost context comes back here); gone if it never starts */
+.w2-camp.is-scene-wait,
+.w2-camp:has(> .dq-scene) {
+  display: block;
+  background: radial-gradient(60% 42% at 50% 62%, rgba(79, 184, 255, 0.07), transparent 70%);
+}
+.w2-camp > .dq-scene {
+  inset: 0;
+  border-radius: 0;
+  -webkit-mask-image: linear-gradient(180deg, transparent, #000 15%, #000 80%, transparent);
+  mask-image: linear-gradient(180deg, transparent, #000 15%, #000 80%, transparent);
+}
+@media (min-width: 900px) {
+  .w2-camp {
+    margin: 0;
+  }
+  .w2-camp > .dq-scene {
+    -webkit-mask-image: linear-gradient(180deg, transparent, #000 15%, #000 80%, transparent), linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+    -webkit-mask-composite: source-in;
+    mask-image: linear-gradient(180deg, transparent, #000 15%, #000 80%, transparent), linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+    mask-composite: intersect;
+  }
+}
+
+.w2-camp-hits {
+  position: absolute;
+  inset: 0;
+  display: none;
+}
+.w2-camp.is-scene-live > .w2-camp-hits {
+  display: block;
+}
+/* a watcher's button: the figure's box in the frame (set by the scene), at least a finger wide, centred on it and kept
+   inside the camp */
+.w2-camp-hit {
+  position: absolute;
+  left: clamp(22px, calc(var(--x, 0%) + var(--w, 0%) / 2), calc(100% - 22px));
+  top: clamp(22px, calc(var(--y, 0%) + var(--h, 0%) / 2), calc(100% - 22px));
+  width: max(44px, var(--w, 0%));
+  height: max(44px, var(--h, 0%));
+  transform: translate(-50%, -50%);
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 14px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.w2-camp-hit:focus-visible {
+  outline: 2px solid #4fb8ff;
+  outline-offset: 2px;
+}
+@media (hover: hover) {
+  .w2-camp-hit:hover {
+    outline: 1px solid rgba(165, 208, 238, 0.45);
+    outline-offset: 2px;
+  }
+}
+/* the name under a watcher while the pointer rests on them or the keyboard is on them */
+.w2-camp-tag {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 6px);
+  transform: translateX(-50%);
+  padding: 3px 9px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: #e6f1ff;
+  background: rgba(7, 8, 15, 0.78);
+  border: 1px solid rgba(79, 184, 255, 0.35);
+  display: none;
+  pointer-events: none;
+}
+.w2-camp-hit:focus-visible .w2-camp-tag {
+  display: block;
+}
+@media (hover: hover) {
+  .w2-camp-hit:hover .w2-camp-tag {
+    display: block;
+  }
+}
+.w2-camp-hint {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 4px;
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.4;
+  text-align: center;
+  color: var(--t-dim, #93abc8);
+  text-shadow: 0 1px 8px #07080f;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 700ms ease-out;
+}
+.w2-camp.is-scene-live > .w2-camp-hint {
+  opacity: 1;
+}
+
+/* the card sheet: the watcher's own panel, over the page and under the top bar */
+.w2-camp-sheet {
+  padding-top: calc(var(--dq-top, 0px) + 12px);
+}
+.w2-camp-card {
+  position: relative;
+  width: min(100%, 340px);
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  --plate-a: #091628;
+  --plate-b: #050d19;
+}
+.w2-camp-card > .w2-sh {
+  flex: none;
+  width: 100%;
+  min-height: 0;
+}
+.w2-camp-x {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  width: 44px;
+  height: 44px;
+  color: #e6f1ff;
+}
+@media (orientation: landscape) and (max-height: 520px) {
+  .w2-camp-card {
+    width: min(100%, 600px);
+  }
+  .w2-camp-card > .w2-sh {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    column-gap: 18px;
+    align-content: start;
+  }
+  .w2-camp-card > .w2-sh > .w2-sh-stage {
+    grid-row: 1 / span 6;
+    align-self: center;
+    margin: 0;
+  }
+  .w2-camp-card > .w2-sh > :not(.w2-sh-stage) {
+    grid-column: 2;
+    margin-right: 40px;
+  }
+}

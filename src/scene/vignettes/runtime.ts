@@ -15,8 +15,8 @@ export interface Vignette {
   /** frees anything the scene made outside its scene graph (the graph itself is freed by the runtime) */
   dispose?(): void;
 }
-/** What a scene file exports as `build`: makes the scene, lit with `accent` as its rim colour. */
-export type BuildScene = (accent: THREE.Color) => Vignette;
+/** What a scene file exports as `build`: makes the scene, lit with `accent` as its rim colour, from its mount options. */
+export type BuildScene = (accent: THREE.Color, opts: SceneOpts) => Vignette;
 
 const STEP = 1 / SCENE.fps;
 /** the longest a scene's frame may take to draw, in ms */
@@ -58,7 +58,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   let lease: Lease | undefined;
   try {
     lease = lendRenderer(holder, evict);
-    vig = build(new THREE.Color(opts.accent ?? '#4fb8ff'));
+    vig = build(new THREE.Color(opts.accent ?? '#4fb8ff'), opts);
   } catch (err) {
     if (vig) disposeTree(vig.scene);
     lease?.release();
