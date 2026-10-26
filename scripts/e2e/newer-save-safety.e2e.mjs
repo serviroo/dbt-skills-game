@@ -331,14 +331,13 @@ export const scenarios = {
     h.expect(/Nothing changed/.test(await restore(h, page, other, 'other.json')), 'a file from another app was taken');
     h.expect(/Nothing changed/.test(await restore(h, page, '{"app":"the-quiet-lantern","v":2,"events":[', 'broken.json')), 'a broken file was taken');
     h.expect((await h.ls(page, h.SAVE)) === before, 'a refused file changed the save');
-    // a preview that is cancelled changes nothing (when this build previews a Save Crystal before restoring)
+    // a Save Crystal preview that is cancelled changes nothing
     const file = { app: 'the-quiet-lantern', exported: new Date().toISOString(), ...newerSave(), v: 2, schema: 3, garden: { seeds: 9 } };
     await page.locator('input[type=file]').setInputFiles({ name: 'newer.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(file)) });
     const cancel = page.getByRole('button', { name: 'Cancel', exact: true });
-    if (await cancel.waitFor({ timeout: 5000 }).then(() => true, () => false)) {
-      await cancel.click();
-      h.expect((await h.ls(page, h.SAVE)) === before, 'a cancelled preview changed the save');
-    }
+    await cancel.waitFor({ timeout: 10000 });
+    await cancel.click();
+    h.expect((await h.ls(page, h.SAVE)) === before, 'a cancelled preview changed the save');
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },
