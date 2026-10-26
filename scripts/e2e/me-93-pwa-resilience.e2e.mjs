@@ -125,20 +125,30 @@ async function active(page, d, sleep) {
   throw new Error(`the ${d.tag} worker never took over`);
 }
 
-const update = (page) =>
-  page.evaluate(async () => {
+/**
+ * Asks the browser for the build the host now serves (d) and waits for the worker it found to settle. It holds the worker
+ * this check finds, even one that fails and leaves the registration before the check returns, and otherwise reads the
+ * registration: a check the browser started on its own may have found d first, and then no event comes. An update error
+ * fails the step. "activated" means d's cache is the current one.
+ */
+const update = (page, d) =>
+  page.evaluate(async ([meta, want]) => {
     const reg = await navigator.serviceWorker.getRegistration();
-    const found = new Promise((res) => reg.addEventListener('updatefound', () => res(reg.installing), { once: true }));
-    await reg.update().catch(() => {});
-    const w = await Promise.race([found, new Promise((res) => setTimeout(() => res(null), 8000))]);
-    if (!w) return 'none';
-    return new Promise((res) => {
+    let found = null;
+    reg.addEventListener('updatefound', () => (found = reg.installing), { once: true });
+    await reg.update();
+    // the check has settled: the worker it found, else one an earlier check found, else the active one
+    const w = found ?? reg.installing ?? reg.waiting ?? reg.active;
+    const state = await new Promise((res) => {
       const done = () => (w.state === 'redundant' || w.state === 'activated') && res(w.state);
       w.addEventListener('statechange', done);
       done();
       setTimeout(() => res('stuck: ' + w.state), 60000);
     });
-  });
+    if (state !== 'activated') return state;
+    const current = await (await caches.open(meta)).match('current').then((r) => r?.text());
+    return current === want ? state : `activated, but the current cache is ${current}, not ${want}`;
+  }, [swConst(d.dir, 'META'), d.cache]);
 
 function run(args, { env = {}, timeoutMs = 240000 } = {}) {
   return new Promise((resolve) => {
@@ -211,7 +221,7 @@ export const scenarios = {
         srv.use(bad.dir);
         const answer = await fetch(srv.url + file);
         expect(answer.status === 200 && /text\/html/.test(answer.headers.get('content-type')), `the host should answer the missing ${file} with its page`);
-        const state = await update(page);
+        const state = await update(page, bad);
         expect(state === 'redundant', `a deploy whose ${file} came back as HTML ended "${state}", not rejected`);
         expect(!(await versionCaches(page, prefix)).includes(bad.cache), `the broken deploy without ${file} left a cache behind`);
       }
@@ -223,11 +233,12 @@ export const scenarios = {
       const magic = await page.evaluate(() => fetch('models/hero.glb').then((r) => r.arrayBuffer()).then((b) => String.fromCharCode(...new Uint8Array(b, 0, 4))));
       expect(magic === 'glTF', `the cached character model starts with "${magic}", not glTF`);
       await shot(page, 'pwa-01-working-version-after-broken-deploys');
-      await ctx.setOffline(false);
+      // v2 is served before the page is online, so no check finds v1 again
       const v2 = deploy(base, 'v2', { rename: true });
       MIME['.js'] = 'text/javascript1.5; charset=utf-8';
       srv.use(v2.dir);
-      const good = await update(page);
+      await ctx.setOffline(false);
+      const good = await update(page, v2);
       expect(good === 'activated', `a complete deploy ended "${good}" instead of installing`);
       await active(page, v2, sleep);
       await page.reload();
@@ -282,7 +293,7 @@ export const scenarios = {
       await page.evaluate((m) => caches.open(m).then((c) => c.delete('versions')), swConst(v1.dir, 'META'));
       for (const v of [v2, v3]) {
         srv.use(v.dir);
-        const state = await update(page);
+        const state = await update(page, v);
         expect(state === 'activated', `${v.tag} ended "${state}"`);
         await active(page, v, sleep);
       }
@@ -316,7 +327,7 @@ export const scenarios = {
       await active(page, vs[0], sleep);
       for (const v of vs.slice(1)) {
         srv.use(v.dir);
-        const state = await update(page);
+        const state = await update(page, v);
         expect(state === 'activated', `${v.tag} ended "${state}"`);
         await active(page, v, sleep);
       }
@@ -394,7 +405,7 @@ export const scenarios = {
       page.on('load', () => navigations++);
       const advance = async (i, screen) => {
         srv.use(vs[i].dir);
-        expect(await update(page) === 'activated', `update ${i} did not activate`);
+        expect(await update(page, vs[i]) === 'activated', `update ${i} did not activate`);
         await active(page, vs[i], sleep);
         await sleep(600);
         expect(navigations === 0, `an update navigated away from ${screen}`);
