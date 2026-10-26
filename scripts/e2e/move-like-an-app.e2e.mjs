@@ -742,6 +742,10 @@ export const scenarios = {
     await onScreen(page, 'hub');
     await forward(page);
     expect((await screenOf(page)) === 'hub', `Forward onto a screen this version doesn't have showed ${await screenOf(page)}`);
+    // history stands on Home's own entry too, so the next Back does what Back does on Home
+    await page.waitForFunction(() => history.state?.i === 0, null, { timeout: 5000 }).catch(() => {});
+    const at = await page.evaluate(() => history.state?.i);
+    expect(at === 0, `after falling back to Home, history stands on entry ${at}, not Home's`);
     expect(!errors.length, errors.join('\n'));
   },
 

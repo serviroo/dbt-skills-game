@@ -545,7 +545,11 @@ export class App {
 
   private land(e: Entry) {
     if (e.key === this.visitKey) return this.current?.moveTo?.(e.place);
-    if (!this.known(e.route)) return this.go({ name: 'hub' });
+    if (!this.known(e.route)) {
+      // Home is drawn from Home's own entry, so the next Back does what Back does on Home
+      this.travel(0);
+      return this.go({ name: 'hub' });
+    }
     this.show(e.route, { again: true, key: e.key, at: e.place });
   }
 
