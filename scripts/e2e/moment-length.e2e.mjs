@@ -1,9 +1,11 @@
 // Give me a moment: the player chooses how long it lasts (about 1 minute, about 3 minutes, or until they're ready).
 // A timed moment ends softly with one calm line and never counts down; until-ready never ends on its own; leaving
 // early never asks; the rest credit stays once a day; the choice is kept on this device; the low hum stops at the end.
+// A Save Crystal carries the choice, and a newer build's choices beside the save, even ones this build doesn't offer.
 // Time runs on Playwright's clock, so the long waits are fast-forwarded.
 import fs from 'node:fs';
 import path from 'node:path';
+import { crystal, restore } from './newer-save-safety.e2e.mjs';
 
 const KEPT_LENGTH = 'dbt.lantern.v1.moment-length';
 const END = /That.s your moment/;
@@ -285,6 +287,30 @@ export const scenarios = {
     await settings(b.page);
     await restore();
     h.expect((await h.ls(b.page, KEPT_LENGTH)) === '1', 'restoring again replaced the length this device chose');
+    h.expect(!b.errors.length, b.errors.join('\n'));
+    await b.ctx.close();
+  },
+
+  /** choices a newer build stored beside the save that this one doesn't offer (a length, a Safe Zone light, a reading
+   * size): Until I'm ready shows, the stored length stays unless the player chooses one here, and a Save Crystal carries
+   * all three to a device that has none */
+  async 'newer-choices-kept'(h) {
+    const kept = { [KEPT_LENGTH]: '5', 'dbt.lantern.v1.safe-light': 'auto', 'dbt.lantern.v1.read-size': 'huge' };
+    const a = await openMoment(h, kept);
+    h.expect(await radio(a.page, /Until I.m ready/).isChecked(), 'a length this build does not offer did not show as Until I am ready');
+    await a.page.locator('.dq-mo-done').click();
+    await h.reachHub(a.page);
+    h.expect((await h.ls(a.page, KEPT_LENGTH)) === '5', "the moment overwrote a newer build's length: " + (await h.ls(a.page, KEPT_LENGTH)));
+    const raw = await crystal(h, a.page, 'crystal-newer-choices');
+    const carried = raw.preferences ?? {};
+    h.expect(carried.momentLength === '5' && carried.safeLight === 'auto' && carried.readSize === 'huge', "the Save Crystal dropped a newer build's choices: " + JSON.stringify(carried));
+    h.expect(!a.errors.length, a.errors.join('\n'));
+    await a.ctx.close();
+    const b = await h.open({ 'dbt.app.v1': h.SEEN });
+    await h.reachHub(b.page);
+    await restore(h, b.page, raw, 'crystal-newer-choices.json');
+    const back = await Promise.all(Object.keys(kept).map((k) => h.ls(b.page, k)));
+    h.expect(JSON.stringify(back) === JSON.stringify(Object.values(kept)), "restoring did not bring a newer build's choices back: " + JSON.stringify(back));
     h.expect(!b.errors.length, b.errors.join('\n'));
     await b.ctx.close();
   },
