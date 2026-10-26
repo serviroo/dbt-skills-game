@@ -66,9 +66,58 @@ function simulate(cfg) {
   Object.defineProperty(proto, 'persist', { configurable: true, get: () => (k.missing ? undefined : persist) });
 }
 
-async function openKeep(h, cfg = {}, { viewport = SIZES.phone, ua } = {}) {
+/** Holds the page's first open of the database `name` until window.__open.release(), as a slow disk would. */
+function holdOpen(name) {
+  const open = IDBFactory.prototype.open;
+  const g = (window.__open = { asked: [], release: null });
+  IDBFactory.prototype.open = function (...a) {
+    g.asked.push(a[0]);
+    if (a[0] !== name || g.release) return open.apply(this, a);
+    let real = null;
+    const req = { onupgradeneeded: null, onsuccess: null, onerror: null, onblocked: null, get result() { return real?.result; }, get error() { return real?.error ?? null; } };
+    g.release = () => {
+      real = open.apply(indexedDB, a);
+      for (const ev of ['upgradeneeded', 'success', 'error', 'blocked']) real['on' + ev] = (e) => req['on' + ev]?.(e);
+    };
+    return req;
+  };
+}
+
+/** Through the app's own stores: waits for their databases to open, then saves a drawing, a draft and a story. */
+async function seedSaves(today) {
+  const [{ artStore }, { storyStore }, { ART_DB, STORY_DB, BESIDE }] = await Promise.all([import('/src/daily/artstore.ts'), import('/src/daily/storystore.ts'), import('/src/core/stored-names.ts')]);
+  const key = window.__daily.store.key;
+  const art = artStore(key);
+  const stories = storyStore(key);
+  const seeding = (window.__seeding = { art: false, stories: false });
+  await Promise.all([art.list().then(() => (seeding.art = true)), stories.list().then(() => (seeding.stories = true))]);
+  const line = (i, x) => ({ i, w: 14, p: [x, 300, x + 120, 520, x + 260, 760, x + 300, 1100] });
+  const drawn = await art.put({ id: 'keep-drawing', kind: 'today', day: today, t: 1, updated: 1, prompt: 'Something that helped today', n: 2, strokes: [line(1, 200), line(3, 640)] });
+  await art.putDraft({ key: 'today:keep', kind: 'today', strokes: [line(2, 420)], t: 2 });
+  const { story, first } = await stories.create('The lantern by the river');
+  const kept = await stories.saveChapter({ id: first.id, story: story.id, kind: 'page', title: first.title, text: 'Kit sat by the water and let the breath go slowly.' }, [first.rev]);
+  await stories.putCards(first.id, [{ id: 'keep-card', mode: 'continue', text: 'What does Lumen notice next?', t: 3 }]);
+  await stories.markOpened(today);
+  return {
+    wrote: [drawn.stored, kept.stored],
+    drawing: drawn.id,
+    chapter: first.id,
+    stores: [...ART_DB.stores.map((s) => `${key}${BESIDE.art}/${s}`), ...STORY_DB.stores.map((s) => `${key}${BESIDE.story}/${s}`)],
+  };
+}
+
+async function savesReady(h, page) {
+  const saved = await page.evaluate(seedSaves, day());
+  const idb = JSON.parse(await storage(page)).idb;
+  const bare = saved.stores.filter((s) => !(JSON.parse(idb[s] ?? '[]').length > 0));
+  h.expect(saved.wrote.every((w) => w === 'wrote') && !bare.length, 'the drawings and stories were not all saved before the baseline: ' + JSON.stringify({ ...saved, bare }));
+  return saved;
+}
+
+async function loadKeep(h, cfg = {}, { viewport = SIZES.phone, ua, hold } = {}) {
   const ctx = await h.browser.newContext({ viewport, deviceScaleFactor: viewport.width > 900 ? 1 : 2, acceptDownloads: true, serviceWorkers: 'block', ...(ua && { userAgent: ua }) });
   await ctx.addInitScript(simulate, cfg);
+  if (hold) await ctx.addInitScript(holdOpen, hold);
   await ctx.addInitScript((s) => {
     if (sessionStorage.getItem('e2e-seeded')) return;
     sessionStorage.setItem('e2e-seeded', '1');
@@ -82,6 +131,14 @@ async function openKeep(h, cfg = {}, { viewport = SIZES.phone, ua } = {}) {
   page.on('request', (r) => requests.push(r.url()));
   await page.goto(h.server.url + '/?mute');
   return { ctx, page, errors, requests };
+}
+
+/** Home shows before the drawings and stories it lists have finished opening, so every baseline waits for them. */
+async function openKeep(h, cfg = {}, opts = {}) {
+  const k = await loadKeep(h, cfg, opts);
+  await k.page.locator('.dq-tile--story').waitFor({ state: 'attached', timeout: 60000 });
+  await savesReady(h, k.page);
+  return k;
 }
 
 const calls = (page) => page.evaluate(() => window.__keep.calls.slice());
@@ -150,14 +207,15 @@ const comeBack = (page) =>
 const storage = (page) =>
   page.evaluate(async () => {
     const all = (s) => Object.fromEntries(Object.keys(s).sort().map((k) => [k, s.getItem(k)]));
+    const bytes = (k, v) => (v instanceof ArrayBuffer ? { bytes: btoa(Array.from(new Uint8Array(v), (b) => String.fromCharCode(b)).join('')) } : v);
     const idb = {};
     for (const { name } of (await indexedDB.databases?.()) ?? []) {
       const db = await new Promise((res, rej) => { const r = indexedDB.open(name); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
       for (const store of [...db.objectStoreNames].sort()) {
-        idb[`${name}/${store}`] = await new Promise((res) => {
+        idb[`${name}/${store}`] = await new Promise((res, rej) => {
           const r = db.transaction(store).objectStore(store).getAll();
-          r.onsuccess = () => res(JSON.stringify(r.result));
-          r.onerror = () => res('unreadable');
+          r.onsuccess = () => res(JSON.stringify(r.result, bytes));
+          r.onerror = () => rej(new Error(`${name}/${store} could not be read: ${r.error?.message}`));
         });
       }
       db.close();
@@ -176,6 +234,26 @@ async function unchanged(h, page, before, what) {
   const after = await storage(page);
   if (after !== before) fs.writeFileSync(path.join(h.out, `storage-${what}.json`), JSON.stringify({ before: JSON.parse(before), after: JSON.parse(after) }, null, 2));
   h.expect(after === before, `${what} changed the saved game or choices`);
+}
+function plant([db, store, id]) {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(db);
+    r.onerror = () => rej(r.error);
+    r.onsuccess = () => {
+      const t = r.result.transaction(store, 'readwrite');
+      const s = t.objectStore(store);
+      const g = s.get(id);
+      g.onsuccess = () => {
+        const v = g.result;
+        if (Array.isArray(v)) v[0].p[0] += 1;
+        else v.text += ' Then the rain stopped.';
+        if (s.keyPath) s.put(v);
+        else s.put(v, id);
+      };
+      t.oncomplete = () => (r.result.close(), res());
+      t.onerror = () => rej(t.error);
+    };
+  });
 }
 
 export const scenarios = {
@@ -302,6 +380,38 @@ export const scenarios = {
       await ctx.close();
     }
     return { simulated: 'StorageManager methods removed; navigator.storage removed' };
+  },
+
+  async 'keeps-baseline-waits-for-stores (simulated)'(h) {
+    const held = `${h.SAVE}.story`;
+    const { ctx, page, errors, requests } = await loadKeep(h, { missing: true }, { hold: held });
+    await h.reachHub(page);
+    await page.waitForFunction(() => !!window.__open.release, null, { timeout: 10000 });
+    const early = await storage(page);
+    h.expect(!Object.keys(JSON.parse(early).idb).some((k) => k.startsWith(held + '/')), 'the stories opened while their first open was held');
+    let ready = false;
+    const readying = savesReady(h, page).then((s) => ((ready = true), s));
+    await Promise.race([readying, page.waitForFunction(() => window.__seeding?.art, null, { timeout: 10000 })]);
+    const seeding = await page.evaluate(() => window.__seeding);
+    h.expect(!ready && seeding.art && !seeding.stories, 'the baseline was ready before the stories opened');
+    await page.evaluate(() => window.__open.release());
+    const saved = await readying;
+    h.expect((await page.evaluate((n) => window.__open.asked.filter((x) => x === n).length, held)) === 2, 'the stories were opened by more than the app and one snapshot');
+    const before = await storage(page);
+    await h.openSettings(page);
+    await waitKeep(h, page, 'unsupported');
+    await unchanged(h, page, before, 'held-open');
+    h.expect(early !== (await storage(page)), 'a baseline taken as soon as Home showed still matched once the stories opened');
+    for (const [db, store, id] of [[held, 'chapters', saved.chapter], [`${h.SAVE}.art`, 'strokes', saved.drawing]]) {
+      const base = await storage(page);
+      await page.evaluate(plant, [db, store, id]);
+      const caught = await unchanged(h, page, base, `planted-${store}`).then(() => '', (e) => e.message);
+      h.expect(caught === `planted-${store} changed the saved game or choices`, `a changed ${store} value went unnoticed`);
+    }
+    localOnly(h, requests);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+    return { simulated: "the app's first open of the stories held until after Home showed; StorageManager methods removed; one story page and one drawing changed after a baseline" };
   },
 
   async 'keeps-rejections (simulated)'(h) {

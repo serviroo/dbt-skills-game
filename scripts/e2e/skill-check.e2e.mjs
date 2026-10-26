@@ -34,6 +34,7 @@ const ENFORCED = new Set([
   'abc-please',
   'give',
   'tipp', 'accepts', 'name-emotion', 'check-facts', 'opposite-action', 'clarifying-priorities',
+  'loving-kindness',
 ]);
 const MAX_TAPS = 12;
 const WORKERS = 3;
