@@ -134,7 +134,8 @@ export const scenarios = {
       await title.click();
       await page.locator('.chest-hold').waitFor({ timeout: 60000 });
       await page.keyboard.down('Space');
-      await page.locator('.chest-hold.is-full').waitFor({ state: 'attached', timeout: 10000 });
+      // the charge runs on the scene's clock, so on slow CI frames it takes longer than its 1.5 s
+      await page.locator('.chest-hold.is-full').waitFor({ state: 'attached', timeout: 30000 });
       await page.locator('.ui-skip').click();
       await page.locator('.rw').waitFor({ timeout: 15000 });
       const left = await page.locator('.chest-hold').count();
