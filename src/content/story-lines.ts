@@ -33,7 +33,8 @@ export const STORY_START = {
 export const STORY_READ = {
   open: 'Read',
   size: 'Text size',
-  sizes: { regular: 'Text size: regular', large: 'Text size: larger', largest: 'Text size: largest' },
+  // each name starts with the "A" the button shows, so voice control finds it by what it says
+  sizes: { regular: 'A regular', large: 'A larger', largest: 'A largest' },
   empty: 'Nothing to read yet. Write a few lines and they will be here.',
   back: 'Back to writing',
   gone: 'This story isn’t on this device any more.',

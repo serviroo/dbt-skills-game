@@ -100,7 +100,7 @@ const ACT = {
       await page.getByRole('dialog', { name: 'Chapters' }).waitFor({ timeout: 5000 });
     },
   },
-  read: { run: (page) => page.getByRole('button', { name: 'Text size: largest', exact: true }).click() },
+  read: { run: (page) => page.getByRole('button', { name: 'A largest', exact: true }).click() },
   settings: { run: (page) => page.getByRole('button', { name: 'Sound settings' }).click() },
   shadows: { run: scrollDown },
 };
