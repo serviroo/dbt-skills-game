@@ -61,6 +61,98 @@ async function serve(host) {
   throw new Error('no free port for the dev server');
 }
 
+// What happened inside each page, for evidence(): the intro's title, name prompt and windows coming and going, taps as
+// they arrived, long tasks, gaps in a 100 ms timer (the main thread was busy) and the 3D stage's loop and frames, all on
+// the page's own clock. evidence() reads it back, so a page that froze for a while still tells what happened in it.
+function pageTrail() {
+  if (window.__e2eTrail) return;
+  const trail = (window.__e2eTrail = { ev: [], seen: {}, frames: 0, lastFrame: null });
+  const add = (ev, extra, t = performance.now()) => {
+    trail.ev.push({ t: Math.round(t), ev, ...extra });
+    if (trail.ev.length > 4000) trail.ev.splice(0, 1000);
+  };
+  const watch = { title: '.title-screen', prompt: '#np-name', windows: '.sw, .dq-sw' };
+  new MutationObserver(() => {
+    for (const [k, sel] of Object.entries(watch)) {
+      const n = document.querySelectorAll(sel).length;
+      if (n !== (trail.seen[k] ?? 0)) add(k, { from: trail.seen[k] ?? 0, to: (trail.seen[k] = n) });
+    }
+  }).observe(document, { childList: true, subtree: true });
+  const what = (n) => (n instanceof Element ? n.tagName.toLowerCase() + (n.id ? '#' + n.id : '') + (n.classList.length ? '.' + [...n.classList].join('.') : '') + ' "' + (n.textContent ?? '').trim().slice(0, 24) + '"' : String(n));
+  for (const type of ['pointerdown', 'click']) addEventListener(type, (e) => add(type, { on: what(e.target) }), true);
+  document.addEventListener('visibilitychange', () => add('visibility', { state: document.visibilityState }));
+  const long = (list) => list.forEach((e) => add('longtask', { ms: Math.round(e.duration) }, e.startTime));
+  let longs;
+  try {
+    longs = new PerformanceObserver((list) => long(list.getEntries()));
+    longs.observe({ type: 'longtask', buffered: true });
+  } catch {}
+  let last = performance.now();
+  const gap = () => {
+    const now = performance.now();
+    if (now - last > 250) add('timer-gap', { ms: Math.round(now - last) }, last);
+    last = now;
+  };
+  setInterval(gap, 100);
+  // a read right after a freeze comes before the observer and the timer have run: take what they have yet to note
+  trail.flush = () => {
+    long(longs?.takeRecords() ?? []);
+    gap();
+  };
+  // src/main.ts sets window.__stage: note when its loop starts and stops, its first frames and every slow one
+  let stage;
+  Object.defineProperty(window, '__stage', {
+    configurable: true,
+    get: () => stage,
+    set(s) {
+      stage = s;
+      if (!s || s.__e2eTrail) return;
+      s.__e2eTrail = true;
+      for (const k of ['start', 'stop']) {
+        const f = s[k];
+        s[k] = function (...a) {
+          add('stage-' + k);
+          return f.apply(this, a);
+        };
+      }
+      const step = s.step;
+      s.step = function (...a) {
+        const t = performance.now();
+        try {
+          return step.apply(this, a);
+        } finally {
+          const ms = performance.now() - t;
+          trail.lastFrame = t;
+          if (++trail.frames <= 3 || ms > 50) add('frame', { n: trail.frames, ms: Math.round(ms) }, t);
+        }
+      };
+    },
+  });
+}
+
+/** The page's state for evidence(), read inside the page. */
+function pageState() {
+  const trail = window.__e2eTrail;
+  trail?.flush();
+  return {
+    path: location.pathname + location.search,
+    readyState: document.readyState,
+    visibility: document.visibilityState,
+    ready: document.documentElement.dataset.ready ?? null,
+    mounted: !!window.__daily,
+    route: window.__daily?.route.name ?? null,
+    title: !!document.querySelector('.title-screen'),
+    prompt: !!document.querySelector('#np-name'),
+    windows: [...document.querySelectorAll('.sw, .dq-sw')].map((w) => {
+      const r = w.getBoundingClientRect();
+      return { label: w.getAttribute('aria-label'), visible: w.checkVisibility(), box: [r.left, r.top, r.width, r.height].map(Math.round) };
+    }),
+    stage: window.__stage ? { frames: trail?.frames ?? null, lastFrameAgo: trail?.lastFrame == null ? null : Math.round(performance.now() - trail.lastFrame) } : null,
+    origin: performance.timeOrigin,
+    trail: trail?.ev ?? null,
+  };
+}
+
 function launch(flags) {
   if (flags.ws) return chromium.connect(flags.ws, { headers: { 'x-playwright-launch-options': JSON.stringify({ headless: flags.headless === 'true', args: ['--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] }) } });
   const gl = flags.gpu ? ['--use-angle=vulkan', '--ignore-gpu-blocklist'] : ['--use-gl=angle', '--use-angle=swiftshader'];
@@ -72,11 +164,47 @@ export async function startHarness(flags = {}) {
   const out = path.join(root, 'artifacts/e2e', new Date().toISOString().replace(/[:.]/g, '-'));
   fs.mkdirSync(out, { recursive: true });
   const browser = await launch(flags);
-  // every context keeps the scripts' zone, also when the browser runs on another machine (--ws)
-  const newContext = browser.newContext.bind(browser);
-  browser.newContext = (o = {}) => newContext({ timezoneId: ZONE, ...o });
   let server;
   let renderer;
+  const trail = new WeakMap();
+  const urlOf = (u) => {
+    const url = new URL(u);
+    const p = url.pathname.replace(/^\/@fs\/.*\/([^/]+)$/, '/@fs/$1');
+    return url.origin === server.url ? p : url.origin + p;
+  };
+  const clean = (s) => s.replaceAll(server.url, '').replace(/\/@fs\/\S*\/([^/\s?]+)/g, '/@fs/$1');
+  function track(page, t0) {
+    const life = [];
+    const logs = [];
+    const log = (ev, extra) => life.push({ t: Date.now() - t0, ev, ...extra });
+    const say = (type, text) => {
+      logs.push({ t: Date.now() - t0, type, text: clean(text).slice(0, 500) });
+      if (logs.length > 600) logs.splice(0, 100);
+    };
+    page.on('console', (m) => say(m.type(), m.text()));
+    page.on('pageerror', (e) => say('pageerror', e.message));
+    page.on('request', (r) => log('request', { type: r.resourceType(), url: urlOf(r.url()) }));
+    page.on('response', (r) => log('response', { url: urlOf(r.url()), status: r.status() }));
+    page.on('requestfailed', (r) => log('failed', { url: urlOf(r.url()), why: r.failure()?.errorText ?? null }));
+    for (const ev of ['domcontentloaded', 'load', 'crash', 'close']) page.on(ev, () => log(ev));
+    trail.set(page, { t0, life, logs, errors: [] });
+  }
+  /** Notes a step the scenario takes (a tap, a fill) in the page's evidence timeline. */
+  const note = (page, ev, extra) => {
+    const t = trail.get(page);
+    t?.life.push({ t: Date.now() - t.t0, ev, ...extra });
+  };
+
+  // every context keeps the scripts' zone, also when the browser runs on another machine (--ws), and every page in it is
+  // followed for evidence()
+  const newContext = browser.newContext.bind(browser);
+  browser.newContext = async (o = {}) => {
+    const t0 = Date.now();
+    const ctx = await newContext({ timezoneId: ZONE, ...o });
+    await ctx.addInitScript(pageTrail);
+    ctx.on('page', (page) => track(page, t0));
+    return ctx;
+  };
   try {
     server = await serve(host);
     const p = await (await browser.newContext()).newPage();
@@ -90,21 +218,42 @@ export async function startHarness(flags = {}) {
   console.log('renderer:', renderer);
   console.log('zone:', ZONE, new Date().toTimeString().slice(0, 5));
 
-  const trail = new WeakMap();
-  const urlOf = (u) => {
-    const url = new URL(u);
-    const p = url.pathname.replace(/^\/@fs\/.*\/([^/]+)$/, '/@fs/$1');
-    return url.origin === server.url ? p : url.origin + p;
-  };
-  const clean = (s) => s.replaceAll(server.url, '').replace(/\/@fs\/\S*\/([^/\s?]+)/g, '/@fs/$1');
-  function track(page, errors, t0) {
-    const life = [];
-    const log = (ev, extra) => life.push({ t: Date.now() - t0, ev, ...extra });
-    page.on('request', (r) => log('request', { type: r.resourceType(), url: urlOf(r.url()) }));
-    page.on('response', (r) => log('response', { url: urlOf(r.url()), status: r.status() }));
-    page.on('requestfailed', (r) => log('failed', { url: urlOf(r.url()), why: r.failure()?.errorText ?? null }));
-    for (const ev of ['domcontentloaded', 'load', 'crash', 'close']) page.on(ev, () => log(ev));
-    trail.set(page, { t0, life, errors });
+  /**
+   * Watches, inside the page, for the selector to be in the page and then leave it. Arm it before the tap that removes
+   * it and call the result with a timeout after the tap: `const left = leaves(page, '#np-name'); await tap; await left(10000)`.
+   * The page reports the moment itself, so a page that freezes right after can't hide that it happened: the intro's first
+   * 3D frames compile their shaders, which on a software GPU (CI's SwiftShader) blocks the page for seconds, and a wait
+   * that asks the page from outside gets no answer until that ends.
+   */
+  function leaves(page, selector) {
+    const at = page.evaluate(
+      (sel) =>
+        new Promise((done) => {
+          let seen = false;
+          const check = () => {
+            if (document.querySelector(sel)) seen = true;
+            else if (seen) {
+              done(performance.timeOrigin + performance.now());
+              return true;
+            }
+          };
+          if (check()) return;
+          const o = new MutationObserver(() => check() && o.disconnect());
+          o.observe(document, { childList: true, subtree: true });
+        }),
+      selector,
+    );
+    at.catch(() => {});
+    return async (timeout) => {
+      note(page, `wait for ${selector} to leave`);
+      let timer;
+      try {
+        const left = await Promise.race([at, new Promise((_, fail) => (timer = setTimeout(() => fail(new Error(`${selector} was still in the page ${timeout / 1000} s later`)), timeout)))]);
+        note(page, `${selector} left`, { inPage: Math.round(left - (trail.get(page)?.t0 ?? 0)) });
+      } finally {
+        clearTimeout(timer);
+      }
+    };
   }
 
   /**
@@ -112,7 +261,6 @@ export async function startHarness(flags = {}) {
    * adds context options for the kind of device, such as hasTouch for a touch-first phone.
    */
   async function open(seed = {}, query = '?mute', viewport = { width: 390, height: 844 }, prepare, device = {}) {
-    const t0 = Date.now();
     const ctx = await browser.newContext({ viewport, deviceScaleFactor: 2, acceptDownloads: true, serviceWorkers: 'block', ...device, ...(flags.media === 'true' ? { recordVideo: { dir: out, size: viewport } } : {}) });
     await ctx.addInitScript((s) => {
       if (sessionStorage.getItem('e2e-seeded')) return;
@@ -121,34 +269,48 @@ export async function startHarness(flags = {}) {
     }, seed);
     await prepare?.(ctx);
     const page = await ctx.newPage();
-    const errors = [];
-    track(page, errors, t0);
+    const errors = trail.get(page).errors;
     page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
     page.on('console', (m) => m.type() === 'error' && !/WebGL|GPU stall|AudioContext/i.test(m.text()) && errors.push('console: ' + m.text().slice(0, 300)));
     await page.goto(server.url + '/' + query);
     return { ctx, page, errors };
   }
+  /**
+   * What a page showed, saved as <name>.json and <name>.png: its state (route, windows, name prompt, title, visibility,
+   * the 3D stage's frames), its console, and one timeline of the scenario's notes, the page's load events and what
+   * happened inside the page. Each read waits at most 3 s, so a frozen page can't hang it; if the page didn't answer,
+   * one more read waits up to 20 s and says when it came back, with the timeline from inside the page.
+   */
   async function evidence(page, name) {
-    const { t0, life, errors } = trail.get(page) ?? { t0: Date.now(), life: [], errors: [] };
-    const state = await Promise.race([
+    const { t0, life, logs, errors } = trail.get(page) ?? { t0: Date.now(), life: [], logs: [], errors: [] };
+    const read = async (ms) => {
+      const t = Date.now();
+      const state = await Promise.race([
+        page.evaluate(pageState).catch((e) => ({ unreadable: clean(String(e?.message ?? e).split('\n')[0]) })),
+        sleep(ms).then(() => ({ unreadable: `no answer in ${ms / 1000} s` })),
+      ]);
+      return { t: t - t0, answeredIn: state.unreadable ? null : Date.now() - t, ...state };
+    };
+    const snap = () =>
       page
-        .evaluate(() => ({
-          path: location.pathname + location.search,
-          readyState: document.readyState,
-          visibility: document.visibilityState,
-          ready: document.documentElement.dataset.ready ?? null,
-          mounted: !!window.__daily,
-          route: window.__daily?.route.name ?? null,
-          windows: [...document.querySelectorAll('.dq-sw')].map((w) => {
-            const r = w.getBoundingClientRect();
-            return { visible: w.checkVisibility(), box: [r.left, r.top, r.width, r.height].map(Math.round) };
-          }),
-        }))
-        .catch((e) => ({ unreadable: clean(String(e?.message ?? e).split('\n')[0]) })),
-      sleep(3000).then(() => ({ unreadable: 'no answer in 3 s' })),
-    ]);
-    fs.writeFileSync(path.join(out, name + '.json'), JSON.stringify({ t: Date.now() - t0, state, errors: errors.map(clean), life }, null, 2));
-    await page.screenshot({ path: path.join(out, name + '.png'), timeout: 3000 }).catch(() => {});
+        .screenshot({ path: path.join(out, name + '.png'), timeout: 3000 })
+        .then(() => 'saved', (e) => 'not saved: ' + clean(String(e?.message ?? e).split('\n')[0]));
+    const now = await read(3000);
+    let shot = await snap();
+    const later = (now.unreadable || shot !== 'saved') && !page.isClosed() ? await read(20000) : null;
+    if (shot !== 'saved' && later && !later.unreadable && (await snap()) === 'saved') shot = `saved at ${Date.now() - t0} ms, once the page answered (first try ${shot})`;
+    const answered = [later, now].find((r) => r && !r.unreadable);
+    const timeline = [
+      ...life.filter((e) => e.ev !== 'request' && e.ev !== 'response'),
+      ...(answered?.trail ?? []).map(({ t, ...e }) => ({ t: Math.round(answered.origin + t - t0), in: 'page', ...e })),
+    ].sort((x, y) => x.t - y.t);
+    for (const s of [now, later]) if (s) delete s.trail;
+    fs.writeFileSync(path.join(out, name + '.json'), JSON.stringify({ t: now.t, state: now, later, shot, errors: errors.map(clean), console: logs, timeline, life }, null, 2));
+  }
+  /** evidence() for every page still open, as <prefix>-1, -2, ... in the order the pages opened */
+  async function evidenceAll(prefix) {
+    const pages = browser.contexts().flatMap((c) => c.pages());
+    await Promise.all(pages.map((p, i) => evidence(p, `${prefix}-${i + 1}`).catch((e) => console.log(`evidence ${prefix}-${i + 1}: ${e?.message ?? e}`))));
   }
   const shot = (page, name) => page.screenshot({ path: path.join(out, name + '.png') });
   const ls = (page, k) => page.evaluate((key) => localStorage.getItem(key), k);
@@ -200,5 +362,5 @@ export async function startHarness(flags = {}) {
     }
   })());
 
-  return { browser, server, out, flags, shared: {}, renderer, zone: ZONE, open, evidence, shot, ls, youOf, deepFind, deepDrop, expect, sleep, reachHub, openSettings, SAVE, YOU, SEEN, stop };
+  return { browser, server, out, flags, shared: {}, renderer, zone: ZONE, open, evidence, evidenceAll, note, leaves, shot, ls, youOf, deepFind, deepDrop, expect, sleep, reachHub, openSettings, SAVE, YOU, SEEN, stop };
 }
