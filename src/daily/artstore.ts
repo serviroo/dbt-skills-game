@@ -133,9 +133,13 @@ const storedDraft = (d: Draft) => ({ ...d, strokes: d.strokes.map(storedStroke) 
 function holds(a: DrawingRec, b: DrawingRec) {
   const fa: Record<string, unknown> = { ...metaOf(a), id: '', n: 0 }, fb = { ...metaOf(b), id: '', n: 0 };
   if (Object.entries(fb).some(([k, v]) => JSON.stringify(fa[k]) !== JSON.stringify(v))) return false;
-  const sa = a.strokes.map((s) => JSON.stringify(storedStroke(s)));
+  return within(a.strokes, b.strokes);
+}
+/** Whether strokes a hold all of strokes b, in their order among a's. */
+function within(a: Stroke[], b: Stroke[]) {
+  const sa = a.map((s) => JSON.stringify(storedStroke(s)));
   let k = 0;
-  for (const s of b.strokes) {
+  for (const s of b) {
     const j = JSON.stringify(storedStroke(s));
     while (k < sa.length && sa[k] !== j) k++;
     if (k++ >= sa.length) return false;
@@ -806,7 +810,8 @@ export class ArtStore {
 
   /**
    * Adds drawings from a backup and never replaces one. A version already here (under its id or a copy of it) is
-   * unchanged. A different version of a page that is here keeps both: the newer one under the page's id, the other as
+   * unchanged, and so is one a page here was edited from, unless a build from before the tools made that edit and
+   * dropped the tools' strokes: then the file's copy comes in as its own page. A different version of a page that is here keeps both: the newer one under the page's id, the other as
    * its own page, in one transaction. The same version stored here with other content was saved by a build that
    * couldn't read all of it: the file's copy updates it when it holds everything the one here does, and comes in with
    * the other kept as its own page when neither does. Each drawing counts once as added, updated, kept (both versions
@@ -836,41 +841,46 @@ export class ArtStore {
     };
     const onDisk = await this.tx(['meta'], 'readonly', (t) => req(t.objectStore('meta').getAll() as IDBRequest<DrawingMeta[]>), () => [] as DrawingMeta[]);
     const diskMeta = new Map(onDisk.map((m) => [m.id, m]));
-    // where each version is stored as itself (not as one a stored drawing descends from)
-    const stored = new Map<string, string[]>();
-    for (const m of onDisk) {
-      const k = `${family(m.id)}\n${revOf(m)}`;
-      stored.set(k, [...(stored.get(k) ?? []), m.id]);
-    }
+    // the pages of each family here, on disk or only in memory, and those the file adds as it comes in
+    const pages = new Map<string, Set<string>>();
+    const page = (id: string) => pages.set(family(id), (pages.get(family(id)) ?? new Set<string>()).add(id));
     for (const m of [...onDisk, ...this.mem.meta.values()]) {
+      page(m.id);
       note(m.id, revOf(m));
       for (const a of fromOf(m.from) ?? []) note(m.id, a);
     }
     let wrote = false;
     const inUse: string[] = [];
     for (const rec of byId.values()) {
-      const hit = known.get(family(rec.id))?.get(revOf(rec));
-      let over: 'update' | 'beside' | undefined;
+      const me = revOf(rec);
+      const hit = known.get(family(rec.id))?.get(me);
       let at = rec;
       if (hit) {
-        const ids = stored.get(`${family(rec.id)}\n${revOf(rec)}`) ?? [];
-        const here = (await Promise.all(ids.map((id) => this.onDisk(id)))).filter((d): d is DrawingRec => !!d && revOf(d) === revOf(rec));
-        const page = here.find((d) => d.id === rec.id) ?? here[0];
-        if (!page || here.some((d) => holds(d, rec))) {
+        const here = (await Promise.all([...(pages.get(family(rec.id)) ?? [])].map((id) => this.versionsOf(id)))).flat();
+        const same = here.filter((d) => revOf(d) === me);
+        // a page edited from this version holds it, unless a build from before the tools made the edit: that keeps the
+        // strokes it can read and drops the tools' strokes, so the file's copy comes in as its own page
+        const later = here.filter((d) => fromOf(d.from)?.includes(me));
+        const lost = !later.some((d) => within(d.strokes, rec.strokes)) && later.some((d) => within(d.strokes, rec.strokes.filter((s) => !storedStroke(s).m)));
+        if (same.some((d) => holds(d, rec)) || (!same.length && !lost)) {
           out.unchanged++;
           inUse.push(hit);
           continue;
         }
-        over = holds(rec, page) ? 'update' : 'beside';
-        at = { ...rec, id: page.id };
+        // the same version here with other content: the file's copy meets the page that holds it (see importOne)
+        if (same.length) at = { ...rec, id: (same.find((d) => d.id === rec.id) ?? same[0]).id };
       }
-      const r = await this.importOne(at, diskMeta.get(at.id), over);
+      const r = await this.importOne(at, diskMeta.get(at.id));
       out[r.result]++;
       if (r.wrote) wrote = true;
       inUse.push(r.at);
-      note(r.at, revOf(rec));
+      page(r.at);
+      note(r.at, me);
       for (const a of rec.from ?? []) note(r.at, a);
-      if (r.moved) note(r.moved.id, r.moved.rev);
+      if (r.moved) {
+        page(r.moved.id);
+        note(r.moved.id, r.moved.rev);
+      }
     }
     out.unsaved = await this.memoryOnly(inUse);
     this.drop();
@@ -878,11 +888,17 @@ export class ArtStore {
     return out;
   }
 
+  /** Drawing id as it is stored and as this session holds it in memory, where it does. */
+  private async versionsOf(id: string): Promise<DrawingRec[]> {
+    const M = this.mem.meta.get(id), S = this.mem.strokes.get(id);
+    return [await this.onDisk(id), M && S ? { ...M, strokes: S } : null].filter((d): d is DrawingRec => !!d);
+  }
+
   /**
-   * One drawing from a backup whose version isn't here yet; see importAll. `at` is where it landed. over: the same
-   * version is stored under rec's id with other content, and the file's copy updates it or comes in beside it.
+   * One drawing from a backup that no page here holds; see importAll. `at` is where it landed. The same version stored
+   * under its id with other content is updated when the file's copy holds all of it, and otherwise kept beside it.
    */
-  private async importOne(rec: DrawingRec, scanned: DrawingMeta | undefined, over?: 'update' | 'beside'): Promise<{ result: 'added' | 'updated' | 'kept' | 'unchanged'; at: string; wrote: boolean; moved?: { id: string; rev: string } }> {
+  private async importOne(rec: DrawingRec, scanned: DrawingMeta | undefined): Promise<{ result: 'added' | 'updated' | 'kept' | 'unchanged'; at: string; wrote: boolean; moved?: { id: string; rev: string } }> {
     const me = revOf(rec);
     const thumb = await canvasBlob(renderDrawing(rec.strokes, rec.kind, THUMB_W), 'image/jpeg', 0.9);
     const buf = thumb ? await thumb.arrayBuffer() : null;
@@ -891,6 +907,7 @@ export class ArtStore {
     let cid = this.copyId(rec.id);
     let at = rec.id;
     let D: DrawingMeta | undefined;
+    let same = false;
     let moved: { id: string; rev: string } | undefined;
     const stored = await this.tx(
       ['meta', 'strokes', 'thumbs'],
@@ -919,12 +936,7 @@ export class ArtStore {
             try {
               D = g.result;
               if (c.result) cid = `${cid}${Math.random().toString(36).slice(2, 6)}`;
-              const same = !!D && revOf(D) === me;
-              if (same && !over) return ok('unchanged');
-              if (same && over === 'update') {
-                put(rec.id);
-                return ok('updated');
-              }
+              same = !!D && revOf(D) === me;
               const tops = [D, M].filter((m): m is DrawingMeta => !!m).map((m) => (fin(m.updated) ? m.updated : -Infinity));
               if (!same && !tops.length) {
                 put(rec.id);
@@ -946,6 +958,17 @@ export class ArtStore {
               th.onerror = () => bad(th.error);
               th.onsuccess = () => {
                 try {
+                  if (same) {
+                    // decided from the version stored now, in this transaction, so a Restore running beside this one
+                    // can't overwrite what that one wrote
+                    const strokes = cleanStrokes(st.result, was.kind);
+                    const page = strokes && { ...was, strokes };
+                    if (page && holds(page, rec)) return ok('unchanged');
+                    if (page && holds(rec, page)) {
+                      put(rec.id);
+                      return ok('updated');
+                    }
+                  }
                   if (st.result) {
                     metaS.put({ ...was, id: cid }, cid);
                     strokeS.put(st.result, cid);
@@ -996,7 +1019,7 @@ export class ArtStore {
     }
     if (stored === 'unchanged') return { result: 'unchanged', at: rec.id, wrote: false };
     // what this copy held of that version in memory is the stored one it replaced or moved aside
-    if (over && at === rec.id && M && revOf(M) === me) memDrop(rec.id);
+    if (same && at === rec.id && M && revOf(M) === me) memDrop(rec.id);
     this.landed.add(landKey(at, me));
     if (moved) this.landed.add(landKey(moved.id, moved.rev));
     if (at === rec.id && M && revOf(M) !== me) {
