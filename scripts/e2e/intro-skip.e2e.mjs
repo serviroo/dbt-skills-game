@@ -110,7 +110,7 @@ export const scenarios = {
       // a player taps Read the note where it shows, and again if nothing happens (a tap, not a Playwright click, which
       // waits for two still frames: two seconds each here)
       while ((await page.locator('.rw').count()) && Date.now() - t0 < 40000) {
-        const box = await note.boundingBox().catch(() => null);
+        const box = await note.boundingBox({ timeout: 1000 }).catch(() => null);
         if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
         await h.sleep(300);
       }
