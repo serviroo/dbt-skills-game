@@ -62,6 +62,9 @@ All timings live in `src/motion/tokens.ts`. Change them there, not in the compon
 - Every cue is recognisable through a phone speaker: its character sits between 0.8 and 5 kHz.
 - Everything is synthesised with Web Audio (`src/audio/`). No sample files.
 - Sound is never required to follow anything. Mute is one tap and it sticks.
+- Vibration has its own switch in Settings, off until the player turns it on and shown only where the device can
+  vibrate: one short pulse when a skill timer starts, a soft double pulse when it ends or is skipped. Never in the
+  Safe Zone or the intro, and never while the page is out of sight.
 
 ## Tone
 
@@ -83,8 +86,9 @@ All timings live in `src/motion/tokens.ts`. Change them there, not in the compon
 5. **Private, on this device only.** No accounts, server, analytics, third-party scripts or remote fonts. The only
    network calls are links the player taps. The Home Screen name and icon say nothing about mental health.
 6. **The Safe Zone is one tap away** from every screen after the intro. Inside it, "Talk to someone now" is pinned on
-   every screen and numbers dial with one tap. No XP, toasts, particles, glow bursts or sound effects inside, and
-   leaving never asks "are you sure". The button says "Safe Zone", plainly: in a crisis, clarity beats theme.
+   every screen and numbers dial with one tap. No XP, toasts, particles, glow bursts, sound effects or vibration
+   inside, and leaving never asks "are you sure". The button says "Safe Zone", plainly: in a crisis, clarity beats
+   theme.
 7. **Point to real support, gently.** The framing is "skills practice that goes with real support". At most one
    therapist mention per session, never on back-to-back screens. The diary card exports plain text "for your
    therapist, if you want". Inside a skill, distress that climbs or doesn't move (a "Higher" answer, or a rating

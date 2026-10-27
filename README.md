@@ -17,9 +17,9 @@ back after a long break is always fine.
   mindfulness of others and more. Each one is a short guided walk-through that takes a minute or two.
 - Skills list: every skill, any time. Search either name, or narrow it by what you need right now, topic or time,
   and pin your favourites to the top. Browsing and pinning never count as practice.
-- Safe Zone: a calm path for hard moments, one tap from every screen. No XP, sounds or glows in there, and a link
-  to crisis lines on every screen: the US, Canada, the UK, Ireland, Australia, New Zealand and India, picked from
-  your device language and changeable in one tap.
+- Safe Zone: a calm path for hard moments, one tap from every screen. No XP, sounds, vibration or glows in there,
+  and a link to crisis lines on every screen: the US, Canada, the UK, Ireland, Australia, New Zealand and India,
+  picked from your device language and changeable in one tap.
 - Give me a moment: a one-tap check-in when you just need to breathe.
 - Diary card: a plain-text card of what you practised, made for sharing with a therapist if you want to.
 - Your name and your companion's: the game asks what to call you the first time (or skip it and stay "Player"), and

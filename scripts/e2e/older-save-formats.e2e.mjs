@@ -13,7 +13,7 @@ import { crystal, restore, settings } from './newer-save-safety.e2e.mjs';
 
 const DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'fixtures/older-saves');
 const MANIFEST = JSON.parse(fs.readFileSync(path.join(DIR, 'manifest.json'), 'utf8'));
-const DEFAULTS = { sound: true, motion: 'system', theme: 'classic', accent: 'blue', cardBack: 'ring', plate: 'plain', title: '', region: '', playerName: '', companion: '' };
+const DEFAULTS = { sound: true, motion: 'system', vibrate: false, theme: 'classic', accent: 'blue', cardBack: 'ring', plate: 'plain', title: '', region: '', playerName: '', companion: '' };
 
 /** A fixture, with its second card moved to today so today's card can be checked. */
 function fixture(file) {
@@ -36,7 +36,7 @@ function parts(s) {
     lists: Object.fromEntries(['comfort', 'activities', 'reasons', 'people'].map((k) => [k, sorted(s.lists?.[k], (i) => [i.id, i.text ?? i.name, i.phone ?? null])])),
     maps: sorted(s.maps, (m) => [m.id, m.urge, m.p1, m.c1, m.p2, m.c2, m.choice]),
     lines: sorted(s.lines, (l) => [l.day, l.id, l.text]),
-    choices: { sound: s.settings?.sound, motion: s.settings?.motion, theme: p.theme, accent: p.accent, cardBack: p.cardBack, plate: p.plate, title: p.title, region: p.region, playerName: p.playerName, companion: p.companion, names: p.names },
+    choices: { sound: s.settings?.sound, motion: s.settings?.motion, vibrate: s.settings?.vibrate, theme: p.theme, accent: p.accent, cardBack: p.cardBack, plate: p.plate, title: p.title, region: p.region, playerName: p.playerName, companion: p.companion, names: p.names },
     rows: [s.settings?.emotionRows, s.settings?.urgeRows],
     titles: p.titlesSeen,
     // safeCredit is left out: it is a one-time notice that Home shows and clears as soon as it opens
