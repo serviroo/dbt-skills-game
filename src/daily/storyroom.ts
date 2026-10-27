@@ -8,7 +8,7 @@ import type { CowriteReq, CowriteRes, CowriteTurn } from '../cowriter/types';
 import { BESIDE, CARE_KEY, READ_SIZES, type ReadSize } from '../core/stored-names';
 import { STORY_FIND, STORY_READ, STORY_START } from '../content/story-lines';
 import { write } from '../core/cleared';
-import type { App, Route, ScreenOut } from './app';
+import type { App, Route, ScreenOut, Visit } from './app';
 import { icon } from './art';
 import { dayDiff, dayKey } from './store';
 import { match, spans, terms, type Span } from './storyfind';
@@ -92,8 +92,7 @@ const pageHead = (title: string, sub: string, extra?: HTMLElement | null) =>
   h('header', { class: 'dq-pagehead st-head' }, h('div', { class: 'st-head-row' }, h('h1', { class: 'dq-h1', 'data-focus': '', text: title }), extra ?? null), p(sub, 'dq-text dq-pagesub'));
 
 // ---------------- the shelf ----------------
-export function storiesScreen(app: App, route: Route): ScreenOut {
-  const r = route as Extract<Route, { name: 'stories' }>;
+export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut {
   const ss = store(app);
   void ss.sweepLives();
   const xp = creditStory(app);
@@ -210,11 +209,11 @@ export function storiesScreen(app: App, route: Route): ScreenOut {
   const PER_STORY = 6;
   let fseq = 0;
   let fTimer = 0;
-  const openFound = (story: Story, ch?: Chapter, at?: number) => app.go({ name: 'write', id: story.id, ch: ch?.id, find: ch && at !== undefined ? { q: findIn.value, at } : undefined });
+  // the route keeps only the place, since history keeps every route; the words go across in memory, to this opening only
+  const openFound = (story: Story, ch?: Chapter, at?: number) =>
+    ch && at !== undefined ? app.go({ name: 'write', id: story.id, ch: ch.id, find: { at } }, { hand: findIn.value }) : app.go({ name: 'write', id: story.id });
   const find = async () => {
     const n = ++fseq;
-    // coming Back here (from a story or the Safe Zone) shows the same search; it lives with this visit, never in storage
-    r.q = findIn.value || undefined;
     const words = terms(findIn.value);
     el.classList.toggle('is-finding', words.length > 0);
     if (!words.length) {
@@ -268,8 +267,11 @@ export function storiesScreen(app: App, route: Route): ScreenOut {
     findIn.value = '';
     void find();
   });
-  if (r.q) {
-    findIn.value = r.q;
+  // coming Back or Forward here (from a story or the Safe Zone) shows the search they left: memory only, as a skill keeps
+  // its answers, never in history or storage
+  const was = visit.again ? (visit.kept as { q?: string } | undefined)?.q : undefined;
+  if (was) {
+    findIn.value = was;
     void find();
   }
 
@@ -288,6 +290,7 @@ export function storiesScreen(app: App, route: Route): ScreenOut {
       off();
       clearTimeout(fTimer);
     },
+    keep: () => ({ q: findIn.value }),
   };
 }
 
@@ -328,8 +331,10 @@ interface Open {
 }
 type Sel = { start: number; end: number; text: string };
 
-export function writeScreen(app: App, route: Route): ScreenOut {
+export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const r = route as Extract<Route, { name: 'write' }>;
+  // a search result opening this page hands over its words; Back or Forward to it brings none, so the page is as they left it
+  const found = r.find && typeof visit.handed === 'string' ? { q: visit.handed, at: r.find.at } : null;
   const ss = store(app);
   const storyId = r.id;
   const offs: (() => void)[] = [];
@@ -1587,12 +1592,8 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     syncState();
     syncModes();
     kb();
-    if (alive && r.find) {
-      // only on the chapter the result opened: a Page or Notes tap while it opened wins, and gets no marks
-      if (landed && n === picks) markFound(r.find);
-      // once only: Back from reading comes to the page as they left it
-      delete r.find;
-    }
+    // only on the chapter the result opened: a Page or Notes tap while it opened wins, and gets no marks
+    if (alive && found && landed && n === picks) markFound(found);
   };
   /** Marks every place the search words are on this page and brings the one they picked into view. */
   const markFound = (f: { q: string; at: number }) => {

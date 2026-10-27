@@ -30,8 +30,8 @@ export type Route =
   | { name: 'art' }
   | { name: 'draw'; kind: 'today' | 'ally'; id?: string; draft?: string }
   | { name: 'piece'; id: string }
-  | { name: 'stories'; q?: string }
-  | { name: 'write'; id: string; ch?: string; find?: { q: string; at: number } }
+  | { name: 'stories' }
+  | { name: 'write'; id: string; ch?: string; find?: { at: number } }
   | { name: 'read'; id: string; ch?: string }
   | { name: 'lines' }
   | { name: 'ease'; next?: Next }
@@ -43,12 +43,15 @@ export type Place = number | string;
 /**
  * One visit to a screen, as Back and Forward see it. `again` is true when the player comes back to a visit already
  * made (Back, Forward, the Lantern button): nothing is credited a second time. `kept` is what the screen's keep() gave
- * when the player last left this visit, held in memory only. `at` is the place to open on. The screen calls
- * mark(place) when the player moves to a new place inside it, so Back steps back through those places.
+ * when the player last left this visit, held in memory only. `handed` is what the screen this visit was opened from
+ * passed it (words typed there), in memory only, on that first showing alone: Back and Forward never bring it again.
+ * `at` is the place to open on. The screen calls mark(place) when the player moves to a new place inside it, so Back
+ * steps back through those places.
  */
 export interface Visit {
   again: boolean;
   kept?: unknown;
+  handed?: unknown;
   at?: Place;
   mark(place: Place): void;
 }
@@ -216,6 +219,8 @@ export class App {
     this.clearForSafe();
     this.toastEl.classList.remove('is-on');
     if (this.route.name !== 'safe') this.go({ name: 'settings' }, { replace: true });
+    // what visits kept for Back and Forward (answers, typed text) goes too: every way back now lands on Settings
+    this.kept.clear();
   }
 
   reduced() {
@@ -483,17 +488,20 @@ export class App {
     });
   }
 
-  /** A move inside the companion. `replace` swaps the visit for a new one; `replace` with `quiet` redraws it. */
   /** Whether this build has the route's screen. A history entry can come from another version of the app. */
   private known(route: Route) {
     return Object.prototype.hasOwnProperty.call(this.screens, route.name);
   }
 
-  go(route: Route, o: { replace?: boolean; quiet?: boolean } = {}) {
+  /**
+   * A move inside the companion. `replace` swaps the visit for a new one; `replace` with `quiet` redraws it. `hand`
+   * goes to the new screen in memory (see Visit.handed); the route is written to history, so nothing typed goes in it.
+   */
+  go(route: Route, o: { replace?: boolean; quiet?: boolean; hand?: unknown } = {}) {
     if (!this.known(route)) route = { name: 'hub' };
     // after clearing, Settings shows how it went; only the Safe Zone opens as ever
     if (cleared() && route.name !== 'safe') route = { name: 'settings' };
-    this.show(route, { again: false, key: this.record(route, o) }, o);
+    this.show(route, { again: false, key: this.record(route, o), hand: o.hand }, o);
   }
 
   /** Mirrors a move in the browser's history and returns the key of the visit it opens. */
@@ -653,7 +661,7 @@ export class App {
   }
 
   /** Draws a screen. Every way in (a tap, Back, Forward, the Lantern button) comes through here. */
-  private show(route: Route, v: { again: boolean; key: string; at?: Place }, o: { quiet?: boolean } = {}) {
+  private show(route: Route, v: { again: boolean; key: string; at?: Place; hand?: unknown }, o: { quiet?: boolean } = {}) {
     // Back, Forward and the Lantern button after clearing land on Settings too; only the Safe Zone opens as ever
     if (cleared() && route.name !== 'safe') route = { name: 'settings' };
     const safe = route.name === 'safe';
@@ -668,7 +676,7 @@ export class App {
     const key = v.key;
     this.visitKey = key;
     if (safe !== wasSafe) this.quietScore(safe);
-    const out = this.screens[route.name](this, route, { again: v.again, kept: v.again ? this.kept.get(key) : undefined, at: v.at, mark: (p) => this.mark(key, p) });
+    const out = this.screens[route.name](this, route, { again: v.again, kept: v.again ? this.kept.get(key) : undefined, handed: v.again ? undefined : v.hand, at: v.at, mark: (p) => this.mark(key, p) });
     this.current = out;
     this.root.style.setProperty('--dq-foot', '0px');
     if (out.foot) this.pins.observe(out.foot);
