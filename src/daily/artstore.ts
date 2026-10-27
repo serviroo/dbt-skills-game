@@ -184,7 +184,8 @@ export function cleanDraft(raw: unknown): Draft | null {
   else if (raw.prompt === null) d.prompt = null;
   d.strokes = strokes;
   d.t = fin(raw.t) ? raw.t : 0;
-  return Object.assign(d, restOf(raw, DRAFT_KEYS));
+  // spread, not assigned, so each one stays a plain field: a stored "__proto__" can't become what d inherits from
+  return { ...d, ...restOf(raw, DRAFT_KEYS) };
 }
 /** Drafts from a file that can't be read: unreadable ones and any past the cap. */
 export function skippedDrafts(raw: unknown) {
