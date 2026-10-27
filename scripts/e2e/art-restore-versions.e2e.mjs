@@ -1,6 +1,7 @@
 // Restoring a Save Crystal never loses a drawing: two copies of one version in the file both come in, two Restores at
-// once both keep what they bring, and a version an older build edited without its tools' strokes comes back whole
-// beside that edit. A version this build edited, or one cleared and drawn again, stays behind the edit as before.
+// once both keep what they bring, as does one meeting another tab's Restore halfway, and a version an older build
+// edited without its tools' strokes comes back whole beside that edit. A version this build edited, or one cleared and
+// drawn again, stays behind the edit as before.
 import { drawPage, line, pick } from './art-eraser-glow.e2e.mjs';
 import { crystal, restore } from './newer-save-safety.e2e.mjs';
 
@@ -77,6 +78,43 @@ export const scenarios = {
     const said = await Promise.all([bring(page, b), bring(other, c)]);
     const got = await stored(page);
     expect(got.some((g) => same(g.strokes, b)) && got.some((g) => same(g.strokes, c)), 'two Restores at once lost one of them: ' + JSON.stringify({ said, got: got.map((g) => [g.id, g.strokes.length]) }));
+    expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /** a Restore in another tab that moves a version aside between two drawings of this one loses neither */
+  async 'art-restore-beside-another-tab'(h) {
+    const { expect } = h;
+    const raw = await drawnCrystal(h);
+    const rec = raw.art[0];
+    const { ctx, page, errors } = await fresh(h);
+    const withC = [...rec.strokes, across(1400)], newer = [across(300)];
+    const said = await page.evaluate(
+      async ({ rec, withC, newer }) => {
+        const { artStore, ArtStore } = await import('/src/daily/artstore.ts');
+        const a = artStore(window.__daily.store.key), b = new ArtStore(a.name);
+        // the other tab's Restore lands right after this one's first drawing: a newer version of that page, which moves
+        // the version this one just restored aside to a copy
+        const one = a.importOne;
+        let first = true;
+        a.importOne = async function (...args) {
+          const r = await one.apply(this, args);
+          if (first) {
+            first = false;
+            await b.importAll([{ ...rec, rev: 'othertab1', updated: rec.updated + 1000, from: [], strokes: newer, n: newer.length }]);
+          }
+          return r;
+        };
+        try {
+          return await a.importAll([rec, { ...rec, id: `${rec.id}~k1`, strokes: withC, n: withC.length }]);
+        } finally {
+          delete a.importOne;
+        }
+      },
+      { rec, withC, newer },
+    );
+    const got = await stored(page);
+    expect(got.some((g) => same(g.strokes, newer)) && got.some((g) => same(g.strokes, withC)), 'a Restore beside another tab\'s lost a drawing: ' + JSON.stringify({ said, got: got.map((g) => [g.id, g.strokes.length]) }));
     expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },

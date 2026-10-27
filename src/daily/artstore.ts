@@ -841,11 +841,7 @@ export class ArtStore {
     };
     const onDisk = await this.tx(['meta'], 'readonly', (t) => req(t.objectStore('meta').getAll() as IDBRequest<DrawingMeta[]>), () => [] as DrawingMeta[]);
     const diskMeta = new Map(onDisk.map((m) => [m.id, m]));
-    // the pages of each family here, on disk or only in memory, and those the file adds as it comes in
-    const pages = new Map<string, Set<string>>();
-    const page = (id: string) => pages.set(family(id), (pages.get(family(id)) ?? new Set<string>()).add(id));
     for (const m of [...onDisk, ...this.mem.meta.values()]) {
-      page(m.id);
       note(m.id, revOf(m));
       for (const a of fromOf(m.from) ?? []) note(m.id, a);
     }
@@ -856,15 +852,17 @@ export class ArtStore {
       const hit = known.get(family(rec.id))?.get(me);
       let at = rec;
       if (hit) {
-        const here = (await Promise.all([...(pages.get(family(rec.id)) ?? [])].map((id) => this.versionsOf(id)))).flat();
+        // the family's pages as they are now, so one a Restore in another tab moved aside meanwhile is still found
+        const here = await this.familyNow(family(rec.id));
         const same = here.filter((d) => revOf(d) === me);
         // a page edited from this version holds it, unless a build from before the tools made the edit: that keeps the
         // strokes it can read and drops the tools' strokes, so the file's copy comes in as its own page
         const later = here.filter((d) => fromOf(d.from)?.includes(me));
         const lost = !later.some((d) => within(d.strokes, rec.strokes)) && later.some((d) => within(d.strokes, rec.strokes.filter((s) => !storedStroke(s).m)));
-        if (same.some((d) => holds(d, rec)) || (!same.length && !lost)) {
+        const by = same.find((d) => holds(d, rec)) ?? (!same.length && !lost ? later[0] : undefined);
+        if (by) {
           out.unchanged++;
-          inUse.push(hit);
+          inUse.push(by.id);
           continue;
         }
         // the same version here with other content: the file's copy meets the page that holds it (see importOne)
@@ -874,13 +872,9 @@ export class ArtStore {
       out[r.result]++;
       if (r.wrote) wrote = true;
       inUse.push(r.at);
-      page(r.at);
       note(r.at, me);
       for (const a of rec.from ?? []) note(r.at, a);
-      if (r.moved) {
-        page(r.moved.id);
-        note(r.moved.id, r.moved.rev);
-      }
+      if (r.moved) note(r.moved.id, r.moved.rev);
     }
     out.unsaved = await this.memoryOnly(inUse);
     this.drop();
@@ -888,10 +882,20 @@ export class ArtStore {
     return out;
   }
 
-  /** Drawing id as it is stored and as this session holds it in memory, where it does. */
-  private async versionsOf(id: string): Promise<DrawingRec[]> {
-    const M = this.mem.meta.get(id), S = this.mem.strokes.get(id);
-    return [await this.onDisk(id), M && S ? { ...M, strokes: S } : null].filter((d): d is DrawingRec => !!d);
+  /** The pages of family f as they are now: each stored one, and each this session holds in memory. */
+  private async familyNow(f: string): Promise<DrawingRec[]> {
+    const ids = await this.tx(['meta'], 'readonly', (t) => req(t.objectStore('meta').getAllKeys(IDBKeyRange.bound(f, `${f}￿`)) as IDBRequest<IDBValidKey[]>), () => [] as IDBValidKey[]);
+    const all = new Set([...ids.map(String), ...this.mem.meta.keys()].filter((id) => family(id) === f));
+    return (
+      await Promise.all(
+        [...all].map(async (id) => {
+          const M = this.mem.meta.get(id), S = this.mem.strokes.get(id);
+          return [await this.onDisk(id), M && S ? { ...M, strokes: S } : null];
+        }),
+      )
+    )
+      .flat()
+      .filter((d): d is DrawingRec => !!d);
   }
 
   /**
