@@ -989,6 +989,7 @@ export function settingsScreen(app: App): ScreenOut {
       const sound = app.root.querySelector<HTMLInputElement>('.dq-settings input[role="switch"]');
       if (sound) sound.checked = s.settings.sound;
     }
+    if (buzzIn) buzzIn.checked = s.settings.vibrate;
     app.shown = null;
     const rawArt = (raw as { art?: unknown }).art;
     let art: Awaited<ReturnType<ReturnType<typeof artStore>['importAll']>> | null = null;
@@ -1282,6 +1283,20 @@ export function settingsScreen(app: App): ScreenOut {
     return h('div', { class: 'dq-setting dq-setting--col' }, h('label', { for: id, class: 'dq-setting-l' }, h('span', { class: 'dq-setting-t', text: label }), h('span', { class: 'dq-setting-h', text: hint })), input);
   };
   const motionLabels = ['Auto', 'Reduced', 'Full'];
+  // no switch at all where the browser can't vibrate
+  const vibrate = app.canBuzz()
+    ? toggle('Vibrate when a timer starts or ends', s.settings.vibrate, (v) => {
+        s.settings.vibrate = v;
+        st.touch('vibrate');
+        st.save();
+        if (v) app.buzz('start');
+      }, 'One soft buzz as it starts, two as it ends.')
+    : null;
+  // another open copy can turn it on or off: the switch shows the choice a buzz follows
+  const buzzIn = vibrate?.querySelector('input');
+  const offBuzz = st.onChange(() => {
+    if (buzzIn) buzzIn.checked = s.settings.vibrate;
+  });
   const levels = app.opts.volume ? volumeSliders(app.opts.volume) : null;
   const el = h(
     'div',
@@ -1322,6 +1337,7 @@ export function settingsScreen(app: App): ScreenOut {
             app.applyMotion();
           }, { labels: motionLabels, cls: 'dq-seg--3' }),
         ),
+        vibrate,
       ),
       panel({ title: 'Crisis lines', ic: icon('phone') }, regionPicker(app, undefined, SAFE.settings)),
       wardrobePanel(app),
@@ -1368,6 +1384,7 @@ export function settingsScreen(app: App): ScreenOut {
     mode: 'sub',
     leave: () => {
       offSaving();
+      offBuzz();
       keeps.stop();
       gone = true;
       pick++;

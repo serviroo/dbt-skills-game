@@ -220,8 +220,8 @@ export const scenarios = {
         const a = window.__daily;
         const s = a.store.state;
         s.settings.playerName = 'Kit'; s.settings.companion = 'Lumen';
-        s.settings.sound = false; s.settings.motion = 'reduce';
-        for (const key of ['sound', 'motion', 'playerName', 'companion']) a.store.touch(key);
+        s.settings.sound = false; s.settings.motion = 'reduce'; s.settings.vibrate = true;
+        for (const key of ['sound', 'motion', 'vibrate', 'playerName', 'companion']) a.store.touch(key);
         const { THEME_IDS, ACCENT_IDS, CARD_BACK_IDS, PLATE_IDS, SHADOW_IDS, TITLE_IDS } = await import('/src/content/roster-lines.ts');
         for (const [key, values] of [['theme', THEME_IDS], ['accent', ACCENT_IDS], ['cardBack', CARD_BACK_IDS], ['plate', PLATE_IDS], ['title', TITLE_IDS]]) {
           s.settings[key] = values.at(-1); a.store.touch(key);
@@ -279,23 +279,25 @@ export const scenarios = {
       await ready(page);
       const raw = JSON.parse(fs.readFileSync(fixture, 'utf8'));
       raw.preferences = { audio: { v: 1, master: .9, music: .8, sfx: .7, muted: false }, room: { aquarium: true, words: true }, safeLight: 'up' };
-      raw.settings.sound = true; raw.settings.motion = 'full';
-      raw.setAt.sound = 5; raw.setAt.motion = 5;
+      raw.settings.sound = true; raw.settings.motion = 'full'; raw.settings.vibrate = true;
+      raw.setAt.sound = 5; raw.setAt.motion = 5; raw.setAt.vibrate = 5;
       await page.evaluate(() => {
         const a = window.__daily;
         a.opts.volume.set({ master: .11, music: .22, sfx: .33, muted: true });
         a.store.state.settings.sound = false;
         a.store.state.settings.motion = 'reduce';
-        a.store.touch('sound'); a.store.touch('motion'); a.store.save();
+        // off, as it starts, but chosen here: the file's "on" must not replace it
+        a.store.state.settings.vibrate = false;
+        a.store.touch('sound'); a.store.touch('motion'); a.store.touch('vibrate'); a.store.save();
         localStorage.setItem(a.store.key + '.stealth', JSON.stringify({ aquarium: false, words: false }));
         localStorage.setItem(a.store.key + '.safe-light', 'dim');
       });
       await restore(page, raw);
       const actual = await page.evaluate(() => {
         const a = window.__daily;
-        return { audio: a.opts.volume.get(), sound: a.store.state.settings.sound, motion: a.store.state.settings.motion, room: JSON.parse(localStorage.getItem(a.store.key + '.stealth')), light: localStorage.getItem(a.store.key + '.safe-light') };
+        return { audio: a.opts.volume.get(), sound: a.store.state.settings.sound, motion: a.store.state.settings.motion, vibrate: a.store.state.settings.vibrate, room: JSON.parse(localStorage.getItem(a.store.key + '.stealth')), light: localStorage.getItem(a.store.key + '.safe-light') };
       });
-      assert.deepEqual(actual, { audio: { master: .11, music: .22, sfx: .33, muted: true }, sound: false, motion: 'reduce', room: { aquarium: false, words: false }, light: 'dim' });
+      assert.deepEqual(actual, { audio: { master: .11, music: .22, sfx: .33, muted: true }, sound: false, motion: 'reduce', vibrate: false, room: { aquarium: false, words: false }, light: 'dim' });
     } finally { await ctx.close(); }
   },
 

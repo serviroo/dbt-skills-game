@@ -80,6 +80,8 @@ export interface LineEntry {
 export interface Settings {
   sound: boolean;
   motion: (typeof MOTIONS)[number];
+  /** A soft buzz when a skill timer starts or ends, on its own switch (Mute is about sound). Off until turned on. */
+  vibrate: boolean;
   emotionRows: string[];
   urgeRows: string[];
   theme: ThemeId;
@@ -115,12 +117,14 @@ export interface Flags {
 }
 /** Choices one copy can change and another must take whole: the later change wins. */
 export type NameKey = `name:${ShadowId}`;
-export type SetKey = 'sound' | 'motion' | 'emotionRows' | 'urgeRows' | 'safeCredit' | 'region' | 'theme' | 'accent' | 'cardBack' | 'plate' | 'title' | 'playerName' | 'companion' | NameKey;
+export type SetKey = 'sound' | 'motion' | 'vibrate' | 'emotionRows' | 'urgeRows' | 'safeCredit' | 'region' | 'theme' | 'accent' | 'cardBack' | 'plate' | 'title' | 'playerName' | 'companion' | NameKey;
 /** The choices round 9 stores in settings and setAt. */
-const BASE_SET_KEYS: SetKey[] = ['sound', 'motion', 'emotionRows', 'urgeRows', 'safeCredit'];
+const BASE_SET_KEYS: SetKey[] = ['sound', 'motion', 'vibrate', 'emotionRows', 'urgeRows', 'safeCredit'];
 /** Wave 2 choices. Stored in the top-level profile (with titlesSeen), which a round 9 copy keeps whole instead of dropping. */
 const PROFILE_SET_KEYS: SetKey[] = ['region', 'theme', 'accent', 'cardBack', 'plate', 'title', 'playerName', 'companion', ...SHADOW_IDS.map((id): NameKey => `name:${id}`)];
 const SET_KEYS: SetKey[] = [...BASE_SET_KEYS, ...PROFILE_SET_KEYS];
+/** How this device plays: a Save Crystal brings them only where this device still has its defaults. */
+const DEVICE_SET_KEYS: SetKey[] = ['sound', 'motion', 'vibrate'];
 export { cleanName };
 const LIST_KEYS = ['comfort', 'activities', 'reasons', 'people'] as const;
 const DAY_FLAGS = ['giftDay', 'cardDay', 'greetDay', 'checkinDay'] as const;
@@ -189,6 +193,7 @@ export function freshState(now = Date.now()): State {
     settings: {
       sound: true,
       motion: 'system',
+      vibrate: false,
       emotionRows: ['Sadness', 'Fear or anxiety', 'Anger', 'Shame', 'Joy'],
       urgeRows: ['Urge to give up on today'],
       theme: 'classic',
@@ -275,6 +280,7 @@ const REGION = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 /** Choices with a fixed set of values: one stored as anything else is kept (see Kept) and the default shows. */
 const USABLE: Partial<Record<SetKey, (v: unknown) => boolean>> = {
   sound: (v) => typeof v === 'boolean',
+  vibrate: (v) => typeof v === 'boolean',
   motion: (v) => (MOTIONS as readonly unknown[]).includes(v),
   theme: (v) => (THEME_IDS as readonly unknown[]).includes(v),
   accent: (v) => (ACCENT_IDS as readonly unknown[]).includes(v),
@@ -304,7 +310,7 @@ function stored(s: State) {
     maps: back(s.maps, k?.dropped.maps),
     lines: back(s.lines, k?.dropped.lines),
     skillPins: { ...k?.pins, ...Object.fromEntries(Object.entries(s.skillPins).map(([id, p]) => [id, asStored(p)])) },
-    settings: { ...settings, emotionRows: asStored(settings.emotionRows), urgeRows: asStored(settings.urgeRows), sound: as('sound', settings.sound), motion: as('motion', settings.motion) },
+    settings: { ...settings, emotionRows: asStored(settings.emotionRows), urgeRows: asStored(settings.urgeRows), sound: as('sound', settings.sound), motion: as('motion', settings.motion), vibrate: as('vibrate', settings.vibrate) },
     flags,
     setAt,
     profile: {
@@ -870,7 +876,7 @@ export function normalize(raw: unknown): State | null {
   }
   if (isObj(raw.settings)) {
     const s = raw.settings;
-    for (const k of ['sound', 'motion'] as const) if (own(s, k) && s[k] !== undefined) putSet(base, k, s[k] as SetVal);
+    for (const k of ['sound', 'motion', 'vibrate'] as const) if (own(s, k) && s[k] !== undefined) putSet(base, k, s[k] as SetVal);
     if (Array.isArray(s.emotionRows)) base.settings.emotionRows = twin(s.emotionRows.map((r) => str(r, 60)).filter(Boolean).slice(0, ROW_CAP.emotions), s.emotionRows, newer);
     if (Array.isArray(s.urgeRows)) base.settings.urgeRows = twin(s.urgeRows.map((r) => str(r, 60)).filter(Boolean).slice(0, ROW_CAP.urges), s.urgeRows, newer);
     keepRest(base.settings, s, SETTINGS_KEYS);
@@ -1496,7 +1502,8 @@ export class Store {
    * has no change time for that choice (the player never set it here), so a new device gets them back; one the player
    * made here, a cleared name included, always wins. A choice taken from the file takes the file's change time too,
    * never later than this device's now (now when the file has none), so another open copy doesn't see it as older than
-   * its own default. Explicit sound and motion choices stay on this device, and the file's removals are not applied.
+   * its own default. Explicit sound, motion and vibration choices stay on this device, and the file's removals are not
+   * applied.
    */
   merge(other: State) {
     this.sync();
@@ -1558,9 +1565,9 @@ export class Store {
       // later than this device's own change, so no other open copy undoes it
       this.state.setAt[k] = own(this.state.setAt, k) ? Math.max(now, (this.state.setAt[k] ?? 0) + 1) : Math.min(other.setAt[k] ?? now, now);
     }
-    for (const k of ['sound', 'motion', ...PROFILE_SET_KEYS] as SetKey[]) {
+    for (const k of [...DEVICE_SET_KEYS, ...PROFILE_SET_KEYS]) {
       if (own(this.state.setAt, k) || raws.has(k)) continue;
-      if ((k === 'sound' || k === 'motion') && getSet(this.state, k) !== getSet(blank, k)) continue;
+      if (DEVICE_SET_KEYS.includes(k) && getSet(this.state, k) !== getSet(blank, k)) continue;
       const ov = getSet(other, k);
       const ft = own(other.setAt, k) ? other.setAt[k] : undefined;
       const timed = typeof ft === 'number' && ft > 0;

@@ -38,8 +38,10 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
   let fed = kept?.fed ?? null;
   /** showing a place again for Back or Forward: it isn't marked, chimes or asks again */
   let replaying = false;
+  /** the Safe Zone is opening over this skill (or the game's data is being cleared): what it stops stops quietly */
+  let hushed = false;
   const stops: (() => void)[] = [];
-  const ctx: Ctx = { sound: (c) => app.sound(c), reduced: () => app.reduced() };
+  const ctx: Ctx = { sound: (c) => app.sound(c), reduced: () => app.reduced(), buzz: (k) => app.buzz(k) };
   const stepsById = new Map<string, number>();
   sk.steps.forEach((s, i) => s.id && stepsById.set(s.id, i));
 
@@ -316,7 +318,12 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
             nextBtn.classList.add('dq-btn--primary');
           },
         });
-        stops.push(tv.stop);
+        // leaving while it runs (Next, a choice, Back, closing the skill) skips the timer: the same soft double pulse as
+        // its end, but not when the Safe Zone opens over it
+        stops.push(() => {
+          if (tv.running() && !hushed) ctx.buzz?.('end');
+          tv.stop();
+        });
         const alts = s.options?.filter((o) => !o.instead).map((o) => btn(o.label, go(o), { kind: 'link' })) ?? [];
         return swap(...head(s), textEl(tx(s.text, answers), !titled), s.small ? p(s.small, 'dq-small') : null, tv.el, h('div', { class: 'dq-actions dq-actions--center' }, nextBtn, ...alts));
       }
@@ -540,6 +547,9 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
     mode: 'skill',
     bubbles: [1.6, 0.6],
     leave: clear,
+    silence: () => {
+      hushed = true;
+    },
     // a revisit opens where the player was; a new visit, or one with no place yet, starts and marks the first step
     after: () => open(visit.at, visit.again && visit.at !== undefined),
     moveTo: (place) => open(place, true),

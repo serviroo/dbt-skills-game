@@ -2,7 +2,7 @@ import { companionName, playerName } from '../core/you';
 import { params } from '../core/params';
 import { cleared, onClear } from '../core/cleared';
 import { animate } from '../ui/anim';
-import { WINDOW } from '../motion/tokens';
+import { BUZZ, BUZZ_GAP, WINDOW } from '../motion/tokens';
 import { DISMISSED, dismissWindows, LanternWindow, lanternLayer, windowSounds, type WindowSpec } from '../ui/lantern-window';
 import { revealRank } from '../ui/rank-reveal';
 import { isHeavy, MODULE_ORDER, MODULES, type Next, type StatId } from '../content/dbt';
@@ -91,6 +91,15 @@ const isEntry = (s: unknown): s is Entry => !!s && typeof s === 'object' && (s a
 /** Rooms a move goes back to when they are already behind the player, so moving around never grows history. */
 const ROOMS = new Set<Route['name']>(['library', 'art', 'stories', 'shadows', 'settings', 'diary', 'comfort', 'lines', 'safe', 'rest']);
 const same = (a: Route, b: Route) => JSON.stringify(a) === JSON.stringify(b);
+/** What is still to play of a vibration pattern `ms` after it began, opening with a pulse (0 ms between pulses); [] once it is over. */
+const buzzLeft = (pattern: readonly number[], ms: number) => {
+  let end = 0;
+  for (let i = 0; i < pattern.length; i++) {
+    end += pattern[i];
+    if (end > ms) return [...(i % 2 ? [0] : []), end - ms, ...pattern.slice(i + 1)];
+  }
+  return [];
+};
 
 export interface DailyOpts {
   onReplay(): void;
@@ -230,6 +239,43 @@ export class App {
       this.opts.sound?.play(cue);
     } catch {
       /* sound is optional */
+    }
+  }
+
+  /**
+   * Vibration has its own switch, shown only where a buzz can really happen: a touch-first device whose browser can
+   * vibrate. Desktop Chrome and Edge have navigator.vibrate too, but nothing there buzzes.
+   */
+  canBuzz() {
+    return typeof navigator.vibrate === 'function' && matchMedia('(pointer: coarse)').matches;
+  }
+
+  /** the pattern last handed to the device and when (performance.now() ms), while it may still be playing */
+  private buzzing: { pattern: number[]; at: number } | null = null;
+
+  /** A skill timer's buzz when the player turned it on (Mute is about sound): never in the Safe Zone or out of sight. */
+  buzz(kind: keyof typeof BUZZ) {
+    if (this.route.name === 'safe' || !this.store.state.settings.vibrate || document.visibilityState !== 'visible' || !this.canBuzz()) return;
+    const at = performance.now();
+    // a new pattern replaces one still playing, so a buzz right after another (a skip that starts the next timer) follows it
+    const left = this.buzzing ? buzzLeft(this.buzzing.pattern, at - this.buzzing.at) : [];
+    const pattern = left.length ? [...left, BUZZ_GAP, ...BUZZ[kind]] : [...BUZZ[kind]];
+    try {
+      this.buzzing = navigator.vibrate(pattern) ? { pattern, at } : null;
+    } catch {
+      /* vibration is optional */
+    }
+  }
+
+  /** The Safe Zone is opening (or the data is being cleared): a buzz still playing stops at once. */
+  private stopBuzz() {
+    const was = this.buzzing;
+    this.buzzing = null;
+    if (!was || !buzzLeft(was.pattern, performance.now() - was.at).length) return;
+    try {
+      navigator.vibrate(0);
+    } catch {
+      /* vibration is optional */
     }
   }
 
@@ -642,6 +688,7 @@ export class App {
     dismissWindows();
     this.dropScrim?.();
     document.querySelectorAll('[data-fx]').forEach((n) => n.remove());
+    this.stopBuzz();
     this.current?.silence?.();
   }
 

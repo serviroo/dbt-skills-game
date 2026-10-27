@@ -2886,8 +2886,12 @@ textarea.dq-input {
 .dq-settings .dq-panel .dq-hint:not(:empty) {
   margin-top: 12px;
 }
+.dq-settings .dq-setting-t {
+  text-wrap: balance;
+}
 .dq-settings .dq-setting-h {
   font-size: 16px;
+  text-wrap: pretty;
 }
 .dq-peek {
   margin-top: 18px;
