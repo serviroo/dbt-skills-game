@@ -834,7 +834,13 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
         const now = await as.get(id);
         if (now && !removed) take(now);
       };
-      f.input.addEventListener('keydown', (e) => (e as KeyboardEvent).key === 'Enter' && (e.preventDefault(), void save()));
+      // an Enter that confirms an IME composition (keyCode 229 in Safari) finishes the word, not the name
+      f.input.addEventListener('keydown', (e) => {
+        const k = e as KeyboardEvent;
+        if (k.key !== 'Enter' || k.isComposing || k.keyCode === 229) return;
+        k.preventDefault();
+        void save();
+      });
       form.replaceChildren(f.el, h('div', { class: 'dq-actions' }, btn('Save name', () => void save(), { kind: 'primary' }), btn('Cancel', () => closeRename(true), { kind: 'quiet' })));
       editing = true;
       renameDone ??= app.sheet(() => {

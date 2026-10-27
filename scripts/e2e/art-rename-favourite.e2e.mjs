@@ -353,6 +353,30 @@ export const scenarios = {
     await q.ctx.close();
   },
 
+  /** The Enter that confirms an IME composition (isComposing, or keyCode 229 as Safari sends it) doesn't save the name. */
+  async 'art-rename-ime-enter'(h) {
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute');
+    page.setDefaultTimeout(15000);
+    await h.reachHub(page);
+    await seed(page);
+    await toArt(h, page);
+    await openPiece(page, 'pg-a');
+    await page.getByRole('button', { name: 'Rename', exact: true }).click();
+    const input = page.getByLabel('Name this page');
+    await input.fill('きょう');
+    for (const init of [{ isComposing: true }, { keyCode: 229 }]) {
+      const kept = await input.evaluate((el, init) => el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...init })), init);
+      await h.sleep(300);
+      h.expect(kept, `the composing Enter was cancelled: ${JSON.stringify(init)}`);
+      h.expect(await page.locator('.dq-piece-rename').isVisible(), `a composing Enter closed the name field: ${JSON.stringify(init)}`);
+      h.expect(!(await records(page)).find((r) => r.id === 'pg-a').name, `a composing Enter saved the name: ${JSON.stringify(init)}`);
+    }
+    await page.keyboard.press('Enter');
+    await until(h, () => records(page), (rs) => rs.find((r) => r.id === 'pg-a')?.name === 'きょう', 'Enter after the composition did not save the name');
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
   /** Storage that reads but can't write (full): a rename and a favourite still hold for the visit and go into a Save Crystal. */
   async 'art-labels-write-fails'(h) {
     const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute');
