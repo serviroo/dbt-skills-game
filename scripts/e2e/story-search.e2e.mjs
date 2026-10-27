@@ -374,6 +374,97 @@ export const scenarios = {
     }
   },
 
+  /** each result opens what it showed: every place in a story can be opened (past the first six, Notes too), a tap
+   *  made before the next search runs opens with the words that found it, and typing on the page while it opens wins
+   *  over the marks and the cursor */
+  async 'story-search-result-taps'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute');
+    try {
+      await h.reachHub(page);
+      await shelf(page);
+      // "comet" in eight chapters and the notes of one story
+      const sky = await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const a = await ss.create('Sky Book');
+        const ids = [a.first.id];
+        await ss.saveChapter({ ...a.first, title: 'Sky 1', text: 'A comet crossed the sky.' }, [a.first.rev]);
+        for (let i = 2; i <= 8; i++) {
+          const c = await ss.addChapter(a.story.id);
+          await ss.saveChapter({ ...c, title: `Sky ${i}`, text: `Night ${i}: the comet came back.` }, [c.rev]);
+          ids.push(c.id);
+        }
+        const notes = await ss.chapter(a.story.notes);
+        await ss.saveChapter({ ...notes, text: 'The comet comes every spring.' }, [notes.rev]);
+        return ids;
+      });
+      await page.evaluate(() => window.__daily.go({ name: 'stories' }));
+      await field(page).waitFor();
+      const places = () => page.evaluate(() => [...[...document.querySelectorAll('.st-found-story')].find((s) => s.querySelector('.st-found-head .st-row-t').textContent === 'Sky Book').querySelectorAll('.st-found-where')].map((e) => e.textContent).join());
+
+      // six places show; the rest, Notes last, come on a tap, and the first of them takes the focus
+      await search(h, page, 'comet');
+      h.expect((await places()) === 'Sky 1,Sky 2,Sky 3,Sky 4,Sky 5,Sky 6', `the first look shows ${await places()}`);
+      const more = page.getByRole('button', { name: 'Show 3 more places in this story' });
+      const tall = await more.evaluate((e) => e.getBoundingClientRect().height);
+      h.expect(tall >= 44, `"more places" is ${tall}px tall, under a 44px tap`);
+      await more.scrollIntoViewIfNeeded();
+      await h.shot(page, 'more-places');
+      await more.click();
+      h.expect((await places()) === 'Sky 1,Sky 2,Sky 3,Sky 4,Sky 5,Sky 6,Sky 7,Sky 8,Notes', `after "more" the story shows ${await places()}`);
+      h.expect(!(await more.count()), '"more places" stayed after showing them');
+      h.expect((await page.evaluate(() => document.activeElement?.querySelector('.st-found-where')?.textContent)) === 'Sky 7', 'the focus did not move to the first place shown');
+      await page.locator('.st-found-row', { hasText: 'Notes' }).click();
+      await routeIs(page, 'write');
+      await page.getByRole('textbox', { name: 'Notes for this story' }).waitFor();
+      await page.waitForSelector('.st-hl .st-mark.is-place', { timeout: 5000 }).catch(() => null);
+      let p = await placeShown(page);
+      h.expect(p?.text === 'comet' && p.sel === 'comet', `the notes found past the first six did not open at "comet": ${JSON.stringify(p)}`);
+
+      // they change the words and tap a result before the next search runs: it opens with the words that found it
+      await page.evaluate(() => window.__daily.back());
+      await routeIs(page, 'stories');
+      await page.waitForFunction(() => document.querySelectorAll('.st-found-row').length > 0, null, { timeout: 5000 });
+      await page.evaluate(() => {
+        const f = document.querySelector('.st-find-in');
+        f.value = 'zebra';
+        f.dispatchEvent(new Event('input', { bubbles: true }));
+        [...document.querySelectorAll('.st-found-row')].find((b) => b.querySelector('.st-found-where').textContent === 'Sky 2').click();
+      });
+      await routeIs(page, 'write');
+      await page.getByRole('textbox', { name: 'Page, Sky 2' }).waitFor();
+      await page.waitForSelector('.st-hl .st-mark.is-place', { timeout: 5000 }).catch(() => null);
+      p = await placeShown(page);
+      h.expect(p?.text === 'comet' && p.sel === 'comet', `a tap before the next search opened without its words marked: ${JSON.stringify(p)}`);
+
+      // they type while the result is still opening: nothing is marked after, and the cursor stays where they typed
+      await page.evaluate(() => window.__daily.go({ name: 'stories' }));
+      await field(page).waitFor();
+      await search(h, page, 'comet');
+      const { waitHeld, drain } = await holdStorage(page, ['onDisk']);
+      await page.locator('.st-found-row', { hasText: 'Sky 3' }).click();
+      await routeIs(page, 'write');
+      const box = page.getByRole('textbox', { name: 'Page, Sky 3' });
+      await box.waitFor();
+      // the page shows Sky 3, and the opening waits on storage
+      await waitHeld(`onDisk ${sky[2]}`);
+      await box.click();
+      await page.keyboard.press('End');
+      await page.keyboard.type('!');
+      await drain();
+      await h.sleep(300);
+      await drain();
+      const left = await page.evaluate(() => {
+        const ta = document.querySelector('.st-write .st-ta');
+        return { text: ta.value, marks: document.querySelectorAll('.st-hl .st-mark').length, at: [ta.selectionStart, ta.selectionEnd], note: document.querySelector('.st-note')?.textContent ?? '' };
+      });
+      h.expect(left.text === 'Night 3: the comet came back.!' && !left.marks && left.at[0] === left.text.length && left.at[1] === left.text.length && left.note !== 'What you searched for is marked on the page.', `typing while the result opened was overruled by the search: ${JSON.stringify(left)}`);
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** results fit at every size: no sideways scroll, 16 px text, held sideways and on desktop too */
   async 'story-search-fits'(h) {
     for (const vp of [{ width: 390, height: 844 }, { width: 320, height: 568 }, { width: 844, height: 390 }, { width: 1280, height: 800 }]) {
