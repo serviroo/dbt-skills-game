@@ -4,7 +4,7 @@
  */
 import type { Skill, Visual } from '../content/dbt';
 import { hasScene, mountScene, type Beat } from '../scene/vignettes/host';
-import { onFrame, now } from './clock';
+import { onFrame, now, backInSight } from './clock';
 import { btn, h, typo } from './ui';
 
 const LN = 'fill="none" stroke="#a9dcff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"';
@@ -50,6 +50,8 @@ export interface Ctx {
   reduced(): boolean;
   /** calls fn whenever the motion setting changes; returns the function that stops it */
   onMotion(fn: () => void): () => void;
+  /** A timer's start or end buzz; a screen without one (the Safe Zone) never buzzes. */
+  buzz?(kind: 'start' | 'end'): void;
 }
 
 const NS = 'http://www.w3.org/2000/svg';
@@ -318,6 +320,8 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
       stop?.();
       stop = null;
       ctx.sound('check');
+      // a countdown that ran out while the page was out of sight ends there: no late buzz when the page comes back
+      if (t0 + dur >= backInSight()) ctx.buzz?.('end');
       opts.onDone();
     }
     beat = { e, dur, started: t0 >= 0, done: finished };
@@ -340,6 +344,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
       );
     }
     opts.onStart?.();
+    ctx.buzz?.('start');
     stop = onFrame(render);
   };
   const tapped = () => {
@@ -349,6 +354,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
   if (opts.start) actions.append(btn(opts.start, tapped, { kind: 'primary' }), ...extra);
   else begin();
   render(now());
+  // running by the clock: a hidden page draws no frames, so a timer can be over before it shows Done
   return {
     el,
     stop: () => {
@@ -358,6 +364,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
     },
     begin,
     started: () => t0 >= 0,
+    running: () => t0 >= 0 && !finished && now() - t0 < dur,
   };
 }
 

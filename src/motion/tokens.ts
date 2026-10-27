@@ -61,6 +61,14 @@ export const WINDOW = {
   reducedCloseMs: 180,
 } as const;
 
+/** A skill timer's buzz, in ms on and off: one short, gentle pulse as it starts, a soft double pulse as it ends. */
+export const BUZZ = {
+  start: [40],
+  end: [40, 120, 40],
+} as const;
+/** ms off between two buzzes that come together (a skip that starts the next timer), so both read */
+export const BUZZ_GAP = 200;
+
 export const CALM = {
   fadeMs: 380,
   ease: EASE.outExpo,
