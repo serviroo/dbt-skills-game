@@ -107,9 +107,31 @@ export const scenarios = {
     await redo();
     expect((await strokes(page)).length === 2, 'Redo did not bring the undone line back after erasing off the page');
 
+    // closer, inside the box the line's light could reach, but where erasing it changes nothing the page shows
+    await pick(page, 'Brush');
+    await line(page, at(300, 1400), at(900, 1400));
+    await undo();
+    await pick(page, 'Eraser');
+    const shown = await page.evaluate(() => window.__daily.ink.render(1200).toDataURL());
+    await line(page, at(100, 900), at(-150, 500));
+    expect((await strokes(page)).length === 2, 'an eraser stroke that changed nothing the page shows was kept: ' + JSON.stringify(await strokes(page)));
+    expect((await page.evaluate(() => window.__daily.ink.render(1200).toDataURL())) === shown, 'the page changed though the eraser stroke was not kept');
+    expect(await canRedo(), 'an eraser stroke that changed nothing the page shows cleared Redo');
+    await redo();
+    expect((await strokes(page)).length === 3, 'Redo did not bring the undone line back after erasing near the page');
+
     // just off the page the line's light still reaches it, so erasing there is kept
     await line(page, at(100, 900), at(-60, 500));
-    expect(JSON.stringify(await strokes(page)) === '["brush","brush","erase"]', 'an eraser stroke over ink whose light reaches the page was not kept: ' + JSON.stringify(await strokes(page)));
+    expect(JSON.stringify(await strokes(page)) === '["brush","brush","brush","erase"]', 'an eraser stroke over ink whose light reaches the page was not kept: ' + JSON.stringify(await strokes(page)));
+
+    // with the line already cut there, erasing it a little further off changes nothing the page shows either
+    await pick(page, 'Brush');
+    await line(page, at(300, 1500), at(900, 1500));
+    await undo();
+    await pick(page, 'Eraser');
+    await line(page, at(100, 900), at(-140, 500));
+    expect((await strokes(page)).length === 4, 'an eraser stroke past a cut line that changed nothing the page shows was kept: ' + JSON.stringify(await strokes(page)));
+    expect(await canRedo(), 'an eraser stroke past a cut line that changed nothing the page shows cleared Redo');
     expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },

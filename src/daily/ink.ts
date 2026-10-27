@@ -401,6 +401,8 @@ export function haloPass(g: CanvasRenderingContext2D, st: Stroke, s: number, cut
       // the part of the scratch canvas in use covers this box of the page, in logical px
       const box: Box = [(ox + r[0]) / s, (oy + r[1]) / s, (ox + r[2]) / s, (oy + r[3]) / s];
       for (const e of cut) {
+        // one with no points cuts nothing
+        if (!e.p.length) continue;
         cg.lineWidth = e.w * ERASE * s;
         traceNear(cg, e.p, s, ox + r[0], oy + r[1], box, (e.w * ERASE) / 2 + 2 / s);
         cg.stroke();
@@ -449,16 +451,22 @@ export function inkPass(g: CanvasRenderingContext2D, st: Stroke, s: number) {
   }
 }
 
+/**
+ * The least change of light in a px (r + g + b) that shows. Less is the light's rounding: a cut far off the page moves
+ * the light on it by a fraction of a step, which rounds up or down with the light already there.
+ */
+const LIT = 4;
 /** A canvas the CPU reads back, for takes. */
 let probe: CanvasRenderingContext2D | null = null;
 /**
- * Whether eraser stroke e, drawn after the strokes (each in its box, logical px) on a page W by H, takes anything the
- * page shows: at least half a px of a stroke's ink or of the line its light starts from, on the page or near enough
- * for its light to reach the page, which no eraser stroke after that stroke took already. They are laid out as the ink
- * layer is (see renderDrawing), only where e can meet them, then kept only under e. Passing close beside a line, over
- * paper an eraser already cleared, or over ink too far off the page to show takes nothing.
+ * Whether eraser stroke e, drawn after the strokes (each in its box, logical px) on a page of kind W by H, takes
+ * anything the page shows: at least half a px of a stroke's ink or of the line its light starts from, which no eraser
+ * stroke after that stroke took already, on the page, or off it where that changes the light the page shows (see dims).
+ * They are laid out as the ink layer is (see renderDrawing), only where e can meet them, then kept only under e.
+ * Passing close beside a line, over paper an eraser already cleared, or over ink too far off the page to show takes
+ * nothing.
  */
-function takes(strokes: Stroke[], boxes: Box[], e: Stroke, W: number, H: number) {
+function takes(strokes: Stroke[], boxes: Box[], e: Stroke, kind: Paper, W: number, H: number) {
   const eb = grow(bounds(e.p), (e.w * ERASE) / 2 + 1);
   // where each stroke e may meet shows: on the page, and as far off it as its light reaches
   const shows = new Map<number, Box>();
@@ -506,8 +514,49 @@ function takes(strokes: Stroke[], boxes: Box[], e: Stroke, W: number, H: number)
   g.stroke();
   const a = g.getImageData(0, 0, w, h).data;
   g.canvas.width = g.canvas.height = 0;
-  for (let k = 3; k < a.length; k += 4) if (a[k] >= 128) return true;
+  let off = false;
+  for (let k = 3; k < a.length; k += 4) {
+    if (a[k] < 128) continue;
+    const at = (k - 3) >> 2, x = x0 + (at % w), y = y0 + Math.floor(at / w);
+    if (x >= 0 && x < W && y >= 0 && y < H) return true;
+    off = true;
+  }
+  return off && dims(strokes, e, kind, W, H);
+}
+/**
+ * Whether eraser stroke e, drawn after the strokes on a page of kind W by H, puts out light the page shows: its paper
+ * and light as a render lays them (see litPaper) differ with e's cut from with the same eraser stroke without points,
+ * which cuts nothing, by at least LIT in some px. Both lay the light of the lines e passes over the same way, so only
+ * what e's cut takes counts.
+ */
+function dims(strokes: Stroke[], e: Stroke, kind: Paper, W: number, H: number) {
+  const all = [...strokes, e], cuts = eraserCuts(all), none: Stroke = { ...e, p: [] };
+  const was = litPaper(all, kind, W, W, H, cuts.map((c) => c?.map((k) => (k === e ? none : k)))), now = litPaper(all, kind, W, W, H, cuts);
+  const a = ctx2d(was).getImageData(0, 0, was.width, was.height).data, b = ctx2d(now).getImageData(0, 0, now.width, now.height).data;
+  was.width = was.height = now.width = now.height = 0;
+  for (let k = 0; k < a.length; k += 4) if (Math.abs(a[k] - b[k]) + Math.abs(a[k + 1] - b[k + 1]) + Math.abs(a[k + 2] - b[k + 2]) >= LIT) return true;
   return false;
+}
+/**
+ * A drawing's paper and light (its halo laid over the paper) on a new canvas outW px wide, as a render lays them.
+ * cuts: for each stroke, the eraser strokes after it that pass over it.
+ */
+function litPaper(strokes: Stroke[], kind: Paper, outW: number, W: number, H: number, cuts = eraserCuts(strokes)) {
+  const out = canvas(outW, H * (outW / W));
+  const g = ctx2d(out);
+  paintPaper(g, out.width, out.height, kind);
+  const hc = canvas(W * HALO, H * HALO);
+  const hg = ctx2d(hc);
+  hg.fillStyle = '#000';
+  hg.fillRect(0, 0, hc.width, hc.height);
+  strokes.forEach((st, i) => haloPass(hg, st, HALO, cuts[i]));
+  g.save();
+  g.globalCompositeOperation = 'screen';
+  g.imageSmoothingEnabled = true;
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(hc, 0, 0, out.width, out.height);
+  g.restore();
+  return out;
 }
 
 /** The page under the ink: void with a cold lift; an ally page adds a violet shadow pool to stand in. */
@@ -547,21 +596,8 @@ export function paintPaper(g: CanvasRenderingContext2D, w: number, h: number, ki
 /** Renders a stored drawing to a new canvas outW px wide (paper, halo, ink). Pure function of its inputs. */
 export function renderDrawing(strokes: Stroke[], kind: Paper, outW: number, W = PAGE[kind].w, H = PAGE[kind].h) {
   const q = outW / W;
-  const out = canvas(outW, H * q);
+  const out = litPaper(strokes, kind, outW, W, H);
   const g = ctx2d(out);
-  paintPaper(g, out.width, out.height, kind);
-  const hc = canvas(W * HALO, H * HALO);
-  const hg = ctx2d(hc);
-  hg.fillStyle = '#000';
-  hg.fillRect(0, 0, hc.width, hc.height);
-  const cuts = eraserCuts(strokes);
-  strokes.forEach((st, i) => haloPass(hg, st, HALO, cuts[i]));
-  g.save();
-  g.globalCompositeOperation = 'screen';
-  g.imageSmoothingEnabled = true;
-  g.imageSmoothingQuality = 'high';
-  g.drawImage(hc, 0, 0, out.width, out.height);
-  g.restore();
   // an eraser cuts ink only, so a drawing that has one inks its own layer and lays it over the paper
   const layer = strokes.some((st) => st.m === 'erase') ? canvas(out.width, out.height) : null;
   const ig = layer ? ctx2d(layer) : g;
@@ -1260,7 +1296,7 @@ export class InkPad {
       this.erase(st);
       // one that takes nothing from the page isn't kept, so the history and what Redo brings back stay as they were;
       // one that does cuts the ink by its points as they are kept
-      const kept = takes(this.strokes, this.er!.box, st, this.W, this.H);
+      const kept = takes(this.strokes, this.er!.box, st, this.opts.kind, this.W, this.H);
       if (kept) this.cutInk(st);
       else this.erase(null);
       this.letGo();
