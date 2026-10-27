@@ -190,7 +190,7 @@ async function closingCards(page, sleep) {
   const note = page.getByRole('button', { name: 'Read the note' });
   await note.waitFor({ timeout: 60000 });
   for (let i = 0; i < 40 && (await page.locator('.rw').count()); i++) {
-    // a short wait inside the retry loop, so a run that fails here reports in seconds, not minutes
+    // a short wait inside the retry loop, so a run that fails here reports in under two minutes, not fourteen
     await tapWhereItIs(page, note, 2000).catch(() => {});
     await sleep(500);
   }
