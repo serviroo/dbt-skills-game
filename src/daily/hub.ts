@@ -8,7 +8,7 @@ import { wait } from './clock';
 import { btn, chip, h, md, panel, segmented, typo } from './ui';
 import { artStore } from './artstore';
 import { storyStore } from './storystore';
-import { todayPrompt, thumbImg } from './artroom';
+import { cardOf, refill, todayPrompt, thumbImg } from './artroom';
 import { linePanel } from './lines';
 import { goNext } from './moment';
 import { isSkillId } from './store';
@@ -388,14 +388,20 @@ function menu(app: App) {
     ['settings', 'Settings', 'Your name, sound, backup', () => app.go({ name: 'settings' })],
   ];
   const artThumb = h('span', { class: 'dq-tile-thumb', 'aria-hidden': 'true' });
-  void artStore(app.store.key)
-    .shown()
-    .then((list) => {
-      if (list[0]) artThumb.replaceChildren(thumbImg(app, list[0], ''));
-      else artThumb.remove();
-      const allies = list.filter((m) => m.kind === 'ally').length;
-      if (allies) shadowsSub.textContent = `${n + 1 + allies} allies`;
-    });
+  const as = artStore(app.store.key);
+  let turn = 0;
+  // the newest drawing and the allies, as every tab has them now (a drawing saved, removed or brought back)
+  const showArt = async () => {
+    const t = ++turn;
+    const list = await as.shown();
+    if (t !== turn) return;
+    if (list[0]) {
+      art.append(artThumb);
+      refill(artThumb, cardOf(list[0]), () => [thumbImg(app, list[0], '')]);
+    } else artThumb.remove();
+    const allies = list.filter((m) => m.kind === 'ally').length;
+    shadowsSub.textContent = allies ? `${n + 1 + allies} allies` : typo(items[1][2]);
+  };
   const art = h(
     'button',
     { type: 'button', class: 'dq-tile dq-tile--art', onclick: () => app.go({ name: 'art' }) },
@@ -422,12 +428,21 @@ function menu(app: App) {
     .catch(() => undefined);
   const tiles = items.map(([ic, t, sub, fn]) => h('button', { type: 'button', class: 'dq-tile', onclick: fn }, h('span', { class: 'dq-tile-ic', html: icon(ic) }), h('span', { class: 'dq-tile-t', text: t }), h('span', { class: 'dq-tile-s', text: typo(sub) })));
   const shadowsSub = tiles[1].querySelector<HTMLElement>('.dq-tile-s')!;
-  return h('nav', { class: 'dq-menu', 'aria-label': 'Places' }, art, story, tiles);
+  const off = as.onChange(() => void showArt());
+  void showArt();
+  return {
+    el: h('nav', { class: 'dq-menu', 'aria-label': 'Places' }, art, story, tiles),
+    off: () => {
+      turn++;
+      off();
+    },
+  };
 }
 
 export function hubScreen(app: App): ScreenOut {
   const gift = h('p', { class: 'dq-gift' }, h('span', { class: 'dq-gift-k', text: 'Daily gift' }), h('span', { class: 'dq-gift-t', html: md(app.store.giftLine()) }));
   const quest = questSection(app);
+  let places!: ReturnType<typeof menu>;
   const el = h(
     'div',
     { class: 'dq-hub' },
@@ -435,8 +450,8 @@ export function hubScreen(app: App): ScreenOut {
     h('div', { class: 'dq-col dq-col--t' }, lobby(app, gift)),
     h('div', { class: 'dq-hcol dq-hcol--m' }, h('div', { class: 'dq-col dq-col--b' }, quest.el), h('div', { class: 'dq-col dq-col--g' }, gift), h('div', { class: 'dq-col dq-col--l' }, linePanel(app))),
     h('div', { class: 'dq-hcol dq-hcol--l' }, h('div', { class: 'dq-col dq-col--a' }, statusPanel(app))),
-    h('div', { class: 'dq-hcol dq-hcol--r' }, h('div', { class: 'dq-col dq-col--c' }, checkinPanel(app)), h('div', { class: 'dq-col dq-col--m' }, menu(app))),
+    h('div', { class: 'dq-hcol dq-hcol--r' }, h('div', { class: 'dq-col dq-col--c' }, checkinPanel(app)), h('div', { class: 'dq-col dq-col--m' }, (places = menu(app)).el)),
   );
   const off = app.store.onChange(quest.sync);
-  return { el, title: 'The Lantern', mode: 'hub', bubbles: [2.4, 0.75], leave: () => void off() };
+  return { el, title: 'The Lantern', mode: 'hub', bubbles: [2.4, 0.75], leave: () => { off(); places.off(); } };
 }

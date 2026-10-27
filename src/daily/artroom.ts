@@ -827,11 +827,7 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
         if (removed) return;
         closeRename(true);
         const now = await as.get(id);
-        if (now && !removed) {
-          rec = now;
-          paint();
-          if (ally) void prepImage(now);
-        }
+        if (now && !removed) take(now);
       };
       f.input.addEventListener('keydown', (e) => (e as KeyboardEvent).key === 'Enter' && (e.preventDefault(), void save()));
       form.replaceChildren(f.el, h('div', { class: 'dq-actions' }, btn('Save name', () => void save(), { kind: 'primary' }), btn('Cancel', () => closeRename(true), { kind: 'quiet' })));
@@ -845,12 +841,18 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
       f.input.focus();
       f.input.select();
     };
-    // a name or favourite set here or in another tab shows at once
+    // a name or favourite set here or in another tab shows at once; a newer version saved in another tab redraws the
+    // page, so what Remove takes away is the version on screen
+    const take = (now: DrawingRec) => {
+      if (revOf(now) !== revOf(rec!)) return void app.go({ name: 'piece', id }, { replace: true, quiet: true });
+      rec = now;
+      paint();
+      if (ally) void prepImage(now);
+    };
     offChange = as.onChange(() => {
       void as.get(id).then((now) => {
         if (!now || removed || editing) return;
-        rec = now;
-        paint();
+        take(now);
       });
     });
     const actions = h(

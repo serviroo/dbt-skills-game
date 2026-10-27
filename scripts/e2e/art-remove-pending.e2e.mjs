@@ -119,6 +119,48 @@ export const scenarios = {
     await ctx.close();
   },
 
+  /** An open page redraws when another tab saves a newer version, so Remove takes what is on screen; Home follows too. */
+  async 'art-remove-shown-version'(h) {
+    const { ctx, page: a, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute');
+    a.setDefaultTimeout(15000);
+    await h.reachHub(a);
+    await seed(a);
+    await toArt(h, a);
+    await openPiece(a, 'pg-a');
+    const b = await second(h, ctx, { width: 320, height: 568 });
+
+    // B saves an edit of the page A has open: A's page shows it, so A's Remove would take the version A sees
+    await b.locator('[data-piece="pg-a"]').click();
+    await b.getByRole('button', { name: 'Keep drawing', exact: true }).click();
+    await b.waitForFunction(() => window.__daily?.ink?.strokes.length === 1 && !document.querySelector('.dq-ink-stage')?.inert);
+    await stroke(b);
+    await b.getByRole('button', { name: 'Save', exact: true }).click();
+    await until(h, () => records(b), (rs) => rs.find((r) => r.id === 'pg-a')?.strokes.length === 2, 'the other tab\'s edit was not saved');
+    const showsStored = () =>
+      a.evaluate(async () => {
+        const rec = await (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).get('pg-a');
+        const { renderDrawing } = await import('/src/daily/ink.ts');
+        const c = document.querySelector('.dq-piece-art canvas');
+        return !!rec && !!c && renderDrawing(rec.strokes, rec.kind, c.width).toDataURL() === c.toDataURL();
+      });
+    await until(h, showsStored, (v) => v, 'the open page still shows the drawing from before the other tab saved its edit', 40);
+
+    // Home in A follows B releasing the ally and B's Undo
+    await a.evaluate(() => window.__daily.go({ name: 'hub' }));
+    const sub = a.locator('.dq-tile', { hasText: 'Shadows' }).locator('.dq-tile-s');
+    await sub.waitFor();
+    const before = (await sub.textContent()).trim();
+    await b.evaluate(() => window.__daily.go({ name: 'art' }));
+    await openPiece(b, 'al-c');
+    await b.getByRole('button', { name: 'Release', exact: true }).click();
+    await b.locator('.dq-toast').getByText('Ally released.', { exact: true }).waitFor();
+    await until(h, async () => (await sub.textContent()).trim(), (t) => t !== before, `Home still counts the released ally: ${before}`, 30);
+    await b.locator('.dq-toast').getByRole('button', { name: 'Undo', exact: true }).click();
+    await until(h, async () => (await sub.textContent()).trim(), (t) => t === before, 'Home did not count the ally again after Undo', 30);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
   /** A reload during the Undo finishes the removal (like the toast ending); a closed tab's removal is finished later. */
   async 'art-remove-reload'(h) {
     const { ctx, page: a, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute');
