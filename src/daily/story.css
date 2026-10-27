@@ -520,6 +520,7 @@
   background: #060e1b;
   transition: transform 0.12s linear;
   will-change: transform;
+  container: st-dock / inline-size;
 }
 .st-dock-in {
   position: relative;
@@ -568,6 +569,20 @@
 .st-cwbtn {
   flex: none;
   padding: 0 16px;
+}
+/* a narrow dock: the save line gets a row of its own above the buttons, so no message runs into Co-writer */
+@container st-dock (max-width: 519px) {
+  .st-dock-in {
+    flex-wrap: wrap;
+  }
+  .st-state {
+    order: -1;
+    flex: 1 0 100%;
+    padding: 6px 10px 2px;
+  }
+  .st-cwbtn {
+    margin-left: auto;
+  }
 }
 
 /* ---------- co-writer ---------- */
@@ -1110,6 +1125,28 @@
   flex-wrap: wrap;
   gap: 10px;
   margin-top: 12px;
+}
+/* a phone held sideways: the line and its buttons side by side and set a little closer, so even a four-row line
+   leaves the page's first line in view between the bars */
+@media (max-height: 500px) and (min-width: 560px) {
+  .st-start-box {
+    display: flex;
+    align-items: center;
+    gap: 10px 18px;
+    padding: 8px 14px 8px 16px;
+  }
+  .st-start-t {
+    flex: 1 1 auto;
+    min-width: 0;
+    line-height: 1.45;
+  }
+  .st-frame {
+    margin-top: 8px;
+  }
+  .st-start-acts {
+    flex: none;
+    margin-top: 0;
+  }
 }
 
 /* ---------- reading ---------- */

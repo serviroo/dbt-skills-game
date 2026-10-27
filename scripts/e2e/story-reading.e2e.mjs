@@ -101,7 +101,7 @@ const sizes = (page) =>
 
 const CH1 = 'The lantern hung by the door all winter.\n\nEvery night it glowed a little brighter, and nobody could say why. The fox who lived under the porch had a theory, but nobody had asked the fox.';
 const CH2 = 'In spring the door opened by itself.\n\nOutside, the path went on further than anyone remembered, past the old mill and the bridge, all the way to the sea.';
-const NAMES = ['Text size: regular', 'Text size: larger', 'Text size: largest'];
+const NAMES = ['A regular', 'A larger', 'A largest'];
 
 export const scenarios = {
   /** Another shows a new line each time, nothing is kept before Use this, and Use this writes it at the cursor */
@@ -593,7 +593,7 @@ export const scenarios = {
       await page.evaluate((r) => window.__daily.go(r), { name: 'read', id: ids.story });
       await page.locator('.st-read-text').nth(1).waitFor();
       const again = await sizes(page);
-      h.expect(again.pressed[0] === 'Text size: largest' && again.text[0] === largest, `after a reload the size went back: ${JSON.stringify(again)}`);
+      h.expect(again.pressed[0] === 'A largest' && again.text[0] === largest, `after a reload the size went back: ${JSON.stringify(again)}`);
 
       for (const vp of [{ width: 844, height: 390 }, { width: 1280, height: 800 }]) {
         await page.setViewportSize(vp);
