@@ -17,9 +17,10 @@ const SIZES = [
   ['320', { width: 320, height: 568 }],
   ['sideways', { width: 844, height: 390 }],
 ];
-// with the gift opened, which keeps every line a first visit shows (the same elements, colours and sizes) and adds the
-// gift's, so its sweep covers a first visit's too: phones upright and sideways, and the common laptop and desktop
-// screens. 1366x768 is left out: it is 1280x720's shape and layout, the column at the same share of the screen.
+// with the gift opened, which keeps every line a first visit shows (the same elements, colours and sizes) but the
+// closed card's, and adds the gift's, so its sweep covers a first visit's too: phones upright and sideways, and the
+// common laptop and desktop screens. 1366x768 is left out: it is 1280x720's shape and layout, the column at the same
+// share of the screen.
 const SCREENS = [
   ['390', { width: 390, height: 844 }],
   ['320', { width: 320, height: 568 }],
@@ -375,7 +376,8 @@ async function safeAtOnce(h, page, move, what) {
 }
 
 export const scenarios = {
-  /** each mood at its hour: the attribute, the painted sky at three sizes and the Safe Zone button */
+  /** each mood at its hour: the attribute, the painted sky at three sizes and the Safe Zone button, and the closed
+   *  card's text at three sizes */
   async 'home-sky-moods'(h) {
     const { expect, out, shot } = h;
     const seen = {};
@@ -397,6 +399,14 @@ export const scenarios = {
         expect(pic.url === `/sky/${mood}-${shape}.webp` && pic.same, `${mood} at ${name} does not draw its own ${shape} picture from this origin: ` + JSON.stringify(pic));
         expect(pic.miss <= 10, `${mood} at ${name}: the painted sky is not the picture (off by ${pic.miss}): ` + JSON.stringify(pic));
         if (name === '390') seen[mood] = { px: await skyPixels(page), safe: await safeButton(page) };
+        // the day's card is only closed on a first visit (the gift save has it turned over, its back hidden); the back
+        // is opaque, so the sky never reaches it and one mood proves it
+        if (mood === 'night') {
+          await page.evaluate(() => document.querySelector('.dq-card:not(.is-open) .dq-cb-t').scrollIntoView({ block: 'center', behavior: 'instant' }));
+          await h.sleep(100);
+          const back = (await contrast(page)).filter((r) => r.where === 'dq-cb-t');
+          expect(back.length && back.every((r) => r.score >= FLOOR), `the closed card's text at ${name} is missing or below ${FLOOR}:1: ` + JSON.stringify(back));
+        }
       }
       fs.writeFileSync(path.join(out, `home-sky-${mood}.json`), JSON.stringify({ sky, pictures, seen: seen[mood] }, null, 2));
       expect(!errors.length, errors.join('\n'));
