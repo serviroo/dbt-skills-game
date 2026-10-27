@@ -1,21 +1,23 @@
 import * as THREE from 'three';
-import { glow, NOISE_GLSL, OUT_GLSL, pointScale, rng } from '../common';
+import { NOISE_GLSL, OUT_GLSL, pointScale, rng } from '../common';
 import type { BuildScene } from '../runtime';
 
 /**
- * The breathing light: a soft orb of light floating in deep blue space, in the player's own accent colour. It swells
- * for 4 seconds and eases for 6, the same breath as Give me a moment's ring, from the timer's own clock. A few motes
- * are drawn in towards it on the in-breath and drift back out on the out-breath. The orb is the only light: a glowing
- * body, a little brighter at its edge and moving softly inside, within a wide halo. Its middle stays a calm mid-tone so
- * a countdown on top of it reads.
+ * The breathing light: a small light floating in deep blue space, in the player's own accent colour. It swells for 4
+ * seconds and eases for 6, the same breath as Give me a moment's ring, from the timer's own clock. A few motes are drawn
+ * in towards it on the in-breath and drift back out on the out-breath, lit by it. The light is the only light: a small
+ * white-hot core inside a soft halo of its colour that is gone by about half the ring, so the deep blue around it stays
+ * dark (a countdown sits below it, on the dark, never on the light).
  */
 
 const FOV = 30;
 const INHALE = 4;
 const EXHALE = 6;
-/** the orb's radius breathed out and breathed in */
+/** the light's size breathed out and breathed in (the probe's scale) */
 const SMALL = 0.5;
 const BIG = 0.7;
+/** the light's square, in world units from its middle: the halo is gone well inside it */
+const REACH = 0.62;
 const DIST = 4;
 
 const ease = (t: number) => 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, Math.max(0, t)));
@@ -25,36 +27,41 @@ const breathAt = (e: number) => {
   return c < INHALE ? ease(c / INHALE) : 1 - ease((c - INHALE) / EXHALE);
 };
 
-const ORB_VERT = /* glsl */ `
-varying vec3 vN;
-varying vec3 vWorld;
-varying vec3 vObj;
+const LIGHT_VERT = /* glsl */ `
+uniform float uSize;
+varying vec2 vP;
 void main() {
-  vObj = position;
-  vN = normalize(mat3(modelMatrix) * normal);
-  vec4 w = modelMatrix * vec4(position, 1.0);
-  vWorld = w.xyz;
-  gl_Position = projectionMatrix * viewMatrix * w;
+  // a square always facing the camera, round the light's middle
+  vP = position.xy * uSize;
+  vec4 mv = modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+  mv.xy += vP;
+  gl_Position = projectionMatrix * mv;
 }`;
-const ORB_FRAG = /* glsl */ `
+/**
+ * The light, in linear colour: a small hot core, white in the middle and tinted at its edge, inside a glow that falls off
+ * steeply near the core and softly further out, like a lamp seen through a little haze, gone by `reach`. Slow light moves
+ * in the glow, never in the core. Bright values roll off to white instead of clipping, the way a hot light looks.
+ */
+const LIGHT_FRAG = /* glsl */ `
 uniform vec3 uColor;
 uniform float uBreath;
 uniform float uTime;
-varying vec3 vN;
-varying vec3 vWorld;
-varying vec3 vObj;
+varying vec2 vP;
 ${NOISE_GLSL}
 void main() {
-  vec3 n = normalize(vN);
-  vec3 V = normalize(cameraPosition - vWorld);
-  // a ball of soft light: as bright as the depth of light you look through, so it fades to nothing at its edge
-  float depth = max(dot(n, V), 0.0);
-  float vol = pow(depth, 2.6);
-  // slow light moving inside, like light through frosted glass
-  vec3 q = normalize(vObj);
-  float wisp = noise3(q * 2.3 + vec3(0.0, uTime * 0.05, uTime * 0.03)) * 0.6 + noise3(q * 4.7 - vec3(uTime * 0.04)) * 0.4;
-  vec3 col = uColor * (0.07 + 0.04 * uBreath) * vol * (0.72 + 0.56 * wisp);
-  gl_FragColor = vec4(col, 1.0);
+  float s = uBreath;
+  float r = length(vP);
+  float rc = 0.045 + 0.025 * s;
+  float core = exp(-r * r / (rc * rc));
+  float reach = 0.36 + 0.2 * s;
+  float r1 = 0.07 + 0.04 * s;
+  float glow = (1.0 - smoothstep(reach * 0.6, reach, r)) / (1.0 + r * r / (r1 * r1));
+  float halo = exp(-r / (0.11 + 0.05 * s)) * (1.0 - smoothstep(reach * 0.45, reach, r));
+  float c = cos(uTime * 0.03), sn = sin(uTime * 0.03);
+  vec2 q = mat2(c, -sn, sn, c) * vP * 7.0;
+  float wisp = 0.82 + 0.36 * noise2(q + vec2(0.0, -uTime * 0.1)) * smoothstep(0.0, 0.12, r);
+  vec3 x = uColor * (2.2 * core + (0.55 * glow + 0.18 * halo) * wisp) * (0.75 + 0.25 * s) + vec3(1.4 * core * core * (0.8 + 0.2 * s));
+  gl_FragColor = vec4(1.0 - exp(-x), 1.0);
   ${OUT_GLSL}
 }`;
 
@@ -64,7 +71,7 @@ void main() {
   vP = position.xy;
   gl_Position = vec4(position.xy, 1.0, 1.0);
 }`;
-/** deep blue space: a little lighter and tinted by the light around the orb, a faint violet glow further out, far specks */
+/** deep blue space: a little lighter and tinted near the light, a faint violet glow further out, far specks */
 const SPACE_FRAG = /* glsl */ `
 uniform vec3 uColor;
 uniform float uBreath;
@@ -75,7 +82,7 @@ void main() {
   vec2 p = vP * vec2(uAspect, 1.0);
   float r = length(p);
   vec3 col = mix(vec3(0.0030, 0.0042, 0.0105), vec3(0.0021, 0.0024, 0.0052), smoothstep(0.0, 1.3, r));
-  col += uColor * 0.010 * (0.7 + 0.3 * uBreath) * exp(-r * 1.6);
+  col += uColor * 0.008 * (0.7 + 0.3 * uBreath) * exp(-r * 3.0);
   col += vec3(0.022, 0.006, 0.060) * 0.05 * smoothstep(0.35, 0.95, noise2(p * 1.4 + 4.0)) * smoothstep(0.4, 1.0, r);
   vec2 g = floor(p * 26.0);
   float s = step(0.985, hash2(g)) * smoothstep(0.32, 0.0, length(fract(p * 26.0) - 0.5 - 0.3 * (hash22(g) - 0.5)));
@@ -92,15 +99,16 @@ uniform float uBreath;
 uniform float uScale;
 varying float vA;
 void main() {
-  // each mote keeps its own direction from the orb and its own distance, nearer on the in-breath
+  // each mote keeps its own direction from the light and its own distance, nearer on the in-breath
   float spin = uTime * (0.025 + 0.03 * seed.x);
   float c = cos(spin), s = sin(spin);
   vec3 d = vec3(c * position.x + s * position.z, position.y, -s * position.x + c * position.z);
-  float r = mix(0.95, 1.6, seed.y) * (1.0 - 0.3 * uBreath) + 0.04 * sin(uTime * 0.3 + seed.z * 6.2831);
+  float r = mix(0.3, 1.05, seed.y) * (1.0 - 0.22 * uBreath) + 0.03 * sin(uTime * 0.3 + seed.z * 6.2831);
   vec4 mv = modelViewMatrix * vec4(d * r, 1.0);
   gl_Position = projectionMatrix * mv;
   gl_PointSize = max(1.0, uScale * (0.012 + 0.016 * seed.w) / -mv.z);
-  vA = (0.35 + 0.65 * seed.w) * (0.55 + 0.45 * uBreath) * smoothstep(1.75, 1.0, r);
+  // lit by the light: bright near it, faint further out
+  vA = (0.35 + 0.65 * seed.w) * (0.6 + 0.4 * uBreath) * (0.12 + 0.88 / (1.0 + r * r / 0.06)) * smoothstep(1.15, 0.8, r);
 }`;
 const MOTE_FRAG = /* glsl */ `
 uniform vec3 uColor;
@@ -124,13 +132,9 @@ export const build: BuildScene = (accent) => {
   space.frustumCulled = false;
   space.renderOrder = -1;
 
-  const orb = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 40), new THREE.ShaderMaterial({ vertexShader: ORB_VERT, fragmentShader: ORB_FRAG, uniforms: { uColor: color, uBreath: breath, uTime: time }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
-  orb.renderOrder = 2;
-  // the light's two layers around the ball: a soft core inside it and a wide halo far out round it
-  const coreI = { value: 0.2 };
-  const core = glow({ color: accent.clone().lerp(new THREE.Color(1, 1, 1), 0.25), size: 1, core: 0.42, halo: 0, intensity: coreI });
-  const haloI = { value: 0.3 };
-  const halo = glow({ color: accent.clone(), size: 2, core: 0.01, halo: 0.9, intensity: haloI });
+  const light = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({ vertexShader: LIGHT_VERT, fragmentShader: LIGHT_FRAG, uniforms: { uColor: color, uBreath: breath, uTime: time, uSize: { value: REACH } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+  light.frustumCulled = false;
+  light.renderOrder = 2;
 
   const rand = rng(23);
   const n = 46;
@@ -147,9 +151,10 @@ export const build: BuildScene = (accent) => {
   motes.frustumCulled = false;
   motes.renderOrder = 3;
 
-  // the light shows the player's colour as it is: its values stay low, so it needs no tone curve, which would bend the hue
-  for (const m of [orb.material, core.material, halo.material, motes.material]) m.toneMapped = false;
-  scene.add(space, halo, orb, core, motes);
+  // the light shows the player's colour as it is and rolls off to white on its own, so it takes no tone curve, which
+  // would bend the hue
+  for (const m of [light.material, motes.material]) m.toneMapped = false;
+  scene.add(space, light, motes);
   const probe = { scale: SMALL, breath: 0 };
 
   return {
@@ -160,14 +165,9 @@ export const build: BuildScene = (accent) => {
       const t = still ? 0 : Math.max(0, b.e);
       const s = still ? 0.55 : breathAt(t);
       const r = SMALL + (BIG - SMALL) * s;
-      orb.scale.setScalar(r);
-      core.material.uniforms.uSize.value = r * 1.1;
-      coreI.value = 0.07 + 0.05 * s;
-      halo.material.uniforms.uSize.value = r * 3.4;
-      haloI.value = 0.16 + 0.1 * s;
       breath.value = s;
       time.value = still ? 12 : t;
-      // the camera drifts round the orb very slowly, so the motes pass in front and behind
+      // the camera drifts round the light very slowly, so the motes pass in front and behind
       const a = 0.03 * time.value + 0.4;
       camera.position.set(Math.sin(a) * DIST, 0.35 * Math.sin(0.02 * time.value), Math.cos(a) * DIST);
       camera.lookAt(0, 0, 0);
