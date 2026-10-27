@@ -983,8 +983,7 @@ export function settingsScreen(app: App): ScreenOut {
       const sound = app.root.querySelector<HTMLInputElement>('.dq-settings input[role="switch"]');
       if (sound) sound.checked = s.settings.sound;
     }
-    const buzz = vibrate?.querySelector('input');
-    if (buzz) buzz.checked = s.settings.vibrate;
+    if (buzzIn) buzzIn.checked = s.settings.vibrate;
     app.shown = null;
     const rawArt = (raw as { art?: unknown }).art;
     let art: Awaited<ReturnType<ReturnType<typeof artStore>['importAll']>> | null = null;
@@ -1287,6 +1286,11 @@ export function settingsScreen(app: App): ScreenOut {
         if (v) app.buzz('start');
       }, 'One soft buzz as it starts, two as it ends.')
     : null;
+  // another open copy can turn it on or off: the switch shows the choice a buzz follows
+  const buzzIn = vibrate?.querySelector('input');
+  const offBuzz = st.onChange(() => {
+    if (buzzIn) buzzIn.checked = s.settings.vibrate;
+  });
   const levels = app.opts.volume ? volumeSliders(app.opts.volume) : null;
   const el = h(
     'div',
@@ -1374,6 +1378,7 @@ export function settingsScreen(app: App): ScreenOut {
     mode: 'sub',
     leave: () => {
       offSaving();
+      offBuzz();
       keeps.stop();
       gone = true;
       pick++;

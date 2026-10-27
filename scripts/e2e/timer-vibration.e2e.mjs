@@ -9,7 +9,8 @@ const SWITCH = 'Vibrate when a timer starts or ends';
 
 /**
  * navigator.vibrate records each pattern instead of buzzing (or is missing, as on iPhone Safari), and __hide puts
- * the page out of sight the way a switched tab or a locked phone does.
+ * the page out of sight the way a switched tab or a locked phone does. With `frames: false` the hidden page also gets
+ * no animation frames, as on a phone: they wait until it is back.
  */
 const device = ({ vibrates = true, clock = true } = {}) => async (ctx) => {
   if (clock) await ctx.clock.install();
@@ -18,11 +19,27 @@ const device = ({ vibrates = true, clock = true } = {}) => async (ctx) => {
     if (!vibrates) delete Navigator.prototype.vibrate;
     else Object.defineProperty(Navigator.prototype, 'vibrate', { configurable: true, writable: true, value: (p) => (window.__buzz.push(JSON.stringify(p)), true) });
     let hidden = false;
+    let still = false;
     Object.defineProperty(Document.prototype, 'visibilityState', { configurable: true, get: () => (hidden ? 'hidden' : 'visible') });
     Object.defineProperty(Document.prototype, 'hidden', { configurable: true, get: () => hidden });
-    window.__hide = (on) => {
+    const raf = window.requestAnimationFrame.bind(window);
+    const caf = window.cancelAnimationFrame.bind(window);
+    const held = new Map();
+    let n = 0;
+    window.requestAnimationFrame = (fn) => {
+      if (!still) return raf(fn);
+      held.set(--n, fn);
+      return n;
+    };
+    window.cancelAnimationFrame = (id) => (id < 0 ? held.delete(id) : caf(id));
+    window.__hide = (on, { frames = true } = {}) => {
       hidden = on;
+      still = on && !frames;
       document.dispatchEvent(new Event('visibilitychange'));
+      if (on) return;
+      const waiting = [...held.values()];
+      held.clear();
+      waiting.forEach((fn) => raf(fn));
     };
   }, vibrates);
 };
@@ -206,14 +223,85 @@ export const scenarios = {
     h.expect((await timer(page).textContent()).trim() === 'Done', 'the timer did not end');
     got = await buzzes(page);
     h.expect(got === none, `the timer buzzed as it ended out of sight, or when the page came back: ${got}`);
-    // a phone stops a hidden page's frames, so the end is only seen when the page is back: no late buzz then
+    // a phone gives a hidden page no frames, so the end is only drawn once the page is back: no late buzz then, not
+    // even when it comes back just after the end
     await wiseMind(h, page);
     h.expect((await buzzes(page)) === only(START), 'the second timer did not give one start pulse');
-    await page.clock.fastForward(40000);
+    await page.clock.runFor(5000);
+    await page.evaluate(() => window.__hide(true, { frames: false }));
+    await page.clock.runFor(15400);
+    h.expect((await timer(page).textContent()).trim() !== 'Done', 'the hidden page drew the end, so this proves nothing');
+    await page.evaluate(() => window.__hide(false));
     await page.clock.runFor(500);
-    h.expect((await timer(page).textContent()).trim() === 'Done', 'the timer did not end after the jump');
+    h.expect((await timer(page).textContent()).trim() === 'Done', 'the timer did not end once the page was back');
     got = await buzzes(page);
-    h.expect(got === none, `the timer buzzed long after it ended: ${got}`);
+    h.expect(got === none, `the timer buzzed when the page came back 0.4 s after it ended out of sight: ${got}`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /** a timer that ended out of sight is over even before the page draws it: Next then is no skip and gives no pulse */
+  async 'vibration-next-after-hidden-end'(h) {
+    const { ctx, page, errors } = await open(h);
+    await turnOn(h, page);
+    await wiseMind(h, page);
+    h.expect((await buzzes(page)) === only(START), 'the timer did not give one start pulse');
+    await page.evaluate(() => window.__hide(true, { frames: false }));
+    await page.clock.runFor(25000);
+    await page.evaluate(() => window.__hide(false));
+    // the page clock stands still, so no frame comes before the tap
+    h.expect((await timer(page).textContent()).trim() !== 'Done', 'a frame drew the end before Next, so this proves nothing');
+    await tap(page, 'Next');
+    await page.clock.runFor(1000);
+    const got = await buzzes(page);
+    h.expect(got === none, `Next on a timer that had ended out of sight buzzed as a skip: ${got}`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /** closing the skill while its timer runs skips it like Next: the end pulse, once; closing it after the end gives nothing more */
+  async 'vibration-skip-by-leaving'(h) {
+    const { ctx, page, errors } = await open(h);
+    await turnOn(h, page);
+    await wiseMind(h, page);
+    h.expect((await buzzes(page)) === only(START), 'the timer did not give one start pulse');
+    await page.clock.runFor(3000);
+    await page.getByRole('button', { name: 'Leave this skill' }).click();
+    h.expect((await page.evaluate(() => window.__daily.route.name)) === 'hub', 'Leave this skill did not go Home');
+    await page.clock.runFor(25000);
+    let got = await buzzes(page);
+    h.expect(got === only(END), `closing the skill while its timer ran did not give one end pulse: ${got}`);
+    await wiseMind(h, page);
+    h.expect((await buzzes(page)) === only(START), 'the second timer did not give one start pulse');
+    await page.clock.runFor(21000);
+    h.expect((await timer(page).textContent()).trim() === 'Done', 'the Wise Mind timer did not finish');
+    h.expect((await buzzes(page)) === only(END), 'the second timer did not give one end pulse');
+    await page.getByRole('button', { name: 'Leave this skill' }).click();
+    await page.clock.runFor(1000);
+    got = await buzzes(page);
+    h.expect(got === none, `closing the skill after its timer ended buzzed again: ${got}`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /** another open copy turning it on or off moves this copy's switch too, so the switch shows the choice a buzz follows */
+  async 'vibration-switch-follows-other-tab'(h) {
+    const { ctx, page, errors } = await open(h, { clock: false });
+    await h.openSettings(page);
+    h.expect(!(await page.getByRole('switch', { name: SWITCH }).isChecked()), 'the vibration switch starts on');
+    const other = await ctx.newPage();
+    other.on('pageerror', (e) => errors.push('pageerror (second tab): ' + e.message));
+    await other.goto(h.server.url + '/?mute');
+    await h.openSettings(other);
+    const shows = (on) =>
+      page
+        .waitForFunction(([name, on]) => [...document.querySelectorAll('.dq-settings input[role="switch"]')].find((i) => i.labels[0]?.textContent.includes(name))?.checked === on, [SWITCH, on], { timeout: 5000 })
+        .then(() => true, () => false);
+    await other.getByRole('switch', { name: SWITCH }).click();
+    h.expect(await shows(true), 'the other tab turned vibration on, and this open Settings still shows it off');
+    await other.getByRole('switch', { name: SWITCH }).click();
+    h.expect(await shows(false), 'the other tab turned vibration off, and this open Settings still shows it on');
+    await h.shot(page, 'settings-vibration-follows');
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },
