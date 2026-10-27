@@ -137,6 +137,11 @@ export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut 
     top.classList.toggle('is-hidden', !stories.length);
     findBox.classList.toggle('is-hidden', !stories.length);
     if (!stories.length) {
+      // nothing left to search (Back after removing the last story): a kept search goes, so the empty shelf shows
+      if (findIn.value) {
+        findIn.value = '';
+        void find();
+      }
       list.replaceChildren(h('div', { class: 'dq-panel st-empty' }, h('p', { class: 'st-empty-t', text: STORY.empty }), h('div', { class: 'dq-actions' }, btn('New story', () => void newStory(), { kind: 'primary', ic: 'plus' }))));
     } else {
       list.replaceChildren(

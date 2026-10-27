@@ -468,6 +468,43 @@ export const scenarios = {
     }
   },
 
+  /** removing the only story from a search result comes back to the empty shelf, not to a search with no field left */
+  async 'story-search-last-story-removed'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute');
+    try {
+      await h.reachHub(page);
+      await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const a = await ss.create('Only One');
+        await ss.saveChapter({ ...a.first, text: 'The comet came back.' }, [a.first.rev]);
+      });
+      await page.evaluate(() => window.__daily.go({ name: 'stories' }));
+      await field(page).waitFor();
+      await search(h, page, 'comet');
+      await page.locator('.st-found-row').first().click();
+      await routeIs(page, 'write');
+      await page.getByRole('textbox', { name: /^Page, / }).waitFor();
+      await page.getByRole('button', { name: 'More' }).click();
+      await page.getByRole('menuitem', { name: 'Remove story' }).click();
+      await routeIs(page, 'stories');
+      await page.waitForFunction(() => !!document.querySelector('.st-empty')?.checkVisibility(), null, { timeout: 5000 }).catch(() => null);
+      await h.sleep(300);
+      const s = await page.evaluate(() => ({
+        empty: !!document.querySelector('.st-empty')?.checkVisibility(),
+        newStory: [...document.querySelectorAll('.st-empty button')].some((b) => b.checkVisibility()),
+        finding: document.querySelector('.st-shelfpage').classList.contains('is-finding'),
+        status: document.querySelector('.st-find-n').textContent,
+        field: document.querySelector('.st-find-in').value,
+      }));
+      await h.shot(page, 'last-story-removed');
+      h.expect(s.empty && s.newStory && !s.finding && !s.status && !s.field, `removing the last story left a search with no way out: ${JSON.stringify(s)}`);
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** results fit at every size: no sideways scroll, 16 px text, held sideways and on desktop too */
   async 'story-search-fits'(h) {
     for (const vp of [{ width: 390, height: 844 }, { width: 320, height: 568 }, { width: 844, height: 390 }, { width: 1280, height: 800 }]) {
