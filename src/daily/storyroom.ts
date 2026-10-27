@@ -210,6 +210,10 @@ export function writeScreen(app: App, route: Route): ScreenOut {
   let pageId = '';
   let tab: 'page' | 'notes' = 'page';
   let cur: Open | null = null;
+  /** every tab switch and page open takes a number, and only the newest one's chapter reaches the editor, however
+   * slowly storage answers; `shown` is the number whose chapter the editor holds */
+  let picks = 0;
+  let shown = 0;
   let dirty = false;
   let saving: Promise<void> | null = null;
   let again = false;
@@ -225,6 +229,9 @@ export function writeScreen(app: App, route: Route): ScreenOut {
   let pageIn!: () => void;
   /** settles once the first page is in the editor: nothing that edits the page runs before there is one */
   const pageLoaded = new Promise<void>((done) => (pageIn = done));
+  /** resolves once the story's first page exists, which opening a story with no pages makes first */
+  let pageMade!: () => void;
+  const pageExists = new Promise<void>((done) => (pageMade = done));
 
   // ---- head: title, chapter bar ----
   const titleIn = h('input', { class: 'st-title', type: 'text', maxlength: 120, placeholder: STORY.untitled, 'aria-label': 'Story title', autocomplete: 'off', autocapitalize: 'words', spellcheck: 'true', enterkeyhint: 'done' });
@@ -551,9 +558,12 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     if ((e as KeyboardEvent).key === 'Enter') titleIn.blur();
   });
 
-  const load = async (id: string) => {
+  /** `taking` runs as the chapter reaches the editor, only if no newer tap came first */
+  const load = async (id: string, n = ++picks, taking?: () => void) => {
     const c = await ss.chapter(id);
-    if (!c || !alive) return false;
+    if (!c || !alive || n !== picks) return false;
+    shown = n;
+    taking?.();
     let text = c.text;
     let bases = [c.rev];
     let recovered = false;
@@ -611,23 +621,38 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     if (alive) syncState();
     return true;
   };
+  /** Brings `to` into the editor: true once the editor holds it, false when a newer tap took over first, also while the
+   * chapter was still settling in. `tab` changes only in load, so it always names what the editor holds and nothing reads
+   * or edits a chapter that isn't on screen. */
   const switchTab = async (to: 'page' | 'notes') => {
-    if (to === tab && cur) return syncSeg();
+    if (to === tab && cur && shown === picks) {
+      syncSeg();
+      return true;
+    }
+    const n = ++picks;
     await flushAll();
-    tab = to;
-    await load(to === 'notes' ? notesId : pageId);
+    // a Page tap while the first page is still being made waits for it, then opens it
+    if (to === 'page') await pageExists;
+    if (n !== picks) return false;
+    return (await load(to === 'notes' ? notesId : pageId, n)) && n === picks;
   };
   const openPage = async (id: string) => {
+    const n = ++picks;
     await flushAll();
-    if (id !== pageId) {
+    if (n !== picks) return;
+    // the page's cards are read aside, and the page and its cards are taken only as its chapter reaches the editor with no
+    // newer tap first, so an overtaken open leaves the selection and the cards as they were
+    const next = id !== pageId ? await ss.cards(id) : null;
+    if (n !== picks) return;
+    await load(id, n, () => {
+      if (!next) return;
       pageId = id;
       caret = null;
       sel = null;
       syncModes();
-      await loadCards();
-    }
-    tab = 'page';
-    await load(id);
+      cards = next;
+      renderCards(false);
+    });
     await refreshStory();
   };
 
@@ -1103,17 +1128,23 @@ export function writeScreen(app: App, route: Route): ScreenOut {
   };
 
   // ---------- cards ----------
+  /** the open page's cards; a read that answers after another page was opened is dropped, so cards never land on it */
   const loadCards = async () => {
-    cards = pageId ? await ss.cards(pageId) : [];
+    const id = pageId;
+    const next = id ? await ss.cards(id) : [];
+    if (id !== pageId) return;
+    cards = next;
     renderCards(false);
   };
   const persistCards = () => void ss.putCards(pageId, cards);
+  /** The page in the editor for an Insert or Replace; false when a newer tap took the editor elsewhere first */
   const toPage = async () => {
     await pageLoaded;
-    if (tab !== 'page') await switchTab('page');
+    return switchTab('page');
   };
+  /** The new page text; null when it doesn't fit, undefined when a newer tap took the editor off the page first */
   const insertText = async (t: string) => {
-    await toPage();
+    if (!(await toPage())) return undefined;
     const text = ta.value;
     const at = Math.min(caret ?? text.length, text.length);
     const piece = t.trim();
@@ -1140,14 +1171,14 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     startBtn.setAttribute('aria-expanded', 'false');
   };
   const useStart = async () => {
-    if ((await insertText(starts[startAt])) === null) return;
+    if ((await insertText(starts[startAt])) == null) return;
     closeStart();
     // the next time they ask, a line they haven't seen yet
     startAt = (startAt + 1) % starts.length;
     ta.focus();
   };
   const replaceSel = async (s: Sel | undefined, t: string) => {
-    await toPage();
+    if (!(await toPage())) return undefined;
     const text = ta.value;
     const piece = t.trim();
     // only the exact range it was asked about; if those words changed, never search for them elsewhere
@@ -1257,12 +1288,14 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     if (c.mode === 'continue')
       main = btn('Insert', async () => {
         const next = await insertText(value());
+        if (next === undefined) return;
         if (next === null) return tell(STORY.full);
         afterChange('Added to your page.', next);
       }, { kind: 'primary', cls: 'dq-btn--sm' });
     else if (c.mode === 'polish')
       main = btn('Replace', async () => {
         const done = await replaceSel(c.sel, value());
+        if (done === undefined) return;
         if (!done) return tell(STORY.full);
         const { next, moved } = done;
         if (moved) {
@@ -1390,9 +1423,12 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     notesId = s.notes;
     titleIn.value = s.title;
     pageId = r.ch && s.chapters.includes(r.ch) ? r.ch : s.chapters[0] ?? '';
+    // the first page takes its number now, so a Page or Notes tap while the chapter is made or its cards are read wins
+    const n = ++picks;
     if (!pageId) pageId = (await ss.addChapter(storyId)).id;
+    pageMade();
     await loadCards();
-    await load(pageId);
+    await load(pageId, n);
     await refreshStory();
     syncState();
     syncModes();
