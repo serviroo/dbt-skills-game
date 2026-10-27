@@ -1,7 +1,12 @@
 // The Night Watch gathers around a 3D camp on the Shadows screen: live and drawn at phone, sideways and desktop sizes
 // with everyone who has arrived (and only them); a tap or the keyboard on a watcher opens their own card, name field
 // and all, while the Safe Zone stays one tap away and takes the camp down; one still frame with reduced motion; the
-// roster as before with no WebGL; one WebGL context however often it opens; back after a lost context; an old save.
+// roster as before with no WebGL; one WebGL context however often it opens; back after a lost context; every part of
+// every watcher where the model file puts it; an old save.
+import { fileURLToPath } from 'node:url';
+import { NodeIO } from '@gltf-transform/core';
+import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
+import { getBounds } from '@gltf-transform/functions';
 import sharp from 'sharp';
 
 const PHONE = { width: 390, height: 844 };
@@ -429,6 +434,33 @@ export const scenarios = {
   },
 
   /** an old save, before flags, settings and names existed, with six visit days: the camp has Sable, Anvil and Bramble */
+  /**
+   * Every part of every watcher stands in camp where the model file puts it. The file's positions are quantized and
+   * the packer shares identical geometry between figures (the knights' eyes), so a part put back in place for one
+   * figure must not move another's.
+   */
+  async 'camp-parts-in-place'(h) {
+    const { ctx, page, errors } = await h.open(seed(h, 30), '?mute', PHONE);
+    await toCamp(h, page, 'parts in place');
+    const got = await page.evaluate(() => window.__watch?.parts ?? {});
+    const doc = await new NodeIO().registerExtensions(ALL_EXTENSIONS).read(fileURLToPath(new URL('../../public/models/watch.glb', import.meta.url)));
+    const off = [];
+    let n = 0;
+    for (const fig of doc.getRoot().listScenes()[0].listChildren()) {
+      for (const part of fig.listChildren()) {
+        n++;
+        const { min, max } = getBounds(part);
+        const want = [...min, ...max];
+        const have = got[part.getName()];
+        const r = (v) => v.map((x) => x.toFixed(3)).join(' ');
+        if (!have || have.some((v, i) => Math.abs(v - want[i]) > 0.002)) off.push(`${part.getName()}: ${have ? r(have) : 'missing'}, the file has ${r(want)}`);
+      }
+    }
+    h.expect(n > 0 && Object.keys(got).length === n && !off.length, `parts out of place (${Object.keys(got).length} loaded, ${n} in the file):\n${off.join('\n')}`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
   async 'camp-old-save'(h) {
     const now = Date.now();
     const raw = JSON.stringify({ v: 1, events: Array.from({ length: 6 }, (_, i) => ({ id: `old-v${i}`, k: 'visit', xp: 10, t: now - (i + 1) * 864e5, day: dayKey(now - (i + 1) * 864e5) })) });

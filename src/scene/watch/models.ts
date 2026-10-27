@@ -11,12 +11,26 @@ import { siteUrl } from '../../core/base';
 let loading: Promise<void> | null = null;
 let nodes: Map<string, THREE.Object3D> | null = null;
 
+/** Where each part of each watcher sits once loaded, in its figure's space, as min and max x, y, z: for the E2E checks. */
+interface WatchHook {
+  parts: Record<string, number[]>;
+}
+const hook: WatchHook = ((window as unknown as { __watch?: WatchHook }).__watch ??= { parts: {} });
+
 export function loadWatch(): Promise<void> {
   loading ??= new GLTFLoader().loadAsync(siteUrl('models/watch.glb')).then(
     (g) => {
       g.scene.updateMatrixWorld(true);
-      const done = new Set<THREE.BufferGeometry>();
-      for (const fig of g.scene.children) for (const part of fig.children) settle(part, done);
+      const made = new Map<string, THREE.BufferGeometry>();
+      const box = new THREE.Box3();
+      for (const fig of g.scene.children) {
+        for (const part of fig.children) {
+          settle(part, made);
+          part.updateMatrixWorld(true);
+          box.setFromObject(part);
+          hook.parts[part.name] = [...box.min.toArray(), ...box.max.toArray()];
+        }
+      }
       nodes = new Map(g.scene.children.map((c) => [c.name, c]));
     },
     (err: unknown) => {
@@ -28,22 +42,27 @@ export function loadWatch(): Promise<void> {
 }
 
 /**
- * The file's positions are quantized, each part scaled back into place by its node. That goes into the geometry here,
- * once, so every part sits at its figure's origin: a cape sways by its height in the figure (./kit) and a wing turns
- * about the root the camp gives it (./figures).
+ * The file's positions are quantized, each part scaled back into place by its node. That goes into a copy of the
+ * geometry here, once, so every part sits at its figure's origin: a cape sways by its height in the figure (./kit) and
+ * a wing turns about the root the camp gives it (./figures). The packer merges identical quantized geometry, so two
+ * figures can share one in different places (the knights' eyes): each place gets its own copy, made once.
  */
-function settle(part: THREE.Object3D, done: Set<THREE.BufferGeometry>) {
+function settle(part: THREE.Object3D, made: Map<string, THREE.BufferGeometry>) {
   part.traverse((o) => {
     const mesh = o as THREE.Mesh;
-    // a geometry two parts share (the packer merges identical ones) is moved once, by the same dequantizing transform
-    if (!mesh.isMesh || done.has(mesh.geometry)) return;
-    done.add(mesh.geometry);
-    const geo = mesh.geometry;
-    const p = geo.getAttribute('position');
-    const f = new Float32Array(p.count * 3);
-    for (let i = 0; i < p.count; i++) f.set([p.getX(i), p.getY(i), p.getZ(i)], i * 3);
-    geo.setAttribute('position', new THREE.BufferAttribute(f, 3));
-    geo.applyMatrix4(mesh.matrixWorld);
+    if (!mesh.isMesh) return;
+    const key = `${mesh.geometry.uuid} ${mesh.matrixWorld.elements.join(' ')}`;
+    let geo = made.get(key);
+    if (!geo) {
+      geo = mesh.geometry.clone();
+      const p = geo.getAttribute('position');
+      const f = new Float32Array(p.count * 3);
+      for (let i = 0; i < p.count; i++) f.set([p.getX(i), p.getY(i), p.getZ(i)], i * 3);
+      geo.setAttribute('position', new THREE.BufferAttribute(f, 3));
+      geo.applyMatrix4(mesh.matrixWorld);
+      made.set(key, geo);
+    }
+    mesh.geometry = geo;
   });
   part.traverse((o) => {
     o.position.set(0, 0, 0);
