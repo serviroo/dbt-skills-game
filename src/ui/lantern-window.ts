@@ -233,6 +233,8 @@ export class LanternWindow {
   private offSkip: (() => void) | null = null;
   private reduced = params.reduced;
   private resolveTap: ((v: string) => void) | null = null;
+  /** an answer that came before anyone waited for one (a button tapped while the window opens), kept for waitForInput */
+  private early: string | null = null;
   private gone = false;
   readonly spec: WindowSpec;
 
@@ -280,7 +282,7 @@ export class LanternWindow {
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
           windowSounds.tap?.();
-          this.resolveTap?.(a.value);
+          this.answer(a.value);
         });
         acts.append(btn);
       }
@@ -485,9 +487,21 @@ export class LanternWindow {
       animate(this.next, [{ opacity: W.nextPulseLow }, { opacity: 1 }], { duration: W.nextPulseMs, iterations: Infinity, direction: 'alternate', easing: css(EASE.inOutSine) });
   }
 
-  /** Resolves with an action value, or 'tap' on any tap when tapToContinue; or 'timeout'. */
+  /** Answers the wait for input. One that comes while the window still opens, before anyone waits, is kept for
+   *  waitForInput and completes the typing, so the opener moves on at once and the tap is never lost. */
+  private answer(v: string) {
+    if (this.resolveTap) return this.resolveTap(v);
+    this.early ??= v;
+    this.skipTyping();
+  }
+
+  /** Resolves with an action value (also one tapped before this call, while the window opened), or 'tap' on any tap
+   *  when tapToContinue; or 'timeout'; or 'dismissed' once the window is gone, even after such a tap. */
   waitForInput(timeoutSec = 0): Promise<string> {
+    const early = this.early;
+    this.early = null;
     if (this.gone) return Promise.resolve(DISMISSED);
+    if (early !== null) return Promise.resolve(early);
     return new Promise((resolve) => {
       let done = false;
       const finish = (v: string) => {
@@ -560,7 +574,7 @@ export class LanternWindow {
 
   /** Ends the wait for input as dismissed (Back, Escape) and leaves the window up for the usual close. */
   cancel() {
-    this.resolveTap?.(DISMISSED);
+    this.answer(DISMISSED);
   }
 
   destroy() {
