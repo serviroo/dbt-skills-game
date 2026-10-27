@@ -3,7 +3,7 @@ import type { AudioLike } from './director';
 
 export interface AudioEvent {
   t: number;
-  kind: 'play' | 'bed' | 'charge' | 'music' | 'duck' | 'hush';
+  kind: 'play' | 'stop' | 'bed' | 'charge' | 'music' | 'duck' | 'hush' | 'unhush';
   name: string;
   args: number[];
   opts?: Record<string, number>;
@@ -21,7 +21,13 @@ export function loggingAudio(inner?: AudioLike): AudioLike & { log: AudioEvent[]
     log,
     play(cue, opts) {
       rec('play', cue, [], opts);
-      return inner?.play(cue, opts);
+      const h = inner?.play(cue, opts) as { stop?(at?: number, ramp?: number): void } | undefined;
+      return {
+        stop: (at?: number, ramp = 0.03) => {
+          rec('stop', cue, [ramp]);
+          h?.stop?.(at, ramp);
+        },
+      };
     },
     bed(name) {
       const b = inner?.bed?.(name);
@@ -59,10 +65,18 @@ export function loggingAudio(inner?: AudioLike): AudioLike & { log: AudioEvent[]
         rec('music', section, [fade], opts);
         inner?.music?.to(section, fade, opts);
       },
+      stop(fade = 1) {
+        rec('music', 'stop', [fade]);
+        inner?.music?.stop?.(fade);
+      },
     },
     hush(from?: number, to?: number) {
       rec('hush', 'master', to !== undefined ? [to] : []);
       inner?.hush?.(from, to);
+    },
+    unhush() {
+      rec('unhush', 'master');
+      inner?.unhush?.();
     },
     duck(db: number, ramp: number) {
       rec('duck', 'master', [db, ramp]);

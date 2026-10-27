@@ -191,11 +191,11 @@ export class Stage {
     this.last = performance.now();
     const loop = (now: number) => {
       this.raf = requestAnimationFrame(loop);
-      let dt = (now - this.last) / 1000;
+      const frame = (now - this.last) / 1000;
       this.last = now;
-      if (dt > 0.1) dt = 0.1;
-      this.adapt(dt);
-      this.step(dt);
+      // quality follows the real frame time; the world never moves more than 0.1 s in one frame
+      this.adapt(frame);
+      this.step(Math.min(frame, 0.1));
     };
     this.raf = requestAnimationFrame(loop);
   }
@@ -206,39 +206,63 @@ export class Stage {
 
   /** 0 full quality, 1 MSAA off, 2 lower resolution floor; only ever steps down. */
   private tier = 0;
+  /** real durations of the slow frames since the last quality change */
+  private slow: number[] = [];
 
-  private adapt(dt: number) {
-    this.frameLog.push(dt);
+  private adapt(frame: number) {
+    this.frameLog.push(frame);
     if (this.frameLog.length > 20000) this.frameLog.splice(0, 10000);
+    // a lone stall (a shader compile, a hidden tab) counts for at most a quarter second, so it never decides alone
+    const dt = Math.min(frame, 0.25);
     this.frameEMA = this.frameEMA * 0.92 + dt * 0.08;
     if (params.dpr) return;
     if (this.frameEMA > 1 / 52) {
       this.badFor += dt;
       this.goodFor = 0;
+      if (this.dpr > this.minDpr || this.tier < 2) this.slow.push(frame);
     } else if (this.frameEMA < 1 / 58.5) {
       this.goodFor += dt;
       this.badFor = 0;
+      this.slow = [];
     } else {
       this.goodFor = 0;
       this.badFor = 0;
+      this.slow = [];
     }
-    if (this.badFor > 0.6 && this.dpr > this.minDpr) {
-      this.dpr = Math.max(this.minDpr, this.dpr - 0.15);
+    const s = this.badFor > 0.6 && this.slow.length ? [...this.slow].sort((a, b) => a - b) : [];
+    const typical = s[s.length >> 1];
+    if (typical <= 1 / 52) {
+      // a few long stalls lifted the average but the typical frame keeps up: a smaller size wouldn't shorten them
       this.badFor = 0;
+      this.slow = [];
+    } else if (this.badFor > 0.6 && this.dpr > this.minDpr) {
+      // pixels cost about dpr squared: go straight to the resolution the typical slow frame fits, at least one step,
+      // so a slow device settles in a few frames instead of drawing dozens at a size it can't keep up with
+      const fit = this.dpr * Math.sqrt(1 / 55 / typical);
+      this.dpr = Math.max(this.minDpr, Math.min(this.dpr - 0.15, fit));
+      this.changed();
       this.resize();
     } else if (this.badFor > 1.2 && this.dpr <= this.minDpr && this.tier < 2) {
       this.tier++;
       if (this.tier === 1) this.composer.multisampling = 0;
       else this.minDpr = Math.max(0.75, this.minDpr - 0.25);
-      this.badFor = 0;
+      this.changed();
     } else if (this.goodFor > 4 && this.dpr < this.maxDpr) {
       this.dpr = Math.min(this.maxDpr, this.dpr + 0.1);
-      this.goodFor = 0;
+      this.changed();
       this.resize();
     }
     if (this.statsEl) {
       const info = this.renderer.info.render;
       this.statsEl.textContent = `${(1 / this.frameEMA).toFixed(0)} fps  dpr ${this.dpr.toFixed(2)}  tier ${this.tier}\n${info.calls} calls  ${(info.triangles / 1000).toFixed(0)}k tris  t ${this.time.toFixed(2)}`;
     }
+  }
+
+  /** After a quality change the old frame times say nothing about the new cost: measure afresh from the budget. */
+  private changed() {
+    this.frameEMA = 1 / 55;
+    this.badFor = 0;
+    this.goodFor = 0;
+    this.slow = [];
   }
 }
