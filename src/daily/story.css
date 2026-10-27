@@ -44,6 +44,74 @@
 }
 .st-shelf-acts {
   display: flex;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+}
+
+/* bringing a story in: what the file holds, shown before anything is added */
+.st-bring-box {
+  margin-top: 14px;
+  padding: 18px 20px 20px;
+}
+.st-bring-h {
+  margin: 0 0 6px;
+  font: 500 22px/1.3 var(--font-display);
+  color: #e4f2ff;
+  overflow-wrap: anywhere;
+}
+.st-bring-t {
+  margin: 0;
+}
+.st-bring-fail {
+  margin: 0 0 12px;
+  padding: 8px 0 8px 12px;
+  border-left: 2px solid #4fb8ff;
+  font-size: 16px;
+  line-height: 1.5;
+  color: #e6f1ff;
+}
+.st-bring-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.st-bring-ch {
+  display: grid;
+  gap: 2px;
+  padding: 8px 0 8px 12px;
+  border-left: 2px solid rgba(168, 220, 255, 0.4);
+}
+.st-bring-ct {
+  font-size: 16px;
+  color: #cfe4f8;
+  overflow-wrap: anywhere;
+}
+.st-bring-cx {
+  font: italic 400 17px/1.5 var(--font-display);
+  color: var(--t-dim);
+  overflow-wrap: anywhere;
+}
+.st-bring-more {
+  margin-top: 12px;
+}
+.st-bring-same,
+.st-bring-p {
+  margin: 10px 0 0;
+  font-size: 16px;
+}
+.st-bring-acts {
+  margin-top: 16px;
+}
+.st-bring-said {
+  margin: 10px 2px 0;
+  font-size: 16px;
+  color: var(--t-dim);
+}
+.st-bring-said:empty {
+  margin: 0;
 }
 .st-shelf {
   display: flex;

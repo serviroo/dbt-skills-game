@@ -104,10 +104,17 @@ function things(body: string, steer: string): string[] {
     .slice(0, 3);
 }
 
+// Text ends are found by walking back once: a pattern like /x+$/ starts over at every point of a long run mid-text.
+const cutEnd = (s: string, chars: string) => {
+  let i = s.length;
+  while (i && chars.includes(s[i - 1])) i--;
+  return s.slice(0, i);
+};
+
 function lastLine(text: string) {
-  const t = text.replace(/\s+$/u, '');
-  const parts = t.split(/(?<=[.!?…]["”’)]*)\s+|\n+/u).filter((s) => s.trim());
-  let s = (parts[parts.length - 1] ?? '').trim().replace(/^["“”‘’'(]+|["“”‘’')]+$/gu, '').replace(/[.,;:]+$/u, '').trim();
+  const t = text.trimEnd();
+  const parts = t.split(/(?<=[.!?…])["”’)]*\s+|\n+/u).filter((s) => s.trim());
+  let s = cutEnd(cutEnd((parts[parts.length - 1] ?? '').trim().replace(/^["“”‘’'(]+/u, ''), '"“”‘’\')'), '.,;:').trim();
   const ws = s.split(/\s+/u);
   if (ws.length < 3) return '';
   if (s.length > 70 || ws.length > 12) s = `…${ws.slice(-8).join(' ')}`;
@@ -116,9 +123,9 @@ function lastLine(text: string) {
 
 type Where = 'start' | 'para' | 'end' | 'mid' | 'speech';
 function where(before: string): { at: Where; open: boolean } {
-  if (!before.trim()) return { at: 'start', open: false };
-  if (/\n\s*$/.test(before)) return { at: 'para', open: false };
-  const tail = before.replace(/\s+$/u, '');
+  const tail = before.trimEnd();
+  if (!tail) return { at: 'start', open: false };
+  if (before.slice(tail.length).includes('\n')) return { at: 'para', open: false };
   const para = tail.slice(tail.lastIndexOf('\n') + 1);
   const curly = (para.match(/“/g)?.length ?? 0) > (para.match(/”/g)?.length ?? 0);
   const straight = (para.match(/"/g)?.length ?? 0) % 2 === 1;
@@ -178,13 +185,16 @@ function tidy(selection: string, before: string) {
     if (next === s) break;
     s = next;
   }
-  s = s.replace(/([.!?]+["”’)]*\s+)(\p{Ll})/gu, (m, pre: string, ch: string, at: number, all: string) => {
+  s = s.replace(/(?<![.!?])([.!?]+["”’)]*\s+)(\p{Ll})/gu, (m, pre: string, ch: string, at: number, all: string) => {
     if (pre.startsWith('..')) return m;
-    const word = all.slice(0, at).match(/([\p{L}.]+)$/u)?.[1]?.toLowerCase() ?? '';
+    // 16 letters back is past the longest ABBR word
+    const word = all.slice(Math.max(0, at - 16), at).match(/([\p{L}.]+)$/u)?.[1]?.toLowerCase() ?? '';
     return pre.startsWith('.') && ABBR.has(word) ? m : pre + ch.toUpperCase();
   });
   s = s.replace(/(\n[ \t]*\n[ \t]*)(\p{Ll})/gu, (_, pre: string, ch: string) => pre + ch.toUpperCase());
-  const opens = !before.trim() || /\n\s*\n\s*$/.test(before) || (/[.!?]["”’)]*\s*$/u.test(before) && !/\.\.\s*$/.test(before));
+  const end = before.trimEnd();
+  // a new sentence, or a new paragraph (two line breaks in the space after the text)
+  const opens = !end || before.slice(end.length).split('\n').length > 2 || (/[.!?]["”’)]*$/u.test(end) && !end.endsWith('..'));
   if (opens) s = s.replace(/^(["“‘'(]*)(\p{Ll})/u, (_, q: string, ch: string) => q + ch.toUpperCase());
   return s;
 }

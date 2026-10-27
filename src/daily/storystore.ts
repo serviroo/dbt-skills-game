@@ -500,6 +500,28 @@ export class StoryStore {
     return { story: { ...story, chapters: [...story.chapters] }, first: { ...first } };
   }
 
+  /**
+   * A new story with its chapters and notes, written in one go (all of it or none), next to every story already here.
+   * Null when this device couldn't write it: then nothing is kept, not even in memory, so it never looks saved.
+   */
+  async createFrom(s: { title: string; chapters: { title: string; text: string }[]; notes: string }): Promise<Story | null> {
+    if ((await this.allStories()).length >= STORY_CAP.stories) throw new RangeError('This device already holds as many stories as it can.');
+    if (!s.chapters.length || s.chapters.length > STORY_CAP.chapters) throw new RangeError('A story holds 1 to 300 chapters.');
+    const now = this.stamp();
+    const sid = uid();
+    const chs: Chapter[] = s.chapters.map((c, i) => ({ id: uid(), story: sid, kind: 'page', title: c.title.trim() ? chapterTitle(c.title.trim(), 'page') : `Chapter ${i + 1}`, text: c.text.slice(0, STORY_CAP.text), updated: now, rev: uid() }));
+    const notes: Chapter = { id: uid(), story: sid, kind: 'notes', title: 'Notes', text: s.notes.slice(0, STORY_CAP.text), updated: now, rev: uid() };
+    const story: Story = { id: sid, title: storyTitle(s.title.trim()) || 'Untitled story', created: Date.now(), updated: now, rev: uid(), chapters: chs.map((c) => c.id), notes: notes.id };
+    const r = await this.tx(['stories', 'chapters'], 'readwrite', async (t) => {
+      t.objectStore('stories').put(story);
+      for (const c of [...chs, notes]) t.objectStore('chapters').put(c);
+    });
+    if (!r) return null;
+    this.lastStory.set(sid, story);
+    this.changed(true);
+    return { ...story, chapters: [...story.chapters] };
+  }
+
   /** Title and chapter order. If the story changed elsewhere since their bases, their order wins and chapters only it lists are added at the end. */
   async saveStory(s: Pick<Story, 'id' | 'title' | 'chapters'>, bases: string[]): Promise<SaveResult> {
     if (!isObj(s) || !validId(s.id)) throw new RangeError('That story id is not valid.');

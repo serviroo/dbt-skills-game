@@ -30,6 +30,26 @@ export const STORY_START = {
   ],
 };
 
+/** Bringing a downloaded (or any plain text) story back in as a new story. */
+export const STORY_IMPORT = {
+  open: 'Bring in a story',
+  ask: (title: string) => `Bring in “${title}”?`,
+  count: (n: number, notes: boolean) => `${n} ${n === 1 ? 'chapter' : 'chapters'}${notes ? ' and notes' : ''}`,
+  same: 'You already have a story with this name. Both will be kept.',
+  add: 'Add as a new story',
+  cancel: 'Not now',
+  close: 'Close',
+  more: (n: number) => `Show ${n} more ${n === 1 ? 'chapter' : 'chapters'}`,
+  added: (title: string) => `“${title}” is on your shelf now.`,
+  notSaved: 'This device couldn’t save it just now, so it isn’t on your shelf yet. Your file is still safe. You can try again.',
+  tooBig: 'That file is too big to bring in. A story file can be up to 1 MB.',
+  notText: 'That file isn’t plain text. Try a .txt or .md file, like the ones Download story makes.',
+  empty: 'That file has no words in it yet.',
+  tooMany: 'That file has more chapters than one story can hold.',
+  full: 'This device already holds as many stories as it can.',
+  privacy: 'The file is read here on this device and never sent anywhere.',
+};
+
 export const STORY_READ = {
   open: 'Read',
   size: 'Text size',

@@ -6,13 +6,14 @@ import { animate } from '../ui/anim';
 import { cowrite } from '../cowriter/local';
 import type { CowriteReq, CowriteRes, CowriteTurn } from '../cowriter/types';
 import { BESIDE, CARE_KEY, READ_SIZES, type ReadSize } from '../core/stored-names';
-import { STORY_FIND, STORY_READ, STORY_START } from '../content/story-lines';
+import { STORY_FIND, STORY_IMPORT, STORY_READ, STORY_START } from '../content/story-lines';
 import { write } from '../core/cleared';
 import type { App, Route, ScreenOut, Visit } from './app';
 import { icon } from './art';
 import { dayDiff, dayKey } from './store';
 import { match, spans, terms, type Span } from './storyfind';
 import { creditStory, STORY_CAP, storyStore, type Card, type CardMode, type Chapter, type Story } from './storystore';
+import { storyFromText, storyToText, type StoryText } from './storytext';
 import { btn, h, p, segmented, shareOrSave } from './ui';
 
 export const STORY = {
@@ -110,7 +111,121 @@ export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut 
     }
   };
   const newBtn = btn('New story', () => void newStory(), { kind: 'primary', ic: 'plus', cls: 'st-new' });
-  const top = h('div', { class: 'st-shelf-acts' }, newBtn);
+
+  // ---- bring in a story: a .txt or .md file read here as plain text, shown first, then added only as a new story ----
+  const fileIn = h('input', { type: 'file', class: 'dq-sr', tabindex: '-1', 'aria-hidden': 'true', accept: '.txt,.md,.markdown,.text,text/plain,text/markdown', onchange: () => void pick() });
+  let from: HTMLElement | null = null;
+  const bringBtn = () => {
+    const b = btn(STORY_IMPORT.open, () => ((from = b), fileIn.click()), { kind: 'quiet', ic: 'import', cls: 'st-bring' });
+    return b;
+  };
+  const bringBox = h('section', { class: 'dq-panel st-bring-box is-hidden' });
+  const bringSaid = h('p', { class: 'st-bring-said', role: 'status', 'aria-live': 'polite' });
+  let bringing: StoryText | null = null;
+  let bringDone: (() => void) | null = null;
+  // each file picked and each close or leave gets a new number; a read or save that finishes after it changes nothing
+  let bringN = 0;
+  const closeBring = (focus = true) => {
+    bringN++;
+    bringing = null;
+    bringDone?.();
+    bringDone = null;
+    bringBox.classList.add('is-hidden');
+    bringBox.replaceChildren();
+    bringBox.removeAttribute('aria-labelledby');
+    if (focus && from?.isConnected) from.focus({ preventScroll: true });
+  };
+  const showBring = (head: string, kids: (HTMLElement | null)[], acts: HTMLElement[]) => {
+    const hd = h('h2', { class: 'st-bring-h', id: 'st-bring-h', tabindex: '-1', text: head });
+    bringBox.replaceChildren(hd, ...kids.filter((k): k is HTMLElement => !!k), h('div', { class: 'dq-actions st-bring-acts' }, acts));
+    // named by its heading only once the heading is there
+    bringBox.setAttribute('aria-labelledby', hd.id);
+    bringBox.classList.remove('is-hidden');
+    // Back and Escape close it like any panel
+    bringDone ??= app.sheet(() => closeBring());
+    bringSaid.textContent = '';
+    hd.focus({ preventScroll: true });
+    bringBox.scrollIntoView({ block: 'nearest' });
+  };
+  const oops = (msg: string) => showBring(STORY_IMPORT.open, [p(msg, 'dq-text st-bring-t')], [btn(STORY_IMPORT.close, () => closeBring(), { kind: 'quiet' })]);
+  const shownLine = (title: string, text: string) => {
+    const line = text.trim().split('\n')[0] ?? '';
+    return h('li', { class: 'st-bring-ch' }, h('span', { class: 'st-bring-ct', text: title }), line ? h('span', { class: 'st-bring-cx', text: line.length > 90 ? `${line.slice(0, 90).trimEnd()}…` : line }) : null);
+  };
+  const SHOWN = 8;
+  const pick = async () => {
+    const f = fileIn.files?.[0];
+    fileIn.value = '';
+    if (!f) return;
+    const n = ++bringN;
+    if (f.size > IMPORT_MAX) return oops(STORY_IMPORT.tooBig);
+    let raw: string;
+    try {
+      raw = new TextDecoder('utf-8', { fatal: true }).decode(await f.arrayBuffer());
+    } catch {
+      if (n === bringN) oops(STORY_IMPORT.notText);
+      return;
+    }
+    if (n !== bringN) return;
+    if (raw.includes('\u0000')) return oops(STORY_IMPORT.notText);
+    const s = fitted(storyFromText(raw, f.name));
+    if (!s.chapters.some((c) => c.text.trim()) && !s.notes.trim()) return oops(STORY_IMPORT.empty);
+    if (s.chapters.length > STORY_CAP.chapters) return oops(STORY_IMPORT.tooMany);
+    const same = (await ss.list()).some((x) => x.title.trim().toLowerCase() === s.title.toLowerCase());
+    if (n === bringN) offer(s, same);
+  };
+  /** what the file holds, before anything is added; after a write this device couldn't make, it says so and Add tries again */
+  const offer = (s: StoryText, same: boolean, notSaved = false) => {
+    bringing = s;
+    // the first chapters show at once and the rest are one tap away, so every chapter can be seen before Add
+    const rows = s.chapters.map((c) => shownLine(c.title, c.text));
+    const rest = rows.slice(SHOWN);
+    const showRest = (e: Event) => {
+      rows[SHOWN - 1].after(...rest);
+      (e.currentTarget as HTMLElement).remove();
+      // focus goes on to the first chapter it showed, where the button was
+      rest[0].tabIndex = -1;
+      rest[0].focus({ preventScroll: true });
+      rest[0].scrollIntoView({ block: 'nearest' });
+    };
+    showBring(
+      STORY_IMPORT.ask(s.title),
+      [
+        notSaved ? h('p', { class: 'st-bring-fail', role: 'alert', text: STORY_IMPORT.notSaved }) : null,
+        p(STORY_IMPORT.count(s.chapters.length, !!s.notes.trim()), 'dq-text st-bring-t'),
+        h('ol', { class: 'st-bring-list' }, [...rows.slice(0, SHOWN), ...(s.notes.trim() ? [shownLine('Notes', s.notes)] : [])]),
+        rest.length ? btn(STORY_IMPORT.more(rest.length), showRest, { kind: 'quiet', cls: 'st-bring-more' }) : null,
+        same ? p(STORY_IMPORT.same, 'dq-small st-bring-same') : null,
+        p(STORY_IMPORT.privacy, 'dq-small st-bring-p'),
+      ],
+      [btn(STORY_IMPORT.add, () => void add(same), { kind: 'primary', ic: 'plus' }), btn(STORY_IMPORT.cancel, () => closeBring(), { kind: 'quiet' })],
+    );
+  };
+  const add = async (same: boolean) => {
+    const s = bringing;
+    // one tap adds it once
+    if (!s) return;
+    bringing = null;
+    const n = bringN;
+    let kept;
+    try {
+      kept = await ss.createFrom(s);
+    } catch (e) {
+      if (n === bringN) oops(e instanceof RangeError && /stories/.test(e.message) ? STORY_IMPORT.full : STORY_IMPORT.tooMany);
+      return;
+    }
+    // closed, another file picked or the shelf left while it wrote: a story it wrote is on the shelf, nothing opens again
+    if (n !== bringN) return;
+    // not written to this device: it stays off the shelf, and the file's story stays here to add again
+    if (!kept) return offer(s, same, true);
+    closeBring(false);
+    bringSaid.textContent = STORY_IMPORT.added(s.title);
+    // the newest story is first on the shelf
+    await render();
+    list.querySelector<HTMLElement>('.st-row')?.focus({ preventScroll: true });
+  };
+
+  const top = h('div', { class: 'st-shelf-acts' }, newBtn, bringBtn());
   // ---- search: titles, chapters and notes, matched here on the device and kept nowhere ----
   const findIn = h('input', { id: `st-find-${rid()}`, class: 'dq-input st-find-in', type: 'search', maxlength: 80, placeholder: STORY_FIND.label, autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', enterkeyhint: 'search' });
   const findBox = h('div', { class: 'st-find is-hidden', role: 'search' }, h('label', { for: findIn.id, class: 'dq-sr', text: STORY_FIND.label }), h('span', { class: 'st-find-ic', html: SEARCH_IC }), findIn);
@@ -121,6 +236,9 @@ export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut 
     { class: 'dq-page st-page st-shelfpage' },
     pageHead(STORY.title, STORY.sub, xp ? h('span', { class: 'dq-xp st-xp', text: `+${xp} XP` }) : null),
     top,
+    fileIn,
+    bringBox,
+    bringSaid,
     findBox,
     findN,
     list,
@@ -142,7 +260,7 @@ export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut 
         findIn.value = '';
         void find();
       }
-      list.replaceChildren(h('div', { class: 'dq-panel st-empty' }, h('p', { class: 'st-empty-t', text: STORY.empty }), h('div', { class: 'dq-actions' }, btn('New story', () => void newStory(), { kind: 'primary', ic: 'plus' }))));
+      list.replaceChildren(h('div', { class: 'dq-panel st-empty' }, h('p', { class: 'st-empty-t', text: STORY.empty }), h('div', { class: 'dq-actions' }, btn('New story', () => void newStory(), { kind: 'primary', ic: 'plus' }), bringBtn())));
     } else {
       list.replaceChildren(
         ...stories.map((s) =>
@@ -306,9 +424,46 @@ export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut 
     leave: () => {
       off();
       clearTimeout(fTimer);
+      bringN++;
     },
     keep: () => ({ q: findIn.value }),
   };
+}
+
+/** A file to bring in is read only up to this size. */
+const IMPORT_MAX = 1_000_000;
+/** At most n UTF-16 units, never half a character: an emoji at the edge stays whole on the side it fits. */
+const clip = (t: string, n: number) => t.slice(0, t.length > n && /[\uD800-\uDBFF]/.test(t[n - 1]) ? n - 1 : n);
+/** Text cut into chapter-sized pieces: between paragraphs where it can, else between words, else between characters. */
+function pieces(text: string): string[] {
+  const out: string[] = [];
+  while (text.length > STORY_CAP.text) {
+    let cut = text.lastIndexOf('\n\n', STORY_CAP.text);
+    const between = cut >= STORY_CAP.text / 2;
+    if (!between) cut = text.lastIndexOf(' ', STORY_CAP.text);
+    if (cut <= 0) cut = clip(text, STORY_CAP.text).length;
+    out.push(text.slice(0, cut).trimEnd());
+    const rest = text.slice(cut);
+    // between paragraphs the break becomes the new chapter, and the next paragraph keeps its indent
+    text = between ? rest.slice(rest.lastIndexOf('\n', rest.length - rest.trimStart().length) + 1) : rest.trimStart();
+  }
+  return [...out, text];
+}
+/**
+ * A story read from a file, shaped the way the Story Room holds one: every chapter named, none longer than a chapter
+ * can hold (a longer one goes on in a chapter after it, split between paragraphs), Notes longer than Notes hold going
+ * on in pages after the chapters, titles within their caps. Nothing in the file is left out.
+ */
+function fitted(s: StoryText): StoryText {
+  const chapters: StoryText['chapters'] = [];
+  s.chapters.forEach((c, i) => {
+    const name = c.title.trim() || `Chapter ${i + 1}`;
+    pieces(c.text).forEach((text, k) => chapters.push({ title: k ? `${clip(name, STORY_CAP.chapterTitle - 6)} (${k + 1})` : clip(name, STORY_CAP.chapterTitle), text }));
+  });
+  const [notes, ...more] = pieces(s.notes);
+  more.forEach((text, k) => chapters.push({ title: `Notes (${k + 2})`, text }));
+  if (!chapters.length) chapters.push({ title: 'Chapter 1', text: '' });
+  return { title: clip(s.title.trim(), STORY_CAP.title) || STORY.untitled, chapters, notes };
 }
 
 /** A line or two around the first place, cut at spaces, with every place inside it marked. */
@@ -973,12 +1128,9 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     if (open && !chs.some((c) => c.id === open.id)) shown.push({ title: open.title, text: ta.value });
     // then Notes, as it is now: the open editor, else what this copy holds unsaved, else what is stored
     const notes = cur && cur.kind === 'notes' ? ta.value : (ss.unsaved(notesId) ?? (await ss.chapter(notesId)))?.text ?? '';
-    if (notes.trim()) shown.push({ title: 'Notes', text: notes });
-    const title = shownTitle(titleIn.value);
-    const parts = [title, ''];
-    for (const c of shown) parts.push(c.title, '', c.text.replace(/\s+$/, ''), '');
     const slug = titleIn.value.normalize('NFKD').replace(/[^\w\s-]/g, '').trim().toLowerCase().replace(/[\s_-]+/g, '-').slice(0, 60) || 'story';
-    return { text: `${parts.join('\n').replace(/\s+$/, '')}\n`, name: `${slug}.txt` };
+    // headings mark the title, each chapter and Notes, so Bring in a story reads it back exactly
+    return { text: storyToText({ title: shownTitle(titleIn.value), chapters: shown, notes }), name: `${slug}.txt` };
   };
   let menuDone: (() => void) | null = null;
   const closeMenu = (focus = false) => {
@@ -1361,7 +1513,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     // only the exact range it was asked about; if those words changed, never search for them elsewhere
     if (s && s.text && text.slice(s.start, s.end) === s.text) {
       // the spaces or line breaks the selection started or ended with stay, so it never glues onto the next word
-      const put = `${s.text.match(/^\s*/)![0]}${piece}${s.text.match(/\s*$/)![0]}`;
+      const put = `${s.text.slice(0, s.text.length - s.text.trimStart().length)}${piece}${s.text.slice(s.text.trimEnd().length)}`;
       const at = s.start;
       const end = at + put.length;
       const next = text.slice(0, at) + put + text.slice(at + s.text.length);
@@ -1762,7 +1914,7 @@ export function readScreen(app: App, route: Route): ScreenOut {
     if (!alive) return;
     const shown = chs.flatMap((c, i) =>
       c && c.text.trim()
-        ? [{ i, sec: h('section', { class: 'st-read-ch', 'data-id': c.id }, h('h2', { class: 'st-read-ch-h', text: c.title.trim() || `Chapter ${i + 1}` }), h('div', { class: 'st-read-text', text: c.text.replace(/\s+$/, '') })) }]
+        ? [{ i, sec: h('section', { class: 'st-read-ch', 'data-id': c.id }, h('h2', { class: 'st-read-ch-h', text: c.title.trim() || `Chapter ${i + 1}` }), h('div', { class: 'st-read-text', text: c.text.trimEnd() })) }]
         : [],
     );
     if (!shown.length) return body.replaceChildren(h('p', { class: 'st-read-empty', text: STORY_READ.empty }));
