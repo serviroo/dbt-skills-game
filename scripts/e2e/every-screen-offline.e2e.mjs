@@ -217,6 +217,12 @@ async function home(h, page) {
   await settle(h, page);
 }
 
+/** taps the middle of `loc` where it is now, as a player does: a Playwright click first waits for two still frames, which a
+ *  scene drawing about one frame a second in software can take longer to give than the click waits */
+async function tapWhereItIs(page, loc) {
+  const box = await loc.boundingBox({ timeout: 2000 });
+  if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+}
 const tile = (page, title) => page.locator('nav.dq-menu .dq-tile').filter({ has: page.locator('.dq-tile-t', { hasText: new RegExp(`^${title}$`) }) });
 const heading = (page) => page.locator('.dq-view h1').first().textContent({ timeout: 10000 });
 
@@ -579,7 +585,14 @@ async function settingsAndCrystal(h, page, problems) {
   await page.waitForFunction(() => /Restored/.test(document.querySelector('.dq-settings .dq-hint[aria-live]')?.textContent ?? ''), null, { timeout: 15000 });
   h.expect(!problems.length, `restore:\n${problems.join('\n')}`);
   await h.shot(page, 'offline-crystal-restored');
-  // the intro again from Settings: its 3D scenes, the hero model and the score all load from the offline cache
+  await replayIntro(h, page, problems).catch(async (e) => {
+    await h.evidence(page, 'offline-replay-fail');
+    throw e;
+  });
+}
+
+/** The intro again from Settings: its 3D scenes, the hero model and the score all load from the offline cache. */
+async function replayIntro(h, page, problems) {
   const awakenShots = page.waitForResponse((r) => /\/awaken-shots-[^/]+\.js$/.test(r.url()), { timeout: 240000 }).catch(() => null);
   await page.getByRole('button', { name: 'Replay cutscene' }).click();
   const title = page.locator('.title-screen');
@@ -588,8 +601,14 @@ async function settingsAndCrystal(h, page, problems) {
     await h.sleep(1500);
     await title.click();
   }
-  // played on, not skipped, to the awaken beat, which loads its own script; then the rest is skipped
-  const shots = await awakenShots;
+  // played on, not skipped, to the awaken beat, which loads its own script, with each Lantern window tapped on as a
+  // player does rather than left to its idle timeout; then the rest is skipped
+  let shots;
+  awakenShots.then((r) => (shots = r));
+  while (shots === undefined) {
+    if (await page.locator('.sw-layer .sw').count()) await page.mouse.click(195, 600);
+    await h.sleep(800);
+  }
   h.expect(!!shots, 'the replayed intro never reached the awaken scene');
   h.expect(shots.ok() && shots.fromServiceWorker(), `the awaken scene's script did not come from the offline cache (HTTP ${shots.status()})`);
   h.expect(!problems.length, `the intro's awaken scene offline:\n${problems.join('\n')}`);
@@ -598,11 +617,17 @@ async function settingsAndCrystal(h, page, problems) {
   const note = page.getByRole('button', { name: 'Read the note' });
   await note.waitFor({ timeout: 60000 });
   for (let i = 0; i < 40 && (await page.locator('.rw').count()); i++) {
-    await note.click({ timeout: 2000 }).catch(() => {});
+    await tapWhereItIs(page, note).catch(() => {});
     await h.sleep(500);
   }
-  await page.getByRole('button', { name: 'Continue' }).click({ timeout: 20000 });
-  await page.getByRole('button', { name: 'Enter the Lantern' }).click({ timeout: 20000 });
+  const cont = page.getByRole('button', { name: 'Continue' });
+  await cont.waitFor({ timeout: 20000 });
+  await tapWhereItIs(page, cont);
+  // the end card breathes, so on slow frames its buttons never hold still for a click: tap Enter the Lantern where it is
+  const enter = page.getByRole('button', { name: 'Enter the Lantern' });
+  await enter.waitFor({ timeout: 20000 });
+  const box = await enter.boundingBox();
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await page.waitForFunction(() => !!window.__daily && document.querySelector('.dq')?.dataset.screen === 'hub', null, { timeout: 30000 });
   await settle(h, page);
   await listen(page);
