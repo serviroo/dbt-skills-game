@@ -7,6 +7,9 @@ const CONFIRM = 'Restore this Save Crystal';
 const stroke = [{ i: 1, w: 3, p: [20, 20, 80, 80] }];
 const drawing = (id, day, updated) => ({ id, kind: 'today', day, t: updated, updated, n: 1, strokes: stroke });
 const entry = (day, note) => ({ day, emotions: { Calm: 3 }, urges: {}, note, updatedAt: 10 });
+/** a time at local noon in the run's time zone: the preview shows local dates, and a UTC noon is already the next day
+ *  east of UTC+12 */
+const noon = (y, m, d) => new Date(y, m, d, 12).getTime();
 const today = () => {
   const d = new Date(Date.now() - 6 * 3600000);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -17,7 +20,7 @@ function here(h) {
   return {
     [h.SAVE]: JSON.stringify({
       v: 1,
-      created: Date.UTC(2025, 10, 5, 12),
+      created: noon(2025, 10, 5),
       events: [
         { id: 'here-visit', k: 'visit', xp: 10, t: 1, day },
         { id: 'here-wise', k: 'skill', skill: 'wise-mind', xp: 20, t: 2, day: '2026-01-05' },
@@ -36,8 +39,8 @@ function crystal(over = {}) {
   return {
     app: 'the-quiet-lantern',
     v: 2,
-    exported: '2026-10-20T12:00:00.000Z',
-    created: Date.UTC(2026, 2, 12, 12),
+    exported: new Date(noon(2026, 9, 20)).toISOString(),
+    created: noon(2026, 2, 12),
     events: [
       { id: 'file-visit', k: 'visit', xp: 10, t: 10, day: '2026-03-12' },
       { id: 'file-wise', k: 'skill', skill: 'wise-mind', xp: 20, t: 11, day: '2026-03-12' },
@@ -314,7 +317,7 @@ export const scenarios = {
       for (const d of want.diary) h.expect(!!again.diary[d], 'the new Save Crystal lost the diary day ' + d);
       exact(h, again.art.map((r) => r.id).sort(), want.art, 'drawings in the new Save Crystal');
       h.expect(again.stories.stories.some((s) => s.id === 'file-story') && again.stories.chapters.some((c) => c.text === 'File page words.'), 'the new Save Crystal lost the restored story');
-      h.expect(again.lists.comfort.some((x) => x.text === 'Warm tea') && again.profile.playerName === 'Robin' && again.created === Date.UTC(2025, 10, 5, 12), 'the new Save Crystal lost lists, the name made here or the earlier start');
+      h.expect(again.lists.comfort.some((x) => x.text === 'Warm tea') && again.profile.playerName === 'Robin' && again.created === noon(2025, 10, 5), 'the new Save Crystal lost lists, the name made here or the earlier start');
       h.expect(again.preferences?.room?.aquarium === true && again.preferences?.safeLight === 'dim', 'the new Save Crystal lost the restored choices');
 
       await choose(page, asFile(source));
