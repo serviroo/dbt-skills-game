@@ -453,6 +453,13 @@ export const scenarios = {
       for (const [name, size] of SCREENS) {
         await page.setViewportSize(size);
         await h.sleep(500);
+        // the sweep only means something over the mood's own picture, so it starts once that is painted at this size
+        const pic = await paintsPicture(page, mood);
+        const shape = size.width >= size.height ? 'wide' : 'tall';
+        if (pic.url !== `/sky/${mood}-${shape}.webp` || !pic.same || !(pic.miss <= 10)) {
+          bad.push(`${mood} at ${name} does not paint its own ${shape} picture: ` + JSON.stringify(pic));
+          continue;
+        }
         const rows = await sweep(h, page);
         const low = rows.filter((r) => r.score < FLOOR);
         const w = weakest(rows);
@@ -471,7 +478,7 @@ export const scenarios = {
     }
     fs.writeFileSync(path.join(out, 'home-sky-contrast.json'), JSON.stringify(table, null, 2));
     expect(!bad.length, bad.join('\n'));
-    return Object.fromEntries(Object.entries(table).map(([m, t]) => [m, Object.fromEntries(Object.entries(t).map(([n, r]) => [n, r.score]))]));
+    return Object.fromEntries(Object.entries(table).map(([m, t]) => [m, Object.fromEntries(Object.entries(t).map(([n, r]) => [n, r.weakest[0].score]))]));
   },
 
   /** 07:58 to 08:00 with Home open: day's picture comes in over dawn's over seconds, never in one frame, and dawn's
