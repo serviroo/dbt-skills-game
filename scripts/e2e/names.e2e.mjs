@@ -3,6 +3,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+/** taps the title once it is on screen: on a busy machine it comes up later than any fixed wait */
+async function tapTitle(page) {
+  const title = page.locator('.title-screen');
+  await title.waitFor({ timeout: 30000 });
+  await title.click();
+}
+
 async function saveCrystal({ open, openSettings, out, shared, expect, deepFind, YOU, SEEN }) {
   if (shared.crystal) return shared.crystal;
   const { ctx, page, errors } = await open({ [YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: Date.now() - 1000, companionAt: Date.now() - 1000 }), 'dbt.app.v1': SEEN });
@@ -21,8 +28,7 @@ export const scenarios = {
   /** first run: the prompt appears after the title, the chosen names are stored and used in the intro */
   async 'first-run'({ open, sleep, shot, youOf, expect, out, shared }) {
     const { ctx, page, errors } = await open();
-    await sleep(2500);
-    await page.mouse.click(195, 500);
+    await tapTitle(page);
     const name = page.locator('#np-name');
     await name.waitFor({ timeout: 15000 });
     expect((await name.getAttribute('placeholder')) === 'Player', 'name field placeholder is not Player');
@@ -45,10 +51,9 @@ export const scenarios = {
   },
 
   /** skipping keeps the defaults and is never asked again */
-  async 'skip-keeps-default'({ open, sleep, youOf, expect }) {
+  async 'skip-keeps-default'({ open, youOf, expect }) {
     const { ctx, page, errors } = await open();
-    await sleep(2500);
-    await page.mouse.click(195, 500);
+    await tapTitle(page);
     await page.locator('#np-name').waitFor({ timeout: 15000 });
     await page.getByRole('button', { name: 'Skip' }).click();
     await page.locator('#np-name').waitFor({ state: 'detached', timeout: 10000 });
@@ -56,9 +61,9 @@ export const scenarios = {
     expect(you && you.name === '' && you.companion === '' && you.nameAt === 0 && you.companionAt === 0, 'skip did not record an empty choice: ' + JSON.stringify(you));
     await page.getByText('Wanderer: Player').first().waitFor({ timeout: 60000 });
     await page.reload();
-    await sleep(2500);
-    await page.mouse.click(195, 500);
-    await sleep(2500);
+    await tapTitle(page);
+    // the prompt would open before the scene: whichever comes first says whether it came back
+    await page.locator('#np-name').or(page.getByText('Wanderer: Player')).first().waitFor({ timeout: 60000 });
     expect(!(await page.locator('#np-name').count()), 'the prompt came back after a skip');
     expect(!errors.length, errors.join('\n'));
     await ctx.close();
@@ -186,8 +191,7 @@ export const scenarios = {
     b.on('pageerror', (e) => errors.push('pageerror B: ' + e.message));
     await b.goto(server.url + '/?mute');
     for (const p of [a, b]) {
-      await sleep(2500);
-      await p.mouse.click(195, 500);
+      await tapTitle(p);
       await p.locator('#np-name').waitFor({ timeout: 15000 });
     }
     await a.locator('#np-name').fill('Robin');
@@ -225,8 +229,7 @@ export const scenarios = {
   /** a phone on its side: the prompt's buttons are on screen and work */
   async 'landscape-prompt'({ open, sleep, shot, youOf, expect }) {
     const { ctx, page, errors } = await open({}, '?mute', { width: 568, height: 320 });
-    await sleep(2500);
-    await page.mouse.click(284, 160);
+    await tapTitle(page);
     await page.locator('#np-name').waitFor({ timeout: 15000 });
     await sleep(1200);
     await shot(page, '08-landscape-prompt');
