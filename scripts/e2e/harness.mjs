@@ -153,10 +153,15 @@ function pageState() {
   };
 }
 
+// --gpu draws through Vulkan, except in WSL (it has /dev/dxg): there the GPU is reached through D3D12 and has no Vulkan
+// driver, so Chromium draws with ANGLE's OpenGL backend on Mesa's OpenGL-on-D3D12 driver.
+const wsl = fs.existsSync('/dev/dxg');
+
 function launch(flags) {
   if (flags.ws) return chromium.connect(flags.ws, { headers: { 'x-playwright-launch-options': JSON.stringify({ headless: flags.headless === 'true', args: ['--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] }) } });
-  const gl = flags.gpu ? ['--use-angle=vulkan', '--ignore-gpu-blocklist'] : ['--use-gl=angle', '--use-angle=swiftshader'];
-  return chromium.launch({ headless: flags.headed !== 'true', handleSIGINT: false, handleSIGTERM: false, args: [...gl, '--autoplay-policy=no-user-gesture-required'] });
+  const gl = flags.gpu ? [wsl ? '--use-angle=gl-egl' : '--use-angle=vulkan', '--ignore-gpu-blocklist'] : ['--use-gl=angle', '--use-angle=swiftshader'];
+  const env = flags.gpu && wsl ? { env: { ...process.env, GALLIUM_DRIVER: 'd3d12' } } : {};
+  return chromium.launch({ headless: flags.headed !== 'true', handleSIGINT: false, handleSIGTERM: false, args: [...gl, '--autoplay-policy=no-user-gesture-required'], ...env });
 }
 
 export async function startHarness(flags = {}) {
@@ -210,6 +215,11 @@ export async function startHarness(flags = {}) {
     const p = await (await browser.newContext()).newPage();
     renderer = await p.evaluate(() => { const g = document.createElement('canvas').getContext('webgl2'); const x = g?.getExtension('WEBGL_debug_renderer_info'); return g ? String(g.getParameter(x ? x.UNMASKED_RENDERER_WEBGL : g.RENDERER)) : 'no webgl'; });
     await p.context().close();
+    // --gpu never draws in software; --gpu=<name> also names the GPU it must draw on (CI's runners: --gpu=NVIDIA).
+    const want = flags.gpu === 'true' ? 'the GPU' : flags.gpu;
+    if (flags.gpu && !flags.ws && (/SwiftShader|llvmpipe|softpipe|lavapipe|no webgl/i.test(renderer) || (flags.gpu !== 'true' && !renderer.includes(flags.gpu)))) {
+      throw new Error(`--gpu: Chromium draws with ${renderer}, not ${want}`);
+    }
   } catch (e) {
     await browser.close().catch(() => {});
     await server?.stop();

@@ -119,8 +119,13 @@ To fix a screen, give each control a short, accurate name that says what it does
 decorative. Never hide a control or a picture a player needs just to pass the check.
 
 Run one file with `node scripts/e2e.mjs --file=<name>`, or one scenario with `--scenario=<scenario name>`. The browser
-renders with SwiftShader by default so local runs match CI. Add `--gpu` to render on this machine's GPU instead, or
-`--headed` to watch it.
+renders with SwiftShader by default so local runs match CI on GitHub's runners. Add `--gpu` to render on this machine's
+GPU instead (through Vulkan, or in WSL through OpenGL on D3D12), or `--headed` to watch it. With `--gpu` the run stops
+before any scenario if Chromium would draw in software; `--gpu=<name>` also stops unless the GPU's name contains `<name>`.
+
+CI runs the E2E parts of a pull request from this repository on the 9950X3D's runners, on its NVIDIA GPU
+(`--gpu=NVIDIA`); pushes to `main` and pull requests from forks run them on GitHub's runners, so code from outside
+never runs on that PC. A fork's workflows also wait for a maintainer's approval before they run at all.
 
 `node scripts/e2e-runner-check.mjs` checks file selection, duplicate names, failure reports and cleanup through the
 real command. It creates temporary scenario files and removes them when it finishes.

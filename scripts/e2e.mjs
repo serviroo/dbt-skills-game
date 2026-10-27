@@ -3,7 +3,8 @@
 // node scripts/e2e.mjs [--file=<name>] [--scenario=<name>] [--shard=<i>/<n>] [--headed] [--gpu] [--ws=<playwright run-server endpoint> --host=<this machine's address>]
 // --shard=2/4 runs the second of four parts; each file goes whole to one part, spread by its CI seconds in
 // scripts/e2e/timings.json (15 s a scenario for a file not listed there), so CI can run the parts in parallel.
-// --file=names runs scripts/e2e/names.e2e.mjs only. --gpu renders on this machine's GPU (Vulkan) instead of SwiftShader.
+// --file=names runs scripts/e2e/names.e2e.mjs only. --gpu renders on this machine's GPU (Vulkan, or OpenGL on D3D12 in
+// WSL) instead of SwiftShader, and stops if Chromium would draw in software; --gpu=NVIDIA also stops unless the GPU is NVIDIA's.
 // With --ws the browser runs on another machine (one with a real GPU) and loads the dev server bound to --host.
 // Writes screenshots and report.json to artifacts/e2e/<time>/.
 import fs from 'node:fs';
