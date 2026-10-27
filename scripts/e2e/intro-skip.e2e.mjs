@@ -134,7 +134,11 @@ export const scenarios = {
       await title.click();
       await page.locator('.chest-hold').waitFor({ timeout: 60000 });
       await page.keyboard.down('Space');
-      // the charge runs on the scene's clock, so on slow CI frames it takes longer than its 1.5 s
+      // the charge runs on the scene's clock, which a slow renderer advances a tenth of a second a frame at most: step it
+      // past the 1.5 s charge here, as the ?capture checks step it, so reaching full doesn't depend on the frame rate
+      await page.evaluate(() => {
+        for (let i = 0; i < 4; i++) window.__stage.step(0.5);
+      });
       await page.locator('.chest-hold.is-full').waitFor({ state: 'attached', timeout: 30000 });
       await page.locator('.ui-skip').click();
       await page.locator('.rw').waitFor({ timeout: 15000 });
