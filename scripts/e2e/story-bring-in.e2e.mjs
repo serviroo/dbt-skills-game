@@ -180,6 +180,14 @@ export const scenarios = {
       h.expect(r.p.count === '2 chapters', `long.txt preview says ${r.p.count}`);
       h.expect(r.story.chapters.map((c) => c.title).join('|') === 'Chapter 1|Chapter 1 (2)' && r.story.chapters.every((c) => c.text.length <= 400000), `long.txt split as ${r.story.chapters.map((c) => `${c.title} ${c.text.length}`)}`);
       h.expect(r.story.chapters.map((c) => c.text).join('\n\n') === long, 'long.txt lost text where it was split');
+      // a cut at a cap never splits a character in two: an emoji at the edge stays whole
+      const wide = 'a'.repeat(399999);
+      r = await added('wide.md', `# ${'c'.repeat(119)}😀\n\n## ${'b'.repeat(79)}😀\n\n${wide}😀end\n`);
+      h.expect(r.story.title === 'c'.repeat(119) && JSON.stringify(r.story.chapters) === JSON.stringify([{ title: 'b'.repeat(79), text: wide }, { title: `${'b'.repeat(74)} (2)`, text: '😀end' }]), `wide.md came in as ${JSON.stringify([r.story.title.slice(-2), r.story.chapters.map((c) => [c.title.slice(-4), c.text.slice(-6)])])}`);
+      // Notes longer than Notes hold go on in a page after the chapters, nothing lost
+      const many = 'n'.repeat(400000);
+      r = await added('big-notes.md', `# Big Notes\n\n## One\n\nA page.\n\n## Notes for this story\n\n${many}\n\nLAST WORDS\n`);
+      h.expect(r.story.notes === many && JSON.stringify(r.story.chapters) === JSON.stringify([{ title: 'One', text: 'A page.' }, { title: 'Notes (2)', text: 'LAST WORDS' }]), `big-notes.md came in as Notes of ${r.story.notes.length} and ${JSON.stringify(r.story.chapters.map((c) => [c.title, c.text.slice(0, 20)]))}`);
       h.expect(!(await page.evaluate(() => window.__ran)) && !errors.length, errors.join('\n'));
     } finally {
       await ctx.close();

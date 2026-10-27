@@ -285,32 +285,38 @@ export function storiesScreen(app: App): ScreenOut {
 
 /** A file to bring in is read only up to this size. */
 const IMPORT_MAX = 1_000_000;
+/** At most n UTF-16 units, never half a character: an emoji at the edge stays whole on the side it fits. */
+const clip = (t: string, n: number) => t.slice(0, t.length > n && /[\uD800-\uDBFF]/.test(t[n - 1]) ? n - 1 : n);
+/** Text cut into chapter-sized pieces: between paragraphs where it can, else between words, else between characters. */
+function pieces(text: string): string[] {
+  const out: string[] = [];
+  while (text.length > STORY_CAP.text) {
+    let cut = text.lastIndexOf('\n\n', STORY_CAP.text);
+    const between = cut >= STORY_CAP.text / 2;
+    if (!between) cut = text.lastIndexOf(' ', STORY_CAP.text);
+    if (cut <= 0) cut = clip(text, STORY_CAP.text).length;
+    out.push(text.slice(0, cut).trimEnd());
+    const rest = text.slice(cut);
+    // between paragraphs the break becomes the new chapter, and the next paragraph keeps its indent
+    text = between ? rest.slice(rest.lastIndexOf('\n', rest.length - rest.trimStart().length) + 1) : rest.trimStart();
+  }
+  return [...out, text];
+}
 /**
  * A story read from a file, shaped the way the Story Room holds one: every chapter named, none longer than a chapter
- * can hold (a longer one goes on in a chapter after it, split between paragraphs), titles within their caps.
+ * can hold (a longer one goes on in a chapter after it, split between paragraphs), Notes longer than Notes hold going
+ * on in pages after the chapters, titles within their caps. Nothing in the file is left out.
  */
 function fitted(s: StoryText): StoryText {
   const chapters: StoryText['chapters'] = [];
   s.chapters.forEach((c, i) => {
     const name = c.title.trim() || `Chapter ${i + 1}`;
-    let text = c.text;
-    let part = 1;
-    const named = () => (part === 1 ? name : `${name.slice(0, STORY_CAP.chapterTitle - 6)} (${part})`).slice(0, STORY_CAP.chapterTitle);
-    while (text.length > STORY_CAP.text) {
-      let cut = text.lastIndexOf('\n\n', STORY_CAP.text);
-      const between = cut >= STORY_CAP.text / 2;
-      if (!between) cut = text.lastIndexOf(' ', STORY_CAP.text);
-      if (cut <= 0) cut = STORY_CAP.text;
-      chapters.push({ title: named(), text: text.slice(0, cut).trimEnd() });
-      const rest = text.slice(cut);
-      // between paragraphs the break becomes the new chapter, and the next paragraph keeps its indent
-      text = between ? rest.slice(rest.lastIndexOf('\n', rest.length - rest.trimStart().length) + 1) : rest.trimStart();
-      part++;
-    }
-    chapters.push({ title: named(), text });
+    pieces(c.text).forEach((text, k) => chapters.push({ title: k ? `${clip(name, STORY_CAP.chapterTitle - 6)} (${k + 1})` : clip(name, STORY_CAP.chapterTitle), text }));
   });
+  const [notes, ...more] = pieces(s.notes);
+  more.forEach((text, k) => chapters.push({ title: `Notes (${k + 2})`, text }));
   if (!chapters.length) chapters.push({ title: 'Chapter 1', text: '' });
-  return { title: s.title.trim().slice(0, STORY_CAP.title) || STORY.untitled, chapters, notes: s.notes.slice(0, STORY_CAP.text) };
+  return { title: clip(s.title.trim(), STORY_CAP.title) || STORY.untitled, chapters, notes };
 }
 
 // ---------------- writing view ----------------
