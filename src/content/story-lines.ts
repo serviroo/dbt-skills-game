@@ -47,5 +47,5 @@ export const STORY_FIND = {
   found: (n: number) => `Found in ${n} ${n === 1 ? 'story' : 'stories'}`,
   notes: 'Notes',
   here: 'What you searched for is marked on the page.',
-  more:(n: number) => `and ${n} more ${n === 1 ? 'place' : 'places'} in this story`,
+  more: (n: number) => `Show ${n} more ${n === 1 ? 'place' : 'places'} in this story`,
 };

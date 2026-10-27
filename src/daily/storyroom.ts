@@ -209,12 +209,14 @@ export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut 
   const PER_STORY = 6;
   let fseq = 0;
   let fTimer = 0;
-  // the route keeps only the place, since history keeps every route; the words go across in memory, to this opening only
-  const openFound = (story: Story, ch?: Chapter, at?: number) =>
-    ch && at !== undefined ? app.go({ name: 'write', id: story.id, ch: ch.id, find: { at } }, { hand: findIn.value }) : app.go({ name: 'write', id: story.id });
+  // the route keeps only the place, since history keeps every route; the words go across in memory, to this opening only.
+  // They are the words that found the result, so a tap before the next search runs still opens what it showed
+  const openFound = (story: Story, ch?: Chapter, at?: number, q?: string) =>
+    ch && at !== undefined ? app.go({ name: 'write', id: story.id, ch: ch.id, find: { at } }, { hand: q }) : app.go({ name: 'write', id: story.id });
   const find = async () => {
     const n = ++fseq;
-    const words = terms(findIn.value);
+    const q = findIn.value;
+    const words = terms(q);
     el.classList.toggle('is-finding', words.length > 0);
     if (!words.length) {
       findN.textContent = '';
@@ -231,6 +233,24 @@ export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut 
         return at ? [{ ch, where, at }] : [];
       });
       if (!inTitle && !places.length) return [];
+      const row = (x: (typeof places)[number]) =>
+        h('li', {}, h('button', { type: 'button', class: 'st-found-row', onclick: () => openFound(story, x.ch, x.at[0][0], q) }, h('span', { class: 'st-found-where', text: x.where }), h('span', { class: 'st-found-snip' }, snip(x.ch.text, x.at))));
+      const rows = places.length ? h('ul', { class: 'st-found-list' }, places.slice(0, PER_STORY).map(row)) : null;
+      // the rest of this story's places come on a tap, so every one of them can be opened
+      const more =
+        rows && places.length > PER_STORY
+          ? h('button', {
+              type: 'button',
+              class: 'st-found-more',
+              text: STORY_FIND.more(places.length - PER_STORY),
+              onclick: () => {
+                const rest = places.slice(PER_STORY).map(row);
+                rows.append(...rest);
+                more?.remove();
+                rest[0].querySelector('button')?.focus();
+              },
+            })
+          : null;
       return [
         h(
           'li',
@@ -241,16 +261,8 @@ export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut 
             h('span', { class: `st-row-t ${story.title.trim() ? '' : 'is-untitled'}` }, inTitle ? marked(title, inTitle) : title),
             h('span', { class: 'st-row-m st-found-m', text: storyMeta(app, story) }),
           ),
-          places.length
-            ? h(
-                'ul',
-                { class: 'st-found-list' },
-                places.slice(0, PER_STORY).map((x) =>
-                  h('li', {}, h('button', { type: 'button', class: 'st-found-row', onclick: () => openFound(story, x.ch, x.at[0][0]) }, h('span', { class: 'st-found-where', text: x.where }), h('span', { class: 'st-found-snip' }, snip(x.ch.text, x.at)))),
-                ),
-              )
-            : null,
-          places.length > PER_STORY ? p(STORY_FIND.more(places.length - PER_STORY), 'st-found-more') : null,
+          rows,
+          more,
         ),
       ];
     });
@@ -406,6 +418,8 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const hl = h('div', { class: 'st-hl', 'aria-hidden': 'true' });
   const frame = h('div', { class: 'dq-panel st-frame' }, h('span', { class: 'dq-hairbar', 'aria-hidden': 'true' }), hl, ta);
   const unmark = () => hl.firstChild && hl.replaceChildren();
+  // once they type, the page is theirs: a search still opening it marks nothing and leaves the cursor where they are
+  let typed = false;
 
   // ---- dock ----
   const undoB = h('button', { type: 'button', class: 'dq-icbtn st-dock-b', 'aria-label': 'Undo', html: icon('undo'), disabled: true, onclick: () => undo() });
@@ -1058,7 +1072,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   });
 
   // ---------- typing ----------
-  on(ta, 'input', unmark);
+  on(ta, 'input', () => ((typed = true), unmark()));
   on(ta, 'input', (e) => {
     if (!cur) return;
     const ie = e as InputEvent;
@@ -1592,8 +1606,8 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     syncState();
     syncModes();
     kb();
-    // only on the chapter the result opened: a Page or Notes tap while it opened wins, and gets no marks
-    if (alive && found && landed && n === picks) markFound(found);
+    // only on the chapter the result opened, as it opened: a Page or Notes tap, or typing, while it opened wins
+    if (alive && found && landed && n === picks && !typed) markFound(found);
   };
   /** Marks every place the search words are on this page and brings the one they picked into view. */
   const markFound = (f: { q: string; at: number }) => {
