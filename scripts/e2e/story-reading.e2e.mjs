@@ -29,6 +29,47 @@ async function storedIs(h, page, text, label) {
   for (const end = Date.now() + 8000; Date.now() < end; await h.sleep(200)) if ((await stored(page)) === text) return;
   throw new Error(`${label}: the page stored ${JSON.stringify(await stored(page))}, not ${JSON.stringify(text)}`);
 }
+/** From here the story store's `kinds` of reads and saves wait until the test lets them through, as on a slow phone where
+ *  storage answers after the next tap: `release()` lets the oldest through, `release(what)` that one, `drain()` all. */
+async function holdStorage(page, kinds) {
+  await page.evaluate(async (ks) => {
+    const { storyStore } = await import('/src/daily/storystore.ts');
+    const ss = storyStore(window.__daily.store.key);
+    const held = [];
+    for (const k of ks) {
+      const real = ss[k];
+      ss[k] = function (...a) {
+        let go, finish;
+        const done = new Promise((r) => (finish = r));
+        held.push({ what: `${k} ${a[0]?.id ?? a[0]}`, go: () => go(), done });
+        return new Promise((r) => (go = r)).then(() => real.apply(this, a)).finally(finish);
+      };
+    }
+    window.__held = () => held.map((x) => x.what);
+    window.__releaseOne = async (what) => {
+      const i = what ? held.findIndex((x) => x.what === what) : 0;
+      const x = i < 0 ? undefined : held.splice(i, 1)[0];
+      if (!x) return false;
+      x.go();
+      await x.done;
+      return true;
+    };
+  }, kinds);
+  return {
+    waitHeld: (what, count = 1) => page.waitForFunction(([w, c]) => window.__held().filter((x) => x === w).length === c, [what, count], { timeout: 5000 }),
+    release: (what) => page.evaluate((w) => window.__releaseOne(w), what),
+    drain: async () => {
+      while (await page.evaluate(() => window.__releaseOne()));
+    },
+  };
+}
+/** the Page or Notes control, the editor's label and its text */
+const shownIn = (page) =>
+  page.evaluate(() => ({
+    seg: document.querySelector('.st-seg [aria-checked="true"]')?.textContent,
+    box: document.querySelector('.st-write .st-ta')?.getAttribute('aria-label'),
+    text: document.querySelector('.st-write .st-ta')?.value,
+  }));
 /** every value in localStorage, so a starting point kept anywhere before Use this shows up */
 const everything = (page) => page.evaluate(() => Object.keys(localStorage).map((k) => localStorage.getItem(k) ?? '').join('\n'));
 async function safeOneTap(h, page, label) {
@@ -225,40 +266,9 @@ export const scenarios = {
       await page.evaluate((r) => window.__daily.go(r), { name: 'write', id });
       const pageBox = page.getByRole('textbox', { name: /^Page,/ });
       await pageBox.waitFor();
-      // from here every chapter read and save waits until the test lets it through, one at a time in the order asked,
-      // as on a slow phone where storage answers after the next tap
-      await page.evaluate(async () => {
-        const { storyStore } = await import('/src/daily/storystore.ts');
-        const ss = storyStore(window.__daily.store.key);
-        const held = [];
-        for (const k of ['chapter', 'saveChapter']) {
-          const real = ss[k];
-          ss[k] = function (...a) {
-            let go, finish;
-            const done = new Promise((r) => (finish = r));
-            held.push({ what: `${k} ${a[0]?.id ?? a[0]}`, go: () => go(), done });
-            return new Promise((r) => (go = r)).then(() => real.apply(this, a)).finally(finish);
-          };
-        }
-        window.__held = () => held.map((x) => x.what);
-        window.__releaseOne = async () => {
-          const x = held.shift();
-          if (!x) return false;
-          x.go();
-          await x.done;
-          return true;
-        };
-      });
-      const waitHeld = (what, count = 1) => page.waitForFunction(([w, c]) => window.__held().filter((x) => x === w).length === c, [what, count], { timeout: 5000 });
-      const drain = async () => {
-        while (await page.evaluate(() => window.__releaseOne()));
-      };
-      const shown = () =>
-        page.evaluate(() => ({
-          seg: document.querySelector('.st-seg [aria-checked="true"]')?.textContent,
-          box: document.querySelector('.st-write .st-ta')?.getAttribute('aria-label'),
-          text: document.querySelector('.st-write .st-ta')?.value,
-        }));
+      // from here every chapter read and save waits until the test lets it through, one at a time in the order asked
+      const { waitHeld, drain } = await holdStorage(page, ['chapter', 'saveChapter']);
+      const shown = () => shownIn(page);
       const notesTab = page.getByRole('radio', { name: 'Show: Notes' });
       const pageTab = page.getByRole('radio', { name: 'Show: Page' });
       const WORDS = 'The fox kept watch.';
@@ -293,6 +303,89 @@ export const scenarios = {
       await drain();
       s = await shown();
       h.expect(s.seg === 'Notes' && s.box === 'Notes for this story', `Notes tapped twice while it loaded showed ${JSON.stringify(s)}`);
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  /** a tap a newer tap overtook changes nothing: a page opened from the chapter list and an Insert waiting for the page
+   *  give way to a later Notes tap, no card moves to another page and nothing lands in the notes (wide screen, where the
+   *  Co-writer sits beside the page) */
+  async 'story-overtaken-taps-change-nothing'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute', { width: 1280, height: 800 });
+    try {
+      await h.reachHub(page);
+      const { id, notes, first, second } = await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const { story, first } = await ss.create('Two Doors');
+        const second = await ss.addChapter(story.id, 'Second Door');
+        await ss.putCards(first.id, [
+          { id: 'first-card', mode: 'continue', text: 'The kettle began to hum.', t: Date.now() },
+          { id: 'lamp-card', mode: 'continue', text: 'The lamp went out.', t: Date.now() },
+        ]);
+        await ss.putCards(second.id, [{ id: 'second-card', mode: 'continue', text: 'The second door stuck.', t: Date.now() }]);
+        return { id: story.id, notes: story.notes, first: first.id, second: second.id };
+      });
+      await page.evaluate((r) => window.__daily.go(r), { name: 'write', id });
+      await page.getByRole('textbox', { name: /^Page,/ }).waitFor();
+      // the chapter list is open before storage slows down; its rows are what the player taps
+      await page.locator('.st-chbtn').click();
+      const secondRow = page.locator('.st-chrow-b', { hasText: 'Second Door' });
+      await secondRow.waitFor();
+      const { waitHeld, release, drain } = await holdStorage(page, ['chapter', 'saveChapter', 'cards']);
+      const notesTab = page.getByRole('radio', { name: 'Show: Notes' });
+      const card = (text) => page.locator('.st-card', { hasText: text });
+      // lets every held read and save through until `ok`, including ones the app asks for only after an earlier one answers
+      const settle = async (ok) => {
+        for (const end = Date.now() + 5000; Date.now() < end; await h.sleep(50)) {
+          await drain();
+          if (await ok()) return;
+        }
+      };
+      const boxIs = (re) => async () => re.test((await shownIn(page)).box ?? '');
+      const notesOnDisk = () =>
+        page.evaluate(async (n) => {
+          const { storyStore } = await import('/src/daily/storystore.ts');
+          return (await storyStore(window.__daily.store.key).onDisk(n))?.text ?? '';
+        }, notes);
+
+      // Second Door opened from the chapter list, then Notes before its cards are read, and the Notes read answers first
+      await secondRow.click();
+      await waitHeld(`cards ${second}`);
+      await notesTab.click();
+      await waitHeld(`chapter ${notes}`);
+      await release(`chapter ${notes}`);
+      await drain();
+      await h.sleep(200);
+      await drain();
+      let s = await shownIn(page);
+      h.expect(s.seg === 'Notes' && s.box === 'Notes for this story', `Second Door then Notes showed ${JSON.stringify(s)}`);
+      h.expect((await card('The second door stuck.').count()) === 0, 'the overtaken page open put its cards beside another page');
+
+      // an Insert from Notes brings the page in first and lands there, never in the notes on screen
+      await card('The kettle began to hum.').getByRole('button', { name: 'Insert', exact: true }).click();
+      await settle(boxIs(/^Page,/));
+      s = await shownIn(page);
+      h.expect(s.seg === 'Page' && s.text === 'The kettle began to hum.', `the Insert from Notes left ${JSON.stringify(s)}`);
+      h.expect((await notesOnDisk()) === '', `the Insert from Notes wrote into the notes: ${JSON.stringify(await notesOnDisk())}`);
+
+      // an Insert waiting for the page gives way to a Notes tap after it, and nothing lands in the notes
+      await notesTab.click();
+      await settle(boxIs(/^Notes for this story$/));
+      await card('The lamp went out.').getByRole('button', { name: 'Insert', exact: true }).click();
+      await waitHeld(`chapter ${first}`);
+      await notesTab.click();
+      await waitHeld(`chapter ${notes}`);
+      // the Notes read answers first, then the page read the Insert waited for
+      await release(`chapter ${notes}`);
+      await drain();
+      await h.sleep(300);
+      await drain();
+      s = await shownIn(page);
+      h.expect(s.seg === 'Notes' && s.box === 'Notes for this story' && s.text === '', `a Notes tap after an Insert still let the card in: ${JSON.stringify(s)}`);
+      h.expect((await notesOnDisk()) === '', `the overtaken Insert wrote into the notes: ${JSON.stringify(await notesOnDisk())}`);
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();

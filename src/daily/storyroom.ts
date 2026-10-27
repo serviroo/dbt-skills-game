@@ -616,26 +616,33 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     if (alive) syncState();
     return true;
   };
+  /** Brings `to` into the editor: true once the editor holds it, false when a newer tap took over first. `tab` changes
+   * only in load, so it always names what the editor holds and nothing reads or edits a chapter that isn't on screen. */
   const switchTab = async (to: 'page' | 'notes') => {
-    if (to === tab && cur && shown === picks) return syncSeg();
+    if (to === tab && cur && shown === picks) {
+      syncSeg();
+      return true;
+    }
     const n = ++picks;
     await flushAll();
-    if (n !== picks) return;
-    tab = to;
-    await load(to === 'notes' ? notesId : pageId, n);
+    if (n !== picks) return false;
+    return load(to === 'notes' ? notesId : pageId, n);
   };
   const openPage = async (id: string) => {
     const n = ++picks;
     await flushAll();
     if (n !== picks) return;
     if (id !== pageId) {
+      // the page's cards are read aside and taken only if no newer tap came first, so they never land on another page
+      const next = await ss.cards(id);
+      if (n !== picks) return;
       pageId = id;
       caret = null;
       sel = null;
       syncModes();
-      await loadCards();
+      cards = next;
+      renderCards(false);
     }
-    tab = 'page';
     await load(id, n);
     await refreshStory();
   };
@@ -1117,12 +1124,14 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     renderCards(false);
   };
   const persistCards = () => void ss.putCards(pageId, cards);
+  /** The page in the editor for an Insert or Replace; false when a newer tap took the editor elsewhere first */
   const toPage = async () => {
     await pageLoaded;
-    if (tab !== 'page') await switchTab('page');
+    return switchTab('page');
   };
+  /** The new page text; null when it doesn't fit, undefined when a newer tap took the editor off the page first */
   const insertText = async (t: string) => {
-    await toPage();
+    if (!(await toPage())) return undefined;
     const text = ta.value;
     const at = Math.min(caret ?? text.length, text.length);
     const piece = t.trim();
@@ -1149,14 +1158,14 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     startBtn.setAttribute('aria-expanded', 'false');
   };
   const useStart = async () => {
-    if ((await insertText(starts[startAt])) === null) return;
+    if ((await insertText(starts[startAt])) == null) return;
     closeStart();
     // the next time they ask, a line they haven't seen yet
     startAt = (startAt + 1) % starts.length;
     ta.focus();
   };
   const replaceSel = async (s: Sel | undefined, t: string) => {
-    await toPage();
+    if (!(await toPage())) return undefined;
     const text = ta.value;
     const piece = t.trim();
     // only the exact range it was asked about; if those words changed, never search for them elsewhere
@@ -1266,12 +1275,14 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     if (c.mode === 'continue')
       main = btn('Insert', async () => {
         const next = await insertText(value());
+        if (next === undefined) return;
         if (next === null) return tell(STORY.full);
         afterChange('Added to your page.', next);
       }, { kind: 'primary', cls: 'dq-btn--sm' });
     else if (c.mode === 'polish')
       main = btn('Replace', async () => {
         const done = await replaceSel(c.sel, value());
+        if (done === undefined) return;
         if (!done) return tell(STORY.full);
         const { next, moved } = done;
         if (moved) {
