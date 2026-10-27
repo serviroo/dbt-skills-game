@@ -389,7 +389,7 @@ function menu(app: App) {
   ];
   const artThumb = h('span', { class: 'dq-tile-thumb', 'aria-hidden': 'true' });
   void artStore(app.store.key)
-    .list()
+    .shown()
     .then((list) => {
       if (list[0]) artThumb.replaceChildren(thumbImg(app, list[0], ''));
       else artThumb.remove();

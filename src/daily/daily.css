@@ -3959,6 +3959,8 @@ textarea.dq-input {
 /* ---------- art room ---------- */
 .dq-artroom {
   max-width: 900px;
+  /* the gallery ends the page: room for its last row to scroll clear of an Undo toast */
+  padding-bottom: 48px;
 }
 .dq-artentries {
   display: grid;
@@ -4097,10 +4099,20 @@ textarea.dq-input {
 }
 .dq-galitem-d {
   padding-left: 2px;
-  font-size: 13.5px;
-  line-height: 1.3;
+  font-size: 16px;
+  line-height: 1.35;
   color: var(--t-dim);
   overflow-wrap: anywhere;
+}
+.dq-galitem-fav {
+  display: inline-block;
+  margin-right: 5px;
+  vertical-align: -2px;
+}
+.dq-galitem-fav .dq-ic {
+  display: block;
+  width: 15px;
+  height: 15px;
 }
 .dq-art-note {
   font-style: italic;
@@ -4145,6 +4157,14 @@ textarea.dq-input {
   top: 7.5cqw;
   left: 8cqw;
   right: 8cqw;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.dq-allycard-fav .dq-ic {
+  display: block;
+  width: clamp(14px, 7cqw, 20px);
+  height: clamp(14px, 7cqw, 20px);
 }
 .dq-allycard-tag {
   display: inline-flex;
@@ -4792,14 +4812,26 @@ textarea.dq-input {
 .dq-piece-side .dq-actions {
   margin-top: 16px;
 }
-.dq-piece-confirm {
-  margin-top: 14px;
-  padding: 14px 16px;
-  border: 1px solid rgba(125, 150, 197, 0.42);
-  background: rgba(8, 20, 36, 0.7);
+.dq-piece-day {
+  margin-top: 4px !important;
+  color: var(--t-dim);
 }
-.dq-piece-confirm .dq-actions {
-  margin-top: 10px;
+/* a favourite's star is solid mint, like a pinned skill's */
+.dq-piece-fav[aria-pressed='true'] .dq-btn-ic,
+.dq-galitem-fav,
+.dq-allycard-fav {
+  color: var(--mint);
+}
+.dq-piece-fav[aria-pressed='true'] path,
+.dq-galitem-fav path,
+.dq-allycard-fav path {
+  fill-rule: nonzero;
+}
+.dq-piece-rename {
+  margin-top: 16px;
+}
+.dq-piece-rename .dq-actions {
+  margin-top: 12px;
 }
 
 @media (min-width: 760px) {

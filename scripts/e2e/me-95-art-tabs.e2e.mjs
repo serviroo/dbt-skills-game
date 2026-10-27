@@ -196,8 +196,10 @@ async function savedPair(h, edit, before) {
   await h.shot(a, edit ? 'delete-before-edit' : 'delete-before-gallery');
   if (before) await before(a);
   await b.getByRole('button', { name: 'Remove', exact: true }).click();
-  await b.locator('.dq-piece-confirm').getByRole('button', { name: 'Remove', exact: true }).click();
   await b.locator('.dq-artroom').waitFor();
+  // the removal lands when its Undo runs out
+  await b.locator('.dq-toast').waitFor({ state: 'hidden', timeout: 15000 });
+  await waitFor(h, () => stored(b), (s) => !s.records.some((r) => r.id === id), 'the removal did not land when its Undo ran out');
   await h.sleep(700);
   return { ctx, a, b, errors, id, edited };
 }

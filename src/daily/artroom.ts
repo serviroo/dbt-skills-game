@@ -45,13 +45,44 @@ export function thumbImg(app: App, m: DrawingMeta, alt: string) {
 }
 
 /** A shadow ally as a full-art Shadow card. */
-export function allyCard(app: App, m: DrawingMeta, img?: HTMLImageElement | HTMLCanvasElement) {
+/** Favourites first, each group in the order it came in. */
+export const favFirst = <T extends { fav?: boolean }>(list: T[]) => [...list.filter((m) => m.fav), ...list.filter((m) => !m.fav)];
+/** The drawing an Undo just brought back: the list that shows it next takes focus to it. */
+let back: string | null = null;
+export function focusBack(list: HTMLElement) {
+  const el = back ? list.querySelector<HTMLElement>(`[data-piece="${CSS.escape(back)}"]`) : null;
+  if (!el) return;
+  back = null;
+  el.focus();
+}
+
+/** What a drawing's card shows: a save, a name or a favourite changes it; a thumbnail filled in elsewhere does not. */
+export const cardOf = (m: DrawingMeta) => [m.id, m.kind, m.day, revOf(m), m.name ?? '', m.fav ? 1 : 0].join('|');
+const filled = new WeakMap<HTMLElement, string>();
+/**
+ * Fills a list of drawing cards again, only when what it shows changed (`shows`). A card that had focus keeps it, or
+ * the card now in its place takes it, so a change in another tab never drops a keyboard player out of the list.
+ */
+export function refill(list: HTMLElement, shows: string, cards: () => HTMLElement[]) {
+  if (filled.get(list) === shows) return;
+  filled.set(list, shows);
+  const was = document.activeElement instanceof HTMLElement && list.contains(document.activeElement) ? document.activeElement : null;
+  const had = was?.closest<HTMLElement>('[data-piece]');
+  const at = had ? [...list.querySelectorAll('[data-piece]')].indexOf(had) : -1;
+  list.replaceChildren(...cards());
+  const all = [...list.querySelectorAll<HTMLElement>('[data-piece]')];
+  // a control kept across the refill (Design an ally) is focused again too
+  const to = had ? (all.find((e) => e.dataset.piece === had.dataset.piece) ?? all[Math.min(at, all.length - 1)]) : was && list.contains(was) ? was : null;
+  to?.focus({ preventScroll: true });
+}
+
+export function allyCard(app: App, m: DrawingMeta, img?: HTMLImageElement | HTMLCanvasElement, star = false) {
   const name = m.name?.trim() || 'Shadow ally';
   return h(
     'div',
     { class: 'dq-cardface dq-allycard' },
     h('div', { class: 'dq-allycard-art' }, img ?? thumbImg(app, m, `${name}, drawn by you`)),
-    h('div', { class: 'dq-allycard-top' }, h('span', { class: 'dq-allycard-tag', html: `${icon('ally')}<span>Shadow ally</span>` })),
+    h('div', { class: 'dq-allycard-top' }, h('span', { class: 'dq-allycard-tag', html: `${icon('ally')}<span>Shadow ally</span>` }), star && m.fav ? h('span', { class: 'dq-allycard-fav', html: icon('star') }) : null),
     h('div', { class: 'dq-allycard-foot' }, h('div', { class: 'dq-allycard-name', text: typo(name) }), h('div', { class: 'dq-allycard-by', text: 'Your design' })),
   );
 }
@@ -179,47 +210,54 @@ export function artScreen(app: App): ScreenOut {
     h('section', { class: 'dq-art-pages', 'aria-labelledby': 'dq-pages-h' }, h('h2', { class: 'dq-sec-h', id: 'dq-pages-h' }, h('span', { text: ART.pages })), gallery, note),
   );
   let refresh = 0;
+  // the draft on show, so a change elsewhere that leaves it the same doesn't rebuild it under the player's focus
+  let draftShown: string | null = null;
   const render = async () => {
     const turn = ++refresh;
-    const [list, drafts] = await Promise.all([as.list(), as.drafts()]);
+    const [list, drafts] = await Promise.all([as.shown(), as.drafts()]);
     if (turn !== refresh) return;
     if (!as.persistent) note.classList.remove('is-hidden');
-    draftBox.classList.add('is-hidden');
     const d = drafts[0];
-    if (d) {
-      draftBox.classList.remove('is-hidden');
-      const thumb = renderDrawing(d.strokes, d.kind, 240);
-      thumb.className = 'dq-thumb';
-      draftBox.replaceChildren(
-        h('div', { class: 'dq-art-draft-img' }, thumb),
-        h(
-          'div',
-          { class: 'dq-art-draft-txt' },
-          p(ART.draft, 'dq-text'),
+    const draftNow = d ? `${d.key}|${d.t}|${d.strokes.length}` : '';
+    if (draftNow !== draftShown) {
+      draftShown = draftNow;
+      draftBox.classList.toggle('is-hidden', !d);
+      if (d) {
+        const thumb = renderDrawing(d.strokes, d.kind, 240);
+        thumb.className = 'dq-thumb';
+        draftBox.replaceChildren(
+          h('div', { class: 'dq-art-draft-img' }, thumb),
           h(
             'div',
-            { class: 'dq-actions' },
-            btn('Keep drawing', () => app.go({ name: 'draw', kind: d.kind, ...(d.editId ? { id: d.editId } : {}), draft: d.key }), { kind: 'primary', ic: 'brush' }),
+            { class: 'dq-art-draft-txt' },
+            p(ART.draft, 'dq-text'),
+            h(
+              'div',
+              { class: 'dq-actions' },
+              btn('Keep drawing', () => app.go({ name: 'draw', kind: d.kind, ...(d.editId ? { id: d.editId } : {}), draft: d.key }), { kind: 'primary', ic: 'brush' }),
+            ),
           ),
-        ),
-      );
+        );
+      }
     }
-    if (!list.length) {
-      gallery.replaceChildren(p(ART.pagesEmpty, 'dq-text dq-empty'));
-      return;
-    }
-    gallery.replaceChildren(
-      ...list.map((m) =>
-        h(
-          'button',
-          { type: 'button', class: `dq-galitem dq-galitem--${m.kind}`, onclick: () => app.go({ name: 'piece', id: m.id }), 'aria-label': m.kind === 'ally' ? `${m.name || 'Shadow ally'}, a shadow ally from ${dayLabel(m.day)}` : `Page from ${dayLabel(m.day)}` },
-          m.kind === 'ally' ? allyCard(app, m) : h('span', { class: 'dq-galitem-img' }, thumbImg(app, m, '')),
-          h('span', { class: 'dq-galitem-d', text: m.kind === 'ally' ? `${m.name || 'Shadow ally'} · ${dayLabel(m.day)}` : dayLabel(m.day) }),
-        ),
-      ),
+    const shown = favFirst(list);
+    refill(gallery, shown.map(cardOf).join('\n'), () =>
+      !shown.length
+        ? [p(ART.pagesEmpty, 'dq-text dq-empty')]
+        : shown.map((m) => {
+            const name = m.kind === 'ally' ? m.name?.trim() || 'Shadow ally' : m.name?.trim();
+            const label = m.kind === 'ally' ? `${name}, a shadow ally from ${dayLabel(m.day)}` : name ? `${name}, a page from ${dayLabel(m.day)}` : `Page from ${dayLabel(m.day)}`;
+            return h(
+              'button',
+              { type: 'button', class: `dq-galitem dq-galitem--${m.kind}`, 'data-piece': m.id, onclick: () => app.go({ name: 'piece', id: m.id }), 'aria-label': m.fav ? `${label}, a favourite` : label },
+              m.kind === 'ally' ? allyCard(app, m) : h('span', { class: 'dq-galitem-img' }, thumbImg(app, m, '')),
+              h('span', { class: 'dq-galitem-d' }, m.fav ? h('span', { class: 'dq-galitem-fav', html: icon('star') }) : null, h('span', { text: name ? `${name} · ${dayLabel(m.day)}` : dayLabel(m.day) })),
+            );
+          }),
     );
+    focusBack(gallery);
   };
-  const off = as.onRemove(() => void render());
+  const off = as.onChange(() => void render());
   void render();
   return { el, title: ART.title, mode: 'sub', bubbles: [1.6, 0.6], leave: () => { refresh++; off(); } };
 }
@@ -409,7 +447,10 @@ export function drawScreen(app: App, route: Route): ScreenOut {
       t: rec?.t ?? now,
       updated: now,
       prompt: kind === 'today' ? (prompt ?? undefined) : undefined,
-      name: kind === 'ally' ? (name ?? rec?.name) : undefined,
+      name: kind === 'ally' ? (name ?? rec?.name) : rec?.name,
+      nameAt: kind === 'ally' && name !== undefined && name !== rec?.name ? Math.max(Date.now(), (rec?.nameAt ?? -1) + 1) : rec?.nameAt,
+      fav: rec?.fav,
+      favAt: rec?.favAt,
       n: pad.strokes.length,
       strokes: pad.strokes.slice(),
     };
@@ -715,55 +756,146 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
     removed = true;
     missing();
   });
+  // hidden while a removal's Undo lasts (from this tab or another): it shows as gone, and comes back with the Undo
+  let hidden = false;
+  const offShown = as.onChange(() => {
+    void as.isShown(id).then((on) => {
+      if (removed || on !== hidden) return;
+      if (on) return app.go({ name: 'piece', id }, { replace: true, quiet: true });
+      hidden = true;
+      missing();
+    });
+  });
+  let offChange = () => {};
   const el = h('div', { class: 'dq-page dq-piece' }, h('h1', { class: 'dq-sr', 'data-focus': '', text: 'Your page' }), body);
   void (async () => {
-    const rec = await as.get(id);
-    if (!rec || removed) {
+    let rec = await as.get(id);
+    const on = !!rec && (await as.isShown(id));
+    if (!rec || !on || removed || hidden) {
+      if (!removed) hidden = true;
       missing();
       return;
     }
+    const ally = rec.kind === 'ally';
     const dpr = Math.min(2, devicePixelRatio || 1);
     const outW = Math.min(PAGE[rec.kind].w, Math.round(Math.min(560, innerWidth - 32) * dpr));
     const art = renderDrawing(rec.strokes, rec.kind, outW);
     art.className = 'dq-thumb';
     art.setAttribute('role', 'img');
-    art.setAttribute('aria-label', rec.kind === 'ally' ? `${rec.name || 'Shadow ally'}, your shadow ally` : `Your page from ${dayLabel(rec.day)}`);
+    const card = ally ? allyCard(app, rec, art) : null;
     const status = h('p', { class: 'dq-hint', 'aria-live': 'polite' });
-    const confirm = h('div', { class: 'dq-piece-confirm is-hidden' });
     void prepImage(rec);
+    const title = h('h2', { class: 'dq-h1 dq-piece-h' });
+    const day = p(dayLabel(rec.day), 'dq-small dq-piece-day');
+    const fav = h('button', { type: 'button', class: 'dq-btn dq-btn--quiet dq-piece-fav', 'aria-pressed': 'false', onclick: () => {
+      rec = { ...rec!, fav: !rec!.fav };
+      paint();
+      void as.setLabels(id, { fav: rec.fav });
+    } }, h('span', { class: 'dq-btn-ic', html: icon('star') }), h('span', { class: 'dq-btn-t', text: ART.favourite }));
+    const renameB = btn(ART.rename, () => openRename(), { kind: 'quiet', ic: 'pencil' });
+    const labels = h('div', { class: 'dq-actions dq-piece-labels' }, fav, renameB);
+    const form = h('div', { class: 'dq-piece-rename is-hidden', role: 'group', 'aria-label': ART.rename });
+    let editing = false;
+    // the name field opens over the page: Back and Escape close it like any sheet
+    let renameDone: (() => void) | null = null;
+    // what the drawing is called and whether it is a favourite, as it is stored now
+    const paint = () => {
+      const r = rec!;
+      const name = r.name?.trim();
+      title.textContent = ally ? typo(name || 'Shadow ally') : name ? typo(name) : dayLabel(r.day);
+      day.classList.toggle('is-hidden', ally || !name);
+      fav.setAttribute('aria-pressed', String(!!r.fav));
+      art.setAttribute('aria-label', ally ? `${name || 'Shadow ally'}, your shadow ally` : name ? `${name}, your page from ${dayLabel(r.day)}` : `Your page from ${dayLabel(r.day)}`);
+      const cardName = card?.querySelector('.dq-allycard-name');
+      if (cardName) cardName.textContent = typo(name || 'Shadow ally');
+    };
+    const closeRename = (focus: boolean) => {
+      editing = false;
+      renameDone?.();
+      renameDone = null;
+      form.classList.add('is-hidden');
+      labels.classList.remove('is-hidden');
+      if (focus) renameB.focus();
+    };
+    const openRename = () => {
+      const r = rec!;
+      const f = field(ally ? ART.nameAsk : ART.pageNameAsk, { value: r.name ?? '', placeholder: ally ? 'Shadow ally' : dayLabel(r.day), max: 24, autocomplete: 'off' });
+      const save = async () => {
+        if (!editing) return;
+        const name = f.input.value.trim().slice(0, 24);
+        if (name !== (rec!.name?.trim() ?? '')) await as.setLabels(id, { name });
+        if (removed) return;
+        closeRename(true);
+        const now = await as.get(id);
+        if (now && !removed) {
+          rec = now;
+          paint();
+          if (ally) void prepImage(now);
+        }
+      };
+      f.input.addEventListener('keydown', (e) => (e as KeyboardEvent).key === 'Enter' && (e.preventDefault(), void save()));
+      form.replaceChildren(f.el, h('div', { class: 'dq-actions' }, btn('Save name', () => void save(), { kind: 'primary' }), btn('Cancel', () => closeRename(true), { kind: 'quiet' })));
+      editing = true;
+      renameDone ??= app.sheet(() => {
+        renameDone = null;
+        closeRename(true);
+      });
+      labels.classList.add('is-hidden');
+      form.classList.remove('is-hidden');
+      f.input.focus();
+      f.input.select();
+    };
+    // a name or favourite set here or in another tab shows at once
+    offChange = as.onChange(() => {
+      void as.get(id).then((now) => {
+        if (!now || removed || editing) return;
+        rec = now;
+        paint();
+      });
+    });
     const actions = h(
       'div',
       { class: 'dq-actions' },
-      btn(rec.kind === 'ally' ? 'Save card image' : 'Save image', async () => (status.textContent = savedText(await saveImage(rec))), { kind: 'primary', ic: 'image' }),
-      btn('Keep drawing', () => app.go({ name: 'draw', kind: rec.kind, id: rec.id }), { kind: 'quiet', ic: 'brush' }),
-      btn(rec.kind === 'ally' ? 'Release' : 'Remove', () => {
-        confirm.replaceChildren(
-          p(rec.kind === 'ally' ? ART.releaseAsk : ART.removeAsk, 'dq-text'),
-          h(
-            'div',
-            { class: 'dq-actions' },
-            btn('Keep it', () => confirm.classList.add('is-hidden'), { kind: 'quiet' }),
-            btn(rec.kind === 'ally' ? 'Release' : 'Remove', async () => {
-              await as.remove(rec.id);
-              app.go({ name: rec.kind === 'ally' ? 'shadows' : 'art' }, { replace: true });
-            }, { kind: 'link' }),
-          ),
-        );
-        confirm.classList.remove('is-hidden');
+      btn(ally ? 'Save card image' : 'Save image', async () => (status.textContent = savedText(await saveImage(rec!))), { kind: 'primary', ic: 'image' }),
+      btn('Keep drawing', () => app.go({ name: 'draw', kind: rec!.kind, id }), { kind: 'quiet', ic: 'brush' }),
+      btn(ally ? 'Release' : 'Remove', () => {
+        // it leaves every screen, in every tab, now and stays stored until the Undo runs out
+        let done = false;
+        removed = true;
+        as.hide(id, revOf(rec!));
+        app.go({ name: ally ? 'shadows' : 'art' }, { replace: true });
+        app.toast(ally ? ART.released : ART.removed, {
+          label: 'Undo',
+          run: () => {
+            if (done) return;
+            done = true;
+            // the list it went back to takes focus to it
+            if (app.route.name === (ally ? 'shadows' : 'art')) back = id;
+            as.unhide(id);
+          },
+          end: () => {
+            if (done) return;
+            done = true;
+            void as.remove(id);
+          },
+        });
       }, { kind: 'link' }),
     );
+    paint();
     body.replaceChildren(
-      h('div', { class: `dq-piece-art dq-piece-art--${rec.kind}` }, rec.kind === 'ally' ? allyCard(app, rec, art) : art),
+      h('div', { class: `dq-piece-art dq-piece-art--${rec.kind}` }, card ?? art),
       h(
         'div',
         { class: 'dq-piece-side' },
-        h('h2', { class: 'dq-h1 dq-piece-h', text: rec.kind === 'ally' ? typo(rec.name || 'Shadow ally') : dayLabel(rec.day) }),
-        rec.kind === 'ally' ? p(`Shadow ally, drawn ${dayLabel(rec.day)}. Part of your army.`, 'dq-text') : rec.prompt ? p(rec.prompt, 'dq-text dq-piece-prompt') : p('A free page.', 'dq-text dq-piece-prompt'),
+        title,
+        day,
+        ally ? p(`Shadow ally, drawn ${dayLabel(rec.day)}. Part of your army.`, 'dq-text') : rec.prompt ? p(rec.prompt, 'dq-text dq-piece-prompt') : p('A free page.', 'dq-text dq-piece-prompt'),
+        labels,
+        form,
         actions,
         status,
-        confirm,
       ),
     );
   })();
-  return { el, title: 'Your page', mode: 'sub', bubbles: [1.6, 0.6], leave: () => { removed = true; off(); } };
+  return { el, title: 'Your page', mode: 'sub', bubbles: [1.6, 0.6], leave: () => { removed = true; off(); offShown(); offChange(); } };
 }

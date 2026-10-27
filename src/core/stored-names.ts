@@ -8,6 +8,7 @@ export const INSTALL_HINT_KEY = 'dbt.install-hint.v1';
 
 export const BESIDE = {
   art: '.art',
+  artGone: '.art.gone',
   story: '.story',
   storyLive: '.story.live',
   unreadable: '.unreadable',
