@@ -87,6 +87,42 @@ export const scenarios = {
     h.expect(!errors.length, errors.join('\n'));
   },
 
+  /** After Skip the rewards keep their own pace in real time, however slowly the 3D scene behind them draws: here every
+   *  3D frame comes a full second apart, as on a phone (or CI) drawing the scene in software, and Read the note still answers
+   *  within a few seconds. Real time, not ?capture. */
+  async 'rewards-keep-their-pace-on-slow-frames'(h) {
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?shot=chest&mute');
+    try {
+      const title = page.locator('.title-screen');
+      await title.waitFor({ timeout: 60000 });
+      await h.sleep(1500);
+      await title.click();
+      await page.locator('.ui-skip').waitFor({ timeout: 60000 });
+      // from here a 3D frame comes once a second while the page itself stays free, as when the GPU (or CI's software
+      // renderer) holds frames back
+      await page.evaluate(() => {
+        window.requestAnimationFrame = (cb) => setTimeout(() => cb(performance.now()), 1000);
+      });
+      const t0 = Date.now();
+      await page.locator('.ui-skip').click();
+      const note = page.getByRole('button', { name: 'Read the note' });
+      await note.waitFor({ timeout: 30000 });
+      // a player taps Read the note where it shows, and again if nothing happens (a tap, not a Playwright click, which
+      // waits for two still frames: two seconds each here)
+      while ((await page.locator('.rw').count()) && Date.now() - t0 < 40000) {
+        const box = await note.boundingBox().catch(() => null);
+        if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+        await h.sleep(300);
+      }
+      const sec = (Date.now() - t0) / 1000;
+      h.expect(!(await page.locator('.rw').count()), 'the rewards never let Read the note through');
+      h.expect(sec < 8, `with slow 3D frames the rewards took ${sec.toFixed(1)} s to let Read the note through (their own pace is under 3 s)`);
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** Skip while the chest charges: the charge hum stops and the chest never bursts */
   async 'skip-in-the-chest-charge'(h) {
     const { page, errors } = await intro(h, 'chest');
