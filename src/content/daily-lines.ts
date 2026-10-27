@@ -200,6 +200,9 @@ export const SKILL_END = {
   } as Record<string, string>,
 };
 
+/** Give me a moment lines that only hold while it lasts until the player is ready */
+const MOMENT_OPEN = ['No rush. Nothing here is timed.', 'Stay as long as you like.'];
+
 export const CHECKIN = {
   ask: "How's the weather inside?",
   level: 'How strong, 1 to 10? Optional.',
@@ -211,7 +214,10 @@ export const CHECKIN = {
   stay: 'Stay here a minute',
   small: 'One small skill',
   /** Give me a moment: one line at a time, at speaking pace */
-  moment: ['Still here.', 'Nothing to answer.', 'Breathe out longer than in.', 'Feet on the floor, if you can.', 'Shoulders down, if they want to.', 'No rush. Nothing here is timed.', 'Stay as long as you like.'],
+  moment: ['Still here.', 'Nothing to answer.', 'Breathe out longer than in.', 'Feet on the floor, if you can.', 'Shoulders down, if they want to.', ...MOMENT_OPEN],
+  momentOpen: MOMENT_OPEN,
+  /** how long a moment lasts: no count is ever shown, and when the time passes it ends softly with one line */
+  momentLength: { legend: 'How long', options: { '1': '1 minute', '3': '3 minutes', open: "Until I'm ready" }, end: "That's your moment. It's here any time you need it." },
   momentNext: 'Slow breathing, if you like',
   gift: { closed: 'Tap to open', open: 'Read again' },
 };

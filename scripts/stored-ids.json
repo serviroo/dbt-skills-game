@@ -2,7 +2,7 @@
   "about": "Every name and id The Lantern stores on a player's device (storage keys, save fields and the ids inside a save). Append-only: scripts/check-stored-ids.mjs fails when one disappears without a migration. Add new ids with: npm run check:ids -- --update",
   "ids": {
     "local-storage": ["dbt.lantern.v1","dbt.lantern.lab","dbt.app.v1","dbt.you.v1","dbt.audio.v1","dbt.cowriter.v1","dbt.install-hint.v1"],
-    "beside-save-key": [".art",".story",".story.live",".unreadable",".stealth",".safe-light",".read-size"],
+    "beside-save-key": [".art",".story",".story.live",".unreadable",".stealth",".safe-light",".read-size",".moment-length"],
     "indexeddb-store": [".art/meta",".art/strokes",".art/thumbs",".art/drafts",".story/stories",".story/chapters",".story/cards",".story/days",".story/chapters/index:story"],
     "indexeddb-version": [".art@1",".story@1"],
     "session-storage": ["dbt.tab","dbt.story.care"],
@@ -38,7 +38,8 @@
     "sw-record": ["current","previous","versions"],
     "ink-index": ["0:ice","1:system","2:violet","3:mint","4:shadow"],
     "region": ["us","ca","uk","ie","au","nz","in","elsewhere","sg","za","mt"],
-    "read-size": ["regular","large","largest"]
+    "read-size": ["regular","large","largest"],
+    "moment-length": ["1","3","open"]
   },
   "migrations-format": "{ \"kind\": \"<kind above>\", \"from\": \"<old id>\", \"to\": \"<new id, or null when it is retired>\", \"since\": \"<first release that reads it, e.g. 2026-11-02>\" }. The entry says the rename is handled; the code that reads the old id and turns it into the new one ships in the same change.",
   "migrations": []
