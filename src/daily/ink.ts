@@ -449,6 +449,59 @@ export function inkPass(g: CanvasRenderingContext2D, st: Stroke, s: number) {
   }
 }
 
+/** A canvas the CPU reads back, for takes. */
+let probe: CanvasRenderingContext2D | null = null;
+/**
+ * Whether eraser stroke e, drawn after the strokes (each in its box, logical px), takes anything from the page: at
+ * least half a px of a stroke's ink or of the line its light starts from, which no eraser stroke after that stroke
+ * took already. They are laid out as the ink layer is (see renderDrawing), only where e can meet them, then kept only
+ * under e. Passing close beside a line, or over paper an eraser already cleared, takes nothing.
+ */
+function takes(strokes: Stroke[], boxes: Box[], e: Stroke) {
+  const eb = grow(bounds(e.p), (e.w * ERASE) / 2 + 1);
+  const of = new Set<number>();
+  let b: Box | null = null;
+  for (let i = 0; i < strokes.length; i++) {
+    const s = strokes[i], sb = grow(boxes[i], lineHalf(s) + 1);
+    if (s.m === 'erase' || !s.p.length || !meets(sb, eb)) continue;
+    of.add(i);
+    b = join(b, sb);
+  }
+  if (!b) return false;
+  const x0 = Math.floor(Math.max(b[0], eb[0])), y0 = Math.floor(Math.max(b[1], eb[1]));
+  const w = Math.ceil(Math.min(b[2], eb[2])) - x0, h = Math.ceil(Math.min(b[3], eb[3])) - y0;
+  if (w <= 0 || h <= 0) return false;
+  const pb: Box = [x0, y0, x0 + w, y0 + h];
+  const g = (probe ??= document.createElement('canvas').getContext('2d', { willReadFrequently: true })!);
+  // a new size clears it and its state
+  g.canvas.width = w;
+  g.canvas.height = h;
+  g.translate(-x0, -y0);
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+  for (let i = Math.min(...of); i < strokes.length; i++) {
+    const s = strokes[i];
+    if (s.m === 'erase') {
+      if (meets(grow(boxes[i], (s.w * ERASE) / 2 + 1), pb)) inkPass(g, s, 1);
+      continue;
+    }
+    if (!of.has(i)) continue;
+    inkPass(g, s, 1);
+    g.strokeStyle = '#000';
+    g.lineWidth = Math.max(...lights(s, HALO).map(([lw]) => lw)) / HALO;
+    trace(g, s.p, 1);
+    g.stroke();
+  }
+  g.globalCompositeOperation = 'destination-in';
+  g.lineWidth = e.w * ERASE;
+  trace(g, e.p, 1);
+  g.stroke();
+  const a = g.getImageData(0, 0, w, h).data;
+  g.canvas.width = g.canvas.height = 0;
+  for (let k = 3; k < a.length; k += 4) if (a[k] >= 128) return true;
+  return false;
+}
+
 /** The page under the ink: void with a cold lift; an ally page adds a violet shadow pool to stand in. */
 export function paintPaper(g: CanvasRenderingContext2D, w: number, h: number, kind: Paper) {
   g.save();
@@ -1197,8 +1250,9 @@ export class InkPad {
     if (st.m === 'erase') {
       this.schedule();
       this.erase(st);
-      // one that reaches nothing on the page isn't kept; one that does cuts the ink by its points as they are kept
-      const kept = this.er!.near.size > 0;
+      // one that takes nothing from the page isn't kept, so the history and what Redo brings back stay as they were;
+      // one that does cuts the ink by its points as they are kept
+      const kept = takes(this.strokes, this.er!.box, st);
       if (kept) this.cutInk(st);
       else this.erase(null);
       this.letGo();
