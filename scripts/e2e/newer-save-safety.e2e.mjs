@@ -74,10 +74,10 @@ export function newerSave() {
         { day: D, id: 'l1', tag: 'calm', text: 'One small step.', t: T, voice: 'soft' },
         { day: D, id: 'l2', tag: 'calm', text: 'Another line.', t: T - 5 },
       ],
-      settings: { sound: true, motion: 'gentle', emotionRows: ['Joy', 'Sadness', ...Array.from({ length: 28 }, (_, i) => `Feeling ${i + 3}`)], urgeRows: ['Urge to give up on today'], haptics: { level: 2 } },
+      settings: { sound: true, motion: 'gentle', vibrate: 'soft', emotionRows: ['Joy', 'Sadness', ...Array.from({ length: 28 }, (_, i) => `Feeling ${i + 3}`)], urgeRows: ['Urge to give up on today'], haptics: { level: 2 } },
       flags: { rankSeen: 0, wardenSeen: false, giftDay: D, cardDay: '', greetDay: D, safeCredit: false, therapistLineShown: false, checkinDay: D, questAsideDay: '', questAsideAt: 0, bloomSeen: true },
       gone: {},
-      setAt: { motion: T, haptics: T },
+      setAt: { motion: T, vibrate: T, haptics: T },
       // pins: a field a newer build put on one, a skill this build doesn't know, one it can't read, one past its limits
       skillPins: { 'wise-mind': { pinned: true, at: T, folder: 'calm' }, 'future-skill': { pinned: true, at: T }, stop: { pinned: 'soon', at: T }, tipp: { pinned: false, at: 9e15 } },
       profile: {
@@ -110,6 +110,7 @@ export function newerParts(save, crystal = false) {
     map: save.maps?.find((m) => m.id === 'nm1')?.sketch,
     line: save.lines?.find((l) => l.day === D)?.voice,
     motion: save.settings?.motion,
+    vibrate: save.settings?.vibrate,
     setting: save.settings?.haptics,
     flag: save.flags?.bloomSeen,
     setAt: save.setAt?.haptics,
