@@ -30,11 +30,13 @@ a thin blue rule under the title. Tokens live in `src/styles/tokens.css`.
 
 **Home's sky** follows the device's clock in four calm moods, each a picture of the same place: a sky over three
 ridges of hills that fade into the void. Dawn (05:00 to 08:00) is lilac with a rose glow low over the hills, day
-(08:00 to 17:00) lifts the lantern blue with soft cloud, dusk (17:00 to 20:00) is indigo with an amber horizon, and
-night is deep blue with stars, which every other screen keeps. The pictures stay at night-light level, because the
-page scrolls over every part of them: the darker sky keeps its rendered light, the glow is folded down under a
-ceiling, and colour rather than brightness carries each mood, so the faintest text on Home keeps 5.4:1 wherever it
-sits. Opening or leaving Home fades the sky in 0.9 s, a new hour drifts in over 8 s with the old picture held under
+(08:00 to 17:00) is the lightest, a clear blue with soft cloud and mist between the ridges, dusk (17:00 to 20:00) is
+indigo with an amber horizon, and night is deep blue with stars, which every other screen keeps. The page scrolls over
+every part of the sky, so the pictures are graded for the text on them: each keeps its rendered colour and shape, and
+only the glow is folded down under a ceiling, about 3% luminance for dawn, day and dusk and 1.4% for night, which
+every screen sits on. Home's labels that sit on bare sky use `--t-dim` (`#93ABC8`) rather than the fainter
+`--t-faint`, so every text on Home keeps 5.4:1 wherever it sits, and even the faintest text colour keeps 5.4:1 over
+night. Opening or leaving Home fades the sky in 0.9 s, a new hour drifts in over 8 s with the old picture held under
 the new one, and the Safe Zone always opens on night at once. The pictures live in `public/sky/` (tall ones for
 portrait screens, wide ones for landscape), the layers in `src/daily/daily.css`, the timings in
 `src/motion/tokens.ts`.
