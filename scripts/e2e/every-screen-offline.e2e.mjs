@@ -217,6 +217,12 @@ async function home(h, page) {
   await settle(h, page);
 }
 
+/** taps the middle of `loc` where it is now, as a player does: a Playwright click first waits for two still frames, which a
+ *  scene drawing about one frame a second in software can take longer to give than the click waits */
+async function tapWhereItIs(page, loc) {
+  const box = await loc.boundingBox({ timeout: 2000 });
+  if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+}
 const tile = (page, title) => page.locator('nav.dq-menu .dq-tile').filter({ has: page.locator('.dq-tile-t', { hasText: new RegExp(`^${title}$`) }) });
 const heading = (page) => page.locator('.dq-view h1').first().textContent({ timeout: 10000 });
 
@@ -611,10 +617,12 @@ async function replayIntro(h, page, problems) {
   const note = page.getByRole('button', { name: 'Read the note' });
   await note.waitFor({ timeout: 60000 });
   for (let i = 0; i < 40 && (await page.locator('.rw').count()); i++) {
-    await note.click({ timeout: 2000 }).catch(() => {});
+    await tapWhereItIs(page, note).catch(() => {});
     await h.sleep(500);
   }
-  await page.getByRole('button', { name: 'Continue' }).click({ timeout: 20000 });
+  const cont = page.getByRole('button', { name: 'Continue' });
+  await cont.waitFor({ timeout: 20000 });
+  await tapWhereItIs(page, cont);
   // the end card breathes, so on slow frames its buttons never hold still for a click: tap Enter the Lantern where it is
   const enter = page.getByRole('button', { name: 'Enter the Lantern' });
   await enter.waitFor({ timeout: 20000 });

@@ -168,16 +168,23 @@ function run(args, { env = {}, timeoutMs = 240000 } = {}) {
   });
 }
 
-async function closingCards(page, sleep) {
+/** taps the middle of `loc` where it is now, as a player does: a Playwright click first waits for two still frames, which
+ *  slow frames or the breathing end card may not give in time */
+async function tapWhereItIs(page, loc) {
+  await loc.waitFor({ timeout: 20000 });
+  const box = await loc.boundingBox({ timeout: 2000 });
+  if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+}
 
+async function closingCards(page, sleep) {
   const note = page.getByRole('button', { name: 'Read the note' });
   await note.waitFor({ timeout: 60000 });
   for (let i = 0; i < 40 && (await page.locator('.rw').count()); i++) {
-    await note.click({ timeout: 2000 }).catch(() => {});
+    await tapWhereItIs(page, note).catch(() => {});
     await sleep(500);
   }
-  await page.getByRole('button', { name: 'Continue' }).click({ timeout: 20000 });
-  await page.getByRole('button', { name: 'Enter the Lantern' }).click({ timeout: 20000 });
+  await tapWhereItIs(page, page.getByRole('button', { name: 'Continue' }));
+  await tapWhereItIs(page, page.getByRole('button', { name: 'Enter the Lantern' }));
 }
 
 async function startIntro(page, sleep) {
