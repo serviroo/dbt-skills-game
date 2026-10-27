@@ -388,9 +388,10 @@ export function holdToCharge(opts: HoldOpts): Promise<void> {
   }
   render(0, born);
   opts.until?.then(() => {
+    // the hold leaves at once, also a full one still held down, which would otherwise wait for the release
+    cleanup();
     if (done) return;
     done = true;
-    cleanup();
     resolveP();
   });
   // focus for keyboard users without stealing the page scroll

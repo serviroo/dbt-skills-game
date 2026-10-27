@@ -123,6 +123,29 @@ export const scenarios = {
     }
   },
 
+  /** Skip after the chest is fully charged while Space is still held: the hold leaves with the scene instead of waiting
+   *  over the rewards for the key to come up. Real time, not ?capture. */
+  async 'skip-after-a-full-hold'(h) {
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?shot=chest&mute');
+    try {
+      const title = page.locator('.title-screen');
+      await title.waitFor({ timeout: 60000 });
+      await h.sleep(1500);
+      await title.click();
+      await page.locator('.chest-hold').waitFor({ timeout: 60000 });
+      await page.keyboard.down('Space');
+      await page.locator('.chest-hold.is-full').waitFor({ state: 'attached', timeout: 10000 });
+      await page.locator('.ui-skip').click();
+      await page.locator('.rw').waitFor({ timeout: 15000 });
+      const left = await page.locator('.chest-hold').count();
+      await page.keyboard.up('Space');
+      h.expect(!left, 'the full chest hold stayed on the page over the rewards while Space was held');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** Skip while the chest charges: the charge hum stops and the chest never bursts */
   async 'skip-in-the-chest-charge'(h) {
     const { page, errors } = await intro(h, 'chest');
