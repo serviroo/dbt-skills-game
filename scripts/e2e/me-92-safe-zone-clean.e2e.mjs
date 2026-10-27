@@ -232,12 +232,24 @@ const WINDOWS = {
       h.expect(r.day !== r.today && !/opened/.test(r.label ?? ''), `gift: the cancelled gift is not claimable on Home (${JSON.stringify(r)})`);
       await page.locator('.dq-chest').click();
       await page.locator('.dq-sw').waitFor({ state: 'visible', timeout: 5000 });
-      await page.evaluate(() => {
-        const w = document.querySelector('.dq-sw');
-        w.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
-        w.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
-      });
-      await page.waitForFunction(() => window.__daily.store.state.flags.giftDay === window.__daily.store.today());
+      const tap = async () => {
+        const p = await page.evaluate(() => {
+          const r = document.querySelector('.dq-sw .sw-plate').getBoundingClientRect();
+          const x = r.x + r.width / 2;
+          const y = r.y + r.height / 2;
+          return { x, y, hit: !!document.elementFromPoint(x, y)?.closest('.dq-sw') };
+        });
+        h.expect(p.hit, 'gift: the window is not what a tap on it reaches');
+        await page.mouse.click(p.x, p.y);
+      };
+      const claimed = (timeout) => page.waitForFunction(() => window.__daily.store.state.flags.giftDay === window.__daily.store.today(), null, { timeout }).then(() => true, () => false);
+      await tap();
+      if (!(await claimed(1500))) {
+        // the chevron shows once the opening has ended: pulsing with motion on, still with reduced motion
+        await page.waitForFunction(() => Number(getComputedStyle(document.querySelector('.dq-sw .sw-next')).opacity) > 0, null, { timeout: 5000 });
+        await tap();
+        h.expect(await claimed(5000), 'gift: two taps on the window did not accept it');
+      }
       h.expect((await probe(page)).windows === 0, 'gift: accepting it did not close the window');
     },
   },

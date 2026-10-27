@@ -1,6 +1,8 @@
 import '../styles/cutscene.css';
-import { after, animate, el, finished, wait } from './anim';
+import { after, animate, complete, el, finished, wait } from './anim';
+import { inertUntil, onTaps } from './taps';
 import { params } from '../core/params';
+import { EASE, WINDOW as W, css } from '../motion/tokens';
 import { ICON_LETTER, ICON_LANTERN, ICON_MOTH, ICON_STAR, FLOURISH } from './icons';
 import type { RewardItem } from '../content/intro';
 import { LETTER, END_CARD, NAME_PROMPT, TITLE_SCREEN } from '../content/intro';
@@ -41,16 +43,20 @@ export function showTitle(onGesture?: () => void): Promise<void> {
     animate(prompt, [{ opacity: 0.62 }, { opacity: 1 }], { duration: 1800, iterations: Infinity, direction: 'alternate', easing: 'ease-in-out' });
     const go = async () => {
       onGesture?.();
-      root.removeEventListener('pointerup', go);
+      root.style.pointerEvents = 'none';
+      root.removeEventListener('pointerup', onUp);
       root.removeEventListener('keydown', onKey);
       resolve();
       await finished(animate(root, [{ opacity: 1 }, { opacity: 0 }], { duration: 700, easing: 'ease-in' }));
       root.remove();
     };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Enter' || e.key === ' ') go();
+    const onUp = (e: PointerEvent) => {
+      if (e.button === 0) go();
     };
-    root.addEventListener('pointerup', go);
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.key === 'Enter' || e.key === ' ') && !e.repeat) go();
+    };
+    root.addEventListener('pointerup', onUp);
     root.addEventListener('keydown', onKey);
     if (params.capture) wait(0.6).then(go);
   });
@@ -77,10 +83,12 @@ export async function namePrompt(): Promise<void> {
   const name = w.root.querySelector<HTMLInputElement>('#np-name')!;
   const comp = w.root.querySelector<HTMLInputElement>('#np-comp')!;
   const go = w.root.querySelector<HTMLButtonElement>('.sw-btn.gold')!;
-  name.addEventListener('keydown', (e) => e.key === 'Enter' && comp.focus());
-  comp.addEventListener('keydown', (e) => e.key === 'Enter' && go.click());
-  await opened;
+  name.addEventListener('keydown', (e) => e.key === 'Enter' && !e.repeat && comp.focus());
+  comp.addEventListener('keydown', (e) => e.key === 'Enter' && !e.repeat && go.click());
+  // the fields are there from the first frame: focus goes in once, as the prompt opens, never when the Lantern's typing
+  // ends, by which time a quick player may already be typing in the other field
   if (matchMedia('(pointer: fine)').matches) name.focus({ preventScroll: true });
+  await opened;
   const v = params.capture ? 'skip' : await w.waitForInput();
   const keep = v === 'go';
   chooseYou(keep ? cleanName(name.value) : '', keep ? cleanName(comp.value) : '', Date.now());
@@ -162,6 +170,58 @@ export async function awakenWord(text = 'AWAKEN', holdSec = 0.5) {
 
 /* ---------------------------------------------------------------- rewards */
 
+function still(frames: Keyframe[]): Keyframe[] {
+  const end = { ...frames[frames.length - 1] };
+  delete end.offset;
+  delete end.easing;
+  return [{ ...end, opacity: frames[0].opacity ?? end.opacity ?? 1 }, end];
+}
+
+function entrance() {
+  const reduced = params.reduced;
+  const anims: Animation[] = [];
+  const due = new Set<() => void>();
+  const flush = () => [...due].forEach((run) => run());
+  const off = onTaps(() => {
+    flush();
+    anims.forEach(complete);
+  });
+  return {
+    reduced,
+    animate(e: Element, frames: Keyframe[], opts: KeyframeAnimationOptions) {
+      const a = reduced ? animate(e, still(frames), { ...opts, duration: W.reducedFadeMs, delay: 0, easing: css(EASE.outCubic) }) : animate(e, frames, opts);
+      anims.push(a);
+      return a;
+    },
+    /** `fn` runs once: at `sec`, or at once when a tap completes the entrance or the screen leaves. `sound` plays only on time. */
+    cue(sec: number, fn: () => void, sound?: () => void) {
+      const run = () => {
+        due.delete(run);
+        fn();
+      };
+      due.add(run);
+      after(reduced ? 0 : sec * 1000).then(() => {
+        if (!due.has(run)) return;
+        run();
+        sound?.();
+      });
+    },
+    buttons(acts: HTMLElement, shown: Animation) {
+      inertUntil(acts, finished(shown));
+    },
+    async leave(root: HTMLElement, ms: number) {
+      flush();
+      off();
+      snd('ui_tap');
+      const out = reduced ? W.reducedCloseMs : ms;
+      animate(root, [{ opacity: 1 }, { opacity: 0 }], reduced ? { duration: out, easing: css(EASE.outCubic) } : { duration: out, easing: 'ease-in' });
+      // page timers, like a window's close: the screen leaves on time however slowly the 3D scene behind it draws
+      await after(out);
+      root.remove();
+    },
+  };
+}
+
 const EMBLEM: Record<RewardItem['id'], () => string> = {
   letter: () => ICON_LETTER,
   companion: () => (window as unknown as { __companionSVG?: () => string }).__companionSVG?.() ?? ICON_MOTH,
@@ -191,31 +251,31 @@ export async function rewardCards(items: RewardItem[], opts: { onCard?: (i: numb
   actions.append(btn);
   root.append(head, grid, actions);
   ui().append(root);
-  animate(root, [{ opacity: 0 }, { opacity: 1 }], { duration: 500, easing: 'ease-out' });
-  animate(head, [{ opacity: 0, letterSpacing: '0.5em' }, { opacity: 1, letterSpacing: '0.22em' }], { duration: 700, easing: 'cubic-bezier(.16,1,.3,1)' });
-  // page timers: the cards keep their pace however slowly the 3D scene behind them draws
-  await after(450);
-  for (let i = 0; i < cards.length; i++) {
-    const c = cards[i];
-    opts.onCard?.(i);
-    snd('reward_chime', { index: i });
-    animate(c, [
+  const e = entrance();
+  e.animate(root, [{ opacity: 0 }, { opacity: 1 }], { duration: 500, easing: 'ease-out' });
+  e.animate(head, [{ opacity: 0, letterSpacing: '0.5em' }, { opacity: 1, letterSpacing: '0.22em' }], { duration: 700, easing: 'cubic-bezier(.16,1,.3,1)' });
+  let at = 450;
+  cards.forEach((c, i) => {
+    e.cue(
+      at / 1000,
+      () => opts.onCard?.(i),
+      () => (!e.reduced || i === 0) && snd('reward_chime', { index: i }),
+    );
+    e.animate(c, [
       { opacity: 0, transform: 'rotateY(-95deg) translateY(10px) scale(.94)', filter: 'brightness(2.2)' },
       { opacity: 1, transform: 'rotateY(8deg) translateY(0) scale(1.01)', filter: 'brightness(1.5)', offset: 0.62 },
       { opacity: 1, transform: 'rotateY(0deg) translateY(0) scale(1)', filter: 'brightness(1)' },
-    ], { duration: params.reduced ? 200 : 620, easing: 'cubic-bezier(.16,1,.3,1)' });
-    animate(c.querySelector('.sweep')!, [{ transform: 'translateX(-100%)' }, { transform: 'translateX(100%)' }], { duration: 900, delay: 260, easing: 'ease-out' });
-    await after(params.reduced ? 200 : 500);
-  }
-  await after(300);
-  animate(btn, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 420, easing: 'cubic-bezier(.16,1,.3,1)' });
+    ], { duration: 620, delay: at, easing: 'cubic-bezier(.16,1,.3,1)' });
+    e.animate(c.querySelector('.sweep')!, [{ transform: 'translateX(-100%)' }, { transform: 'translateX(100%)' }], { duration: 900, delay: at + 260, easing: 'ease-out' });
+    at += 500;
+  });
+  at += 300;
+  e.buttons(btn, e.animate(btn, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 420, delay: at, easing: 'cubic-bezier(.16,1,.3,1)' }));
   await new Promise<void>((resolve) => {
     btn.addEventListener('click', () => resolve(), { once: true });
-    if (params.capture) wait(2.2).then(resolve);
+    if (params.capture) wait(at / 1000 + 2.2).then(resolve);
   });
-  snd('ui_tap');
-  await finished(animate(root, [{ opacity: 1 }, { opacity: 0 }], { duration: 380, easing: 'ease-in' }));
-  root.remove();
+  await e.leave(root, 380);
   return 'letter';
 }
 
@@ -238,21 +298,24 @@ export async function letterView(): Promise<void> {
   wrap.append(card);
   ui().append(wrap);
   snd('letter_open');
-  animate(wrap, [{ opacity: 0 }, { opacity: 1 }], { duration: 600, easing: 'ease-out' });
-  animate(card, [{ opacity: 0, transform: 'translateY(24px) scale(.985)', filter: 'brightness(1.6)' }, { opacity: 1, transform: 'translateY(0) scale(1)', filter: 'brightness(1)' }], {
+  const e = entrance();
+  e.animate(wrap, [{ opacity: 0 }, { opacity: 1 }], { duration: 600, easing: 'ease-out' });
+  e.animate(card, [{ opacity: 0, transform: 'translateY(24px) scale(.985)', filter: 'brightness(1.6)' }, { opacity: 1, transform: 'translateY(0) scale(1)', filter: 'brightness(1)' }], {
     duration: 900,
     easing: 'cubic-bezier(.16,1,.3,1)',
   });
+  const acts = card.querySelector<HTMLElement>('.sw-actions')!;
   const parts = Array.from(card.querySelectorAll<HTMLElement>('h2, p, .sign, .sw-actions'));
-  parts.forEach((p, i) => animate(p, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 700, delay: 380 + i * 260, easing: 'cubic-bezier(.16,1,.3,1)' }));
+  parts.forEach((p, i) => {
+    const a = e.animate(p, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 700, delay: 380 + i * 260, easing: 'cubic-bezier(.16,1,.3,1)' });
+    if (p === acts) e.buttons(acts, a);
+  });
   const btn = card.querySelector<HTMLButtonElement>('button')!;
   await new Promise<void>((resolve) => {
     btn.addEventListener('click', () => resolve(), { once: true });
     if (params.capture) wait(9).then(resolve);
   });
-  snd('ui_tap');
-  await finished(animate(wrap, [{ opacity: 1 }, { opacity: 0 }], { duration: 500, easing: 'ease-in' }));
-  wrap.remove();
+  await e.leave(wrap, 500);
 }
 
 /* ---------------------------------------------------------------- end card */
@@ -279,26 +342,25 @@ export async function endCard(): Promise<'replay' | 'enter'> {
   const acts = stage.querySelector<HTMLElement>('.ec-actions')!;
   const r1 = stage.querySelector<SVGCircleElement>('.r1')!;
   const curls = stage.querySelector<HTMLElement>('.ec-curls')!;
-  animate(root, [{ opacity: 0 }, { opacity: 1 }], { duration: 600, easing: 'ease-out' });
+  const e = entrance();
+  e.animate(root, [{ opacity: 0 }, { opacity: 1 }], { duration: 600, easing: 'ease-out' });
   // soft slam (no white blur frame), then a slow exponential settle
-  animate(title, [
+  e.animate(title, [
     { opacity: 0, transform: 'scale(1.3)', filter: 'blur(6px) brightness(1.8)' },
     { opacity: 1, transform: 'scale(1)', filter: 'blur(0) brightness(1)', offset: 0.25 },
     { opacity: 1, transform: 'scale(.96)', filter: 'blur(0) brightness(1)' },
   ], { duration: 1600, easing: 'cubic-bezier(.16,1,.3,1)' });
-  animate(r1, [{ strokeDashoffset: 604 }, { strokeDashoffset: 0 }], { duration: 1400, delay: 150, easing: 'cubic-bezier(.65,0,.35,1)' });
-  animate(curls, [{ opacity: 0, transform: 'translate(-50%,-50%) scale(.94)' }, { opacity: 1, transform: 'translate(-50%,-50%) scale(1)' }], { duration: 1600, delay: 300, easing: 'cubic-bezier(.16,1,.3,1)' });
-  animate(line, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 900, delay: 700, easing: 'cubic-bezier(.16,1,.3,1)' });
-  animate(acts, [{ opacity: 0 }, { opacity: 1 }], { duration: 900, delay: 2600, easing: 'ease-out' });
+  e.animate(r1, [{ strokeDashoffset: 604 }, { strokeDashoffset: 0 }], { duration: 1400, delay: 150, easing: 'cubic-bezier(.65,0,.35,1)' });
+  e.animate(curls, [{ opacity: 0, transform: 'translate(-50%,-50%) scale(.94)' }, { opacity: 1, transform: 'translate(-50%,-50%) scale(1)' }], { duration: 1600, delay: 300, easing: 'cubic-bezier(.16,1,.3,1)' });
+  e.animate(line, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 900, delay: 700, easing: 'cubic-bezier(.16,1,.3,1)' });
+  e.buttons(acts, e.animate(acts, [{ opacity: 0 }, { opacity: 1 }], { duration: 900, delay: 2600, easing: 'ease-out' }));
   // breathing drift on the held card
-  animate(stage, [{ transform: 'scale(1)' }, { transform: 'scale(.985)' }], { duration: 9000, delay: 1600, iterations: Infinity, direction: 'alternate', easing: 'ease-in-out' });
+  if (!params.reduced) animate(stage, [{ transform: 'scale(1)' }, { transform: 'scale(.985)' }], { duration: 9000, delay: 1600, iterations: Infinity, direction: 'alternate', easing: 'ease-in-out' });
   const v = await new Promise<'replay' | 'enter'>((resolve) => {
     acts.querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => resolve(b.dataset.v as 'replay' | 'enter'), { once: true }));
     if (params.capture) wait(6).then(() => resolve('enter'));
   });
-  snd('ui_tap');
-  await finished(animate(root, [{ opacity: 1 }, { opacity: 0 }], { duration: 600, easing: 'ease-in' }));
-  root.remove();
+  await e.leave(root, 600);
   return v;
 }
 

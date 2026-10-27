@@ -234,6 +234,8 @@ export function holdToCharge(opts: HoldOpts): Promise<void> {
   };
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key !== ' ' && e.key !== 'Enter') return;
+    // a focused button (Skip) keeps its own key
+    if (!done && (e.target as Element | null)?.closest?.('button')) return;
     if (done) {
       if (keyHeld) {
         e.preventDefault();
@@ -247,12 +249,12 @@ export function holdToCharge(opts: HoldOpts): Promise<void> {
     setPressed(true, uiNow());
   };
   const onKeyUp = (e: KeyboardEvent) => {
-    if (e.key !== ' ' && e.key !== 'Enter') return;
+    // only the release of a key the hold took: a button's Space acts on its release
+    if ((e.key !== ' ' && e.key !== 'Enter') || !keyHeld) return;
     e.preventDefault();
-    const was = keyHeld;
     keyHeld = false;
     if (done) {
-      if (was) e.stopImmediatePropagation();
+      e.stopImmediatePropagation();
       maybeCleanup();
       return;
     }
