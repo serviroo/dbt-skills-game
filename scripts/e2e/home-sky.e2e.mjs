@@ -1,7 +1,8 @@
 // Home's sky follows the device's clock: dawn (05:00-08:00), day, dusk (17:00-20:00) and night, which is the sky the
 // companion always shows. Each mood is a picture in public/sky/. With Playwright's clock at each mood: Home shows it
-// (data-sky, the mood's picture loaded from this origin and painted where it should be), every visible text passes
-// WCAG AA against it at phone, small phone and sideways sizes, and the Safe Zone button keeps its contrast. Crossing
+// (data-sky, the mood's picture loaded from this origin and painted where it should be), and the Safe Zone button keeps
+// its contrast. Every visible text keeps 5.4:1 against the sky at every scroll position, 80 px apart, on a first visit
+// and on a returning player's Home with the daily gift opened, from a 320 px phone to a 1920x1080 screen. Crossing
 // 08:00 with Home open drifts over seconds without dipping toward night; with reduced motion it switches at once.
 // Leaving Home stops its clock watch and gives the other screens the night sky back, at once for the Safe Zone.
 import fs from 'node:fs';
@@ -16,7 +17,19 @@ const SIZES = [
   ['320', { width: 320, height: 568 }],
   ['sideways', { width: 844, height: 390 }],
 ];
+// with the gift opened, phones and the common laptop and desktop screens
+const SCREENS = [
+  ['390', { width: 390, height: 844 }],
+  ['320', { width: 320, height: 568 }],
+  ['1280', { width: 1280, height: 720 }],
+  ['1366', { width: 1366, height: 768 }],
+  ['1440', { width: 1440, height: 900 }],
+  ['1920', { width: 1920, height: 1080 }],
+];
 const MOODS = { dawn: [6, 30], day: [13, 0], dusk: [18, 30], night: [23, 0] };
+// the plain sky before the pictures left every Home text at 5.6:1 or better; a mood may cost a little of that, never
+// more, so even the faintest line keeps a clear margin over WCAG AA's 4.5:1
+const FLOOR = 5.4;
 const DPR = 2;
 const DAYTIME = ['dawn', 'day', 'dusk'];
 
@@ -75,8 +88,21 @@ function skyReader() {
   };
 }
 
-async function home(h, time, query = '?mute', viewport) {
-  const r = await h.open({ 'dbt.app.v1': h.SEEN }, query, viewport, async (ctx) => {
+/** A returning player's save: five days of visits, with today's greeting, card and check-in done and the daily gift
+ *  opened, so Home shows the gift's own lines under the quest. The day turns at 06:00, as the store counts it. */
+function returning(h, time) {
+  const day = (ms) => {
+    const d = new Date(ms - 6 * 3600e3);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  const today = day(time);
+  const events = Array.from({ length: 5 }, (_, i) => ({ id: `sky-v${i}`, k: 'visit', xp: 10, t: time - i * 864e5, day: day(time - i * 864e5) }));
+  const flags = { greetDay: today, cardDay: today, giftDay: today, checkinDay: today, therapistLineShown: true, rankSeen: 9, wardenSeen: true };
+  return { [h.SAVE]: JSON.stringify({ v: 1, events, flags }), 'dbt.app.v1': h.SEEN };
+}
+
+async function home(h, time, query = '?mute', viewport, seed = { 'dbt.app.v1': h.SEEN }) {
+  const r = await h.open(seed, query, viewport, async (ctx) => {
     await ctx.clock.install({ time });
     await ctx.addInitScript(trackTimers);
     await ctx.addInitScript(skyReader);
@@ -227,6 +253,20 @@ async function contrast(page) {
   return rows;
 }
 
+/** Every text's contrast at each scroll position of Home, 80 px apart from the top to the very end. The sky stays put
+ *  while the page moves over it, so each line passes over every part of the sky behind its column. */
+async function sweep(h, page) {
+  const max = await page.evaluate(() => { const r = document.querySelector('.dq'); return r.scrollHeight - r.clientHeight; });
+  const rows = [];
+  for (let y = 0; ; y = Math.min(y + 80, max)) {
+    await page.evaluate((top) => document.querySelector('.dq').scrollTo({ top, behavior: 'instant' }), y);
+    await h.sleep(100);
+    for (const r of await contrast(page)) rows.push({ ...r, y });
+    if (y >= max) return rows;
+  }
+}
+const weakest = (rows) => rows.reduce((a, r) => (r.score < a.score ? r : a));
+
 /** The painted sky alone: the middle of its top edge (under the top bar) and the band just above the ridges, where
  *  dawn and dusk glow (the pictures put the horizon at 43% of a tall one and 55% of a wide one). */
 async function skyPixels(page) {
@@ -333,7 +373,7 @@ async function safeAtOnce(h, page, move, what) {
 }
 
 export const scenarios = {
-  /** each mood at its hour: the attribute, the painted sky, AA text at three sizes and the Safe Zone button */
+  /** each mood at its hour: the attribute, the painted sky, the text over it at three sizes and the Safe Zone button */
   async 'home-sky-moods'(h) {
     const { expect, out, shot } = h;
     const seen = {};
@@ -356,15 +396,12 @@ export const scenarios = {
         expect(pic.url === `/sky/${mood}-${shape}.webp` && pic.same, `${mood} at ${name} does not draw its own ${shape} picture from this origin: ` + JSON.stringify(pic));
         expect(pic.miss <= 10, `${mood} at ${name}: the painted sky is not the picture (off by ${pic.miss}): ` + JSON.stringify(pic));
         if (name === '390') seen[mood] = { px: await skyPixels(page), safe: await safeButton(page) };
-        const all = await contrast(page);
-        await page.evaluate(() => { const r = document.querySelector('.dq'); r.scrollTo({ top: r.scrollHeight, behavior: 'instant' }); });
-        await h.sleep(300);
-        all.push(...(await contrast(page)));
+        const all = await sweep(h, page);
         await shot(page, `${mood}-${name}-end`);
-        rows[name] = all;
-        const low = all.filter((r) => r.score < r.need);
+        rows[name] = weakest(all);
+        const low = all.filter((r) => r.score < FLOOR);
         expect(all.length > 10, `only ${all.length} text pieces found on Home at ${name}`);
-        expect(!low.length, `${mood} at ${name}: text below WCAG AA: ${JSON.stringify(low.slice(0, 8))}`);
+        expect(!low.length, `${mood} at ${name}: text below ${FLOOR}:1: ${JSON.stringify(low.slice(0, 8))}`);
       }
       fs.writeFileSync(path.join(out, `home-sky-${mood}.json`), JSON.stringify({ sky, pictures, seen: seen[mood], rows }, null, 2));
       expect(!errors.length, errors.join('\n'));
@@ -398,6 +435,43 @@ export const scenarios = {
       expect(ratio(s.inside, seen.night.safe.inside) <= 1.1, `the Safe Zone button itself looks different at ${m}: ${s.inside} vs night ${seen.night.safe.inside}`);
     }
     return { moods: Object.fromEntries(names.map((m) => [m, { top: seen[m].px.top, band: seen[m].px.band, safe: seen[m].safe.label }])) };
+  },
+
+  /** a returning player with today's gift opened: every text at every scroll position, in each mood, on phones and
+   *  on laptop and desktop screens. Every mood and size runs even when one fails, so a failure names all it reaches. */
+  async 'home-sky-contrast'(h) {
+    const { expect, out, shot } = h;
+    const bad = [];
+    const table = {};
+    for (const [mood, [hh, mm]] of Object.entries(MOODS)) {
+      const time = at(hh, mm);
+      const { ctx, page, errors } = await home(h, time, '?mute', SCREENS[0][1], returning(h, time));
+      await settle(h, page);
+      expect((await skyOf(page)).mood === mood, `Home at ${hh}h is not ${mood}: ` + JSON.stringify(await skyOf(page)));
+      expect(await page.locator('.dq-gift:not(.is-hidden) .dq-gift-k').isVisible(), "today's gift is not open on Home");
+      table[mood] = {};
+      for (const [name, size] of SCREENS) {
+        await page.setViewportSize(size);
+        await h.sleep(500);
+        const rows = await sweep(h, page);
+        const low = rows.filter((r) => r.score < FLOOR);
+        const w = weakest(rows);
+        // the three weakest lines, each at its weakest place, so the report shows the sky's own margin next to any text
+        // that sits on a panel of its own
+        const least = [...new Map([...rows].sort((a, b) => b.score - a.score).map((r) => [r.text, r])).values()].sort((a, b) => a.score - b.score);
+        table[mood][name] = { positions: new Set(rows.map((r) => r.y)).size, weakest: least.slice(0, 3).map((r) => ({ text: r.text, where: r.where, score: r.score, y: r.y })) };
+        if (rows.length < 10) bad.push(`${mood} at ${name}: only ${rows.length} text pieces found`);
+        if (!low.length) continue;
+        bad.push(`${mood} at ${name}: ${low.length} text below ${FLOOR}:1, weakest ${JSON.stringify(w)}`);
+        await page.evaluate((top) => document.querySelector('.dq').scrollTo({ top, behavior: 'instant' }), w.y);
+        await shot(page, `low-${mood}-${name}-y${w.y}`);
+      }
+      if (errors.length) bad.push(errors.join('\n'));
+      await ctx.close();
+    }
+    fs.writeFileSync(path.join(out, 'home-sky-contrast.json'), JSON.stringify(table, null, 2));
+    expect(!bad.length, bad.join('\n'));
+    return Object.fromEntries(Object.entries(table).map(([m, t]) => [m, Object.fromEntries(Object.entries(t).map(([n, r]) => [n, r.score]))]));
   },
 
   /** 07:58 to 08:00 with Home open: day's picture comes in over dawn's over seconds, never in one frame, and dawn's
