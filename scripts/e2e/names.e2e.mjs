@@ -4,9 +4,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /** taps the title once it is on screen: on a busy machine it comes up later than any fixed wait */
-async function tapTitle(page) {
+async function tapTitle(page, note) {
   const title = page.locator('.title-screen');
   await title.waitFor({ timeout: 30000 });
+  note?.(page, 'tap title');
   await title.click();
 }
 
@@ -26,7 +27,7 @@ async function saveCrystal({ open, openSettings, out, shared, expect, deepFind, 
 
 export const scenarios = {
   /** first run: the prompt appears after the title, the chosen names are stored and used in the intro */
-  async 'first-run'({ open, sleep, shot, youOf, expect, out, shared }) {
+  async 'first-run'({ open, sleep, shot, youOf, expect, leaves, out, shared }) {
     const { ctx, page, errors } = await open();
     await tapTitle(page);
     const name = page.locator('#np-name');
@@ -38,8 +39,9 @@ export const scenarios = {
     expect(await page.locator('#np-comp').evaluate((el) => el === document.activeElement), 'Enter did not move to the companion field');
     await page.locator('#np-comp').fill('Pip');
     await shot(page, '02-name-prompt-filled');
+    const left = leaves(page, '#np-name');
     await page.keyboard.press('Enter');
-    await page.locator('#np-name').waitFor({ state: 'detached', timeout: 10000 });
+    await left(10000);
     const you = await youOf(page);
     expect(you?.name === 'Robin b' && you?.companion === 'Pip' && you.nameAt > 0 && you.companionAt > 0, 'names not stored cleanly: ' + JSON.stringify(you));
     await page.getByText('Wanderer: Robin b').first().waitFor({ timeout: 60000 }).catch(async (e) => { await shot(page, 'fail-first-run'); fs.writeFileSync(path.join(out, 'fail-first-run.txt'), await page.locator('#ui').innerText().catch(() => '')); throw e; });
@@ -51,12 +53,13 @@ export const scenarios = {
   },
 
   /** skipping keeps the defaults and is never asked again */
-  async 'skip-keeps-default'({ open, youOf, expect }) {
+  async 'skip-keeps-default'({ open, youOf, expect, leaves }) {
     const { ctx, page, errors } = await open();
     await tapTitle(page);
     await page.locator('#np-name').waitFor({ timeout: 15000 });
+    const left = leaves(page, '#np-name');
     await page.getByRole('button', { name: 'Skip' }).click();
-    await page.locator('#np-name').waitFor({ state: 'detached', timeout: 10000 });
+    await left(10000);
     const you = await youOf(page);
     expect(you && you.name === '' && you.companion === '' && you.nameAt === 0 && you.companionAt === 0, 'skip did not record an empty choice: ' + JSON.stringify(you));
     await page.getByText('Wanderer: Player').first().waitFor({ timeout: 60000 });
@@ -185,26 +188,63 @@ export const scenarios = {
   },
 
   /** two first-run prompts open at once: a Skip in one never erases the names chosen in the other */
-  async 'two-prompts'({ server, open, sleep, youOf, expect }) {
+  async 'two-prompts'({ server, open, sleep, youOf, expect, note, leaves }) {
     const { ctx, page: a, errors } = await open();
     const b = await ctx.newPage();
     b.on('pageerror', (e) => errors.push('pageerror B: ' + e.message));
     await b.goto(server.url + '/?mute');
     for (const p of [a, b]) {
-      await tapTitle(p);
+      await tapTitle(p, note);
       await p.locator('#np-name').waitFor({ timeout: 15000 });
+      note(p, 'prompt seen');
     }
     await a.locator('#np-name').fill('Robin');
     await a.locator('#np-comp').fill('Pip');
+    const leftA = leaves(a, '#np-name');
+    note(a, 'tap Continue');
     await a.getByRole('button', { name: 'Continue' }).click();
-    await a.locator('#np-name').waitFor({ state: 'detached', timeout: 10000 });
+    await leftA(10000);
     await sleep(300);
+    const leftB = leaves(b, '#np-name');
+    note(b, 'tap Skip');
     await b.getByRole('button', { name: 'Skip' }).click();
-    await b.locator('#np-name').waitFor({ state: 'detached', timeout: 10000 });
+    await leftB(10000);
     for (const p of [a, b]) {
       const you = await youOf(p);
       expect(you?.name === 'Robin' && you?.companion === 'Pip', 'a Skip erased the chosen names: ' + JSON.stringify(you));
     }
+    expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /** the page freezes right after the prompt leaves, as CI's software GPU does on the first 3D frame: the prompt's
+   * leaving is still seen within the usual 10 s, and the names are stored */
+  async 'frozen-after-prompt'({ open, youOf, expect, leaves }) {
+    const { ctx, page, errors } = await open({}, '?mute', undefined, (c) =>
+      c.addInitScript(() => {
+        let seen = false;
+        new MutationObserver((_, o) => {
+          if (document.querySelector('#np-name')) seen = true;
+          else if (seen) {
+            o.disconnect();
+            requestAnimationFrame(() => {
+              const t0 = performance.now();
+              for (const end = t0 + 11000; performance.now() < end; );
+              window.__stall = performance.now() - t0;
+            });
+          }
+        }).observe(document, { childList: true, subtree: true });
+      }),
+    );
+    await tapTitle(page);
+    await page.locator('#np-name').fill('Robin');
+    const left = leaves(page, '#np-name');
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await left(10000);
+    // the freeze really ran (this waits for it to end), so the check cannot pass without it
+    const stall = await page.waitForFunction(() => window.__stall, null, { timeout: 30000 }).then((h) => h.jsonValue()).catch(() => 0);
+    expect(stall >= 11000, `the page never froze after the prompt left (stall ${stall} ms), so this check proved nothing`);
+    expect((await youOf(page))?.name === 'Robin', 'Continue did not store the name');
     expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },
@@ -227,7 +267,7 @@ export const scenarios = {
   },
 
   /** a phone on its side: the prompt's buttons are on screen and work */
-  async 'landscape-prompt'({ open, sleep, shot, youOf, expect }) {
+  async 'landscape-prompt'({ open, sleep, shot, youOf, expect, leaves }) {
     const { ctx, page, errors } = await open({}, '?mute', { width: 568, height: 320 });
     await tapTitle(page);
     await page.locator('#np-name').waitFor({ timeout: 15000 });
@@ -238,8 +278,9 @@ export const scenarios = {
       expect(box && box.y >= 0 && box.y + box.height <= 320 && box.x >= 0 && box.x + box.width <= 568, `${label} is off screen: ${JSON.stringify(box)}`);
     }
     await page.locator('#np-name').fill('Robin');
+    const left = leaves(page, '#np-name');
     await page.getByRole('button', { name: 'Continue' }).click();
-    await page.locator('#np-name').waitFor({ state: 'detached', timeout: 10000 });
+    await left(10000);
     expect((await youOf(page))?.name === 'Robin', 'landscape Continue did not store the name');
     expect(!errors.length, errors.join('\n'));
     await ctx.close();
