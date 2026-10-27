@@ -1,5 +1,5 @@
 import { companionName, playerName } from '../core/you';
-import { params } from '../core/params';
+import { params, setMotion } from '../core/params';
 import { cleared, onClear } from '../core/cleared';
 import { animate } from '../ui/anim';
 import { BUZZ, BUZZ_GAP, WINDOW } from '../motion/tokens';
@@ -225,9 +225,10 @@ export class App {
 
   reduced() {
     const m = this.store.state.settings.motion;
-    return m === 'reduce' || (m === 'system' && params.reduced);
+    return m === 'reduce' || (m === 'system' && params.systemReduced);
   }
   applyMotion() {
+    setMotion(this.store.state.settings.motion);
     const still = this.reduced();
     this.root.classList.toggle('is-still', still);
     this.bubbles.resize();

@@ -1,5 +1,6 @@
 import '../styles/lantern-window.css';
-import { after, animate, complete, el, wait } from './anim';
+import { after, animate, complete, el, finished, wait } from './anim';
+import { inertUntil, onTaps } from './taps';
 import { params } from '../core/params';
 import { EASE, LEVEL, WINDOW as W, css, fr } from '../motion/tokens';
 
@@ -213,6 +214,8 @@ export interface RevealCtx {
   reduced: boolean;
   /** schedules an animation that a tap-to-skip completes */
   animate: (el: Element, frames: Keyframe[], opts: KeyframeAnimationOptions) => Animation;
+  /** runs `fn` `ms` into the reveal, unless the typing has ended (a tap completed it, or the window went) */
+  cue: (ms: number, fn: () => void) => void;
 }
 
 export type WindowCue = 'land' | 'row' | 'typed';
@@ -229,8 +232,7 @@ export class LanternWindow {
   private typeAnims: Animation[] = [];
   private typing = false;
   private skipRes: (() => void) | null = null;
-  private skipEv: Event | null = null;
-  private offSkip: (() => void) | null = null;
+  private offInput: (() => void) | null = null;
   private reduced = params.reduced;
   private resolveTap: ((v: string) => void) | null = null;
   /** an answer that came before anyone waited for one (a button tapped while the window opens), kept for waitForInput */
@@ -345,30 +347,41 @@ export class LanternWindow {
     this.reduced = params.reduced || this.root.classList.contains('dq-sw--still');
     this.root.style.visibility = 'visible';
     windowSounds.open?.(kind);
+    this.listen();
     let hookAt = 0;
-    const ctx: RevealCtx = { root: this.root, reduced: this.reduced, animate: (e, f, o) => this.typed(e, f, { ...o, delay: hookAt + Number(o.delay ?? 0) }) };
+    const ctx: RevealCtx = {
+      root: this.root,
+      reduced: this.reduced,
+      animate: (e, f, o) => this.typed(e, f, { ...o, delay: hookAt + Number(o.delay ?? 0) }),
+      cue: (ms, fn) => this.cue(hookAt + ms, fn),
+    };
     const rolls = Array.from(this.root.querySelectorAll<HTMLElement>('.sw-roll')).map(buildRoll);
+    const acts = this.root.querySelector<HTMLElement>('.sw-actions');
     if (this.reduced) {
       this.spec.reveal?.(ctx);
       for (const r of rolls) r.oldN.style.opacity = '0';
-      animate(this.root, [{ opacity: 0 }, { opacity: 1 }], { duration: W.reducedFadeMs, easing: css(EASE.outCubic) });
-      await after(W.reducedFadeMs);
-      if (this.gone) return;
-      if (this.spec.tapToContinue) this.next.style.opacity = '0.85';
-      this.spec.onCue?.('typed');
-      return;
+      // the one fade is the whole opening: a press during it completes it, like a tap while the Lantern types
+      const shown = this.typed(this.root, [{ opacity: 0 }, { opacity: 1 }], { duration: W.reducedFadeMs, easing: css(EASE.outCubic) });
+      if (acts) inertUntil(acts, finished(shown));
+      return this.typeOut(W.reducedFadeMs);
     }
 
     // 1. stepped height open (frames 0, 2, 4, 6, 8)
     const h = this.plate.offsetHeight;
     const steps = W.openSteps.map((s, i) => (i === 0 ? Math.max(W.lineMinPx / h, s) : s));
     const D = fr(W.openStepFrames * (steps.length - 1));
-    const hold = (k: Keyframe, i: number, n: number): Keyframe => ({ ...k, offset: i / (n - 1), easing: 'steps(1, end)' });
-    animate(this.plate, steps.map((s, i, a) => hold({ clipPath: `inset(${((1 - s) / 2) * 100}% -2px ${((1 - s) / 2) * 100}% -2px)` }, i, a.length)), { duration: D, easing: 'linear' });
+    // each step changes a quarter frame before its frame boundary, so rounding to the display's frames never shows a
+    // step for one frame instead of two
+    const lead = fr(W.openStepLeadFrames) / D;
+    const stepped = (vals: number[], key: (v: number) => Keyframe): Keyframe[] => [
+      ...vals.map((v, i) => ({ ...key(v), offset: i && i / (vals.length - 1) - lead, easing: 'steps(1, end)' })),
+      { ...key(vals[vals.length - 1]), offset: 1 },
+    ];
+    animate(this.plate, stepped(steps, (s) => ({ clipPath: `inset(${((1 - s) / 2) * 100}% -2px ${((1 - s) / 2) * 100}% -2px)` })), { duration: D, easing: 'linear' });
     const ys = steps.map((s) => ((1 - s) * h) / 2);
     const [bt, bb] = this.bars;
-    animate(bt, ys.map((y, i, a) => hold({ transform: `translateY(${y}px)` }, i, a.length)), { duration: D, easing: 'linear' });
-    animate(bb, ys.map((y, i, a) => hold({ transform: `translateY(${-y}px)` }, i, a.length)), { duration: D, easing: 'linear' });
+    animate(bt, stepped(ys, (y) => ({ transform: `translateY(${y}px)` })), { duration: D, easing: 'linear' });
+    animate(bb, stepped(ys, (y) => ({ transform: `translateY(${-y}px)` })), { duration: D, easing: 'linear' });
     this.startPlasma();
 
     // 2. glitch-in on the frame only: slices shift each frame, bars twitch sideways, a decaying cyan wash
@@ -441,32 +454,39 @@ export class LanternWindow {
     }
     if (lineMode) at += W.bodyLineMs;
     if (!rolls.length && bigEnd) cues.push([bigEnd, 'land']);
-    const acts = this.root.querySelector('.sw-actions');
     if (acts) {
       at += fr(W.actionsDelayFrames);
-      this.typed(acts, [{ opacity: 0 }, { opacity: 1 }], { duration: W.actionsFadeMs, delay: at, easing: css(EASE.outCubic) });
+      // a press where a button hasn't shown yet finishes the typing instead of pressing it
+      inertUntil(acts, finished(this.typed(acts, [{ opacity: 0 }, { opacity: 1 }], { duration: W.actionsFadeMs, delay: at, easing: css(EASE.outCubic) })));
       at += W.actionsFadeMs;
     }
-    for (const [t, c, i] of cues) after(t).then(() => this.typing && this.spec.onCue?.(c, i));
+    for (const [t, c, i] of cues) this.cue(t, () => this.spec.onCue?.(c, i));
 
     // 4. a tap (or Enter / Space) while the Lantern types completes the text at once
+    return this.typeOut(at);
+  }
+
+  /** The opening lasts `ms` and until it is really on screen: every animation of it has finished on the frames drawn,
+   *  a reveal's own ones included, so a tap before then completes it however late the frames come. */
+  private async typeOut(ms: number) {
     this.typing = true;
     const skipped = new Promise<void>((r) => (this.skipRes = r));
-    const onSkip = (e: Event) => {
-      if (!this.typing) return;
-      if (e instanceof KeyboardEvent && e.key !== 'Enter' && e.key !== ' ') return;
-      if ((e.target as Element | null)?.closest?.('.sw-btn, .ui-skip')) return;
-      this.skipEv = e;
-      this.skipTyping();
-    };
-    window.addEventListener('pointerup', onSkip);
-    window.addEventListener('keydown', onSkip);
-    this.offSkip = () => {
-      window.removeEventListener('pointerup', onSkip);
-      window.removeEventListener('keydown', onSkip);
-    };
-    await Promise.race([after(at), skipped]);
+    await Promise.race([Promise.all([after(ms), ...this.typeAnims.map((a) => finished(a).catch(() => undefined))]), skipped]);
     this.endTyping();
+  }
+
+  private cue(ms: number, fn: () => void) {
+    after(ms).then(() => this.typing && fn());
+  }
+
+  /** Taps and Enter / Space from open to close: one completes the typing, or answers a tap-to-continue window. */
+  private listen() {
+    this.offInput ??= onTaps((tap) => {
+      if (this.typing) return this.skipTyping();
+      if (!this.spec.tapToContinue) return;
+      if (tap) windowSounds.tap?.();
+      this.answer('tap');
+    });
   }
 
   /** Completes the typed text now (a tap while the Lantern types). */
@@ -479,12 +499,11 @@ export class LanternWindow {
   private endTyping() {
     if (!this.typing) return;
     this.typing = false;
-    this.offSkip?.();
-    this.offSkip = null;
     this.skipRes?.();
     this.spec.onCue?.('typed');
-    if (this.spec.tapToContinue && this.root.isConnected)
-      animate(this.next, [{ opacity: W.nextPulseLow }, { opacity: 1 }], { duration: W.nextPulseMs, iterations: Infinity, direction: 'alternate', easing: css(EASE.inOutSine) });
+    if (!this.spec.tapToContinue || !this.root.isConnected) return;
+    if (this.reduced) this.next.style.opacity = '0.85';
+    else animate(this.next, [{ opacity: W.nextPulseLow }, { opacity: 1 }], { duration: W.nextPulseMs, iterations: Infinity, direction: 'alternate', easing: css(EASE.inOutSine) });
   }
 
   /** Answers the wait for input. One that comes while the window still opens, before anyone waits, is kept for
@@ -508,32 +527,9 @@ export class LanternWindow {
         if (done) return;
         done = true;
         this.resolveTap = null;
-        window.removeEventListener('pointerup', onTap);
-        window.removeEventListener('keydown', onKey);
         resolve(v);
       };
       this.resolveTap = finish;
-      const onTap = (e: PointerEvent) => {
-        if (!this.spec.tapToContinue) return;
-        if ((e.target as HTMLElement).closest('.sw-btn, .ui-skip')) return;
-        if (e === this.skipEv) return;
-        if (this.typing) {
-          this.skipEv = e;
-          return this.skipTyping();
-        }
-        windowSounds.tap?.();
-        finish('tap');
-      };
-      const onKey = (e: KeyboardEvent) => {
-        if (!this.spec.tapToContinue || (e.key !== 'Enter' && e.key !== ' ') || e === this.skipEv) return;
-        if (this.typing) {
-          this.skipEv = e;
-          return this.skipTyping();
-        }
-        finish('tap');
-      };
-      window.addEventListener('pointerup', onTap);
-      window.addEventListener('keydown', onKey);
       if (timeoutSec > 0) wait(timeoutSec).then(() => finish('timeout'));
     });
   }
@@ -541,6 +537,7 @@ export class LanternWindow {
   /** Measured close: one frame at scale .85 with a soft wash, 167 ms collapse to a bright bar, the bar fades. */
   async close() {
     if (this.gone) return;
+    this.offInput?.();
     this.skipTyping();
     windowSounds.close?.();
     const h = this.plate.offsetHeight;
@@ -580,7 +577,7 @@ export class LanternWindow {
   destroy() {
     live.delete(this);
     this.gone = true;
-    this.offSkip?.();
+    this.offInput?.();
     this.typing = false;
     this.skipRes?.();
     this.typeAnims.forEach((a) => a.cancel());

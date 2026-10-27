@@ -52,6 +52,37 @@ export const scenarios = {
     await ctx.close();
   },
 
+  /** a quick player types both names while the Lantern is still typing the prompt and keeps typing as it finishes:
+   * every key stays in the field the player chose and the names are saved exactly */
+  async 'quick-typing'({ open, youOf, expect }) {
+    const { ctx, page, errors } = await open();
+    await tapTitle(page);
+    const name = page.locator('#np-name');
+    await name.waitFor({ timeout: 15000 });
+    const fields = () => page.evaluate(() => ({ name: document.querySelector('#np-name').value, comp: document.querySelector('#np-comp').value, focus: document.activeElement?.id || document.activeElement?.tagName, typing: Number(getComputedStyle(document.querySelector('.sw .sw-actions')).opacity) < 1 }));
+    const opened = await fields();
+    // the first keys go in as fast as the browser takes them, so even a slow machine reaches the companion field while
+    // the Lantern is still typing
+    await name.click();
+    await page.keyboard.insertText('Sam');
+    await page.keyboard.press('Enter');
+    await page.keyboard.insertText('Pip');
+    const early = await fields();
+    expect(early.typing, `the Lantern had finished typing before the player reached the companion field, so this run checks nothing: ${JSON.stringify(early)}`);
+    // the Lantern finishes typing (its buttons fade in last) while the player is still typing the companion's name
+    await page.waitForFunction(() => Number(getComputedStyle(document.querySelector('.sw .sw-actions')).opacity) === 1, null, { polling: 'raf' });
+    await page.keyboard.type(' the moth', { delay: 120 });
+    const typed = await fields();
+    expect(typed.name === 'Sam' && typed.comp === 'Pip the moth' && typed.focus === 'np-comp', `keys landed in the wrong field: ${JSON.stringify(typed)}`);
+    await page.keyboard.press('Enter');
+    await name.waitFor({ state: 'detached', timeout: 10000 });
+    const you = await youOf(page);
+    expect(you?.name === 'Sam' && you?.companion === 'Pip the moth', 'names not saved exactly: ' + JSON.stringify(you));
+    expect(opened.focus === 'np-name', `the name field did not take focus as the prompt opened: ${JSON.stringify(opened)}`);
+    expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
   /** skipping keeps the defaults and is never asked again */
   async 'skip-keeps-default'({ open, youOf, expect, leaves }) {
     const { ctx, page, errors } = await open();

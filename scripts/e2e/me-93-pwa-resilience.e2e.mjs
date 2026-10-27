@@ -179,9 +179,14 @@ function run(args, { env = {}, timeoutMs = 240000 } = {}) {
 }
 
 /** taps the middle of `loc` where it is now, as a player does: a Playwright click first waits for two still frames, which
- *  slow frames or the breathing end card may not give in time */
+ *  slow frames or the breathing end card may not give in time. Like a player, it taps a button once it has shown: until
+ *  then it takes no tap, and a tap there only completes the screen */
 async function tapWhereItIs(page, loc, waitMs = 20000) {
   await loc.waitFor({ timeout: waitMs });
+  await page.waitForFunction((b) => {
+    const r = b.getBoundingClientRect();
+    return b.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
+  }, await loc.elementHandle({ timeout: 2000 }), { timeout: waitMs });
   const box = await loc.boundingBox({ timeout: 2000 });
   if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 }

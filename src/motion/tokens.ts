@@ -28,6 +28,7 @@ export const WINDOW = {
   /** stepped height open, fraction of the final height per step (measured 23 / 61 / 61 / 100 %) */
   openSteps: [0.06, 0.23, 0.61, 0.61, 1],
   openStepFrames: 2,
+  openStepLeadFrames: 0.25,
   lineMinPx: 6,
   /** glitch-in: frames after the panel reaches full height; slices live on the bars and plate edges only */
   glitchFrames: 3,

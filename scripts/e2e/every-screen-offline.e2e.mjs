@@ -218,8 +218,14 @@ async function home(h, page) {
 }
 
 /** taps the middle of `loc` where it is now, as a player does: a Playwright click first waits for two still frames, which a
- *  scene drawing about one frame a second in software can take longer to give than the click waits */
+ *  scene drawing about one frame a second in software can take longer to give than the click waits. Like a player, it
+ *  taps a button once it has shown: until then it takes no tap, and a tap there only completes the screen */
 async function tapWhereItIs(page, loc) {
+  const el = await loc.elementHandle({ timeout: 2000 });
+  await page.waitForFunction((b) => {
+    const r = b.getBoundingClientRect();
+    return b.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
+  }, el, { timeout: 20000 });
   const box = await loc.boundingBox({ timeout: 2000 });
   if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 }
@@ -626,8 +632,7 @@ async function replayIntro(h, page, problems) {
   // the end card breathes, so on slow frames its buttons never hold still for a click: tap Enter the Lantern where it is
   const enter = page.getByRole('button', { name: 'Enter the Lantern' });
   await enter.waitFor({ timeout: 20000 });
-  const box = await enter.boundingBox();
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await tapWhereItIs(page, enter);
   await page.waitForFunction(() => !!window.__daily && document.querySelector('.dq')?.dataset.screen === 'hub', null, { timeout: 30000 });
   await settle(h, page);
   await listen(page);

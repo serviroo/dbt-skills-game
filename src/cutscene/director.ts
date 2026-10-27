@@ -3,7 +3,7 @@ import type { Stage } from '../core/stage';
 import { params } from '../core/params';
 import { clamp, cubicBezier, ease, fbm1, lerp, smoothstep } from '../core/math';
 import { animate, wait, uiNow } from '../ui/anim';
-import { LanternWindow, levelBody, lanternLayer } from '../ui/lantern-window';
+import { LanternWindow, levelBody, lanternLayer, type RevealCtx } from '../ui/lantern-window';
 import { GATE, LEVEL } from '../motion/tokens';
 import { Letterbox, awakenWord, rewardCards, letterView, endCard, fader, skipButton } from '../ui/cutscene-ui';
 import { INTRO, WINDOWS, REWARDS } from '../content/intro';
@@ -292,25 +292,24 @@ export class Director {
       `<p class="center dq-arrived">${Q.arrived}</p><div class="dq-goal">${Q.goal}</div><div class="sw-rows dq-rows">${rows}</div>` +
       `<p class="center dq-warn"><span class="dq-w">WARNING:</span> ${Q.warning}<span class="dq-dots">...</span> <b class="dq-punch">${Q.punch}</b></p>` +
       `<p class="center sys dq-side"><span>${Q.after}</span></p>`;
-    const questWin = this.window({ kind: 'quest', icon: 'alert', title: Q.title, html, width: 'min(92vw, 680px)' }, 3.4);
-    const root = lanternLayer().querySelector<HTMLElement>('.sw[data-kind="quest"]:last-of-type');
-    if (root && !params.reduced) {
-      const live = () => root.isConnected;
+    const reveal = ({ root, reduced, animate, cue }: RevealCtx) => {
+      if (reduced) return;
       root.querySelectorAll<SVGPathElement>('.dq-box path.c').forEach((tick, i) => {
         const at = 0.95 + i * 0.26;
         animate(tick, [{ strokeDashoffset: 1 }, { strokeDashoffset: 0 }], { duration: 190, delay: at * 1000, easing: 'cubic-bezier(.4,0,.2,1)' });
-        wait(at).then(() => live() && this.audio.play('level_tick', { index: i, detune: 200 + i * 200 }));
+        cue(at * 1000, () => this.audio.play('level_tick', { index: i, detune: 200 + i * 200 }));
       });
-      const reveal = (sel: string, at: number, dur: number) => {
+      const show = (sel: string, at: number, dur: number) => {
         const n = root.querySelector<HTMLElement>(sel);
         if (n) animate(n, [{ opacity: 0, filter: 'blur(2px)' }, { opacity: 1, filter: 'blur(0px)' }], { duration: dur, delay: at * 1000, easing: 'cubic-bezier(.16,1,.3,1)' });
       };
-      reveal('.dq-dots', 1.75, 420);
-      reveal('.dq-punch', 2.3, 260);
-      reveal('.dq-side span', 2.75, 500);
-      wait(2.3).then(() => live() && this.audio.play('soft_chime', { gain: 0.5 }));
-    }
-    await questWin;
+      show('.dq-dots', 1.75, 420);
+      show('.dq-punch', 2.3, 260);
+      show('.dq-side span', 2.75, 500);
+      cue(2300, () => this.audio.play('soft_chime', { gain: 0.5 }));
+    };
+    // the reveal runs inside the window's typing, so a tap that completes the typing completes it too
+    await this.window({ kind: 'quest', icon: 'alert', title: Q.title, html, width: 'min(92vw, 680px)', reveal }, 3.4);
   }
 
   /* ---------------------------------------------------------------- beat 4: silhouette, eyes */
