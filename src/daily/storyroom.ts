@@ -1519,16 +1519,21 @@ export function readScreen(app: App, route: Route): ScreenOut {
   setSize(storedSize(app));
 
   /**
-   * The chapter they came from starts just clear of the top bar and its shade (the scroll padding in daily.css). Measured
-   * from the layout, so the screen's entry motion can't shift it, and placed again once the fonts are in unless they
-   * have scrolled since.
+   * The chapter they came from starts just clear of the top bar and its shade (the scroll padding in daily.css), even a
+   * short last one: room after the page lets it scroll that far. Measured from the layout, so the screen's entry motion
+   * can't shift it, and placed again once the fonts are in unless they have scrolled since.
    */
   const openAt = (sec: HTMLElement) => {
     const box = app.root;
+    const room = el.appendChild(h('div', { 'aria-hidden': 'true' }));
     const place = () => {
       let y = 0;
       for (let n: HTMLElement | null = sec; n && n !== box; n = n.offsetParent as HTMLElement | null) y += n.offsetTop;
-      box.scrollTop = y - (parseFloat(getComputedStyle(box).scrollPaddingTop) || 0);
+      const top = y - (parseFloat(getComputedStyle(box).scrollPaddingTop) || 0);
+      // a page shorter than the screen still scrolls a full screen high, so give it a screen of room and trim the excess
+      room.style.height = `${box.clientHeight}px`;
+      room.style.height = `${Math.max(0, box.clientHeight - (box.scrollHeight - box.clientHeight - top))}px`;
+      box.scrollTop = top;
       return box.scrollTop;
     };
     const put = place();
@@ -1560,11 +1565,12 @@ export function readScreen(app: App, route: Route): ScreenOut {
     );
     if (!shown.length) return body.replaceChildren(h('p', { class: 'st-read-empty', text: STORY_READ.empty }));
     body.replaceChildren(...shown.map((x) => x.sec));
-    // an empty chapter isn't shown, so Read from one (a chapter just added) opens at the nearest chapter before it
+    // an empty chapter isn't shown, so Read from one (a chapter just added) opens at the nearest chapter before it; only
+    // chapter 1 opens at the top of the page, so a chapter 2 that comes first (chapter 1 has no words yet) is placed too
     const from = r.ch ? s.chapters.indexOf(r.ch) : -1;
     let at = -1;
     for (const [k, x] of shown.entries()) if (x.i <= from) at = k;
-    if (at > 0) openAt(shown[at].sec);
+    if (at >= 0 && shown[at].i > 0) openAt(shown[at].sec);
   };
   void init().finally(titled);
 

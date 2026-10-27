@@ -27,25 +27,22 @@ const SIDEWAYS = [
 const ALL = [...PHONES, SIDEWAYS[0], { width: 1280, height: 800 }];
 const tag = (vp) => `${vp.width}x${vp.height}`;
 
-/** a story of three long chapters, made through the app's own store */
-async function threeChapters(page) {
-  return page.evaluate(
-    async (texts) => {
-      const { storyStore } = await import('/src/daily/storystore.ts');
-      const ss = storyStore(window.__daily.store.key);
-      const { story, first } = await ss.create('The Long Night');
-      await ss.saveChapter({ ...first, title: 'Winter', text: texts[0] }, [first.rev]);
-      const ids = [first.id];
-      for (const [i, t] of texts.slice(1).entries()) {
-        const next = await ss.addChapter(story.id);
-        await ss.saveChapter({ ...next, title: ['Spring', 'Summer'][i], text: t }, [next.rev]);
-        ids.push(next.id);
-      }
-      return { story: story.id, ch: ids };
-    },
-    [para(8, 'Snow'), para(8, 'Rain'), para(8, 'Sun')],
-  );
-}
+/** a story with these chapters (an empty one has no words yet), made through the app's own store */
+const storyOf = (page, texts) =>
+  page.evaluate(async (texts) => {
+    const { storyStore } = await import('/src/daily/storystore.ts');
+    const ss = storyStore(window.__daily.store.key);
+    const { story, first } = await ss.create('The Long Night');
+    const ids = [];
+    for (const [i, t] of texts.entries()) {
+      const ch = i ? await ss.addChapter(story.id) : first;
+      if (t) await ss.saveChapter({ ...ch, title: ['Winter', 'Spring', 'Summer'][i], text: t }, [ch.rev]);
+      ids.push(ch.id);
+    }
+    return { story: story.id, ch: ids };
+  }, texts);
+/** a story of three long chapters */
+const threeChapters = (page) => storyOf(page, [para(8, 'Snow'), para(8, 'Rain'), para(8, 'Sun')]);
 
 /** where the top bar and its shade end, and where a chapter (its divider) and its heading sit on screen */
 const chapterPlace = (page, i) =>
@@ -57,13 +54,13 @@ const chapterPlace = (page, i) =>
     return { clear: bar + shade, top: sec.top, head: hd.top, headBottom: hd.bottom, vh: innerHeight };
   }, i);
 
-async function openRead(page, ids, ch) {
+async function openRead(page, ids, ch, shown = 3) {
   await page.evaluate((r) => window.__daily.go(r), { name: 'write', id: ids.story, ch });
   await page.getByRole('textbox', { name: /^Page,/ }).waitFor();
   await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Read', exact: true }).click();
   await routeIs(page, 'read');
-  await page.locator('.st-read-ch').nth(2).waitFor();
+  await page.locator('.st-read-ch').nth(shown - 1).waitFor();
 }
 
 export const scenarios = {
@@ -117,6 +114,38 @@ export const scenarios = {
         await h.shot(page, `read-empty-ch4-${at}`);
         h.expect((await page.locator('.st-read-ch').count()) === 3, `${at}: the empty chapter shows in Read`);
         h.expect(p.top >= p.clear - 0.5 && p.top - p.clear < 24 && p.headBottom <= p.vh, `${at}: Read from an empty chapter 4 does not open at chapter 3 (it starts at ${p.top.toFixed(1)}, the bar ends ${p.clear.toFixed(1)})`);
+        h.expect(!errors.length, errors.join('\n'));
+      } finally {
+        await ctx.close();
+      }
+    }
+  },
+
+  /** Read from chapter 2 opens there too when the chapters are too short to scroll, or when chapter 1 has no words yet */
+  async 'story-read-short-or-after-empty'(h) {
+    const cases = [
+      { what: 'two short chapters', texts: [para(1, 'Snow'), para(1, 'Rain')], sec: 1 },
+      { what: 'an empty chapter 1', texts: ['', para(8, 'Rain'), para(8, 'Sun')], sec: 0 },
+      { what: 'an empty chapter 1 and a short chapter 2', texts: ['', para(1, 'Rain')], sec: 0 },
+    ];
+    for (const vp of [PHONES[0], { width: 1280, height: 800 }]) {
+      const at = tag(vp);
+      const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
+      try {
+        await h.reachHub(page);
+        for (const c of cases) {
+          const ids = await storyOf(page, c.texts);
+          await openRead(page, ids, ids.ch[1], c.texts.filter(Boolean).length);
+          await h.sleep(400);
+          const first = await chapterPlace(page, c.sec);
+          await h.sleep(700);
+          const p = await chapterPlace(page, c.sec);
+          await h.shot(page, `read-ch2-${c.texts.map((t) => (t ? (t.length > 400 ? 'long' : 'short') : 'empty')).join('-')}-${at}`);
+          h.expect(Math.abs(p.top - first.top) <= 1, `${at}, ${c.what}: Read from chapter 2 moved after it opened (${first.top.toFixed(1)} to ${p.top.toFixed(1)})`);
+          h.expect(p.top >= p.clear - 0.5 && p.top - p.clear < 24 && p.headBottom <= p.vh, `${at}, ${c.what}: Read from chapter 2 does not open at chapter 2 (it starts at ${p.top.toFixed(1)}, the bar ends ${p.clear.toFixed(1)})`);
+          await page.getByRole('button', { name: 'Back to writing' }).click();
+          await routeIs(page, 'write');
+        }
         h.expect(!errors.length, errors.join('\n'));
       } finally {
         await ctx.close();
