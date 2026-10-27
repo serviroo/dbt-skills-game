@@ -23,9 +23,9 @@ function fold(text: string): { s: string; at: number[] } {
   return { s, at };
 }
 
-/** The words looked for, folded the same way: at most 8, none repeated. */
+/** The words looked for, folded the same way, none repeated. */
 export function terms(query: string): string[] {
-  return [...new Set(fold(query.slice(0, 200)).s.split(/\s+/).filter(Boolean))].slice(0, 8);
+  return [...new Set(fold(query.slice(0, 200)).s.split(/\s+/).filter(Boolean))];
 }
 
 /** Every place any of the words appears, in order, overlaps joined. */

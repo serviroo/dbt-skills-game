@@ -168,6 +168,9 @@ export const scenarios = {
         // nothing found
         r = await search(h, page, 'zebra');
         h.expect(r.status === 'Nothing matches that yet.' && !r.stories.length, `${at}: no match reads "${r.status}"`);
+        // every word counts, however many: eight that are in Winter and a ninth that is nowhere find nothing
+        r = await search(h, page, 'snow fell on the cafe by harbour lamp zebra');
+        h.expect(r.status === 'Nothing matches that yet.' && !r.stories.length, `${at}: a ninth word was left out: ${JSON.stringify(r.stories)}`);
 
         // notes, with two words that aren't side by side
         r = await search(h, page, 'key ferry');
