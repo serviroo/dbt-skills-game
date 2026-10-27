@@ -180,8 +180,8 @@ function run(args, { env = {}, timeoutMs = 240000 } = {}) {
 
 /** taps the middle of `loc` where it is now, as a player does: a Playwright click first waits for two still frames, which
  *  slow frames or the breathing end card may not give in time */
-async function tapWhereItIs(page, loc) {
-  await loc.waitFor({ timeout: 20000 });
+async function tapWhereItIs(page, loc, waitMs = 20000) {
+  await loc.waitFor({ timeout: waitMs });
   const box = await loc.boundingBox({ timeout: 2000 });
   if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 }
@@ -190,7 +190,8 @@ async function closingCards(page, sleep) {
   const note = page.getByRole('button', { name: 'Read the note' });
   await note.waitFor({ timeout: 60000 });
   for (let i = 0; i < 40 && (await page.locator('.rw').count()); i++) {
-    await tapWhereItIs(page, note).catch(() => {});
+    // a short wait inside the retry loop, so a run that fails here reports in under two minutes, not fourteen
+    await tapWhereItIs(page, note, 2000).catch(() => {});
     await sleep(500);
   }
   await tapWhereItIs(page, page.getByRole('button', { name: 'Continue' }));
@@ -497,8 +498,9 @@ export const scenarios = {
         await b.ctx.route('**/fonts/*.woff2', () => {});
         await b.page.goto(srv.url + '?mute', { waitUntil: 'commit' });
         await ready(b.page, 10000);
+        const left = h.leaves(b.page, '#np-name');
         await startIntro(b.page, sleep);
-        await b.page.locator('#np-name').waitFor({ state: 'detached', timeout: 5000 });
+        await left(5000);
         expect(!b.errors.length, b.errors.join('\n'));
       } finally {
         await b.ctx.close();

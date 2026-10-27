@@ -77,6 +77,10 @@ try {
       let result;
       try {
         result = await run(h);
+      } catch (e) {
+        // what every page still open showed when the scenario failed
+        if (!interrupted) await h.evidenceAll('fail-' + name.replace(/[^\w-]+/g, '-'));
+        throw e;
       } finally {
         await Promise.all(h.browser.contexts().map((ctx) => ctx.close()));
       }
