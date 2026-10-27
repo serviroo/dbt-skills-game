@@ -70,12 +70,17 @@ const ctx2d = (c: HTMLCanvasElement) => c.getContext('2d')!;
 type Box = [number, number, number, number];
 /** A group of strokes' light (see InkPad.kept): its canvas and box on the halo, what it holds and whether it's ready. */
 type Group = { c: HTMLCanvasElement | null; box: Box | null; key: (Stroke | null)[] | null; ok: boolean };
-/** Replaces everything on g with the canvas from, or only what is in box b (canvas px). */
+/**
+ * Replaces everything on g with the canvas from, or only what is in box b (whole canvas px). It clears and draws only
+ * that box: Chromium may take a 'copy' draw for one over the whole canvas and drop what lies outside its clip.
+ */
 const paste = (g: CanvasRenderingContext2D, from: HTMLCanvasElement, b?: Box) => {
+  const [x, y, w, h] = b ? [b[0], b[1], b[2] - b[0], b[3] - b[1]] : [0, 0, g.canvas.width, g.canvas.height];
+  if (w <= 0 || h <= 0) return;
   g.save();
-  if (b) clip(g, b);
-  g.globalCompositeOperation = 'copy';
-  g.drawImage(from, 0, 0);
+  g.globalCompositeOperation = 'source-over';
+  g.clearRect(x, y, w, h);
+  g.drawImage(from, x, y, w, h, x, y, w, h);
   g.restore();
 };
 const clip = (g: CanvasRenderingContext2D, b: Box) => {
