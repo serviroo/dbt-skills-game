@@ -89,7 +89,7 @@ export class Director {
   }
 
   async init() {
-    this.w = await buildWorld(this.stage);
+    this.w = await this.stage.loading(buildWorld(this.stage));
     this.lb = new Letterbox();
     characterLighting();
     this.baseBloom = this.stage.bloom.intensity;
@@ -396,7 +396,7 @@ export class Director {
       return;
     }
     awaken.group.visible = true;
-    const { awakenSequence, HIT } = await import('./awaken-shots');
+    const { awakenSequence, HIT } = await this.stage.loading(import('./awaken-shots'));
     this.stopIfSkipped();
     const seq = awakenSequence(this.stage, awaken as never, jw, cam);
     this.shot = null;

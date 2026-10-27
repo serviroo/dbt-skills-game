@@ -184,7 +184,7 @@ async function playIntro(stage: Stage, audio: AppAudio | null, state: AppState) 
   await askNames();
   useStageClock(stage);
   stage.start();
-  const { playCutscene } = await import('./cutscene/director').catch(offerReload);
+  const { playCutscene } = await stage.loading(import('./cutscene/director')).catch(offerReload);
   let choice: 'replay' | 'enter';
   try {
     choice = await playCutscene(stage, audio ?? undefined, { skippable: state.seenCutscene });
