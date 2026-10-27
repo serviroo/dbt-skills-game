@@ -159,7 +159,8 @@
   box-shadow: 0 0 10px rgba(243, 230, 196, 0.6);
 }
 
-.dq.ca-szlit .dq-vignette {
+.dq.ca-szlit .dq-vignette,
+.dq.ca-szlit .dq-sky-top::after {
   background: radial-gradient(120% 85% at 50% 30%, rgba(176, 206, 236, 0.34), rgba(96, 130, 170, 0.28) 55%, rgba(60, 86, 120, 0.24));
   transition: background 0.6s ease;
 }

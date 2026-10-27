@@ -626,4 +626,32 @@ export const scenarios = {
     await ctx.close();
     return seen;
   },
+
+  /** the Safe Zone's Lights up reaches the top bar too: the bar's copy of the sky matches the lit screen under it */
+  async 'home-sky-safe-lights-up'(h) {
+    const { expect, shot } = h;
+    const { ctx, page, errors } = await home(h, at(23, 0));
+    await page.locator(SAFE).first().click();
+    await page.locator('.dq[data-screen="safe"]').waitFor({ timeout: 10000 });
+    await page.locator('.dq-top .ca-sz-light').click();
+    await page.locator('.dq.ca-szlit').waitFor({ timeout: 10000 });
+    await h.sleep(800);
+    // only the sky and what lies on it: the same screen with the bar's copy, then without it
+    const bare = `${NO_TEXT} .dq-view, .dq-top > * { visibility: hidden !important; }`;
+    const copy = await capture(page, bare);
+    const under = await capture(page, `${bare} .dq-sky-top { visibility: hidden !important; }`);
+    const bar = await page.locator('.dq-top').boundingBox();
+    const off = [];
+    for (const fx of [0.1, 0.5, 0.9]) {
+      for (const fy of [0.3, 0.7]) {
+        const [x, y] = [bar.width * fx, bar.y + bar.height * fy];
+        const [a, b] = [patch(copy, x, y), patch(under, x, y)];
+        if (dist(a, b) > 3) off.push(`at ${Math.round(x)},${Math.round(y)} the bar shows ${a} over the page's ${b}`);
+      }
+    }
+    expect(!off.length, 'with Lights up the top bar is darker than the screen: ' + off.join('; '));
+    await shot(page, 'safe-zone-lights-up');
+    expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
 };
