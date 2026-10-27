@@ -35,8 +35,11 @@ function listenForHum() {
   };
 }
 
+/** A player who visited before: a first visit's welcome opens over Home a moment after it shows, under the first tap. */
+const RETURNING = JSON.stringify({ v: 1, created: 946684800000, events: [{ id: 'previous-visit', k: 'visit', day: '2000-01-01', t: 946684800000, xp: 10 }] });
+
 async function openMoment(h, seed = {}, viewport, query = '?mute') {
-  const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN, ...seed }, query, viewport, async (c) => {
+  const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN, [h.SAVE]: RETURNING, ...seed }, query, viewport, async (c) => {
     await c.clock.install();
     await c.addInitScript(listenForHum);
   });
