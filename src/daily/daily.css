@@ -1212,7 +1212,7 @@ textarea.dq-input {
   font-weight: 500;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--t-faint);
+  color: var(--t-dim);
 }
 .dq-gift-t {
   font-size: 16px;
@@ -1452,7 +1452,7 @@ textarea.dq-input {
 }
 .dq-quest-foot {
   font-size: 16px;
-  color: var(--t-faint);
+  color: var(--t-dim);
   text-align: center;
 }
 .dq-quest-alt {
