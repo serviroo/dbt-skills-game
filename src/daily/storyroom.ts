@@ -555,10 +555,12 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     if ((e as KeyboardEvent).key === 'Enter') titleIn.blur();
   });
 
-  const load = async (id: string, n = ++picks) => {
+  /** `taking` runs as the chapter reaches the editor, only if no newer tap came first */
+  const load = async (id: string, n = ++picks, taking?: () => void) => {
     const c = await ss.chapter(id);
     if (!c || !alive || n !== picks) return false;
     shown = n;
+    taking?.();
     let text = c.text;
     let bases = [c.rev];
     let recovered = false;
@@ -633,18 +635,19 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     const n = ++picks;
     await flushAll();
     if (n !== picks) return;
-    if (id !== pageId) {
-      // the page's cards are read aside and taken only if no newer tap came first, so they never land on another page
-      const next = await ss.cards(id);
-      if (n !== picks) return;
+    // the page's cards are read aside, and the page and its cards are taken only as its chapter reaches the editor with no
+    // newer tap first, so an overtaken open leaves the selection and the cards as they were
+    const next = id !== pageId ? await ss.cards(id) : null;
+    if (n !== picks) return;
+    await load(id, n, () => {
+      if (!next) return;
       pageId = id;
       caret = null;
       sel = null;
       syncModes();
       cards = next;
       renderCards(false);
-    }
-    await load(id, n);
+    });
     await refreshStory();
   };
 

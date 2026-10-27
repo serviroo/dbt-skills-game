@@ -366,6 +366,23 @@ export const scenarios = {
       h.expect(s.seg === 'Notes' && s.box === 'Notes for this story', `Second Door then Notes showed ${JSON.stringify(s)}`);
       h.expect((await card('The second door stuck.').count()) === 0, 'the overtaken page open put its cards beside another page');
 
+      // Second Door again, its cards read but its chapter still loading when Notes is tapped: nothing of it is taken
+      await page.locator('.st-chbtn').click();
+      await settle(() => secondRow.isVisible());
+      await secondRow.click();
+      await waitHeld(`cards ${second}`);
+      await release(`cards ${second}`);
+      await waitHeld(`chapter ${second}`);
+      await notesTab.click();
+      await waitHeld(`chapter ${notes}`);
+      await release(`chapter ${notes}`);
+      await drain();
+      await h.sleep(200);
+      await drain();
+      s = await shownIn(page);
+      h.expect(s.seg === 'Notes' && s.box === 'Notes for this story', `Second Door loading, then Notes, showed ${JSON.stringify(s)}`);
+      h.expect((await card('The second door stuck.').count()) === 0, 'the page open overtaken while its chapter loaded still took its cards');
+
       // an Insert from Notes brings the page in first and lands there, never in the notes on screen
       await card('The kettle began to hum.').getByRole('button', { name: 'Insert', exact: true }).click();
       await settle(boxIs(/^Page,/));
