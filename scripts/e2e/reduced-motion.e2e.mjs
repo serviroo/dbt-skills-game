@@ -70,13 +70,6 @@ const ACT = {
       for (let i = 0; i < 3 && (await forward(page)); i++) await settle(page);
     },
   },
-  'night-watch': {
-    // the camp's 3D scene loads its models and draws its first frame in its own time, on a slow GPU after settle() has
-    // stopped waiting: both runs are compared once it has come up (or given up), never while one of them still loads
-    run: async (page) => {
-      if (await page.locator('.w2-camp').count()) await page.locator('.w2-camp:not(.is-scene-wait)').waitFor({ timeout: 60000 });
-    },
-  },
   library: { run: scrollDown },
   moment: null,
   diary: {
@@ -86,7 +79,14 @@ const ACT = {
       await page.locator('.dq-details summary').click();
     },
   },
-  'night-watch': { run: (page) => page.locator('.w2-sh-in').first().click() },
+  'night-watch': {
+    run: async (page) => {
+      // the camp's 3D scene loads its models and draws its first frame in its own time, on a slow GPU after settle() has
+      // stopped waiting: both runs are compared once it has come up (or given up), never while one of them still loads
+      if (await page.locator('.w2-camp').count()) await page.locator('.w2-camp:not(.is-scene-wait)').waitFor({ timeout: 60000 });
+      await page.locator('.w2-sh-in').first().click();
+    },
+  },
   wardrobe: { run: (page) => page.locator('.w2-wopt--theme[aria-checked=false]:not([disabled])').first().click() },
   art: {
     run: async (page) => {
