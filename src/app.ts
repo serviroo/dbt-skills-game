@@ -63,7 +63,7 @@ async function makeAudio(): Promise<AppAudio | null> {
     const { wireWindowSounds } = await import('./audio/wire');
     const { createVolume, loadPrefs } = await import('./audio/prefs');
     const prefs = loadPrefs();
-    const initial = { master: prefs.master, music: prefs.music, sfx: prefs.sfx, muted: prefs.muted };
+    const initial = { master: prefs.master, music: prefs.music, sfx: prefs.sfx, hum: prefs.hum, muted: prefs.muted };
     // ?mute silences this visit only: it is never written to their stored levels
     const e = new AudioEngine(undefined, { user: { ...initial, muted: initial.muted || params.mute } });
     const volume = params.shot ? undefined : createVolume(e, { fresh: prefs.fresh, initial, forceMute: params.mute });

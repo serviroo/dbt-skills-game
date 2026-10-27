@@ -1297,7 +1297,7 @@ export function settingsScreen(app: App): ScreenOut {
   const offBuzz = st.onChange(() => {
     if (buzzIn) buzzIn.checked = s.settings.vibrate;
   });
-  const levels = app.opts.volume ? volumeSliders(app.opts.volume) : null;
+  const levels = app.opts.volume ? volumeSliders(app.opts.volume, { hum: true }) : null;
   const el = h(
     'div',
     { class: 'dq-page dq-settings' },

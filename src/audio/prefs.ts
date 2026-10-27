@@ -1,14 +1,18 @@
 /**
- * Their sound levels (Master, Music, Effects, mute), kept on this device only. The controller applies every change to
- * the engine with a short ramp, persists it, and follows a second tab through the storage event.
+ * Their sound levels (Master, Music, Effects, Hum, mute), kept on this device only. The controller applies every change
+ * to the engine with a short ramp, persists it, and follows a second tab through the storage event.
  */
 import type { AudioEngine, UserLevels } from './engine';
 import { AUDIO_KEY } from '../core/stored-names';
 import { write } from '../core/cleared';
 
-export type AudioLevels = UserLevels;
+export interface AudioLevels extends UserLevels {
+  /** The low hum in Give me a moment, which plays outside the engine; a save from before it has the full level. */
+  hum: number;
+}
 
-const DEFAULTS: AudioLevels = { master: 1, music: 1, sfx: 1, muted: false };
+const DEFAULTS: AudioLevels = { master: 1, music: 1, sfx: 1, hum: 1, muted: false };
+const LEVELS = ['master', 'music', 'sfx', 'hum'] as const;
 
 const unit = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1);
 
@@ -18,7 +22,7 @@ export function parsePrefs(raw: string | null): AudioLevels {
   try {
     const o = JSON.parse(raw) as Record<string, unknown> | null;
     if (!o || typeof o !== 'object' || Array.isArray(o) || o.v !== 1) return { ...DEFAULTS };
-    return { master: unit(o.master), music: unit(o.music), sfx: unit(o.sfx), muted: o.muted === true };
+    return { master: unit(o.master), music: unit(o.music), sfx: unit(o.sfx), hum: unit(o.hum), muted: o.muted === true };
   } catch {
     return { ...DEFAULTS };
   }
@@ -34,7 +38,7 @@ export function loadPrefs(): AudioLevels & { fresh: boolean } {
 }
 
 export function savePrefs(p: AudioLevels) {
-  const out = JSON.stringify({ v: 1, master: unit(p.master), music: unit(p.music), sfx: unit(p.sfx), muted: p.muted === true });
+  const out = JSON.stringify({ v: 1, master: unit(p.master), music: unit(p.music), sfx: unit(p.sfx), hum: unit(p.hum), muted: p.muted === true });
   write(() => {
     try {
       localStorage.setItem(AUDIO_KEY, out);
@@ -113,7 +117,7 @@ export function createVolume(engine: AudioEngine | null, opts: { fresh: boolean;
     restore(p) {
       flush();
       const next = { ...state };
-      for (const k of ['master', 'music', 'sfx'] as const) if (!chosen.has(k)) next[k] = unit(p[k]);
+      for (const k of LEVELS) if (!chosen.has(k)) next[k] = unit(p[k]);
       if (!chosen.has('muted')) next.muted ||= p.muted === true;
       state = next;
       apply();
@@ -127,11 +131,13 @@ export function createVolume(engine: AudioEngine | null, opts: { fresh: boolean;
     unlock: engine ? () => void engine.unlock() : undefined,
     set(p, o = {}) {
       const next = { ...state };
-      for (const k of ['master', 'music', 'sfx', 'muted'] as const) if (p[k] !== undefined) chosen.add(k);
-      if (p.master !== undefined) next.master = unit(p.master);
-      if (p.music !== undefined) next.music = unit(p.music);
-      if (p.sfx !== undefined) next.sfx = unit(p.sfx);
+      for (const k of LEVELS) {
+        if (p[k] === undefined) continue;
+        chosen.add(k);
+        next[k] = unit(p[k]);
+      }
       if (p.muted !== undefined) {
+        chosen.add('muted');
         next.muted = p.muted === true;
         force = false;
       } else if (p.master !== undefined && next.master > 0 && (state.muted || force)) {
