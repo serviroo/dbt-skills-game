@@ -141,7 +141,8 @@ function lowHum(scale: number) {
     // hidden: fade out, then pause like the rest of the app's sound (a phone may pause it sooner; see `paused`)
     wake.gain.setTargetAtTime(0, t, SLEEP_TAU);
     nap = setTimeout(() => {
-      if (!dead && document.hidden && ctx.state === 'running') ctx.suspend().catch(() => {});
+      // a page shown again before this pause lands still found the hum running, so it is woken once the pause lands
+      if (!dead && document.hidden && ctx.state === 'running') ctx.suspend().then(resume, () => {});
     }, SLEEP_TAU * 6000);
   };
   document.addEventListener('visibilitychange', seen);

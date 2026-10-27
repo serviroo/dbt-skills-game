@@ -365,6 +365,22 @@ export const scenarios = {
         const cut = rms(around.filter((q) => q[0] < sys - 2 * per).slice(-5));
         wokeSoftly(h, `woken by ${how}`, around, per, sys, cut, ref, sys + 4 * per);
       }
+
+      // Shown again while the hum's own pause is still landing (stretched here to 300 ms): it wakes once it lands.
+      await page.evaluate((n) => {
+        const c = window.__taps[n].a.context;
+        const suspend = c.suspend.bind(c);
+        c.suspend = () => {
+          window.__napAsked = true;
+          return new Promise((r) => setTimeout(r, 300)).then(suspend).then(() => (window.__napLanded = true));
+        };
+      }, n);
+      await setHidden(page, true);
+      await page.waitForFunction(() => window.__napAsked, null, { timeout: 3000 });
+      await setHidden(page, false);
+      await page.waitForFunction((n) => window.__napLanded && window.__taps[n].a.context.state === 'running', n, { timeout: 3000 }).catch(() => {
+        throw new Error('shown again while its pause was landing, the hum stayed paused on a visible page');
+      });
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();
