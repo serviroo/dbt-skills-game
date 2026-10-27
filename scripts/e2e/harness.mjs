@@ -160,9 +160,7 @@ function pageState() {
 
 function launch(flags) {
   if (flags.ws) return chromium.connect(flags.ws, { headers: { 'x-playwright-launch-options': JSON.stringify({ headless: flags.headless === 'true', args: ['--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] }) } });
-  // Without a GPU, WebGL renders in SwiftShader. The page itself is composited in software: compositing it through
-  // SwiftShader too costs about 2 cores whenever anything on screen moves and 0.8 s a screenshot (0.2 core, 0.2 s here).
-  const gl = flags.gpu ? ['--use-angle=vulkan', '--ignore-gpu-blocklist'] : ['--use-gl=angle', '--use-angle=swiftshader', '--disable-gpu-compositing'];
+  const gl = flags.gpu ? ['--use-angle=vulkan', '--ignore-gpu-blocklist'] : ['--use-gl=angle', '--use-angle=swiftshader'];
   return chromium.launch({ headless: flags.headed !== 'true', handleSIGINT: false, handleSIGTERM: false, args: [...gl, '--autoplay-policy=no-user-gesture-required'] });
 }
 
