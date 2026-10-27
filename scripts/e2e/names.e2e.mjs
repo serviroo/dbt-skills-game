@@ -228,7 +228,9 @@ export const scenarios = {
           else if (seen) {
             o.disconnect();
             requestAnimationFrame(() => {
-              for (const end = performance.now() + 11000; performance.now() < end; );
+              const t0 = performance.now();
+              for (const end = t0 + 11000; performance.now() < end; );
+              window.__stall = performance.now() - t0;
             });
           }
         }).observe(document, { childList: true, subtree: true });
@@ -239,6 +241,9 @@ export const scenarios = {
     const left = leaves(page, '#np-name');
     await page.getByRole('button', { name: 'Continue' }).click();
     await left(10000);
+    // the freeze really ran (this waits for it to end), so the check cannot pass without it
+    const stall = await page.waitForFunction(() => window.__stall, null, { timeout: 30000 }).then((h) => h.jsonValue()).catch(() => 0);
+    expect(stall >= 11000, `the page never froze after the prompt left (stall ${stall} ms), so this check proved nothing`);
     expect((await youOf(page))?.name === 'Robin', 'Continue did not store the name');
     expect(!errors.length, errors.join('\n'));
     await ctx.close();
