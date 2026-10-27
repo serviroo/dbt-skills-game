@@ -3,7 +3,7 @@
  * an app switch. If IndexedDB is unavailable the session keeps drawings in memory and the Art room says so.
  * Backups carry the strokes, not images: a restore re-renders every thumbnail from them.
  */
-import { canvasBlob, INKS, PAGE, renderDrawing, type Paper, type Stroke } from './ink';
+import { canvasBlob, INKS, PAGE, renderDrawing, STROKE_MODES, type Paper, type Stroke, type StrokeMode } from './ink';
 import { connectionLost, uid, validDay } from './store';
 import { ART_DB, BESIDE, TAB_KEY } from '../core/stored-names';
 import { canWrite, cleared, goneElsewhere, mayWrite, onClear, write as writeOut } from '../core/cleared';
@@ -62,24 +62,89 @@ const fromOf = (x: unknown): string[] | undefined => {
   return out.length ? out : undefined;
 };
 
-/** Accepts anything JSON-parsed as strokes; drops what doesn't fit, clamps what does. */
+/** A stroke as it is stored on this device, in drafts and in a Save Crystal (see storedStroke). */
+export interface StoredStroke {
+  i: number;
+  w: number;
+  p: number[];
+  m?: StrokeMode;
+  q?: number[];
+}
+const STROKE_KEYS = ['i', 'w', 'p', 'm', 'q'];
+/**
+ * Each stroke read whose stored form isn't what this build would store for it (a tool, field, ink or size from a newer
+ * build, or values past this build's limits), with that stored form. Strokes never change once drawn, so storedStroke
+ * writes it back exactly as it came and this build never turns a newer build's stroke into one of its own (as store.ts
+ * keeps a newer save's records, see AS_STORED there).
+ */
+const AS_STORED = new WeakMap<Stroke, unknown>();
+/**
+ * A stroke as it is stored. A brush stroke keeps the three fields it always had. A stroke made with another tool
+ * keeps its points in q and an empty p, so a build from before tools skips it: it shows less, never a tool's stroke
+ * painted as a brush line, and its saves can't turn one into a brush stroke.
+ */
+export function storedStroke(s: Stroke): StoredStroke {
+  if (AS_STORED.has(s)) return AS_STORED.get(s) as StoredStroke;
+  return s.m ? { i: s.i, w: s.w, p: [], m: s.m, q: s.p } : { i: s.i, w: s.w, p: s.p };
+}
+
+/**
+ * Accepts anything JSON-parsed as stored strokes; drops what doesn't fit, clamps what does. A stroke made with a tool
+ * this build doesn't know, or with fields it doesn't, is kept as it was stored; one it can't draw draws nothing.
+ */
 export function cleanStrokes(raw: unknown, kind: Paper): Stroke[] | null {
   if (!Array.isArray(raw)) return null;
   const { w, h } = PAGE[kind];
   const out: Stroke[] = [];
   for (const s of raw.slice(0, 20000)) {
-    if (!isObj(s) || !Array.isArray(s.p) || !fin(s.i) || !fin(s.w)) continue;
+    if (!isObj(s)) continue;
+    // undefined: the brush; null: a tool this build doesn't know
+    const m = s.m === undefined ? undefined : STROKE_MODES.includes(s.m as StrokeMode) ? (s.m as StrokeMode) : null;
+    const unknown = m === null || Object.keys(s).some((k) => !STROKE_KEYS.includes(k));
+    const src = m === null || !fin(s.i) || !fin(s.w) ? null : m ? s.q : s.p;
     const p: number[] = [];
-    const src = s.p.slice(0, 400000);
-    for (let k = 0; k + 1 < src.length; k += 2) {
-      const x = src[k], y = src[k + 1];
-      if (!fin(x) || !fin(y)) continue;
-      p.push(Math.max(-w, Math.min(2 * w, x)), Math.max(-h, Math.min(2 * h, y)));
+    if (Array.isArray(src)) {
+      for (let k = 0; k + 1 < Math.min(src.length, 400000); k += 2) {
+        const x = src[k], y = src[k + 1];
+        if (!fin(x) || !fin(y)) continue;
+        p.push(Math.max(-w, Math.min(2 * w, x)), Math.max(-h, Math.min(2 * h, y)));
+      }
     }
-    if (!p.length) continue;
-    out.push({ i: Math.max(0, Math.min(INKS.length - 1, Math.round(s.i))), w: Math.max(1, Math.min(400, s.w)), p });
+    if (!p.length && !unknown) continue;
+    const st: Stroke = { i: fin(s.i) ? Math.max(0, Math.min(INKS.length - 1, Math.round(s.i))) : 0, w: fin(s.w) ? Math.max(1, Math.min(400, s.w)) : 1, p };
+    if (m) st.m = m;
+    if (JSON.stringify(storedStroke(st)) !== JSON.stringify(s)) AS_STORED.set(st, s);
+    out.push(st);
   }
   return out;
+}
+
+/** The fields of a drawing and of a draft this build reads. Any other is kept as it was stored (see restOf). */
+const REC_KEYS = ['id', 'kind', 'day', 't', 'updated', 'prompt', 'name', 'n', 'rev', 'from', 'strokes', 'bases', 'after'];
+const DRAFT_KEYS = ['key', 'kind', 'editId', 'bases', 'base', 'prompt', 'strokes', 't'];
+/** The fields of o this build doesn't read, as they were stored, so a newer build's fields stay on what this one writes. */
+const restOf = (o: object, known: readonly string[]): Record<string, unknown> => Object.fromEntries(Object.entries(o).filter(([k]) => !known.includes(k)));
+/** The fields of a drawing this build doesn't read, for a new version of it to carry on. */
+export const extrasOf = (r: DrawingMeta) => restOf(r, REC_KEYS);
+/** A drawing or a draft as it is stored and goes into a Save Crystal. */
+export const storedRec = (r: DrawingRec) => ({ ...r, strokes: r.strokes.map(storedStroke) });
+const storedDraft = (d: Draft) => ({ ...d, strokes: d.strokes.map(storedStroke) });
+/** Whether drawing a holds everything b does: each of b's fields, and b's strokes in their order among a's. */
+function holds(a: DrawingRec, b: DrawingRec) {
+  const fa: Record<string, unknown> = { ...metaOf(a), id: '', n: 0 }, fb = { ...metaOf(b), id: '', n: 0 };
+  if (Object.entries(fb).some(([k, v]) => JSON.stringify(fa[k]) !== JSON.stringify(v))) return false;
+  return within(a.strokes, b.strokes);
+}
+/** Whether strokes a hold all of strokes b, in their order among a's. */
+function within(a: Stroke[], b: Stroke[]) {
+  const sa = a.map((s) => JSON.stringify(storedStroke(s)));
+  let k = 0;
+  for (const s of b) {
+    const j = JSON.stringify(storedStroke(s));
+    while (k < sa.length && sa[k] !== j) k++;
+    if (k++ >= sa.length) return false;
+  }
+  return true;
 }
 
 export function cleanRec(raw: unknown): DrawingRec | null {
@@ -91,6 +156,7 @@ export function cleanRec(raw: unknown): DrawingRec | null {
   if (!day) return null;
   const t = fin(raw.t) ? raw.t : 0;
   return {
+    ...restOf(raw, REC_KEYS),
     id: raw.id,
     kind,
     day,
@@ -122,7 +188,8 @@ export function cleanDraft(raw: unknown): Draft | null {
   else if (raw.prompt === null) d.prompt = null;
   d.strokes = strokes;
   d.t = fin(raw.t) ? raw.t : 0;
-  return d;
+  // spread, not assigned, so each one stays a plain field: a stored "__proto__" can't become what d inherits from
+  return { ...d, ...restOf(raw, DRAFT_KEYS) };
 }
 /** Drafts from a file that can't be read: unreadable ones and any past the cap. */
 export function skippedDrafts(raw: unknown) {
@@ -133,7 +200,7 @@ export function skippedDrafts(raw: unknown) {
 /** A page and the copies kept apart from it share this. */
 const family = (id: string) => id.split('~')[0].slice(0, 26);
 const landKey = (id: string, rev: string) => `${id}\n${rev}`;
-const metaOf = (r: DrawingRec): DrawingMeta => ({ id: r.id, kind: r.kind, day: r.day, t: r.t, updated: r.updated, prompt: r.prompt, name: r.name, n: r.strokes.length, rev: r.rev, from: fromOf(r.from) });
+const metaOf = (r: DrawingRec): DrawingMeta => ({ ...restOf(r, REC_KEYS), id: r.id, kind: r.kind, day: r.day, t: r.t, updated: r.updated, prompt: r.prompt, name: r.name, n: r.strokes.length, rev: r.rev, from: fromOf(r.from) });
 const detached = (d: Draft): Draft => {
   const { editId, bases, base, ...draft } = d;
   return draft;
@@ -413,7 +480,19 @@ export class ArtStore {
     if (gen !== this.gen) return this.get(id);
     const mm = this.mem.meta.get(id), ms = this.mem.strokes.get(id);
     if (mm && ms && (!m || !s || mm.updated > m.updated)) return { ...mm, strokes: ms };
-    return m && s ? { ...m, strokes: s } : null;
+    return m && s ? { ...m, strokes: cleanStrokes(s, m.kind) ?? [] } : null;
+  }
+
+  /** The drawing stored under id, as it is on the disk (not this copy's memory). */
+  private async onDisk(id: string): Promise<DrawingRec | null> {
+    const [m, s] = await this.tx(
+      ['meta', 'strokes'],
+      'readonly',
+      (t) => Promise.all([req(t.objectStore('meta').get(id) as IDBRequest<DrawingMeta | undefined>), req(t.objectStore('strokes').get(id) as IDBRequest<unknown>)]),
+      (): [DrawingMeta | undefined, unknown] => [undefined, undefined],
+    );
+    const strokes = m ? cleanStrokes(s, m.kind) : null;
+    return m && strokes ? { ...m, strokes } : null;
   }
 
   /**
@@ -436,6 +515,7 @@ export class ArtStore {
     let id = rec.id;
     const thumb = await canvasBlob(renderDrawing(rec.strokes, rec.kind, THUMB_W), 'image/jpeg', 0.9);
     const buf = thumb ? await thumb.arrayBuffer() : null;
+    const kept = rec.strokes.map(storedStroke);
     let prev: number | undefined;
     let decided = false;
     let same = false;
@@ -467,7 +547,7 @@ export class ArtStore {
           const keep = (as: 'wrote' | 'copied') => {
             try {
               t.objectStore('meta').put(metaOf({ ...rec, id, updated: stamp, rev, from }), id);
-              t.objectStore('strokes').put(rec.strokes, id);
+              t.objectStore('strokes').put(kept, id);
               if (buf) t.objectStore('thumbs').put({ type: 'image/jpeg', buf }, id);
               ok(as);
             } catch (e) {
@@ -592,7 +672,7 @@ export class ArtStore {
 
   /** The newer of the stored draft and the one this copy holds in memory (a draft write can fail when storage is full). */
   async getDraft(key: string): Promise<Draft | null> {
-    const d = await this.tx(['drafts'], 'readonly', (t) => req(t.objectStore('drafts').get(key) as IDBRequest<Draft | undefined>), () => undefined);
+    const d = cleanDraft(await this.tx(['drafts'], 'readonly', (t) => req(t.objectStore('drafts').get(key) as IDBRequest<unknown>), () => undefined));
     const m = this.mem.drafts.get(key);
     const best = d && m ? (m.t > d.t ? m : d) : (d ?? m);
     return best && Array.isArray(best.strokes) && best.strokes.length ? best : null;
@@ -600,9 +680,9 @@ export class ArtStore {
 
   async drafts(): Promise<Draft[]> {
     const gen = this.gen;
-    const all = await this.tx(['drafts'], 'readonly', (t) => req(t.objectStore('drafts').getAll() as IDBRequest<Draft[]>), () => [] as Draft[]);
+    const all = await this.tx(['drafts'], 'readonly', (t) => req(t.objectStore('drafts').getAll() as IDBRequest<unknown[]>), () => [] as unknown[]);
     if (gen !== this.gen) return this.drafts();
-    const byKey = new Map(all.filter((d) => d && typeof d.key === 'string').map((d) => [d.key, d]));
+    const byKey = new Map(all.map(cleanDraft).filter((d): d is Draft => !!d).map((d) => [d.key, d]));
     for (const m of this.mem.drafts.values()) {
       const d = byKey.get(m.key);
       if (!d || m.t > d.t) byKey.set(m.key, m);
@@ -622,7 +702,7 @@ export class ArtStore {
     this.mem.drafts.set(d.key, d);
     await this.tx(['drafts', 'meta'], 'readwrite', async (t) => {
       if (d.editId && !this.keepsEdit(d.editId, !!(await req(t.objectStore('meta').get(d.editId))))) d = detached(d);
-      t.objectStore('drafts').put(d, d.key);
+      t.objectStore('drafts').put(storedDraft(d), d.key);
     }, () => {
       if (d.editId && this.deleted.has(d.editId)) d = detached(d);
     });
@@ -646,21 +726,21 @@ export class ArtStore {
     this.drop();
     const ids = (await this.list()).map((m) => m.id);
     const used = new Set(ids);
-    const plain = (r: DrawingRec): DrawingRec => ({ ...r, strokes: r.strokes.map((s) => ({ i: s.i, w: s.w, p: s.p })) });
-    const out: DrawingRec[] = [];
+    const out: ReturnType<typeof storedRec>[] = [];
     for (const id of ids) {
       const [m, s] = await this.tx(
         ['meta', 'strokes'],
         'readonly',
-        (t) => Promise.all([req(t.objectStore('meta').get(id) as IDBRequest<DrawingMeta | undefined>), req(t.objectStore('strokes').get(id) as IDBRequest<Stroke[] | undefined>)]),
-        (): [DrawingMeta | undefined, Stroke[] | undefined] => [undefined, undefined],
+        (t) => Promise.all([req(t.objectStore('meta').get(id) as IDBRequest<DrawingMeta | undefined>), req(t.objectStore('strokes').get(id) as IDBRequest<unknown>)]),
+        (): [DrawingMeta | undefined, unknown] => [undefined, undefined],
       );
-      const disk = m && s ? { ...m, strokes: s } : null;
+      const strokes = m ? cleanStrokes(s, m.kind) : null;
+      const disk = m && strokes ? { ...m, strokes } : null;
       const mm = this.mem.meta.get(id), ms = this.mem.strokes.get(id);
       const mem = mm && ms ? { ...mm, strokes: ms } : null;
       // the version in use keeps the id (as get() picks it); a different one only memory holds goes in under its own id
       const main = mem && (!disk || mem.updated > disk.updated) ? mem : disk;
-      if (main) out.push(plain(main));
+      if (main) out.push(storedRec(main));
       if (!mem || !disk || revOf(mem) === revOf(disk) || (main === disk && this.landed.has(landKey(id, revOf(mem))))) continue;
       const other = main === mem ? disk : mem;
       const base = `${family(id)}~${Math.max(0, Math.floor(other.updated)).toString(36)}`;
@@ -668,7 +748,7 @@ export class ArtStore {
       // numbered, not random, so the same drawings make the same Save Crystal
       for (let n = 2; used.has(cid); n++) cid = `${base}${n.toString(36)}`;
       used.add(cid);
-      out.push(plain({ ...other, id: cid }));
+      out.push(storedRec({ ...other, id: cid }));
     }
     return { records: out.sort((a, b) => a.t - b.t), incomplete: this.readFails > fails };
   }
@@ -676,8 +756,8 @@ export class ArtStore {
   /** Every unfinished drawing, for the Save Crystal, read fresh. incomplete: the stored ones couldn't all be read. */
   async exportDrafts(): Promise<{ drafts: Draft[]; incomplete: boolean }> {
     const fails = this.readFails;
-    const all = (await this.drafts()).map(cleanDraft).filter((d): d is Draft => !!d);
-    return { drafts: all.sort((a, b) => a.t - b.t || (a.key < b.key ? -1 : 1)), incomplete: this.readFails > fails };
+    const all = (await this.drafts()).sort((a, b) => a.t - b.t || (a.key < b.key ? -1 : 1));
+    return { drafts: all.map(storedDraft), incomplete: this.readFails > fails };
   }
 
   /**
@@ -688,17 +768,18 @@ export class ArtStore {
   async importDrafts(raw: unknown): Promise<{ added: number; skipped: number }> {
     const out = { added: 0, skipped: skippedDrafts(raw) };
     if (!Array.isArray(raw)) return out;
-    const here = new Map((await this.drafts()).map((d) => [d.key, cleanDraft(d)]));
+    const here = new Map<string, Draft>((await this.drafts()).map((d) => [d.key, d]));
+    const drawnAs = (d: Draft) => JSON.stringify(d.strokes.map(storedStroke));
     const saved = new Set((await this.tx(['meta'], 'readonly', (t) => req(t.objectStore('meta').getAllKeys() as IDBRequest<IDBValidKey[]>), () => [] as IDBValidKey[])).map(String));
     // what each draft draws and the saved drawing it edits, as it is (or would be) kept here ('' once that drawing isn't
     // here, see putDraft), so one an earlier Restore put under a key of its own is recognised too
-    const drawn = (d: Draft) => `${d.kind}\n${d.editId && this.keepsEdit(d.editId, saved.has(d.editId)) ? d.editId : ''}\n${JSON.stringify(d.strokes)}`;
-    const held = new Set([...here.values()].filter((d): d is Draft => !!d).map(drawn));
+    const drawn = (d: Draft) => `${d.kind}\n${d.editId && this.keepsEdit(d.editId, saved.has(d.editId)) ? d.editId : ''}\n${drawnAs(d)}`;
+    const held = new Set([...here.values()].map(drawn));
     for (const x of raw.slice(0, DRAFT_CAP)) {
       const d = cleanDraft(x);
       if (!d) continue;
       const had = here.get(d.key);
-      if ((had && JSON.stringify(had.strokes) === JSON.stringify(d.strokes)) || held.has(drawn(d))) continue;
+      if ((had && drawnAs(had) === drawnAs(d)) || held.has(drawn(d))) continue;
       let key = d.key;
       if (here.has(key)) {
         const base = `${d.key.slice(0, DRAFT_KEY - 12)}~${Math.max(0, Math.floor(d.t)).toString(36)}`;
@@ -729,12 +810,16 @@ export class ArtStore {
 
   /**
    * Adds drawings from a backup and never replaces one. A version already here (under its id or a copy of it) is
-   * unchanged. A different version of a page that is here keeps both: the newer one under the page's id, the other as
-   * its own page, in one transaction. Each drawing counts once as added, kept (both versions kept), unchanged or skipped
-   * (unreadable). unsaved counts the drawings from the file whose copy in use lives only in memory for this session.
+   * unchanged, and so is one a page here was edited from, unless a build from before the tools made that edit and
+   * dropped the tools' strokes: then the file's copy comes in as its own page. A different version of a page that is here keeps both: the newer one under the page's id, the other as
+   * its own page, in one transaction. The same version stored here with other content was saved by a build that
+   * couldn't read all of it: the file's copy updates it when it holds everything the one here does, and comes in with
+   * the other kept as its own page when neither does. Each drawing counts once as added, updated, kept (both versions
+   * kept), unchanged or skipped (unreadable). unsaved counts the drawings from the file whose copy in use lives only in
+   * memory for this session.
    */
-  async importAll(raw: unknown): Promise<{ added: number; kept: number; unchanged: number; skipped: number; unsaved: number }> {
-    const out = { added: 0, kept: 0, unchanged: 0, skipped: 0, unsaved: 0 };
+  async importAll(raw: unknown): Promise<{ added: number; updated: number; kept: number; unchanged: number; skipped: number; unsaved: number }> {
+    const out = { added: 0, updated: 0, kept: 0, unchanged: 0, skipped: 0, unsaved: 0 };
     if (!Array.isArray(raw)) return out;
     this.drop();
     out.skipped += Math.max(0, raw.length - 10000);
@@ -763,17 +848,31 @@ export class ArtStore {
     let wrote = false;
     const inUse: string[] = [];
     for (const rec of byId.values()) {
-      const hit = known.get(family(rec.id))?.get(revOf(rec));
+      const me = revOf(rec);
+      const hit = known.get(family(rec.id))?.get(me);
+      let at = rec;
       if (hit) {
-        out.unchanged++;
-        inUse.push(hit);
-        continue;
+        // the family's pages as they are now, so one a Restore in another tab moved aside meanwhile is still found
+        const here = await this.familyNow(family(rec.id));
+        const same = here.filter((d) => revOf(d) === me);
+        // a page edited from this version holds it, unless a build from before the tools made the edit: that keeps the
+        // strokes it can read and drops the tools' strokes, so the file's copy comes in as its own page
+        const later = here.filter((d) => fromOf(d.from)?.includes(me));
+        const lost = !later.some((d) => within(d.strokes, rec.strokes)) && later.some((d) => within(d.strokes, rec.strokes.filter((s) => !storedStroke(s).m)));
+        const by = same.find((d) => holds(d, rec)) ?? (!same.length && !lost ? later[0] : undefined);
+        if (by) {
+          out.unchanged++;
+          inUse.push(by.id);
+          continue;
+        }
+        // the same version here with other content: the file's copy meets the page that holds it (see importOne)
+        if (same.length) at = { ...rec, id: (same.find((d) => d.id === rec.id) ?? same[0]).id };
       }
-      const r = await this.importOne(rec, diskMeta.get(rec.id));
+      const r = await this.importOne(at, diskMeta.get(at.id));
       out[r.result]++;
       if (r.wrote) wrote = true;
       inUse.push(r.at);
-      note(r.at, revOf(rec));
+      note(r.at, me);
       for (const a of rec.from ?? []) note(r.at, a);
       if (r.moved) note(r.moved.id, r.moved.rev);
     }
@@ -783,21 +882,42 @@ export class ArtStore {
     return out;
   }
 
-  /** One drawing from a backup whose version isn't here yet; see importAll. `at` is where it landed. */
-  private async importOne(rec: DrawingRec, scanned: DrawingMeta | undefined): Promise<{ result: 'added' | 'kept' | 'unchanged'; at: string; wrote: boolean; moved?: { id: string; rev: string } }> {
+  /** The pages of family f as they are now: each stored one, and each this session holds in memory. */
+  private async familyNow(f: string): Promise<DrawingRec[]> {
+    const ids = await this.tx(['meta'], 'readonly', (t) => req(t.objectStore('meta').getAllKeys(IDBKeyRange.bound(f, `${f}￿`)) as IDBRequest<IDBValidKey[]>), () => [] as IDBValidKey[]);
+    const all = new Set([...ids.map(String), ...this.mem.meta.keys()].filter((id) => family(id) === f));
+    return (
+      await Promise.all(
+        [...all].map(async (id) => {
+          const M = this.mem.meta.get(id), S = this.mem.strokes.get(id);
+          return [await this.onDisk(id), M && S ? { ...M, strokes: S } : null];
+        }),
+      )
+    )
+      .flat()
+      .filter((d): d is DrawingRec => !!d);
+  }
+
+  /**
+   * One drawing from a backup that no page here holds; see importAll. `at` is where it landed. The same version stored
+   * under its id with other content is updated when the file's copy holds all of it, and otherwise kept beside it.
+   */
+  private async importOne(rec: DrawingRec, scanned: DrawingMeta | undefined): Promise<{ result: 'added' | 'updated' | 'kept' | 'unchanged'; at: string; wrote: boolean; moved?: { id: string; rev: string } }> {
     const me = revOf(rec);
     const thumb = await canvasBlob(renderDrawing(rec.strokes, rec.kind, THUMB_W), 'image/jpeg', 0.9);
     const buf = thumb ? await thumb.arrayBuffer() : null;
+    const kept = rec.strokes.map(storedStroke);
     const M = this.mem.meta.get(rec.id);
     let cid = this.copyId(rec.id);
     let at = rec.id;
     let D: DrawingMeta | undefined;
+    let same = false;
     let moved: { id: string; rev: string } | undefined;
     const stored = await this.tx(
       ['meta', 'strokes', 'thumbs'],
       'readwrite',
       (t) =>
-        new Promise<'added' | 'kept' | 'unchanged'>((ok, bad) => {
+        new Promise<'added' | 'updated' | 'kept' | 'unchanged'>((ok, bad) => {
           const metaS = t.objectStore('meta'), strokeS = t.objectStore('strokes'), thumbS = t.objectStore('thumbs');
           const fail = (e: unknown) => {
             bad(e);
@@ -809,7 +929,7 @@ export class ArtStore {
           };
           const put = (id: string) => {
             metaS.put(metaOf({ ...rec, id }), id);
-            strokeS.put(rec.strokes, id);
+            strokeS.put(kept, id);
             if (buf) thumbS.put({ type: 'image/jpeg', buf }, id);
           };
           const g = metaS.get(rec.id) as IDBRequest<DrawingMeta | undefined>;
@@ -820,13 +940,13 @@ export class ArtStore {
             try {
               D = g.result;
               if (c.result) cid = `${cid}${Math.random().toString(36).slice(2, 6)}`;
-              if (D && revOf(D) === me) return ok('unchanged');
+              same = !!D && revOf(D) === me;
               const tops = [D, M].filter((m): m is DrawingMeta => !!m).map((m) => (fin(m.updated) ? m.updated : -Infinity));
-              if (!tops.length) {
+              if (!same && !tops.length) {
                 put(rec.id);
                 return ok('added');
               }
-              if (!(rec.updated > Math.max(...tops))) {
+              if (!same && !(rec.updated > Math.max(...tops))) {
                 at = cid;
                 put(cid);
                 return ok('kept');
@@ -842,6 +962,17 @@ export class ArtStore {
               th.onerror = () => bad(th.error);
               th.onsuccess = () => {
                 try {
+                  if (same) {
+                    // decided from the version stored now, in this transaction, so a Restore running beside this one
+                    // can't overwrite what that one wrote
+                    const strokes = cleanStrokes(st.result, was.kind);
+                    const page = strokes && { ...was, strokes };
+                    if (page && holds(page, rec)) return ok('unchanged');
+                    if (page && holds(rec, page)) {
+                      put(rec.id);
+                      return ok('updated');
+                    }
+                  }
                   if (st.result) {
                     metaS.put({ ...was, id: cid }, cid);
                     strokeS.put(st.result, cid);
@@ -891,6 +1022,8 @@ export class ArtStore {
       return { result: there.length ? 'kept' : 'added', at, wrote: false };
     }
     if (stored === 'unchanged') return { result: 'unchanged', at: rec.id, wrote: false };
+    // what this copy held of that version in memory is the stored one it replaced or moved aside
+    if (same && at === rec.id && M && revOf(M) === me) memDrop(rec.id);
     this.landed.add(landKey(at, me));
     if (moved) this.landed.add(landKey(moved.id, moved.rev));
     if (at === rec.id && M && revOf(M) !== me) {

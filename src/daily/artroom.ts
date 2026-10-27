@@ -7,8 +7,8 @@ import { ALLY_NAMES, ART, ART_PROMPTS } from '../content/daily-lines';
 import { playerName } from '../core/you';
 import type { App, Route, ScreenOut } from './app';
 import { icon } from './art';
-import { artStore, revOf, type Draft, type DrawingMeta, type DrawingRec } from './artstore';
-import { canvasBlob, INKS, InkPad, PAGE, renderDrawing, SIZES, type Paper, type Stroke } from './ink';
+import { artStore, extrasOf, revOf, type Draft, type DrawingMeta, type DrawingRec } from './artstore';
+import { canvasBlob, INKS, InkPad, PAGE, renderDrawing, SIZES, TOOLS, type Paper, type Stroke, type Tool } from './ink';
 import { dayLabel } from './lines';
 import { uid } from './store';
 import { btn, chip, field, h, p, panel, radioKeys, shareOrSave, typo } from './ui';
@@ -319,11 +319,25 @@ export function drawScreen(app: App, route: Route): ScreenOut {
   };
   renderPrompt();
 
-  // tools
+  // tools. Picking an ink while erasing goes back to the last way of painting.
+  let paint: Tool = 'brush';
+  const pickTool = (t: Tool) => {
+    pad.tool = t;
+    if (t !== 'erase') paint = t;
+    sync();
+  };
+  const pickInk = (i: number) => {
+    pad.inkIdx = i;
+    if (pad.tool === 'erase') pad.tool = paint;
+    sync();
+  };
+  const toolBtns = TOOLS.map((t) =>
+    h('button', { type: 'button', role: 'radio', class: `dq-pen dq-pen--${t.id}`, 'aria-label': t.name, title: t.name, onclick: () => pickTool(t.id) }, h('span', { class: 'dq-pen-ic', html: icon(t.id === 'erase' ? 'eraser' : t.id) }), h('span', { class: 'dq-pen-n', text: t.name })),
+  );
   const inkBtns = INKS.map((ink, i) =>
     h(
       'button',
-      { type: 'button', role: 'radio', class: `dq-swatch dq-swatch--${ink.id}`, 'aria-label': `${ink.name} ink`, title: ink.name, onclick: () => ((pad.inkIdx = i), sync()) },
+      { type: 'button', role: 'radio', class: `dq-swatch dq-swatch--${ink.id}`, 'aria-label': `${ink.name} ink`, title: ink.name, onclick: () => pickInk(i) },
       h('span', { class: 'dq-swatch-dot', style: `--b:${ink.body};--c:${ink.core ?? ink.mid ?? ink.body};--g:${ink.halo}` }),
       h('span', { class: 'dq-swatch-n', text: ink.name }),
     ),
@@ -358,6 +372,8 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     acts.classList.remove('is-hidden');
   };
   const sync = () => {
+    toolBtns.forEach((b, i) => b.setAttribute('aria-checked', String(TOOLS[i].id === pad.tool)));
+    tools.dataset.tool = pad.tool;
     inkBtns.forEach((b, i) => b.setAttribute('aria-checked', String(i === pad.inkIdx)));
     sizeBtns.forEach((b, i) => b.setAttribute('aria-checked', String(i === pad.sizeIdx)));
     pad.el.style.setProperty('--ink', INKS[pad.inkIdx].body);
@@ -371,7 +387,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
   const tools = h(
     'div',
     { class: 'dq-tools' },
-    h('div', { class: 'dq-tools-pick' }, radioKeys(h('div', { class: 'dq-inks', role: 'radiogroup', 'aria-label': 'Ink' }, inkBtns)), radioKeys(h('div', { class: 'dq-sizes', role: 'radiogroup', 'aria-label': 'Size' }, sizeBtns))),
+    h('div', { class: 'dq-tools-pick' }, radioKeys(h('div', { class: 'dq-inks', role: 'radiogroup', 'aria-label': 'Ink' }, inkBtns)), radioKeys(h('div', { class: 'dq-pens', role: 'radiogroup', 'aria-label': 'Tool' }, toolBtns)), radioKeys(h('div', { class: 'dq-sizes', role: 'radiogroup', 'aria-label': 'Size' }, sizeBtns))),
     acts,
     confirmRow,
     msg,
@@ -385,6 +401,8 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     recId = id;
     const snap = pad.strokes;
     const next: DrawingRec = {
+      // fields a newer build stored on the drawing stay on it
+      ...(rec ? extrasOf(rec) : {}),
       id,
       kind,
       day: rec?.day ?? app.store.today(),
@@ -393,7 +411,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
       prompt: kind === 'today' ? (prompt ?? undefined) : undefined,
       name: kind === 'ally' ? (name ?? rec?.name) : undefined,
       n: pad.strokes.length,
-      strokes: pad.strokes.map((s) => ({ i: s.i, w: s.w, p: s.p })),
+      strokes: pad.strokes.slice(),
     };
     storing = true;
     const res = await as.put(first ? next : { ...next, bases: bases ?? [], after: rec?.updated }).finally(() => (storing = false));
