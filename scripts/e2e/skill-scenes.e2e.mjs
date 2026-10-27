@@ -6,7 +6,8 @@
 // The wave, the breathing light and the tide go through the same host: each is live and drawn at four screen sizes and
 // does what its picture promises (the board rides the swell, the light swells with the breath in the player's colour,
 // the water comes in and goes out), keeps to its timer's clock, stops on leaving, holds still with reduced motion and
-// leaves its flat picture with no WebGL.
+// leaves its flat picture with no WebGL. The breathing light is a small hot core in a halo gone by half its ring, with
+// the countdown readable (3:1) under it all breath long; the wave's moon is a light that shows whole at every size.
 import sharp from 'sharp';
 import { screenshot } from './harness.mjs';
 
@@ -421,6 +422,87 @@ const hueOf = (hex) => {
   const hue = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
   return (hue * 60 + 360) % 360;
 };
+
+/** relative luminance (WCAG) of an sRGB pixel */
+const lin = (v) => ((v /= 255) <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+const lum = (r, g, b) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+const luma = (d, i) => 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+const raw = (png) => sharp(png).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+
+/** The countdown's contrast (WCAG) with the lightest of what is behind it: the 98th percentile, its figures hidden. */
+async function countdownContrast(page) {
+  const num = page.locator('.dq-timer-num');
+  const [box, color] = [await num.boundingBox(), await num.evaluate((e) => getComputedStyle(e).color)];
+  await num.evaluate((e) => (e.style.visibility = 'hidden'));
+  const { data, info } = await raw(await page.screenshot({ clip: box }));
+  await num.evaluate((e) => (e.style.visibility = ''));
+  const ls = [];
+  for (let i = 0; i < data.length; i += info.channels) ls.push(lum(data[i], data[i + 1], data[i + 2]));
+  ls.sort((a, b) => a - b);
+  const bg = ls[Math.floor(ls.length * 0.98)];
+  const text = lum(...color.match(/\d+/g).map(Number));
+  return (Math.max(text, bg) + 0.05) / (Math.min(text, bg) + 0.05);
+}
+
+/** Shoots the scene window with the countdown hidden. */
+async function sceneShot(page) {
+  await page.addStyleTag({ content: '.dq-timer-center{visibility:hidden!important}' });
+  const png = await page.locator('.dq-scene').screenshot();
+  await page.evaluate(() => document.querySelectorAll('style').forEach((s) => s.textContent.includes('dq-timer-center{visibility') && s.remove()));
+  return raw(png);
+}
+
+/**
+ * The breathing light as shown (0-255 luma): its middle, and the mean round circles at a share of the countdown ring's
+ * radius (the ring's track is r 78 of the 200 wide picture; the scene window is the picture less 13% each side).
+ */
+function lightOf({ data, info }) {
+  const { width: w, height: ht, channels: c } = info;
+  const R = (0.39 / 0.74) * w;
+  const at = (x, y) => luma(data, (Math.round(y) * w + Math.round(x)) * c);
+  const circle = (k) => {
+    let n = 0, sum = 0;
+    for (let a = 0; a < 360; a += 2) (n++, (sum += at(w / 2 + Math.cos((a * Math.PI) / 180) * R * k, ht / 2 + Math.sin((a * Math.PI) / 180) * R * k)));
+    return sum / n;
+  };
+  let mid = 0;
+  for (let y = ht / 2 - 3; y <= ht / 2 + 3; y++) for (let x = w / 2 - 3; x <= w / 2 + 3; x++) mid = Math.max(mid, at(x, y));
+  return { mid: Math.round(mid), half: Math.round(circle(0.5)), out: Math.round(circle(0.6)) };
+}
+
+/**
+ * The wave's moon as shown: the brightest thing in the sky (the top third of the window) and everything joined to it within 85%
+ * of its brightness (the disc), where it sits (shares of the window), how round it shows, and the light round it: the
+ * mean just outside the disc (1.5 radii) against the sky further out (5 radii, above it), inside the window's soft edge.
+ */
+function moonOf({ data, info }) {
+  const { width: W, height: H, channels: c } = info;
+  const L = (x, y) => luma(data, (y * W + x) * c);
+  let max = 0, mx = 0, my = 0;
+  for (let y = 0; y < H * 0.32; y++) for (let x = 0; x < W; x++) if (L(x, y) > max) (max = L(x, y)), (mx = x), (my = y);
+  const seen = new Uint8Array(W * H);
+  const todo = [[mx, my]];
+  let [x0, x1, y0, y1] = [mx, mx, my, my];
+  while (todo.length) {
+    const [x, y] = todo.pop();
+    if (x < 0 || y < 0 || x >= W || y >= H || seen[y * W + x] || L(x, y) < max * 0.85) continue;
+    seen[y * W + x] = 1;
+    (x0 = Math.min(x0, x)), (x1 = Math.max(x1, x)), (y0 = Math.min(y0, y)), (y1 = Math.max(y1, y));
+    todo.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+  }
+  const [w, ht] = [x1 - x0 + 1, y1 - y0 + 1];
+  const [cx, cy, r] = [(x0 + x1) / 2, (y0 + y1) / 2, (w + ht) / 4];
+  const ring = (k, above) => {
+    let n = 0, sum = 0;
+    for (let a = 0; a < 360; a += 3) {
+      const x = Math.round(cx + Math.cos((a * Math.PI) / 180) * r * k), y = Math.round(cy - Math.sin((a * Math.PI) / 180) * r * k);
+      if ((above && y > cy) || x < W * 0.13 || x > W * 0.87 || y < H * 0.09 || y >= H) continue;
+      (n++, (sum += L(x, y)));
+    }
+    return n ? sum / n : 0;
+  };
+  return { max: Math.round(max), box: [x0 / W, y0 / H, (x1 + 1) / W, (y1 + 1) / H].map((v) => +v.toFixed(3)), round: +(Math.min(w, ht) / Math.max(w, ht)).toFixed(2), glow: Math.round(ring(1.5) - ring(5, true)) };
+}
 
 /** the new scenes, the step each lives on, and how its flat picture moves without WebGL */
 const KINDS = [
@@ -877,6 +959,73 @@ export const scenarios = {
     }
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
+  },
+
+  /**
+   * the breathing light is a small hot core in a soft halo that is gone by about half the countdown ring, and the
+   * countdown reads against what is behind it (3:1 or more) all through the breath, at every size
+   */
+  async 'ring-countdown'(h) {
+    // every size is looked at before failing, so a failure lists each size it fails at
+    const bad = [];
+    for (const [tag, vp] of [...VIEWS, ['wide', DESK]]) {
+      const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
+      await page.clock.install();
+      await page.reload();
+      await toStep(h, page, 'sense-up', 'only-this', { pause: true });
+      await showsStopped(h, page, `ring ${tag}`);
+      await drawn(h, page, `ring ${tag}`);
+      const a = await after(h, page, 0);
+      let at = a.e % 10 < 0.5 ? a : await after(h, page, (10 - (a.e % 10)) * 1000 + 100);
+      const start = at.e;
+      const seen = [];
+      let light;
+      for (const p of [0, 1, 2, 3, 4, 5.5, 7, 9]) {
+        at = await after(h, page, (start + p - at.e) * 1000);
+        seen.push({ p, ratio: await countdownContrast(page) });
+        if (p === 4) {
+          light = lightOf(await sceneShot(page));
+          await h.shot(page, `ring-countdown-${tag}`);
+        }
+      }
+      const list = seen.map((x) => `${x.p}s ${x.ratio.toFixed(2)}:1`).join(', ');
+      console.log(`  ring ${tag}: countdown ${list}; light at the top of the breath ${JSON.stringify(light)}`);
+      if (!seen.every((x) => x.ratio >= 3)) bad.push(`ring ${tag}: the countdown is under 3:1 against the light: ${list}`);
+      if (light.mid < 215) bad.push(`ring ${tag}: the light's core is not hot at the top of the breath (${JSON.stringify(light)})`);
+      if (light.out > 30 || light.half > 60) bad.push(`ring ${tag}: the light spreads past half the ring at the top of the breath (${JSON.stringify(light)})`);
+      h.expect(!errors.length, errors.join('\n'));
+      await ctx.close();
+    }
+    h.expect(!bad.length, bad.join('\n'));
+  },
+
+  /** the wave's moon is a light (a bright disc in a core of light and a halo) and shows whole at every size, rest to crest */
+  async 'wave-moon'(h) {
+    const bad = [];
+    for (const [tag, vp] of [...VIEWS, ['wide', DESK]]) {
+      const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
+      await page.clock.install();
+      await page.reload();
+      await toStep(h, page, 'urge-surf', 'ride', { pause: true });
+      await showsStopped(h, page, `wave ${tag}`);
+      await drawn(h, page, `wave ${tag}`);
+      let at = await after(h, page, 0);
+      // calm at the start, then the middle swell's crest, where the camera rises furthest
+      for (const t of [1, 45]) {
+        if (at.probe.t < t) at = await after(h, page, (t - at.probe.t) * 1000);
+        const m = moonOf(await sceneShot(page));
+        const where = `wave ${tag} at ${at.probe.t.toFixed(1)} s: ${JSON.stringify(m)}`;
+        if (m.max < 205) bad.push(`${where}: the moon is not bright`);
+        if (m.box[0] < 0.13 || m.box[2] > 0.87 || m.box[1] < 0.09 || m.box[3] > 0.5) bad.push(`${where}: the moon is cut off or under the window's soft edge`);
+        if (m.round < 0.85) bad.push(`${where}: the moon does not show whole`);
+        if (m.glow < 60) bad.push(`${where}: the moon has no light round it`);
+        if (t === 45) await h.shot(page, `wave-moon-${tag}`);
+        console.log(`  ${where}`);
+      }
+      h.expect(!errors.length, errors.join('\n'));
+      await ctx.close();
+    }
+    h.expect(!bad.length, bad.join('\n'));
   },
 
   /** Give me a moment breathes with the same 3D light, keeps its lines, and lets it go on Done */
