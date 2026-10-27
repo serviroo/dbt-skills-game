@@ -129,7 +129,9 @@ export const scenarios = {
     await openPiece(a, 'pg-a');
     const b = await second(h, ctx, { width: 320, height: 568 });
 
-    // B saves an edit of the page A has open: A's page shows it, so A's Remove would take the version A sees
+    // B saves an edit of the page A has open: A's page shows it, so A's Remove would take the version A sees, and a
+    // keyboard player in A keeps focus on Remove
+    await a.getByRole('button', { name: 'Remove', exact: true }).focus();
     await b.locator('[data-piece="pg-a"]').click();
     await b.getByRole('button', { name: 'Keep drawing', exact: true }).click();
     await b.waitForFunction(() => window.__daily?.ink?.strokes.length === 1 && !document.querySelector('.dq-ink-stage')?.inert);
@@ -144,6 +146,8 @@ export const scenarios = {
         return !!rec && !!c && renderDrawing(rec.strokes, rec.kind, c.width).toDataURL() === c.toDataURL();
       });
     await until(h, showsStored, (v) => v, 'the open page still shows the drawing from before the other tab saved its edit', 40);
+    const at = await a.evaluate(() => document.activeElement?.textContent?.trim() ?? null);
+    h.expect(at === 'Remove', `the redraw took focus off Remove: ${at}`);
 
     // Home in A follows B releasing the ally and B's Undo
     await a.evaluate(() => window.__daily.go({ name: 'hub' }));

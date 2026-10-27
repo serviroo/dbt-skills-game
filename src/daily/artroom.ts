@@ -779,10 +779,15 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
     const ally = rec.kind === 'ally';
     const dpr = Math.min(2, devicePixelRatio || 1);
     const outW = Math.min(PAGE[rec.kind].w, Math.round(Math.min(560, innerWidth - 32) * dpr));
-    const art = renderDrawing(rec.strokes, rec.kind, outW);
-    art.className = 'dq-thumb';
-    art.setAttribute('role', 'img');
-    const card = ally ? allyCard(app, rec, art) : null;
+    let art: HTMLCanvasElement, card: HTMLElement | null;
+    const draw = (r: DrawingRec) => {
+      art = renderDrawing(r.strokes, r.kind, outW);
+      art.className = 'dq-thumb';
+      art.setAttribute('role', 'img');
+      card = ally ? allyCard(app, r, art) : null;
+      return card ?? art;
+    };
+    const artBox = h('div', { class: `dq-piece-art dq-piece-art--${rec.kind}` }, draw(rec));
     const status = h('p', { class: 'dq-hint', 'aria-live': 'polite' });
     void prepImage(rec);
     const title = h('h2', { class: 'dq-h1 dq-piece-h' });
@@ -842,9 +847,9 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
       f.input.select();
     };
     // a name or favourite set here or in another tab shows at once; a newer version saved in another tab redraws the
-    // page, so what Remove takes away is the version on screen
+    // drawing in place, so what Remove takes away is the version on screen
     const take = (now: DrawingRec) => {
-      if (revOf(now) !== revOf(rec!)) return void app.go({ name: 'piece', id }, { replace: true, quiet: true });
+      if (revOf(now) !== revOf(rec!)) artBox.replaceChildren(draw(now));
       rec = now;
       paint();
       if (ally) void prepImage(now);
@@ -885,7 +890,7 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
     );
     paint();
     body.replaceChildren(
-      h('div', { class: `dq-piece-art dq-piece-art--${rec.kind}` }, card ?? art),
+      artBox,
       h(
         'div',
         { class: 'dq-piece-side' },
