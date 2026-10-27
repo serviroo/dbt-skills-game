@@ -457,6 +457,79 @@ export const scenarios = {
     }
   },
 
+  /** a story with no pages makes its first page on opening: a Page tap meanwhile waits for it and opens it, so the page
+   *  reaches the editor and what is typed there is kept */
+  async 'story-page-tapped-while-first-page-is-made'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await h.reachHub(page);
+      const id = await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const { story, first } = await ss.create('No Pages Yet');
+        await ss.removeChapter(story.id, first.id);
+        return story.id;
+      });
+      const { waitHeld, drain } = await holdStorage(page, ['addChapter']);
+      await page.evaluate((r) => window.__daily.go(r), { name: 'write', id });
+      await waitHeld(`addChapter ${id}`);
+      await page.getByRole('radio', { name: 'Show: Page' }).click();
+      await drain();
+      const box = page.getByRole('textbox', { name: /^Page,/ });
+      await box.waitFor({ timeout: 5000 }).catch(() => {});
+      const s = await shownIn(page);
+      h.expect(/^Page,/.test(s.box ?? ''), `a Page tap while the first page was made left the editor as ${JSON.stringify(s)}`);
+      await box.fill('The first line.');
+      await storedIs(h, page, 'The first line.', 'typed into the page made on opening');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  /** another page opened while the Story Room still reads its first page's cards: the late read is dropped, so the first
+   *  page's cards never show (or get saved) beside the other page */
+  async 'story-first-cards-read-overtaken'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await h.reachHub(page);
+      const { id, first, second } = await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const { story, first } = await ss.create('Two Doors');
+        const second = await ss.addChapter(story.id, 'Second Door');
+        await ss.putCards(first.id, [{ id: 'first-card', mode: 'continue', text: 'The kettle began to hum.', t: Date.now() }]);
+        await ss.putCards(second.id, [{ id: 'second-card', mode: 'continue', text: 'The second door stuck.', t: Date.now() }]);
+        return { id: story.id, first: first.id, second: second.id };
+      });
+      const { waitHeld, release, drain } = await holdStorage(page, ['cards']);
+      await page.evaluate((r) => window.__daily.go(r), { name: 'write', id });
+      await waitHeld(`cards ${first}`);
+      await page.locator('.st-chbtn').click();
+      const secondRow = page.locator('.st-chrow-b', { hasText: 'Second Door' });
+      await secondRow.click({ timeout: 10000 });
+      await waitHeld(`cards ${second}`);
+      await release(`cards ${second}`);
+      await page.getByRole('textbox', { name: 'Page, Second Door' }).waitFor({ timeout: 5000 }).catch(() => {});
+      await release(`cards ${first}`);
+      await drain();
+      await h.sleep(300);
+      const s = await shownIn(page);
+      const card = (text) => page.locator('.st-card', { hasText: text }).count();
+      h.expect(s.box === 'Page, Second Door', `opening Second Door during the first read showed ${JSON.stringify(s)}`);
+      h.expect((await card('The kettle began to hum.')) === 0 && (await card('The second door stuck.')) === 1, "the first page's late card read put its cards beside Second Door");
+      const kept = await page.evaluate(async (c) => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        return ((await (ss.__real?.cards ?? ss.cards).call(ss, c)) ?? []).map((x) => x.text);
+      }, second);
+      h.expect(kept.length === 1 && kept[0] === 'The second door stuck.', `Second Door's stored cards became ${JSON.stringify(kept)}`);
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** three sizes on the story text only, never under 16 px, no sideways scroll, kept after a reload and in a Save Crystal */
   async 'story-reading-size'(h) {
     const { ctx, page, errors } = await h.open(seed(h));

@@ -229,6 +229,9 @@ export function writeScreen(app: App, route: Route): ScreenOut {
   let pageIn!: () => void;
   /** settles once the first page is in the editor: nothing that edits the page runs before there is one */
   const pageLoaded = new Promise<void>((done) => (pageIn = done));
+  /** resolves once the story's first page exists, which opening a story with no pages makes first */
+  let pageMade!: () => void;
+  const pageExists = new Promise<void>((done) => (pageMade = done));
 
   // ---- head: title, chapter bar ----
   const titleIn = h('input', { class: 'st-title', type: 'text', maxlength: 120, placeholder: STORY.untitled, 'aria-label': 'Story title', autocomplete: 'off', autocapitalize: 'words', spellcheck: 'true', enterkeyhint: 'done' });
@@ -628,6 +631,8 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     }
     const n = ++picks;
     await flushAll();
+    // a Page tap while the first page is still being made waits for it, then opens it
+    if (to === 'page') await pageExists;
     if (n !== picks) return false;
     return (await load(to === 'notes' ? notesId : pageId, n)) && n === picks;
   };
@@ -1123,8 +1128,12 @@ export function writeScreen(app: App, route: Route): ScreenOut {
   };
 
   // ---------- cards ----------
+  /** the open page's cards; a read that answers after another page was opened is dropped, so cards never land on it */
   const loadCards = async () => {
-    cards = pageId ? await ss.cards(pageId) : [];
+    const id = pageId;
+    const next = id ? await ss.cards(id) : [];
+    if (id !== pageId) return;
+    cards = next;
     renderCards(false);
   };
   const persistCards = () => void ss.putCards(pageId, cards);
@@ -1417,6 +1426,7 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     // the first page takes its number now, so a Page or Notes tap while the chapter is made or its cards are read wins
     const n = ++picks;
     if (!pageId) pageId = (await ss.addChapter(storyId)).id;
+    pageMade();
     await loadCards();
     await load(pageId, n);
     await refreshStory();
