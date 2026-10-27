@@ -83,7 +83,7 @@ const ACT = {
     run: async (page) => {
       // the camp's 3D scene loads its models and draws its first frame in its own time, on a slow GPU after settle() has
       // stopped waiting: both runs are compared once it has come up (or given up), never while one of them still loads
-      if (await page.locator('.w2-camp').count()) await page.locator('.w2-camp:not(.is-scene-wait)').waitFor({ timeout: 60000 });
+      if (await page.locator('.w2-camp').count()) await page.locator('.w2-camp:not(.is-scene-wait)').waitFor({ state: 'attached', timeout: 60000 });
       await page.locator('.w2-sh-in').first().click();
     },
   },
