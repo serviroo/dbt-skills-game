@@ -602,8 +602,11 @@ export class InkPad {
   private twoFinger: { t: number; moved: boolean } | null = null;
   private raf = 0;
   private offs: (() => void)[] = [];
-  /** frame times while drawing (an eraser's, only those that erased more), for the perf check */
-  readonly frames: number[] = [];
+  /**
+   * when each frame while drawing began and how long it took, in ms (an eraser's: only those that erased more), for
+   * the perf check
+   */
+  readonly frames: [number, number][] = [];
 
   constructor(readonly opts: PadOpts) {
     const { w, h } = PAGE[opts.kind];
@@ -1106,7 +1109,7 @@ export class InkPad {
       // only frames that erased more count: one with no new points does nothing
       const done = this.er?.done;
       this.erase(c.st);
-      if (this.er?.done !== done) this.frames.push(performance.now() - t0);
+      if (this.er?.done !== done) this.frames.push([t0, performance.now() - t0]);
       if (this.frames.length > 2000) this.frames.splice(0, 1000);
       return;
     }
@@ -1120,7 +1123,7 @@ export class InkPad {
     this.hlg.fillStyle = '#000';
     this.hlg.fillRect(0, 0, this.haloLive.width, this.haloLive.height);
     haloPass(this.hlg, c.st, HALO);
-    this.frames.push(performance.now() - t0);
+    this.frames.push([t0, performance.now() - t0]);
     if (this.frames.length > 2000) this.frames.splice(0, 1000);
   };
 

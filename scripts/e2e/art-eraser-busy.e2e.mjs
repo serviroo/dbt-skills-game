@@ -93,6 +93,39 @@ function busyPage(n) {
   });
 }
 
+/**
+ * Starts a trace of the page and marks the page's clock in it, so a frame's time on that clock is found in the trace
+ * (see cpuTimes). Returns the mark's time on the page's clock.
+ */
+async function traceFrom(ctx, page) {
+  await ctx.browser().startTracing(page, { categories: ['devtools.timeline', 'blink.user_timing'] });
+  return page.evaluate(() => performance.mark('eraser-clock').startTime);
+}
+
+/**
+ * Ends the trace and gives, for each frame ([began, took] in ms on the page's clock), the CPU time of the page's main
+ * thread in the animation frame that ran it: its own work, not time it waited. On a runner without a GPU the browser
+ * draws the canvases on the CPU too, on the same few cores (a phone draws them on its GPU), and the browser's CPU
+ * slowdown counted the main thread's wait for a core 4 times over as its work. NaN for a frame not found.
+ */
+async function cpuTimes(ctx, clock, frames) {
+  const ev = JSON.parse(String(await ctx.browser().stopTracing())).traceEvents;
+  const mark = ev.find((e) => e.name === 'eraser-clock');
+  if (!mark) return frames.map(() => NaN);
+  const off = mark.ts - clock * 1000;
+  const fire = ev.filter((e) => e.ph === 'X' && e.name === 'FireAnimationFrame' && e.pid === mark.pid && e.tid === mark.tid && e.tdur !== undefined);
+  // the frame the eraser's work overlaps most: the page's clock is coarse, so a neighbour may touch its edges
+  return frames.map(([at, took]) => {
+    const a = at * 1000 + off, b = a + took * 1000;
+    let best = null, most = 0;
+    for (const e of fire) {
+      const o = Math.min(b, e.ts + e.dur) - Math.max(a, e.ts);
+      if (o > most) [best, most] = [e, o];
+    }
+    return best ? best.tdur / 1000 : NaN;
+  });
+}
+
 export const scenarios = {
   async 'art-eraser-takes-a-glow-line-away'(h) {
     const { expect } = h;
@@ -126,18 +159,19 @@ export const scenarios = {
     await page.evaluate((s) => window.__daily.ink.load(s), busyPage(150));
     await pick(page, 'Eraser');
     await pick(page, 'Bold size');
-    const cdp = await ctx.newCDPSession(page);
     const from = await page.evaluate(() => window.__daily.ink.frames.length);
-    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+    const clock = await traceFrom(ctx, page);
     // one long stroke sweeping the page three times, as a player clearing a corner of a busy drawing would; the page is
     // read while the finger is still down, so it is the eraser's own drawing as it goes, not the page kept after
     await path(page, [[0.1, 0.15], [0.9, 0.3], [0.1, 0.5], [0.9, 0.7], [0.1, 0.85]], 30, false);
-    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
-    const f = (await page.evaluate((n) => window.__daily.ink.frames.slice(n), from)).sort((a, b) => a - b);
+    const frames = await page.evaluate((n) => window.__daily.ink.frames.slice(n), from);
+    // a CPU 4 times slower than this one takes 4 times its CPU time
+    const f = (await cpuTimes(ctx, clock, frames)).map((t) => t * 4).sort((a, b) => a - b);
     const q = (k) => f[Math.min(f.length - 1, Math.floor(f.length * k))];
     const took = { frames: f.length, median: +q(0.5).toFixed(1), p90: +q(0.9).toFixed(1), max: +f[f.length - 1].toFixed(1) };
-    console.log('eraser frame work at 4x CPU slowdown, ms:', JSON.stringify(took));
+    const wall = frames.map(([, t]) => t).sort((a, b) => a - b);
+    console.log('eraser frame work at 4x CPU slowdown, ms:', JSON.stringify(took), 'on the wall here, at 1x:', JSON.stringify({ median: +wall[wall.length >> 1].toFixed(1), p90: +wall[Math.floor(wall.length * 0.9)].toFixed(1) }));
     await keepLayers(page, '__live');
     await page.mouse.up();
     await page.evaluate(() => window.__daily.ink.redraw());
@@ -146,6 +180,7 @@ export const scenarios = {
     const off = await offBetween(page, '__live', '__fresh');
     await h.shot(page, 'busy-erased-390x844');
     expect(f.length >= 20, `the eraser drew only ${f.length} frames`);
+    expect(f.every(Number.isFinite), `an eraser frame is missing from the trace: ${JSON.stringify(f)}`);
     expect(took.p90 <= 12, `erasing on a busy page stutters at 4x CPU slowdown: ${JSON.stringify(took)}`);
     expect(off.every((o) => o.share < 0.0005), `while erasing the page showed something other than the drawing it keeps: ${JSON.stringify(off)}`);
     expect(!errors.length, errors.join('\n'));
