@@ -8,7 +8,9 @@ import type { BuildScene } from '../runtime';
  * one every PERIOD seconds (three in the 90 s ride), lift the small board in the middle, crest gently and pass on; in
  * between the sea settles back to calm. Swells never steepen or break. The board rides on the surface the whole time,
  * tilting with its slope, carrying a small lantern whose light pools on the water around it. The only light sources are
- * the moon (with its path on the water) and the lantern, each a bright core inside a soft halo.
+ * the moon (with its path on the water) and the lantern, each a bright core inside a soft halo. The camera follows the
+ * board only a little, so a swell is seen lifting it towards the horizon; the moon is placed in the frame, not the world,
+ * so it shows whole at every size.
  */
 
 const FOV = 30;
@@ -19,10 +21,15 @@ const PERIOD = 30;
 const SPEED = 0.26;
 const WIDTH = 1.8;
 /** each swell's height; the middle one of the three is the biggest, the way an urge peaks and falls */
-const AMP = [0.48, 0.7, 0.56];
+const AMP = [0.5, 0.92, 0.6];
 const ampOf = (i: number) => (i < 0 ? 0 : (AMP[i] ?? 0.5));
 const DIR = new THREE.Vector2(1, 0.35).normalize();
-const MOON_DIR = new THREE.Vector3(-0.31, 0.125, -1).normalize();
+/** where the moon's middle sits in the frame at rest (-1..1 across and up): high on the left, clear of every edge */
+const MOON_AT = new THREE.Vector2(-0.46, 0.6);
+/** the camera at rest, and how much of the board's rise it follows (eye and gaze) */
+const EYE = new THREE.Vector3(0, 0.95, 4.9);
+const GAZE = 0.53;
+const FOLLOW = { eye: 0.25, gaze: 0.25 };
 const YAW = 0.36;
 /** how far the board's middle sits above the water around it: it floats, a little sunk */
 const FLOAT = 0.012;
@@ -159,6 +166,46 @@ void main() {
   ${OUT_GLSL}
 }`;
 
+const MOON_VERT = /* glsl */ `
+uniform float uSize;
+varying vec3 vDir;
+void main() {
+  // a square of sky round the moon, facing the camera; each pixel looks along its own direction
+  vec4 mv = modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+  mv.xy += position.xy * uSize;
+  vDir = transpose(mat3(viewMatrix)) * mv.xyz;
+  gl_Position = projectionMatrix * mv;
+}`;
+/**
+ * The sky round the moon drawn again, the same as the night behind it, with the moon as a light: a bright disc with soft
+ * grey seas, a core of light hugging it and a wide soft halo, both gone before the square's edge so it meets the sky.
+ */
+const MOON_FRAG = /* glsl */ `
+uniform float uTime;
+uniform vec3 uMoon;
+varying vec3 vDir;
+${NIGHT_GLSL}
+void main() {
+  vec3 d = normalize(vDir);
+  float a = acos(clamp(dot(d, uMoon), -1.0, 1.0));
+  vec3 u = normalize(cross(uMoon, vec3(0.0, 1.0, 0.0)));
+  vec2 q = vec2(dot(d, u), dot(d, cross(u, uMoon))) / MOON_R;
+  float r = length(q);
+  float disc = smoothstep(1.0, 1.0 - max(fwidth(r), 1e-3) * 1.2, r);
+  float seas = smoothstep(0.42, 0.78, fbm2(q * 1.7 + vec2(4.0, 1.3)));
+  float limb = 0.7 + 0.3 * sqrt(max(0.0, 1.0 - r * r));
+  vec3 col = skyDome(d, uMoon, uTime, 1.0) + moonHalo(d, uMoon);
+  col += MOON * 4.2 * (1.0 - 0.5 * seas) * limb * disc;
+  float off = max(a - MOON_R, 0.0);
+  col += MOON * (0.45 * exp(-off / (MOON_R * 0.45)) + 0.05 * exp(-off / (MOON_R * 1.4))) * smoothstep(MOON_R * 0.9, MOON_R * 1.05, a) * (1.0 - smoothstep(0.2, 0.28, a));
+  col += (hash2(gl_FragCoord.xy) - 0.5) * 0.0009;
+  gl_FragColor = vec4(col, 1.0);
+  ${OUT_GLSL}
+}`;
+/** how far out the moon's square sits, inside the far plane, and its half-width as an angle (radians) */
+const MOON_FAR = 90;
+const MOON_SPAN = 0.3;
+
 const BODY_VERT = /* glsl */ `
 varying vec3 vObj;
 varying vec3 vNObj;
@@ -251,7 +298,9 @@ export const build: BuildScene = (accent) => {
   const camera = new THREE.PerspectiveCamera(FOV, 2, 0.1, 120);
   const look = new THREE.Vector3();
   const time = { value: 0 };
-  const moon = { value: MOON_DIR.clone() };
+  const moon = { value: new THREE.Vector3(-0.3, 0.1, -1).normalize() };
+  // the camera at rest, to place the moon in the frame
+  const rest = new THREE.PerspectiveCamera(FOV, 2, 0.1, 120);
   const ridges = [new THREE.Vector2(), new THREE.Vector2(), new THREE.Vector2(), new THREE.Vector2()];
   const lampAt = { value: new THREE.Vector3() };
   const lampCol = { value: new THREE.Color().copy(LAMP).multiplyScalar(1) };
@@ -298,7 +347,12 @@ export const build: BuildScene = (accent) => {
   lantern.add(base, glass, cap, ring, light);
   rider.add(board, lantern);
 
-  scene.add(nightBackdrop(camera, moon, time), seaMesh, rider);
+  // the moon's own sky, drawn over the night behind and under the sea, which hides it below the horizon
+  const moonSky = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({ vertexShader: MOON_VERT, fragmentShader: MOON_FRAG, uniforms: { uTime: time, uMoon: moon, uSize: { value: MOON_FAR * Math.tan(MOON_SPAN) } }, depthWrite: false }));
+  moonSky.frustumCulled = false;
+  moonSky.renderOrder = -0.5;
+
+  scene.add(nightBackdrop(camera, moon, time), moonSky, seaMesh, rider);
 
   // more time after Done picks the sea up where it stopped instead of jumping ahead
   let gap = 0;
@@ -334,16 +388,24 @@ export const build: BuildScene = (accent) => {
       // the lantern breathes very slightly, slower than a breath; it never flickers
       lit.value = still ? 1 : 1 + 0.05 * Math.sin(t * 0.7);
 
-      camera.position.set(0.12 * Math.sin(t * 0.045), 0.95 + 0.3 * y, 4.9);
-      look.set(0.05 * Math.sin(t * 0.05 + 1), 0.4 + 0.4 * y, 0);
+      camera.position.set(EYE.x + 0.12 * Math.sin(t * 0.045), EYE.y + FOLLOW.eye * y, EYE.z);
+      look.set(0.05 * Math.sin(t * 0.05 + 1), GAZE + FOLLOW.gaze * y, 0);
       camera.lookAt(look);
       camera.updateMatrixWorld();
+      moonSky.position.copy(camera.position).addScaledVector(moon.value, MOON_FAR);
       time.value = t;
       Object.assign(probe, { t, board: rider.position.y, sea: y, gap: rider.position.y - y, tilt: Math.atan(gx * fwd.x + gz * fwd.z) });
     },
     resize(width, height) {
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
+      // the moon sits at MOON_AT in the frame of the camera at rest, whatever the frame's shape
+      rest.aspect = camera.aspect;
+      rest.updateProjectionMatrix();
+      rest.position.copy(EYE);
+      rest.lookAt(0.05 * Math.sin(1), GAZE, 0);
+      rest.updateMatrixWorld();
+      moon.value.set(MOON_AT.x, MOON_AT.y, 0.5).unproject(rest).sub(rest.position).normalize();
     },
   };
 };
