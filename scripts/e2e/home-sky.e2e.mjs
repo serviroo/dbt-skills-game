@@ -1,9 +1,9 @@
 // Home's sky follows the device's clock: dawn (05:00-08:00), day, dusk (17:00-20:00) and night, which is the sky the
 // companion always shows. Each mood is a picture in public/sky/. With Playwright's clock at each mood: Home shows it
 // (data-sky, the mood's picture loaded from this origin and painted where it should be), and the Safe Zone button keeps
-// its contrast. Every visible text keeps 5.4:1 against the sky at every scroll position, 80 px apart, on a first visit
-// and on a returning player's Home with the daily gift opened, from a 320 px phone to a 1920x1080 screen. Crossing
-// 08:00 with Home open drifts over seconds without dipping toward night; with reduced motion it switches at once.
+// its contrast. Every visible text keeps 5.4:1 against the sky at every scroll position, 80 px apart, on a returning
+// player's Home with the daily gift opened, from a 320 px phone to a 1920x1080 screen. Crossing 08:00 with Home open
+// drifts over seconds without dipping toward night; with reduced motion it switches at once.
 // Leaving Home stops its clock watch and gives the other screens the night sky back, at once for the Safe Zone.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -17,12 +17,14 @@ const SIZES = [
   ['320', { width: 320, height: 568 }],
   ['sideways', { width: 844, height: 390 }],
 ];
-// with the gift opened, phones and the common laptop and desktop screens
+// with the gift opened, which keeps every line a first visit shows (the same elements, colours and sizes) and adds the
+// gift's, so its sweep covers a first visit's too: phones upright and sideways, and the common laptop and desktop
+// screens. 1366x768 is left out: it is 1280x720's shape and layout, the column at the same share of the screen.
 const SCREENS = [
   ['390', { width: 390, height: 844 }],
   ['320', { width: 320, height: 568 }],
+  ['sideways', { width: 844, height: 390 }],
   ['1280', { width: 1280, height: 720 }],
-  ['1366', { width: 1366, height: 768 }],
   ['1440', { width: 1440, height: 900 }],
   ['1920', { width: 1920, height: 1080 }],
 ];
@@ -373,7 +375,7 @@ async function safeAtOnce(h, page, move, what) {
 }
 
 export const scenarios = {
-  /** each mood at its hour: the attribute, the painted sky, the text over it at three sizes and the Safe Zone button */
+  /** each mood at its hour: the attribute, the painted sky at three sizes and the Safe Zone button */
   async 'home-sky-moods'(h) {
     const { expect, out, shot } = h;
     const seen = {};
@@ -385,7 +387,6 @@ export const scenarios = {
       expect(sky.mood === mood, `at ${hh}:${String(mm).padStart(2, '0')} Home shows ${sky.mood}, not ${mood}`);
       expect(sky.layers[mood] === 1 && DAYTIME.every((m) => m === mood || sky.layers[m] === 0), `${mood}: its picture is not the one showing: ` + JSON.stringify(sky.layers));
       const pictures = {};
-      const rows = {};
       for (const [name, size] of SIZES) {
         await page.setViewportSize(size);
         await h.sleep(500);
@@ -396,14 +397,8 @@ export const scenarios = {
         expect(pic.url === `/sky/${mood}-${shape}.webp` && pic.same, `${mood} at ${name} does not draw its own ${shape} picture from this origin: ` + JSON.stringify(pic));
         expect(pic.miss <= 10, `${mood} at ${name}: the painted sky is not the picture (off by ${pic.miss}): ` + JSON.stringify(pic));
         if (name === '390') seen[mood] = { px: await skyPixels(page), safe: await safeButton(page) };
-        const all = await sweep(h, page);
-        await shot(page, `${mood}-${name}-end`);
-        rows[name] = weakest(all);
-        const low = all.filter((r) => r.score < FLOOR);
-        expect(all.length > 10, `only ${all.length} text pieces found on Home at ${name}`);
-        expect(!low.length, `${mood} at ${name}: text below ${FLOOR}:1: ${JSON.stringify(low.slice(0, 8))}`);
       }
-      fs.writeFileSync(path.join(out, `home-sky-${mood}.json`), JSON.stringify({ sky, pictures, seen: seen[mood], rows }, null, 2));
+      fs.writeFileSync(path.join(out, `home-sky-${mood}.json`), JSON.stringify({ sky, pictures, seen: seen[mood] }, null, 2));
       expect(!errors.length, errors.join('\n'));
       await ctx.close();
     }
@@ -437,8 +432,9 @@ export const scenarios = {
     return { moods: Object.fromEntries(names.map((m) => [m, { top: seen[m].px.top, band: seen[m].px.band, safe: seen[m].safe.label }])) };
   },
 
-  /** a returning player with today's gift opened: every text at every scroll position, in each mood, on phones and
-   *  on laptop and desktop screens. Every mood and size runs even when one fails, so a failure names all it reaches. */
+  /** a returning player with today's gift opened: every text at every scroll position, in each mood, on phones upright
+   *  and sideways and on laptop and desktop screens. Every mood and size runs even when one fails, so a failure names
+   *  all it reaches. */
   async 'home-sky-contrast'(h) {
     const { expect, out, shot } = h;
     const bad = [];
