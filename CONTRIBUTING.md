@@ -60,12 +60,12 @@ can't run, add `--browser=chromium`.
 
 `scripts/e2e.mjs` starts its own dev server and Playwright Chromium, runs every scenario in `scripts/e2e/*.e2e.mjs`
 and saves screenshots and `report.json` to `artifacts/e2e/<time>/`. It exits non-zero if any scenario fails. Scenarios
-run side by side, longest first, each in a browser of its own: `--jobs=<n>` browsers, by default half the machine's
-cores and at most 4. CI runs the same checks on every pull request and splits the scenarios into parts with
-`--shard=<i>/<n>`, spread by the seconds each one took on CI, kept in `scripts/e2e/timings.json`. A scenario not listed
-there counts as 15 s; after adding a long one, refresh the file from a CI run's `e2e-*` artifacts with
-`node scripts/e2e-timings.mjs <every part's report.json>`. For anything visual, also look at it in a browser at phone
-width (390 and 320 px) with motion on and off.
+run side by side, longest first, each in a browser of its own: `--jobs=<n>` browsers, by default one for every 4 of the
+machine's CPU threads and at most 4, so one on CI's 4-vCPU runners. CI runs the same checks on every pull request and
+splits the scenarios into parts with `--shard=<i>/<n>`, spread by the seconds each one took on CI, kept in
+`scripts/e2e/timings.json`. A scenario not listed there counts as 15 s; after adding a long one, refresh the file from
+a CI run's `e2e-*` artifacts with `node scripts/e2e-timings.mjs <every part's report.json>`. For anything visual, also
+look at it in a browser at phone width (390 and 320 px) with motion on and off.
 
 ### E2E scenarios
 

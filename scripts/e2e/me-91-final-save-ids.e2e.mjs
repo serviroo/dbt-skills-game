@@ -1,7 +1,8 @@
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const SNAP = path.join(root, 'scripts/stored-ids.json');
@@ -361,41 +362,43 @@ export const scenarios = {
       fs.writeFileSync(file, JSON.stringify(snap));
       return file;
     };
-    const run = (snap, base = snap, env = process.env) => {
+    // not execFileSync: scenarios run side by side in this process, and each check would stall them all while it runs
+    const check = promisify(execFile);
+    const run = async (snap, base = snap, env = process.env) => {
       const args = ['scripts/check-stored-ids.mjs', `--snapshot=${write(snap)}`, ...(base ? [`--baseline=${write(base)}`] : [])];
       try {
-        return { code: 0, text: execFileSync(process.execPath, args, { cwd: root, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) };
+        return { code: 0, text: (await check(process.execPath, args, { cwd: root, env, encoding: 'utf8' })).stdout };
       } catch (e) {
-        return { code: e.status, text: `${e.stdout}${e.stderr}` };
+        return { code: e.code, text: `${e.stdout}${e.stderr}` };
       }
     };
     const snap = JSON.parse(fs.readFileSync(SNAP, 'utf8'));
-    const now = run(snap, null);
+    const now = await run(snap, null);
     fs.writeFileSync(path.join(out, 'me91-guard-main.txt'), now.text);
     expect(now.code === 0 && /^OK/m.test(now.text), 'guard fails on the committed snapshot against main:\n' + now.text);
-    const lost = run(snap, null, { ...process.env, STORED_IDS_BASE: 'no-such-ref-me91' });
+    const lost = await run(snap, null, { ...process.env, STORED_IDS_BASE: 'no-such-ref-me91' });
     expect(lost.code === 1 && lost.text.includes("Can't find the earlier list"), 'guard passed without an earlier list to compare with:\n' + lost.text);
     const renamed = structuredClone(snap);
     renamed.ids.skill.push('renamed-away');
-    const r = run(renamed);
+    const r = await run(renamed);
     fs.writeFileSync(path.join(out, 'me91-guard-renamed.txt'), r.text);
     expect(r.code === 1 && /skill "renamed-away" is stored on players' devices but no longer in the source/.test(r.text), 'guard passed a lost skill id:\n' + r.text);
     renamed.migrations = [{ kind: 'skill', from: 'renamed-away', to: ids.skill[0], since: '2026-10-23' }];
-    const m = run(renamed);
+    const m = await run(renamed);
     expect(m.code === 0, 'guard refused a lost id that has a migration:\n' + m.text);
     const moved = structuredClone(renamed);
     moved.migrations[0].to = ids.skill[1];
-    const mv = run(moved, renamed);
+    const mv = await run(moved, renamed);
     expect(mv.code === 1 && mv.text.includes('was changed or removed'), 'guard accepted a shipped migration being changed:\n' + mv.text);
     const added = structuredClone(snap);
     const fresh = added.ids.skill.pop();
-    const a = run(added);
+    const a = await run(added);
     fs.writeFileSync(path.join(out, 'me91-guard-added.txt'), a.text);
     expect(a.code === 0 && a.text.includes(`skill: ${fresh}`) && a.text.includes('--update'), 'guard did not pass and list a new id:\n' + a.text);
     renamed.migrations[0].since = '';
-    const invalid = run(renamed);
+    const invalid = await run(renamed);
     expect(invalid.code === 1 && invalid.text.includes('Invalid migration'), 'guard accepted an undocumented migration');
-    const empty = run({ ids: {}, migrations: [] });
+    const empty = await run({ ids: {}, migrations: [] });
     expect(empty.code === 1 && empty.text.includes('Invalid stored-id snapshot'), 'guard accepted an empty snapshot');
 
     const scratch = path.join(out, 'guard-source');
@@ -404,35 +407,35 @@ export const scenarios = {
     for (const file of ['check-stored-ids.mjs', 'stored-ids.json']) fs.copyFileSync(path.join(root, 'scripts', file), path.join(scratch, 'scripts', file));
     fs.copyFileSync(path.join(root, 'package.json'), path.join(scratch, 'package.json'));
     fs.symlinkSync(path.join(root, 'node_modules'), path.join(scratch, 'node_modules'), 'dir');
-    const sourceRun = (label, code, match) => {
+    const sourceRun = async (label, code, match) => {
       let actual = 0, output;
-      try { output = execFileSync(process.execPath, ['scripts/check-stored-ids.mjs', `--baseline=${SNAP}`], { cwd: scratch, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
-      catch (e) { actual = e.status; output = `${e.stdout}${e.stderr}`; }
+      try { output = (await check(process.execPath, ['scripts/check-stored-ids.mjs', `--baseline=${SNAP}`], { cwd: scratch, encoding: 'utf8' })).stdout; }
+      catch (e) { actual = e.code; output = `${e.stdout}${e.stderr}`; }
       fs.writeFileSync(path.join(out, `me91-source-${label}.txt`), output);
       expect(actual === code && match.test(output), `${label}: exit ${actual}\n${output}`);
     };
     const file = path.join(scratch, 'src/content/dbt.ts');
     const original = fs.readFileSync(file, 'utf8');
     fs.writeFileSync(file, original.replace("id: 'lie-low'", "id: 'lay-low'"));
-    sourceRun('rename', 1, /skill "lie-low" is stored/);
+    await sourceRun('rename', 1, /skill "lie-low" is stored/);
     const scratchSnap = path.join(scratch, 'scripts/stored-ids.json');
     const frozen = fs.readFileSync(scratchSnap, 'utf8');
     fs.writeFileSync(scratchSnap, frozen.replace('"lie-low"', '"lay-low"'));
-    sourceRun('rename-list-too', 1, /skill "lie-low" was frozen in .+ and is gone from the list/);
+    await sourceRun('rename-list-too', 1, /skill "lie-low" was frozen in .+ and is gone from the list/);
     const kept = JSON.parse(frozen);
     kept.ids.skill.push('lay-low');
     kept.migrations.push({ kind: 'skill', from: 'lie-low', to: 'lay-low', since: '2026-10-23' });
     fs.writeFileSync(scratchSnap, JSON.stringify(kept));
-    sourceRun('rename-migrated', 0, /renamed by a migration/);
+    await sourceRun('rename-migrated', 0, /renamed by a migration/);
     fs.writeFileSync(scratchSnap, frozen);
     fs.writeFileSync(file, original.replace('export const SKILL =', "SKILLS.push({ ...SKILLS[0], id: 'guard-new-skill' });\nexport const SKILL ="));
-    sourceRun('addition', 0, /skill: guard-new-skill[\s\S]*--update/);
+    await sourceRun('addition', 0, /skill: guard-new-skill[\s\S]*--update/);
     fs.writeFileSync(file, original);
     const sw = path.join(scratch, 'src/pwa/sw-template.js');
     fs.writeFileSync(sw, fs.readFileSync(sw, 'utf8').replace(/^const (PREFIX|META) = .*;$/gm, ''));
-    sourceRun('zero', 1, /found no sw-cache ids/);
+    await sourceRun('zero', 1, /found no sw-cache ids/);
     fs.copyFileSync(path.join(root, 'src/pwa/sw-template.js'), sw);
     fs.writeFileSync(file, 'export const broken = ;');
-    sourceRun('import', 1, /Error|error/i);
+    await sourceRun('import', 1, /Error|error/i);
   },
 };

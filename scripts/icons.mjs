@@ -221,6 +221,7 @@ let parts;
 const write = (rel, dataUrl) => {
   const file = path.join(outDir, rel);
   if (!parts) {
+    fs.mkdirSync(path.dirname(outDir), { recursive: true });
     parts = fs.mkdtempSync(path.join(path.dirname(outDir), '.icons-'));
     process.once('exit', () => fs.rmSync(parts, { recursive: true, force: true }));
   }

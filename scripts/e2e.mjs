@@ -1,8 +1,9 @@
 // Runs the end-to-end scenarios in scripts/e2e/*.e2e.mjs against its own Vite dev server and Playwright Chromium, then
 // stops only the processes it started. Exits 1 if any scenario fails.
 // node scripts/e2e.mjs [--file=<name>] [--scenario=<name>] [--shard=<i>/<n>] [--jobs=<n>] [--headed] [--gpu] [--ws=<playwright run-server endpoint> --host=<this machine's address>]
-// Scenarios run side by side in --jobs browsers (default half this machine's cores, at most 4, and 1 with --ws), each browser taking the longest one left. A file that exports `serial = true` runs its scenarios in the order
-// they are written, one at a time in one browser.
+// Scenarios run side by side in --jobs browsers (default one for every 4 of this machine's CPU threads, at most 4, and 1
+// with --ws), each browser taking the longest one left. A file that exports `serial = true` runs its scenarios in the
+// order they are written, one at a time in one browser.
 // --shard=2/4 runs the second of four parts; scenarios are spread by their CI seconds in scripts/e2e/timings.json
 // (15 s for one not listed there; a serial file goes whole to one part), so CI can run the parts in parallel.
 // --file=names runs scripts/e2e/names.e2e.mjs only. --gpu renders on this machine's GPU (Vulkan) instead of SwiftShader.
@@ -21,7 +22,9 @@ for (const key of ['file', 'scenario', 'shard', 'jobs']) {
   if (flags[key] === '') throw new Error(`--${key} needs a value`);
 }
 if (flags.jobs && !/^[1-9]\d*$/.test(flags.jobs)) throw new Error(`--jobs needs a whole number of 1 or more, got ${flags.jobs}`);
-const jobs = flags.jobs ? +flags.jobs : flags.ws ? 1 : Math.max(1, Math.min(4, Math.floor(os.availableParallelism() / 2)));
+// One browser booting pages and drawing the skills' 3D scenes in SwiftShader keeps about 1.5 desktop cores busy. On
+// CI's 4-vCPU runners two of them starved each other: short scenarios ran 4 to 12 times slower, and some timed out.
+const jobs = flags.jobs ? +flags.jobs : flags.ws ? 1 : Math.max(1, Math.min(4, Math.floor(os.availableParallelism() / 4)));
 
 const all = [];
 const fileOf = new Map();

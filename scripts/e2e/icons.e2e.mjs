@@ -1,16 +1,17 @@
 // The build draws the PWA icons in headless Chromium; a lost WebGL context (as on GPU-less CI runners) must not fail it.
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const draw = (out, ...extra) => {
-  const r = spawnSync(process.execPath, [path.join(root, 'scripts/icons.mjs'), `--out=${out}`, '--only=icons', '--quiet', ...extra], { cwd: root, encoding: 'utf8' });
-  if (r.status !== 0) throw Object.assign(new Error(`icons.mjs exited ${r.status}`), { stderr: r.stderr });
-  return r;
-};
+// not spawnSync: scenarios run side by side in this process, and a draw would stall them all for the 20 s it takes
+const draw = (out, ...extra) =>
+  promisify(execFile)(process.execPath, [path.join(root, 'scripts/icons.mjs'), `--out=${out}`, '--only=icons', '--quiet', ...extra], { cwd: root, encoding: 'utf8' }).catch((e) => {
+    throw Object.assign(new Error(`icons.mjs exited ${e.code}`), { stderr: e.stderr });
+  });
 const hashes = (dir) => {
   const out = {};
   const walk = (d) => {
@@ -28,10 +29,10 @@ export const scenarios = {
   async 'icons-survive-lost-context'({ out, expect }) {
     const plain = path.join(out, 'icons-plain');
     const lost = path.join(out, 'icons-lost-context');
-    draw(plain);
+    await draw(plain);
     let run;
     try {
-      run = draw(lost, '--lose-context-at=3');
+      run = await draw(lost, '--lose-context-at=3');
     } catch (e) {
       throw new Error('a lost WebGL context failed the icon build: ' + String(e.stderr || e.message).slice(0, 400));
     }
@@ -47,10 +48,10 @@ export const scenarios = {
   async 'icons-fall-back-to-software-gl'({ out, expect }) {
     const plain = path.join(out, 'icons-plain-2');
     const lost = path.join(out, 'icons-software');
-    draw(plain);
+    await draw(plain);
     let run;
     try {
-      run = draw(lost, '--lose-context-at=2', '--lose-context-times=2');
+      run = await draw(lost, '--lose-context-at=2', '--lose-context-times=2');
     } catch (e) {
       throw new Error('losing the context twice failed the icon build: ' + String(e.stderr || e.message).slice(0, 400));
     }

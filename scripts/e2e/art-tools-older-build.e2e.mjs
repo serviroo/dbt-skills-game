@@ -2,11 +2,12 @@
 // it, never a tool's stroke painted as a brush line, and what it saves can't damage the drawing for good: restoring the
 // Save Crystal again once the device is on this build brings the drawing back whole. A Restore of the same version
 // with other content keeps everything: it updates a copy it holds all of, and otherwise comes in beside it.
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { drawPage, inkAt, line, pick, strokes } from './art-eraser-glow.e2e.mjs';
 import { active, build, buildOf, crystal, host, restore, update } from './newer-save-safety.e2e.mjs';
 
@@ -62,7 +63,10 @@ export const scenarios = {
     try {
       const src = path.join(scratch, 'src-a');
       fs.mkdirSync(src);
-      execFileSync('tar', ['-x', '-C', src], { input: execFileSync('git', ['archive', BEFORE_TOOLS], { cwd: root, maxBuffer: 1 << 30 }) });
+      // not execFileSync: scenarios run side by side in this process, and the copy would stall them all while it runs
+      const tarball = path.join(scratch, 'src-a.tar');
+      await promisify(execFile)('git', ['archive', '-o', tarball, BEFORE_TOOLS], { cwd: root });
+      await promisify(execFile)('tar', ['-x', '-f', tarball, '-C', src]);
       fs.symlinkSync(fs.realpathSync(path.join(root, 'node_modules')), path.join(src, 'node_modules'));
       const [a, b] = await Promise.all([build(src, path.join(scratch, 'a'), 'before-tools'), build(root, path.join(scratch, 'b'), 'this-build')]);
       const site = await host(a.dir);
