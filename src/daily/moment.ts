@@ -340,7 +340,7 @@ export function momentView(app: App, o: { done: () => void; then?: string; hum?:
   const fades: Animation[] = [];
   const stage = h('div', { class: 'dq-mo-stage' }, h('div', { class: 'dq-mo-halo', 'aria-hidden': 'true' }), svg);
   // the same breath as the flat ring: both count from t0
-  const unmount = mountScene(stage, { kind: 'ring', accent: playerAccent(), reduced: () => app.reduced(), clock: { now, onFrame, beat: () => ({ e: now() - t0, dur: Infinity, started: true, done: false }) } });
+  const unmount = mountScene(stage, { kind: 'ring', accent: playerAccent(), reduced: () => app.reduced(), onMotion: (fn) => app.onMotion(fn), clock: { now, onFrame, beat: () => ({ e: now() - t0, dur: Infinity, started: true, done: false }) } });
   /** The chosen time has passed: the hum fades as when leaving, the ring settles, one calm line stays, and the way back is Done. */
   const end = (t: number) => {
     endAt = t;

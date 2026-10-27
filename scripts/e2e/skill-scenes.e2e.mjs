@@ -1047,6 +1047,35 @@ export const scenarios = {
     await ctx.close();
   },
 
+  /** Motion changed while Give me a moment is open: Reduced stills its light, Full moves it again */
+  async 'moment-motion'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
+    await home(h, page);
+    await page.evaluate(() => window.__daily.go({ name: 'moment' }));
+    await live(h, page, 'moment motion', '.dq-mo-stage');
+    // set the way the Settings screen of this copy or another open one does
+    const here = (m) =>
+      page.evaluate((v) => {
+        const app = window.__daily;
+        app.store.state.settings.motion = v;
+        app.store.touch('motion');
+        app.store.save();
+        app.applyMotion();
+      }, m);
+    await here('reduce');
+    await h.sleep(600);
+    const a = await scenes(page);
+    await h.sleep(1000);
+    const b = await scenes(page);
+    h.expect(a.last.still && b.frames === a.frames, `moment, Reduced: the light did not settle on one still frame (${a.frames} -> ${b.frames}, still ${a.last.still})`);
+    await here('full');
+    await h.sleep(1500);
+    const c = await scenes(page);
+    h.expect(c.frames > b.frames + 10 && !c.last.still, `moment, Full: the light stayed still (${b.frames} -> ${c.frames} frames, still ${c.last.still})`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
   /** the tide: the water's edge comes in and goes back out at least once in 20 s, at every size */
   async 'tide-scene'(h) {
     for (const [tag, vp] of VIEWS) {
