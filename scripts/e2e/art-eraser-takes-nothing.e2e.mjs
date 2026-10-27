@@ -1,6 +1,7 @@
 // An eraser stroke that takes nothing from the page leaves the history alone: erasing beside a line, over paper an
 // eraser already cleared, or in an empty corner of a line's box after an Undo keeps Redo, and Redo brings the drawing
-// back. One that does take ink is still kept, undone and redone.
+// back, as it does after erasing ink too far off the page to show. One that does take ink is still kept, undone and
+// redone.
 import { drawPage, inkAt, line, pick, strokes } from './art-eraser-glow.e2e.mjs';
 
 /** A tap at a point given as a fraction of the page. */
@@ -76,6 +77,39 @@ export const scenarios = {
     await redo();
     expect((await strokes(page)).length === 6 && (await inkAt(page, 900, 1500)) > 200, 'Redo did not bring the undone line back after the tap');
 
+    expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /** 1280 px: ink off the page shows only as far as its light reaches onto it; erasing beyond that takes nothing */
+  async 'art-eraser-off-the-page'(h) {
+    const { expect } = h;
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', { width: 1280, height: 800 });
+    await drawPage(h, page);
+    const undo = () => button(page, 'Undo').click();
+    const redo = () => button(page, 'Redo').click();
+    const canRedo = async () => !(await button(page, 'Redo').isDisabled());
+    const box = await page.locator('.dq-ink-live').boundingBox();
+    expect(box.x + box.width * (-500 / 1200) > 0, 'the page is too close to the window edge to draw off it: ' + JSON.stringify(box));
+
+    // a line running from the page far off its left edge, and a second line undone so Redo holds it
+    await line(page, at(200, 500), at(-500, 500));
+    const left = await page.evaluate(() => Math.min(...window.__daily.ink.strokes[0].p.filter((_, i) => i % 2 === 0)));
+    expect(left < -400, `the line did not run off the page (it reaches ${left})`);
+    await line(page, at(300, 1200), at(900, 1200));
+    await undo();
+
+    // from the page to the line far off it, past where the line's light reaches the page: nothing it shows is taken
+    await pick(page, 'Eraser');
+    await line(page, at(100, 900), at(-400, 500));
+    expect((await strokes(page)).length === 1, 'an eraser stroke over ink too far off the page to show was kept: ' + JSON.stringify(await strokes(page)));
+    expect(await canRedo(), 'an eraser stroke off the page that took nothing cleared Redo');
+    await redo();
+    expect((await strokes(page)).length === 2, 'Redo did not bring the undone line back after erasing off the page');
+
+    // just off the page the line's light still reaches it, so erasing there is kept
+    await line(page, at(100, 900), at(-60, 500));
+    expect(JSON.stringify(await strokes(page)) === '["brush","brush","erase"]', 'an eraser stroke over ink whose light reaches the page was not kept: ' + JSON.stringify(await strokes(page)));
     expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },

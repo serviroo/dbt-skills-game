@@ -452,20 +452,25 @@ export function inkPass(g: CanvasRenderingContext2D, st: Stroke, s: number) {
 /** A canvas the CPU reads back, for takes. */
 let probe: CanvasRenderingContext2D | null = null;
 /**
- * Whether eraser stroke e, drawn after the strokes (each in its box, logical px), takes anything from the page: at
- * least half a px of a stroke's ink or of the line its light starts from, which no eraser stroke after that stroke
- * took already. They are laid out as the ink layer is (see renderDrawing), only where e can meet them, then kept only
- * under e. Passing close beside a line, or over paper an eraser already cleared, takes nothing.
+ * Whether eraser stroke e, drawn after the strokes (each in its box, logical px) on a page W by H, takes anything the
+ * page shows: at least half a px of a stroke's ink or of the line its light starts from, on the page or near enough
+ * for its light to reach the page, which no eraser stroke after that stroke took already. They are laid out as the ink
+ * layer is (see renderDrawing), only where e can meet them, then kept only under e. Passing close beside a line, over
+ * paper an eraser already cleared, or over ink too far off the page to show takes nothing.
  */
-function takes(strokes: Stroke[], boxes: Box[], e: Stroke) {
+function takes(strokes: Stroke[], boxes: Box[], e: Stroke, W: number, H: number) {
   const eb = grow(bounds(e.p), (e.w * ERASE) / 2 + 1);
-  const of = new Set<number>();
+  // where each stroke e may meet shows: on the page, and as far off it as its light reaches
+  const shows = new Map<number, Box>();
   let b: Box | null = null;
   for (let i = 0; i < strokes.length; i++) {
-    const s = strokes[i], sb = grow(boxes[i], lineHalf(s) + 1);
-    if (s.m === 'erase' || !s.p.length || !meets(sb, eb)) continue;
-    of.add(i);
-    b = join(b, sb);
+    const s = strokes[i];
+    if (s.m === 'erase' || !s.p.length) continue;
+    const pg = grow([0, 0, W, H], reach(s, HALO)), sb = grow(boxes[i], lineHalf(s) + 1);
+    const v: Box = [Math.max(sb[0], pg[0]), Math.max(sb[1], pg[1]), Math.min(sb[2], pg[2]), Math.min(sb[3], pg[3])];
+    if (v[2] <= v[0] || v[3] <= v[1] || !meets(v, eb)) continue;
+    shows.set(i, pg);
+    b = join(b, v);
   }
   if (!b) return false;
   const x0 = Math.floor(Math.max(b[0], eb[0])), y0 = Math.floor(Math.max(b[1], eb[1]));
@@ -479,18 +484,21 @@ function takes(strokes: Stroke[], boxes: Box[], e: Stroke) {
   g.translate(-x0, -y0);
   g.lineCap = 'round';
   g.lineJoin = 'round';
-  for (let i = Math.min(...of); i < strokes.length; i++) {
-    const s = strokes[i];
+  for (let i = Math.min(...shows.keys()); i < strokes.length; i++) {
+    const s = strokes[i], pg = shows.get(i);
     if (s.m === 'erase') {
       if (meets(grow(boxes[i], (s.w * ERASE) / 2 + 1), pb)) inkPass(g, s, 1);
       continue;
     }
-    if (!of.has(i)) continue;
+    if (!pg) continue;
+    g.save();
+    clip(g, pg);
     inkPass(g, s, 1);
     g.strokeStyle = '#000';
     g.lineWidth = Math.max(...lights(s, HALO).map(([lw]) => lw)) / HALO;
     trace(g, s.p, 1);
     g.stroke();
+    g.restore();
   }
   g.globalCompositeOperation = 'destination-in';
   g.lineWidth = e.w * ERASE;
@@ -1252,7 +1260,7 @@ export class InkPad {
       this.erase(st);
       // one that takes nothing from the page isn't kept, so the history and what Redo brings back stay as they were;
       // one that does cuts the ink by its points as they are kept
-      const kept = takes(this.strokes, this.er!.box, st);
+      const kept = takes(this.strokes, this.er!.box, st, this.W, this.H);
       if (kept) this.cutInk(st);
       else this.erase(null);
       this.letGo();
