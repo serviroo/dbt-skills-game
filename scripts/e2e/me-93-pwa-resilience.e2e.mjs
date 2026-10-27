@@ -498,8 +498,9 @@ export const scenarios = {
         await b.ctx.route('**/fonts/*.woff2', () => {});
         await b.page.goto(srv.url + '?mute', { waitUntil: 'commit' });
         await ready(b.page, 10000);
+        const left = h.leaves(b.page, '#np-name');
         await startIntro(b.page, sleep);
-        await b.page.locator('#np-name').waitFor({ state: 'detached', timeout: 5000 });
+        await left(5000);
         expect(!b.errors.length, b.errors.join('\n'));
       } finally {
         await b.ctx.close();

@@ -346,23 +346,28 @@ export function libraryScreen(app: App): ScreenOut {
     return h(
       'li',
       { class: 'dq-libitem', 'data-skill': s.id },
-      h('button', { type: 'button', class: 'dq-librow', onclick: () => app.go({ name: 'skill', id: s.id }) }, h('span', { class: 'dq-librow-n', text: typo(s.sl) }), h('span', { class: 'dq-librow-r', text: typo(s.real) }), h('span', { class: 'dq-librow-m', text: s.minutes }), h('span', { class: 'dq-librow-c', html: icon('chev') })),
-      h('button', { type: 'button', class: 'dq-libpin', 'aria-pressed': String(on), 'aria-label': C.pin(typo(s.sl), typo(s.real)), html: icon('star'), onclick: (e: Event) => pin(s.id, !on, e.currentTarget as HTMLElement) }),
+      h('button', { type: 'button', class: 'dq-librow', 'data-spot': `row ${s.id}`, onclick: () => app.go({ name: 'skill', id: s.id }) }, h('span', { class: 'dq-librow-n', text: typo(s.sl) }), h('span', { class: 'dq-librow-r', text: typo(s.real) }), h('span', { class: 'dq-librow-m', text: s.minutes }), h('span', { class: 'dq-librow-c', html: icon('chev') })),
+      h('button', { type: 'button', class: 'dq-libpin', 'data-spot': `pin ${s.id}`, 'aria-pressed': String(on), 'aria-label': C.pin(typo(s.sl), typo(s.real)), html: icon('star'), onclick: (e: Event) => pin(s.id, !on, e.currentTarget as HTMLElement) }),
     );
   };
   const section = (cls: string, ic: string, title: string, sub: string, ids: string[]) =>
     ids.length ? h('section', { class: `dq-libsec ${cls}` }, h('h2', { class: 'dq-libsec-h' }, h('span', { class: 'dq-libsec-ic', html: ic }), h('span', { text: title }), h('span', { class: 'dq-libsec-s', text: sub })), h('ul', { class: 'dq-liblist' }, ids.map((id) => row(SKILL[id])))) : null;
+  const clear = () => {
+    const b = btn(C.clear, clearAll, { kind: 'quiet' });
+    b.dataset.spot = 'clear';
+    return b;
+  };
   const pinsNow = () => CATALOGUE.filter((id) => st.pinned(id)).join(' ');
   let pinsShown = '';
 
   /**
-   * Draws the list for what is chosen. When a row the player is on moves (pinned, unpinned, here or in another open
-   * copy), the same control on the same skill keeps focus and stays where it was on screen.
+   * Draws the list for what is chosen. Every control in it has a spot (a skill's row or pin, or Clear filters), and
+   * whatever redraws the list (a pin here or in another open copy), the control in the same spot keeps focus and stays
+   * where it was on screen, even when its row moves.
    */
-  function render(keep?: { id: string; pin: boolean; top: number }) {
+  function render(keep?: { spot: string; top: number }) {
     const at = document.activeElement instanceof HTMLElement && results.contains(document.activeElement) ? document.activeElement : null;
-    const item = at?.closest<HTMLElement>('.dq-libitem');
-    if (!keep && at && item?.dataset.skill) keep = { id: item.dataset.skill, pin: at.classList.contains('dq-libpin'), top: at.getBoundingClientRect().top };
+    if (!keep && at?.dataset.spot) keep = { spot: at.dataset.spot, top: at.getBoundingClientRect().top };
     const shown = new Set(SKILLS.filter((s) => fits(s, finding)).map((s) => s.id));
     const free = (id: string) => shown.has(id) && !st.pinned(id);
     pinsShown = pinsNow();
@@ -371,15 +376,16 @@ export function libraryScreen(app: App): ScreenOut {
         section('dq-libsec--fav', icon('star'), C.favourites, C.favouritesSub, CATALOGUE.filter((id) => shown.has(id) && st.pinned(id))),
         section('dq-libsec--loadout', icon('comfort'), LOADOUT_COPY.title, LOADOUT_COPY.sub, LOADOUT.filter(free)),
         ...MODULE_ORDER.map((mid) => section(`dq-mod-${mid}`, glyph(mid), MODULES[mid].name, MODULES[mid].statName, CATALOGUE.filter((id) => SKILL[id].module === mid && !SKILL[id].loadout && free(id)))),
-        shown.size ? null : h('div', { class: 'dq-libempty' }, h('p', { class: 'dq-libempty-t', text: C.empty }), p(C.emptySub, 'dq-small'), btn(C.clear, clearAll, { kind: 'quiet' })),
+        shown.size ? null : h('div', { class: 'dq-libempty' }, h('p', { class: 'dq-libempty-t', text: C.empty }), p(C.emptySub, 'dq-small'), clear()),
       ].filter((x): x is HTMLElement => !!x),
     );
-    const filtered = !!(fold(finding.q) || finding.need || finding.topic || finding.time);
-    const said = filtered ? C.some(shown.size, SKILLS.length) : C.all(SKILLS.length);
+    // the count and Show all skills follow what shows: a search every skill fits still shows all of them
+    const every = shown.size === SKILLS.length;
+    const said = every ? C.all(SKILLS.length) : C.some(shown.size, SKILLS.length);
     if (count.textContent !== said) count.textContent = said;
-    showAll.classList.toggle('is-hidden', !filtered);
+    showAll.classList.toggle('is-hidden', every);
     if (!keep) return;
-    const to = results.querySelector<HTMLElement>(`[data-skill="${keep.id}"] ${keep.pin ? '.dq-libpin' : '.dq-librow'}`);
+    const to = results.querySelector<HTMLElement>(`[data-spot="${keep.spot}"]`);
     if (!to) return;
     to.focus({ preventScroll: true });
     const box = scrollerOf(to);
@@ -394,7 +400,7 @@ export function libraryScreen(app: App): ScreenOut {
     } finally {
       pinning = false;
     }
-    render({ id, pin: true, top });
+    render({ spot: `pin ${id}`, top });
   };
   const off = st.onChange(() => {
     if (!pinning && pinsNow() !== pinsShown) render();
