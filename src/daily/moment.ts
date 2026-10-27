@@ -235,6 +235,8 @@ export function momentScreen(app: App, route: Route): ScreenOut {
     length = v;
     from = now();
     arm();
+    // a line that promises no timing goes at once: the next frame shows a line again, from the timed ones
+    if (v !== 'open' && CHECKIN.momentOpen.some((l) => words.textContent === typo(l))) shown = -1;
     write(() => {
       try {
         localStorage.setItem(lengthKey(st.key), v);

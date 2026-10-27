@@ -294,6 +294,20 @@ export const scenarios = {
     await b.ctx.close();
   },
 
+  /** choosing a length while a line promises no timing takes that line down at once, not at the next line */
+  async 'timed-drops-open-line'(h) {
+    const { ctx, page, errors } = await openMoment(h);
+    await pause(page);
+    await page.clock.fastForward(37000);
+    await page.clock.runFor(100);
+    h.expect(/Nothing here is timed/.test(await line(page)), 'the open-ended line did not show 37 s in: ' + (await line(page)));
+    await radio(page, '1 minute').check();
+    await page.clock.runFor(100);
+    h.expect(!/Nothing here is timed|Stay as long/.test(await line(page)), 'a timed moment still says nothing is timed: ' + (await line(page)));
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
   /** with reduced motion a timed moment's end goes to its finished state with only a short soft fade, the ring too */
   async 'reduced-motion-end'(h) {
     const { ctx, page, errors } = await openMoment(h, {}, undefined, '?mute&reduced');
