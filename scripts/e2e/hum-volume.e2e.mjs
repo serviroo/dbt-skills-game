@@ -336,8 +336,11 @@ export const scenarios = {
       await h.shot(page, 'moment-after-wake');
 
       // The system pauses the hum at full level (a call, iOS locking) while the page stays in front. The hum waits,
-      // like the rest of the app's sound, until the system lets it go, or until the next tap or key press.
-      for (const how of ['the system', 'a key press']) {
+      // like the rest of the app's sound, until the system lets it go, or until the next tap or key press, also one in
+      // the speaker control, which keeps its taps and keys from the page.
+      for (const how of ['the system', 'a key press', 'the Hum slider']) {
+        const hum = how === 'the Hum slider' ? (await soundControls(page)).getByRole('slider', { name: 'Hum', exact: true }) : null;
+        await hum?.focus();
         const at = await clock(page, n);
         await recorded(page, n, at + 1);
         const sys = await page.evaluate(async (n) => {
@@ -350,7 +353,7 @@ export const scenarios = {
         }, n);
         h.expect((await clock(page, n)) === sys, `paused by the system, the hum woke itself before ${how} let it go`);
         if (how === 'the system') await page.evaluate((n) => window.__taps[n].a.context.resume(), n);
-        else await page.keyboard.press('Shift');
+        else await page.keyboard.press(hum ? 'ArrowLeft' : 'Shift');
         await page.waitForFunction((n) => window.__taps[n].a.context.state === 'running', n, { timeout: 3000 }).catch(() => {
           throw new Error(`the hum stayed paused after ${how} let it go`);
         });

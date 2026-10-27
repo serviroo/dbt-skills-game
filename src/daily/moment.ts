@@ -162,6 +162,8 @@ function lowHum(scale: number) {
       if (dead) return;
       // the glide the engine gives Master, Music and Effects (setUser: ramp 0.08 s, tau = ramp / 4), so no click
       vol.gain.setTargetAtTime(s, ctx.currentTime, 0.02);
+      // a level moved in the speaker control wakes a paused hum like any tap: the control keeps its taps and keys
+      resume();
     },
     breathe(s: number) {
       if (dead) return;
