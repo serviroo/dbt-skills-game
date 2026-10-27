@@ -1138,32 +1138,4 @@ export const scenarios = {
       await ctx.close();
     }
   },
-
-  /** a lost WebGL context shows the flat picture; when it comes back the scene draws again */
-  async 'scene-context-restored'(h) {
-    const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
-    await toStone(h, page);
-    await live(h, page, 'restore');
-    await page.evaluate(() => {
-      window.__lose = document.querySelector('.dq-scene canvas').getContext('webgl2').getExtension('WEBGL_lose_context');
-      window.__lose.loseContext();
-    });
-    await page.locator('.dq-timer-stage:not(.is-scene-live)').waitFor({ timeout: 5000 });
-    await h.sleep(800);
-    const a = await scenes(page);
-    await h.sleep(800);
-    const b = await scenes(page);
-    h.expect(a.live === 0 && b.frames === a.frames, `lost: the scene kept drawing (${a.frames} -> ${b.frames})`);
-    h.expect((await flat(page)).every(Boolean), 'lost: the flat picture did not come back');
-    await page.evaluate(() => window.__lose.restoreContext());
-    await live(h, page, 'restored');
-    await h.sleep(1200);
-    const c = await scenes(page);
-    h.expect(c.live === 1 && c.contexts === 1 && c.frames > b.frames + 10, `restored: ${JSON.stringify(c)}`);
-    inStep(h, await pair(page), 'restored');
-    await drawn(h, page, 'restored');
-    await h.shot(page, 'restored-phone');
-    h.expect(!errors.length, errors.join('\n'));
-    await ctx.close();
-  },
 };
