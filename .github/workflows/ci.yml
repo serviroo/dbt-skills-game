@@ -14,10 +14,10 @@ concurrency:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/playwright:v1.64.1-noble
-      options: --user 1001
+    # Pushes and pull requests from this repo run on the laptop's runners. A pull request from a fork stays on a GitHub
+    # runner in the Playwright container: the repo is public, and code from outside never runs on our machine.
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (github.event_name == 'pull_request' && fromJSON('["self-hosted", "laptop", "pr"]') || fromJSON('["self-hosted", "laptop"]')) || 'ubuntu-latest' }}
+    container: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && fromJSON('{"image":"mcr.microsoft.com/playwright:v1.64.1-noble","options":"--user 1001"}') || '' }}
     timeout-minutes: 30
     env:
       STORED_IDS_BASE: ${{ github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha }}
@@ -26,13 +26,18 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Temp files stay in this job
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v7
         with:
           node-version: 20.x
           cache: npm
       - run: npm ci
-      - name: Browsers come from the container
+      - name: Playwright matches the container image
         run: test "$(npx playwright --version)" = "Version 1.64.1" || { echo "package-lock has $(npx playwright --version); set the same version in the container image above"; exit 1; }
+      - name: Browsers for this Playwright
+        if: runner.environment == 'self-hosted'
+        run: npx playwright install chromium firefox webkit
       - run: npx tsc --noEmit -p .
       - name: Stored ids
         run: npm run check:ids
@@ -58,10 +63,8 @@ jobs:
           if-no-files-found: ignore
 
   e2e:
-    runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/playwright:v1.64.1-noble
-      options: --user 1001
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (github.event_name == 'pull_request' && fromJSON('["self-hosted", "laptop", "pr"]') || fromJSON('["self-hosted", "laptop"]')) || 'ubuntu-latest' }}
+    container: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && fromJSON('{"image":"mcr.microsoft.com/playwright:v1.64.1-noble","options":"--user 1001"}') || '' }}
     timeout-minutes: 30
     env:
       STORED_IDS_BASE: ${{ github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha }}
@@ -74,15 +77,23 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Temp files stay in this job
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v7
         with:
           node-version: 20.x
           cache: npm
       - run: npm ci
-      - name: Browsers come from the container
+      - name: Playwright matches the container image
         run: test "$(npx playwright --version)" = "Version 1.64.1" || { echo "package-lock has $(npx playwright --version); set the same version in the container image above"; exit 1; }
+      - name: Browsers for this Playwright
+        if: runner.environment == 'self-hosted'
+        run: npx playwright install chromium firefox webkit
       - name: E2E part ${{ matrix.shard }} of 8
-        run: node scripts/e2e.mjs --shard=${{ matrix.shard }}/8
+        run: node scripts/e2e.mjs --shard=${{ matrix.shard }}/8 ${{ runner.environment == 'self-hosted' && '--gpu' || '' }}
+      - name: Drawn on the GPU
+        if: runner.environment == 'self-hosted'
+        run: jq -e '.renderer | test("swiftshader|llvmpipe|no webgl"; "i") | not' artifacts/e2e/*/report.json
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -92,7 +103,7 @@ jobs:
           if-no-files-found: ignore
 
   secrets:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (github.event_name == 'pull_request' && fromJSON('["self-hosted", "laptop", "pr"]') || fromJSON('["self-hosted", "laptop"]')) || 'ubuntu-latest' }}
     timeout-minutes: 10
     env:
       GITLEAKS_VERSION: 8.30.1
