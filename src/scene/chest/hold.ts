@@ -23,6 +23,8 @@ export interface HoldOpts {
   onFrame?: (fn: () => void) => () => void;
   /** QA only: scripted presses as [downAt, upAt] in uiNow() seconds; upAt = Infinity holds to full. */
   script?: [number, number][];
+  /** ends the hold where it is, without the reward, when it resolves (the intro's Skip) */
+  until?: Promise<unknown>;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -385,6 +387,13 @@ export function holdToCharge(opts: HoldOpts): Promise<void> {
     stop = () => cancelAnimationFrame(raf);
   }
   render(0, born);
+  opts.until?.then(() => {
+    // the hold leaves at once, also a full one still held down, which would otherwise wait for the release
+    cleanup();
+    if (done) return;
+    done = true;
+    resolveP();
+  });
   // focus for keyboard users without stealing the page scroll
   if (!params.capture) target.focus({ preventScroll: true });
   return promise;

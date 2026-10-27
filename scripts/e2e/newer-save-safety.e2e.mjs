@@ -533,7 +533,7 @@ export const scenarios = {
         h.expect(fromB.v === 2 && fromB.garden?.seeds === 3, `build B did not store a v2 save with its new fields (v${fromB.v})`);
         // this build, the older one, takes over the device, then runs offline from its cached worker
         site.use(a.dir);
-        h.expect((await update(page)) === 'activated', 'build A never installed');
+        h.expect((await update(page, a)) === 'activated', 'build A never installed');
         await active(page, a, h.sleep);
         await ctx.setOffline(true);
         await page.reload();
@@ -546,10 +546,10 @@ export const scenarios = {
         h.expect(fromA.v === 2, `build A relabelled the v2 save as v${fromA.v}`);
         h.expect(same(fromA.garden, fromB.garden) && same(fromA.settings.haptics, { level: 2 }) && same(fromA.events.find((e) => e.id === 'b-bloom')?.glow, { ring: 2 }), 'build A dropped what build B stored');
         await h.shot(page, 'newer-cached-a-offline-390x844');
-        // B is back: it finds its own fields and A's change
-        await ctx.setOffline(false);
+        // B is back: it finds its own fields and A's change. B is served before the page is online, so no check finds A again
         site.use(b.dir);
-        h.expect((await update(page)) === 'activated', 'build B never came back');
+        await ctx.setOffline(false);
+        h.expect((await update(page, b)) === 'activated', 'build B never came back');
         await active(page, b, h.sleep);
         await page.reload();
         await h.reachHub(page);
@@ -624,17 +624,27 @@ async function active(page, d, sleep) {
   }
   throw new Error(`the ${d.tag} worker never took over`);
 }
-const update = (page) =>
-  page.evaluate(async () => {
+/**
+ * Asks the browser for the build the host now serves (d) and waits for the worker it found to settle. It holds the worker
+ * this check finds, even one that fails and leaves the registration before the check returns, and otherwise reads the
+ * registration: a check the browser started on its own may have found d first, and then no event comes. An update error
+ * fails the step. "activated" means d's cache is the current one.
+ */
+const update = (page, d) =>
+  page.evaluate(async ([meta, want]) => {
     const reg = await navigator.serviceWorker.getRegistration();
-    const found = new Promise((res) => reg.addEventListener('updatefound', () => res(reg.installing), { once: true }));
-    await reg.update().catch(() => {});
-    const w = await Promise.race([found, new Promise((res) => setTimeout(() => res(null), 8000))]);
-    if (!w) return 'none';
-    return new Promise((res) => {
+    let found = null;
+    reg.addEventListener('updatefound', () => (found = reg.installing), { once: true });
+    await reg.update();
+    // the check has settled: the worker it found, else one an earlier check found, else the active one
+    const w = found ?? reg.installing ?? reg.waiting ?? reg.active;
+    const state = await new Promise((res) => {
       const done = () => (w.state === 'redundant' || w.state === 'activated') && res(w.state);
       w.addEventListener('statechange', done);
       done();
       setTimeout(() => res('stuck: ' + w.state), 60000);
     });
-  });
+    if (state !== 'activated') return state;
+    const current = await (await caches.open(meta)).match('current').then((r) => r?.text());
+    return current === want ? state : `activated, but the current cache is ${current}, not ${want}`;
+  }, [swConst(d.dir, 'META'), d.cache]);

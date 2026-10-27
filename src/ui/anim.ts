@@ -3,6 +3,7 @@
  * In normal playback WAAPI runs on the document timeline; in capture mode every animation is paused and scrubbed.
  */
 import { params } from '../core/params';
+import type { Stage } from '../core/stage';
 
 type Tracked = { a: Animation; start: number; total: number };
 const tracked = new Set<Tracked>();
@@ -24,6 +25,18 @@ export function useRealClock() {
     tickUI();
   };
   realLoop = requestAnimationFrame(loop);
+}
+
+let stageTicks = false;
+/** Switch UI timing to the Stage clock when the cinematic starts its frames; stage time carries on from the UI time. */
+export function useStageClock(stage: Stage) {
+  if (params.capture) return;
+  cancelAnimationFrame(realLoop);
+  realLoop = 0;
+  stage.time = clockNow();
+  clockNow = () => stage.time;
+  if (!stageTicks) stage.onUpdate(() => tickUI());
+  stageTicks = true;
 }
 
 export function uiNow() {
@@ -77,6 +90,12 @@ export function complete(a: Animation) {
 /** Resolves when the stage clock has advanced by `sec`. */
 export function wait(sec: number) {
   return new Promise<void>((resolve) => waiters.push({ at: clockNow() + sec, resolve }));
+}
+
+/** Resolves `ms` from now on the page clock (the stage clock in captures): for DOM states that must not wait on 3D frames. */
+export function after(ms: number) {
+  if (params.capture) return wait(ms / 1000);
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
 export function finished(a: Animation) {
