@@ -153,6 +153,53 @@ export const scenarios = {
     }
   },
 
+  /** turning the phone keeps the chapter Read opened at just under the top bar, until they scroll; then the place is theirs */
+  async 'story-read-turns'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONES[0]);
+    const scrolled = () => page.evaluate(() => ({ top: document.querySelector('.dq').scrollTop, max: document.querySelector('.dq').scrollHeight - document.querySelector('.dq').clientHeight }));
+    const placed = async (what) => {
+      const p = await chapterPlace(page, 1);
+      h.expect(p.top >= p.clear - 0.5 && p.top - p.clear < 24 && p.headBottom <= p.vh, `${what}: chapter 2 is not just under the top bar (it starts at ${p.top.toFixed(1)}, the bar ends ${p.clear.toFixed(1)})`);
+    };
+    try {
+      await h.reachHub(page);
+      for (const texts of [[para(8, 'Snow'), para(8, 'Rain'), para(8, 'Sun')], [para(1, 'Snow'), para(1, 'Rain')]]) {
+        for (const [from, to] of [[PHONES[0], SIDEWAYS[0]], [SIDEWAYS[0], PHONES[0]]]) {
+          const what = `${texts.length} chapters, ${tag(from)}`;
+          await page.setViewportSize(from);
+          const ids = await storyOf(page, texts);
+          await openRead(page, ids, ids.ch[1], texts.length);
+          await h.sleep(1100);
+          await placed(`${what}, opened`);
+          await page.setViewportSize(to);
+          await h.sleep(500);
+          await h.shot(page, `read-turn-${texts.length}ch-${tag(from)}-to-${tag(to)}`);
+          await placed(`${what}, turned to ${tag(to)}`);
+          await page.setViewportSize(from);
+          await h.sleep(500);
+          await placed(`${what}, turned back`);
+          // a scroll of theirs ends it: the next turn leaves the page where the browser puts it
+          await page.mouse.move(from.width / 2, from.height / 2);
+          await page.mouse.wheel(0, -120);
+          await h.sleep(400);
+          const up = await chapterPlace(page, 1);
+          h.expect(up.top > up.clear + 24, `${what}: the scroll up did not move the page (chapter 2 at ${up.top.toFixed(1)})`);
+          const before = await scrolled();
+          await page.setViewportSize(to);
+          await h.sleep(500);
+          const after = await scrolled();
+          h.expect(Math.abs(after.top - Math.min(before.top, after.max)) <= 1, `${what}: a turn after they scrolled moved the page (${before.top} to ${after.top})`);
+          await page.setViewportSize(from);
+          await page.getByRole('button', { name: 'Back to writing' }).click();
+          await routeIs(page, 'write');
+        }
+      }
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** focus lands on a heading that already says the story's title, and the size buttons are named by their visible "A" */
   async 'story-read-names'(h) {
     const { ctx, page, errors } = await h.open(seed(h));

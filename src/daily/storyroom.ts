@@ -1518,14 +1518,19 @@ export function readScreen(app: App, route: Route): ScreenOut {
   };
   setSize(storedSize(app));
 
+  let unkeep = () => {};
   /**
    * The chapter they came from starts just clear of the top bar and its shade (the scroll padding in daily.css), even a
    * short last one: room after the page lets it scroll that far. Measured from the layout, so the screen's entry motion
-   * can't shift it, and placed again once the fonts are in unless they have scrolled since.
+   * can't shift it, and placed again whenever the page or the screen changes size (the fonts coming in, a turn of the
+   * phone) until they scroll.
    */
   const openAt = (sec: HTMLElement) => {
     const box = app.root;
     const room = el.appendChild(h('div', { 'aria-hidden': 'true' }));
+    const sizes = () => [box.clientWidth, box.clientHeight, body.offsetHeight].join();
+    let put = 0;
+    let placedAt = '';
     const place = () => {
       let y = 0;
       for (let n: HTMLElement | null = sec; n && n !== box; n = n.offsetParent as HTMLElement | null) y += n.offsetTop;
@@ -1534,10 +1539,18 @@ export function readScreen(app: App, route: Route): ScreenOut {
       room.style.height = `${box.clientHeight}px`;
       room.style.height = `${Math.max(0, box.clientHeight - (box.scrollHeight - box.clientHeight - top))}px`;
       box.scrollTop = top;
-      return box.scrollTop;
+      put = box.scrollTop;
+      placedAt = sizes();
     };
-    const put = place();
-    void document.fonts?.ready.then(() => alive && box.scrollTop === put && place());
+    place();
+    const keep = new ResizeObserver(place);
+    // a scroll with no change of size is theirs and ends it; a screen grown past the end of the page also pulls the
+    // scroll back, but that comes with a new size and is placed again
+    const theirs = () => Math.abs(box.scrollTop - put) >= 1 && sizes() === placedAt && unkeep();
+    keep.observe(box);
+    keep.observe(body);
+    box.addEventListener('scroll', theirs, { passive: true });
+    unkeep = () => (keep.disconnect(), box.removeEventListener('scroll', theirs));
   };
 
   let titled!: () => void;
@@ -1583,6 +1596,7 @@ export function readScreen(app: App, route: Route): ScreenOut {
     ready,
     leave: () => {
       alive = false;
+      unkeep();
     },
   };
 }
