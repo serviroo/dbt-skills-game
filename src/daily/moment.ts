@@ -339,8 +339,26 @@ export function momentView(app: App, o: { done: () => void; then?: string; hum?:
   let passes = 0;
   const fades: Animation[] = [];
   const stage = h('div', { class: 'dq-mo-stage' }, h('div', { class: 'dq-mo-halo', 'aria-hidden': 'true' }), svg);
-  // the same breath as the flat ring: both count from t0
-  const unmount = mountScene(stage, { kind: 'ring', accent: playerAccent(), reduced: () => app.reduced(), onMotion: (fn) => app.onMotion(fn), clock: { now, onFrame, beat: () => ({ e: now() - t0, dur: Infinity, started: true, done: false }) } });
+  // the same breath as the flat ring: both count from t0, and once the moment ends both settle, then hold still
+  const unmount = mountScene(stage, {
+    kind: 'ring',
+    accent: playerAccent(),
+    reduced: () => app.reduced(),
+    onMotion: (fn) => app.onMotion(fn),
+    clock: {
+      now,
+      onFrame: (fn) => {
+        // the first frame past the settle draws the light at rest, however late it comes; then it holds that frame
+        let rested = false;
+        return onFrame((t) => {
+          if (rested) return;
+          rested = endAt >= 0 && t - endAt > SETTLE_S;
+          fn(t);
+        });
+      },
+      beat: () => ({ e: now() - t0, dur: endAt < 0 ? Infinity : endAt - t0, started: true, done: endAt >= 0 }),
+    },
+  });
   /** The chosen time has passed: the hum fades as when leaving, the ring settles, one calm line stays, and the way back is Done. */
   const end = (t: number) => {
     endAt = t;

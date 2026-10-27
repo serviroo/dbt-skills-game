@@ -1076,6 +1076,34 @@ export const scenarios = {
     await ctx.close();
   },
 
+  /** a timed Give me a moment ends with its light settled to a slow exhale and holding still, as its flat ring does */
+  async 'moment-end-light'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
+    await page.clock.install();
+    await home(h, page);
+    await page.evaluate(() => window.__daily.go({ name: 'moment' }));
+    await live(h, page, 'moment end', '.dq-mo-stage');
+    await pauseSoon(page);
+    await page.getByRole('radiogroup', { name: 'How long' }).getByRole('radio', { name: '1 minute' }).check();
+    await page.clock.runFor(2000);
+    const on = await scenes(page);
+    h.expect(on.last.probe.breath > 0.05, `moment end: the light was not breathing before the end (${JSON.stringify(on.last)})`);
+    await page.clock.fastForward(60000);
+    await page.locator('.dq-mo-line', { hasText: /your moment/ }).waitFor({ timeout: 5000 });
+    // the flat ring settles over 2.4 s; a slow page can skip from part way through that straight past its end
+    await page.clock.runFor(300);
+    await page.clock.fastForward(2300);
+    await page.clock.runFor(500);
+    const a = await scenes(page);
+    await page.clock.runFor(2000);
+    const b = await scenes(page);
+    h.expect(a.last.done && a.last.probe.breath < 0.01, `moment end: the light did not settle to its exhale (${JSON.stringify(a.last)})`);
+    h.expect(b.frames === a.frames, `moment end: the light kept drawing after it settled (${a.frames} -> ${b.frames} frames)`);
+    await page.clock.resume();
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
   /** the tide: the water's edge comes in and goes back out at least once in 20 s, at every size */
   async 'tide-scene'(h) {
     for (const [tag, vp] of VIEWS) {

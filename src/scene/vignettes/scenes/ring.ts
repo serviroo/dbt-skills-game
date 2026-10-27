@@ -13,6 +13,8 @@ import type { BuildScene } from '../runtime';
 const FOV = 30;
 const INHALE = 4;
 const EXHALE = 6;
+/** seconds the breath takes to settle once it has ended (the same as Give me a moment's ring) */
+const SETTLE = 2.4;
 /** the light's size breathed out and breathed in (the probe's scale) */
 const SMALL = 0.5;
 const BIG = 0.7;
@@ -162,8 +164,9 @@ export const build: BuildScene = (accent) => {
     camera,
     probe,
     pose(b, still) {
-      const t = still ? 0 : Math.max(0, b.e);
-      const s = still ? 0.55 : breathAt(t);
+      // past its end (a timed Give me a moment) the breath settles to the exhale, as the flat ring does, and holds still
+      const t = still ? 0 : Math.max(0, Math.min(b.e, b.dur + SETTLE));
+      const s = still ? 0.55 : breathAt(t) * (1 - ease((t - b.dur) / SETTLE));
       const r = SMALL + (BIG - SMALL) * s;
       breath.value = s;
       time.value = still ? 12 : t;
