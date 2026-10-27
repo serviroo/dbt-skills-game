@@ -1,16 +1,27 @@
 import * as THREE from 'three';
-import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { siteUrl } from '../../../core/base';
 import { motes, OUT_GLSL, pointScale, rng, WATER_GLSL, WORLD_VERT, waterBackdrop } from '../common';
 import type { Beat } from '../host';
 import type { BuildScene } from '../runtime';
 
 /**
  * Wise Mind's stone: a small flat river stone drifting down through clear water, turning a little as it glides from
- * side to side, light caustics moving over it, until it settles on pale rippled sand with a small puff that fades.
+ * side to side, light caustics moving over it, until it settles on cool rippled sand with a small puff that fades.
  * Everything is posed from the timer's beat, so the stone lands as the countdown ends and waits there after.
  * The only light is the sun through the water (caustics and shafts, each a bright core plus a soft halo) and the
  * lantern-blue rim on the stone. Deep water fades to the void.
  */
+
+/**
+ * The stone itself, modelled and baked in Blender: its mesh with colour, roughness and normal maps. The scene waits
+ * for it, so it never starts without its stone; if it can't load, the flat picture stays.
+ */
+const STONE = await new GLTFLoader().loadAsync(siteUrl('models/stone.glb')).then((g) => {
+  const mesh = g.scene.getObjectByProperty('isMesh', true) as THREE.Mesh;
+  const mat = mesh.material as THREE.MeshStandardMaterial;
+  return { geometry: mesh.geometry, map: mat.map!, normalMap: mat.normalMap!, roughnessMap: mat.roughnessMap! };
+});
 
 const FLOOR = -1;
 const TOP = 1.05;
@@ -22,6 +33,8 @@ const RZ0 = -0.05;
 const FOV = 34;
 
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
+/** cool grey river sand, darker than the stone so the stone stays the brightest thing on the floor */
+const SAND = /* glsl */ `vec3(0.31, 0.34, 0.355)`;
 
 const SAND_FRAG = /* glsl */ `
 uniform float uTime;
@@ -31,18 +44,24 @@ uniform float uYaw;
 varying vec3 vWorld;
 ${WATER_GLSL}
 const vec2 POOL = vec2(0.15, 0.1);
-/** wind-combed ripples, a finer cross ripple and a little grain */
-float sandH(vec2 p) {
-  float warp = 0.7 * sin(p.x * 0.6 + p.y * 0.45) + 0.9 * noise2(p * 0.7);
-  float r1 = pow(0.5 + 0.5 * sin(dot(p, vec2(0.56, 0.83)) * 16.0 + warp * 3.2), 1.6);
-  float r2 = 0.5 + 0.5 * sin(dot(p, vec2(-0.55, 0.84)) * 41.0 + noise2(p * 5.0) * 3.4);
-  return r1 * 0.02 + r2 * 0.0025 + noise2(p * 30.0) * 0.0015;
+/** ripples half a stone apart, across the current, their long gentle backs turned to the sun */
+const vec2 ACROSS = vec2(-0.8, -0.6) / 0.45;
+/**
+ * One ripple's shape (0 in the trough, 1 on the crest) times its height: a long gentle back, a short steep front,
+ * the crests bending, branching and fading in and out.
+ */
+float ripple(vec2 p) {
+  float f = fract(dot(p, ACROSS) + 0.9 * noise2(p * 0.32 + 4.0) + 0.45 * noise2(p * 1.3 + 2.0) + 0.3 * sin(dot(p, vec2(-0.6, 0.8)) * 0.8));
+  float h = f < 0.64 ? 0.5 - 0.5 * cos(3.14159 * f / 0.64) : 0.5 + 0.5 * cos(3.14159 * (f - 0.64) / 0.36);
+  return h * (0.5 + 0.5 * noise2(p * 0.5 + 9.0));
 }
+float sandH(vec2 p) { return ripple(p) * 0.017 + noise2(p * 26.0) * 0.0012; }
 void main() {
   vec2 p = vWorld.xz;
   float dist = length(cameraPosition - vWorld);
-  float near = 1.0 - smoothstep(4.5, 11.0, dist);
-  float e = 0.01;
+  // fine relief fades out with distance, and before a ripple gets thinner than a few pixels, so it never shimmers
+  float near = (1.0 - smoothstep(6.0, 13.0, dist)) * (1.0 - smoothstep(0.15, 0.3, fwidth(dot(p, ACROSS))));
+  float e = 0.008;
   float h = sandH(p);
   vec3 n = normalize(vec3(-(sandH(p + vec2(e, 0.0)) - h) / e * near, 1.0, -(sandH(p + vec2(0.0, e)) - h) / e * near));
 
@@ -56,29 +75,36 @@ void main() {
   vec2 under = (p - uStone.xz) / vec2(0.52, 0.38);
   float ao = 1.0 - 0.55 * (1.0 - smoothstep(0.75, 1.3, length(under))) * (1.0 - smoothstep(0.0, 0.12, uLift));
 
-  // a pool of light on the sand around the stone; beyond it the floor sinks into the dark
-  float pool = exp(-pow(length(p - POOL) / 2.6, 2.0));
+  // a pool of light on the sand around the stone, fading slowly, so the far floor sinks into the dark by degrees
+  float pool = 1.0 / (1.0 + pow(length(p - POOL) / 2.2, 2.0));
   float grain = mix(1.0, 0.9 + 0.2 * noise2(p * 55.0), near);
   // the fine dark grains collect in the troughs between ripples, so the ripples read even where the light is flat
-  vec3 albedo = vec3(0.93, 0.85, 0.69) * grain * (0.9 + 0.2 * noise2(p * 1.7)) * mix(1.0, 0.86 + 0.2 * smoothstep(0.002, 0.02, h), near);
+  vec3 albedo = ${SAND} * grain * (0.9 + 0.2 * noise2(p * 1.7)) * mix(1.0, 0.92 + 0.1 * ripple(p), near);
   vec3 sun = sunAt(vWorld.y) * pool;
   vec2 c = caustic(p * 1.6, uTime);
   vec3 amb = vec3(0.010, 0.022, 0.038) * (0.15 + 0.85 * pool);
   float ndl = max(dot(n, LIGHT), 0.0);
   vec3 col = albedo * (amb * ao + SUN * sun * 0.58 * ndl * vis * ao);
-  // caustic light: the core is the light itself, the halo its soft spill
-  col += albedo * SUN * sun * vis * ao * (c.x * 0.24 + c.y * 0.17) * near;
-  gl_FragColor = vec4(haze(col, vWorld, uTime, smoothstep(4.0, 9.5, dist)), 1.0);
+  // caustic light: the core is the light itself, the halo its soft spill, brightest on the ripple faces turned to the
+  // sun; far off the net gets finer than the eye can follow and blends into its average glow instead of going out
+  c = mix(vec2(0.06, 0.28), c, 1.0 - smoothstep(5.0, 12.0, dist));
+  col += albedo * SUN * sun * vis * ao * (c.x * 0.42 + c.y * 0.22) * clamp(ndl / LIGHT.y, 0.6, 1.25);
+  // the floor sinks into the water evenly across the view, from just behind the stone to the far edge, instead of all
+  // at once near the horizon (1 / dist follows the angle below the horizon), so there is no line where sand meets water
+  gl_FragColor = vec4(haze(col, vWorld, uTime, 1.0 - smoothstep(0.03, 0.24, 1.0 / dist)), 1.0);
   ${OUT_GLSL}
 }`;
 
 const STONE_VERT = /* glsl */ `
-varying vec3 vObj;
+attribute vec4 tangent;
+varying vec2 vUv;
 varying vec3 vNObj;
+varying vec4 vTObj;
 varying vec3 vWorld;
 void main() {
-  vObj = position;
+  vUv = uv;
   vNObj = normal;
+  vTObj = tangent;
   vec4 w = modelMatrix * vec4(position, 1.0);
   vWorld = w.xyz;
   gl_Position = projectionMatrix * viewMatrix * w;
@@ -88,48 +114,52 @@ uniform float uTime;
 uniform vec3 uRim;
 uniform mat3 uRot;
 uniform float uLift;
-varying vec3 vObj;
+uniform sampler2D uMap;
+uniform sampler2D uNormalMap;
+uniform sampler2D uRoughMap;
+varying vec2 vUv;
 varying vec3 vNObj;
+varying vec4 vTObj;
 varying vec3 vWorld;
 ${WATER_GLSL}
-float dents(vec3 p) { return noise3(p * 14.0) * 0.7 + noise3(p * 31.0) * 0.3; }
 void main() {
-  // a smooth, water-worn surface with a few shallow dents that turn with the stone
-  float e = 0.006;
-  float h0 = dents(vObj);
-  vec3 grad = vec3(dents(vObj + vec3(e, 0.0, 0.0)) - h0, dents(vObj + vec3(0.0, e, 0.0)) - h0, dents(vObj + vec3(0.0, 0.0, e)) - h0) / e;
-  vec3 no = normalize(vNObj);
-  no = normalize(no - 0.0045 * (grad - dot(grad, no) * no));
-  vec3 n = normalize(uRot * no);
-
-  // grey slate with soft cloudy patches, a few pale grains and one thin quartz vein
-  float blot = noise3(vObj * 4.5) * 0.65 + noise3(vObj * 11.0) * 0.35;
-  vec3 albedo = mix(vec3(0.10, 0.10, 0.102), vec3(0.22, 0.215, 0.208), smoothstep(0.32, 0.78, blot));
-  albedo *= 0.93 + 0.14 * noise3(vObj * 26.0);
-  albedo = mix(albedo, vec3(0.28, 0.29, 0.30), smoothstep(0.84, 0.9, noise3(vObj * 40.0 + 3.1)) * 0.4);
-  float band = abs(dot(vObj, normalize(vec3(1.0, 0.3, 0.42))) - 0.06 + 0.03 * (noise3(vObj * 9.0) - 0.5));
-  albedo = mix(albedo, vec3(0.62, 0.64, 0.65), (1.0 - smoothstep(0.006, 0.015, band)) * 0.45);
+  // the stone's own mottling, grains, pits and quartz veins, baked from the Blender model
+  vec3 albedo = texture2D(uMap, vUv).rgb;
+  float rough = max(texture2D(uRoughMap, vUv).g, 0.18);
+  vec3 nb = normalize(vNObj);
+  vec3 tb = normalize(vTObj.xyz - nb * dot(nb, vTObj.xyz));
+  vec3 n = normalize(uRot * (mat3(tb, cross(nb, tb) * vTObj.w, nb) * (texture2D(uNormalMap, vUv).xyz * 2.0 - 1.0)));
+  vec3 ng = normalize(uRot * nb);
 
   vec3 V = normalize(cameraPosition - vWorld);
   vec3 sun = sunAt(vWorld.y);
   float wrap = max((dot(n, LIGHT) + 0.25) / 1.25, 0.0);
   vec3 amb = mix(vec3(0.003, 0.004, 0.006), vec3(0.016, 0.026, 0.036), n.y * 0.5 + 0.5);
   // resting on sand, the underside sits in its own shade
-  float ao = mix(mix(0.3, 1.0, smoothstep(-0.8, 0.3, n.y)), 1.0, smoothstep(0.0, 0.15, uLift));
+  float ao = mix(mix(0.3, 1.0, smoothstep(-0.8, 0.3, ng.y)), 1.0, smoothstep(0.0, 0.15, uLift));
   // the same net of light as on the sand, so it runs on over the stone
   vec2 c = caustic(vWorld.xz * 1.6, uTime);
-  float up = smoothstep(0.1, 0.85, n.y);
-  vec3 col = albedo * (amb * ao + SUN * sun * wrap * 0.42 * ao);
-  // the pale sand below throws a little warm light back up onto the underside
-  col += albedo * vec3(0.93, 0.85, 0.69) * SUN * sunAt(-1.0) * 0.16 * smoothstep(0.25, -0.9, n.y) * mix(0.35, 1.0, exp(-uLift * 0.8)) * ao;
-  col += albedo * SUN * sun * up * (c.x * 1.2 + c.y * 0.4);
-  // wet sheen: a soft broad highlight and a tighter one inside it
+  float up = smoothstep(0.1, 0.85, ng.y);
+  vec3 col = albedo * (amb * ao + SUN * sun * wrap * 0.9 * ao);
+  // the sand below throws a little light back up onto the underside
+  col += albedo * ${SAND} * SUN * sunAt(-1.0) * 0.3 * smoothstep(0.25, -0.9, ng.y) * mix(0.35, 1.0, exp(-uLift * 0.8)) * ao;
+  col += albedo * SUN * sun * up * (c.x * 0.45 + c.y * 0.1);
+  // wet sheen: a soft highlight as broad as the baked roughness, a little stronger at grazing angles, only where light
+  // from above can reach (never on the shaded underside)
+  float lit = ao * smoothstep(-0.2, 0.3, ng.y);
   vec3 H = normalize(LIGHT + V);
-  float nh = max(dot(n, H), 0.0);
-  col += SUN * sun * (pow(nh, 24.0) * 0.05 + pow(nh, 110.0) * 0.16);
+  float a2 = max(rough * rough * rough * rough, 0.002);
+  float spec = pow(max(dot(n, H), 0.0), 2.0 / a2 - 2.0) / (4.0 * a2);
+  float fres = 0.04 + 0.96 * pow(1.0 - max(dot(n, V), 0.0), 5.0);
+  col += SUN * sun * fres * spec * max(dot(n, LIGHT), 0.0) * lit * 0.5;
+  // and the bright surface far behind mirrored in the wet top as a soft sheen, broken up by the grain
+  vec3 R = reflect(-V, n);
+  float s2 = 4.0 / max(rough * rough, 0.02);
+  col += SUN * sun * fres * (s2 + 2.0) / 8.0 * pow(max(dot(R, normalize(vec3(0.1, 0.32, -0.94))), 0.0), s2) * lit * 0.3;
+  col += (water(R) + shafts(R, uTime) * 0.5) * fres * (1.0 - rough) * 0.5 * smoothstep(-0.1, 0.4, R.y);
   // the lantern-blue rim, from behind and to the left
-  float fres = pow(1.0 - max(dot(n, V), 0.0), 3.2);
-  col += uRim * fres * (0.05 + 0.95 * clamp(dot(n, normalize(vec3(-0.65, 0.4, -0.6))) + 0.1, 0.0, 1.0)) * 0.7;
+  float rim = pow(1.0 - max(dot(ng, V), 0.0), 3.5);
+  col += uRim * rim * (0.05 + 0.95 * clamp(dot(ng, normalize(vec3(-0.65, 0.4, -0.6))) + 0.1, 0.0, 1.0)) * 0.4;
   gl_FragColor = vec4(haze(col, vWorld, uTime, 0.0), 1.0);
   ${OUT_GLSL}
 }`;
@@ -155,29 +185,9 @@ const PUFF_FRAG = /* glsl */ `
 varying float vA;
 void main() {
   float a = smoothstep(0.5, 0.0, length(gl_PointCoord - 0.5)) * vA;
-  gl_FragColor = vec4(vec3(0.56, 0.56, 0.52), a);
+  gl_FragColor = vec4(vec3(0.17, 0.21, 0.23), a);
   ${OUT_GLSL}
 }`;
-
-/** A smooth flat river stone: flattened top and bottom, a rounded edge, one end a little fuller, never quite even. */
-function stoneGeometry() {
-  const sphere = new THREE.SphereGeometry(1, 72, 48);
-  sphere.deleteAttribute('uv');
-  sphere.deleteAttribute('normal');
-  const geo = mergeVertices(sphere);
-  sphere.dispose();
-  const pos = geo.attributes.position as THREE.BufferAttribute;
-  const v = new THREE.Vector3();
-  for (let i = 0; i < pos.count; i++) {
-    v.fromBufferAttribute(pos, i);
-    const lump = 0.6 * Math.sin(3.1 * v.x + 1.7) * Math.sin(2.3 * v.z + 0.4) + 0.4 * Math.sin(4.7 * v.y + 2.9 * v.x + 0.8);
-    const r = 1 + 0.035 * lump;
-    const y = Math.sign(v.y) * Math.pow(Math.abs(v.y), 0.75);
-    pos.setXYZ(i, v.x * 0.46 * r * (1 + 0.07 * v.z), y * 0.082 * (1 + 0.06 * lump) * (1 - 0.12 * v.x), v.z * 0.33 * r);
-  }
-  geo.computeVertexNormals();
-  return geo;
-}
 
 /** The sand kicked up where the stone lands: a low ring of fine grains and a few soft clouds, posed by uS. */
 function puffGeometry() {
@@ -207,13 +217,20 @@ export const build: BuildScene = (accent) => {
   const lift = { value: 0 };
   const yaw = { value: YAW };
 
-  const sandGeo = new THREE.PlaneGeometry(24, 18);
+  const sandGeo = new THREE.PlaneGeometry(36, 30);
   sandGeo.rotateX(-Math.PI / 2);
-  sandGeo.translate(0, FLOOR, -5);
+  sandGeo.translate(0, FLOOR, -11);
   const sand = new THREE.Mesh(sandGeo, new THREE.ShaderMaterial({ vertexShader: WORLD_VERT, fragmentShader: SAND_FRAG, uniforms: { uTime: time, uStone: stoneAt, uLift: lift, uYaw: yaw } }));
 
   const rot = { value: new THREE.Matrix3() };
-  const stone = new THREE.Mesh(stoneGeometry(), new THREE.ShaderMaterial({ vertexShader: STONE_VERT, fragmentShader: STONE_FRAG, uniforms: { uTime: time, uRim: { value: accent.clone() }, uRot: rot, uLift: lift } }));
+  const stone = new THREE.Mesh(
+    STONE.geometry,
+    new THREE.ShaderMaterial({
+      vertexShader: STONE_VERT,
+      fragmentShader: STONE_FRAG,
+      uniforms: { uTime: time, uRim: { value: accent.clone() }, uRot: rot, uLift: lift, uMap: { value: STONE.map }, uNormalMap: { value: STONE.normalMap }, uRoughMap: { value: STONE.roughnessMap } },
+    }),
+  );
 
   const land = { value: new THREE.Vector3(REST.x, FLOOR + 0.01, REST.z) };
   const since = { value: -1 };
