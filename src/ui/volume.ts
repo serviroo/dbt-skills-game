@@ -1,5 +1,6 @@
 /**
- * The speaker control: a small Lantern-window popover with Master, Music and Effects sliders plus Mute, reachable on
+ * The speaker control: a small Lantern-window popover with Master, Music and Effects sliders (and Hum in the
+ * companion) plus Mute, reachable on
  * every cutscene beat (top-left, beside the skip button's layer) and in the companion's top bar and Settings.
  */
 import '../styles/volume.css';
@@ -8,12 +9,14 @@ import type { AudioLevels, VolumeCtrl } from '../audio/prefs';
 
 export type { VolumeCtrl } from '../audio/prefs';
 
-type Key = 'master' | 'music' | 'sfx';
+type Key = 'master' | 'music' | 'sfx' | 'hum';
 const ROWS: [Key, string][] = [
   ['master', 'Master'],
   ['music', 'Music'],
   ['sfx', 'Effects'],
 ];
+/** The low hum's own level, shown where the hum can play: the companion, not the intro. */
+const HUM_ROW: [Key, string] = ['hum', 'Hum'];
 const STOP = ['pointerdown', 'pointerup', 'click', 'keydown', 'keyup'];
 /** The keys the control acts on: pressing its buttons and moving its sliders. */
 const OWN_KEYS = new Set([' ', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
@@ -56,12 +59,12 @@ export function speakerSVG(l: AudioLevels) {
 
 export type VolumeSliders = HTMLElement & { dispose(): void; focusFirst(): void };
 
-/** The three sliders and the Mute button. Used inside the popover and inline in the companion's Settings. */
-export function volumeSliders(ctrl: VolumeCtrl, o: { compact?: boolean } = {}): VolumeSliders {
+/** The sliders (Hum too when `hum`) and the Mute button. Used inside the popover and inline in the companion's Settings. */
+export function volumeSliders(ctrl: VolumeCtrl, o: { compact?: boolean; hum?: boolean } = {}): VolumeSliders {
   const root = el('div', `vol-sl${o.compact ? ' vol-sl--compact' : ''}`, { role: 'group', 'aria-label': 'Sound levels' }) as unknown as VolumeSliders;
   const n = ++uid;
   const inputs = new Map<Key, { input: HTMLInputElement; out: HTMLOutputElement }>();
-  for (const [k, label] of ROWS) {
+  for (const [k, label] of o.hum ? [...ROWS, HUM_ROW] : ROWS) {
     const id = `vol-${k}-${n}`;
     const row = el('div', 'vol-row');
     const head = el('div', 'vol-row-h');
@@ -155,7 +158,7 @@ export function volumeButton(ctrl: VolumeCtrl, o: { placement: 'cutscene' | 'top
   const title = el('span', 'vol-title');
   title.textContent = 'Sound';
   head.append(title);
-  const sliders = volumeSliders(ctrl, { compact: true });
+  const sliders = volumeSliders(ctrl, { compact: true, hum: o.placement === 'top' });
   pop.append(frame, head, sliders);
   root.append(btn, pop);
   isolate(root, ctrl);

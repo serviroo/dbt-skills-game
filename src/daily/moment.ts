@@ -6,7 +6,7 @@
  */
 import { animate } from '../ui/anim';
 import { SCORE, WINDOW } from '../motion/tokens';
-import { holdAt } from '../audio/param';
+import { holdAt, taper } from '../audio/param';
 import { type Next } from '../content/dbt';
 import { CHECKIN } from '../content/daily-lines';
 import { write } from '../core/cleared';
@@ -71,6 +71,10 @@ export function easeScreen(app: App, route: Route): ScreenOut {
 }
 
 // ---------------- Give me a moment ----------------
+/** The hum's fade back in after the page wakes (about 0.4 s), and its fade out as the page hides (time constants). */
+const WAKE_TAU = 0.12;
+const SLEEP_TAU = 0.02;
+
 /** A low, soft two-note hum that swells a little with the breath. Off by default; made only after the player turns it on. */
 function lowHum(scale: number) {
   type AC = typeof AudioContext;
@@ -83,16 +87,18 @@ function lowHum(scale: number) {
     return null;
   }
   void ctx.resume?.();
-  // two gains in a row, one writer each: the breath slowly swells `breath`, the player's volume glides `vol`
+  // three gains in a row, one writer each: the breath slowly swells `breath`, the player's levels glide `vol`, and
+  // `wake` fades the hum out before the page sleeps and back in from silence when it wakes
   const breath = ctx.createGain();
   breath.gain.value = 0;
   const vol = ctx.createGain();
   vol.gain.value = scale;
+  const wake = ctx.createGain();
   const lp = ctx.createBiquadFilter();
   lp.type = 'lowpass';
   lp.frequency.value = 360;
   lp.Q.value = 0.4;
-  lp.connect(breath).connect(vol).connect(ctx.destination);
+  lp.connect(breath).connect(vol).connect(wake).connect(ctx.destination);
   const oscs = [
     [98, 'sine', 0.6],
     [98.6, 'sine', 0.35],
@@ -110,11 +116,55 @@ function lowHum(scale: number) {
   });
   breath.gain.setTargetAtTime(0.05, ctx.currentTime, 0.8);
   let dead = false;
+  let nap: ReturnType<typeof setTimeout> | undefined;
+  const resume = () => {
+    if (!dead && !document.hidden && ctx.state !== 'running') ctx.resume().catch(() => {});
+  };
+  // A paused context (the page hidden, a locked phone, a call) picks up at the audio clock where it stopped, so
+  // silence and a short fade-in are set at that time: whoever resumes it, the hum comes back without a pop. A pause
+  // the system made is left to the system (or the next tap): a call keeps the hum quiet until it ends.
+  const paused = () => {
+    if (dead || ctx.state === 'running') return;
+    const t = ctx.currentTime;
+    wake.gain.cancelScheduledValues(0);
+    wake.gain.setValueAtTime(0, t);
+    wake.gain.setTargetAtTime(1, t, WAKE_TAU);
+  };
+  const seen = () => {
+    if (dead) return;
+    clearTimeout(nap);
+    // already paused: `paused` has set where it comes back from
+    if (ctx.state !== 'running') return resume();
+    const t = ctx.currentTime;
+    holdAt(wake.gain, t);
+    if (!document.hidden) return void wake.gain.setTargetAtTime(1, t, WAKE_TAU);
+    // hidden: fade out, then pause like the rest of the app's sound (a phone may pause it sooner; see `paused`)
+    wake.gain.setTargetAtTime(0, t, SLEEP_TAU);
+    nap = setTimeout(() => {
+      // a page shown again before this pause lands still found the hum running, so it is woken once the pause lands
+      if (!dead && document.hidden && ctx.state === 'running') ctx.suspend().then(resume, () => {});
+    }, SLEEP_TAU * 6000);
+  };
+  document.addEventListener('visibilitychange', seen);
+  ctx.addEventListener('statechange', paused);
+  // iOS can keep a context it paused for a call or the lock screen waiting for a touch. Heard last, once the tap has
+  // done its work: a tap that opens the Safe Zone has already stopped the hum, so it never wakes it.
+  window.addEventListener('click', resume);
+  window.addEventListener('keydown', resume);
+  const unlisten = () => {
+    clearTimeout(nap);
+    document.removeEventListener('visibilitychange', seen);
+    ctx.removeEventListener('statechange', paused);
+    window.removeEventListener('click', resume);
+    window.removeEventListener('keydown', resume);
+  };
   return {
     setScale(s: number) {
       if (dead) return;
       // the glide the engine gives Master, Music and Effects (setUser: ramp 0.08 s, tau = ramp / 4), so no click
       vol.gain.setTargetAtTime(s, ctx.currentTime, 0.02);
+      // a level moved in the speaker control wakes a paused hum like any tap: the control keeps its taps and keys
+      resume();
     },
     breathe(s: number) {
       if (dead) return;
@@ -125,6 +175,7 @@ function lowHum(scale: number) {
     stop(ramp?: number) {
       if (dead) return;
       dead = true;
+      unlisten();
       const t = ctx.currentTime;
       if (ramp !== undefined) {
         holdAt(breath.gain, t);
@@ -198,9 +249,10 @@ export function momentScreen(app: App, route: Route): ScreenOut {
     goNext(app, { to: 'skill', id, entry });
   }, { kind: 'quiet', cls: 'dq-mo-next is-hidden' }) : null;
   let hum: ReturnType<typeof lowHum> = null;
+  // its own Hum level with Master and mute on top, on the curve the engine gives the other sliders
   const humScale = () => {
     const l = app.opts.volume?.get();
-    return l ? (l.muted ? 0 : l.master * l.sfx) : (st.state.settings.sound ? 1 : 0);
+    return l ? (l.muted ? 0 : taper(l.master) * taper(l.hum)) : (st.state.settings.sound ? 1 : 0);
   };
   const offVolume = app.opts.volume?.subscribe(() => hum?.setScale(humScale()));
   const humToggle = toggle('Low hum', false, (on) => {

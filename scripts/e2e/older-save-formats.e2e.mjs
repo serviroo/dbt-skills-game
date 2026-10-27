@@ -68,7 +68,9 @@ function lost(want, got, where) {
   want.rows.forEach((rows, i) => (rows ?? []).forEach((r) => !got.rows[i]?.includes(r) && bad.push(`diary row "${r}" is gone`)));
   for (const t of want.titles ?? []) if (!got.titles?.includes(t)) bad.push(`title seen ${t} is gone`);
   if (want.flags && got.flags && (got.flags[0] < want.flags[0] || (want.flags[1] && !got.flags[1]) || (want.flags[2] && !got.flags[2]) || j(got.flags.slice(3)) !== j(want.flags.slice(3)))) bad.push(`flags: ${j(got.flags)}, not ${j(want.flags)}`);
-  if (want.preferences && j(got.preferences) !== j(want.preferences)) bad.push(`preferences: ${j(got.preferences)}, not ${j(want.preferences)}`);
+  // every preference the file held comes back the same; one added since (like the Hum level) may come back too
+  const holds = (w, g) => (w && typeof w === 'object' ? !!g && typeof g === 'object' && Object.entries(w).every(([k, v]) => holds(v, g[k])) : j(w) === j(g));
+  if (want.preferences && !holds(want.preferences, got.preferences)) bad.push(`preferences: ${j(got.preferences)}, not ${j(want.preferences)}`);
   return bad.map((b) => `${where}: ${b}`);
 }
 

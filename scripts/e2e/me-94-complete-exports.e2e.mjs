@@ -236,7 +236,7 @@ export const scenarios = {
         s.maps = [{ id: 'map-one', t: 3, urge: 'Pause', p1: 'Rest', c1: 'Time', p2: 'Walk', c2: 'Energy', choice: 'Rest' }];
         s.lines = [{ day: '2026-01-02', id: 'quiet-line', tag: 'quiet', text: 'A quiet day.', t: 3 }];
         a.store.save();
-        a.opts.volume.set({ master: .27, music: .38, sfx: .49, muted: true });
+        a.opts.volume.set({ master: .27, music: .38, sfx: .49, hum: .61, muted: true });
         localStorage.setItem(a.store.key + '.stealth', JSON.stringify({ aquarium: true, words: true }));
         localStorage.setItem(a.store.key + '.safe-light', 'up');
         localStorage.setItem('dbt.cowriter.v1', JSON.stringify({ key: 'do-not-export-test-value' }));
@@ -267,7 +267,7 @@ export const scenarios = {
       }
       assert.deepEqual(cleanRevs(actual.stories), cleanRevs(raw.stories), 'Stories/cards differ after restore.');
       const live = await target.page.evaluate(() => ({ levels: window.__daily.opts.volume.get(), reduced: window.__daily.reduced(), credentials: localStorage.getItem('dbt.cowriter.v1') }));
-      assert.deepEqual(live.levels, { master: .27, music: .38, sfx: .49, muted: true });
+      assert.deepEqual(live.levels, { master: .27, music: .38, sfx: .49, hum: .61, muted: true });
       h.expect(live.reduced && live.credentials === null, 'Motion or credential isolation was not applied.');
       h.expect(await target.page.getByRole('radio', { name: 'Motion: Reduced', exact: true }).getAttribute('aria-checked') === 'true', 'Restored motion choice is stale in Settings.');
     } finally { await target.ctx.close(); }
@@ -278,12 +278,12 @@ export const scenarios = {
     try {
       await ready(page);
       const raw = JSON.parse(fs.readFileSync(fixture, 'utf8'));
-      raw.preferences = { audio: { v: 1, master: .9, music: .8, sfx: .7, muted: false }, room: { aquarium: true, words: true }, safeLight: 'up' };
+      raw.preferences = { audio: { v: 1, master: .9, music: .8, sfx: .7, hum: .66, muted: false }, room: { aquarium: true, words: true }, safeLight: 'up' };
       raw.settings.sound = true; raw.settings.motion = 'full'; raw.settings.vibrate = true;
       raw.setAt.sound = 5; raw.setAt.motion = 5; raw.setAt.vibrate = 5;
       await page.evaluate(() => {
         const a = window.__daily;
-        a.opts.volume.set({ master: .11, music: .22, sfx: .33, muted: true });
+        a.opts.volume.set({ master: .11, music: .22, sfx: .33, hum: .44, muted: true });
         a.store.state.settings.sound = false;
         a.store.state.settings.motion = 'reduce';
         // off, as it starts, but chosen here: the file's "on" must not replace it
@@ -297,20 +297,20 @@ export const scenarios = {
         const a = window.__daily;
         return { audio: a.opts.volume.get(), sound: a.store.state.settings.sound, motion: a.store.state.settings.motion, vibrate: a.store.state.settings.vibrate, room: JSON.parse(localStorage.getItem(a.store.key + '.stealth')), light: localStorage.getItem(a.store.key + '.safe-light') };
       });
-      assert.deepEqual(actual, { audio: { master: .11, music: .22, sfx: .33, muted: true }, sound: false, motion: 'reduce', vibrate: false, room: { aquarium: false, words: false }, light: 'dim' });
+      assert.deepEqual(actual, { audio: { master: .11, music: .22, sfx: .33, hum: .44, muted: true }, sound: false, motion: 'reduce', vibrate: false, room: { aquarium: false, words: false }, light: 'dim' });
     } finally { await ctx.close(); }
   },
 
   async 'crystal-sparse-destination'(h) {
     const raw = JSON.parse(fs.readFileSync(fixture, 'utf8'));
     raw.settings.sound = true;
-    raw.preferences = { audio: { v: 1, master: .9, music: .8, sfx: .7, muted: false }, room: { aquarium: true, words: true }, safeLight: 'up' };
+    raw.preferences = { audio: { v: 1, master: .9, music: .8, sfx: .7, hum: .66, muted: false }, room: { aquarium: true, words: true }, safeLight: 'up' };
     const { ctx, page } = await h.open(seed(h, { 'dbt.audio.v1': JSON.stringify({ v: 1, master: .11, muted: true }), [h.SAVE + '.stealth']: JSON.stringify({ aquarium: false }) }), '');
     try {
       await ready(page);
       await restore(page, raw);
       const actual = await crystal(h, page, 'sparse-choices');
-      assert.deepEqual(actual.preferences, { audio: { v: 1, master: .11, music: .8, sfx: .7, muted: true }, room: { aquarium: false, words: true }, safeLight: 'up' });
+      assert.deepEqual(actual.preferences, { audio: { v: 1, master: .11, music: .8, sfx: .7, hum: .66, muted: true }, room: { aquarium: false, words: true }, safeLight: 'up' });
     } finally { await ctx.close(); }
   },
 
@@ -505,7 +505,7 @@ export const scenarios = {
 
   async 'crystal-fallback-audio-export'(h) {
     for (const sound of [false, true, null]) {
-      const stored = { v: 1, master: .4, music: .3, sfx: .2, muted: sound ?? true };
+      const stored = { v: 1, master: .4, music: .3, sfx: .2, hum: .5, muted: sound ?? true };
       const { ctx, page } = await h.open(seed(h, { 'dbt.audio.v1': JSON.stringify(stored) }), '');
       let raw;
       try {
@@ -529,13 +529,13 @@ export const scenarios = {
         await ready(target.page);
         await restore(target.page, raw);
         const actual = await target.page.evaluate(() => window.__daily.opts.volume.snapshot());
-        assert.deepEqual(actual, { master: stored.master, music: stored.music, sfx: stored.sfx, muted: !sound });
+        assert.deepEqual(actual, { master: stored.master, music: stored.music, sfx: stored.sfx, hum: stored.hum, muted: !sound });
       } finally { await target.ctx.close(); }
     }
   },
 
   async 'crystal-corrupt-destination-audio'(h) {
-    const audio = { v: 1, master: .4, music: .3, sfx: .2, muted: true };
+    const audio = { v: 1, master: .4, music: .3, sfx: .2, hum: .5, muted: true };
     for (const value of ['{}', '[]', 'null', 'false', '"foreign"', '{', '{"v":2,"master":0.8}', '{"v":1,"master":null,"music":"quiet","muted":"false"}', '{"v":1,"master":0,"muted":false}']) {
       const { ctx, page } = await h.open(seed(h, { 'dbt.audio.v1': value }), '');
       try {
@@ -691,7 +691,7 @@ export const scenarios = {
     for (const stored of [stale, null]) for (const muted of [true, false]) for (const sourceAudio of [true, false]) for (const blockedRestore of [false, true]) {
       const destination = stored ? { ...stored, muted: !muted } : null;
       const { ctx, page } = await h.open(seed(h, destination ? { 'dbt.audio.v1': JSON.stringify(destination) } : {}), '');
-      const expected = { master: .2, music: .3, sfx: .4, muted };
+      const expected = { master: .2, music: .3, sfx: .4, hum: .45, muted };
       try {
         await ready(page);
         await page.evaluate(({ expected, blockedRestore }) => {
@@ -706,7 +706,7 @@ export const scenarios = {
         }, { expected, blockedRestore });
         const raw = JSON.parse(fs.readFileSync(fixture, 'utf8'));
         raw.settings.sound = true;
-        if (sourceAudio) raw.preferences = { audio: { v: 1, master: .9, music: .8, sfx: .7, muted: false } };
+        if (sourceAudio) raw.preferences = { audio: { v: 1, master: .9, music: .8, sfx: .7, hum: .85, muted: false } };
         await restore(page, raw);
         assert.deepEqual(await page.evaluate(() => window.__daily.opts.volume.get()), expected);
         const status = await page.locator('.dq-settings .dq-hint[aria-live]').textContent();
@@ -732,7 +732,7 @@ export const scenarios = {
     const old = { v: 1, master: .8, music: .7, sfx: .6, muted: true };
     const cases = [[null, false], [null, true], [old, false], [old, true], [null, null]];
     for (const [index, [stored, muted]] of cases.entries()) {
-      const expected = muted === null ? { master: 1, music: 1, sfx: 1, muted: false } : { master: .2, music: .3, sfx: .4, muted };
+      const expected = muted === null ? { master: 1, music: 1, sfx: 1, hum: 1, muted: false } : { master: .2, music: .3, sfx: .4, hum: .45, muted };
       const { ctx, page } = await h.open(seed(h, stored ? { 'dbt.audio.v1': JSON.stringify(stored) } : {}));
       let exported;
       try {
