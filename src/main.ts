@@ -23,22 +23,24 @@ async function boot() {
     console.warn('[boot] WebGL unavailable, running without the 3D stage', err);
     canvas.style.display = 'none';
   }
-  if (stage) {
+  const lab = stage && params.lab ? labs[params.lab] : undefined;
+  if (stage) (window as any).__stage = stage;
+  // labs and captures follow the stage clock from the first frame; the app keeps the stage stopped and UI timing on the
+  // page clock until the cinematic starts (src/app.ts), so the DOM-only title and name prompt draw no 3D frames
+  if (stage && (lab || params.capture)) {
     const s = stage;
-    (window as any).__stage = s;
     bindClock(() => s.time);
     s.onUpdate(() => tickUI());
   } else useRealClock();
   const fonts = ['16px Jost', 'italic 16px Jost', '700 16px "Bodoni Moda"'].map((f) => document.fonts.load(f));
   await Promise.race([Promise.allSettled([...fonts, document.fonts.ready]), new Promise((r) => setTimeout(r, 2500))]);
-  if (stage && params.lab && labs[params.lab]) {
-    const m = await labs[params.lab]();
+  if (stage && lab) {
+    const m = await lab();
     await (m.lab ?? m.characterLab ?? m.windowLab)?.(stage);
     stage.start();
     document.documentElement.dataset.ready = '1';
   } else {
     const { runApp } = await import('./app');
-    stage?.start();
     document.documentElement.dataset.ready = '1';
     await runApp(stage);
   }
