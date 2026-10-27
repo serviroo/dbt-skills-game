@@ -31,7 +31,7 @@ async function storedIs(h, page, text, label) {
 }
 /** From here the story store's `kinds` of reads and saves wait until the test lets them through, as on a slow phone where
  *  storage answers after the next tap: `release()` lets the oldest through, `release(what)` that one, `drain()` all. */
-async function holdStorage(page, kinds) {
+export async function holdStorage(page, kinds) {
   await page.evaluate(async (ks) => {
     const { storyStore } = await import('/src/daily/storystore.ts');
     const ss = storyStore(window.__daily.store.key);
@@ -65,7 +65,7 @@ async function holdStorage(page, kinds) {
   };
 }
 /** the Page or Notes control, the editor's label and its text */
-const shownIn = (page) =>
+export const shownIn = (page) =>
   page.evaluate(() => ({
     seg: document.querySelector('.st-seg [aria-checked="true"]')?.textContent,
     box: document.querySelector('.st-write .st-ta')?.getAttribute('aria-label'),

@@ -6,11 +6,12 @@ import { animate } from '../ui/anim';
 import { cowrite } from '../cowriter/local';
 import type { CowriteReq, CowriteRes, CowriteTurn } from '../cowriter/types';
 import { BESIDE, CARE_KEY, READ_SIZES, type ReadSize } from '../core/stored-names';
-import { STORY_IMPORT, STORY_READ, STORY_START } from '../content/story-lines';
+import { STORY_FIND, STORY_IMPORT, STORY_READ, STORY_START } from '../content/story-lines';
 import { write } from '../core/cleared';
-import type { App, Route, ScreenOut } from './app';
+import type { App, Route, ScreenOut, Visit } from './app';
 import { icon } from './art';
 import { dayDiff, dayKey } from './store';
+import { match, spans, terms, type Span } from './storyfind';
 import { creditStory, STORY_CAP, storyStore, type Card, type CardMode, type Chapter, type Story } from './storystore';
 import { storyFromText, storyToText, type StoryText } from './storytext';
 import { btn, h, p, segmented, shareOrSave } from './ui';
@@ -74,12 +75,25 @@ export function storyMeta(app: App, s: Story) {
   return `${n} chapter${n === 1 ? '' : 's'}, ${editedWhen(app, s.updated)}`;
 }
 const shownTitle = (t: string) => t.trim() || STORY.untitled;
+/** The player's text as text nodes, with each span in a mark: nothing in it is ever read as markup. */
+const marked = (text: string, at: Span[], place?: Span) => {
+  const out: Node[] = [];
+  let i = 0;
+  for (const [a, b] of at) {
+    if (a > i) out.push(document.createTextNode(text.slice(i, a)));
+    out.push(h('mark', { class: `st-mark${place && place[0] === a ? ' is-place' : ''}`, text: text.slice(a, b) }));
+    i = b;
+  }
+  if (i < text.length) out.push(document.createTextNode(text.slice(i)));
+  return out;
+};
+const SEARCH_IC = '<svg class="dq-ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="5.5"/><path d="M14.6 14.6l4.6 4.6"/></svg>';
 
 const pageHead = (title: string, sub: string, extra?: HTMLElement | null) =>
   h('header', { class: 'dq-pagehead st-head' }, h('div', { class: 'st-head-row' }, h('h1', { class: 'dq-h1', 'data-focus': '', text: title }), extra ?? null), p(sub, 'dq-text dq-pagesub'));
 
 // ---------------- the shelf ----------------
-export function storiesScreen(app: App): ScreenOut {
+export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut {
   const ss = store(app);
   void ss.sweepLives();
   const xp = creditStory(app);
@@ -212,6 +226,11 @@ export function storiesScreen(app: App): ScreenOut {
   };
 
   const top = h('div', { class: 'st-shelf-acts' }, newBtn, bringBtn());
+  // ---- search: titles, chapters and notes, matched here on the device and kept nowhere ----
+  const findIn = h('input', { id: `st-find-${rid()}`, class: 'dq-input st-find-in', type: 'search', maxlength: 80, placeholder: STORY_FIND.label, autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', enterkeyhint: 'search' });
+  const findBox = h('div', { class: 'st-find is-hidden', role: 'search' }, h('label', { for: findIn.id, class: 'dq-sr', text: STORY_FIND.label }), h('span', { class: 'st-find-ic', html: SEARCH_IC }), findIn);
+  const findN = h('p', { class: 'st-find-n', role: 'status', 'aria-live': 'polite' });
+  const found = h('ul', { class: 'st-found' });
   const el = h(
     'div',
     { class: 'dq-page st-page st-shelfpage' },
@@ -220,7 +239,10 @@ export function storiesScreen(app: App): ScreenOut {
     fileIn,
     bringBox,
     bringSaid,
+    findBox,
+    findN,
     list,
+    found,
     removedBox,
     h('p', { class: 'dq-small st-privacy', text: STORY.privacyShelf }),
   );
@@ -231,7 +253,13 @@ export function storiesScreen(app: App): ScreenOut {
     const [stories, gone] = await Promise.all([ss.list(), ss.removed()]);
     if (n !== seq) return;
     top.classList.toggle('is-hidden', !stories.length);
+    findBox.classList.toggle('is-hidden', !stories.length);
     if (!stories.length) {
+      // nothing left to search (Back after removing the last story): a kept search goes, so the empty shelf shows
+      if (findIn.value) {
+        findIn.value = '';
+        void find();
+      }
       list.replaceChildren(h('div', { class: 'dq-panel st-empty' }, h('p', { class: 'st-empty-t', text: STORY.empty }), h('div', { class: 'dq-actions' }, btn('New story', () => void newStory(), { kind: 'primary', ic: 'plus' }), bringBtn())));
     } else {
       list.replaceChildren(
@@ -289,13 +317,117 @@ export function storiesScreen(app: App): ScreenOut {
     const v = await app.window({ kind: 'notification', title: 'Story Room', icon: 'alert', html: `<p>${STORY.deleteAsk}</p>`, actions: [{ label: 'Delete', value: 'delete' }, { label: 'Keep it', value: 'keep', variant: 'quiet' }] });
     if (v === 'delete') await ss.deleteForever(id);
   };
-  const off = ss.onChange(() => void render());
-  void render();
-  const leave = () => {
-    off();
-    bringN++;
+
+  // every story with its chapters and notes, read once and again only after a change; what the editor holds but
+  // couldn't store yet is searched as it reads there
+  type Shelf = { story: Story; chs: { ch: Chapter; where: string }[] }[];
+  let shelf: Promise<Shelf> | null = null;
+  const readShelf = async (): Promise<Shelf> =>
+    Promise.all(
+      (await ss.list()).map(async (story) => {
+        const chs = await Promise.all([...story.chapters, story.notes].filter(Boolean).map(async (id) => ss.unsaved(id) ?? (await ss.chapter(id))));
+        return { story, chs: chs.flatMap((ch, i) => (ch ? [{ ch, where: ch.kind === 'notes' ? STORY_FIND.notes : ch.title.trim() || `Chapter ${i + 1}` }] : [])) };
+      }),
+    );
+  const PER_STORY = 6;
+  let fseq = 0;
+  let fTimer = 0;
+  // the route keeps only the place, since history keeps every route; the words go across in memory, to this opening only.
+  // They are the words that found the result, so a tap before the next search runs still opens what it showed
+  const openFound = (story: Story, ch?: Chapter, at?: number, q?: string) =>
+    ch && at !== undefined ? app.go({ name: 'write', id: story.id, ch: ch.id, find: { at } }, { hand: q }) : app.go({ name: 'write', id: story.id });
+  const find = async () => {
+    const n = ++fseq;
+    const q = findIn.value;
+    const words = terms(q);
+    el.classList.toggle('is-finding', words.length > 0);
+    if (!words.length) {
+      findN.textContent = '';
+      found.replaceChildren();
+      return;
+    }
+    const all = await (shelf ??= readShelf());
+    if (n !== fseq) return;
+    const groups = all.flatMap(({ story, chs }) => {
+      const title = shownTitle(story.title);
+      const inTitle = story.title.trim() ? match(title, words) : null;
+      const places = chs.flatMap(({ ch, where }) => {
+        const at = match(ch.text, words);
+        return at ? [{ ch, where, at }] : [];
+      });
+      if (!inTitle && !places.length) return [];
+      const row = (x: (typeof places)[number]) =>
+        h('li', {}, h('button', { type: 'button', class: 'st-found-row', onclick: () => openFound(story, x.ch, x.at[0][0], q) }, h('span', { class: 'st-found-where', text: x.where }), h('span', { class: 'st-found-snip' }, snip(x.ch.text, x.at))));
+      const rows = places.length ? h('ul', { class: 'st-found-list' }, places.slice(0, PER_STORY).map(row)) : null;
+      // the rest of this story's places come on a tap, so every one of them can be opened
+      const more =
+        rows && places.length > PER_STORY
+          ? h('button', {
+              type: 'button',
+              class: 'st-found-more',
+              text: STORY_FIND.more(places.length - PER_STORY),
+              onclick: () => {
+                const rest = places.slice(PER_STORY).map(row);
+                rows.append(...rest);
+                more?.remove();
+                rest[0].querySelector('button')?.focus();
+              },
+            })
+          : null;
+      return [
+        h(
+          'li',
+          { class: 'dq-panel st-found-story' },
+          h(
+            'button',
+            { type: 'button', class: 'st-found-head', onclick: () => openFound(story) },
+            h('span', { class: `st-row-t ${story.title.trim() ? '' : 'is-untitled'}` }, inTitle ? marked(title, inTitle) : title),
+            h('span', { class: 'st-row-m st-found-m', text: storyMeta(app, story) }),
+          ),
+          rows,
+          more,
+        ),
+      ];
+    });
+    found.replaceChildren(...groups);
+    findN.textContent = groups.length ? STORY_FIND.found(groups.length) : STORY_FIND.none;
   };
-  return { el, title: STORY.title, mode: 'sub', bubbles: [1.4, 0.55], leave };
+  findIn.addEventListener('input', () => {
+    clearTimeout(fTimer);
+    fTimer = window.setTimeout(() => void find(), 120);
+  });
+  findIn.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !findIn.value) return;
+    e.preventDefault();
+    findIn.value = '';
+    void find();
+  });
+  // coming Back or Forward here (from a story or the Safe Zone) shows the search they left: memory only, as a skill keeps
+  // its answers, never in history or storage
+  const was = visit.again ? (visit.kept as { q?: string } | undefined)?.q : undefined;
+  if (was) {
+    findIn.value = was;
+    void find();
+  }
+
+  const off = ss.onChange(() => {
+    shelf = null;
+    void render();
+    if (findIn.value.trim()) void find();
+  });
+  void render();
+  return {
+    el,
+    title: STORY.title,
+    mode: 'sub',
+    bubbles: [1.4, 0.55],
+    leave: () => {
+      off();
+      clearTimeout(fTimer);
+      bringN++;
+    },
+    keep: () => ({ q: findIn.value }),
+  };
 }
 
 /** A file to bring in is read only up to this size. */
@@ -334,6 +466,24 @@ function fitted(s: StoryText): StoryText {
   return { title: clip(s.title.trim(), STORY_CAP.title) || STORY.untitled, chapters, notes };
 }
 
+/** A line or two around the first place, cut at spaces, with every place inside it marked. */
+function snip(text: string, at: Span[]) {
+  const [s0, e0] = at[0];
+  let a = Math.max(0, s0 - 48);
+  let b = Math.min(text.length, e0 + 96);
+  if (a > 0) {
+    const sp = text.slice(a, s0).search(/\s/);
+    if (sp >= 0) a += sp + 1;
+  }
+  if (b < text.length) {
+    const sp = text.slice(e0, b).search(/\s\S*$/);
+    if (sp >= 0) b = e0 + sp;
+  }
+  const part = text.slice(a, b);
+  const inPart = at.filter(([x, y]) => x >= a && y <= b).map(([x, y]): Span => [x - a, y - a]);
+  return [a > 0 ? '…' : '', ...marked(part, inPart), b < text.length ? '…' : ''];
+}
+
 // ---------------- writing view ----------------
 interface Snap {
   text: string;
@@ -353,8 +503,10 @@ interface Open {
 }
 type Sel = { start: number; end: number; text: string };
 
-export function writeScreen(app: App, route: Route): ScreenOut {
+export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const r = route as Extract<Route, { name: 'write' }>;
+  // a search result opening this page hands over its words; Back or Forward to it brings none, so the page is as they left it
+  const found = r.find && typeof visit.handed === 'string' ? { q: visit.handed, at: r.find.at } : null;
   const ss = store(app);
   const storyId = r.id;
   const offs: (() => void)[] = [];
@@ -422,7 +574,12 @@ export function writeScreen(app: App, route: Route): ScreenOut {
 
   // ---- the page ----
   const ta = h('textarea', { class: 'st-ta', maxlength: STORY_CAP.text, spellcheck: 'true', autocapitalize: 'sentences', autocomplete: 'off', 'aria-label': 'Your page', placeholder: 'Start anywhere.', rows: 8 }) as HTMLTextAreaElement;
-  const frame = h('div', { class: 'dq-panel st-frame' }, h('span', { class: 'dq-hairbar', 'aria-hidden': 'true' }), ta);
+  // a place found by search, marked behind the text (same box and type as the page) until the page changes
+  const hl = h('div', { class: 'st-hl', 'aria-hidden': 'true' });
+  const frame = h('div', { class: 'dq-panel st-frame' }, h('span', { class: 'dq-hairbar', 'aria-hidden': 'true' }), hl, ta);
+  const unmark = () => hl.firstChild && hl.replaceChildren();
+  // once they type, the page is theirs: a search still opening it marks nothing and leaves the cursor where they are
+  let typed = false;
 
   // ---- dock ----
   const undoB = h('button', { type: 'button', class: 'dq-icbtn st-dock-b', 'aria-label': 'Undo', html: icon('undo'), disabled: true, onclick: () => undo() });
@@ -517,6 +674,7 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     syncUndo();
   };
   const applySnap = (s: Snap) => {
+    unmark();
     ta.value = s.text;
     const n = s.text.length;
     try {
@@ -560,6 +718,7 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     hh.redo.length = 0;
     hh.undo.push(hh.base);
     if (hh.undo.length > UNDO_CAP) hh.undo.shift();
+    unmark();
     ta.value = next;
     try {
       ta.setSelectionRange(s, e);
@@ -740,6 +899,7 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     pageIn();
     startBtn.disabled = false;
     tab = c.kind === 'notes' ? 'notes' : 'page';
+    unmark();
     ta.value = text;
     ta.placeholder = tab === 'notes' ? 'Characters, places, anything you want to remember.' : 'Start anywhere.';
     ta.setAttribute('aria-label', tab === 'notes' ? 'Notes for this story' : `Page, ${c.title}`);
@@ -1069,6 +1229,7 @@ export function writeScreen(app: App, route: Route): ScreenOut {
   });
 
   // ---------- typing ----------
+  on(ta, 'input', () => ((typed = true), unmark()));
   on(ta, 'input', (e) => {
     if (!cur) return;
     const ie = e as InputEvent;
@@ -1596,11 +1757,36 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     if (!pageId) pageId = (await ss.addChapter(storyId)).id;
     pageMade();
     await loadCards();
-    await load(pageId, n);
+    // search can open the notes; the Page tab then goes to the first chapter
+    const landed = await load(r.ch && r.ch === s.notes ? notesId : pageId, n);
     await refreshStory();
     syncState();
     syncModes();
     kb();
+    // only on the chapter the result opened, as it opened: a Page or Notes tap, or typing, while it opened wins
+    if (alive && found && landed && n === picks && !typed) markFound(found);
+  };
+  /** Marks every place the search words are on this page and brings the one they picked into view. */
+  const markFound = (f: { q: string; at: number }) => {
+    const text = ta.value;
+    const at = spans(text, terms(f.q));
+    if (!at.length) return;
+    const place = at.reduce((b, x) => (Math.abs(x[0] - f.at) < Math.abs(b[0] - f.at) ? x : b));
+    hl.replaceChildren(...marked(text, at, place));
+    // the cursor waits at the place for when they start writing
+    try {
+      ta.setSelectionRange(place[0], place[1]);
+    } catch {
+      /* an older engine without selection on a field out of focus */
+    }
+    if (tab === 'page') caret = place[1];
+    say(STORY_FIND.here);
+    const m = hl.querySelector<HTMLElement>('.is-place');
+    if (!m) return;
+    const box = app.root;
+    const top = box.getBoundingClientRect().top + (parseFloat(getComputedStyle(box).scrollPaddingTop) || 0);
+    const room = dock.getBoundingClientRect().top - top;
+    box.scrollBy({ top: m.getBoundingClientRect().top - (top + room / 3) });
   };
   renderCards(false);
   syncModes();
