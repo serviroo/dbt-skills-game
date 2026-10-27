@@ -1163,8 +1163,21 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     startT.textContent = starts[startAt];
     startBox.classList.remove('is-hidden');
     startBtn.setAttribute('aria-expanded', 'true');
-    // above the pinned dock, so Use this is never under it on a phone held sideways
-    startBox.scrollIntoView({ block: 'nearest' });
+    startInView();
+  };
+  /**
+   * The line, Use this and the first line of the page all in view between the top bar and the dock, so they see where
+   * the line will go. The "Need a starting point?" row above may scroll away for that; when even then not everything
+   * fits, the starting point's line stays and the page shows less.
+   */
+  const startInView = () => {
+    const box = app.root;
+    const top = box.getBoundingClientRect().top + (parseFloat(getComputedStyle(box).scrollPaddingTop) || 0);
+    const cs = getComputedStyle(ta);
+    const line = ta.getBoundingClientRect().top + (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.lineHeight) || 32);
+    // whole pixels, so the line ends above the dock rather than a fraction under it
+    const dy = Math.min(Math.ceil(line - dock.getBoundingClientRect().top), Math.floor(startBox.getBoundingClientRect().top - top));
+    if (dy > 0) box.scrollBy({ top: dy });
   };
   const closeStart = () => {
     startBox.classList.add('is-hidden');
@@ -1505,39 +1518,85 @@ export function readScreen(app: App, route: Route): ScreenOut {
   };
   setSize(storedSize(app));
 
+  let unkeep = () => {};
+  /**
+   * The chapter they came from starts just clear of the top bar and its shade (the scroll padding in daily.css), even a
+   * short last one: room after the page lets it scroll that far. Measured from the layout, so the screen's entry motion
+   * can't shift it, and placed again whenever the page or the screen changes size (the fonts coming in, a turn of the
+   * phone) until they scroll.
+   */
+  const openAt = (sec: HTMLElement) => {
+    const box = app.root;
+    const room = el.appendChild(h('div', { 'aria-hidden': 'true' }));
+    const sizes = () => [box.clientWidth, box.clientHeight, body.offsetHeight].join();
+    let put = 0;
+    let placedAt = '';
+    const place = () => {
+      let y = 0;
+      for (let n: HTMLElement | null = sec; n && n !== box; n = n.offsetParent as HTMLElement | null) y += n.offsetTop;
+      const top = y - (parseFloat(getComputedStyle(box).scrollPaddingTop) || 0);
+      // a page shorter than the screen still scrolls a full screen high, so give it a screen of room and trim the excess
+      room.style.height = `${box.clientHeight}px`;
+      room.style.height = `${Math.max(0, box.clientHeight - (box.scrollHeight - box.clientHeight - top))}px`;
+      box.scrollTop = top;
+      put = box.scrollTop;
+      placedAt = sizes();
+    };
+    place();
+    const keep = new ResizeObserver(place);
+    // a scroll with no change of size is theirs and ends it; a screen grown past the end of the page also pulls the
+    // scroll back, but that comes with a new size and is placed again
+    const theirs = () => Math.abs(box.scrollTop - put) >= 1 && sizes() === placedAt && unkeep();
+    keep.observe(box);
+    keep.observe(body);
+    box.addEventListener('scroll', theirs, { passive: true });
+    unkeep = () => (keep.disconnect(), box.removeEventListener('scroll', theirs));
+  };
+
+  let titled!: () => void;
+  const ready = new Promise<void>((done) => (titled = done));
   const init = async () => {
     const s = await ss.story(r.id);
     if (!alive) return;
     if (!s || s.removed) {
       title.textContent = STORY.title;
+      titled();
       tools.remove();
       body.replaceChildren(h('p', { class: 'st-read-empty', text: STORY_READ.gone }));
       return;
     }
     title.textContent = shownTitle(s.title);
     sub.textContent = storyMeta(app, s);
+    titled();
     // what this copy holds but couldn't store yet reads as it is in the editor
     const chs = await Promise.all(s.chapters.map(async (id) => ss.unsaved(id) ?? (await ss.chapter(id))));
     if (!alive) return;
-    const secs = chs.flatMap((c, i) =>
+    const shown = chs.flatMap((c, i) =>
       c && c.text.trim()
-        ? [h('section', { class: 'st-read-ch', 'data-id': c.id }, h('h2', { class: 'st-read-ch-h', text: c.title.trim() || `Chapter ${i + 1}` }), h('div', { class: 'st-read-text', text: c.text.replace(/\s+$/, '') }))]
+        ? [{ i, sec: h('section', { class: 'st-read-ch', 'data-id': c.id }, h('h2', { class: 'st-read-ch-h', text: c.title.trim() || `Chapter ${i + 1}` }), h('div', { class: 'st-read-text', text: c.text.replace(/\s+$/, '') })) }]
         : [],
     );
-    if (!secs.length) return body.replaceChildren(h('p', { class: 'st-read-empty', text: STORY_READ.empty }));
-    body.replaceChildren(...secs);
-    const at = secs.findIndex((x) => x.dataset.id === r.ch);
-    if (at > 0) secs[at].scrollIntoView({ block: 'start' });
+    if (!shown.length) return body.replaceChildren(h('p', { class: 'st-read-empty', text: STORY_READ.empty }));
+    body.replaceChildren(...shown.map((x) => x.sec));
+    // an empty chapter isn't shown, so Read from one (a chapter just added) opens at the nearest chapter before it; only
+    // chapter 1 opens at the top of the page, so a chapter 2 that comes first (chapter 1 has no words yet) is placed too
+    const from = r.ch ? s.chapters.indexOf(r.ch) : -1;
+    let at = -1;
+    for (const [k, x] of shown.entries()) if (x.i <= from) at = k;
+    if (at >= 0 && shown[at].i > 0) openAt(shown[at].sec);
   };
-  void init();
+  void init().finally(titled);
 
   return {
     el,
     title: STORY.title,
     mode: 'sub',
     bubbles: [0.9, 0.45],
+    // focus lands on the heading once it holds the story's title
+    ready,
     leave: () => {
       alive = false;
+      unkeep();
     },
   };
 }
