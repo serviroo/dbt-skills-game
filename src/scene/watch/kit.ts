@@ -238,20 +238,10 @@ export function grained(params: THREE.MeshStandardMaterialParameters, grain: Gra
 export const lit = (hex: number, k: number) => new THREE.Color(hex).multiplyScalar(k);
 
 export type MatKey =
-  | 'steel'
-  | 'plate'
   | 'trim'
-  | 'cloth'
-  | 'cape'
-  | 'cloak'
   | 'banner'
   | 'bannerTrim'
   | 'bannerGlow'
-  | 'plume'
-  | 'leather'
-  | 'fur'
-  | 'horn'
-  | 'membrane'
   | 'eye'
   | 'eyeSoft'
   | 'visor'
@@ -263,13 +253,12 @@ export type MatKey =
   | 'rope'
   | 'stone'
   | 'ash'
-  | 'cube'
   | 'iron'
   | 'glass'
   | 'flame';
 export type Mats = Record<MatKey, THREE.Material>;
 
-const RIM = 0x4fb8ff;
+export const RIM = 0x4fb8ff;
 /** the banner's sway, shared by the cloth and the emblem stitched on it so they move as one */
 const BANNER_WAVE = { top: 2.53, len: 1.3, amp: 0.03, speed: 0.8, mode: 'hang' } as const;
 
@@ -278,20 +267,10 @@ export function makeMats(): Mats {
   const cloth = (color: number, wave?: Parameters<typeof grained>[2], rimStrength = 0.32) =>
     grained({ color, roughness: 0.9, metalness: 0, side: wave ? THREE.DoubleSide : THREE.FrontSide }, { scale: [34, 34, 34], color: 0.16, rough: 0.06, rim: RIM, rimStrength, rimPow: 2.6 }, wave);
   return {
-    steel: grained({ color: 0x8794ad, roughness: 0.32, metalness: 0.9 }, { scale: [5, 5, 5], color: 0.14, rough: 0.12, rim: RIM, rimStrength: 0.12 }),
-    plate: grained({ color: 0x2b3650, roughness: 0.42, metalness: 0.78 }, { scale: [6, 6, 6], color: 0.18, rough: 0.14, rim: RIM, rimStrength: 0.38, rimPow: 2.4 }),
     trim: grained({ color: 0x9fb1cf, roughness: 0.28, metalness: 0.95 }, { scale: [9, 9, 9], color: 0.1, rough: 0.08, rim: RIM, rimStrength: 0.15 }),
-    cloth: cloth(0x141d33),
-    cape: cloth(0x111a31, { top: 1.5, len: 1.4, amp: 0.035, speed: 0.9, mode: 'hang' }, 0.36),
-    cloak: cloth(0x101828, { top: 1.62, len: 1.6, amp: 0.025, speed: 0.75, mode: 'hang' }, 0.34),
     banner: cloth(0x15244a, BANNER_WAVE, 0.28),
     bannerTrim: grained({ color: 0x9fb1cf, roughness: 0.3, metalness: 0.9, side: THREE.DoubleSide }, { scale: [9, 9, 9], color: 0.1, rough: 0.08, rim: RIM, rimStrength: 0.15 }, BANNER_WAVE),
     bannerGlow: grained({ color: 0x000000, emissive: lit(0x7fcfff, 1.7), roughness: 1, metalness: 0, side: THREE.DoubleSide }, { scale: [1, 1, 1], color: 0, rough: 0 }, BANNER_WAVE),
-    plume: cloth(0x1c2350, undefined, 0.5),
-    leather: grained({ color: 0x2a2a33, roughness: 0.72, metalness: 0 }, { scale: [22, 22, 22], color: 0.14, rough: 0.1, rim: RIM, rimStrength: 0.2 }),
-    fur: grained({ color: 0x151b2d, roughness: 0.96, metalness: 0 }, { scale: [26, 26, 26], color: 0.28, rough: 0.03, rim: RIM, rimStrength: 0.36, rimPow: 2.2 }),
-    horn: grained({ color: 0x252b3d, roughness: 0.5, metalness: 0.3 }, { scale: [3, 30, 3], color: 0.2, rough: 0.1, rim: RIM, rimStrength: 0.35 }),
-    membrane: grained({ color: 0x1b1a3a, roughness: 0.62, metalness: 0 }, { scale: [12, 12, 12], color: 0.2, rough: 0.1, rim: 0x7b3fe4, rimStrength: 0.28, rimPow: 2 }),
     eye: new THREE.MeshBasicMaterial({ color: lit(0xcfefff, 3.2) }),
     eyeSoft: new THREE.MeshBasicMaterial({ color: lit(0xa8dcff, 1.2) }),
     visor: grained({ color: 0x030409, roughness: 1, metalness: 0 }, { scale: [1, 1, 1], color: 0, rough: 0 }),
@@ -303,7 +282,6 @@ export function makeMats(): Mats {
     rope: grained({ color: 0x4a4f5a, roughness: 0.95, metalness: 0 }, { scale: [40, 40, 40], color: 0.2, rough: 0.03 }),
     stone: grained({ color: 0x323949, roughness: 0.9, metalness: 0.02 }, { scale: [4, 4, 4], color: 0.26, rough: 0.07 }),
     ash: grained({ color: 0x15181f, roughness: 1, metalness: 0, emissive: lit(0x2f8fd8, 0.18) }, { scale: [9, 9, 9], color: 0.45, rough: 0.02 }),
-    cube: grained({ color: 0x232c42, roughness: 0.55, metalness: 0.35 }, { scale: [7, 7, 7], color: 0.12, rough: 0.1, rim: RIM, rimStrength: 0.36, rimPow: 2.2 }),
     iron: grained({ color: 0x343a48, roughness: 0.5, metalness: 0.85 }, { scale: [8, 8, 8], color: 0.2, rough: 0.12 }),
     glass: new THREE.MeshStandardMaterial({ color: 0xbfe6ff, roughness: 0.08, metalness: 0, transparent: true, opacity: 0.2, depthWrite: false, emissive: 0x4fb8ff, emissiveIntensity: 0.7, side: THREE.DoubleSide }),
     flame: new THREE.MeshBasicMaterial({ color: lit(0x9fdcff, 3.6) }),

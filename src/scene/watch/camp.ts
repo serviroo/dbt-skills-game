@@ -3,6 +3,7 @@ import type { ShadowId } from '../../content/roster-lines';
 import type { BuildScene } from '../vignettes/runtime';
 import { FIGURES, type Figure } from './figures';
 import { makeMats, sway } from './kit';
+import { loadWatch } from './models';
 import { buildSky, HORIZON } from './sky';
 import { buildWorld, HEARTH, LANTERN, SPOTS } from './world';
 
@@ -35,6 +36,9 @@ interface CampHook {
   hits: CampHit[];
 }
 const hook: CampHook = ((window as unknown as { __camp?: CampHook }).__camp ??= { builds: 0, disposed: 0, ids: [], hits: [] });
+
+/** Loads the watchers' models; the scene host waits for it before building the camp. */
+export const ready = loadWatch;
 
 const FOV = 36;
 /** a still frame (reduced motion) is posed at this moment: the Lantern at the middle of its breath */

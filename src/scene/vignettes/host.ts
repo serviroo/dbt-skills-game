@@ -22,7 +22,8 @@ import './scenes.css';
 
 const SCENES = {
   drift: () => import('./scenes/drift'),
-  camp: () => import('../watch/camp'),
+  // the camp's figures are models, loaded before it is built
+  camp: () => import('../watch/camp').then((m) => m.ready().then(() => m)),
 } satisfies Record<string, () => Promise<{ build: BuildScene }>>;
 
 export type SceneKind = keyof typeof SCENES;

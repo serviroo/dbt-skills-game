@@ -16,6 +16,12 @@ The hooded wanderer in the intro (`public/models/hero.glb`) is built by `scripts
 
 CC0 doesn't require credit, but Quaternius made this possible, so here it is.
 
+## Night Watch figures
+
+The watchers in the Night Watch's camp (`public/models/watch.glb`) are original to this project: modelled, textured and
+baked in [Blender](https://www.blender.org) by `scripts/build-watch.py`, then packed for the web by
+`scripts/build-watch.mjs`.
+
 ## Fonts
 
 - [Jost](https://github.com/indestructible-type/Jost) by indestructible type*, SIL Open Font License 1.1.
@@ -45,8 +51,8 @@ or outside assets went into them.
 
 ## Made in code for this project
 
-- Every other 3D scene (the gate, the knight, the Night Watch, the chest, rubble, smoke and particles), built from
-  three.js primitives and shaders.
+- Every other 3D scene (the gate, the knight, the Night Watch's camp and banner, the chest, rubble, smoke and
+  particles), built from three.js primitives and shaders.
 - All 2D art: icons, the moth, the Night Watch cards, the pebble, the moonflower, the flourish and the app icons and
   splash screens (`scripts/icons.mjs`).
 - All sound and music, synthesised live with Web Audio (`src/audio/`). There are no sample files.
