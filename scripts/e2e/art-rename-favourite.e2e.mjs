@@ -353,6 +353,52 @@ export const scenarios = {
     await q.ctx.close();
   },
 
+  /** Storage that reads but can't write (full): a rename and a favourite still hold for the visit and go into a Save Crystal. */
+  async 'art-labels-write-fails'(h) {
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute');
+    page.setDefaultTimeout(15000);
+    await h.reachHub(page);
+    await seed(page);
+    const full = () =>
+      page.evaluate(() => {
+        const transaction = IDBDatabase.prototype.transaction;
+        IDBDatabase.prototype.transaction = function (stores, mode, ...rest) {
+          if (mode === 'readwrite' && this.name.endsWith('.art')) throw new DOMException('The disk is full.', 'QuotaExceededError');
+          return transaction.call(this, stores, mode, ...rest);
+        };
+      });
+    const relabel = async (id, name) => {
+      await openPiece(page, id);
+      await page.getByRole('button', { name: 'Favourite', exact: true }).click();
+      await page.getByRole('button', { name: 'Rename', exact: true }).click();
+      await page.getByLabel('Name this page').fill(name);
+      await page.keyboard.press('Enter');
+      await until(h, () => page.locator('.dq-piece-h').textContent(), (t) => t.trim() === name, `${id}: the new name did not show while storage could not write`, 30);
+      h.expect((await page.locator('.dq-piece-fav').getAttribute('aria-pressed')) === 'true', `${id}: the favourite did not hold while storage could not write`);
+      await page.locator('.dq-back').click();
+      await page.locator('.dq-artroom .dq-galitem').first().waitFor();
+    };
+    const crystalHas = async (id, name) => {
+      const rs = await records(page);
+      const r = rs.find((r) => r.id === id);
+      h.expect(rs.length === 3 && r?.name === name && r.fav === true, `${id}: a Save Crystal now would lose the labels: ` + JSON.stringify(rs.map((r) => [r.id, r.name, r.fav])));
+    };
+    // one this visit saved (so a copy is held in memory too), then, on a later visit, one only the disk holds
+    await toArt(h, page);
+    await full();
+    await relabel('pg-b', 'Kept here');
+    await crystalHas('pg-b', 'Kept here');
+    await page.goto(h.server.url + '/?mute');
+    await toArt(h, page);
+    await full();
+    await relabel('pg-a', 'Night');
+    await until(h, () => order(page, '.dq-galitem'), (o) => JSON.stringify(o) === '["pg-a","al-c","pg-b"]', 'the gallery does not put the favourite first');
+    h.expect(/^Night, .+, a favourite$/.test((await page.locator('[data-piece="pg-a"]').getAttribute('aria-label')) ?? ''), 'the gallery does not show the name and the star');
+    await crystalHas('pg-a', 'Night');
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
   /** Landscape phone and desktop: the gallery, a named favourite, the name field and the toast fit. */
   async 'art-labels-wide'(h) {
     for (const vp of [{ width: 844, height: 390 }, { width: 1280, height: 800 }]) {

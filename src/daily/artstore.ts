@@ -220,6 +220,8 @@ const newestLabels = (first: Labels, other: Labels): Labels => ({
   ...(setAt(other.favAt) > setAt(first.favAt) ? { fav: other.fav, favAt: other.favAt } : { fav: first.fav, favAt: first.favAt }),
 });
 const sameLabels = (a: Labels, b: Labels) => a.name === b.name && a.nameAt === b.nameAt && a.fav === b.fav && a.favAt === b.favAt;
+/** The copy in use, with each label from whichever copy of the same version (stored or in memory) set it last. */
+const withLabels = <T extends DrawingMeta>(use: T, other: DrawingMeta | undefined): T => (other && revOf(other) === revOf(use) ? { ...use, ...newestLabels(use, other) } : use);
 const detached = (d: Draft): Draft => {
   const { editId, bases, base, ...draft } = d;
   return draft;
@@ -503,7 +505,7 @@ export class ArtStore {
     const byId = new Map(rows.map((m) => [m.id, m]));
     for (const m of this.mem.meta.values()) {
       const db = byId.get(m.id);
-      if (!db || m.updated > db.updated) byId.set(m.id, m);
+      byId.set(m.id, !db || m.updated > db.updated ? withLabels(m, db) : withLabels(db, m));
     }
     const out = [...byId.values()].sort((a, b) => b.t - a.t);
     // a list read while the drawings couldn't be read is not kept, so the next look reads again
@@ -620,8 +622,18 @@ export class ArtStore {
             }
           };
         }),
-      () => false,
+      () => null,
     );
+    // a write that failed keeps the labels for this visit, as a failed save keeps a drawing: in the copy held in memory,
+    // or in one taken from the disk now
+    if (wrote === null && !this.mem.meta.has(id)) {
+      const d = await this.onDisk(id);
+      if (d && !this.mem.meta.has(id) && !this.deleted.has(id)) {
+        this.mem.meta.set(id, metaOf(d));
+        this.mem.strokes.set(id, d.strokes);
+        this.landed.add(landKey(id, revOf(d)));
+      }
+    }
     const mm = this.mem.meta.get(id);
     const held = mm ? next(mm) : null;
     if (held) this.mem.meta.set(id, held);
@@ -629,7 +641,7 @@ export class ArtStore {
       this.drop();
       this.changed();
     }
-    return wrote;
+    return wrote === true;
   }
   /** Brings the labels a copy from elsewhere set later into the stored drawing it matches. */
   private takeLabels(id: string, from: Labels) {
@@ -669,8 +681,8 @@ export class ArtStore {
     );
     if (gen !== this.gen) return this.get(id);
     const mm = this.mem.meta.get(id), ms = this.mem.strokes.get(id);
-    if (mm && ms && (!m || !s || mm.updated > m.updated)) return { ...mm, strokes: ms };
-    return m && s ? { ...m, strokes: cleanStrokes(s, m.kind) ?? [] } : null;
+    if (mm && ms && (!m || !s || mm.updated > m.updated)) return { ...withLabels(mm, m), strokes: ms };
+    return m && s ? { ...withLabels(m, mm), strokes: cleanStrokes(s, m.kind) ?? [] } : null;
   }
 
   /** The drawing stored under id, as it is on the disk (not this copy's memory). */
@@ -960,7 +972,7 @@ export class ArtStore {
       const mem = mm && ms ? { ...mm, strokes: ms } : null;
       // the version in use keeps the id (as get() picks it); a different one only memory holds goes in under its own id
       const main = mem && (!disk || mem.updated > disk.updated) ? mem : disk;
-      if (main) out.push(storedRec(main));
+      if (main) out.push(storedRec(withLabels(main, main === disk ? mm : m)));
       if (!mem || !disk || revOf(mem) === revOf(disk) || (main === disk && this.landed.has(landKey(id, revOf(mem))))) continue;
       const other = main === mem ? disk : mem;
       const base = `${family(id)}~${Math.max(0, Math.floor(other.updated)).toString(36)}`;
