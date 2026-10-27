@@ -55,4 +55,18 @@ export const scenarios = {
     await ctx.close();
     return { openingLeftMs: Math.round(left) };
   },
+
+  /** A window dismissed after a tap it kept answers dismissed, not the tap */
+  async 'dismissed-after-early-tap'({ open, expect }) {
+    const { ctx, page, errors } = await open({}, '?lab=window&kind=quest&mute');
+    // the lab opens the window and never waits for input, so the tap is kept for a wait that has not begun
+    await page.getByRole('button', { name: 'Start' }).click({ timeout: 20000 });
+    const v = await page.evaluate(() => {
+      window.__win.dismiss();
+      return window.__win.waitForInput();
+    });
+    expect(v === 'dismissed', `a window dismissed after a tap it kept answered ${v}, not dismissed`);
+    expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
 };

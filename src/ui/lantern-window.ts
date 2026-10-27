@@ -496,12 +496,12 @@ export class LanternWindow {
   }
 
   /** Resolves with an action value (also one tapped before this call, while the window opened), or 'tap' on any tap
-   *  when tapToContinue; or 'timeout'. */
+   *  when tapToContinue; or 'timeout'; or 'dismissed' once the window is gone, even after such a tap. */
   waitForInput(timeoutSec = 0): Promise<string> {
     const early = this.early;
     this.early = null;
-    if (early !== null) return Promise.resolve(early);
     if (this.gone) return Promise.resolve(DISMISSED);
+    if (early !== null) return Promise.resolve(early);
     return new Promise((resolve) => {
       let done = false;
       const finish = (v: string) => {
