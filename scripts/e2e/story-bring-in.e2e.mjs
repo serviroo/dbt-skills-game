@@ -396,6 +396,54 @@ export const scenarios = {
     }
   },
 
+  /** blank lines at the edges of a page or Notes, and a page named like Notes, come back exactly */
+  async 'story-bring-in-exact'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute');
+    try {
+      await h.reachHub(page);
+      const bad = [];
+      const stories = [
+        { title: 'Edges', chapters: [{ title: 'Opening', text: '\n\n  \nAfter three blank lines.\n\n' }, { title: 'Spaces', text: '   ' }, { title: 'Last', text: '\nOne line down.\n' }], notes: '\n\nNotes after two blank lines.\n' },
+        { title: 'Called Notes', chapters: [{ title: 'Before', text: 'A page.' }, { title: '\\Notes for this story', text: 'A slash in its name.' }, { title: 'Notes for this story', text: 'A page, not the notes.' }], notes: '' },
+      ];
+      for (const s of stories) {
+        const ids = await page.evaluate(async (s) => {
+          const { storyStore } = await import('/src/daily/storystore.ts');
+          const ss = storyStore(window.__daily.store.key);
+          const { story, first } = await ss.create(s.title);
+          for (const [i, c] of s.chapters.entries()) {
+            const ch = i ? await ss.addChapter(story.id) : first;
+            await ss.saveChapter({ ...ch, title: c.title, text: c.text }, [ch.rev]);
+          }
+          const notes = await ss.chapter(story.notes);
+          await ss.saveChapter({ ...notes, text: s.notes }, [notes.rev]);
+          return { story: story.id, ch: first.id };
+        }, s);
+        // out through Download story, back in through the file chooser
+        await page.evaluate((r) => window.__daily.go(r), { name: 'write', id: ids.story, ch: ids.ch });
+        await page.getByRole('textbox', { name: /^Page,/ }).waitFor();
+        await page.getByRole('button', { name: 'More', exact: true }).click();
+        const [dl] = await Promise.all([page.waitForEvent('download'), page.getByRole('menuitem', { name: 'Download story' }).click()]);
+        const file = path.join(h.out, `exact-${ids.story}.txt`);
+        await dl.saveAs(file);
+        const was = await everything(page);
+        const held = was.find((x) => x.id === ids.story);
+        h.expect(JSON.stringify({ title: held.title, chapters: held.chapters, notes: held.notes }) === JSON.stringify(s), `${s.title}: the store holds ${JSON.stringify(held)}`);
+        await shelfOf(h, page);
+        await bringIn(page, file);
+        await page.getByRole('button', { name: 'Add as a new story' }).click();
+        await page.locator('.st-bring-said:not(:empty)').waitFor();
+        const added = (await everything(page)).find((x) => !was.some((w) => w.id === x.id));
+        const got = { title: added?.title, chapters: added?.chapters, notes: added?.notes };
+        if (JSON.stringify(got) !== JSON.stringify(s)) bad.push(`${s.title}: came back as ${JSON.stringify(got)}`);
+      }
+      h.expect(!bad.length, bad.join('\n'));
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** the preview fits at every size, text at 16 px or more, nothing past the edge */
   async 'story-bring-in-fits'(h) {
     for (const vp of [{ width: 390, height: 844 }, { width: 320, height: 568 }, { width: 844, height: 390 }, { width: 1280, height: 800 }]) {

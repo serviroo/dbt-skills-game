@@ -1,8 +1,10 @@
 /**
  * A story as a plain text file and back. Download writes the title as "# Title" and each chapter as "## Chapter",
- * with Notes last under "## Notes for this story", so a downloaded story comes back in exactly as it went out. A line
- * of the player's own that would read as one of those headings gets a backslash in front, taken off again on the
- * way in. Bringing a file in reads it as plain text only: nothing in it is ever run or shown as markup.
+ * with Notes last under "## Notes for this story", and one blank line on each side of every heading, so a downloaded
+ * story comes back in exactly as it went out, blank lines and spaces at the edges of a page included. A line of the
+ * player's own that would read as one of those headings, or a page named like Notes, gets a backslash in front, taken
+ * off again on the way in. Bringing a file in reads it as plain text only: nothing in it is ever run or shown as
+ * markup.
  */
 
 export interface StoryText {
@@ -18,16 +20,25 @@ const HEAD = /^#{1,2}[ \t]/;
 const OWN_HEAD = /^(\\*#{1,2}[ \t])/;
 const escape = (text: string) => text.replace(/^(\\*#{1,2}[ \t])/gm, '\\$1');
 const unescape = (text: string) => text.replace(/^\\(\\*#{1,2}[ \t])/gm, '$1');
+// a page named like Notes, so the real Notes are the only "## Notes for this story" in a download
+const escapeTitle = (title: string) => title.trim().replace(/^(\\*notes for this story)$/i, '\\$1');
+const unescapeTitle = (title: string) => title.replace(/^\\(\\*notes for this story)$/i, '$1');
 const blank = (l: string) => !/[^ \t]/.test(l);
 const tidy = (lines: string[]) => {
   const from = lines.findIndex((l) => !blank(l));
   return from < 0 ? '' : lines.slice(from).join('\n').trimEnd();
 };
+/** The lines under a heading, less the one blank line Download writes on each side; blank lines of the text's own stay. */
+const under = (lines: string[]) => {
+  const from = lines.length && blank(lines[0]) ? 1 : 0;
+  const to = lines.length > from && blank(lines[lines.length - 1]) ? lines.length - 1 : lines.length;
+  return lines.slice(from, to).join('\n');
+};
 
 export function storyToText(s: StoryText): string {
   const parts = [`# ${s.title}`];
-  for (const c of s.chapters) parts.push(`## ${c.title}`, escape(c.text.trimEnd()));
-  if (s.notes.trim()) parts.push(`## ${NOTES_HEAD}`, escape(s.notes.trimEnd()));
+  for (const c of s.chapters) parts.push(`## ${escapeTitle(c.title)}`, escape(c.text));
+  if (s.notes) parts.push(`## ${NOTES_HEAD}`, escape(s.notes));
   return `${parts.filter((x, i) => i === 0 || x !== '' || !parts[i - 1].startsWith('## ')).join('\n\n')}\n`;
 }
 
@@ -72,10 +83,10 @@ export function storyFromText(raw: string, fileName: string): StoryText {
   const lead = tidy(lines.slice(start, cuts[0]?.i ?? lines.length));
   if (lead) out.chapters.push({ title: '', text: heads.length ? unescape(lead) : lead });
   cuts.forEach((c, k) => {
-    const body = tidy(lines.slice(c.i + 1, cuts[k + 1]?.i ?? lines.length));
-    const text = heads.length ? unescape(body) : body;
+    const body = lines.slice(c.i + 1, cuts[k + 1]?.i ?? lines.length);
+    const text = heads.length ? unescape(under(body)) : tidy(body);
     if (k === cuts.length - 1 && c.title.toLowerCase() === NOTES_HEAD.toLowerCase()) out.notes = text;
-    else out.chapters.push({ title: c.title, text });
+    else out.chapters.push({ title: unescapeTitle(c.title), text });
   });
   return out;
 }
