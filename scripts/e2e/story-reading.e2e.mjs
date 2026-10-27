@@ -36,8 +36,9 @@ async function holdStorage(page, kinds) {
     const { storyStore } = await import('/src/daily/storystore.ts');
     const ss = storyStore(window.__daily.store.key);
     const held = [];
+    ss.__real ??= {};
     for (const k of ks) {
-      const real = ss[k];
+      const real = (ss.__real[k] ??= ss[k]);
       ss[k] = function (...a) {
         let go, finish;
         const done = new Promise((r) => (finish = r));
@@ -334,7 +335,7 @@ export const scenarios = {
       await page.locator('.st-chbtn').click();
       const secondRow = page.locator('.st-chrow-b', { hasText: 'Second Door' });
       await secondRow.waitFor();
-      const { waitHeld, release, drain } = await holdStorage(page, ['chapter', 'saveChapter', 'cards']);
+      const { waitHeld, release, drain } = await holdStorage(page, ['chapter', 'saveChapter', 'cards', 'onDisk']);
       const notesTab = page.getByRole('radio', { name: 'Show: Notes' });
       const card = (text) => page.locator('.st-card', { hasText: text });
       // lets every held read and save through until `ok`, including ones the app asks for only after an earlier one answers
@@ -348,7 +349,8 @@ export const scenarios = {
       const notesOnDisk = () =>
         page.evaluate(async (n) => {
           const { storyStore } = await import('/src/daily/storystore.ts');
-          return (await storyStore(window.__daily.store.key).onDisk(n))?.text ?? '';
+          const ss = storyStore(window.__daily.store.key);
+          return (await (ss.__real?.onDisk ?? ss.onDisk).call(ss, n))?.text ?? '';
         }, notes);
 
       // Second Door opened from the chapter list, then Notes before its cards are read, and the Notes read answers first
@@ -386,6 +388,21 @@ export const scenarios = {
       s = await shownIn(page);
       h.expect(s.seg === 'Notes' && s.box === 'Notes for this story' && s.text === '', `a Notes tap after an Insert still let the card in: ${JSON.stringify(s)}`);
       h.expect((await notesOnDisk()) === '', `the overtaken Insert wrote into the notes: ${JSON.stringify(await notesOnDisk())}`);
+
+      // the page is in but still settling (its stored copy is being read) when Notes is tapped: the Insert gives way too
+      await card('The lamp went out.').getByRole('button', { name: 'Insert', exact: true }).click();
+      await waitHeld(`chapter ${first}`);
+      await release(`chapter ${first}`);
+      await waitHeld(`onDisk ${first}`);
+      await notesTab.click();
+      await waitHeld(`chapter ${notes}`);
+      await release(`chapter ${notes}`);
+      await drain();
+      await h.sleep(300);
+      await drain();
+      s = await shownIn(page);
+      h.expect(s.seg === 'Notes' && s.box === 'Notes for this story' && s.text === '', `a Notes tap while the page settled still let the card in: ${JSON.stringify(s)}`);
+      h.expect((await notesOnDisk()) === '', `the Insert overtaken while the page settled wrote into the notes: ${JSON.stringify(await notesOnDisk())}`);
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();

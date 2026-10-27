@@ -616,8 +616,9 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     if (alive) syncState();
     return true;
   };
-  /** Brings `to` into the editor: true once the editor holds it, false when a newer tap took over first. `tab` changes
-   * only in load, so it always names what the editor holds and nothing reads or edits a chapter that isn't on screen. */
+  /** Brings `to` into the editor: true once the editor holds it, false when a newer tap took over first, also while the
+   * chapter was still settling in. `tab` changes only in load, so it always names what the editor holds and nothing reads
+   * or edits a chapter that isn't on screen. */
   const switchTab = async (to: 'page' | 'notes') => {
     if (to === tab && cur && shown === picks) {
       syncSeg();
@@ -626,7 +627,7 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     const n = ++picks;
     await flushAll();
     if (n !== picks) return false;
-    return load(to === 'notes' ? notesId : pageId, n);
+    return (await load(to === 'notes' ? notesId : pageId, n)) && n === picks;
   };
   const openPage = async (id: string) => {
     const n = ++picks;
