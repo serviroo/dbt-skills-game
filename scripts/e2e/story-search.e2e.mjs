@@ -2,6 +2,7 @@
 // accents or curly quotes, as whole words or parts of words. Each result names its chapter and shows the words with
 // the match marked, opens that chapter at that place with the place marked, comes back to the same search, works
 // offline, stores nothing and never runs the player's text as markup. The Safe Zone stays one tap away.
+import { holdStorage, shownIn } from './story-reading.e2e.mjs';
 
 const day = () => {
   const d = new Date(Date.now() - 6 * 3600000);
@@ -214,6 +215,54 @@ export const scenarios = {
         await field(page).waitFor();
         h.expect((await field(page).inputValue()) === '', `${at}: a new visit to the Story Room kept an old search`);
         h.expect(!errors.filter((e) => !/ERR_INTERNET_DISCONNECTED|net::/.test(e)).length, errors.join('\n'));
+      } finally {
+        await ctx.close();
+      }
+    }
+  },
+
+  /** a result opening its chapter gives way to a Page or Notes tap made while it opened, however slowly storage
+   *  answers: the tapped side shows, with nothing marked, selected or said about the search on it */
+  async 'story-search-open-overtaken'(h) {
+    const cases = [
+      { row: 'Winter', tap: 'Notes', box: 'Notes for this story', text: NOTES },
+      { row: 'Notes', tap: 'Page', box: 'Page, Winter', text: WINTER },
+    ];
+    for (const c of cases) {
+      const at = `${c.row} overtaken by ${c.tap}`;
+      const { ctx, page, errors } = await h.open(seed(h), '?mute');
+      try {
+        await h.reachHub(page);
+        const ids = await shelf(page);
+        await page.evaluate(() => window.__daily.go({ name: 'stories' }));
+        await field(page).waitFor();
+        // "mira" is on both sides of The Long Night: in Winter and in its notes
+        const r = await search(h, page, 'mira');
+        const rows = r.stories.find((s) => s.title === 'The Long Night')?.rows.map((x) => x.where).join();
+        h.expect(rows === 'Winter,Notes', `${at}: "mira" found ${JSON.stringify(r.stories)}`);
+        const opened = c.row === 'Winter' ? ids.winter : ids.notes;
+        const tapped = c.row === 'Winter' ? ids.notes : ids.winter;
+        // from here every chapter read waits until the test lets it through
+        const { waitHeld, release, drain } = await holdStorage(page, ['chapter']);
+        await page.locator('.st-found-row', { hasText: c.row }).click();
+        await routeIs(page, 'write');
+        await waitHeld(`chapter ${opened}`);
+        await page.getByRole('radio', { name: `Show: ${c.tap}` }).click();
+        await waitHeld(`chapter ${tapped}`);
+        // the tapped side reaches the editor first, then the chapter the result asked for answers
+        await release(`chapter ${tapped}`);
+        await release(`chapter ${opened}`);
+        await drain();
+        await h.sleep(200);
+        await drain();
+        const s = await shownIn(page);
+        h.expect(s.seg === c.tap && s.box === c.box && s.text === c.text, `${at}: the Story Room showed ${JSON.stringify(s)}`);
+        const left = await page.evaluate(() => {
+          const ta = document.querySelector('.st-write .st-ta');
+          return { marks: document.querySelectorAll('.st-hl .st-mark').length, sel: ta.value.slice(ta.selectionStart, ta.selectionEnd), note: document.querySelector('.st-note')?.textContent ?? '' };
+        });
+        h.expect(!left.marks && !left.sel && left.note !== 'What you searched for is marked on the page.', `${at}: the search was marked on the ${c.tap} side: ${JSON.stringify(left)}`);
+        h.expect(!errors.length, errors.join('\n'));
       } finally {
         await ctx.close();
       }
