@@ -132,9 +132,10 @@ export const scenarios = {
     await radio(page, '3 minutes').check();
     await page.reload();
     await h.reachHub(page);
+    // the kept 3 minutes start as the moment opens, so time stands still from before it opens
+    await h.pauseClock(page);
     await page.getByRole('button', { name: 'Give me a moment', exact: true }).click();
     await page.locator('.dq-moment').waitFor({ timeout: 15000 });
-    await h.pauseClock(page);
     h.expect(await radio(page, '3 minutes').isChecked(), 'the 3 minutes choice did not survive a reload');
     await page.clock.fastForward(65000);
     h.expect(!(await ended(page)), 'the 3 minute moment ended at 1 minute');

@@ -99,7 +99,7 @@ async function toStep(h, page, id, entry, { pause = false } = {}) {
     }
   }
   await page.locator('.dq-timer-stage').waitFor({ timeout: 10000 });
-  if (pause) await pauseSoon(page);
+  if (pause) await h.pauseClock(page);
   await page.locator('.dq-timer-stage').scrollIntoViewIfNeeded();
 }
 
@@ -383,7 +383,7 @@ async function showsStopped(h, page, where, stage = '.dq-timer-stage') {
 
 /** The page freezes and comes back: the scene picks up in step with the countdown. Then leaving frees it. */
 async function keepsTime(h, page, kind) {
-  await pauseSoon(page);
+  await h.pauseClock(page);
   await h.sleep(1200);
   const b = await pair(page);
   await page.clock.resume();
@@ -1083,7 +1083,7 @@ export const scenarios = {
     await home(h, page);
     await page.evaluate(() => window.__daily.go({ name: 'moment' }));
     await live(h, page, 'moment end', '.dq-mo-stage');
-    await pauseSoon(page);
+    await h.pauseClock(page);
     await page.getByRole('radiogroup', { name: 'How long' }).getByRole('radio', { name: '1 minute' }).check();
     await page.clock.runFor(2000);
     const on = await scenes(page);
