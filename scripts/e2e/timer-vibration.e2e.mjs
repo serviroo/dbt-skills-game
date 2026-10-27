@@ -5,6 +5,10 @@
 
 const START = JSON.stringify([40]);
 const END = JSON.stringify([40, 120, 40]);
+/** a skip's double pulse, a 200 ms rest, then the next timer's start pulse: one pattern, so neither cuts the other off */
+const END_THEN_START = JSON.stringify([40, 120, 40, 200, 40]);
+/** what stops a pattern still playing */
+const STOP = JSON.stringify(0);
 const SWITCH = 'Vibrate when a timer starts or ends';
 
 /**
@@ -188,6 +192,7 @@ export const scenarios = {
     await turnOn(h, page);
     await wiseMind(h, page);
     h.expect((await buzzes(page)) === only(START), 'the timer did not give one start pulse');
+    await page.clock.runFor(1000);
     await page.locator('header .dq-safe').click();
     await page.locator('.dq-safezone').waitFor({ timeout: 5000 });
     await page.clock.runFor(25000);
@@ -199,6 +204,15 @@ export const scenarios = {
     got = await buzzes(page);
     h.expect(got === none, `the Safe Zone's own timer buzzed: ${got}`);
     await h.shot(page, 'safe-zone-quiet');
+    // an end pulse still playing as the Safe Zone opens stops at once, so no part of it is felt in there
+    await wiseMind(h, page);
+    h.expect((await buzzes(page)) === only(START), 'the second timer did not give one start pulse');
+    await page.clock.runFor(20050);
+    h.expect((await buzzes(page)) === only(END), 'the second timer did not give one end pulse');
+    await page.locator('header .dq-safe').click();
+    await page.locator('.dq-safezone').waitFor({ timeout: 5000 });
+    got = await buzzes(page);
+    h.expect(got === only(STOP), `the end pulse went on playing into the Safe Zone: ${got}`);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },
@@ -302,6 +316,29 @@ export const scenarios = {
     await other.getByRole('switch', { name: SWITCH }).click();
     h.expect(await shows(false), 'the other tab turned vibration off, and this open Settings still shows it on');
     await h.shot(page, 'settings-vibration-follows');
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /** Next on a running timer that leads straight into the next one: the skip pulse plays out, then the start pulse */
+  async 'vibration-skip-into-next-timer'(h) {
+    const { ctx, page, errors } = await open(h);
+    await turnOn(h, page);
+    await page.waitForFunction(() => !!window.__daily, null, { timeout: 30000 });
+    await page.clock.resume();
+    await page.evaluate(() => window.__daily.go({ name: 'hub' }));
+    await h.reachHub(page);
+    // Open Gauntlets: three 20 second timers in a row, each starting by itself
+    await page.evaluate(() => window.__daily.go({ name: 'skill', id: 'willing-hands' }));
+    await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000);
+    await tap(page, 'Begin');
+    await timer(page).waitFor({ timeout: 5000 });
+    h.expect((await buzzes(page)) === only(START), 'the first timer did not give one start pulse');
+    await page.clock.runFor(3000);
+    await tap(page, 'Next');
+    // the second call replaces the first, so it has to carry the skip pulse too
+    const got = await buzzes(page);
+    h.expect(got === JSON.stringify([END, END_THEN_START]), `the next timer's start pulse cut off the skip pulse: ${got}`);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },

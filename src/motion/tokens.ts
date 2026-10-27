@@ -66,6 +66,8 @@ export const BUZZ = {
   start: [40],
   end: [40, 120, 40],
 } as const;
+/** ms off between two buzzes that come together (a skip that starts the next timer), so both read */
+export const BUZZ_GAP = 200;
 
 export const CALM = {
   fadeMs: 380,
