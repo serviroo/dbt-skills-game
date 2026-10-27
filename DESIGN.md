@@ -22,17 +22,20 @@ anything a player sees or hears.
 | gold | `#C9A45C` | Rewards only: the chest, ranks, titles. If everything is gold, nothing is. |
 | ice | `#E6F1FF` | Text. |
 | mint | `#89CF9D` | Tiny doses, only for things that belong to the player. |
-| rose | `#E2968C` | Home's horizon at dawn only, as a soft glow at about a third strength. |
-| amber | `#D67048` | Home's horizon at dusk only, as a soft glow at about a third strength. |
+| rose | `#E2968C` | Home's horizon at dawn only, low and soft in the dawn sky. |
+| amber | `#D67048` | Home's horizon at dusk only, low and soft in the dusk sky. |
 
 The window material: a dark translucent plate (`rgba(5,17,31,.93)`), one lit hairline on top and a darker one below,
 a thin blue rule under the title. Tokens live in `src/styles/tokens.css`.
 
-**Home's sky** follows the device's clock in four soft moods over the void: dawn (05:00 to 08:00) is a pale blue top
-with a rose horizon, day (08:00 to 17:00) lifts the lantern blue, dusk (17:00 to 20:00) is an indigo top with an amber
-horizon, and night is the companion's usual deep blue, which every other screen keeps. Opening or leaving Home fades
-the sky in 0.9 s, a new hour drifts in over 8 s, and the Safe Zone always opens on night at once. The colours live in
-`src/daily/daily.css`, the timings in `src/motion/tokens.ts`.
+**Home's sky** follows the device's clock in four calm moods, each a picture of the same place: a sky over three
+ridges of hills that fade into the void. Dawn (05:00 to 08:00) is lilac with a rose glow low over the hills, day
+(08:00 to 17:00) lifts the lantern blue with soft cloud, dusk (17:00 to 20:00) is indigo with an amber horizon, and
+night is deep blue with stars, which every other screen keeps. The pictures stay at night-light level: the top is
+darkest, where the small text sits, and no cloud or glow gets bright enough to weaken text over it. Opening or leaving
+Home fades the sky in 0.9 s, a new hour drifts in over 8 s with the old picture held under the new one, and the Safe
+Zone always opens on night at once. The pictures live in `public/sky/` (tall ones for portrait screens, wide ones for
+landscape), the layers in `src/daily/daily.css`, the timings in `src/motion/tokens.ts`.
 
 ## Type
 

@@ -90,7 +90,11 @@
   background: var(--w2-bg);
 }
 :root[data-dq-theme]:not([data-dq-theme='classic']) .dq-top::after {
+  content: '';
   background: var(--vig), var(--w2-bg);
+}
+:root[data-dq-theme]:not([data-dq-theme='classic']) .dq-sky {
+  display: none;
 }
 :root[data-dq-theme='gold'] .dq-panel {
   background: radial-gradient(90% 60% at 30% 0%, rgba(201, 164, 92, 0.09), transparent 70%), linear-gradient(180deg, var(--plate-a), var(--plate-b));

@@ -1,18 +1,5 @@
 /* The quiet Lantern: the same material as the cutscene's windows, turned down to night-light level. */
 
-/* the sky's two glows, registered so a change of mood cross-fades (src/daily/sky.ts); the initial values are night.
-   They don't inherit, so each frame of a fade restyles only the elements that paint the sky (.dq and the top bar) */
-@property --sky-hi {
-  syntax: '<color>';
-  inherits: false;
-  initial-value: rgba(20, 52, 92, 0.42);
-}
-@property --sky-lo {
-  syntax: '<color>';
-  inherits: false;
-  initial-value: rgba(16, 38, 70, 0.35);
-}
-
 .dq {
   --plate-a: rgba(9, 22, 40, 0.88);
   --plate-b: rgba(5, 13, 25, 0.9);
@@ -31,9 +18,6 @@
   --pad: 18px;
   /* how far the top bar's shade runs below it */
   --top-shade: 10px;
-  /* the night sky, which every screen but Home keeps whatever the time */
-  --sky-hi: rgba(20, 52, 92, 0.42);
-  --sky-lo: rgba(16, 38, 70, 0.35);
   position: fixed;
   inset: 0;
   z-index: 10;
@@ -45,13 +29,7 @@
   scroll-padding: calc(var(--dq-top, 0px) + var(--top-shade)) 0 var(--dq-foot, 0px);
   -webkit-overflow-scrolling: touch;
   pointer-events: auto;
-  background:
-    radial-gradient(120% 60% at 50% -10%, var(--sky-hi), transparent 60%),
-    radial-gradient(90% 50% at 50% 115%, var(--sky-lo), transparent 70%),
-    #07080f;
-  transition:
-    --sky-hi var(--sky-ms, 0ms) ease-in-out,
-    --sky-lo var(--sky-ms, 0ms) ease-in-out;
+  background: #07080f;
   color: var(--t-body);
   font-family: var(--font-ui);
   font-size: 17px;
@@ -64,18 +42,78 @@
   scrollbar-width: thin;
   scrollbar-color: rgba(125, 150, 197, 0.35) transparent;
 }
-/* Home's sky by the clock: lantern blue lifts for the day, a soft warm horizon for dawn and dusk, night as above */
-.dq[data-sky='dawn'] {
-  --sky-hi: rgba(92, 112, 170, 0.46);
-  --sky-lo: rgba(226, 150, 140, 0.34);
+/* ---------- sky (src/daily/sky.ts) ----------
+   A picture per mood, stacked with night at the bottom: night is what every screen shows, and Home fades its mood's
+   picture in over it. Tall pictures for portrait screens, wide ones for landscape, each anchored at the top, where the
+   sky is, with the ground fading into the void below. */
+.dq-sky {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: #07080f;
 }
-.dq[data-sky='day'] {
-  --sky-hi: rgba(64, 140, 210, 0.5);
-  --sky-lo: rgba(40, 96, 186, 0.34);
+.dq-sky > i {
+  position: absolute;
+  inset: 0;
+  background: none center top / cover no-repeat;
+  opacity: 0;
+  transition: opacity var(--sky-ms, 0ms) ease-in-out;
 }
-.dq[data-sky='dusk'] {
-  --sky-hi: rgba(66, 62, 136, 0.5);
-  --sky-lo: rgba(214, 112, 72, 0.36);
+.dq-sky > .dq-sky-night {
+  opacity: 1;
+  transition: none;
+  background-image: url('/sky/night-tall.webp');
+}
+.dq-sky > .dq-sky-dawn {
+  background-image: url('/sky/dawn-tall.webp');
+}
+.dq-sky > .dq-sky-day {
+  background-image: url('/sky/day-tall.webp');
+}
+.dq-sky > .dq-sky-dusk {
+  background-image: url('/sky/dusk-tall.webp');
+}
+@media (min-aspect-ratio: 1/1) {
+  .dq-sky > .dq-sky-night {
+    background-image: url('/sky/night-wide.webp');
+  }
+  .dq-sky > .dq-sky-dawn {
+    background-image: url('/sky/dawn-wide.webp');
+  }
+  .dq-sky > .dq-sky-day {
+    background-image: url('/sky/day-wide.webp');
+  }
+  .dq-sky > .dq-sky-dusk {
+    background-image: url('/sky/dusk-wide.webp');
+  }
+}
+/* the mood before stays whole under the new one until that has come in, then goes */
+.dq[data-sky-was='dawn'] .dq-sky > .dq-sky-dawn,
+.dq[data-sky-was='day'] .dq-sky > .dq-sky-day,
+.dq[data-sky-was='dusk'] .dq-sky > .dq-sky-dusk {
+  z-index: 1;
+  transition: opacity 0s linear var(--sky-ms, 0ms);
+}
+.dq[data-sky='dawn'] .dq-sky > .dq-sky-dawn,
+.dq[data-sky='day'] .dq-sky > .dq-sky-day,
+.dq[data-sky='dusk'] .dq-sky > .dq-sky-dusk {
+  z-index: 2;
+  opacity: 1;
+  transition: opacity var(--sky-ms, 0ms) ease-in-out;
+}
+/* the top bar's backdrop: the same sky over the page, cut to the bar and its shade, with the vignette on it */
+.dq-sky-top {
+  z-index: 5;
+  -webkit-mask-image: linear-gradient(180deg, #000 var(--dq-top, 0px), transparent calc(var(--dq-top, 0px) + var(--top-shade)));
+  mask-image: linear-gradient(180deg, #000 var(--dq-top, 0px), transparent calc(var(--dq-top, 0px) + var(--top-shade)));
+}
+.dq-sky-top::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background: radial-gradient(130% 90% at 50% 45%, transparent 55%, rgba(3, 4, 9, 0.55) 100%);
 }
 .dq::-webkit-scrollbar {
   width: 8px;
@@ -135,8 +173,6 @@
 
 /* ---------- top bar ---------- */
 .dq-top {
-  /* the sky glow doesn't inherit (see @property above); the top bar hands it to its shade itself */
-  --sky-hi: inherit;
   position: sticky;
   top: 0;
   z-index: 6;
@@ -147,23 +183,19 @@
   padding: calc(var(--safe-top) + 8px) max(12px, var(--safe-right)) 4px max(12px, var(--safe-left));
   margin-bottom: 6px;
 }
+/* the themes paint their own backdrop behind the bar (wave2.css); the classic look uses the sky's copy, .dq-sky-top */
 .dq-top::after {
-  content: '';
-  --sky-hi: inherit;
   position: absolute;
   inset: 0 0 calc(-1 * var(--top-shade));
   z-index: -1;
   pointer-events: none;
   --vig: radial-gradient(130% 90vh at 50% 45vh, transparent 55%, rgba(3, 4, 9, 0.55) 100%);
-  --glow: radial-gradient(120% 60vh at 50% -10vh, var(--sky-hi), transparent 60%);
-  background: var(--vig), var(--glow), #07080f;
   -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - var(--top-shade)), transparent);
   mask-image: linear-gradient(180deg, #000 calc(100% - var(--top-shade)), transparent);
 }
 @supports (height: 1dvh) {
   .dq-top::after {
     --vig: radial-gradient(130% 90dvh at 50% 45dvh, transparent 55%, rgba(3, 4, 9, 0.55) 100%);
-    --glow: radial-gradient(120% 60dvh at 50% -10dvh, var(--sky-hi), transparent 60%);
   }
 }
 .dq-top > :last-child {

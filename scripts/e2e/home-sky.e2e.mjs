@@ -1,11 +1,15 @@
 // Home's sky follows the device's clock: dawn (05:00-08:00), day, dusk (17:00-20:00) and night, which is the sky the
-// companion always had. With Playwright's clock at each mood: Home shows it (data-sky plus the painted sky), every
-// visible text passes WCAG AA against it at phone, small phone and sideways sizes, and the Safe Zone button keeps
-// its contrast. Crossing 08:00 with Home open drifts over seconds; with reduced motion it switches at once. Leaving
-// Home stops its clock watch and gives the other screens the night sky back, at once for the Safe Zone.
+// companion always shows. Each mood is a picture in public/sky/. With Playwright's clock at each mood: Home shows it
+// (data-sky, the mood's picture loaded from this origin and painted where it should be), every visible text passes
+// WCAG AA against it at phone, small phone and sideways sizes, and the Safe Zone button keeps its contrast. Crossing
+// 08:00 with Home open drifts over seconds without dipping toward night; with reduced motion it switches at once.
+// Leaving Home stops its clock watch and gives the other screens the night sky back, at once for the Safe Zone.
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 const SIZES = [
   ['390', { width: 390, height: 844 }],
@@ -14,7 +18,7 @@ const SIZES = [
 ];
 const MOODS = { dawn: [6, 30], day: [13, 0], dusk: [18, 30], night: [23, 0] };
 const DPR = 2;
-const SKY_PROPS = ['--sky-hi', '--sky-lo'];
+const DAYTIME = ['dawn', 'day', 'dusk'];
 
 /** A time today in the browser's zone (the harness gives Node the same zone). */
 const at = (h, m, s = 0) => new Date(2026, 9, 27, h, m, s).getTime();
@@ -45,10 +49,37 @@ function trackTimers() {
   window.__liveTimers = (part) => [...live.values()].filter((s) => s.includes(part)).length;
 }
 
+/** The sky as the page has it right now: the mood attribute, how opaque each mood's picture is and which picture it
+ *  draws, and how many of its fades are still running. In the page, so a move and a read can share one task. */
+function skyReader() {
+  window.__readSky = () => {
+    const root = document.querySelector('.dq');
+    const layers = {};
+    const img = {};
+    for (const l of root.querySelector(':scope > .dq-sky:not(.dq-sky-top)').children) {
+      const cs = getComputedStyle(l);
+      const m = l.className.replace('dq-sky-', '');
+      layers[m] = Math.round(Number(cs.opacity) * 1000) / 1000;
+      img[m] = cs.backgroundImage;
+    }
+    return {
+      mood: root.dataset.sky ?? null,
+      screen: root.dataset.screen,
+      layers,
+      img,
+      fading: document.getAnimations().filter((a) => a instanceof CSSTransition && a.effect?.target?.closest?.('.dq-sky')).length,
+      hours: new Date().getHours(),
+      // the clock the fades run on (the fake clock leaves it alone)
+      at: document.timeline.currentTime,
+    };
+  };
+}
+
 async function home(h, time, query = '?mute', viewport) {
   const r = await h.open({ 'dbt.app.v1': h.SEEN }, query, viewport, async (ctx) => {
     await ctx.clock.install({ time });
     await ctx.addInitScript(trackTimers);
+    await ctx.addInitScript(skyReader);
   });
   await calm(h, r.page);
   return r;
@@ -73,19 +104,7 @@ const rgba = (s) => {
 };
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2], ((a[3] ?? 1) - (b[3] ?? 1)) * 255);
 
-/** The sky as the page has it right now: the mood attribute, the glow colours and whether they are still fading. */
-const skyOf = (page) =>
-  page.evaluate((props) => {
-    const root = document.querySelector('.dq');
-    const cs = getComputedStyle(root);
-    return {
-      mood: root.dataset.sky ?? null,
-      screen: root.dataset.screen,
-      glow: props.map((p) => cs.getPropertyValue(p).trim()),
-      fading: document.getAnimations().filter((a) => props.includes(a.transitionProperty)).length,
-      hours: new Date().getHours(),
-    };
-  }, SKY_PROPS);
+const skyOf = (page) => page.evaluate(() => window.__readSky());
 
 async function settle(h, page) {
   for (const end = Date.now() + 8000; Date.now() < end; await h.sleep(100)) if (!(await skyOf(page)).fading) return;
@@ -208,12 +227,53 @@ async function contrast(page) {
   return rows;
 }
 
-/** The painted sky alone: the middle of its top edge (under the top bar) and its bottom edge. */
+/** The painted sky alone: the middle of its top edge (under the top bar) and the band just above the ridges, where
+ *  dawn and dusk glow (the pictures put the horizon at 43% of a tall one and 55% of a wide one). */
 async function skyPixels(page) {
   const img = await capture(page, SKY_ONLY);
   const w = img.w / DPR;
-  const hgt = img.h / DPR;
-  return { top: patch(img, w / 2, 6), low: patch(img, w / 2, hgt - 6) };
+  const { band } = await page.evaluate(() => {
+    const l = document.querySelector('.dq > .dq-sky > .dq-sky-night');
+    const r = l.getBoundingClientRect();
+    // the pictures cover the screen from the top: a tall one is 9:16, a wide one 16:9
+    const [iw, ih] = innerWidth >= innerHeight ? [16, 9] : [9, 16];
+    const s = Math.max(r.width / iw, r.height / ih);
+    return { band: r.top + ih * s * (innerWidth >= innerHeight ? 0.48 : 0.37) };
+  });
+  const across = [0.2, 0.5, 0.8].map((f) => patch(img, w * f, band));
+  // warm: how far red leads blue at the warmest of the three
+  return { top: patch(img, w / 2, 6), band: across.map((c) => c.map(Math.round)), warm: Math.max(...across.map((c) => c[0] - c[2])) };
+}
+
+/** The mood's own picture, from this origin, decoded, and painted as the page should draw it: covering the screen
+ *  from the top. Checked against the file itself at twelve points where the vignette is clear. */
+async function paintsPicture(page, mood) {
+  const at = await page.evaluate(async (m) => {
+    const l = document.querySelector(`.dq > .dq-sky:not(.dq-sky-top) > .dq-sky-${m}`);
+    const r = l.getBoundingClientRect();
+    const url = getComputedStyle(l).backgroundImage.match(/url\("?(.*?)"?\)/)?.[1] ?? null;
+    if (!url) return { url };
+    const i = new Image();
+    i.src = url;
+    await i.decode();
+    return { url, same: new URL(url).origin === location.origin, size: [i.naturalWidth, i.naturalHeight], box: [r.left, r.top, r.width, r.height] };
+  }, mood);
+  if (!at.url) return at;
+  const file = path.join(ROOT, 'public', new URL(at.url).pathname);
+  const [bx, by, bw, bh] = at.box;
+  const [iw, ih] = at.size;
+  const s = Math.max(bw / iw, bh / ih);
+  const { data, info } = await sharp(file).resize(Math.round(iw * s * DPR), Math.round(ih * s * DPR), { fit: 'fill' }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const want = { data, w: info.width, h: info.height };
+  const got = await capture(page, SKY_ONLY);
+  const off = (bw - iw * s) / 2;
+  const miss = [];
+  for (const fx of [0.3, 0.5, 0.7])
+    for (const fy of [0.06, 0.2, 0.33, 0.46]) {
+      const [x, y] = [bx + bw * fx, by + bh * fy];
+      miss.push(Math.round(dist(patch(want, x - bx - off, y - by), patch(got, x, y))));
+    }
+  return { url: new URL(at.url).pathname, same: at.same, size: at.size, miss: Math.max(...miss) };
 }
 
 const SAFE = '.dq-top .dq-safe';
@@ -227,49 +287,38 @@ async function safeButton(page) {
 }
 
 async function crossEight(h, page) {
-  const left = at(8, 0, 31) - (await page.evaluate(() => Date.now()));
-  h.expect(left > 31000, 'the page reached Home after 08:00, so the clock could not be crossed with Home open');
+  const left = at(8, 0, 0) - (await page.evaluate(() => Date.now()));
+  h.expect(left > 1000, 'the page reached Home after 08:00, so the clock could not be crossed with Home open');
   h.expect((await skyOf(page)).mood === 'dawn', 'Home before 08:00 does not show dawn: ' + JSON.stringify(await skyOf(page)));
-  // the clock jumps as if the phone lay still for a while; the open Home sees the new hour on its next look
+  // the clock jumps to 08:00 as if the phone lay still, then runs on a second at a time until the open Home's next
+  // look sees the new hour. Jumping well past that look would replay every frame callback of the extra time in one
+  // go after the drift had started, and on a slow machine that eats the real seconds the drift is measured in.
   await page.clock.fastForward(left);
+  for (let i = 0; i < 40 && (await skyOf(page)).mood !== 'day'; i++) await page.clock.fastForward(1000);
 }
 
-const NIGHT = [
-  [20, 52, 92, 0.42],
-  [16, 38, 70, 0.35],
-];
-const isNight = (s) => s.mood === null && !s.fading && SKY_PROPS.every((_, i) => dist(rgba(s.glow[i]), NIGHT[i]) < 1);
+const isNight = (s) => s.mood === null && !s.fading && s.layers.night === 1 && DAYTIME.every((m) => s.layers[m] === 0);
 
 /** In the page: reads the sky, makes one move (`how`: 'tap' clicks `arg`, 'history' goes `arg` steps), then reads the
  *  sky again in the same task as the screen the move opened, before any frame of it is drawn. So `after` is exactly
  *  what that screen's first frame shows, and `before` says whether a fade was still running when the move came. */
 const moveAndRead = (page, how, arg) =>
   page.evaluate(
-    ([how, arg, props]) => {
-      const root = document.querySelector('.dq');
-      const read = () => {
-        const cs = getComputedStyle(root);
-        return {
-          mood: root.dataset.sky ?? null,
-          screen: root.dataset.screen,
-          glow: props.map((p) => cs.getPropertyValue(p).trim()),
-          fading: document.getAnimations().filter((a) => props.includes(a.transitionProperty)).length,
-        };
-      };
-      const before = read();
+    ([how, arg]) => {
+      const before = window.__readSky();
       if (how === 'tap') {
         document.querySelector(arg).click();
-        return { before, after: read() };
+        return { before, after: window.__readSky() };
       }
       // the app's own popstate listener came first, so this one reads the screen it has just drawn
       return new Promise((done) => {
         // a Back or Forward with nowhere to go never fires popstate; say so instead of waiting forever
-        setTimeout(() => done({ before, after: { ...read(), stuck: true } }), 3000);
-        addEventListener('popstate', () => done({ before, after: read() }), { once: true });
+        setTimeout(() => done({ before, after: { ...window.__readSky(), stuck: true } }), 3000);
+        addEventListener('popstate', () => done({ before, after: window.__readSky() }), { once: true });
         history.go(arg);
       });
     },
-    [how, arg, SKY_PROPS],
+    [how, arg],
   );
 
 /** The Safe Zone opened by `move` while the sky was still fading: night from its first frame and still night after. */
@@ -280,7 +329,7 @@ async function safeAtOnce(h, page, move, what) {
   await h.sleep(300);
   const later = await skyOf(page);
   h.expect(isNight(later), `${what}: the Safe Zone's sky moved after it opened: ` + JSON.stringify(later));
-  return { from: before.glow[0], first: after.glow[0] };
+  return { from: before.layers, first: after.layers };
 }
 
 export const scenarios = {
@@ -294,13 +343,19 @@ export const scenarios = {
       const sky = await skyOf(page);
       expect(sky.hours === hh, `the page clock reads ${sky.hours}h, not ${hh}h`);
       expect(sky.mood === mood, `at ${hh}:${String(mm).padStart(2, '0')} Home shows ${sky.mood}, not ${mood}`);
+      expect(sky.layers[mood] === 1 && DAYTIME.every((m) => m === mood || sky.layers[m] === 0), `${mood}: its picture is not the one showing: ` + JSON.stringify(sky.layers));
+      const pictures = {};
       const rows = {};
       for (const [name, size] of SIZES) {
         await page.setViewportSize(size);
         await h.sleep(500);
         await page.evaluate(() => document.querySelector('.dq').scrollTo({ top: 0, behavior: 'instant' }));
         await shot(page, `${mood}-${name}`);
-        if (name === '390') seen[mood] = { glow: sky.glow, px: await skyPixels(page), safe: await safeButton(page) };
+        const pic = (pictures[name] = await paintsPicture(page, mood));
+        const shape = size.width >= size.height ? 'wide' : 'tall';
+        expect(pic.url === `/sky/${mood}-${shape}.webp` && pic.same, `${mood} at ${name} does not draw its own ${shape} picture from this origin: ` + JSON.stringify(pic));
+        expect(pic.miss <= 10, `${mood} at ${name}: the painted sky is not the picture (off by ${pic.miss}): ` + JSON.stringify(pic));
+        if (name === '390') seen[mood] = { px: await skyPixels(page), safe: await safeButton(page) };
         const all = await contrast(page);
         await page.evaluate(() => { const r = document.querySelector('.dq'); r.scrollTo({ top: r.scrollHeight, behavior: 'instant' }); });
         await h.sleep(300);
@@ -311,7 +366,7 @@ export const scenarios = {
         expect(all.length > 10, `only ${all.length} text pieces found on Home at ${name}`);
         expect(!low.length, `${mood} at ${name}: text below WCAG AA: ${JSON.stringify(low.slice(0, 8))}`);
       }
-      fs.writeFileSync(path.join(out, `home-sky-${mood}.json`), JSON.stringify({ sky, seen: seen[mood], rows }, null, 2));
+      fs.writeFileSync(path.join(out, `home-sky-${mood}.json`), JSON.stringify({ sky, pictures, seen: seen[mood], rows }, null, 2));
       expect(!errors.length, errors.join('\n'));
       await ctx.close();
     }
@@ -322,58 +377,61 @@ export const scenarios = {
     await settle(h, page);
     const plain = { ...(await skyOf(page)), px: await skyPixels(page) };
     await ctx.close();
-    expect(plain.mood === null, 'Settings has a sky mood: ' + plain.mood);
-    expect(dist(rgba(plain.glow[0]), [20, 52, 92, 0.42]) < 1 && dist(rgba(plain.glow[1]), [16, 38, 70, 0.35]) < 1, 'the night sky colours changed: ' + plain.glow);
-    expect(dist(seen.night.px.top, plain.px.top) <= 3 && dist(seen.night.px.low, plain.px.low) <= 3, `Home at night is not the usual sky: ${JSON.stringify(seen.night.px)} vs ${JSON.stringify(plain.px)}`);
+    expect(isNight(plain), 'Settings does not show the night sky alone: ' + JSON.stringify(plain));
+    expect(dist(seen.night.px.top, plain.px.top) <= 3 && seen.night.px.band.every((c, i) => dist(c, plain.px.band[i]) <= 3), `Home at night is not the usual sky: ${JSON.stringify(seen.night.px)} vs ${JSON.stringify(plain.px)}`);
     // each mood is its own sky: day lifts the top, dawn and dusk warm the horizon, and no two look alike
     const n = seen.night.px;
     expect(seen.day.px.top[2] >= n.top[2] + 10 && seen.day.px.top[1] >= n.top[1] + 8, `day does not lift the sky: ${JSON.stringify(seen.day.px)} vs night ${JSON.stringify(n)}`);
     for (const m of ['dawn', 'dusk']) {
-      const low = seen[m].px.low;
-      expect(low[0] >= n.low[0] + 20 && low[0] > low[2], `${m} has no warm horizon: ${JSON.stringify(low)} vs night ${JSON.stringify(n.low)}`);
+      const p = seen[m].px;
+      expect(p.warm > 0 && p.warm >= n.warm + 20 && Math.max(...p.band.map((c) => c[0])) >= Math.max(...n.band.map((c) => c[0])) + 20, `${m} has no warm horizon: ${JSON.stringify(p)} vs night ${JSON.stringify(n)}`);
     }
     const names = Object.keys(seen);
+    const look = (p) => [p.top, ...p.band];
     for (const a of names)
       for (const b of names)
-        if (a < b) expect(dist(seen[a].px.top, seen[b].px.top) + dist(seen[a].px.low, seen[b].px.low) >= 12, `${a} and ${b} look the same`);
+        if (a < b) expect(look(seen[a].px).reduce((t, c, i) => t + dist(c, look(seen[b].px)[i]), 0) >= 24, `${a} and ${b} look the same`);
     // the Safe Zone button reads as well as at night in every mood (AAA and within 5%), and keeps its own look
     for (const m of names) {
       const s = seen[m].safe;
       expect(s.label >= 7 && s.label >= seen.night.safe.label * 0.95, `the Safe Zone label is weaker at ${m}: ${s.label} vs night ${seen.night.safe.label}`);
       expect(ratio(s.inside, seen.night.safe.inside) <= 1.1, `the Safe Zone button itself looks different at ${m}: ${s.inside} vs night ${seen.night.safe.inside}`);
     }
-    return { moods: Object.fromEntries(names.map((m) => [m, { top: seen[m].px.top, low: seen[m].px.low, safe: seen[m].safe.label }])) };
+    return { moods: Object.fromEntries(names.map((m) => [m, { top: seen[m].px.top, band: seen[m].px.band, safe: seen[m].safe.label }])) };
   },
 
-  /** 07:58 to 08:00 with Home open: dawn drifts into day over seconds, never in one frame */
+  /** 07:58 to 08:00 with Home open: day's picture comes in over dawn's over seconds, never in one frame, and dawn's
+   *  stays whole under it until it has, so the sky never dips toward night on the way */
   async 'home-sky-drift'(h) {
     const { expect, shot } = h;
     const { ctx, page, errors } = await home(h, at(7, 58, 0));
     await settle(h, page);
-    const from = rgba((await skyOf(page)).glow[0]);
     expect((await page.evaluate(() => window.__liveTimers('sky.ts'))) >= 1, 'Home does not watch the clock (no sky timer while open)');
     await crossEight(h, page);
-    const t0 = Date.now();
     const series = [];
     for (let i = 0; i < 140; i++) {
       const s = await skyOf(page);
-      series.push({ t: Date.now() - t0, hi: rgba(s.glow[0]), mood: s.mood, fading: s.fading });
+      series.push({ t: Math.round(s.at - (series[0]?.at0 ?? s.at)), at0: series[0]?.at0 ?? s.at, day: s.layers.day, dawn: s.layers.dawn, mood: s.mood, fading: s.fading });
       if (i === 25) await shot(page, 'drift-mid');
       if (series.length > 5 && !s.fading && series.at(-2).fading === 0 && s.mood === 'day' && i > 30) break;
       await h.sleep(90);
     }
-    const to = series.at(-1).hi;
-    const span = dist(from, to);
-    expect(series.at(-1).mood === 'day' && span > 10, 'Home did not move on to day after 08:00: ' + JSON.stringify(series.at(-1)));
-    const moving = series.filter((s) => dist(s.hi, from) > span * 0.02 && dist(s.hi, to) > span * 0.02);
-    const steps = series.slice(1).map((s, i) => dist(s.hi, series[i].hi) / span);
+    const last = series.at(-1);
+    expect(last.mood === 'day' && last.day === 1 && last.dawn === 0, 'Home did not move on to day after 08:00: ' + JSON.stringify(last));
+    const moving = series.filter((s) => s.day > 0.02 && s.day < 0.98);
+    // how fast the picture came in between each two looks, per second of the fades' own clock, so a slow machine
+    // that looks less often still measures the fade and not its own pace; an 8 s ease-in-out peaks near 0.19 a second
+    const rates = series.slice(1).map((s, i) => Math.abs(s.day - series[i].day) / Math.max(0.001, (s.t - series[i].t) / 1000));
     const took = moving.length ? moving.at(-1).t - moving[0].t : 0;
-    expect(took >= 4000, `the drift took ${took} ms; it should take several seconds`);
-    expect(Math.max(...steps) <= 0.12, `the sky jumped ${Math.round(Math.max(...steps) * 100)}% of the way in one step`);
+    expect(took >= 4000, `the drift took ${took} ms; it should take several seconds: ` + JSON.stringify(series.slice(0, 12)));
+    expect(Math.max(...rates) <= 0.4, `the sky came in at ${Math.round(Math.max(...rates) * 100)}% a second at its fastest, faster than an 8 s fade: ` + JSON.stringify(series.slice(0, 40)));
+    const dip = series.find((s) => s.day < 1 && s.dawn < 1);
+    expect(!dip, 'dawn went before day had come in, so the sky dipped toward night: ' + JSON.stringify(dip));
+    expect((await paintsPicture(page, 'day')).miss <= 10, 'after the drift the sky is not the day picture');
     await shot(page, 'drift-day');
     expect(!errors.length, errors.join('\n'));
     await ctx.close();
-    return { tookMs: took, biggestStep: Math.round(Math.max(...steps) * 1000) / 1000, samples: series.length };
+    return { tookMs: took, fastestPerSec: Math.round(Math.max(...rates) * 1000) / 1000, samples: series.length };
   },
 
   /** reduced motion: the same crossing changes the sky at once, with nothing fading */
@@ -388,7 +446,7 @@ export const scenarios = {
       await h.sleep(80);
     }
     expect(looks.every((s) => s.mood === 'day' && !s.fading), 'with reduced motion the sky faded or did not change: ' + JSON.stringify(looks));
-    expect(new Set(looks.map((s) => s.glow.join())).size === 1, 'with reduced motion the sky still moved: ' + JSON.stringify(looks.map((s) => s.glow)));
+    expect(looks.every((s) => s.layers.day === 1 && s.layers.dawn === 0), 'with reduced motion the sky still moved: ' + JSON.stringify(looks.map((s) => s.layers)));
     expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },
@@ -405,7 +463,7 @@ export const scenarios = {
     expect((await live()) === 0, `${await live()} sky timers still run after leaving Home`);
     await settle(h, page);
     let s = await skyOf(page);
-    expect(s.mood === null && dist(rgba(s.glow[0]), [20, 52, 92, 0.42]) < 1, 'Settings did not get the night sky back: ' + JSON.stringify(s));
+    expect(isNight(s), 'Settings did not get the night sky back: ' + JSON.stringify(s));
     // hours pass on Settings: nothing wakes up and the sky stays night
     await page.clock.fastForward(5 * 60 * 60 * 1000);
     s = await skyOf(page);
@@ -418,7 +476,7 @@ export const scenarios = {
     await page.locator(SAFE).first().click();
     await page.locator('.dq[data-screen="safe"]').waitFor({ timeout: 10000 });
     s = await skyOf(page);
-    expect(s.mood === null && !s.fading && dist(rgba(s.glow[0]), [20, 52, 92, 0.42]) < 1 && dist(rgba(s.glow[1]), [16, 38, 70, 0.35]) < 1, 'the Safe Zone opened with a sky mood or a fade: ' + JSON.stringify(s));
+    expect(isNight(s), 'the Safe Zone opened with a sky mood or a fade: ' + JSON.stringify(s));
     expect((await live()) === 0, 'sky timers run in the Safe Zone');
     await h.sleep(1200);
     await shot(page, 'safe-zone-at-dusk');

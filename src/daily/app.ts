@@ -172,7 +172,7 @@ export class App {
     this.view = h('main', { class: 'dq-view', id: 'dq-main' });
     this.scrim = h('div', { class: 'dq-scrim', 'aria-hidden': 'true' });
     this.toastEl = h('div', { class: 'dq-toast', role: 'status', 'aria-live': 'polite' });
-    this.root.append(this.bubbles.canvas, h('div', { class: 'dq-vignette', 'aria-hidden': 'true' }), this.top, this.view, this.toastEl, this.scrim);
+    this.root.append(this.sky.back, this.bubbles.canvas, h('div', { class: 'dq-vignette', 'aria-hidden': 'true' }), this.sky.shade, this.top, this.view, this.toastEl, this.scrim);
     host.append(this.root);
     this.pins = new ResizeObserver(() => {
       this.root.style.setProperty('--dq-top', `${this.top.offsetHeight}px`);
