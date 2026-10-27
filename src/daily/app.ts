@@ -63,6 +63,8 @@ export interface ScreenOut {
   foot?: HTMLElement;
   leave?: () => void;
   after?: () => void;
+  /** Focus waits for this, so a heading filled in from storage is read out whole, never empty and then changed unannounced. */
+  ready?: Promise<unknown>;
   /** The Safe Zone is opening: stop this screen's own sound at once (leave still follows). */
   silence?: () => void;
   /** What this visit keeps for Back and Forward (answers, typed text). Memory only: never in history or storage. */
@@ -626,7 +628,10 @@ export class App {
     const focus = out.el.querySelector<HTMLElement>('[data-focus]') ?? out.el.querySelector<HTMLElement>('h1');
     if (focus && !o.quiet) {
       focus.setAttribute('tabindex', '-1');
-      focus.focus({ preventScroll: true });
+      // still this screen, and nothing else was focused while it waited
+      const put = () => this.current === out && (!document.activeElement || document.activeElement === document.body) && focus.focus({ preventScroll: true });
+      if (out.ready) void out.ready.then(put, put);
+      else focus.focus({ preventScroll: true });
     }
     out.after?.();
     if (route.name === 'hub' && !o.quiet && !fromSkill) void this.celebrate();
