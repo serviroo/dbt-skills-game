@@ -1,7 +1,8 @@
 // Wise Mind's stone step shows a calm 3D scene through the companion's shared scene host: live and drawn at phone,
 // sideways and desktop sizes; in step with the countdown after the page freezes and through more time; one still frame
-// with reduced motion; the flat picture with no WebGL, never hidden again once the device is known to have none, and
-// never hidden at all in a browser without WebGL 2; one WebGL context however often it opens; back after a lost context.
+// with reduced motion, and in step again when Motion changes mid-scene (here or in another copy); the flat picture with no
+// WebGL, never hidden again once the device is known to have none, and never hidden at all in a browser without WebGL 2;
+// one WebGL context however often it opens, let go while the page is hidden; back after a lost context.
 import sharp from 'sharp';
 
 const PHONE = { width: 390, height: 844 };
@@ -65,6 +66,18 @@ async function pauseSoon(page) {
     }
   }
 }
+
+/** The page goes to the background (hidden, as in another tab) or comes back, as the page sees it. */
+const hide = (page, on) =>
+  page.evaluate((hidden) => {
+    if (!window.__vis) {
+      window.__vis = { hidden: false };
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => window.__vis.hidden });
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (window.__vis.hidden ? 'hidden' : 'visible') });
+    }
+    window.__vis.hidden = hidden;
+    document.dispatchEvent(new Event('visibilitychange'));
+  }, on);
 
 async function live(h, page, where) {
   await page.locator('.dq-timer-stage.is-scene-live').waitFor({ timeout: 15000 }).catch(async () => {
@@ -360,6 +373,88 @@ export const scenarios = {
     h.expect(!s || (s.contexts === 0 && s.live === 0), `no WebGL 2: the scene host made a context: ${JSON.stringify(s)}`);
     h.expect((await flat(page)).every(Boolean) && (await flat(page)).length > 0, 'no WebGL 2: the flat picture is hidden');
     await h.shot(page, 'no-webgl2-phone');
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /** a hidden page holds no scene: past the idle period its WebGL context is gone, and shown again the scene is in step */
+  async 'scene-hidden'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
+    await page.clock.install();
+    await page.reload();
+    await toStone(h, page);
+    await live(h, page, 'before hiding');
+    // more time, so the countdown outlasts the time spent hidden
+    await page.locator('.dq-timer').getByRole('button', { name: '+15 s' }).click();
+    await h.sleep(800);
+    inStep(h, await pair(page), 'before hiding');
+    await hide(page, true);
+    await h.sleep(300);
+    const a = await scenes(page);
+    h.expect(a.live === 0 && !(await page.locator('.dq-scene').count()), `hidden: the scene is still up: ${JSON.stringify(a)}`);
+    await page.clock.fastForward(16000);
+    await h.sleep(300);
+    const b = await scenes(page);
+    h.expect(b.contexts === 0, `hidden past the idle period: the shared renderer kept its WebGL context: ${JSON.stringify(b)}`);
+    await hide(page, false);
+    await live(h, page, 'shown again');
+    await h.sleep(1200);
+    const c = await pair(page);
+    h.expect(c.s.live === 1 && c.s.contexts === 1 && c.s.frames > b.frames + 10, `shown again: ${JSON.stringify(c.s)}`);
+    inStep(h, c, 'shown again');
+    await drawn(h, page, 'shown again');
+    await h.shot(page, 'hidden-back-phone');
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /** Motion changed mid-scene, in this copy or another open one: Reduced stills the scene, Full moves it again in step */
+  async 'scene-motion'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
+    await toStone(h, page);
+    await live(h, page, 'motion');
+    // more time, so the countdown outlasts every change below
+    await page.locator('.dq-timer').getByRole('button', { name: '+15 s' }).click();
+    await h.sleep(800);
+    inStep(h, await pair(page), 'motion: full');
+    const still = async (where) => {
+      await h.sleep(600);
+      const a = await scenes(page);
+      await h.sleep(1000);
+      const b = await scenes(page);
+      h.expect(a.last.still && b.frames === a.frames, `${where}: the scene did not settle on one still frame (${a.frames} -> ${b.frames}, still ${a.last.still})`);
+      return b;
+    };
+    const moving = async (where, from) => {
+      await h.sleep(1500);
+      const c = await pair(page);
+      h.expect(c.s.frames > from.frames + 10, `${where}: the scene stayed still (${from.frames} -> ${c.s.frames} frames)`);
+      inStep(h, c, where);
+    };
+    // Settings is a screen of its own, so this copy sets Motion mid-scene the way its Settings screen does
+    const here = (m) =>
+      page.evaluate((v) => {
+        const app = window.__daily;
+        app.store.state.settings.motion = v;
+        app.store.touch('motion');
+        app.store.save();
+        app.applyMotion();
+      }, m);
+    await here('reduce');
+    let s = await still('Reduced here');
+    await here('full');
+    await moving('Full here', s);
+
+    // another open copy (a second tab of this one) changes it on its own Settings screen
+    const [other] = await Promise.all([ctx.waitForEvent('page'), page.evaluate(() => void window.open('/?mute'))]);
+    other.on('pageerror', (e) => errors.push('pageerror, other copy: ' + e.message));
+    await h.openSettings(other);
+    await other.getByRole('radio', { name: 'Motion: Reduced', exact: true }).click();
+    s = await still('Reduced in another copy');
+    await other.getByRole('radio', { name: 'Motion: Full', exact: true }).click();
+    await moving('Full in another copy', s);
+    h.expect((await page.evaluate(() => document.visibilityState)) === 'visible', 'the copy with the scene was hidden meanwhile, so it was not followed while in view');
+    await drawn(h, page, 'motion');
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },

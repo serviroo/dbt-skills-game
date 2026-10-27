@@ -247,7 +247,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   };
   /** Follows the clock only while the scene can be seen; coming back on screen draws at once. */
   function sync() {
-    const can = onScreen && sized && !lost && !evicted && !document.hidden;
+    const can = onScreen && sized && !lost && !evicted;
     if (can && !sub) {
       lastTick = -1;
       gaps = [];
@@ -300,8 +300,8 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   };
   canvas.addEventListener('webglcontextlost', onLost);
   canvas.addEventListener('webglcontextrestored', onRestored);
-  document.addEventListener('visibilitychange', sync);
   media.addEventListener('change', resync);
+  const offMotion = opts.onMotion?.(resync);
 
   return () => {
     sub?.();
@@ -311,8 +311,8 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
     ro.disconnect();
     canvas.removeEventListener('webglcontextlost', onLost);
     canvas.removeEventListener('webglcontextrestored', onRestored);
-    document.removeEventListener('visibilitychange', sync);
     media.removeEventListener('change', resync);
+    offMotion?.();
     setLive(false);
     v.dispose?.();
     disposeTree(v.scene);

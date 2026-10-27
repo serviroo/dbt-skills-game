@@ -39,7 +39,7 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
   /** showing a place again for Back or Forward: it isn't marked, chimes or asks again */
   let replaying = false;
   const stops: (() => void)[] = [];
-  const ctx: Ctx = { sound: (c) => app.sound(c), reduced: () => app.reduced() };
+  const ctx: Ctx = { sound: (c) => app.sound(c), reduced: () => app.reduced(), onMotion: (fn) => app.onMotion(fn) };
   const stepsById = new Map<string, number>();
   sk.steps.forEach((s, i) => s.id && stepsById.set(s.id, i));
 

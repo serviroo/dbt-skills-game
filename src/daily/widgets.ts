@@ -48,6 +48,8 @@ export function loadoutArt(id: Skill['art']) {
 export interface Ctx {
   sound(cue: string): void;
   reduced(): boolean;
+  /** calls fn whenever the motion setting changes; returns the function that stops it */
+  onMotion(fn: () => void): () => void;
 }
 
 const NS = 'http://www.w3.org/2000/svg';
@@ -250,6 +252,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
     ? mountScene(stageEl, {
         kind: visual,
         reduced: () => ctx.reduced(),
+        onMotion: (fn) => ctx.onMotion(fn),
         clock: {
           now,
           onFrame: (fn) => {

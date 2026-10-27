@@ -10,8 +10,10 @@
  * object live in ./runtime and the scene files, fetched the first time a scene is needed. The flat picture stays
  * underneath: mark it `dq-scene-flat` and it hides while the scene loads (`is-scene-wait` on the stage, at most
  * SCENE.waitMs) and while it is live (`is-scene-live`), and shows with no WebGL (from the first frame, once this device
- * is known to have none), while the context is lost, and if loading fails. Scenes draw only while on screen and the page is visible, at most SCENE.fps frames a second, and only
- * when their clock ticks; with reduced motion they draw one still frame.
+ * is known to have none), while the context is lost, and if loading fails. Scenes draw only while on screen, at most
+ * SCENE.fps frames a second, and only when their clock ticks; with reduced motion they draw one still frame. A hidden
+ * page holds no scene: it is taken down and lets the renderer go (its context is released after SCENE.idleMs), and is
+ * built again at its beat once the page is back.
  */
 import { SCENE } from '../../motion/tokens';
 import { NO_WEBGL } from '../stats';
@@ -53,6 +55,8 @@ export interface SceneOpts {
   accent?: string;
   /** the game's motion setting; prefers-reduced-motion when left out */
   reduced?: () => boolean;
+  /** calls fn whenever that setting changes; returns the function that stops it */
+  onMotion?: (fn: () => void) => () => void;
 }
 
 /**
@@ -63,31 +67,50 @@ let flatOnly = typeof WebGL2RenderingContext === 'undefined';
 
 export function mountScene(stage: HTMLElement, opts: SceneOpts): () => void {
   if (flatOnly) return () => {};
-  let gone = false;
   let off: (() => void) | null = null;
-  stage.classList.add('is-scene-wait');
-  const wait = setTimeout(() => stage.classList.remove('is-scene-wait'), SCENE.waitMs);
-  Promise.all([import('./runtime'), SCENES[opts.kind]()])
-    .then(([runtime, { build }]) => (gone ? () => {} : runtime.runScene(stage, build, opts)))
-    .then((stop) => {
-      if (gone) stop();
-      else off = stop;
-    })
-    .catch((err) => {
-      if (err instanceof Error && err.name === NO_WEBGL) flatOnly = true;
-      console.warn('[scene] the 3D scene did not start; the flat picture stays', err);
-    })
-    .finally(() => {
-      if (!off) {
-        clearTimeout(wait);
-        stage.classList.remove('is-scene-wait');
-      }
-    });
-  return () => {
-    gone = true;
+  let wait = 0;
+  /** a scene is wanted now; each start and stop moves `run` on, so a start still loading then stands down */
+  let up = false;
+  let run = 0;
+  const start = () => {
+    if (flatOnly) return;
+    up = true;
+    const me = ++run;
+    stage.classList.add('is-scene-wait');
+    wait = window.setTimeout(() => stage.classList.remove('is-scene-wait'), SCENE.waitMs);
+    Promise.all([import('./runtime'), SCENES[opts.kind]()])
+      .then(([runtime, { build }]) => (me === run ? runtime.runScene(stage, build, opts) : () => {}))
+      .then((stop) => {
+        if (me === run) off = stop;
+        else stop();
+      })
+      .catch((err) => {
+        if (err instanceof Error && err.name === NO_WEBGL) flatOnly = true;
+        console.warn('[scene] the 3D scene did not start; the flat picture stays', err);
+      })
+      .finally(() => {
+        if (me === run && !off) {
+          clearTimeout(wait);
+          stage.classList.remove('is-scene-wait');
+        }
+      });
+  };
+  const halt = () => {
+    up = false;
+    run++;
     clearTimeout(wait);
     off?.();
     off = null;
     stage.classList.remove('is-scene-wait', 'is-scene-live');
+  };
+  const onVisibility = () => {
+    if (document.hidden) halt();
+    else if (!up) start();
+  };
+  document.addEventListener('visibilitychange', onVisibility);
+  if (!document.hidden) start();
+  return () => {
+    document.removeEventListener('visibilitychange', onVisibility);
+    halt();
   };
 }
