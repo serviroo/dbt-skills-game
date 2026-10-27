@@ -32,6 +32,11 @@ Both are self-hosted and subset by `scripts/fonts.mjs`.
   [Playwright](https://playwright.dev) (Apache-2.0), [Vite](https://vite.dev) (MIT) and
   [TypeScript](https://www.typescriptlang.org) (Apache-2.0).
 
+## Made in Blender for this project
+
+- The river stone in Wise Mind's calm scene (`public/models/stone.glb`): modelled, textured and baked in Blender for
+  this game, then packed with its colour, roughness and normal maps as WebP.
+
 ## Made in code for this project
 
 - Every other 3D scene (the gate, the knight, the Night Watch, the chest, rubble, smoke and particles), built from

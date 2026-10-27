@@ -3,6 +3,7 @@
  * seek and capture cleanly. Reduced motion keeps the pacing (numbers, words, fades) and drops movement.
  */
 import type { Skill, Visual } from '../content/dbt';
+import { hasScene, mountScene, type Beat } from '../scene/vignettes/host';
 import { onFrame, now, backInSight } from './clock';
 import { btn, h, typo } from './ui';
 
@@ -47,6 +48,8 @@ export function loadoutArt(id: Skill['art']) {
 export interface Ctx {
   sound(cue: string): void;
   reduced(): boolean;
+  /** calls fn whenever the motion setting changes; returns the function that stops it */
+  onMotion(fn: () => void): () => void;
   /** A timer's start or end buzz; a screen without one (the Safe Zone) never buzzes. */
   buzz?(kind: 'start' | 'end'): void;
 }
@@ -199,6 +202,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
   if (!wide) {
     const gradId = ringBase(svg, visual !== 'drift' && visual !== 'tide');
     parts.orb = sv('circle', { cx: 100, cy: 100, r: 60, fill: `url(#${gradId})` });
+    if (hasScene(visual)) parts.orb.classList.add('dq-scene-flat');
     svg.append(parts.orb);
     parts.track = sv('circle', { cx: 100, cy: 100, r: 78, fill: 'none', stroke: 'rgba(125,150,197,.18)', 'stroke-width': 2 });
     parts.arc = sv('path', { d: '', fill: 'none', stroke: visual === 'cold' ? '#bfe9ff' : '#4fb8ff', 'stroke-width': 2, 'stroke-linecap': 'round' });
@@ -209,7 +213,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
     const cp = sv('clipPath', { id: clip });
     cp.append(sv('circle', { cx: 100, cy: 100, r: 70 }));
     svg.append(cp);
-    const water = sv('g', { 'clip-path': `url(#${clip})` });
+    const water = sv('g', { 'clip-path': `url(#${clip})`, class: 'dq-scene-flat' });
     water.append(sv('path', { d: 'M20 158Q60 146 100 152T180 150V200H20Z', fill: 'rgba(137,180,220,.14)' }));
     parts.rays = sv('g', { stroke: 'rgba(170,215,255,.12)', 'stroke-width': 1 });
     for (let i = 0; i < 5; i++) parts.rays.append(sv('path', { d: `M${50 + i * 25} 20L${40 + i * 25} 170` }));
@@ -243,6 +247,24 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
   let t0 = -1;
   let stop: (() => void) | null = null;
   let finished = false;
+  // a visual with a 3D scene follows this countdown: the scene ticks only when the timer renders, with its beat
+  const ticks = new Set<(t: number) => void>();
+  let beat: Beat = { e: 0, dur, started: false, done: false };
+  const unmount = hasScene(visual)
+    ? mountScene(stageEl, {
+        kind: visual,
+        reduced: () => ctx.reduced(),
+        onMotion: (fn) => ctx.onMotion(fn),
+        clock: {
+          now,
+          onFrame: (fn) => {
+            ticks.add(fn);
+            return () => void ticks.delete(fn);
+          },
+          beat: () => beat,
+        },
+      })
+    : null;
   // whole seconds left, rounded up all the way down, so no second shows twice ("1:00" then "60")
   const fmt = (s: number) => {
     const c = Math.ceil(s);
@@ -302,6 +324,8 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
       if (t0 + dur >= backInSight()) ctx.buzz?.('end');
       opts.onDone();
     }
+    beat = { e, dur, started: t0 >= 0, done: finished };
+    ticks.forEach((f) => f(t));
   };
   const begin = () => {
     t0 = now();
@@ -331,7 +355,17 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
   else begin();
   render(now());
   // running by the clock: a hidden page draws no frames, so a timer can be over before it shows Done
-  return { el, stop: () => stop?.(), begin, started: () => t0 >= 0, running: () => t0 >= 0 && !finished && now() - t0 < dur };
+  return {
+    el,
+    stop: () => {
+      stop?.();
+      stop = null;
+      unmount?.();
+    },
+    begin,
+    started: () => t0 >= 0,
+    running: () => t0 >= 0 && !finished && now() - t0 < dur,
+  };
 }
 
 /** Press and hold. Letting go early simply drains the ring back; nothing is lost. */

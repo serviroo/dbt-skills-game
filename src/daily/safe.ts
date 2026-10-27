@@ -63,7 +63,7 @@ const readLight = (key: string) => {
 export function safeScreen(app: App, route: Route): ScreenOut {
   const r = route as Extract<Route, { name: 'safe' }>;
   const st = app.store;
-  const ctx: Ctx = { sound: (c) => app.sound(c), reduced: () => app.reduced() };
+  const ctx: Ctx = { sound: (c) => app.sound(c), reduced: () => app.reduced(), onMotion: (fn) => app.onMotion(fn) };
   const stops: (() => void)[] = [];
   let higher = false;
   let danger = false;
