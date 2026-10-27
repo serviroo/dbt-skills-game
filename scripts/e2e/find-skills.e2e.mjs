@@ -1,7 +1,8 @@
 // Find a skill in the Skills list: a labelled search over both names and three filters (need, topic, time).
 // find-combine: every need with every topic and every time gives exactly the skills that fit all three, in list order,
 // each once; searches match either name in any case and spacing; the time budgets use each label's upper end (90 s,
-// 1-3 min, 2.5 min) and songs, taps and a match only show under No set time; Show all skills brings every skill back
+// 1-3 min, 2.5 min) and songs, taps and a match only show under No set time; the count and Show all skills follow the
+// skills that should show (a search every skill fits reads "All N skills"); Show all skills brings every skill back
 // once, and every need names real skills, the six newest included.
 // find-keys: the search and filters work from the keyboard alone, nothing matching shows the empty state with Clear
 // filters, and the Safe Zone stays one tap away.
@@ -95,14 +96,18 @@ export async function choose(page, { q = '', need = null, topic = null, time = n
   return view(page);
 }
 
-/** The list shows exactly these skills in this order, each once, under the right count. */
+/**
+ * The list shows exactly these skills in this order, each once. The count and Show all skills are worked out from those
+ * skills alone: all of them reads "All N skills" with no Show all skills, fewer reads "n of N skills" beside it.
+ */
 export function shows(h, got, want, total, where) {
   h.expect(same(got.ids, want), `${where}: shows ${JSON.stringify(got.ids)}, not ${JSON.stringify(want)}`);
   h.expect(new Set(got.ids).size === got.ids.length, `${where}: a skill shows twice`);
   h.expect(got.empty === !want.length, `${where}: the empty state ${got.empty ? 'shows with' : 'is missing with'} ${want.length} results`);
   h.expect(got.groups.every((g) => g.ids.length), `${where}: an empty section heading shows`);
-  const filtered = got.showAll;
-  h.expect(got.count === (filtered ? `${want.length} of ${total} skills` : `All ${total} skills`), `${where}: the count says "${got.count}" for ${want.length} of ${total}`);
+  const every = want.length === total;
+  h.expect(got.count === (every ? `All ${total} skills` : `${want.length} of ${total} skills`), `${where}: the count says "${got.count}" for ${want.length} of ${total}`);
+  h.expect(got.showAll === !every, `${where}: Show all skills ${got.showAll ? 'shows' : 'is missing'} with ${want.length} of ${total} skills`);
 }
 
 /** Anything in the list or the top bar sticking out sideways, a clipped control, text under 16 px or a lost Safe Zone button. */
@@ -180,6 +185,11 @@ export const scenarios = {
         [{ q: 'kind light', topic: 'Mindfulness', time: 120 }, ['loving-kindness']],
       ];
       for (const [f, want] of fixed) shows(h, await choose(page, f), want, total, JSON.stringify(f));
+
+      // a search every skill fits still shows all of them, so it reads like no search at all
+      const everyOne = [...'abcdefghijklmnopqrstuvwxyz'].find((c) => cat.skills.every((s) => fold(`${s.sl} ${s.real}`).includes(c)));
+      h.expect(everyOne, 'no letter is in every skill name, so a search that fits them all went untested');
+      if (everyOne) shows(h, await choose(page, { q: everyOne.toUpperCase() }), all, total, `a search for ${everyOne.toUpperCase()}, which every skill fits`);
 
       // the time budgets at their edges: a range counts as its upper end, 90 s is over a minute
       const under = async (time) => (await choose(page, { time })).ids;
