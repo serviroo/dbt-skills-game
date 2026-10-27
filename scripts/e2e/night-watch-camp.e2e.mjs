@@ -150,7 +150,9 @@ export const scenarios = {
     await page.reload();
     await h.reachHub(page);
     await page.evaluate(() => window.__daily.go({ name: 'stories' }));
-    // an empty shelf hides its top New story once the list has loaded and offers the one in the empty card
+    // the shelf shows its top New story until the list has loaded, then an empty shelf hides it and offers the one in
+    // the empty card: the button is picked once the list is there
+    await page.locator('.st-empty, .st-row').first().waitFor({ timeout: 10000 });
     await page.getByRole('button', { name: 'New story', exact: true }).filter({ visible: true }).first().click({ timeout: 10000 });
     await page.locator('.st-chbtn').waitFor({ timeout: 10000 });
     // Chapters reads the story twice: once to bring the screen up to date, then for the list itself, which is held
