@@ -14,7 +14,12 @@ export const BESIDE = {
   stealth: '.stealth',
   safeLight: '.safe-light',
   readSize: '.read-size',
+  momentLength: '.moment-length',
 } as const;
+
+/** How long Give me a moment lasts, kept beside the save on this device: about 1 or 3 minutes, or until the player leaves. */
+export const MOMENT_LENGTHS = ['1', '3', 'open'] as const;
+export type MomentLength = (typeof MOMENT_LENGTHS)[number];
 
 export const ART_DB = { version: 1, stores: ['meta', 'strokes', 'thumbs', 'drafts'] } as const;
 export const STORY_DB = { version: 1, stores: ['stories', 'chapters', 'cards', 'days'], chapterIndex: 'story' } as const;

@@ -1,5 +1,5 @@
 import { parsePrefs, savePrefs, type AudioLevels, type VolumeCtrl } from '../audio/prefs';
-import { AUDIO_KEY, BESIDE, READ_SIZES, type ReadSize } from '../core/stored-names';
+import { AUDIO_KEY, BESIDE } from '../core/stored-names';
 import { write } from '../core/cleared';
 import { artStore, cleanRec, skippedDrafts } from './artstore';
 import { cleanChapter, cleanStory, skippedCards, storyStore, STORY_CAP, type Story } from './storystore';
@@ -8,11 +8,21 @@ import { isSkillId, normalize, type State, type Store } from './store';
 interface Preferences {
   audio?: AudioLevels & { v: 1 };
   room?: { aquarium: boolean; words: boolean };
-  safeLight?: 'up' | 'dim';
-  readSize?: ReadSize;
+  /** 'up' or 'dim' */
+  safeLight?: string;
+  /** one of READ_SIZES */
+  readSize?: string;
+  /** one of MOMENT_LENGTHS */
+  momentLength?: string;
 }
+/** The choices kept beside a save under one name each, by their name in Preferences. */
+const BESIDE_CHOICES = [['safeLight', BESIDE.safeLight], ['readSize', BESIDE.readSize], ['momentLength', BESIDE.momentLength]] as const;
+/**
+ * A choice kept beside a save, as stored: one this build offers, or a newer build's value, which this build shows as its
+ * default and carries on unchanged, so a Save Crystal never drops it.
+ */
+const choice = (v: unknown): v is string => typeof v === 'string' && /^[a-z0-9-]{1,20}$/.test(v);
 const object = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
-const readSize = (x: unknown): x is ReadSize => (READ_SIZES as readonly unknown[]).includes(x);
 
 export function exportPreferences(store: Store, volume?: VolumeCtrl) {
   const key = store.key;
@@ -29,10 +39,10 @@ export function exportPreferences(store: Store, volume?: VolumeCtrl) {
       const value: unknown = JSON.parse(room);
       if (object(value)) preferences.room = { aquarium: value.aquarium === true, words: value.words === true };
     }
-    const light = localStorage.getItem(`${key}${BESIDE.safeLight}`);
-    if (light === 'up' || light === 'dim') preferences.safeLight = light;
-    const size = localStorage.getItem(`${key}${BESIDE.readSize}`);
-    if (readSize(size)) preferences.readSize = size;
+    for (const [name, end] of BESIDE_CHOICES) {
+      const v = localStorage.getItem(`${key}${end}`);
+      if (choice(v)) preferences[name] = v;
+    }
   } catch {
     incomplete = true;
   }
@@ -165,13 +175,10 @@ export function restorePreferences(raw: unknown, store: Store, volume?: VolumeCt
         if (JSON.stringify(next) !== JSON.stringify(room)) write(() => localStorage.setItem(`${store.key}${BESIDE.stealth}`, JSON.stringify(next)));
       }
     }
-    if ((prefs.safeLight === 'up' || prefs.safeLight === 'dim') && localStorage.getItem(`${store.key}${BESIDE.safeLight}`) === null) {
-      const light = prefs.safeLight;
-      write(() => localStorage.setItem(`${store.key}${BESIDE.safeLight}`, light));
-    }
-    if (readSize(prefs.readSize) && localStorage.getItem(`${store.key}${BESIDE.readSize}`) === null) {
-      const size = prefs.readSize;
-      write(() => localStorage.setItem(`${store.key}${BESIDE.readSize}`, size));
+    // added only where this device has none: the length, light or size it chose here stays
+    for (const [name, end] of BESIDE_CHOICES) {
+      const v = prefs[name];
+      if (choice(v) && localStorage.getItem(`${store.key}${end}`) === null) write(() => localStorage.setItem(`${store.key}${end}`, v));
     }
     return saved;
   } catch {
