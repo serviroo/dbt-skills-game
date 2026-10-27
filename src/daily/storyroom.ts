@@ -156,14 +156,24 @@ export function storiesScreen(app: App): ScreenOut {
   /** what the file holds, before anything is added; after a write this device couldn't make, it says so and Add tries again */
   const offer = (s: StoryText, same: boolean, notSaved = false) => {
     bringing = s;
-    const more = s.chapters.length - SHOWN;
+    // the first chapters show at once and the rest are one tap away, so every chapter can be seen before Add
+    const rows = s.chapters.map((c) => shownLine(c.title, c.text));
+    const rest = rows.slice(SHOWN);
+    const showRest = (e: Event) => {
+      rows[SHOWN - 1].after(...rest);
+      (e.currentTarget as HTMLElement).remove();
+      // focus goes on to the first chapter it showed, where the button was
+      rest[0].tabIndex = -1;
+      rest[0].focus({ preventScroll: true });
+      rest[0].scrollIntoView({ block: 'nearest' });
+    };
     showBring(
       STORY_IMPORT.ask(s.title),
       [
         notSaved ? h('p', { class: 'st-bring-fail', role: 'alert', text: STORY_IMPORT.notSaved }) : null,
         p(STORY_IMPORT.count(s.chapters.length, !!s.notes.trim()), 'dq-text st-bring-t'),
-        h('ol', { class: 'st-bring-list' }, [...s.chapters.slice(0, SHOWN).map((c) => shownLine(c.title, c.text)), ...(s.notes.trim() ? [shownLine('Notes', s.notes)] : [])]),
-        more > 0 ? p(STORY_IMPORT.more(more), 'dq-small st-bring-more') : null,
+        h('ol', { class: 'st-bring-list' }, [...rows.slice(0, SHOWN), ...(s.notes.trim() ? [shownLine('Notes', s.notes)] : [])]),
+        rest.length ? btn(STORY_IMPORT.more(rest.length), showRest, { kind: 'quiet', cls: 'st-bring-more' }) : null,
         same ? p(STORY_IMPORT.same, 'dq-small st-bring-same') : null,
         p(STORY_IMPORT.privacy, 'dq-small st-bring-p'),
       ],

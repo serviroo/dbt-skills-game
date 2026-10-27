@@ -94,7 +94,9 @@
   color: var(--t-dim);
   overflow-wrap: anywhere;
 }
-.st-bring-more,
+.st-bring-more {
+  margin-top: 12px;
+}
 .st-bring-same,
 .st-bring-p {
   margin: 10px 0 0;

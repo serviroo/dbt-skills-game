@@ -369,6 +369,33 @@ export const scenarios = {
     }
   },
 
+  /** a story of more chapters than the preview lists at first: one tap shows every one before Add */
+  async 'story-bring-in-every-chapter'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute');
+    try {
+      await h.reachHub(page);
+      await shelfOf(h, page);
+      // twelve chapters: the preview lists eight, and one tap shows the other four
+      const parts = Array.from({ length: 12 }, (_, i) => `## Part ${i + 1}\n\nLine ${i + 1}.`).join('\n\n');
+      const p = await bringIn(page, write(h, 'twelve.md', `# Twelve\n\n${parts}\n\n## Notes for this story\n\nKeep count.\n`));
+      await h.shot(page, 'first-eight');
+      h.expect(p.chapters.length === 9 && p.chapters[8][0] === 'Notes', `twelve.md: the preview first lists ${JSON.stringify(p.chapters)}`);
+      await page.getByRole('button', { name: 'Show 4 more chapters' }).click({ timeout: 5000 });
+      const all = await page.evaluate(() => ({
+        rows: [...document.querySelectorAll('.st-bring-ch')].map((c) => `${c.querySelector('.st-bring-ct').textContent}:${c.querySelector('.st-bring-cx')?.textContent ?? ''}`),
+        focus: document.activeElement?.querySelector?.('.st-bring-ct')?.textContent,
+      }));
+      await h.shot(page, 'every-chapter');
+      const want = [...Array.from({ length: 12 }, (_, i) => `Part ${i + 1}:Line ${i + 1}.`), 'Notes:Keep count.'];
+      h.expect(JSON.stringify(all.rows) === JSON.stringify(want), `twelve.md: the preview lists ${JSON.stringify(all.rows)}`);
+      h.expect(all.focus === 'Part 9' && !(await page.getByRole('button', { name: /more chapter/ }).count()), `twelve.md: focus is on ${all.focus} or the button stayed`);
+      await page.getByRole('button', { name: 'Not now' }).click();
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** the preview fits at every size, text at 16 px or more, nothing past the edge */
   async 'story-bring-in-fits'(h) {
     for (const vp of [{ width: 390, height: 844 }, { width: 320, height: 568 }, { width: 844, height: 390 }, { width: 1280, height: 800 }]) {
