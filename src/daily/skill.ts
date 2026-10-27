@@ -41,7 +41,7 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
   /** the Safe Zone is opening over this skill (or the game's data is being cleared): what it stops stops quietly */
   let hushed = false;
   const stops: (() => void)[] = [];
-  const ctx: Ctx = { sound: (c) => app.sound(c), reduced: () => app.reduced(), buzz: (k) => app.buzz(k) };
+  const ctx: Ctx = { sound: (c) => app.sound(c), reduced: () => app.reduced(), onMotion: (fn) => app.onMotion(fn), buzz: (k) => app.buzz(k) };
   const stepsById = new Map<string, number>();
   sk.steps.forEach((s, i) => s.id && stepsById.set(s.id, i));
 

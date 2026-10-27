@@ -138,6 +138,9 @@ export class App {
   private queue: (() => void)[] = [];
   private current: ScreenOut | null = null;
   private offs: (() => void)[] = [];
+  private motionFns = new Set<() => void>();
+  /** the motion setting as last applied, so a change made in another open copy is applied here once */
+  private stillShown: boolean | null = null;
   /** numbers already shown on the status panel, so new gains count up once */
   shown: { xp: number; stats: Record<StatId, number> } | null = null;
   /** the drawing page while it is open */
@@ -179,6 +182,8 @@ export class App {
     // names chosen in another open copy: Home is redrawn, name plates elsewhere take the new name in place
     let shown = `${playerName()}\n${companionName()}`;
     this.store.onChange(() => {
+      // Motion chosen in another open copy applies here too, to the scenes already moving
+      if (this.reduced() !== this.stillShown) this.applyMotion();
       const now = `${playerName()}\n${companionName()}`;
       if (now === shown) return;
       shown = now;
@@ -218,8 +223,17 @@ export class App {
     return m === 'reduce' || (m === 'system' && params.reduced);
   }
   applyMotion() {
-    this.root.classList.toggle('is-still', this.reduced());
+    const still = this.reduced();
+    this.root.classList.toggle('is-still', still);
     this.bubbles.resize();
+    if (still === this.stillShown) return;
+    this.stillShown = still;
+    this.motionFns.forEach((f) => f());
+  }
+  /** Calls fn whenever the motion setting changes, here or in another open copy. Returns the function that stops it. */
+  onMotion(fn: () => void) {
+    this.motionFns.add(fn);
+    return () => void this.motionFns.delete(fn);
   }
 
   /** The Sound setting covers the calm score too, not only the cues. */
