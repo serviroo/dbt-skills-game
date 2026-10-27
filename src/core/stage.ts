@@ -219,7 +219,7 @@ export class Stage {
     if (this.frameEMA > 1 / 52) {
       this.badFor += dt;
       this.goodFor = 0;
-      this.slow.push(frame);
+      if (this.dpr > this.minDpr || this.tier < 2) this.slow.push(frame);
     } else if (this.frameEMA < 1 / 58.5) {
       this.goodFor += dt;
       this.badFor = 0;
@@ -229,11 +229,16 @@ export class Stage {
       this.badFor = 0;
       this.slow = [];
     }
-    if (this.badFor > 0.6 && this.dpr > this.minDpr) {
+    const s = this.badFor > 0.6 && this.slow.length ? [...this.slow].sort((a, b) => a - b) : [];
+    const typical = s[s.length >> 1];
+    if (typical <= 1 / 52) {
+      // a few long stalls lifted the average but the typical frame keeps up: a smaller size wouldn't shorten them
+      this.badFor = 0;
+      this.slow = [];
+    } else if (this.badFor > 0.6 && this.dpr > this.minDpr) {
       // pixels cost about dpr squared: go straight to the resolution the typical slow frame fits, at least one step,
       // so a slow device settles in a few frames instead of drawing dozens at a size it can't keep up with
-      const s = [...this.slow].sort((a, b) => a - b);
-      const fit = this.dpr * Math.sqrt(1 / 55 / s[s.length >> 1]);
+      const fit = this.dpr * Math.sqrt(1 / 55 / typical);
       this.dpr = Math.max(this.minDpr, Math.min(this.dpr - 0.15, fit));
       this.changed();
       this.resize();
