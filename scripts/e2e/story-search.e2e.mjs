@@ -1,7 +1,8 @@
 // Story Room search: one field on the shelf finds stories by title, chapter text and notes, whatever the case,
 // accents or curly quotes, as whole words or parts of words. Each result names its chapter and shows the words with
 // the match marked, opens that chapter at that place with the place marked, comes back to the same search, works
-// offline, stores nothing and never runs the player's text as markup. The Safe Zone stays one tap away.
+// offline, stores nothing and never runs the player's text as markup. The Safe Zone stays one tap away. The search
+// lives in memory with its visit: the browser's history, address and saved session never hold a word of it.
 import { holdStorage, shownIn } from './story-reading.e2e.mjs';
 
 const day = () => {
@@ -99,6 +100,26 @@ const placeShown = (page) =>
       marks: document.querySelectorAll('.st-hl .st-mark').length,
     };
   });
+
+/** every history entry the game writes, as written: the browser keeps them all, and saves them with the session */
+const recordHistory = (ctx) =>
+  ctx.addInitScript(() => {
+    const written = (window.__written = []);
+    for (const how of ['pushState', 'replaceState']) {
+      const real = history[how].bind(history);
+      history[how] = (state, title, url) => {
+        written.push(JSON.stringify({ state, url: url ?? null }));
+        return real(state, title, url);
+      };
+    }
+  });
+const TYPED = /brass|ferry/i;
+/** the history entry the browser stands on and the address hold none of the words typed */
+async function noneTyped(page, when, bad) {
+  const s = await page.evaluate(() => ({ state: JSON.stringify(history.state), url: location.href }));
+  if (TYPED.test(s.state)) bad.push(`${when}: history holds the search: ${s.state}`);
+  if (TYPED.test(s.url)) bad.push(`${when}: the address holds the search: ${s.url}`);
+}
 
 export const scenarios = {
   /** every way of finding words, at phone sizes, offline, storing nothing */
@@ -266,6 +287,90 @@ export const scenarios = {
       } finally {
         await ctx.close();
       }
+    }
+  },
+
+  /** the browser's own Back and Forward (a phone's back gesture is the same step): Back from a result shows the search
+   *  the player left, from memory; Forward opens the page unmarked; nothing typed reaches history, the address or the
+   *  saved session at any point, and after Clear everything no search words are left anywhere */
+  async 'story-search-browser-history'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute', undefined, recordHistory);
+    const bad = [];
+    try {
+      await h.reachHub(page);
+      await shelf(page);
+      await page.evaluate(() => window.__daily.go({ name: 'stories' }));
+      await field(page).waitFor();
+      const r = await search(h, page, 'brass ferry');
+      h.expect(r.stories.length === 1 && r.stories[0].rows.map((x) => x.where).join() === 'Notes', `"brass ferry" found ${JSON.stringify(r.stories)}`);
+      await noneTyped(page, 'searching', bad);
+      await page.locator('.st-found-row', { hasText: 'Notes' }).click();
+      await routeIs(page, 'write');
+      await page.waitForSelector('.st-hl .st-mark.is-place');
+      h.expect((await placeShown(page)).text === 'brass', 'the result did not open the notes at "brass"');
+      await noneTyped(page, 'a result opened', bad);
+
+      const searchShown = (when) =>
+        page.evaluate(() => ({ q: document.querySelector('.st-find-in').value, rows: document.querySelectorAll('.st-found-row').length })).then((s) => {
+          if (s.q !== 'brass ferry' || !s.rows) bad.push(`${when} showed ${JSON.stringify(s)}, not the search they left`);
+        });
+      // Back comes to the search as they left it, kept in memory with that visit
+      await page.goBack({ waitUntil: 'commit' });
+      await routeIs(page, 'stories');
+      await field(page).waitFor();
+      await h.sleep(450);
+      await searchShown('Back from the result');
+      await noneTyped(page, 'Back', bad);
+
+      // Forward opens the page as a revisit does: nothing marked, selected or said about the search
+      await page.goForward({ waitUntil: 'commit' });
+      await routeIs(page, 'write');
+      await page.getByRole('textbox', { name: 'Notes for this story' }).waitFor();
+      await page.waitForFunction((t) => document.querySelector('.st-write .st-ta')?.value === t, NOTES, { timeout: 5000 });
+      await h.sleep(400);
+      const fwd = await page.evaluate(() => {
+        const ta = document.querySelector('.st-write .st-ta');
+        return { marks: document.querySelectorAll('.st-hl .st-mark').length, sel: ta.value.slice(ta.selectionStart, ta.selectionEnd), note: document.querySelector('.st-note')?.textContent ?? '' };
+      });
+      if (fwd.marks || fwd.sel || fwd.note === 'What you searched for is marked on the page.') bad.push(`Forward marked the page again from history: ${JSON.stringify(fwd)}`);
+      await noneTyped(page, 'Forward', bad);
+
+      // and Back again still has the search
+      await page.goBack({ waitUntil: 'commit' });
+      await routeIs(page, 'stories');
+      await field(page).waitFor();
+      await h.sleep(450);
+      await searchShown('A second Back');
+      await noneTyped(page, 'a second Back', bad);
+      await page.goForward({ waitUntil: 'commit' });
+      await routeIs(page, 'write');
+      await page.getByRole('textbox', { name: 'Notes for this story' }).waitFor();
+
+      // Clear everything from there, so the opened result stays behind in history; then every entry left in history,
+      // the session and what the app holds for Back and Forward
+      await page.evaluate(() => window.__daily.go({ name: 'settings' }, { quiet: true }));
+      await page.locator('#set-playerName').waitFor();
+      await page.locator('.dq-clear').scrollIntoViewIfNeeded();
+      await Promise.all([page.waitForEvent('download', { timeout: 20000 }), page.getByRole('button', { name: 'Back up, then clear' }).click()]);
+      await page.locator('.dq-clear.is-asking').waitFor({ timeout: 10000 });
+      await page.getByRole('button', { name: /^Clear this game.s data$/ }).click();
+      await page.locator('.dq-cleared-h', { hasText: 'All clear' }).waitFor({ timeout: 30000 });
+      const held = await page.evaluate(() => ({ session: JSON.stringify(Object.entries(sessionStorage)), memory: JSON.stringify([window.__daily.trail, [...window.__daily.kept.values()]]) }));
+      if (TYPED.test(held.session)) bad.push(`after clearing, the session holds the search: ${held.session}`);
+      if (TYPED.test(held.memory)) bad.push(`after clearing, the app still holds the search for Back and Forward: ${held.memory}`);
+      for (let n = 0; n < 12; n++) {
+        await noneTyped(page, `after clearing, ${n} steps back`, bad);
+        if (!((await page.evaluate(() => history.state?.i)) > 0)) break;
+        await page.goBack({ waitUntil: 'commit' });
+        await h.sleep(200);
+      }
+      // the saved session is made of these entries: none was ever written with a word of the search
+      const written = (await page.evaluate(() => window.__written)).filter((w) => TYPED.test(w));
+      if (written.length) bad.push(`the search was written into history ${written.length} times, first as ${written[0]}`);
+      h.expect(!bad.length, bad.join('\n'));
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
     }
   },
 
