@@ -15,8 +15,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 /** The build that was live before the eraser and the soft glow. */
 const BEFORE_TOOLS = 'f320b2cb2eaae6eefab5a319487372aec9fe2d44';
 
-/** A brush line, a soft-glow line and an eraser cutting the brush line, saved, and the Save Crystal with it. */
-async function toolCrystal(h) {
+/** A brush line, a soft-glow line and an eraser cutting the brush line, saved, and the Save Crystal with it, as <name>.json. */
+async function toolCrystal(h, name) {
   const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute');
   await drawPage(h, page);
   await line(page, [0.2, 0.4], [0.8, 0.4]);
@@ -27,7 +27,7 @@ async function toolCrystal(h) {
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.getByText('Saved in your Art room.').waitFor();
   await toSettings(page);
-  const raw = await crystal(h, page, 'tools');
+  const raw = await crystal(h, page, name);
   h.expect(!errors.length, errors.join('\n'));
   await ctx.close();
   return raw;
@@ -57,7 +57,7 @@ const pages = (page) =>
 export const scenarios = {
   async 'art-tools-meet-the-build-before-them'(h) {
     const { expect } = h;
-    const raw = await toolCrystal(h);
+    const raw = await toolCrystal(h, 'tools-before-them');
     const id = raw.art[0].id;
     const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'lantern-before-tools-'));
     try {
@@ -126,7 +126,7 @@ export const scenarios = {
 
   async 'art-restore-of-the-same-version-with-other-content'(h) {
     const { expect } = h;
-    const raw = await toolCrystal(h);
+    const raw = await toolCrystal(h, 'tools-same-version');
     const rec = raw.art[0];
     const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute');
     await h.reachHub(page);
