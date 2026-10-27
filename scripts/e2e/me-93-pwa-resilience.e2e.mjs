@@ -10,7 +10,7 @@ import { writeServiceWorker } from '../sw-build.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const KIT = JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: 1, companionAt: 1 });
-const MIME = { '.html': 'text/html; charset=utf-8; note="javascript"', '.js': 'application/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.woff2': 'font/woff2', '.png': 'image/png', '.svg': 'image/svg+xml', '.glb': 'model/gltf-binary', '.txt': 'text/plain' };
+const MIME = { '.html': 'text/html; charset=utf-8; note="javascript"', '.js': 'application/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.woff2': 'font/woff2', '.png': 'image/png', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.glb': 'model/gltf-binary', '.txt': 'text/plain' };
 const NOISE = /WebGL|GPU stall|AudioContext|Failed to load resource/i;
 
 let scratch;
@@ -228,7 +228,7 @@ export const scenarios = {
       await active(page, v1, sleep);
       const prefix = swConst(v1.dir, 'PREFIX');
 
-      const victims = [v1.file(/^director-.*\.js$/), v1.file(/\.css$/), 'fonts/jost.woff2', 'models/hero.glb', v1.file(/\.png$/, 'icons'), 'manifest.webmanifest'];
+      const victims = [v1.file(/^director-.*\.js$/), v1.file(/\.css$/), 'fonts/jost.woff2', 'models/hero.glb', v1.file(/\.png$/, 'icons'), 'sky/night-tall.webp', 'manifest.webmanifest'];
       const listed = JSON.parse(fs.readFileSync(path.join(v1.dir, 'sw.js'), 'utf8').match(/const ASSETS = (\[.*?\]);/s)[1]);
       for (const ext of new Set(listed.map((f) => path.extname(f)))) expect(victims.some((v) => v.endsWith(ext)), `no broken-deploy case for precached ${ext} files`);
       for (const file of victims) {
