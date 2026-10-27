@@ -452,6 +452,57 @@ export const scenarios = {
     }
   },
 
+  /** a file still reading or a save still writing changes nothing once the panel is closed or the shelf is left */
+  async 'story-bring-in-overtaken'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute');
+    try {
+      await h.reachHub(page);
+      await shelfOf(h, page);
+      const bad = [];
+      const file = write(h, 'slow.md', '# Slow\n\n## One\n\nA page.\n');
+      // the file is still reading when the player leaves the shelf: Back afterwards goes straight back to the shelf
+      await page.evaluate(() => {
+        const read = Blob.prototype.arrayBuffer;
+        window.__read = read;
+        window.__gate = new Promise((r) => (window.__open = r));
+        Blob.prototype.arrayBuffer = function () {
+          return window.__gate.then(() => read.call(this));
+        };
+      });
+      const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByRole('button', { name: 'Bring in a story' }).first().click()]);
+      await chooser.setFiles(file);
+      await page.evaluate(() => window.__daily.go({ name: 'settings' }));
+      await routeIs(page, 'settings');
+      await page.evaluate(() => {
+        Blob.prototype.arrayBuffer = window.__read;
+        window.__open();
+      });
+      await h.sleep(500);
+      await page.goBack();
+      await routeIs(page, 'stories').catch(() => {});
+      const back = await page.evaluate(() => window.__daily.route.name);
+      if (back !== 'stories') bad.push(`after the file finished reading on another screen, Back went to ${back}`);
+
+      // Not now while Add is still writing: a write that then fails does not open the panel again
+      await shelfOf(h, page);
+      await bringIn(page, file);
+      await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        window.__gate = new Promise((r) => (window.__open = r));
+        storyStore(window.__daily.store.key).createFrom = async () => (await window.__gate, null);
+      });
+      await page.getByRole('button', { name: 'Add as a new story' }).click();
+      await page.getByRole('button', { name: 'Not now' }).click();
+      await page.evaluate(() => window.__open());
+      await h.sleep(500);
+      if (!(await page.locator('.st-bring-box').evaluate((b) => b.classList.contains('is-hidden')))) bad.push('the panel opened again after Not now');
+      h.expect(!bad.length, bad.join('\n'));
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** the preview fits at every size, text at 16 px or more, nothing past the edge */
   async 'story-bring-in-fits'(h) {
     for (const vp of [{ width: 390, height: 844 }, { width: 320, height: 568 }, { width: 844, height: 390 }, { width: 1280, height: 800 }]) {

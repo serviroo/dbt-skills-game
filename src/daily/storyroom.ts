@@ -109,7 +109,10 @@ export function storiesScreen(app: App): ScreenOut {
   const bringSaid = h('p', { class: 'st-bring-said', role: 'status', 'aria-live': 'polite' });
   let bringing: StoryText | null = null;
   let bringDone: (() => void) | null = null;
+  // each file picked and each close or leave gets a new number; a read or save that finishes after it changes nothing
+  let bringN = 0;
   const closeBring = (focus = true) => {
+    bringN++;
     bringing = null;
     bringDone?.();
     bringDone = null;
@@ -140,18 +143,22 @@ export function storiesScreen(app: App): ScreenOut {
     const f = fileIn.files?.[0];
     fileIn.value = '';
     if (!f) return;
+    const n = ++bringN;
     if (f.size > IMPORT_MAX) return oops(STORY_IMPORT.tooBig);
     let raw: string;
     try {
       raw = new TextDecoder('utf-8', { fatal: true }).decode(await f.arrayBuffer());
     } catch {
-      return oops(STORY_IMPORT.notText);
+      if (n === bringN) oops(STORY_IMPORT.notText);
+      return;
     }
+    if (n !== bringN) return;
     if (raw.includes('\u0000')) return oops(STORY_IMPORT.notText);
     const s = fitted(storyFromText(raw, f.name));
     if (!s.chapters.some((c) => c.text.trim()) && !s.notes.trim()) return oops(STORY_IMPORT.empty);
     if (s.chapters.length > STORY_CAP.chapters) return oops(STORY_IMPORT.tooMany);
-    offer(s, (await ss.list()).some((x) => x.title.trim().toLowerCase() === s.title.toLowerCase()));
+    const same = (await ss.list()).some((x) => x.title.trim().toLowerCase() === s.title.toLowerCase());
+    if (n === bringN) offer(s, same);
   };
   /** what the file holds, before anything is added; after a write this device couldn't make, it says so and Add tries again */
   const offer = (s: StoryText, same: boolean, notSaved = false) => {
@@ -185,12 +192,16 @@ export function storiesScreen(app: App): ScreenOut {
     // one tap adds it once
     if (!s) return;
     bringing = null;
+    const n = bringN;
     let kept;
     try {
       kept = await ss.createFrom(s);
     } catch (e) {
-      return oops(e instanceof RangeError && /stories/.test(e.message) ? STORY_IMPORT.full : STORY_IMPORT.tooMany);
+      if (n === bringN) oops(e instanceof RangeError && /stories/.test(e.message) ? STORY_IMPORT.full : STORY_IMPORT.tooMany);
+      return;
     }
+    // closed, another file picked or the shelf left while it wrote: a story it wrote is on the shelf, nothing opens again
+    if (n !== bringN) return;
     // not written to this device: it stays off the shelf, and the file's story stays here to add again
     if (!kept) return offer(s, same, true);
     closeBring(false);
@@ -280,7 +291,11 @@ export function storiesScreen(app: App): ScreenOut {
   };
   const off = ss.onChange(() => void render());
   void render();
-  return { el, title: STORY.title, mode: 'sub', bubbles: [1.4, 0.55], leave: off };
+  const leave = () => {
+    off();
+    bringN++;
+  };
+  return { el, title: STORY.title, mode: 'sub', bubbles: [1.4, 0.55], leave };
 }
 
 /** A file to bring in is read only up to this size. */
