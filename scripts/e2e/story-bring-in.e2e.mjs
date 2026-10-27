@@ -299,7 +299,8 @@ export const scenarios = {
       }, story.id);
       await page.evaluate((r) => window.__daily.go(r), { name: 'write', id: story.id, ch });
       const ta = page.locator('.st-write .st-ta');
-      await ta.waitFor();
+      // the page is open once its words are in the editor; a word picked before that is not on the page
+      await page.waitForFunction(() => document.querySelector('.st-write .st-ta')?.value.includes('smiled'));
       await ta.evaluate((el) => {
         const at = el.value.indexOf('smiled');
         el.focus();
