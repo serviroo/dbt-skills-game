@@ -426,6 +426,37 @@ export const scenarios = {
     }
   },
 
+  /** Notes tapped while the Story Room is still opening its first page wins: the first page's late read doesn't take
+   *  the editor back */
+  async 'story-notes-tapped-while-opening-wins'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await h.reachHub(page);
+      const { id, notes, first } = await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const { story, first } = await ss.create('Slow Door');
+        return { id: story.id, notes: story.notes, first: first.id };
+      });
+      const { waitHeld, release, drain } = await holdStorage(page, ['chapter', 'cards']);
+      await page.evaluate((r) => window.__daily.go(r), { name: 'write', id });
+      await waitHeld(`cards ${first}`);
+      await page.getByRole('radio', { name: 'Show: Notes' }).click();
+      await waitHeld(`chapter ${notes}`);
+      await release(`cards ${first}`);
+      await waitHeld(`chapter ${first}`);
+      await release(`chapter ${notes}`);
+      await drain();
+      await h.sleep(200);
+      await drain();
+      const s = await shownIn(page);
+      h.expect(s.seg === 'Notes' && s.box === 'Notes for this story', `Notes tapped while the first page opened showed ${JSON.stringify(s)}`);
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** three sizes on the story text only, never under 16 px, no sideways scroll, kept after a reload and in a Save Crystal */
   async 'story-reading-size'(h) {
     const { ctx, page, errors } = await h.open(seed(h));

@@ -1414,9 +1414,11 @@ export function writeScreen(app: App, route: Route): ScreenOut {
     notesId = s.notes;
     titleIn.value = s.title;
     pageId = r.ch && s.chapters.includes(r.ch) ? r.ch : s.chapters[0] ?? '';
+    // the first page takes its number now, so a Page or Notes tap while the chapter is made or its cards are read wins
+    const n = ++picks;
     if (!pageId) pageId = (await ss.addChapter(storyId)).id;
     await loadCards();
-    await load(pageId);
+    await load(pageId, n);
     await refreshStory();
     syncState();
     syncModes();
