@@ -4128,20 +4128,27 @@ textarea.dq-input {
 }
 .dq-tools-pick {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 4px 6px;
 }
 .dq-inks,
+.dq-pens,
 .dq-sizes {
   display: flex;
   align-items: center;
+}
+.dq-inks {
+  flex: 1 0 100%;
+  justify-content: center;
 }
 .dq-sizes {
   padding-left: 6px;
   border-left: 1px solid rgba(125, 150, 197, 0.3);
 }
 .dq-swatch,
+.dq-pen,
 .dq-size,
 .dq-tool {
   position: relative;
@@ -4196,7 +4203,39 @@ textarea.dq-input {
   outline: 1.5px solid rgba(220, 239, 255, 0.85);
   outline-offset: 4px;
 }
+.dq-pen-ic {
+  width: 24px;
+  height: 24px;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+.dq-pen-ic svg {
+  width: 100%;
+  height: 100%;
+}
+.dq-pen[aria-checked='true'] .dq-pen-ic {
+  opacity: 1;
+  color: #e6f1ff;
+}
+.dq-pen[aria-checked='true']::before {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(220, 239, 255, 0.85);
+  pointer-events: none;
+}
+/* the size dots show the tool: a soft light for the glow, an empty ring for the eraser */
+.dq-tools[data-tool='glow'] .dq-size-dot {
+  background: radial-gradient(circle, #e6f1ff 0 16%, var(--ink-b) 42%, transparent 74%);
+  box-shadow: 0 0 10px 2px var(--ink-g);
+}
+.dq-tools[data-tool='erase'] .dq-size-dot {
+  background: none;
+  box-shadow: inset 0 0 0 1.5px #c5dcf2;
+}
 .dq-swatch-n,
+.dq-pen-n,
 .dq-size-n,
 .dq-tool-n {
   position: absolute;
@@ -4249,14 +4288,6 @@ textarea.dq-input {
   min-width: 112px;
 }
 @media (max-width: 388px) {
-  .dq-tools-pick {
-    flex-wrap: wrap;
-    row-gap: 4px;
-  }
-  .dq-sizes {
-    padding-left: 0;
-    border-left: 0;
-  }
   .dq-save {
     min-width: 96px;
   }
@@ -4517,11 +4548,43 @@ textarea.dq-input {
     flex-direction: column;
     align-items: stretch;
   }
-  .dq-sizes {
+  .dq-inks {
+    flex: none;
+  }
+  .dq-sizes,
+  .dq-pens {
     flex-direction: row;
     padding: 12px 0 0;
     border-left: 0;
     border-top: 1px solid rgba(125, 150, 197, 0.3);
+  }
+  .dq-pens {
+    gap: 4px;
+  }
+  .dq-pen {
+    flex: 1;
+    height: auto;
+    min-height: 44px;
+    grid-template-rows: 24px auto;
+    gap: 4px;
+    padding: 8px 0 6px;
+  }
+  .dq-pen-n {
+    position: static;
+    width: auto;
+    height: auto;
+    clip-path: none;
+    font-size: 14.5px;
+    color: var(--t-body);
+  }
+  .dq-pen[aria-checked='true'] {
+    background: rgba(79, 184, 255, 0.08);
+  }
+  .dq-pen[aria-checked='true']::before {
+    display: none;
+  }
+  .dq-pen[aria-checked='true'] .dq-pen-n {
+    color: var(--t-title);
   }
   .dq-swatch {
     width: 100%;
@@ -4601,7 +4664,7 @@ textarea.dq-input {
     position: relative;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-rows: 1fr auto;
+    grid-template-rows: 1fr auto auto;
     align-self: start;
     gap: 4px 6px;
     width: auto;
@@ -4636,7 +4699,7 @@ textarea.dq-input {
     height: auto;
     clip-path: none;
     white-space: normal;
-    font-size: 13px;
+    font-size: 16px;
     line-height: 1.1;
     text-align: center;
     color: var(--t-body);
@@ -4647,8 +4710,43 @@ textarea.dq-input {
   .dq-swatch[aria-checked='true'] .dq-swatch-n {
     color: var(--t-title);
   }
+  .dq-pens {
+    grid-area: 2 / 1;
+    justify-content: space-between;
+    padding: 0;
+    border: 0;
+  }
+  .dq-pen {
+    flex: none;
+    width: auto;
+    height: 44px;
+    min-height: 0;
+    grid-template-rows: none;
+    grid-auto-flow: column;
+    gap: 6px;
+    padding: 0 10px 0 8px;
+  }
+  .dq-pen-n {
+    position: static;
+    width: auto;
+    height: auto;
+    clip-path: none;
+    font-size: 16px;
+    color: var(--t-body);
+  }
+  .dq-pen[aria-checked='true'] .dq-pen-n {
+    color: var(--t-title);
+  }
+  .dq-pen[aria-checked='true'] {
+    background: none;
+  }
+  .dq-pen[aria-checked='true']::before {
+    display: block;
+    inset: 4px 0;
+    border-radius: 18px;
+  }
   .dq-sizes {
-    grid-area: 1 / 2 / 3 / 3;
+    grid-area:  1 / 2 / 4 / 3;
     flex-direction: column;
     align-items: center;
     justify-content: center;
@@ -4660,7 +4758,7 @@ textarea.dq-input {
     flex: none;
   }
   .dq-tools-acts {
-    grid-area: 2 / 1;
+    grid-area: 3 / 1;
     flex-wrap: nowrap;
     padding: 0;
     border: 0;

@@ -172,6 +172,9 @@ const ICON: Record<string, string> = {
   checkin: '<circle cx="12" cy="12" r="7.5"/><path d="M8.6 13.6q3.4 2.6 6.8 0"/><path d="M9.4 9.8h.01M14.6 9.8h.01" stroke-width="2.4"/>',
   book: '<path d="M5 5.5h5.2c1 0 1.8.8 1.8 1.8v12.2c0-.9-.7-1.5-1.6-1.5H5z"/><path d="M19 5.5h-5.2c-1 0-1.8.8-1.8 1.8v12.2c0-.9.7-1.5 1.6-1.5H19z"/>',
   brush: '<path d="M19.2 4.8c-2.6 1.4-6.4 5-8.3 7.6l1.7 1.7c2.6-1.9 6.2-5.7 7.6-8.3z"/><path d="M10.2 13.3c-1.9-.2-3.3 1-3.5 2.7-.1 1.1-.7 2-1.9 2.4 2.7 1.4 6.2.6 6.9-2.2.2-.9-.3-2.2-1.5-2.9z"/>',
+  // the brush's handle with its bristle lit: the bristle is the light's core, a lantern blue halo its soft glow
+  glow: '<defs><radialGradient id="dqglow"><stop offset=".25" stop-color="#4fb8ff" stop-opacity=".95"/><stop offset=".5" stop-color="#4fb8ff" stop-opacity=".42"/><stop offset="1" stop-color="#4fb8ff" stop-opacity="0"/></radialGradient></defs><circle cx="9" cy="16" r="7" fill="url(#dqglow)" stroke="none"/><path d="M19.2 4.8c-2.6 1.4-6.4 5-8.3 7.6l1.7 1.7c2.6-1.9 6.2-5.7 7.6-8.3z"/><path d="M13.1 14.4c-.9 1.5-3.8 2.8-5.7 2.8.6-2.1 1.8-4.5 3.2-5.3z" fill="currentColor"/>',
+  eraser: '<path d="M13.2 4.6l6.2 6.2-8.1 8.1-6.2-6.2z"/><path d="M8.3 9.5l6.2 6.2"/><path d="M13.6 19.4h6"/>',
   undo: '<path d="M9 7.5L5 11.5l4 4"/><path d="M5.5 11.5h8.2a4.8 4.8 0 0 1 0 9.6H11"/>',
   redo: '<path d="M15 7.5l4 4-4 4"/><path d="M18.5 11.5h-8.2a4.8 4.8 0 0 0 0 9.6H13"/>',
   quote: '<path d="M6 7.5h4.5v4.6c0 2.6-1.4 4.2-4 4.6"/><path d="M13.5 7.5H18v4.6c0 2.6-1.4 4.2-4 4.6"/>',

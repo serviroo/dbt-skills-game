@@ -570,7 +570,7 @@ export const scenarios = {
 };
 
 /** A production build of the tree at dir, tagged so a page can tell which build it is. */
-function build(dir, out, tag) {
+export function build(dir, out, tag) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [path.join(dir, 'node_modules/vite/bin/vite.js'), 'build', '--outDir', out, '--emptyOutDir', '--logLevel', 'warn'], { cwd: dir, env: { ...process.env, BUILD_ID: tag }, stdio: ['ignore', 'pipe', 'pipe'] });
     let log = '';
@@ -586,11 +586,11 @@ function build(dir, out, tag) {
   });
 }
 const swConst = (dir, name) => fs.readFileSync(path.join(dir, 'sw.js'), 'utf8').match(new RegExp(`const ${name} = ['"]([^'"]+)['"]`))[1];
-const buildOf = (page) => page.evaluate(() => document.querySelector('meta[name=x-e2e-build]')?.content ?? null);
+export const buildOf = (page) => page.evaluate(() => document.querySelector('meta[name=x-e2e-build]')?.content ?? null);
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.woff2': 'font/woff2', '.png': 'image/png', '.svg': 'image/svg+xml', '.glb': 'model/gltf-binary', '.txt': 'text/plain' };
 
 /** Serves one build at a time on one origin; use() switches what it serves, as a deploy would. */
-async function host(dir) {
+export async function host(dir) {
   let current = dir;
   const server = http.createServer((req, res) => {
     let p;
@@ -616,7 +616,7 @@ async function host(dir) {
 }
 
 /** Waits until this build's worker controls the page and its cache is the current one. */
-async function active(page, d, sleep) {
+export async function active(page, d, sleep) {
   const meta = swConst(d.dir, 'META');
   for (let i = 0; i < 300; i++) {
     const cur = await page.evaluate(async (m) => (navigator.serviceWorker.controller ? (await (await caches.open(m)).match('current'))?.text() : null), meta).catch(() => null);
@@ -631,7 +631,7 @@ async function active(page, d, sleep) {
  * registration: a check the browser started on its own may have found d first, and then no event comes. An update error
  * fails the step. "activated" means d's cache is the current one.
  */
-const update = (page, d) =>
+export const update = (page, d) =>
   page.evaluate(async ([meta, want]) => {
     const reg = await navigator.serviceWorker.getRegistration();
     let found = null;

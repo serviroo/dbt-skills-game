@@ -7,7 +7,7 @@ import { createServer } from 'vite';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const flags = Object.fromEntries(process.argv.slice(2).filter((a) => a.startsWith('--')).map((a) => { const [k, v = 'true'] = a.slice(2).split('='); return [k, v]; }));
 const snapPath = path.resolve(root, flags.snapshot ?? 'scripts/stored-ids.json');
-const KEBAB = new Set(['read-size', 'skill', 'stat', 'event-kind', 'shadow', 'title', 'theme', 'accent', 'card-back', 'plate', 'motion', 'art-paper', 'chapter-kind', 'region']);
+const KEBAB = new Set(['read-size', 'skill', 'stat', 'event-kind', 'shadow', 'title', 'theme', 'accent', 'card-back', 'plate', 'motion', 'art-paper', 'chapter-kind', 'region', 'stroke-mode']);
 
 class MemoryStorage {
   #m = new Map();
@@ -81,11 +81,11 @@ async function collect() {
     if (!back) throw new Error('the save the Store wrote could not be read back');
     const st = new store.Store('check.save', () => t, back);
     const saved = JSON.parse(localStorage.getItem('check.save') ?? 'null');
-    const rec = art.cleanRec({ id: 'a1', kind: 'ally', day, t, updated: t, prompt: 'p', name: 'n', rev: 'r1', from: ['r0@1'], strokes: [{ i: 0, w: 4, p: [1, 2, 3, 4] }] });
+    const rec = art.cleanRec({ id: 'a1', kind: 'ally', day, t, updated: t, prompt: 'p', name: 'n', rev: 'r1', from: ['r0@1'], strokes: [{ i: 0, w: 4, p: [1, 2, 3, 4] }, { i: 0, w: 4, p: [], m: ink.STROKE_MODES[0], q: [1, 2] }] });
     const tale = story.cleanStory({ id: 's1', title: 'T', created: t, updated: t, rev: 'r1', chapters: ['c1'], notes: 'c2', removed: t });
     const chapter = story.cleanChapter({ id: 'c1', story: 's1', kind: 'page', title: 'C', text: 'x', updated: t, rev: 'r1' });
-    const draft = art.cleanDraft({ key: 'edit:a1:t1', kind: 'ally', editId: 'a1', bases: ['r1@1'], base: t, prompt: 'p', strokes: [{ i: 0, w: 4, p: [1, 2, 3, 4] }], t });
-    const crystal = JSON.parse(st.exportJSON({ art: [rec], drafts: [draft], stories: { stories: [tale], chapters: [chapter] }, unreadSaves: [{ at: String(t), raw: '{' }] }));
+    const draft = art.cleanDraft({ key: 'edit:a1:t1', kind: 'ally', editId: 'a1', bases: ['r1@1'], base: t, prompt: 'p', strokes: [{ i: 0, w: 4, p: [1, 2, 3, 4] }, { i: 0, w: 4, p: [], m: ink.STROKE_MODES[0], q: [1, 2] }], t });
+    const crystal = JSON.parse(st.exportJSON({ art: [art.storedRec(rec)], drafts: [{ ...draft, strokes: draft.strokes.map(art.storedStroke) }], stories: { stories: [tale], chapters: [chapter] }, unreadSaves: [{ at: String(t), raw: '{' }] }));
     const card = story.cleanCard({ id: 'k1', mode: story.CARD_MODES[0], text: 'x', t, sel: { start: 0, end: 1, text: 'x' } });
     you.writeYou({ name: 'Kit', companion: 'Lumen', nameAt: t, companionAt: t });
     prefs.savePrefs({ master: 1, music: 1, sfx: 1, hum: 1, muted: false });
@@ -109,7 +109,8 @@ async function collect() {
       'audio-field': json(names.AUDIO_KEY),
       'stored-interface-field': [
         ...['Ev', 'Item', 'Person', 'SavedMap', 'DiaryEntry', 'LineEntry', 'Settings', 'Flags', 'SkillPin', 'State'].flatMap((type) => interfaceFields('src/daily/store.ts', type)),
-        ...['DrawingMeta', 'Draft'].flatMap((type) => interfaceFields('src/daily/artstore.ts', type)),
+        ...['DrawingMeta', 'Draft', 'StoredStroke'].flatMap((type) => interfaceFields('src/daily/artstore.ts', type)),
+        ...interfaceFields('src/daily/ink.ts', 'Stroke'),
         ...['Story', 'Chapter', 'Card', 'Live'].flatMap((type) => interfaceFields('src/daily/storystore.ts', type)),
         ...interfaceFields('src/cowriter/types.ts', 'Cred'),
       ],
@@ -134,6 +135,7 @@ async function collect() {
       motion: [...store.MOTIONS],
       'read-size': [...names.READ_SIZES],
       'art-paper': Object.keys(ink.PAGE),
+      'stroke-mode': [...ink.STROKE_MODES],
       'chapter-kind': [...story.CHAPTER_KINDS],
       'cowriter-card-mode': [...story.CARD_MODES],
     };
