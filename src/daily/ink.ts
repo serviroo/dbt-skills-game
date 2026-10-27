@@ -524,39 +524,18 @@ function takes(strokes: Stroke[], boxes: Box[], e: Stroke, kind: Paper, W: numbe
   return off && dims(strokes, e, kind, W, H);
 }
 /**
- * Whether eraser stroke e, drawn after the strokes on a page of kind W by H, puts out light the page shows: its paper
- * and light as a render lays them (see litPaper) differ with e's cut from with the same eraser stroke without points,
- * which cuts nothing, by at least LIT in some px. Both lay the light of the lines e passes over the same way, so only
- * what e's cut takes counts.
+ * Whether eraser stroke e, drawn after the strokes on a page of kind W by H, changes what the page shows: its render
+ * (paper, light and ink) with e differs from its render with the same eraser stroke without points, which cuts
+ * nothing, by at least LIT in some px. Both lay the light of the lines e passes over the same way, so only what e's
+ * cut takes counts, and only where nothing over it hides it.
  */
 function dims(strokes: Stroke[], e: Stroke, kind: Paper, W: number, H: number) {
-  const all = [...strokes, e], cuts = eraserCuts(all), none: Stroke = { ...e, p: [] };
-  const was = litPaper(all, kind, W, W, H, cuts.map((c) => c?.map((k) => (k === e ? none : k)))), now = litPaper(all, kind, W, W, H, cuts);
+  const cuts = eraserCuts([...strokes, e]), none: Stroke = { ...e, p: [] };
+  const was = renderDrawing([...strokes, none], kind, W, W, H, cuts.map((c) => c?.map((k) => (k === e ? none : k)))), now = renderDrawing([...strokes, e], kind, W, W, H, cuts);
   const a = ctx2d(was).getImageData(0, 0, was.width, was.height).data, b = ctx2d(now).getImageData(0, 0, now.width, now.height).data;
   was.width = was.height = now.width = now.height = 0;
   for (let k = 0; k < a.length; k += 4) if (Math.abs(a[k] - b[k]) + Math.abs(a[k + 1] - b[k + 1]) + Math.abs(a[k + 2] - b[k + 2]) >= LIT) return true;
   return false;
-}
-/**
- * A drawing's paper and light (its halo laid over the paper) on a new canvas outW px wide, as a render lays them.
- * cuts: for each stroke, the eraser strokes after it that pass over it.
- */
-function litPaper(strokes: Stroke[], kind: Paper, outW: number, W: number, H: number, cuts = eraserCuts(strokes)) {
-  const out = canvas(outW, H * (outW / W));
-  const g = ctx2d(out);
-  paintPaper(g, out.width, out.height, kind);
-  const hc = canvas(W * HALO, H * HALO);
-  const hg = ctx2d(hc);
-  hg.fillStyle = '#000';
-  hg.fillRect(0, 0, hc.width, hc.height);
-  strokes.forEach((st, i) => haloPass(hg, st, HALO, cuts[i]));
-  g.save();
-  g.globalCompositeOperation = 'screen';
-  g.imageSmoothingEnabled = true;
-  g.imageSmoothingQuality = 'high';
-  g.drawImage(hc, 0, 0, out.width, out.height);
-  g.restore();
-  return out;
 }
 
 /** The page under the ink: void with a cold lift; an ally page adds a violet shadow pool to stand in. */
@@ -593,11 +572,26 @@ export function paintPaper(g: CanvasRenderingContext2D, w: number, h: number, ki
   g.restore();
 }
 
-/** Renders a stored drawing to a new canvas outW px wide (paper, halo, ink). Pure function of its inputs. */
-export function renderDrawing(strokes: Stroke[], kind: Paper, outW: number, W = PAGE[kind].w, H = PAGE[kind].h) {
+/**
+ * Renders a stored drawing to a new canvas outW px wide (paper, halo, ink). Pure function of its inputs. cuts: for each
+ * stroke, the eraser strokes after it that pass over it.
+ */
+export function renderDrawing(strokes: Stroke[], kind: Paper, outW: number, W = PAGE[kind].w, H = PAGE[kind].h, cuts = eraserCuts(strokes)) {
   const q = outW / W;
-  const out = litPaper(strokes, kind, outW, W, H);
+  const out = canvas(outW, H * q);
   const g = ctx2d(out);
+  paintPaper(g, out.width, out.height, kind);
+  const hc = canvas(W * HALO, H * HALO);
+  const hg = ctx2d(hc);
+  hg.fillStyle = '#000';
+  hg.fillRect(0, 0, hc.width, hc.height);
+  strokes.forEach((st, i) => haloPass(hg, st, HALO, cuts[i]));
+  g.save();
+  g.globalCompositeOperation = 'screen';
+  g.imageSmoothingEnabled = true;
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(hc, 0, 0, out.width, out.height);
+  g.restore();
   // an eraser cuts ink only, so a drawing that has one inks its own layer and lays it over the paper
   const layer = strokes.some((st) => st.m === 'erase') ? canvas(out.width, out.height) : null;
   const ig = layer ? ctx2d(layer) : g;

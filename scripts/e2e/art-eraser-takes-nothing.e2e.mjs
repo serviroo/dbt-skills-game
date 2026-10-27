@@ -11,6 +11,15 @@ async function tap(page, a) {
   await page.mouse.down();
   await page.mouse.up();
 }
+/** A mouse stroke through points given as fractions of the page. */
+async function path(page, pts) {
+  const box = await page.locator('.dq-ink-live').boundingBox();
+  const to = ([x, y]) => [box.x + box.width * x, box.y + box.height * y];
+  await page.mouse.move(...to(pts[0]));
+  await page.mouse.down();
+  for (const p of pts.slice(1)) await page.mouse.move(...to(p), { steps: 14 });
+  await page.mouse.up();
+}
 const button = (page, name) => page.getByRole('button', { name, exact: true });
 /** The page is 1200 by 1600 logical px; a point there as a fraction of it. */
 const at = (x, y) => [x / 1200, y / 1600];
@@ -132,6 +141,24 @@ export const scenarios = {
     await line(page, at(100, 900), at(-140, 500));
     expect((await strokes(page)).length === 4, 'an eraser stroke past a cut line that changed nothing the page shows was kept: ' + JSON.stringify(await strokes(page)));
     expect(await canRedo(), 'an eraser stroke past a cut line that changed nothing the page shows cleared Redo');
+
+    // light that changes only under opaque ink changes nothing the page shows either
+    await page.evaluate(() =>
+      window.__daily.ink.load([
+        { i: 1, w: 25.2, p: [200, 500, -500, 500] },
+        ...[25, 75, 125].map((x) => ({ i: 1, w: 60, p: [x, 200, x, 800] })),
+        { i: 1, w: 25.2, p: [0, 800, 180, 800, 180, 500], m: 'erase' },
+      ]),
+    );
+    await pick(page, 'Brush');
+    await line(page, at(300, 1500), at(900, 1500));
+    await undo();
+    await pick(page, 'Eraser');
+    const under = await page.evaluate(() => window.__daily.ink.render(1200).toDataURL());
+    await path(page, [at(100, 1000), at(-60, 1000), at(-60, 500)]);
+    expect((await strokes(page)).length === 5, 'an eraser stroke whose light change only opaque ink covers was kept: ' + JSON.stringify(await strokes(page)));
+    expect((await page.evaluate(() => window.__daily.ink.render(1200).toDataURL())) === under, 'the page changed though the eraser stroke was not kept');
+    expect(await canRedo(), 'an eraser stroke whose light change only opaque ink covers cleared Redo');
     expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },
