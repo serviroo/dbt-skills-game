@@ -2,6 +2,7 @@ import { chromium } from 'playwright';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { glArgs, checkRenderer } from './gl.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -54,7 +55,7 @@ const browser = await chromium.launch({
   channel: 'chromium',
   headless: flags.headed !== 'true',
   args: [
-    ...(flags.gpu ? ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist'] : ['--use-gl=angle', '--use-angle=swiftshader']),
+    ...glArgs(),
     '--autoplay-policy=no-user-gesture-required',
     ...(insecure ? [`--unsafely-treat-insecure-origin-as-secure=${site.origin}`] : []),
   ],
@@ -109,6 +110,12 @@ let assetCount = 0;
 let metaCache = '';
 let built = null;
 try {
+  const probe = await browser.newPage();
+  try {
+    console.log('renderer:', await checkRenderer(probe));
+  } finally {
+    await probe.context().close();
+  }
   await check('build-id', async () => {
     const deadline = Date.now() + Number(flags.wait ?? 180) * 1000;
     for (;;) {

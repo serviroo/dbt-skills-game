@@ -1,6 +1,6 @@
 // Draws every PWA image in code: a GLSL gate tear rendered in headless Chromium, read back as PNG.
-// node scripts/icons.mjs [--out=public] [--only=icons|splash] [--sheet=qa/out/pwa/icon-src] [--lose-context-at=<n>] [--lose-context-times=<k>]
-// A lost WebGL context (GPU-less CI runners) redraws that image on a fresh page, then in a software-GL browser.
+// node scripts/icons.mjs [--software] [--out=public] [--only=icons|splash] [--sheet=qa/out/pwa/icon-src] [--lose-context-at=<n>] [--lose-context-times=<k>]
+// A lost WebGL context redraws that image once on a fresh page, keeping the requested renderer.
 // --lose-context-at=<n> (tests) loses the context on the nth image's first <k> draws (default 1).
 import { chromium } from 'playwright';
 import fs from 'node:fs';
@@ -8,6 +8,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { ICONS, splashImages } from './pwa-spec.mjs';
+import { glArgs, checkRenderer } from './gl.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const flags = Object.fromEntries(process.argv.slice(2).filter((a) => a.startsWith('--')).map((a) => { const [k, v = 'true'] = a.slice(2).split('='); return [k, v]; }));
@@ -192,25 +193,20 @@ const ICON_LOOK = {
   tiny: { scale: 1.05, bold: 1.9 },
 };
 
-const GPU = ['--use-angle=vulkan', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-features=Vulkan'];
-const SOFTWARE = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
 const loseAt = Number(flags['lose-context-at'] ?? 0);
 const loseTimes = Number(flags['lose-context-times'] ?? 1);
-let browser = await chromium.launch({ headless: true, args: GPU });
-let page = await browser.newPage();
-await page.setContent(PAGE);
+const browser = await chromium.launch({ headless: true, args: glArgs() });
+let page;
 async function draw(j, n) {
   for (let attempt = 1; ; attempt++) {
     try {
       return await page.evaluate((o) => window.render(o), { ...j, lose: n === loseAt && attempt <= loseTimes });
     } catch (e) {
-      if (!/context lost/.test(String(e?.message)) || attempt === 3) throw new Error(`${j.file}: ${e?.message ?? e}`);
-      console.warn(`${j.file}: WebGL context lost, drawing it again (${attempt === 1 ? 'fresh page' : 'software GL'})`);
-      if (attempt === 2) {
-        await browser.close();
-        browser = await chromium.launch({ headless: true, args: SOFTWARE });
-      } else await page.close();
+      if (!/context lost/.test(String(e?.message)) || attempt === 2) throw new Error(`${j.file}: ${e?.message ?? e}`);
+      console.warn(`${j.file}: WebGL context lost, drawing it again (fresh page)`);
+      await page.close();
       page = await browser.newPage();
+      await checkRenderer(page);
       await page.setContent(PAGE);
     }
   }
@@ -238,11 +234,17 @@ const jobs = [];
 if (flags.only !== 'splash') for (const i of ICONS) jobs.push({ file: i.file, w: i.size, h: i.size, mode: 0, ss: i.size <= 64 ? 8 : 6, ...ICON_LOOK[i.kind] });
 if (flags.only !== 'icons') for (const s of splashImages()) jobs.push({ file: s.file, w: s.width, h: s.height, mode: 1, ss: 1, scale: 1, bold: 1 });
 let total = 0;
-for (const [n, j] of jobs.entries()) {
-  const url = await draw(j, n + 1);
-  const size = write(j.file, url);
-  total += size;
-  if (!flags.quiet) console.log(`${j.file}  ${j.w}x${j.h}  ${(size / 1024).toFixed(1)} KB`);
+try {
+  page = await browser.newPage();
+  console.log('renderer:', await checkRenderer(page));
+  await page.setContent(PAGE);
+  for (const [n, j] of jobs.entries()) {
+    const url = await draw(j, n + 1);
+    const size = write(j.file, url);
+    total += size;
+    if (!flags.quiet) console.log(`${j.file}  ${j.w}x${j.h}  ${(size / 1024).toFixed(1)} KB`);
+  }
+  console.log(`wrote ${jobs.length} images (${(total / 1024).toFixed(0)} KB) to ${path.relative(root, outDir) || '.'}`);
+} finally {
+  await browser.close();
 }
-console.log(`wrote ${jobs.length} images (${(total / 1024).toFixed(0)} KB) to ${path.relative(root, outDir) || '.'}`);
-await browser.close();

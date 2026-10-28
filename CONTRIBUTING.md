@@ -138,8 +138,9 @@ To fix a screen, give each control a short, accurate name that says what it does
 decorative. Never hide a control or a picture a player needs just to pass the check.
 
 Run one file with `node scripts/e2e.mjs --file=<name>`, or one scenario with `--scenario=<scenario name>`. The browser
-renders with SwiftShader by default so local runs match CI. Add `--gpu` to render on this machine's GPU instead, or
-`--headed` to watch it.
+uses this machine's GPU through Vulkan by default. Add `--software` to use SwiftShader on a machine without a GPU,
+or `--headed` to watch it. The requested renderer is checked before any scenario runs; a mismatch fails the run.
+The same choice reaches browser children, including icon draws during a build.
 
 `node scripts/e2e-runner-check.mjs` checks file selection, duplicate names, failure reports and cleanup through the
 real command. It creates temporary scenario files and removes them when it finishes.

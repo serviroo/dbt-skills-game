@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { glArgs, checkRenderer } from '../gl.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -223,9 +224,9 @@ function pageState() {
 }
 
 function launch(flags) {
-  if (flags.ws) return chromium.connect(flags.ws, { headers: { 'x-playwright-launch-options': JSON.stringify({ headless: flags.headless === 'true', args: ['--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] }) } });
-  const gl = flags.gpu ? ['--use-angle=vulkan', '--ignore-gpu-blocklist'] : ['--use-gl=angle', '--use-angle=swiftshader'];
-  return chromium.launch({ headless: flags.headed !== 'true', handleSIGINT: false, handleSIGTERM: false, args: [...gl, '--autoplay-policy=no-user-gesture-required'] });
+  const args = [...glArgs(), '--autoplay-policy=no-user-gesture-required'];
+  if (flags.ws) return chromium.connect(flags.ws, { headers: { 'x-playwright-launch-options': JSON.stringify({ headless: flags.headless === 'true', args }) } });
+  return chromium.launch({ headless: flags.headed !== 'true', handleSIGINT: false, handleSIGTERM: false, args });
 }
 
 export async function startHarness(flags = {}) {
@@ -269,7 +270,14 @@ export async function startHarness(flags = {}) {
   const setups = [];
   const throttleErrors = [];
   const start = () => {
-    const p = launch(flags).then((browser) => {
+    const p = launch(flags).then(async (browser) => {
+      browsers.push(browser);
+      const probe = await browser.newPage();
+      try {
+        renderer = await checkRenderer(probe);
+      } finally {
+        await probe.context().close();
+      }
       // every context keeps the scripts' zone, also when the browser runs on another machine (--ws), and every page in it is
       // followed for evidence()
       const newContext = browser.newContext.bind(browser);
@@ -294,20 +302,17 @@ export async function startHarness(flags = {}) {
         };
         return ctx;
       };
-      browsers.push(browser);
       return browser;
     });
     launches.push(p);
     return p;
   };
-  const browser = await start();
+  let browser;
   try {
+    browser = await start();
     server = await serve(host);
-    const p = await (await browser.newContext()).newPage();
-    renderer = await p.evaluate(() => { const g = document.createElement('canvas').getContext('webgl2'); const x = g?.getExtension('WEBGL_debug_renderer_info'); return g ? String(g.getParameter(x ? x.UNMASKED_RENDERER_WEBGL : g.RENDERER)) : 'no webgl'; });
-    await p.context().close();
   } catch (e) {
-    await browser.close().catch(() => {});
+    await Promise.allSettled(browsers.map((b) => b.close()));
     await server?.stop();
     throw e;
   }

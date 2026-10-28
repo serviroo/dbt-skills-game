@@ -68,6 +68,10 @@ npm run build    # static site in dist/
 npm run preview  # serves dist/ on http://localhost:4173
 ```
 
+Browser checks and icon draws use the GPU through Vulkan by default. On a machine without a GPU, pass
+`--software` to browser scripts, for example `node scripts/e2e.mjs --software`. For builds, use
+`LANTERN_GL=software npm run build`; child browser scripts inherit that explicit choice.
+
 `dist/` is a plain static site with an offline service worker, so any static host works. The service worker only runs
 over HTTPS (or on localhost).
 

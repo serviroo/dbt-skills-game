@@ -3,6 +3,7 @@
 // Serves on the first free port from --port. Exits 1 if any page breaks the policy, logs an error, has a request fail
 // or never gets ready, or if the browser can't start. (--check, which older callers pass, changes nothing.)
 import { chromium } from 'playwright';
+import { glArgs, checkRenderer } from './gl.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startPreview } from './preview.mjs';
@@ -20,7 +21,7 @@ let browser;
 try {
   srv = await startPreview(dist, { from: Number(flags.port ?? 4179), base: mount });
   console.log('preview:', srv.url);
-  browser = await chromium.launch({ headless: true, args: ['--use-angle=vulkan', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-features=Vulkan', '--autoplay-policy=no-user-gesture-required'] });
+  browser = await chromium.launch({ headless: true, args: [...glArgs(), '--autoplay-policy=no-user-gesture-required'] });
   for (const q of pages) {
     const ctx = await browser.newContext({ viewport: { width: 375, height: 800 } });
     await ctx.addInitScript(() => {
@@ -33,6 +34,7 @@ try {
     page.on('console', (m) => m.type() === 'error' && errs.push(m.text().slice(0, 160)));
     page.on('requestfailed', (r) => errs.push(`request failed: ${r.url()} ${r.failure()?.errorText ?? ''}`));
     try {
+      console.log('renderer:', await checkRenderer(page));
       await page.goto(srv.url + q);
       await page.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 30000 }).catch(() => errs.push('ready timeout'));
       // tap through anything that waits for their (title screen, windows, hold-to-charge gets a long press)

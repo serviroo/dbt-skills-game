@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container:
       image: mcr.microsoft.com/playwright:v1.64.1-noble
       options: --user 1001
@@ -39,16 +39,18 @@ jobs:
       - name: Stored ids
         run: npm run check:ids
       - run: npm run build
+        env:
+          LANTERN_GL: software
       - name: PWA offline launch
-        run: node scripts/pwa-verify.mjs --check
+        run: node scripts/pwa-verify.mjs --software --check
       - name: PWA update
-        run: node scripts/pwa-verify.mjs --update --check
+        run: node scripts/pwa-verify.mjs --software --update --check
       - name: CSP sweep
-        run: node scripts/pwa-csp-sweep.mjs --check
+        run: node scripts/pwa-csp-sweep.mjs --software --check
       - name: E2E runner contract
-        run: node scripts/e2e-runner-check.mjs
+        run: node scripts/e2e-runner-check.mjs --software
       - name: PWA failure paths and Firefox storage
-        run: node scripts/e2e/me-93-pwa-resilience.e2e.mjs
+        run: node scripts/e2e/me-93-pwa-resilience.e2e.mjs --software
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -63,7 +65,7 @@ jobs:
   # the push reuses that run's e2e parts instead of running them again. Any doubt or lookup error runs them in full.
   proven:
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: read
@@ -106,7 +108,7 @@ jobs:
   e2e:
     needs: proven
     if: ${{ !cancelled() && needs.proven.outputs.run == '' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container:
       image: mcr.microsoft.com/playwright:v1.64.1-noble
       options: --user 1001
@@ -131,7 +133,7 @@ jobs:
       - name: Browsers come from the container
         run: test "$(npx playwright --version)" = "Version 1.64.1" || { echo "package-lock has $(npx playwright --version); set the same version in the container image above"; exit 1; }
       - name: E2E part ${{ matrix.shard }} of 18
-        run: node scripts/e2e.mjs --shard=${{ matrix.shard }}/18
+        run: node scripts/e2e.mjs --software --shard=${{ matrix.shard }}/18
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -141,7 +143,7 @@ jobs:
           if-no-files-found: ignore
 
   secrets:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       GITLEAKS_VERSION: 8.30.1
