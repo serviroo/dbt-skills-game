@@ -36,8 +36,8 @@ async function boot() {
   const fontsIn = Promise.race([Promise.allSettled([...fonts, document.fonts.ready]), new Promise((r) => setTimeout(r, 2500))]);
   await (stage?.loading(fontsIn) ?? fontsIn);
   if (stage && lab) {
-    const m = await lab();
-    await (m.lab ?? m.characterLab ?? m.windowLab)?.(stage);
+    const m = await stage.loading(lab());
+    await stage.loading(Promise.resolve((m.lab ?? m.characterLab ?? m.windowLab)?.(stage)));
     stage.start();
     document.documentElement.dataset.ready = '1';
   } else {

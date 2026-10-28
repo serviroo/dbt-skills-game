@@ -51,7 +51,7 @@ export function windowLab(stage: Stage) {
   const kind = q.get('kind') ?? 'notification';
   if (['title', 'awaken', 'rewards', 'letter', 'endcard'].includes(kind)) {
     env.skyMat.uniforms.uGlow.value = 0.25;
-    overlayDemo(kind);
+    overlayDemo(kind, stage);
     return;
   }
   const RANK_LINES: Record<string, string> = {
@@ -71,9 +71,9 @@ export function windowLab(stage: Stage) {
   (window as any).__win = w;
 }
 
-export async function overlayDemo(kind: string) {
-  const ui = await import('../ui/cutscene-ui');
-  const { REWARDS } = await import('../content/intro');
+export async function overlayDemo(kind: string, stage: Stage) {
+  // a capture's clock holds while the overlay's modules load; the overlay itself then plays on that clock
+  const [ui, { REWARDS }] = await stage.loading(Promise.all([import('../ui/cutscene-ui'), import('../content/intro')]));
   if (kind === 'title') return ui.showTitle();
   if (kind === 'awaken') return ui.awakenWord('AWAKEN', 30);
   if (kind === 'rewards') return ui.rewardCards(REWARDS);
