@@ -35,6 +35,7 @@ const look = (page) =>
       text: bar?.querySelector('.w2-try-t')?.textContent ?? '',
       gate: !!bar?.querySelector('.w2-try-back path[d^="M28 84V40"]'),
       plate: bar?.querySelector('.w2-plate')?.className ?? '',
+      name: bar?.querySelector('.w2-plate')?.textContent ?? '',
       checked: [...document.querySelectorAll('.w2-wopt[aria-checked=true]')].map((b) => `${b.dataset.slot}:${b.dataset.id}`),
     };
   });
@@ -50,11 +51,13 @@ export const scenarios = {
       await h.openSettings(page);
       const was = await kept(h, page);
       h.expect(was.theme === 'mint' && was.accent === 'green', `the seeded look did not load: ${JSON.stringify(was)}`);
+      // a typed name saves as focus leaves it for the first look tapped, and that tap still counts
+      await page.locator('#set-playerName').fill('Sam');
       for (const [slot, id] of [['theme', 'night'], ['accent', 'rose'], ['cardBack', 'gate'], ['plate', 'gold']]) await tryOn(page, slot, id);
       await page.locator('.w2-try').waitFor({ timeout: 5000 });
       let on = await look(page);
       h.expect(on.theme === 'night' && on.accent === 'rose', `the screen does not wear the look tried on: ${JSON.stringify(on)}`);
-      h.expect(on.gate && on.plate.includes('w2-plate--gold') && on.text.startsWith('Trying on Night, Rose, Gate and Gold trim.'), `the bar does not show the look tried on: ${JSON.stringify(on)}`);
+      h.expect(on.gate && on.plate.includes('w2-plate--gold') && on.name === 'Sam' && on.text.startsWith('Trying on Night, Rose, Gate and Gold trim.'), `the bar does not show the look tried on: ${JSON.stringify(on)}`);
       h.expect(['theme:night', 'accent:rose', 'cardBack:gate', 'plate:gold'].every((c) => on.checked.includes(c)), `the Wardrobe does not mark the look tried on: ${on.checked}`);
       h.expect(same(await kept(h, page), was), `trying a look on saved it: ${JSON.stringify(await kept(h, page))}`);
       await h.shot(page, 'try-on-trying');

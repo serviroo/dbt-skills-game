@@ -190,9 +190,12 @@ export function wardrobePanel(app: App) {
       h('div', { class: 'dq-actions w2-try-acts' }, btn(TRY_ON.keep, () => end(true)), btn(TRY_ON.back, () => end(false), { kind: 'quiet' })),
     ),
   );
-  /** Redraws the options and the bar from what is tried on and what is kept now, here or in another open copy. */
+  /**
+   * Marks the options and fills the bar from what is tried on and what is kept now, here or in another open copy. The
+   * options are marked in place, so a tap already landing on one (as a name field's save on blur fires) still counts.
+   */
   const refresh = () => {
-    render();
+    body.querySelectorAll<HTMLElement>('.w2-wopt').forEach((b) => b.setAttribute('aria-checked', String(shown(st, b.dataset.slot as Slot) === b.dataset.id)));
     const on = (Object.keys(TABLE) as Slot[]).filter((k) => tried[k]);
     if (!on.length) {
       bar.hidden = true;
@@ -214,32 +217,26 @@ export function wardrobePanel(app: App) {
     paint(st);
     refresh();
   };
-  const render = () => {
-    // a pick redraws the Wardrobe: focus stays on the look just picked
-    const on = body.contains(document.activeElement) ? { ...(document.activeElement as HTMLElement).dataset } : null;
-    const group = (slot: Slot, title: string, pv: (id: string) => HTMLElement) =>
-      h(
-        'div',
-        { class: `w2-wgroup w2-wgroup--${slot}` },
-        h('h3', { class: 'dq-label w2-wgroup-t', text: title }),
-        radioKeys(
-          h(
-            'div',
-            { class: 'w2-wopts', role: 'radiogroup', 'aria-label': title },
-            TABLE[slot].ids.map((id) => option(app, slot, id, pv(id), pick)),
-          ),
+  const group = (slot: Slot, title: string, pv: (id: string) => HTMLElement) =>
+    h(
+      'div',
+      { class: `w2-wgroup w2-wgroup--${slot}` },
+      h('h3', { class: 'dq-label w2-wgroup-t', text: title }),
+      radioKeys(
+        h(
+          'div',
+          { class: 'w2-wopts', role: 'radiogroup', 'aria-label': title },
+          TABLE[slot].ids.map((id) => option(app, slot, id, pv(id), pick)),
         ),
-      );
-    body.replaceChildren(
-      h('p', { class: 'dq-small', text: WARDROBE_COPY.sub }),
-      group('theme', WARDROBE_COPY.theme, themePreview),
-      group('accent', WARDROBE_COPY.accent, accentPreview),
-      group('cardBack', WARDROBE_COPY.cardBack, backPreview),
-      group('plate', WARDROBE_COPY.plate, platePreview),
+      ),
     );
-    if (on?.slot) body.querySelector<HTMLElement>(`[data-slot="${on.slot}"][data-id="${on.id}"]`)?.focus({ preventScroll: true });
-  };
-  render();
+  body.append(
+    h('p', { class: 'dq-small', text: WARDROBE_COPY.sub }),
+    group('theme', WARDROBE_COPY.theme, themePreview),
+    group('accent', WARDROBE_COPY.accent, accentPreview),
+    group('cardBack', WARDROBE_COPY.cardBack, backPreview),
+    group('plate', WARDROBE_COPY.plate, platePreview),
+  );
   const off = st.onChange(refresh);
   return {
     el: panel({ title: WARDROBE_COPY.title, ic: icon('card'), cls: 'w2-wardrobe-p' }, body, status),
