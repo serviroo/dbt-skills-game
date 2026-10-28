@@ -73,8 +73,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   const { renderer, canvas } = lent;
 
   const { clock } = opts;
-  const media = matchMedia('(prefers-reduced-motion: reduce)');
-  const still = () => (opts.reduced ? opts.reduced() : media.matches);
+  const still = () => opts.reduced();
   let onScreen = false;
   let sized = false;
   let lost = renderer.getContext().isContextLost();
@@ -303,8 +302,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   };
   canvas.addEventListener('webglcontextlost', onLost);
   canvas.addEventListener('webglcontextrestored', onRestored);
-  media.addEventListener('change', resync);
-  const offMotion = opts.onMotion?.(resync);
+  const offMotion = opts.onMotion(resync);
 
   return () => {
     sub?.();
@@ -314,8 +312,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
     ro.disconnect();
     canvas.removeEventListener('webglcontextlost', onLost);
     canvas.removeEventListener('webglcontextrestored', onRestored);
-    media.removeEventListener('change', resync);
-    offMotion?.();
+    offMotion();
     setLive(false);
     v.dispose?.();
     disposeTree(v.scene);

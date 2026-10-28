@@ -225,7 +225,7 @@ function campStage(app: App, arrived: ShadowDef[], open: (id: ShadowId, from: HT
       }
     },
   };
-  const unmount = mountScene(stage, { kind: 'camp', clock: { now, onFrame }, reduced: () => app.reduced(), waitMs: Infinity, input });
+  const unmount = mountScene(stage, { kind: 'camp', clock: { now, onFrame }, reduced: () => app.reduced(), onMotion: (fn) => app.onMotion(fn), waitMs: Infinity, input });
   return { stage, unmount };
 }
 

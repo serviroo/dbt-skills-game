@@ -1,9 +1,10 @@
 // The Night Watch gathers around a 3D camp on the Shadows screen: live and drawn at phone, sideways and desktop sizes
 // with everyone who has arrived (and only them); a tap or the keyboard on a watcher opens their own card, name field
-// and all, while the Safe Zone stays one tap away and takes the camp down; one still frame with reduced motion; the
-// roster as before with no WebGL; one WebGL context however often it opens; back after a lost context; every part of
-// every watcher where the model file puts it; an old save; no :has(); a failed load retried on the next visit;
-// a card opened during the page's entrance; a late chapter list stays closed after leaving.
+// and all, while the Safe Zone stays one tap away and takes the camp down; one still frame with reduced motion, and
+// moving or still again as Motion changes (here or in another copy); the roster as before with no WebGL; one WebGL
+// context however often it opens; back after a lost context; every part of every watcher where the model file puts it;
+// an old save; no :has(); a failed load retried on the next visit; a card opened during the page's entrance; a late
+// chapter list stays closed after leaving.
 import { fileURLToPath } from 'node:url';
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
@@ -362,6 +363,64 @@ export const scenarios = {
       h.expect(!errors.length, errors.join('\n'));
       await ctx.close();
     }
+  },
+
+  /**
+   * Motion changed on this copy's Settings screen, then in another open copy while the camp is up: Reduced stills it,
+   * Full moves it again
+   */
+  async 'camp-motion'(h) {
+    const { ctx, page, errors } = await h.open(seed(h, 30), '?mute', PHONE);
+    const still = async (where) => {
+      await page.waitForFunction(() => window.__scenes?.last.still, null, { timeout: 15000 }).catch(async (e) => {
+        if (e.name !== 'TimeoutError') throw e;
+        throw new Error(`${where}: the camp kept moving (${JSON.stringify((await state(page)).scenes.last)})`);
+      });
+      const a = (await state(page)).scenes;
+      await h.frames(page, 60);
+      const b = (await state(page)).scenes;
+      h.expect(a.last.still && b.frames === a.frames, `${where}: the camp did not settle on one still frame (${a.frames} -> ${b.frames}, still ${a.last.still})`);
+      return b;
+    };
+    const moving = async (where, from) => {
+      await page.waitForFunction((from) => {
+        const s = window.__scenes;
+        return s?.frames > from.frames + 10 && !s.last.still && s.last.e > from.last.e;
+      }, from, { timeout: 15000 }).catch(async (e) => {
+        if (e.name !== 'TimeoutError') throw e;
+        const s = (await state(page)).scenes;
+        throw new Error(`${where}: the camp drew ${s.frames - from.frames} new frames (still ${s.last.still}), needed 11 moving ones`);
+      });
+      return (await state(page)).scenes;
+    };
+    // Motion set on this copy's own Settings screen, then back to the camp
+    const here = async (name) => {
+      await page.evaluate(() => window.__daily.go({ name: 'settings' }));
+      await page.getByRole('radio', { name: `Motion: ${name}`, exact: true }).click();
+      await page.evaluate(() => window.__daily.go({ name: 'shadows' }));
+      await page.locator('.w2-camp').evaluate((e) => e.scrollIntoView({ block: 'center' }));
+      await page.locator('.w2-camp.is-scene-live').waitFor({ timeout: 20000 });
+    };
+    await toCamp(h, page, 'motion');
+    let s = await moving('Full at first', (await state(page)).scenes);
+    await here('Reduced');
+    s = await still('Reduced here');
+    // another open copy (a second tab of this one) changes it on its own Settings screen while this camp stays up
+    const [other] = await Promise.all([ctx.waitForEvent('page'), page.evaluate(() => void window.open('/?mute'))]);
+    other.on('pageerror', (e) => errors.push('pageerror, other copy: ' + e.message));
+    await h.openSettings(other);
+    // the copy with the camp is the one in view: a window left under another draws hardly any frames
+    await page.bringToFront();
+    await other.getByRole('radio', { name: 'Motion: Full', exact: true }).click();
+    s = await moving('Full in another copy', s);
+    await other.getByRole('radio', { name: 'Motion: Reduced', exact: true }).click();
+    s = await still('Reduced in another copy');
+    h.expect((await page.evaluate(() => document.visibilityState)) === 'visible', 'the copy with the camp was hidden meanwhile, so it was not followed while in view');
+    await here('Full');
+    await moving('Full here', s);
+    await drawn(h, page, 'motion');
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
   },
 
   /** no WebGL (none at all, or a browser that can't make a context): no camp and no canvas, the roster as it always was */
