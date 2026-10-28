@@ -196,8 +196,9 @@ async function history(page, row) {
 export const slug = (s) => s.replace(/[^\w]+/g, '-').replace(/^-|-$/g, '');
 export const holdDaily = (h, held) => (ctx) =>
   ctx.route('**/src/daily/index.ts', async (r) => {
+    // 9 s as Date.now counts them: Node keeps its timer clock in whole milliseconds, so a timer can fire 1 ms early
     const t = Date.now();
-    await h.sleep(9000);
+    for (let left = 9000; left > 0; left = 9000 - (Date.now() - t)) await h.sleep(left);
     held.push(Date.now() - t);
     await r.continue().catch(() => {});
   });
