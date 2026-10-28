@@ -3,6 +3,7 @@
 // copy's later choice wins; a Save Crystal never replaces a choice made on this device.
 import fs from 'node:fs';
 import path from 'node:path';
+import { settled } from './harness.mjs';
 
 // Written out by hand from the verified table, so a wrong number in the app fails here.
 const EXPECT = {
@@ -50,7 +51,7 @@ async function talk(page, { danger = false } = {}) {
   if (danger) await page.getByRole('button', { name: 'I might not be safe' }).click();
   else await page.locator('.dq-sz-talk').click();
   await page.locator('.dq-region select').waitFor();
-  await page.waitForTimeout(1500);
+  await settled(page, '.dq-safezone');
 }
 
 const shown = (page) =>
@@ -153,7 +154,7 @@ export const scenarios = {
       h.expect((await picker.inputValue()) === 'nz', 'Settings does not show the chosen country');
       await picker.selectOption('au');
       await picker.scrollIntoViewIfNeeded();
-      await page.waitForTimeout(400);
+      await settled(page, '.dq-region');
       await h.shot(page, 'me97-settings-au-390');
       await ctx.setOffline(true);
       await page.evaluate(() => window.__daily.go({ name: 'hub' }));
@@ -308,7 +309,7 @@ export const scenarios = {
         h.expect(await page.locator('.dq-sz-talk').isVisible(), `${size}: "Talk to someone now" is not pinned on the first Safe Zone screen`);
         await page.locator('.dq-sz-talk').click();
         await page.locator('.dq-region select').waitFor();
-        await page.waitForTimeout(1500);
+        await settled(page, '.dq-safezone');
         expectRegion(h, await shown(page), 'au', size);
         await h.shot(page, `me97-talk-au-${size}`);
         const m = await page.evaluate(() => {
@@ -328,7 +329,7 @@ export const scenarios = {
         h.expect(m.wide && !m.out.length, `${size}: wider than the screen: ${m.out.join(', ')}`);
         h.expect(m.sel.top >= 0 && m.sel.bottom <= Math.min(m.foot, m.innerHeight) && m.sel.right <= viewport.width, `${size}: the picker can't be scrolled clear of the screen edge and the pinned foot`);
         h.expect(m.sel.height >= 44 && m.sel.font >= 16 && m.label, `${size}: picker is ${m.sel.height}px tall, ${m.sel.font}px text, labelled ${m.label}`);
-        await page.waitForTimeout(300);
+        await settled(page, '.dq-region');
         await h.shot(page, `me97-talk-au-${size}-picker`);
         h.expect(!errors.length, `${size}: ${errors.join(' | ')}`);
       } finally {

@@ -54,7 +54,7 @@ async function toStone(h, page) {
   await page.locator('.dq-librow', { hasText: 'Still Center' }).first().click();
   await page.locator('.dq-intro-name', { hasText: 'Still Center' }).waitFor({ timeout: 10000 });
   await tap(page, 'Begin');
-  await h.sleep(500);
+  await h.settled(page, '.dq-step-body .dq-actions');
   await tap(page, 'Next');
   await page.locator('.dq-timer-svg--drift').waitFor({ timeout: 10000 });
   await page.locator('.dq-timer-stage').scrollIntoViewIfNeeded();
@@ -109,7 +109,10 @@ async function pixels(page) {
 async function drawn(h, page, where) {
   // a scene fades in over its flat picture once it shows, so it is judged once fully in (the page clock may be stopped,
   // so this looks from here rather than from the page)
-  for (const t0 = Date.now(); Number(await page.locator('.dq-scene').evaluate((e) => getComputedStyle(e).opacity)) < 0.99 && Date.now() - t0 < 5000; ) await h.sleep(50);
+  for (const end = Date.now() + 5000; Number(await page.locator('.dq-scene').evaluate((e) => getComputedStyle(e).opacity)) < 0.99; ) {
+    h.expect(Date.now() < end, `${where}: the scene never finished fading in`);
+    await h.sleep(50);
+  }
   const p = await pixels(page);
   h.expect(p.sd > 4 && p.max > 40 && p.mean > 6, `${where}: the scene looks blank (${JSON.stringify(p)})`);
   return p;
@@ -418,21 +421,28 @@ export const scenarios = {
     await toStone(h, page);
     await live(h, page, 'motion');
     // more time, so the countdown outlasts every change below
+    const duration = (await scenes(page)).last.dur;
     await page.locator('.dq-timer').getByRole('button', { name: '+15 s' }).click();
-    await h.sleep(800);
+    await page.waitForFunction((duration) => window.__scenes?.last.dur > duration, duration, { timeout: 15000 });
     inStep(h, await pair(page), 'motion: full');
     const still = async (where) => {
-      await h.sleep(600);
+      await page.waitForFunction(() => window.__scenes?.last.still, null, { timeout: 15000 });
       const a = await scenes(page);
-      await h.sleep(1000);
+      await h.frames(page, 60);
       const b = await scenes(page);
       h.expect(a.last.still && b.frames === a.frames, `${where}: the scene did not settle on one still frame (${a.frames} -> ${b.frames}, still ${a.last.still})`);
       return b;
     };
     const moving = async (where, from) => {
-      await h.sleep(1500);
+      await page.waitForFunction((from) => {
+        const s = window.__scenes;
+        return s?.frames > from.frames + 10 && !s.last.still && s.last.e > from.last.e;
+      }, from, { timeout: 15000 }).catch(async (e) => {
+        if (e.name !== 'TimeoutError') throw e;
+        const s = await scenes(page);
+        throw new Error(`${where}: only ${(s?.frames ?? 0) - from.frames} new frames, progress ${((s?.last?.e ?? 0) - from.last.e).toFixed(2)} s (needed 11 frames and advancing time)`);
+      });
       const c = await pair(page);
-      h.expect(c.s.frames > from.frames + 10, `${where}: the scene stayed still (${from.frames} -> ${c.s.frames} frames)`);
       inStep(h, c, where);
     };
     // Settings is a screen of its own, so this copy sets Motion mid-scene the way its Settings screen does
@@ -557,11 +567,12 @@ export const scenarios = {
       await page.locator('.dq-timer-svg--drift').waitFor({ timeout: 10000 });
       await live(h, page, `never waits ${vp.width}x${vp.height}`);
       await page.evaluate(() => window.scrollTo(0, 0));
-      await h.sleep(300);
+      await h.settled(page, '.dq-timer-stage');
       await tap(page, 'Start 30 s');
       await h.sleep(900);
       const box = await page.locator('.dq-timer-stage').boundingBox();
       h.expect(box.y >= -1 && box.y + box.height <= vp.height + 1, `${vp.width}x${vp.height}: 900 ms after Start the scene is still off screen (${Math.round(box.y)}..${Math.round(box.y + box.height)})`);
+      await h.settled(page, '.dq-timer-stage');
       await h.sleep(1500);
       const waits = await page.evaluate(() => window.__gpuWaits);
       h.expect(waits === 0 && (await scenes(page)).frames > 3, `${vp.width}x${vp.height}: the scene made the page wait for the GPU ${waits} times`);

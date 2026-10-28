@@ -74,10 +74,9 @@ export const scenarios = {
         const ids = await threeChapters(page);
         for (const n of [1, 2]) {
           await openRead(page, ids, ids.ch[n]);
-          // once the screen's 300 ms entry has played, nothing moves it
-          await h.sleep(400);
+          await h.settled(page, '.st-read-ch');
           const first = await chapterPlace(page, n);
-          await h.sleep(700);
+          await h.frames(page, 60);
           const p = await chapterPlace(page, n);
           await h.shot(page, `read-ch${n + 1}-${at}`);
           h.expect(Math.abs(p.top - first.top) <= 1, `${at}: Read from chapter ${n + 1} moved after it opened (${first.top.toFixed(1)} to ${p.top.toFixed(1)})`);
@@ -87,7 +86,7 @@ export const scenarios = {
           await routeIs(page, 'write');
         }
         await openRead(page, ids, ids.ch[0]);
-        await h.sleep(400);
+        await h.settled(page, '.st-read-ch');
         h.expect((await page.evaluate(() => document.querySelector('.dq').scrollTop)) === 0, `${at}: Read from chapter 1 does not open at the top`);
         h.expect(!errors.length, errors.join('\n'));
       } finally {
@@ -109,7 +108,7 @@ export const scenarios = {
           return (await storyStore(window.__daily.store.key).addChapter(id)).id;
         }, ids.story);
         await openRead(page, ids, empty);
-        await h.sleep(400);
+        await h.settled(page, '.st-read-ch');
         const p = await chapterPlace(page, 2);
         await h.shot(page, `read-empty-ch4-${at}`);
         h.expect((await page.locator('.st-read-ch').count()) === 3, `${at}: the empty chapter shows in Read`);
@@ -136,9 +135,9 @@ export const scenarios = {
         for (const c of cases) {
           const ids = await storyOf(page, c.texts);
           await openRead(page, ids, ids.ch[1], c.texts.filter(Boolean).length);
-          await h.sleep(400);
+          await h.settled(page, '.st-read-ch');
           const first = await chapterPlace(page, c.sec);
-          await h.sleep(700);
+          await h.frames(page, 60);
           const p = await chapterPlace(page, c.sec);
           await h.shot(page, `read-ch2-${c.texts.map((t) => (t ? (t.length > 400 ? 'long' : 'short') : 'empty')).join('-')}-${at}`);
           h.expect(Math.abs(p.top - first.top) <= 1, `${at}, ${c.what}: Read from chapter 2 moved after it opened (${first.top.toFixed(1)} to ${p.top.toFixed(1)})`);
@@ -169,24 +168,29 @@ export const scenarios = {
           await page.setViewportSize(from);
           const ids = await storyOf(page, texts);
           await openRead(page, ids, ids.ch[1], texts.length);
-          await h.sleep(1100);
+          await h.settled(page, '.st-read-ch');
           await placed(`${what}, opened`);
           await page.setViewportSize(to);
-          await h.sleep(500);
+          await h.settled(page, '.st-read-ch');
           await h.shot(page, `read-turn-${texts.length}ch-${tag(from)}-to-${tag(to)}`);
           await placed(`${what}, turned to ${tag(to)}`);
           await page.setViewportSize(from);
-          await h.sleep(500);
+          await h.settled(page, '.st-read-ch');
           await placed(`${what}, turned back`);
           // a scroll of theirs ends it: the next turn leaves the page where the browser puts it
           await page.mouse.move(from.width / 2, from.height / 2);
+          const scrollTop = await page.evaluate(() => document.querySelector('.dq').scrollTop);
           await page.mouse.wheel(0, -120);
-          await h.sleep(400);
+          await page.waitForFunction((before) => document.querySelector('.dq').scrollTop !== before, scrollTop, { timeout: 15000 }).catch((e) => {
+            if (e.name !== 'TimeoutError') throw e;
+            throw new Error(`${what}: the scroll up did not move the page`);
+          });
+          await h.settled(page, '.st-read-ch');
           const up = await chapterPlace(page, 1);
           h.expect(up.top > up.clear + 24, `${what}: the scroll up did not move the page (chapter 2 at ${up.top.toFixed(1)})`);
           const before = await scrolled();
           await page.setViewportSize(to);
-          await h.sleep(500);
+          await h.settled(page, '.st-read-ch');
           const after = await scrolled();
           h.expect(Math.abs(after.top - Math.min(before.top, after.max)) <= 1, `${what}: a turn after they scrolled moved the page (${before.top} to ${after.top})`);
           await page.setViewportSize(from);
@@ -272,7 +276,7 @@ export const scenarios = {
         for (let n = 0; n < lines; n++) {
           const step = n ? `another ${n}` : 'open';
           await (n ? page.getByRole('button', { name: 'Another' }) : page.getByRole('button', { name: 'Need a starting point?' })).click();
-          await h.sleep(n ? 150 : 400);
+          await h.settled(page, '.st-start, .st-ta, .dq-top, .st-dock');
           const p = await place();
           if (n < 2) await h.shot(page, `start-${n ? 'another' : 'open'}-${at}`);
           h.expect(p.box.top >= p.bar - 0.5, `${at} ${step}: the starting point's line is under the top bar (${p.box.top.toFixed(1)} < ${p.bar.toFixed(1)})`);
@@ -310,7 +314,7 @@ export const scenarios = {
           await page.evaluate((r) => window.__daily.go(r), { name: 'write', id: ids.story, ch: ids.ch[0] });
           await page.getByRole('textbox', { name: /^Page,/ }).waitFor();
           await page.locator('.st-state').filter({ hasText: state === 'saved' ? 'Saved on this device' : 'Not saving right now' }).waitFor();
-          await h.sleep(300);
+          await h.settled(page, '.st-state, .st-cwbtn');
           const d = await page.evaluate(() => {
             const r = (e) => e.getBoundingClientRect();
             const el = document.querySelector('.st-state');

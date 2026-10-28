@@ -131,10 +131,26 @@ export const scenarios = {
       console.log('fixture ready');
       await page.waitForTimeout(60000);
     },
+    async '${name}-popup-throttle-failure'(h) {
+      record(h);
+      const ctx = await h.browser.newContext();
+      const page = await ctx.newPage();
+      ctx.newCDPSession = async () => {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        throw new Error('popup throttle refused');
+      };
+      const popup = ctx.waitForEvent('page');
+      await page.evaluate(() => void window.open('about:blank'));
+      await popup;
+    },
   };`);
   const reportError = await run('report-write-error', [`--scenario=${name}-report-error`]);
   assert.notEqual(reportError.code, 0);
   assert.match(reportError.log, /EISDIR/);
+  const throttle = await run('popup-throttle-failure', [`--scenario=${name}-popup-throttle-failure`, '--cpu-throttle=4']);
+  assert.notEqual(throttle.code, 0);
+  assert.match(throttle.log, /CPU throttle 4: popup throttle refused/);
+  assert.deepEqual(throttle.report.throttleErrors, ['CPU throttle 4: popup throttle refused']);
   const signal = await run('signal-cleanup', [`--scenario=${name}-signal`], 'SIGTERM');
   assert.equal(signal.code, 130);
   const sigint = await run('sigint-cleanup', [`--scenario=${name}-signal`], 'SIGINT');

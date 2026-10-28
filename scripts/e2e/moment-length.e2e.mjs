@@ -5,6 +5,7 @@
 // Time runs on Playwright's clock, so the long waits are fast-forwarded.
 import fs from 'node:fs';
 import path from 'node:path';
+import { settled } from './harness.mjs';
 import { crystal, restore } from './newer-save-safety.e2e.mjs';
 
 const KEPT_LENGTH = 'dbt.lantern.v1.moment-length';
@@ -64,18 +65,6 @@ const restToday = async (h, page) => {
   return (save.events ?? []).filter((e) => e.k === 'rest' && e.day === day).length;
 };
 const safeOneTap = (page) => page.locator('.dq-top').getByRole('button', { name: /Safe Zone/ }).isVisible();
-/**
- * Waits until nothing still moves what is inside `selector`: every running animation that ends, on it, inside it or
- * on a parent (a screen rises 10 px as it opens), has ended. A box measured sooner is where the entrance has it, not
- * where it rests.
- */
-const settled = (page, selector) =>
-  page.locator(selector).evaluate(async (el) => {
-    const all = el.getAnimations({ subtree: true });
-    for (let e = el.parentElement; e; e = e.parentElement) all.push(...e.getAnimations());
-    const moving = all.filter((a) => a.playState === 'running' && a.effect?.getComputedTiming().endTime !== Infinity);
-    await Promise.allSettled(moving.map((a) => a.finished));
-  });
 /** Stops the page's clock, so the test moves time only when it says so. */
 const pause = async (page) => page.clock.pauseAt(await page.evaluate(() => Date.now() + 50));
 
@@ -368,9 +357,8 @@ export const scenarios = {
       const where = `${w}x${ht}`;
       const { ctx, page, errors } = await openMoment(h, {}, { width: w, height: ht });
       await page.clock.fastForward(9000);
-      await h.sleep(1500);
-      await h.shot(page, `sizes-${where}-running`);
       await settled(page, '.dq-mo-foot');
+      await h.shot(page, `sizes-${where}-running`);
       const fit = await page.evaluate(() => {
         const box = (s) => {
           const r = document.querySelector(s)?.getBoundingClientRect();
@@ -388,7 +376,7 @@ export const scenarios = {
         await page.clock.fastForward(61000);
         await page.locator('.dq-mo-line', { hasText: END }).waitFor({ timeout: 5000 });
         await page.clock.runFor(3000);
-        await h.sleep(2600);
+        await settled(page, '.dq-mo-done');
         await h.shot(page, `sizes-${where}-ended`);
         if (!(await page.getByRole('button', { name: 'Done' }).isVisible())) problems.push(`${where}: Done is not visible after the end`);
         const doneEnd = await page.locator('.dq-mo-done').boundingBox();

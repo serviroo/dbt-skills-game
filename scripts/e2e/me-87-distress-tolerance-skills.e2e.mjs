@@ -203,7 +203,7 @@ async function checkScreen(h, page, id, step, label) {
       throw new Error(`${label}: expected ${want} but the screen says: ${(await page.locator('.dq-skill').innerText().catch(() => '')).slice(0, 300)}`);
     });
   const firstTimer = (await body.locator('.dq-timer-num').count()) ? (await body.locator('.dq-timer-num').textContent()).trim() : null;
-  await h.sleep(450);
+  await h.settled(page, '.dq-step-body > *, .dq-skill .dq-actions button');
   await h.shot(page, label);
   const text = await page.locator('.dq-skill').evaluate((el) => `${el.innerText}\n${el.textContent}`);
   for (const re of BANNED) h.expect(!re.test(text), `${label}: screen text matches ${re}: ${text.slice(0, 200)}`);

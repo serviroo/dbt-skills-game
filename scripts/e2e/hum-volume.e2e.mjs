@@ -192,7 +192,7 @@ export const scenarios = {
       const { ctx, page, errors } = await boot(h, { viewport });
       try {
         const pop = await soundControls(page);
-        await h.sleep(600);
+        await h.settled(page, '[role=dialog][aria-label=Sound]');
         const names = await pop.getByRole('slider').evaluateAll((els) => els.map((e) => e.labels[0]?.textContent));
         h.expect(JSON.stringify(names) === '["Master","Music","Effects","Hum"]', `${tag}: speaker control sliders are ${JSON.stringify(names)}`);
         await h.shot(page, `speaker-control-${tag}`);

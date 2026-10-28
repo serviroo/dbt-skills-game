@@ -67,6 +67,9 @@ splits the scenarios into parts with `--shard=<i>/<n>`, spread by the seconds ea
 a CI run's `e2e-*` artifacts with `node scripts/e2e-timings.mjs <every part's report.json>`. For anything visual, also
 look at it in a browser at phone width (390 and 320 px) with motion on and off.
 
+`--cpu-throttle=4` slows each Chromium page's CPU work by four through CDP, including new tabs. The rate must be at
+least 1. The report records `cpuThrottle` and `throttleErrors`; a failure to apply it fails the run.
+
 ### E2E scenarios
 
 Each file in `scripts/e2e/` named `<name>.e2e.mjs` exports its scenarios:
@@ -91,6 +94,12 @@ scenario gets an `h` object from `scripts/e2e/harness.mjs`, the same but for `br
 - `open(seed?, query = '?mute', viewport = 390x844)`: a fresh browser profile with `seed` written to localStorage
   first. Returns `{ ctx, page, errors }`; close `ctx` when done.
 - `reachHub(page)`, `openSettings(page)`: tap through to Home or the Settings screen.
+- `settled(page, selector, { timeout = 15000 } = {})`: wait for finite layout animations affecting the matched boxes
+  to end, then for identical rectangles across two frames. Select elements that come to rest after entry. On timeout,
+  it names the animations or rectangles still moving. Wait for the app's own state first when script delays an entry.
+- `frames(page, n)`: wait for real browser frames, even with the page clock paused, with a 15 s deadline. Use this
+  for an observation window, and a drawn-frame count for a scene's progress. Intentional endless motion keeps playing;
+  measure its layout box or a still parent when testing layout. Keep separate performance deadlines such as 900 ms.
 - `shot(page, name)`: a screenshot in the run's folder (`out`). Start the name with your file's name, and give
   whatever a scenario writes there a name no other scenario uses, as they run at once.
 - `ls(page, key)`, `youOf(page)`, `deepFind(obj, key)`, `deepDrop(obj, keys)`, `expect(cond, msg)`, `sleep(ms)`.

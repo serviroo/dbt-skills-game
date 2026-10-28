@@ -160,7 +160,7 @@ async function holdAnswerRead(h, page) {
   return at;
 }
 const bootAsked = (page, what) => page.waitForFunction((w) => window.__keep.calls.includes(w), what, { timeout: 15000 });
-const settled = (page) =>
+const panelReady = (page) =>
   page.waitForFunction(() => {
     const k = document.querySelector('.dq-keep');
     return !!k && (!!k.querySelector('[aria-busy="true"]') || k.dataset.keep !== 'checking');
@@ -520,7 +520,7 @@ export const scenarios = {
     await bootAsked(page, 'persist');
     const before = await storage(page);
     await h.openSettings(page);
-    await settled(page);
+    await panelReady(page);
     await tapHard(page);
     await h.sleep(400);
     let n = await asking(page);
@@ -529,7 +529,7 @@ export const scenarios = {
     await page.locator('.dq-panel', { has: keep(page) }).screenshot({ path: path.join(h.out, 'keep-boot-asking-phone.png') });
     await page.locator('.dq-back').click();
     await h.openSettings(page);
-    await settled(page);
+    await panelReady(page);
     await stillAsking(h, page, 'reopen');
     await comeBack(page);
     await h.sleep(400);
@@ -564,7 +564,7 @@ export const scenarios = {
       await bootAsked(page, 'persist');
       const before = await storage(page);
       await h.openSettings(page);
-      await settled(page);
+      await panelReady(page);
       await stillAsking(h, page, away ? 'before the Safe Zone' : 'open');
       if (!away) {
         await release(page, 'persist', false);
@@ -646,7 +646,7 @@ export const scenarios = {
       } else {
         await page.locator('.dq-back').click();
         await h.openSettings(page);
-        await settled(page);
+        await panelReady(page);
       }
       await h.sleep(400);
       await stillAsking(h, page, way);
@@ -743,7 +743,7 @@ export const scenarios = {
         while (s && !(s.scrollHeight > s.clientHeight && /auto|scroll/.test(getComputedStyle(s).overflowY))) s = s.parentElement;
         (s ?? document.scrollingElement).scrollBy(0, -((document.querySelector('.dq-top')?.getBoundingClientRect().bottom ?? 0) + 16));
       });
-      await h.sleep(250);
+      await h.settled(page, '.dq-keep, .dq-keep .dq-btn');
       const fit = await panel.evaluate((p) => {
         const box = p.getBoundingClientRect();
         const bad = [...p.querySelectorAll('.dq-keep-s, .dq-btn')]
