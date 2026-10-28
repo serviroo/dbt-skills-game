@@ -1,6 +1,7 @@
 // The Safe Zone's calming path stays inside it. "Give me a moment" from the Safe Zone keeps the player in the Safe
 // Zone: "Talk to someone now" pinned and tappable, the score still quiet, no cues, bubbles or XP, no low hum, and Done
 // comes back to its first screen; Leave still goes Home, whether the Safe Zone was opened from Home or from a skill.
+// Every way into its moment stays flat, without creating a WebGL context; the moment outside still has its scene.
 
 const PHONE = { width: 390, height: 844 };
 const DESK = { width: 1440, height: 900 };
@@ -16,9 +17,19 @@ function returning() {
 }
 
 /** Home on a returning save. Every quiet() the score gets and every cue asked for is noted, not played. */
-async function boot(h, viewport) {
-  const ctx = await h.browser.newContext({ viewport, deviceScaleFactor: 2, serviceWorkers: 'block', locale: 'en-US' });
+async function boot(h, viewport, { reduced = false, webgl = true } = {}) {
+  const ctx = await h.browser.newContext({ viewport, deviceScaleFactor: 2, serviceWorkers: 'block', locale: 'en-US', reducedMotion: reduced ? 'reduce' : 'no-preference' });
   await ctx.clock.install();
+  await ctx.addInitScript((webgl) => {
+    window.__safeGL = 0;
+    const get = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (kind, ...args) {
+      if (/webgl/i.test(String(kind)) && !webgl) return null;
+      const ctx = get.call(this, kind, ...args);
+      if (/webgl/i.test(String(kind)) && ctx && window.__daily?.route.name === 'safe') window.__safeGL++;
+      return ctx;
+    };
+  }, webgl);
   const seed = { [h.YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: Date.now() - 1000, companionAt: Date.now() - 1000 }), 'dbt.app.v1': h.SEEN, [h.SAVE]: returning() };
   await ctx.addInitScript((s) => {
     if (sessionStorage.getItem('e2e-seeded')) return;
@@ -99,6 +110,78 @@ async function moment(page) {
 }
 
 export const scenarios = {
+  'safe-moment-stays-flat': async (h) => {
+    for (const [mode, opts] of [['full', {}], ['reduced', { reduced: true }], ['no-webgl', { webgl: false }]]) {
+      const { ctx, page, errors } = await boot(h, { width: 320, height: 568 }, opts);
+      const flat = async (where) => {
+        await h.settled(page, '.dq-sz-talk');
+        await withSeen(page);
+        const got = await page.evaluate(() => ({
+          route: window.__daily.route.name,
+          webgl: window.__safeGL,
+          scenes: document.querySelectorAll('.dq-safezone canvas, .dq-safezone .dq-scene, .dq-safezone .is-scene-wait, .dq-safezone .is-scene-live').length,
+          live: window.__scenes?.live ?? 0,
+          talk: window.__seen(document.querySelector('.dq-sz-talk')),
+        }));
+        h.expect(got.route === 'safe' && got.webgl === 0 && got.scenes === 0 && got.live === 0, `${mode}, ${where}: a scene started inside the Safe Zone: ${JSON.stringify(got)}`);
+        h.expect(got.talk, `${mode}, ${where}: "Talk to someone now" is not pinned and tappable`);
+      };
+      try {
+        await intoSafe(page, 'Home');
+        await moment(page);
+        await flat('entry');
+        await page.goBack();
+        await onScreen(page, 'hub');
+        await page.goForward();
+        await onScreen(page, 'safe');
+        await flat('Forward after Back');
+        await moment(page);
+        await flat('reopened after Back');
+
+        await page.getByRole('radio', { name: '1 minute', exact: true }).check();
+        await page.clock.fastForward(61000);
+        await page.locator('.dq-mo-line', { hasText: /That.s your moment/ }).waitFor();
+        await flat('timer end');
+        await page.locator('.dq-mo-done').click();
+        await moment(page);
+        await flat('reopened after Done');
+
+        await page.reload();
+        await onScreen(page, 'hub');
+        await intoSafe(page, 'Home');
+        await moment(page);
+        await flat('reopened after reload');
+
+        // direct routes use the same widgets, including the Safe Zone's only countdown
+        for (const at of ['moment', 'breathe', 'squeeze', 'cold']) {
+          await page.evaluate((at) => window.__daily.go({ name: 'safe', at }), at);
+          await flat(`route ${at}`);
+        }
+        await page.getByRole('button', { name: 'Cool air', exact: true }).click();
+        await page.clock.fastForward(31000);
+        await page.locator('.dq-timer').waitFor({ state: 'detached' });
+        await flat('cold timer end');
+
+        await page.locator('.dq-top .dq-back', { hasText: 'Leave' }).click();
+        await onScreen(page, 'hub');
+        await page.getByRole('button', { name: 'Give me a moment', exact: true }).click();
+        if (opts.webgl === false) {
+          await page.locator('.dq-mo-svg').waitFor();
+          h.expect(!(await page.locator('.dq-mo-stage .dq-scene').count()), 'no WebGL: the moment left a scene on screen');
+        } else {
+          await page.locator('.dq-mo-stage.is-scene-live canvas').waitFor({ state: 'attached', timeout: 15000 });
+          h.expect((await page.evaluate(() => window.__scenes?.last.kind)) === 'ring', `${mode}: the moment outside the Safe Zone has no ring scene`);
+        }
+        h.expect((await page.evaluate(() => window.__safeGL)) === 0, `${mode}: a WebGL context was created in the Safe Zone`);
+        await intoSafe(page, 'Home');
+        await moment(page);
+        await flat('entry from the outside moment');
+        h.expect(!errors.length, `${mode}: ${errors.join(' | ')}`);
+      } finally {
+        await ctx.close();
+      }
+    }
+  },
   'safe-moment-stays-inside': async (h) => {
     const failed = [];
     const ok = (c, m) => c || failed.push(m);

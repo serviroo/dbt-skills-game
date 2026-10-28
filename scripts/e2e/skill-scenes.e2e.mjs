@@ -17,7 +17,6 @@ const DESK = { width: 1440, height: 900 };
 /** the four sizes every new scene is checked at */
 const VIEWS = [['phone', PHONE], ['small', { width: 320, height: 568 }], ['side', SIDE], ['desk', { width: 1280, height: 800 }]];
 
-
 const seed = (h) => ({ 'dbt.app.v1': h.SEEN });
 const scenes = (page) => page.evaluate(() => (window.__scenes ? JSON.parse(JSON.stringify(window.__scenes)) : null));
 /** the scene's last beat and the countdown on screen, read in the same moment */

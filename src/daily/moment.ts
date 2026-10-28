@@ -247,9 +247,9 @@ export function momentScreen(app: App, route: Route): ScreenOut {
 
 /**
  * The moment itself: the ring, one calm line at a time, How long and Done. The Safe Zone shows it too, without the low
- * hum (no sound in there) and without a credit. `then` is the skill "Slow breathing, if you like" opens.
+ * hum, 3D scene or credit. `then` is the skill "Slow breathing, if you like" opens.
  */
-export function momentView(app: App, o: { done: () => void; then?: string; hum?: boolean }) {
+export function momentView(app: App, o: { done: () => void; then?: string; hum?: boolean; scene?: boolean }) {
   const st = app.store;
   const svg = sv('svg', { viewBox: '0 0 200 200', class: 'dq-mo-svg', 'aria-hidden': 'true' });
   const defs = sv('defs');
@@ -340,7 +340,7 @@ export function momentView(app: App, o: { done: () => void; then?: string; hum?:
   const fades: Animation[] = [];
   const stage = h('div', { class: 'dq-mo-stage' }, h('div', { class: 'dq-mo-halo', 'aria-hidden': 'true' }), svg);
   // the same breath as the flat ring: both count from t0, and once the moment ends both settle, then hold still
-  const unmount = mountScene(stage, {
+  const unmount = o.scene === false ? null : mountScene(stage, {
     kind: 'ring',
     accent: playerAccent(),
     reduced: () => app.reduced(),
@@ -434,7 +434,7 @@ export function momentView(app: App, o: { done: () => void; then?: string; hum?:
     foot,
     leave: () => {
       stop();
-      unmount();
+      unmount?.();
       fades.forEach((a) => a.cancel());
       offVolume?.();
       hum?.stop();

@@ -177,7 +177,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
         );
       case 'moment': {
         // the moment stays in here, with people one tap away and no sound or credit; Done comes back to the first screen
-        const m = momentView(app, { done: () => show('start') });
+        const m = momentView(app, { scene: false, done: () => show('start') });
         stops.push(m.leave);
         return swap(at, [h3('Give me a moment'), m.stage], h('div', { class: 'dq-moment' }, m.words, m.foot));
       }
