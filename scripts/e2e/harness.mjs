@@ -388,6 +388,8 @@ function launch(flags) {
 /** Home is usable only after any due greeting has opened and closed, including its scrim. */
 export async function reachHub(page) {
   const end = Date.now() + 60000;
+  const closed = [];
+  let label = null;
   try {
     while (Date.now() < end) {
       const ready = await page.waitForFunction(() => {
@@ -401,22 +403,29 @@ export async function reachHub(page) {
       const win = ready.asElement();
       if (!win) {
         await ready.dispose();
-        return;
+        return closed;
       }
-      await page.keyboard.press('Escape');
+      label = await win.getAttribute('aria-label');
+      await page.waitForFunction((w) => {
+        const next = w.querySelector('.sw-next');
+        return next && Number(getComputedStyle(next).opacity) > 0;
+      }, win, { timeout: Math.max(1, end - Date.now()) });
+      await win.press('Enter', { timeout: Math.max(1, end - Date.now()) });
       await page.waitForFunction((w) => !w.isConnected, win, { timeout: Math.max(1, end - Date.now()) });
+      closed.push(label);
       await win.dispose();
     }
   } catch (e) {
     if (e.name !== 'TimeoutError') throw e;
-    const state = await page.evaluate(() => JSON.stringify({
+    const state = await page.evaluate((label) => JSON.stringify({
+      label,
       route: window.__daily?.route.name,
       greeting: window.__daily?.greeting,
       busy: window.__daily?.busy,
       window: !!document.querySelector('.dq-sw'),
       scrim: !!document.querySelector('.dq-scrim.is-on, .dq-scrim.is-closing'),
       inert: document.querySelector('#dq-main')?.inert,
-    })).catch(() => 'unreadable');
+    }), label).catch(() => 'unreadable');
     throw new Error(`Home never became idle: ${state}`, { cause: e });
   }
   throw new Error('Home never became idle');

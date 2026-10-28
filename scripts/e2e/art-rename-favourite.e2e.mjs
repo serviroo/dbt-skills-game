@@ -113,11 +113,13 @@ export const scenarios = {
       h.expect(paused, 'the navigation did not pass through the clock gate');
       h.expect(before.home && before.greeting && !before.window, 'the welcome was not pending when Home became ready: ' + JSON.stringify(before));
       let reached;
+      let closed;
       let failed;
-      const reaching = h.reachHub(page).then(async () => { reached = await state(); }, (e) => { failed = e; });
+      const reaching = h.reachHub(page).then(async (names) => { closed = names; reached = await state(); }, (e) => { failed = e; });
       for (const end = Date.now() + 30000; !reached && !failed && Date.now() < end; ) await page.clock.runFor(50);
       await reaching;
       if (failed) throw failed;
+      h.expect(JSON.stringify(closed) === '["Notification"]', 'the helper did not close the due welcome: ' + JSON.stringify(closed));
       h.expect(reached && !reached.greeting && !reached.window && !reached.inert, 'reaching Home returned before the pending welcome closed: ' + JSON.stringify(reached));
       await page.clock.resume();
       await seed(page);

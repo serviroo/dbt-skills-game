@@ -81,7 +81,8 @@ export const scenarios = {
       try {
         // a device still on the build from before the tools restores the Save Crystal and saves one of its own
         await page.goto(site.url + '?mute');
-        await h.reachHub(page);
+        const closed = await h.reachHub(page);
+        expect(JSON.stringify(closed) === '["Notification"]', 'the older build did not close its welcome: ' + JSON.stringify(closed));
         await active(page, a, h.sleep);
         expect((await buildOf(page)) === 'before-tools', 'the first load is not the build from before the tools');
         await restore(h, page, raw);
