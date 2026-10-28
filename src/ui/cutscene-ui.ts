@@ -54,12 +54,34 @@ export function showTitle(onGesture?: () => void): Promise<void> {
       if (e.button === 0) go();
     };
     const onKey = (e: KeyboardEvent) => {
-      if ((e.key === 'Enter' || e.key === ' ') && !e.repeat) go();
+      if ((e.key !== 'Enter' && e.key !== ' ') || e.repeat) return;
+      // the key is the title's alone: the name field takes focus in this keydown, so the key's own character and its
+      // auto-repeat would land in it
+      e.preventDefault();
+      swallowRepeat(e.key);
+      go();
     };
     root.addEventListener('pointerup', onUp);
     root.addEventListener('keydown', onKey);
     if (params.capture) wait(0.6).then(go);
   });
+}
+
+/** Takes the auto-repeat of a held key until it is released, wherever focus goes meanwhile. */
+function swallowRepeat(key: string) {
+  const off = () => {
+    window.removeEventListener('keydown', onDown, true);
+    window.removeEventListener('keyup', onUp, true);
+  };
+  const onDown = (e: KeyboardEvent) => {
+    if (e.key !== key) return;
+    // a fresh press: the release was missed (focus left the page), so it is no longer held
+    if (!e.repeat) return off();
+    e.preventDefault();
+  };
+  const onUp = (e: KeyboardEvent) => e.key === key && off();
+  window.addEventListener('keydown', onDown, true);
+  window.addEventListener('keyup', onUp, true);
 }
 
 /* ---------------------------------------------------------------- first-run names */
@@ -88,8 +110,22 @@ export async function namePrompt(): Promise<void> {
   // the fields are there from the first frame: focus goes in once, as the prompt opens, never when the Lantern's typing
   // ends, by which time a quick player may already be typing in the other field
   if (matchMedia('(pointer: fine)').matches) name.focus({ preventScroll: true });
+  // a letter typed while neither field has focus (a keyboard on a touch-first device, which gets no focus above) moves
+  // focus to the field the player was last in before the letter lands, so it goes in there
+  let into = name;
+  for (const f of [name, comp]) f.addEventListener('focus', () => (into = f));
+  const onKey = (e: KeyboardEvent) => {
+    // AltGr types letters (Ł, ß) and reports Ctrl and Alt with them; a dead key (the ´ of Á) starts a letter, which
+    // composes only in a focused field
+    const altGraph = e.getModifierState('AltGraph');
+    if ((e.key.length !== 1 && e.key !== 'Dead') || e.key === ' ' || e.metaKey || (!altGraph && (e.ctrlKey || e.altKey))) return;
+    if (document.activeElement?.closest('button, a[href], input, select, textarea, [contenteditable]')) return;
+    into.focus({ preventScroll: true });
+  };
+  window.addEventListener('keydown', onKey);
   await opened;
   const v = params.capture ? 'skip' : await w.waitForInput();
+  window.removeEventListener('keydown', onKey);
   const keep = v === 'go';
   chooseYou(keep ? cleanName(name.value) : '', keep ? cleanName(comp.value) : '', Date.now());
   name.blur();
