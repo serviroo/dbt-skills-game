@@ -211,7 +211,7 @@ export const scenarios = {
         await routeIs(page, 'write');
         await page.getByRole('textbox', { name: 'Page, Spring' }).waitFor();
         await page.waitForSelector('.st-hl .st-mark.is-place');
-        await h.sleep(400);
+        await h.settled(page, '.st-mark.is-place, .st-ta, .dq-top, .dq-dock');
         p = await placeShown(page);
         await h.shot(page, `opened-far-${at}`);
         h.expect(p.text === 'lighthouse' && p.sel === 'lighthouse', `${at}: Spring did not open at "lighthouse": ${JSON.stringify(p)}`);

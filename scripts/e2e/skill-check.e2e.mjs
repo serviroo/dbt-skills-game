@@ -254,7 +254,7 @@ async function insteadProblems(h, risky) {
           await page.locator('.dq-step-body .dq-actions .dq-btn--primary').first().click();
           await page.waitForFunction(() => !document.querySelector('.dq-step-body .dq-intro'), null, { timeout: 10000 });
         }
-        await page.waitForTimeout(500);
+        await h.settled(page, '.dq-step-body');
         const found = await onScreen(page);
         const { breathe, main } = found;
         if (found.caution === null) bad.add(`${where}: no caution on screen at ${size}`);

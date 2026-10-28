@@ -67,6 +67,7 @@ async function drawAndErase(h, page) {
 async function phone(h, vp, tag) {
   const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', vp);
   await drawPage(h, page);
+  await h.settled(page, '.dq-tools button, .dq-draw-frame, .dq-pens, .dq-sizes');
   const { expect } = h;
   expect(await page.getByRole('radiogroup', { name: 'Tool' }).isVisible(), `${tag}: no Tool group on the drawing page`);
   for (const name of ['Brush', 'Soft glow', 'Eraser']) {

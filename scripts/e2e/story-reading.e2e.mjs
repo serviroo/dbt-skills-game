@@ -184,7 +184,7 @@ export const scenarios = {
       await page.setViewportSize({ width: 844, height: 390 });
       await page.evaluate(() => (document.querySelector('.dq').scrollTop = 0));
       await ask.click();
-      await h.sleep(300);
+      await h.settled(page, '.st-start');
       const hit = await page.getByRole('button', { name: 'Use this', exact: true }).evaluate((b) => {
         const r = b.getBoundingClientRect();
         return [r.top + 3, r.top + r.height / 2, r.bottom - 3].every((y) => b.contains(document.elementFromPoint(r.left + r.width / 2, y)));
@@ -568,7 +568,7 @@ export const scenarios = {
         for (const [i, name] of NAMES.entries()) {
           const b = page.getByRole('button', { name, exact: true });
           await b.click();
-          await h.sleep(150);
+          await h.settled(page, '.st-read');
           const s = await sizes(page);
           h.expect(s.pressed.length === 1 && s.pressed[0] === name, `${at}: ${name} is not the one pressed: ${JSON.stringify(s.pressed)}`);
           h.expect(s.text.length === 2 && s.text.every((x) => x === s.text[0]), `${at}: the chapters are not one size: ${s.text}`);
@@ -597,7 +597,7 @@ export const scenarios = {
 
       for (const vp of [{ width: 844, height: 390 }, { width: 1280, height: 800 }]) {
         await page.setViewportSize(vp);
-        await h.sleep(200);
+        await h.settled(page, '.st-read');
         const bad = await fits(page);
         h.expect(!bad.length, `${vp.width}x${vp.height}: ${bad.join('; ')}`);
         await h.shot(page, `read-3-${vp.width}x${vp.height}`);

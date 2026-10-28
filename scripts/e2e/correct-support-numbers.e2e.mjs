@@ -1,3 +1,4 @@
+import { settled } from './harness.mjs';
 import path from 'node:path';
 
 const CARRIER = [/carrier|network/i, /rates? may apply/i];
@@ -85,7 +86,7 @@ async function talk(page, { danger = false } = {}) {
   if (danger) await page.getByRole('button', { name: 'I might not be safe' }).click();
   else await page.locator('.dq-sz-talk').click();
   await page.locator('.dq-region select').waitFor();
-  await page.waitForTimeout(1500);
+  await settled(page, '.dq-safezone');
 }
 
 const target = (href) => {
@@ -178,7 +179,7 @@ export const scenarios = {
           for (const name of Object.keys(FACTS[id].lines)) {
             const row = b.page.locator('.dq-safezone .dq-res').filter({ has: b.page.locator('.dq-res-n', { hasText: name }) });
             await row.evaluate((el) => el.scrollIntoView({ block: 'center' }));
-            await b.page.waitForTimeout(250);
+            await settled(b.page, '.dq-res');
             const m = await row.evaluate((el) => {
               const box = (e) => { const r = e.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, width: r.width, height: r.height }; };
               const rowBox = box(el);

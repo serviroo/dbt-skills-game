@@ -1,6 +1,6 @@
 // Runs the end-to-end scenarios in scripts/e2e/*.e2e.mjs against its own Vite dev server and Playwright Chromium, then
 // stops only the processes it started. Exits 1 if any scenario fails.
-// node scripts/e2e.mjs [--file=<name>] [--scenario=<name>] [--shard=<i>/<n>] [--jobs=<n>] [--headed] [--gpu] [--ws=<playwright run-server endpoint> --host=<this machine's address>]
+// node scripts/e2e.mjs [--file=<name>] [--scenario=<name>] [--shard=<i>/<n>] [--jobs=<n>] [--cpu-throttle=<n>] [--headed] [--gpu] [--ws=<playwright run-server endpoint> --host=<this machine's address>]
 // Scenarios run side by side in --jobs browsers (default one for every 4 of this machine's CPU threads, at most 4, and 1
 // with --ws), each browser taking the longest one left. A file that exports `serial = true` runs its scenarios in the
 // order they are written, one at a time in one browser.
@@ -18,10 +18,11 @@ import { startHarness } from './e2e/harness.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.join(root, 'scripts/e2e');
 const flags = Object.fromEntries(process.argv.slice(2).filter((a) => a.startsWith('--')).map((a) => { const [k, ...v] = a.slice(2).split('='); return [k, v.length ? v.join('=') : 'true']; }));
-for (const key of ['file', 'scenario', 'shard', 'jobs']) {
+for (const key of ['file', 'scenario', 'shard', 'jobs', 'cpu-throttle']) {
   if (flags[key] === '') throw new Error(`--${key} needs a value`);
 }
 if (flags.jobs && !/^[1-9]\d*$/.test(flags.jobs)) throw new Error(`--jobs needs a whole number of 1 or more, got ${flags.jobs}`);
+if (flags['cpu-throttle'] && (!Number.isFinite(Number(flags['cpu-throttle'])) || Number(flags['cpu-throttle']) < 1)) throw new Error(`--cpu-throttle needs a number of 1 or more, got ${flags['cpu-throttle']}`);
 // One browser booting pages and drawing the skills' 3D scenes in SwiftShader keeps about 1.5 desktop cores busy. On
 // CI's 4-vCPU runners two of them starved each other: short scenarios ran 4 to 12 times slower, and some timed out.
 const jobs = flags.jobs ? +flags.jobs : flags.ws ? 1 : Math.max(1, Math.min(4, Math.floor(os.availableParallelism() / 4)));
@@ -97,7 +98,7 @@ let failed = 0;
 try {
   h = await startHarness(flags);
   const lanes = [h, ...(await Promise.all(Array.from({ length: Math.min(jobs, units.length) - 1 }, () => h.more())))];
-  report = { url: h.server.url, browser: flags.ws ? 'remote ' + flags.ws : 'local', jobs: lanes.length, scenarios: [], renderer: h.renderer, zone: h.zone };
+  report = { url: h.server.url, browser: flags.ws ? 'remote ' + flags.ws : 'local', jobs: lanes.length, scenarios: [], renderer: h.renderer, cpuThrottle: Number(flags['cpu-throttle'] ?? 1), zone: h.zone };
   await Promise.all(lanes.map(async (lane) => {
     for (let unit; !interrupted && (unit = units.shift()); ) {
       for (const { name, file, run, i } of unit.scenarios) {

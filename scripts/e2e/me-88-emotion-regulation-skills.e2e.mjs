@@ -82,7 +82,7 @@ async function stepTo(page, label, next) {
 }
 
 async function checkScreen(h, page, name, see) {
-  await h.sleep(450);
+  await h.settled(page, '.dq-step-body > *, .dq-skill .dq-actions button');
   const text = norm(await page.locator('body').innerText());
   for (const re of BANNED) h.expect(!re.test(text), `${name}: screen text matches ${re}: ${text.slice(0, 300)}`);
   if (see) h.expect(norm(await page.locator('.dq-skill').textContent()).includes(see), `${name}: expected "${see}" on screen, got: ${await stepText(page)}`);

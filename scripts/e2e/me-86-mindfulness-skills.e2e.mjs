@@ -129,7 +129,7 @@ async function stepText(page) {
 
 async function walk(h, page, steps, tag, reduced) {
   const tapIn = (name) => page.locator('.dq-skill').getByRole('button', { name, exact: true }).first();
-  const settle = () => h.sleep(reduced ? 320 : 560);
+  const settle = () => h.settled(page, '.dq-step-body > *, .dq-skill .dq-actions button');
   for (let i = 0; i < steps.length; i++) {
     await settle();
     const s = typeof steps[i] === 'string' ? { tap: steps[i] } : steps[i];

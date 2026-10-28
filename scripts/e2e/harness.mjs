@@ -13,6 +13,66 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const portFree = (p, host) => new Promise((res) => { const s = net.createServer().once('error', () => res(false)).once('listening', () => s.close(() => res(true))).listen(p, host); });
 
+/** Counts real browser frames, including when a scenario has installed the page clock. */
+export async function frames(page, n) {
+  let timer;
+  try {
+    await Promise.race([
+      page.evaluate((n) => new Promise((done) => {
+        const raf = window.__e2eRaf;
+        const tick = () => --n <= 0 ? done() : raf(tick);
+        raf(tick);
+      }), n),
+      new Promise((_, fail) => { timer = setTimeout(() => fail(new Error(`the browser did not draw ${n} frames within 15000 ms`)), 15000); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Waits for entry motion to finish on boxes that come to rest, then compares consecutive frame rects. */
+export async function settled(page, selector, { timeout = 15000 } = {}) {
+  const end = Date.now() + timeout;
+  let before = [];
+  let moving = 'no frame received';
+  for (;;) {
+    let timer;
+    try {
+      const now = await Promise.race([
+        (async () => {
+          await frames(page, 1);
+          return page.evaluate(({ selector, before }) => {
+            const label = (e) => e.tagName.toLowerCase() + (e.id ? '#' + e.id : '') + [...e.classList].map((c) => '.' + c).join('');
+            const paint = /^(opacity|color|fill|fillOpacity|stroke|strokeOpacity|strokeWidth|strokeDasharray|strokeDashoffset|background.*|filter|boxShadow|textShadow|.*Color)$/;
+            const els = [...document.querySelectorAll(selector)];
+            const blocking = [];
+            for (const a of document.getAnimations()) {
+              if (a.playState !== 'running') continue;
+              const props = a.transitionProperty ? [a.transitionProperty.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] : [...new Set(a.effect.getKeyframes().flatMap((k) => Object.keys(k)))].filter((k) => !['offset', 'computedOffset', 'easing', 'composite'].includes(k));
+              if (props.every((k) => paint.test(k))) continue;
+              const owner = a.effect.target;
+              const direct = els.some((el) => owner === el || owner.contains(el));
+              const reflows = !owner.ownerSVGElement && props.some((k) => !paint.test(k) && !['transform', 'translate', 'rotate', 'scale'].includes(k));
+              if (!direct && !(reflows && els.some((el) => el.contains(owner)))) continue;
+              const timing = a.effect.getComputedTiming();
+              blocking.push({ owner: label(owner), animation: a.animationName ?? a.transitionProperty ?? 'animation', properties: props, progress: timing.progress, endless: timing.endTime === Infinity });
+            }
+            const rects = els.map((el) => ({ owner: label(el), rect: ['x', 'y', 'width', 'height'].map((k) => el.getBoundingClientRect()[k]) }));
+            const changed = rects.flatMap((r, i) => JSON.stringify(r) === JSON.stringify(before[i]) ? [] : [{ owner: r.owner, before: before[i]?.rect ?? null, after: r.rect }]);
+            return { rects, blocking, changed, stable: els.length > 0 && before.length === rects.length && !changed.length && !blocking.some((a) => !a.endless) };
+          }, { selector, before });
+        })(),
+        new Promise((_, fail) => { timer = setTimeout(() => fail(new Error(`${selector} did not settle within ${timeout} ms: ${moving}`)), Math.max(0, end - Date.now())); }),
+      ]);
+      if (now.stable) return;
+      before = now.rects;
+      moving = JSON.stringify({ animations: now.blocking, rects: now.changed, ...(!now.rects.length && { missing: selector }) });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+}
+
 const SAVE = 'dbt.lantern.v1';
 const YOU = 'dbt.you.v1';
 const SEEN = JSON.stringify({ seenCutscene: true });
@@ -70,6 +130,7 @@ async function serve(host) {
 // they arrived, long tasks, gaps in a 100 ms timer (the main thread was busy) and the 3D stage's loop and frames, all on
 // the page's own clock. evidence() reads it back, so a page that froze for a while still tells what happened in it.
 function pageTrail() {
+  window.__e2eRaf = window.requestAnimationFrame.bind(window);
   if (window.__e2eTrail) return;
   const trail = (window.__e2eTrail = { ev: [], seen: {}, frames: 0, lastFrame: null });
   const add = (ev, extra, t = performance.now()) => {
@@ -211,7 +272,20 @@ export async function startHarness(flags = {}) {
         const t0 = Date.now();
         const ctx = await newContext({ timezoneId: ZONE, ...o });
         await ctx.addInitScript(pageTrail);
-        ctx.on('page', (page) => track(page, t0));
+        const throttle = flags['cpu-throttle'] ? Number(flags['cpu-throttle']) : 1;
+        const prepared = new WeakMap();
+        ctx.on('page', (page) => {
+          track(page, t0);
+          const ready = throttle === 1 ? Promise.resolve() : ctx.newCDPSession(page).then((cdp) => cdp.send('Emulation.setCPUThrottlingRate', { rate: throttle }));
+          prepared.set(page, ready);
+          ready.catch(() => {});
+        });
+        const newPage = ctx.newPage.bind(ctx);
+        ctx.newPage = async () => {
+          const page = await newPage();
+          await prepared.get(page);
+          return page;
+        };
         return ctx;
       };
       browsers.push(browser);
@@ -388,7 +462,7 @@ export async function startHarness(flags = {}) {
   })());
 
   const shared = {};
-  const lane = (browser) => ({ browser, server, out, flags, shared, renderer, zone: ZONE, open: opener(browser), evidence, evidenceAll: allEvidence(browser), note, leaves, shot, ls, youOf, deepFind, deepDrop, expect, sleep, reachHub, openSettings, SAVE, YOU, SEEN, stop, more });
+  const lane = (browser) => ({ browser, server, out, flags, shared, renderer, zone: ZONE, open: opener(browser), evidence, evidenceAll: allEvidence(browser), note, leaves, shot, ls, youOf, deepFind, deepDrop, expect, sleep, frames, settled, reachHub, openSettings, SAVE, YOU, SEEN, stop, more });
   /** Another browser on the same dev server, so scenarios can run side by side: its own profiles, the same `shared`. */
   async function more() {
     if (stopping) throw new Error('the harness is stopping');

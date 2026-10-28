@@ -743,7 +743,7 @@ export const scenarios = {
         while (s && !(s.scrollHeight > s.clientHeight && /auto|scroll/.test(getComputedStyle(s).overflowY))) s = s.parentElement;
         (s ?? document.scrollingElement).scrollBy(0, -((document.querySelector('.dq-top')?.getBoundingClientRect().bottom ?? 0) + 16));
       });
-      await h.sleep(250);
+      await h.settled(page, '.dq-keep, .dq-keep .dq-btn');
       const fit = await panel.evaluate((p) => {
         const box = p.getBoundingClientRect();
         const bad = [...p.querySelectorAll('.dq-keep-s, .dq-btn')]
