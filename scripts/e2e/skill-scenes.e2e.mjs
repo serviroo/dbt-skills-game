@@ -463,6 +463,8 @@ export const scenarios = {
     const [other] = await Promise.all([ctx.waitForEvent('page'), page.evaluate(() => void window.open('/?mute'))]);
     other.on('pageerror', (e) => errors.push('pageerror, other copy: ' + e.message));
     await h.openSettings(other);
+    // the copy with the scene is the one in view: a window left under another draws hardly any frames
+    await page.bringToFront();
     await other.getByRole('radio', { name: 'Motion: Reduced', exact: true }).click();
     s = await still('Reduced in another copy');
     await other.getByRole('radio', { name: 'Motion: Full', exact: true }).click();
