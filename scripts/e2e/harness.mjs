@@ -350,7 +350,14 @@ export async function startHarness(flags = {}) {
       const home = await page.locator('.dq-tile').first().isVisible().catch(() => false);
       if (!win && home) return;
       if (await page.locator('.dq-scrim.is-on').count()) await page.mouse.click(195, 700);
-      await sleep(400);
+      // the next look comes 400 ms on, or as soon as Home shows with no window over it
+      await page
+        .waitForFunction(() => {
+          const tile = document.querySelector('.dq-tile');
+          const home = !!tile && tile.getClientRects().length > 0 && getComputedStyle(tile).visibility !== 'hidden';
+          return home && ![...document.querySelectorAll('.dq-sw')].some((w) => !w.closest('.pwa-hint-layer'));
+        }, null, { timeout: 400 })
+        .catch(() => {});
     }
     await shot(page, 'fail-no-home');
     throw new Error('Home never appeared');

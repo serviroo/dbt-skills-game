@@ -14,17 +14,23 @@ export function bindClock(now: () => number) {
   clockNow = now;
 }
 
+let real = false;
 let realLoop = 0;
-/** Switch UI timing to the page clock with its own light rAF loop (used when the WebGL stage is stopped). */
+function realTick() {
+  realLoop = 0;
+  tickUI();
+  if (waiters.length) realLoop = requestAnimationFrame(realTick);
+}
+/**
+ * Switch UI timing to the page clock (used when the WebGL stage is stopped). Its rAF loop runs only while a wait() is
+ * pending, so a still screen costs nothing.
+ */
 export function useRealClock() {
-  if (params.capture || realLoop) return;
+  if (params.capture || real) return;
+  real = true;
   const base = performance.now() / 1000 - clockNow();
   clockNow = () => performance.now() / 1000 - base;
-  const loop = () => {
-    realLoop = requestAnimationFrame(loop);
-    tickUI();
-  };
-  realLoop = requestAnimationFrame(loop);
+  if (waiters.length) realLoop = requestAnimationFrame(realTick);
 }
 
 let stageTicks = false;
@@ -33,6 +39,7 @@ export function useStageClock(stage: Stage) {
   if (params.capture) return;
   cancelAnimationFrame(realLoop);
   realLoop = 0;
+  real = false;
   stage.time = clockNow();
   clockNow = () => stage.time;
   if (!stageTicks) stage.onUpdate(() => tickUI());
@@ -89,7 +96,10 @@ export function complete(a: Animation) {
 
 /** Resolves when the stage clock has advanced by `sec`. */
 export function wait(sec: number) {
-  return new Promise<void>((resolve) => waiters.push({ at: clockNow() + sec, resolve }));
+  return new Promise<void>((resolve) => {
+    waiters.push({ at: clockNow() + sec, resolve });
+    if (real && !realLoop) realLoop = requestAnimationFrame(realTick);
+  });
 }
 
 /** Resolves `ms` from now on the page clock (the stage clock in captures): for DOM states that must not wait on 3D frames. */
