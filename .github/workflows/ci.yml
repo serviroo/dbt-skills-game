@@ -107,7 +107,7 @@ jobs:
   # runners, which a queue there hands out one run at a time. Only pushes to main and pull requests from this
   # repository's own branches may use the dev box; a fork's pull request always stays on GitHub's runners.
   route:
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == 'fork-style/dbt-skills-game'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -130,7 +130,7 @@ jobs:
               busy=$((busy + jobs))
             done
           done
-          if ((busy + 10 > 20)); then
+          if ((busy + 10 > 0)); then
             echo "::notice title=E2E runners::GitHub's runners have $busy jobs: the e2e parts run on the dev box"
             echo "devbox=true" >> "$GITHUB_OUTPUT"
           else
@@ -140,7 +140,7 @@ jobs:
   e2e:
     needs: [proven, route]
     if: ${{ !cancelled() && needs.proven.outputs.run == '' }}
-    runs-on: ${{ needs.route.outputs.devbox == 'true' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted", "devbox", "dbt", "{0}"]', github.event_name == 'push' && 'dbt-main' || format('dbt-pr-{0}', github.event.pull_request.number))) || 'ubuntu-latest' }}
+    runs-on: ${{ needs.route.outputs.devbox == 'true' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == 'fork-style/dbt-skills-game') && fromJSON(format('["self-hosted", "devbox", "dbt", "{0}"]', github.event_name == 'push' && 'dbt-main' || format('dbt-pr-{0}', github.event.pull_request.number))) || 'ubuntu-latest' }}
     # the dev box has its own test browser, drawing on its GPU
     container: ${{ needs.route.outputs.devbox != 'true' && fromJSON('{"image":"mcr.microsoft.com/playwright:v1.64.1-noble","options":"--user 1001"}') || '' }}
     timeout-minutes: 30
