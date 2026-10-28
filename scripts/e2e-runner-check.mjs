@@ -95,6 +95,7 @@ try {
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { checkRenderer } from '../gl.mjs';
 const state = ${JSON.stringify(state)};
 function record(h) {
   const children = execFileSync('ps', ['-axo', 'pid=,ppid=,comm='], { encoding: 'utf8' }).trim().split(String.fromCharCode(10)).map((line) => line.trim().split(/\\s+/)).filter((fields) => Number(fields[1]) === process.pid && path.basename(fields[2]) !== 'ps').map((fields) => Number(fields[0]));
@@ -121,11 +122,26 @@ export const scenarios = {
     await h.shot(page, '${name}-clean');
     return { kept: [h.flags.probe] };
   },
+  async '${name}-masked-renderer'(h) {
+    record(h);
+    const { page } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', undefined, (ctx) => ctx.addInitScript(() => {
+      const get = WebGL2RenderingContext.prototype.getExtension;
+      WebGL2RenderingContext.prototype.getExtension = function (name) {
+        return name === 'WEBGL_debug_renderer_info' ? null : get.call(this, name);
+      };
+    }));
+    let error;
+    try { await checkRenderer(page); } catch (e) { error = e; }
+    h.expect(error?.message === 'WebGL renderer cannot be verified: WebKit WebGL', 'a masked renderer was not rejected: ' + error?.message);
+  },
 };
 `, { flag: 'wx' });
   const selected = await run('scenario-from-other-cwd', [`--scenario=${name}-clean`, '--probe=a=b']);
   assert.equal(selected.code, 0);
   assert.deepEqual(selected.report.scenarios.map((s) => [s.name, s.file, s.ok, s.result]), [[`${name}-clean`, name, true, { kept: ['a=b'] }]]);
+  const masked = await run('masked-renderer', [`--scenario=${name}-masked-renderer`]);
+  assert.equal(masked.code, 0);
+  assert.equal(masked.report.scenarios[0].ok, true);
   const failed = await run('failure-and-continuation', [`--file=${name}`, '--probe=a=b']);
   assert.notEqual(failed.code, 0);
   assert(failed.report.scenarios.some((s) => s.name === `${name}-fail` && !s.ok && /deliberate runner failure/.test(s.error)));

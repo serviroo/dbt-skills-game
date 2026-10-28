@@ -14,11 +14,12 @@ export function glArgs() {
 }
 
 export async function checkRenderer(page) {
-  const renderer = await page.evaluate(() => {
+  const { renderer, unmasked } = await page.evaluate(() => {
     const gl = document.createElement('canvas').getContext('webgl2');
     const info = gl?.getExtension('WEBGL_debug_renderer_info');
-    return gl ? String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER)) : 'no webgl';
+    return { renderer: gl ? String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER)) : 'no webgl', unmasked: !!info };
   });
+  if (!unmasked) throw new Error(`WebGL renderer cannot be verified: ${renderer}`);
   if (software()) {
     if (!/SwiftShader/i.test(renderer)) throw new Error(`--software requires SwiftShader; renderer: ${renderer}`);
   } else if (/SwiftShader|llvmpipe|softpipe|no webgl/i.test(renderer)) {
