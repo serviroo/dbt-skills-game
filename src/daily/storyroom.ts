@@ -6,15 +6,17 @@ import { animate } from '../ui/anim';
 import { cowrite } from '../cowriter/local';
 import type { CowriteReq, CowriteRes, CowriteTurn } from '../cowriter/types';
 import { BESIDE, CARE_KEY, READ_SIZES, type ReadSize } from '../core/stored-names';
-import { STORY_FIND, STORY_IMPORT, STORY_READ, STORY_START } from '../content/story-lines';
+import { STORY_DRAWING, STORY_FIND, STORY_IMPORT, STORY_READ, STORY_START } from '../content/story-lines';
 import { write } from '../core/cleared';
 import type { App, Route, ScreenOut, Visit } from './app';
 import { icon } from './art';
+import { artStore, type DrawingMeta } from './artstore';
+import { dayLabel } from './lines';
 import { dayDiff, dayKey } from './store';
 import { match, spans, terms, type Span } from './storyfind';
 import { creditStory, STORY_CAP, storyStore, type Card, type CardMode, type Chapter, type Story } from './storystore';
 import { storyFromText, storyToText, type StoryText } from './storytext';
-import { btn, h, p, segmented, shareOrSave } from './ui';
+import { btn, h, p, segmented, shareOrSave, typo } from './ui';
 
 export const STORY = {
   title: 'Story Room',
@@ -75,6 +77,39 @@ export function storyMeta(app: App, s: Story) {
   return `${n} chapter${n === 1 ? '' : 's'}, ${editedWhen(app, s.updated)}`;
 }
 const shownTitle = (t: string) => t.trim() || STORY.untitled;
+
+/** What a drawing is called: its own name, else what the Art room calls it. */
+const drawingName = (m: DrawingMeta) => typo(m.name?.trim() || (m.kind === 'ally' ? STORY_DRAWING.ally : STORY_DRAWING.page(dayLabel(m.day))));
+/** The drawing above each page of the story that this device holds, by chapter id. One gone or kept elsewhere is simply not here. */
+async function drawingsOf(app: App, s: Story) {
+  const out = new Map<string, DrawingMeta>();
+  if (!s.drawings) return out;
+  const list = await artStore(app.store.key)
+    .list()
+    .catch((): DrawingMeta[] => []);
+  for (const [c, id] of Object.entries(s.drawings)) {
+    const m = list.find((x) => x.id === id);
+    if (m) out.set(c, m);
+  }
+  return out;
+}
+/** A drawing's picture, filled in once it is ready; `box` is taken away when there is no picture to show. */
+function drawingImg(app: App, m: DrawingMeta, alt: string, box?: HTMLElement) {
+  const img = h('img', { class: 'st-pic-img', alt, decoding: 'async', draggable: 'false' });
+  void artStore(app.store.key)
+    .thumbUrl(m)
+    .then(
+      (u) => (u ? (img.src = u) : box?.remove()),
+      () => box?.remove(),
+    );
+  return img;
+}
+/** A drawing above a chapter of the story they read, at its own shape. */
+function drawingFig(app: App, m: DrawingMeta) {
+  const fig = h('figure', { class: `st-read-pic st-pic--${m.kind}` });
+  fig.append(drawingImg(app, m, drawingName(m), fig));
+  return fig;
+}
 /** The player's text as text nodes, with each span in a mark: nothing in it is ever read as markup. */
 const marked = (text: string, at: Span[], place?: Span) => {
   const out: Node[] = [];
@@ -571,7 +606,12 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     h('span', { class: 'st-start-ic', 'aria-hidden': 'true', html: icon('pencil') }),
     h('span', { text: STORY_START.ask }),
   );
-  const start = h('div', { class: 'st-start' }, startBtn, startBox);
+  // ---- a drawing of theirs above the page: picked beside the starting point, shown in full when they read ----
+  const picIc = h('span', { class: 'st-start-ic', 'aria-hidden': 'true', html: icon('image') });
+  const picThumb = h('span', { class: 'st-pic-thumb is-hidden', 'aria-hidden': 'true' });
+  const picT = h('span', { class: 'st-pic-t', text: STORY_DRAWING.add });
+  const picBtn = h('button', { type: 'button', class: 'st-start-tg st-pic-b', 'aria-haspopup': 'dialog', onclick: () => void openDrawings() }, picIc, picThumb, picT);
+  const start = h('div', { class: 'st-start' }, startBtn, picBtn, startBox);
 
   // ---- the page ----
   const ta = h('textarea', { class: 'st-ta', maxlength: STORY_CAP.text, spellcheck: 'true', autocapitalize: 'sentences', autocomplete: 'off', 'aria-label': 'Your page', placeholder: 'Start anywhere.', rows: 8 }) as HTMLTextAreaElement;
@@ -907,6 +947,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     frame.classList.toggle('is-notes', tab === 'notes');
     start.classList.toggle('is-hidden', tab === 'notes');
     if (tab === 'notes') closeStart();
+    void showPic();
     const hh = hist.get(c.id);
     if (hh) hh.base = { text, s: text.length, e: text.length };
     syncSeg();
@@ -978,13 +1019,28 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   // ---------- chapter sheet ----------
   let sheet: HTMLElement | null = null;
   let sheetDone: (() => void) | null = null;
+  /** where focus goes back to once the sheet closes */
+  let sheetFrom: HTMLElement = chBtn;
   const closeSheet = () => {
     if (!sheet) return;
     sheet.remove();
     sheet = null;
     sheetDone?.();
     sheetDone = null;
-    if (chBtn.isConnected) chBtn.focus({ preventScroll: true });
+    const back = sheetFrom;
+    sheetFrom = chBtn;
+    if (back.isConnected) back.focus({ preventScroll: true });
+  };
+  const showSheet = (wrap: HTMLElement, body: HTMLElement) => {
+    wrap.addEventListener('click', (e) => {
+      if (e.target === wrap) closeSheet();
+    });
+    wrap.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') (e.stopPropagation(), closeSheet());
+    });
+    app.sheetLayer.append(wrap);
+    sheetDone = app.sheet(closeSheet);
+    if (!app.reduced()) animate(body, [{ opacity: 0, transform: 'translateY(16px)' }, { opacity: 1, transform: 'none' }], { duration: 280, easing: 'cubic-bezier(.16,1,.3,1)' });
   };
   const openChapters = async () => {
     await flushAll();
@@ -1093,20 +1149,74 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
       list,
       h('div', { class: 'dq-actions st-sheet-acts' }, btn('New chapter', () => void addNew(), { kind: 'quiet', ic: 'plus' })),
     );
-    wrap.addEventListener('click', (e) => {
-      if (e.target === wrap) closeSheet();
-    });
-    wrap.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') (e.stopPropagation(), closeSheet());
-    });
     await render();
     // the player may have left while the list loaded (Back, the Safe Zone), or opened it again: the sheet layer outlives
     // this screen, so a late sheet would open over the next one, and its Back entry would land on the next screen too
     if (!alive || sheet !== wrap) return;
-    app.sheetLayer.append(wrap);
-    sheetDone = app.sheet(closeSheet);
-    if (!app.reduced()) animate(body, [{ opacity: 0, transform: 'translateY(16px)' }, { opacity: 1, transform: 'none' }], { duration: 280, easing: 'cubic-bezier(.16,1,.3,1)' });
+    showSheet(wrap, body);
     list.querySelector<HTMLElement>('[aria-current="true"]')?.focus({ preventScroll: true });
+  };
+
+  // ---------- a drawing above the page ----------
+  /** every look at the open page's drawing takes a number, and only the newest one shows */
+  let picTurn = 0;
+  const showPic = async () => {
+    const turn = ++picTurn;
+    const at = cur?.kind === 'page' ? cur.id : '';
+    const s = at ? await ss.story(storyId) : null;
+    const m = s ? (await drawingsOf(app, s)).get(at) : undefined;
+    if (turn !== picTurn || !alive) return;
+    picThumb.replaceChildren(...(m ? [drawingImg(app, m, '')] : []));
+    picThumb.classList.toggle('is-hidden', !m);
+    picIc.classList.toggle('is-hidden', !!m);
+    picT.textContent = m ? STORY_DRAWING.change : STORY_DRAWING.add;
+    // the name they see first, then which drawing it is
+    if (m) picBtn.setAttribute('aria-label', `${STORY_DRAWING.change}, ${drawingName(m)}`);
+    else picBtn.removeAttribute('aria-label');
+  };
+  const placeDrawing = async (id: string | null) => {
+    const at = cur?.kind === 'page' ? cur.id : '';
+    closeSheet();
+    if (!at) return;
+    await ss.setDrawing(storyId, at, id);
+    await showPic();
+  };
+  const openDrawings = async () => {
+    const at = cur?.kind === 'page' ? cur.id : '';
+    if (!at) return;
+    const [list, s] = await Promise.all([artStore(app.store.key).list().catch((): DrawingMeta[] => []), ss.story(storyId)]);
+    if (!alive || cur?.id !== at) return;
+    closeSheet();
+    const placed = s?.drawings?.[at];
+    const body = h('div', { class: 'dq-panel dq-sheet-p st-chsheet st-picks', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'st-pick-h' });
+    const wrap = h('div', { class: 'dq-sheet st-sheet' }, body);
+    sheet = wrap;
+    sheetFrom = picBtn;
+    const toArt = async () => {
+      closeSheet();
+      await flushAll();
+      if (alive) app.go({ name: 'art' });
+    };
+    body.append(
+      h('div', { class: 'st-sheet-top' }, h('h2', { class: 'dq-sheet-h', id: 'st-pick-h', text: STORY_DRAWING.pick }), h('button', { type: 'button', class: 'dq-icbtn st-sheet-x', 'aria-label': STORY_DRAWING.close, html: icon('close'), onclick: closeSheet })),
+      list.length
+        ? h(
+            'div',
+            { class: 'st-picks-grid' },
+            list.map((m) =>
+              h(
+                'button',
+                { type: 'button', class: 'st-pick', 'aria-current': m.id === placed ? 'true' : null, onclick: () => void placeDrawing(m.id) },
+                h('span', { class: `st-pick-img st-pic--${m.kind}` }, drawingImg(app, m, '')),
+                h('span', { class: 'st-pick-t', text: drawingName(m) }),
+              ),
+            ),
+          )
+        : h('div', { class: 'st-picks-none' }, p(STORY_DRAWING.none, 'dq-text'), h('div', { class: 'dq-actions st-sheet-acts' }, btn(STORY_DRAWING.toArt, () => void toArt(), { kind: 'quiet', ic: 'brush' }))),
+      ...(list.some((m) => m.id === placed) ? [h('div', { class: 'dq-actions st-sheet-acts' }, btn(STORY_DRAWING.remove, () => void placeDrawing(null), { kind: 'quiet', ic: 'close' }))] : []),
+    );
+    showSheet(wrap, body);
+    (body.querySelector<HTMLElement>('.st-pick[aria-current="true"]') ?? body.querySelector<HTMLElement>('.st-pick, .st-picks-none .dq-btn'))?.focus({ preventScroll: true });
   };
   const renameChapter = async (id: string, title: string) => {
     if (cur && cur.id === id) {
@@ -1916,11 +2026,19 @@ export function readScreen(app: App, route: Route): ScreenOut {
     if (!alive) return;
     const shown = chs.flatMap((c, i) =>
       c && c.text.trim()
-        ? [{ i, sec: h('section', { class: 'st-read-ch', 'data-id': c.id }, h('h2', { class: 'st-read-ch-h', text: c.title.trim() || `Chapter ${i + 1}` }), h('div', { class: 'st-read-text', text: c.text.trimEnd() })) }]
+        ? [{ i, id: c.id, sec: h('section', { class: 'st-read-ch', 'data-id': c.id }, h('h2', { class: 'st-read-ch-h', text: c.title.trim() || `Chapter ${i + 1}` }), h('div', { class: 'st-read-text', text: c.text.trimEnd() })) }]
         : [],
     );
     if (!shown.length) return body.replaceChildren(h('p', { class: 'st-read-empty', text: STORY_READ.empty }));
     body.replaceChildren(...shown.map((x) => x.sec));
+    // the words come first; each drawing joins above its chapter once found, its room kept by its shape
+    void drawingsOf(app, s).then((by) => {
+      if (!alive) return;
+      for (const x of shown) {
+        const m = by.get(x.id);
+        if (m) x.sec.prepend(drawingFig(app, m));
+      }
+    });
     // an empty chapter isn't shown, so Read from one (a chapter just added) opens at the nearest chapter before it; only
     // chapter 1 opens at the top of the page, so a chapter 2 that comes first (chapter 1 has no words yet) is placed too
     const from = r.ch ? s.chapters.indexOf(r.ch) : -1;

@@ -1079,6 +1079,11 @@
   max-width: calc(70ch + 2px);
   margin: 10px auto 0;
   font: 400 19px/1.7 var(--font-display);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  column-gap: 8px;
 }
 .st-start-tg {
   display: inline-flex;
@@ -1109,6 +1114,7 @@
   color: var(--accent);
 }
 .st-start-box {
+  flex: 1 1 100%;
   margin: 4px 0 2px;
   padding: 14px 16px 16px;
   border-left: 2px solid rgba(168, 220, 255, 0.5);
@@ -1147,6 +1153,96 @@
     flex: none;
     margin-top: 0;
   }
+}
+
+/* ---------- one of their drawings above a page: a calm size, never in the way of the words ---------- */
+.st-pic-b {
+  min-width: 44px;
+  justify-content: center;
+}
+.st-pic-thumb,
+.st-read-pic,
+.st-pick-img {
+  display: block;
+  flex: none;
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  aspect-ratio: 3 / 4;
+  border: 1px solid;
+  border-color: rgba(143, 180, 225, 0.5) rgba(54, 66, 87, 0.95) rgba(54, 66, 87, 0.95) rgba(143, 180, 225, 0.5);
+  border-radius: 3px;
+  background: #07080f;
+}
+.st-pic--ally {
+  aspect-ratio: 5 / 7;
+}
+.st-pic-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.st-read-pic {
+  height: min(280px, 40vh);
+  margin: 0 auto 1em;
+}
+.st-pic-thumb {
+  height: 34px;
+  border-radius: 2px;
+}
+/* a small phone keeps the starting point and the drawing on one line: there the drawing's button shows its picture */
+@media (max-width: 359px) {
+  .st-pic-t {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+.st-picks-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 14px 12px;
+  align-items: start;
+  padding-top: 12px;
+  border-top: 1px solid rgba(62, 100, 133, 0.36);
+}
+.st-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 0;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.st-pick-img {
+  width: 100%;
+  transition: border-color 0.2s;
+}
+.st-pick:hover .st-pick-img {
+  border-color: rgba(175, 215, 245, 0.85);
+}
+.st-pick[aria-current='true'] .st-pick-img {
+  border-color: #a8dcff;
+  box-shadow: 0 0 0 1px #a8dcff;
+}
+.st-pick-t {
+  padding-left: 2px;
+  font-size: 16px;
+  line-height: 1.3;
+  color: var(--t-dim);
+  overflow-wrap: anywhere;
+}
+.st-pick[aria-current='true'] .st-pick-t {
+  color: #e6f1ff;
 }
 
 /* ---------- reading ---------- */

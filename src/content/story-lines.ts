@@ -69,3 +69,16 @@ export const STORY_FIND = {
   here: 'What you searched for is marked on the page.',
   more: (n: number) => `Show ${n} more ${n === 1 ? 'place' : 'places'} in this story`,
 };
+
+/** One of their own drawings from the Art room, placed above a chapter. */
+export const STORY_DRAWING = {
+  add: 'Add a drawing',
+  change: 'Change drawing',
+  remove: 'Remove drawing',
+  pick: 'Pick a drawing',
+  close: 'Close the drawings',
+  none: 'No drawings yet. Anything you draw in the Art room can sit above a chapter.',
+  toArt: 'Go to the Art room',
+  ally: 'Shadow ally',
+  page: (day: string) => `Your page from ${day}`,
+};
