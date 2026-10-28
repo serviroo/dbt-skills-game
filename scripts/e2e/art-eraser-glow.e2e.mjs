@@ -20,6 +20,8 @@ export async function drawPage(h, page) {
   await page.getByRole('button', { name: /^Draw today/ }).click();
   await page.locator('.dq-ink-live').waitFor();
   await page.waitForFunction(() => window.__daily?.ink && !document.querySelector('.dq-ink-stage')?.inert);
+  // the page takes input while its screen is still sliding in: strokes aimed by the page's box wait until it rests
+  await page.waitForFunction(() => !document.querySelector('.dq-draw')?.getAnimations().some((a) => a.playState === 'running'));
 }
 /** A mouse stroke between two points given as fractions of the page. */
 export async function line(page, a, b) {
