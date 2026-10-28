@@ -1089,8 +1089,9 @@ export const scenarios = {
     await home(h, page);
     await page.evaluate(() => window.__daily.go({ name: 'moment' }));
     await live(h, page, 'moment end', '.dq-mo-stage');
-    await h.pauseClock(page);
+    // chosen while time runs: a welcome that leaving Home closed takes taps until its collapse ends
     await page.getByRole('radiogroup', { name: 'How long' }).getByRole('radio', { name: '1 minute' }).check();
+    await h.pauseClock(page);
     await page.clock.runFor(2000);
     const on = await scenes(page);
     h.expect(on.last.probe.breath > 0.05, `moment end: the light was not breathing before the end (${JSON.stringify(on.last)})`);
