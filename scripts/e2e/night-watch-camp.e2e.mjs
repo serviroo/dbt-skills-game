@@ -2,7 +2,8 @@
 // with everyone who has arrived (and only them); a tap or the keyboard on a watcher opens their own card, name field
 // and all, while the Safe Zone stays one tap away and takes the camp down; one still frame with reduced motion; the
 // roster as before with no WebGL; one WebGL context however often it opens; back after a lost context; every part of
-// every watcher where the model file puts it; an old save.
+// every watcher where the model file puts it; an old save; no :has(); a failed load retried on the next visit;
+// a card opened during the page's entrance; a late chapter list stays closed after leaving.
 import { fileURLToPath } from 'node:url';
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
@@ -107,7 +108,6 @@ async function buttons(h, page, ids, where) {
   return got.btns;
 }
 
-
 /**
  * Holds the n-th read of the stories store from now on: a write transaction on the same stores is started just before it
  * and kept busy, so the read waits behind it until window.__release(). window.__held says the hold is on,
@@ -155,7 +155,6 @@ const settleThrowsOnce = () => {
 };
 
 export const scenarios = {
-
   /**
    * The chapter list loads from IndexedDB before its sheet opens. Left in that moment (here for the Safe Zone), the sheet
    * never opens: the sheet layer outlives the page, so a late one would cover "Talk to someone now".
@@ -498,7 +497,6 @@ export const scenarios = {
     await ctx.close();
   },
 
-  /** an old save, before flags, settings and names existed, with six visit days: the camp has Sable, Anvil and Bramble */
   /**
    * Every part of every watcher stands in camp where the model file puts it. The file's positions are quantized and
    * the packer shares identical geometry between figures (the knights' eyes), so a part put back in place for one
@@ -526,6 +524,7 @@ export const scenarios = {
     await ctx.close();
   },
 
+  /** an old save, before flags, settings and names existed, with six visit days: the camp has Sable, Anvil and Bramble */
   async 'camp-old-save'(h) {
     const now = Date.now();
     const raw = JSON.stringify({ v: 1, events: Array.from({ length: 6 }, (_, i) => ({ id: `old-v${i}`, k: 'visit', xp: 10, t: now - (i + 1) * 864e5, day: dayKey(now - (i + 1) * 864e5) })) });

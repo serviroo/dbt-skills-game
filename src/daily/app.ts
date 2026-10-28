@@ -715,8 +715,7 @@ export class App {
         duration: this.reduced() ? WINDOW.reducedFadeMs : 300,
         easing: 'cubic-bezier(.16,1,.3,1)',
       });
-      // once the page has arrived it keeps no transform, so a sheet fixed inside it (a card, a chapter list) sits on the
-      // screen and not on the page
+      // drop the entrance transform so fixed elements inside the page (the story co-writer) sit on the screen
       a.finished.then(() => a.cancel(), () => {});
     }
     const focus = out.el.querySelector<HTMLElement>('[data-focus]') ?? out.el.querySelector<HTMLElement>('h1');
