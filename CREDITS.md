@@ -37,6 +37,12 @@ Both are self-hosted and subset by `scripts/fonts.mjs`.
 - The river stone in Wise Mind's calm scene (`public/models/stone.glb`): modelled, textured and baked in Blender for
   this game, then packed with its colour, roughness and normal maps as WebP.
 
+## Skies
+
+Home's four skies (`public/sky/`) are original, made for this project in Blender: one sky and three ridges of hills
+with mist between them, lit for dawn, day, dusk and night, then graded and sized for phones and desktops. No photos
+or outside assets went into them.
+
 ## Made in code for this project
 
 - Every other 3D scene (the gate, the knight, the Night Watch, the chest, rubble, smoke and particles), built from

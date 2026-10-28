@@ -29,10 +29,7 @@
   scroll-padding: calc(var(--dq-top, 0px) + var(--top-shade)) 0 var(--dq-foot, 0px);
   -webkit-overflow-scrolling: touch;
   pointer-events: auto;
-  background:
-    radial-gradient(120% 60% at 50% -10%, rgba(20, 52, 92, 0.42), transparent 60%),
-    radial-gradient(90% 50% at 50% 115%, rgba(16, 38, 70, 0.35), transparent 70%),
-    #07080f;
+  background: #07080f;
   color: var(--t-body);
   font-family: var(--font-ui);
   font-size: 17px;
@@ -44,6 +41,79 @@
   user-select: none;
   scrollbar-width: thin;
   scrollbar-color: rgba(125, 150, 197, 0.35) transparent;
+}
+/* ---------- sky (src/daily/sky.ts) ----------
+   A picture per mood, stacked with night at the bottom: night is what every screen shows, and Home fades its mood's
+   picture in over it. Tall pictures for portrait screens, wide ones for landscape, each anchored at the top, where the
+   sky is, with the ground fading into the void below. */
+.dq-sky {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: #07080f;
+}
+.dq-sky > i {
+  position: absolute;
+  inset: 0;
+  background: none center top / cover no-repeat;
+  opacity: 0;
+  transition: opacity var(--sky-ms, 0ms) ease-in-out;
+}
+.dq-sky > .dq-sky-night {
+  opacity: 1;
+  transition: none;
+  background-image: url('/sky/night-tall.webp');
+}
+.dq-sky > .dq-sky-dawn {
+  background-image: url('/sky/dawn-tall.webp');
+}
+.dq-sky > .dq-sky-day {
+  background-image: url('/sky/day-tall.webp');
+}
+.dq-sky > .dq-sky-dusk {
+  background-image: url('/sky/dusk-tall.webp');
+}
+@media (min-aspect-ratio: 1/1) {
+  .dq-sky > .dq-sky-night {
+    background-image: url('/sky/night-wide.webp');
+  }
+  .dq-sky > .dq-sky-dawn {
+    background-image: url('/sky/dawn-wide.webp');
+  }
+  .dq-sky > .dq-sky-day {
+    background-image: url('/sky/day-wide.webp');
+  }
+  .dq-sky > .dq-sky-dusk {
+    background-image: url('/sky/dusk-wide.webp');
+  }
+}
+/* the mood before stays whole under the new one until that has come in, then goes */
+.dq[data-sky-was='dawn'] .dq-sky > .dq-sky-dawn,
+.dq[data-sky-was='day'] .dq-sky > .dq-sky-day,
+.dq[data-sky-was='dusk'] .dq-sky > .dq-sky-dusk {
+  z-index: 1;
+  transition: opacity 0s linear var(--sky-ms, 0ms);
+}
+.dq[data-sky='dawn'] .dq-sky > .dq-sky-dawn,
+.dq[data-sky='day'] .dq-sky > .dq-sky-day,
+.dq[data-sky='dusk'] .dq-sky > .dq-sky-dusk {
+  z-index: 2;
+  opacity: 1;
+  transition: opacity var(--sky-ms, 0ms) ease-in-out;
+}
+/* the top bar's backdrop: the same sky over the page, cut to the bar and its shade, with the vignette on it */
+.dq-sky-top {
+  z-index: 5;
+  -webkit-mask-image: linear-gradient(180deg, #000 var(--dq-top, 0px), transparent calc(var(--dq-top, 0px) + var(--top-shade)));
+  mask-image: linear-gradient(180deg, #000 var(--dq-top, 0px), transparent calc(var(--dq-top, 0px) + var(--top-shade)));
+}
+.dq-sky-top::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background: radial-gradient(130% 90% at 50% 45%, transparent 55%, rgba(3, 4, 9, 0.55) 100%);
 }
 .dq::-webkit-scrollbar {
   width: 8px;
@@ -113,22 +183,19 @@
   padding: calc(var(--safe-top) + 8px) max(12px, var(--safe-right)) 4px max(12px, var(--safe-left));
   margin-bottom: 6px;
 }
+/* the themes paint their own backdrop behind the bar (wave2.css); the classic look uses the sky's copy, .dq-sky-top */
 .dq-top::after {
-  content: '';
   position: absolute;
   inset: 0 0 calc(-1 * var(--top-shade));
   z-index: -1;
   pointer-events: none;
   --vig: radial-gradient(130% 90vh at 50% 45vh, transparent 55%, rgba(3, 4, 9, 0.55) 100%);
-  --glow: radial-gradient(120% 60vh at 50% -10vh, rgba(20, 52, 92, 0.42), transparent 60%);
-  background: var(--vig), var(--glow), #07080f;
   -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - var(--top-shade)), transparent);
   mask-image: linear-gradient(180deg, #000 calc(100% - var(--top-shade)), transparent);
 }
 @supports (height: 1dvh) {
   .dq-top::after {
     --vig: radial-gradient(130% 90dvh at 50% 45dvh, transparent 55%, rgba(3, 4, 9, 0.55) 100%);
-    --glow: radial-gradient(120% 60dvh at 50% -10dvh, rgba(20, 52, 92, 0.42), transparent 60%);
   }
 }
 .dq-top > :last-child {
@@ -1145,7 +1212,7 @@ textarea.dq-input {
   font-weight: 500;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--t-faint);
+  color: var(--t-dim);
 }
 .dq-gift-t {
   font-size: 16px;
@@ -1385,7 +1452,7 @@ textarea.dq-input {
 }
 .dq-quest-foot {
   font-size: 16px;
-  color: var(--t-faint);
+  color: var(--t-dim);
   text-align: center;
 }
 .dq-quest-alt {

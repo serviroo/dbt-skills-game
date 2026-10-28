@@ -120,7 +120,7 @@
 }
 .dq-chest-s {
   font-size: 13px;
-  color: var(--t-faint);
+  color: var(--t-dim);
 }
 .dq-chest:hover .dq-chest-t {
   color: #f1dcaa;

@@ -118,6 +118,14 @@ export const SCORE = {
   safeBackSec: 3,
 } as const;
 
+/** Home's sky (src/daily/sky.ts): a slow drift when the hour turns while Home is open, a short fade in and out */
+export const SKY = {
+  driftMs: 8000,
+  fadeMs: 900,
+  /** how often an open Home looks at the clock */
+  checkMs: 30000,
+} as const;
+
 export const GATE = {
   /** cutscene seconds from the start of beat 1 (measured, pacing f0052-f0084) */
   plateFadeAtSec: 1.7,
