@@ -110,7 +110,8 @@ async function sealedUntil(): Promise<void> {
   await new Promise(() => undefined);
 }
 
-export async function runApp(stage: Stage | null) {
+/** `stage` is the 3D stage when boot made one up front (labs, captures); `makeStage` makes it, null without WebGL. */
+export async function runApp(stage: Stage | null, makeStage: () => Stage | null) {
   await sealedUntil();
   const state = load();
   if (params.fresh) state.seenCutscene = false;
@@ -133,7 +134,12 @@ export async function runApp(stage: Stage | null) {
       .catch(() => undefined);
 
   const wantCutscene = !state.seenCutscene || !!params.shot || params.cutscene;
-  if (wantCutscene) await (stage ? playIntro(stage, audio, state) : playWithoutStage(audio, state));
+  // only the intro draws on the 3D stage: the companion is DOM only (its small scenes bring their own renderer), so a
+  // returning player never sets up WebGL for it
+  if (wantCutscene) {
+    stage ??= makeStage();
+    await (stage ? playIntro(stage, audio, state) : playWithoutStage(audio, state));
+  }
   await enterDaily(stage, audio, state);
 }
 

@@ -282,6 +282,8 @@ try {
       expect(res?.status() === 200, `${q} answered HTTP ${res?.status()}`);
       await ready(page);
       if (!q.includes('lab=')) {
+        // the app makes the 3D stage for the intro just before the title shows
+        await page.locator('.title-screen').waitFor({ timeout: 30000 });
         const model = await page.evaluate(() => !!window.__stage)
           ? page.waitForResponse((r) => new URL(r.url()).pathname.endsWith('/models/hero.glb'), { timeout: 30000 })
           : null;
