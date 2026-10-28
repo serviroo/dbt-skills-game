@@ -7,11 +7,10 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-// not spawnSync: scenarios run side by side in this process, and a draw would stall them all for the 20 s it takes
+// not spawnSync: scenarios run side by side in this process, and a draw would stall them all for the 20 s it takes. A
+// failed draw rejects with execFile's own error, whose message carries the child's stderr, so the report shows why
 const draw = (out, ...extra) =>
-  promisify(execFile)(process.execPath, [path.join(root, 'scripts/icons.mjs'), `--out=${out}`, '--only=icons', '--quiet', ...extra], { cwd: root, encoding: 'utf8' }).catch((e) => {
-    throw Object.assign(new Error(`icons.mjs exited ${e.code}`), { stderr: e.stderr });
-  });
+  promisify(execFile)(process.execPath, [path.join(root, 'scripts/icons.mjs'), `--out=${out}`, '--only=icons', '--quiet', ...extra], { cwd: root, encoding: 'utf8' });
 const hashes = (dir) => {
   const out = {};
   const walk = (d) => {
