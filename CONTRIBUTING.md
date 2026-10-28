@@ -58,10 +58,14 @@ node scripts/e2e-runner-check.mjs
 The PWA checks test the build in `dist/`. `pwa-verify` runs in both Chromium and WebKit; on a machine where WebKit
 can't run, add `--browser=chromium`.
 
-`scripts/e2e.mjs` starts its own dev server and a Playwright Chromium, runs every scenario in `scripts/e2e/*.e2e.mjs`
-and saves screenshots and `report.json` to `artifacts/e2e/<time>/`. It exits non-zero if any scenario fails. CI runs
-the same checks on every pull request. For anything visual, also look at it in a browser at phone width (390 and
-320 px) with motion on and off.
+`scripts/e2e.mjs` starts its own dev server and Playwright Chromium, runs every scenario in `scripts/e2e/*.e2e.mjs`
+and saves screenshots and `report.json` to `artifacts/e2e/<time>/`. It exits non-zero if any scenario fails. Scenarios
+run side by side, longest first, each in a browser of its own: `--jobs=<n>` browsers, by default one for every 4 of the
+machine's CPU threads and at most 4, so one on CI's 4-vCPU runners. CI runs the same checks on every pull request and
+splits the scenarios into parts with `--shard=<i>/<n>`, spread by the seconds each one took on CI, kept in
+`scripts/e2e/timings.json`. A scenario not listed there counts as 15 s; after adding a long one, refresh the file from
+a CI run's `e2e-*` artifacts with `node scripts/e2e-timings.mjs <every part's report.json>`. For anything visual, also
+look at it in a browser at phone width (390 and 320 px) with motion on and off.
 
 ### E2E scenarios
 
@@ -79,21 +83,25 @@ export const scenarios = {
 };
 ```
 
-Scenario names must be unique across all files. If two match, the runner stops before it starts anything. Files run in
-name order, and each file's scenarios run in the order they are written. Every scenario gets the same `h` object from
-`scripts/e2e/harness.mjs`:
+Scenario names must be unique across all files. If two match, the runner stops before it starts anything. Scenarios
+from every file run side by side in no fixed order, so a scenario must not count on another one having run or not run
+yet. A file whose scenarios must run in the order they are written, one at a time, exports `serial = true`. Every
+scenario gets an `h` object from `scripts/e2e/harness.mjs`, the same but for `browser` and `open` in each browser:
 
 - `open(seed?, query = '?mute', viewport = 390x844)`: a fresh browser profile with `seed` written to localStorage
   first. Returns `{ ctx, page, errors }`; close `ctx` when done.
 - `reachHub(page)`, `openSettings(page)`: tap through to Home or the Settings screen.
-- `shot(page, name)`: a screenshot in the run's folder (`out`). Start the name with your file's name.
+- `shot(page, name)`: a screenshot in the run's folder (`out`). Start the name with your file's name, and give
+  whatever a scenario writes there a name no other scenario uses, as they run at once.
 - `ls(page, key)`, `youOf(page)`, `deepFind(obj, key)`, `deepDrop(obj, keys)`, `expect(cond, msg)`, `sleep(ms)`.
 - `SAVE`, `YOU`, `SEEN`: the save key, the names key and an app state that skips the intro.
-- `browser`, `server.url`, `flags`, and `shared`, an object scenarios can use to pass results to later ones.
-- `out`, the run's artifact folder; `renderer`, the WebGL renderer; `stop()`, which closes the browser and server.
+- `browser`, `server.url`, `flags`, and `shared`, one object for the whole run, for a result worth making once (a
+  build, the content). Store a promise in it (`shared.x ??= make()`) so scenarios running at once share one. A file
+  that passes results from one scenario to the next must be serial.
+- `out`, the run's artifact folder; `renderer`, the WebGL renderer; `stop()`, which closes every browser and the server.
 
-The runner closes any remaining browser profiles after each scenario, including failures. A scenario should also
-work on its own: create any fixture it needs when an earlier scenario has not run. Whatever a scenario returns is kept
+The runner closes any remaining browser profiles in a scenario's browser after it, including failures. A scenario
+should also work on its own: create any fixture it needs when an earlier scenario has not run. Whatever a scenario returns is kept
 as its `result` in `report.json`.
 
 ### Phone layout

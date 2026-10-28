@@ -25,6 +25,9 @@ async function saveCrystal({ open, openSettings, out, shared, expect, deepFind, 
   return file;
 }
 
+// Later scenarios pick up the names and save an earlier one left in `shared`, and the Save Crystal goes to one file.
+export const serial = true;
+
 export const scenarios = {
   /** first run: the prompt appears after the title, the chosen names are stored and used in the intro */
   async 'first-run'({ open, sleep, shot, youOf, expect, leaves, out, shared }) {

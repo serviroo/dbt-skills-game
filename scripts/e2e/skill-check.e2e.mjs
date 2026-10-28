@@ -217,6 +217,24 @@ const onScreen = (page) =>
     };
   });
 
+/** Start brings the timer into view with a smooth scroll, which takes longer on a busy machine: wait until the timer has
+ * stayed put for 20 frames and half a second (at most 10 s) before reading what is on screen. */
+const scrolled = (page) =>
+  page.evaluate(() => new Promise((done) => {
+    const at = () => document.querySelector('.dq-step-body .dq-timer')?.getBoundingClientRect().top;
+    const t0 = performance.now();
+    let last = at();
+    let still = 0;
+    const tick = () => {
+      const y = at();
+      still = y === last ? still + 1 : 0;
+      last = y;
+      if ((still >= 20 && performance.now() - t0 >= 500) || performance.now() - t0 > 10000) done();
+      else requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }));
+
 async function insteadProblems(h, risky) {
   const out = {};
   for (const vp of [PHONE, SIDEWAYS, SMALL]) {
@@ -251,7 +269,7 @@ async function insteadProblems(h, risky) {
         }
         if (found.start) {
           await page.locator('.dq-step-body .dq-timer .dq-actions .dq-btn--primary').first().click();
-          await page.waitForTimeout(900);
+          await scrolled(page);
           const running = await onScreen(page);
           if (!running.countdown) bad.add(`${where}: after Start the countdown is off screen at ${size}`);
           if (!running.next) bad.add(`${where}: after Start, Next is off screen at ${size}`);

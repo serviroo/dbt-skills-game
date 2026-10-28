@@ -9,6 +9,7 @@ const name = `runner-check-${process.pid}`;
 const out = path.join(root, 'artifacts/e2e', `${name}-${Date.now()}`);
 const fixture = path.join(root, 'scripts/e2e', `${name}.e2e.mjs`);
 const duplicate = path.join(root, 'scripts/e2e', `${name}-duplicate.e2e.mjs`);
+const side = path.join(root, 'scripts/e2e', `${name}-side.e2e.mjs`);
 const state = path.join(out, 'state.json');
 const results = [];
 fs.mkdirSync(out, { recursive: true });
@@ -61,6 +62,7 @@ function record(h) {
   fs.writeFileSync(state, JSON.stringify(saved));
   h.browser.once('disconnected', () => fs.writeFileSync(state, JSON.stringify({ ...saved, disconnected: true })));
 }
+export const serial = true;
 export const scenarios = {
   async '${name}-fail'(h) {
     record(h);
@@ -117,7 +119,36 @@ export const scenarios = {
   const missing = await run('missing-file', ['--file=does-not-exist']);
   assert.notEqual(missing.code, 0);
   assert.match(missing.log, /no scenario file/);
-  for (const key of ['file', 'scenario']) {
+  // scenarios in a file that isn't serial run side by side, each in a browser of its own, and every browser is stopped
+  fs.writeFileSync(side, prelude.replace('export const serial = true;', '') + `
+async function meet(h, me) {
+  if (me === 'a') record(h);
+  const { page } = await h.open({ 'dbt.app.v1': h.SEEN });
+  h.expect(await page.title() === 'The Lantern', 'app did not load');
+  h.expect(h.browser.contexts().length === 1, 'another scenario opened a profile in this browser');
+  const met = (h.shared.met ??= {});
+  met[me] = h.browser;
+  for (const end = Date.now() + 20000; !(met.a && met.b); await h.sleep(100)) h.expect(Date.now() < end, 'the other scenario did not run at the same time');
+  h.expect(met.a !== met.b, 'both scenarios ran in one browser');
+  if (h.flags.hold) {
+    console.log('fixture ready');
+    await page.waitForTimeout(60000);
+  }
+}
+export const scenarios = {
+  '${name}-side-a': (h) => meet(h, 'a'),
+  '${name}-side-b': (h) => meet(h, 'b'),
+};
+`, { flag: 'wx' });
+  const both = await run('side-by-side', [`--file=${name}-side`, '--jobs=2']);
+  assert.equal(both.code, 0);
+  assert.equal(both.report.jobs, 2);
+  assert.deepEqual(both.report.scenarios.map((s) => [s.name, s.ok]), [[`${name}-side-a`, true], [`${name}-side-b`, true]]);
+  assert.equal([...both.log.matchAll(/<launched> pid=/g)].length, 2);
+  const bothSignal = await run('side-by-side-signal', [`--file=${name}-side`, '--jobs=2', '--hold'], 'SIGTERM');
+  assert.equal(bothSignal.code, 130);
+  fs.unlinkSync(side);
+  for (const key of ['file', 'scenario', 'jobs']) {
     const empty = await run(`empty-${key}`, [`--${key}=`]);
     assert.notEqual(empty.code, 0);
     assert.match(empty.log, new RegExp(`--${key} needs a value`));
@@ -127,7 +158,7 @@ export const scenarios = {
   assert.notEqual(startup.code, 0);
   assert.match(startup.log, /no free port/);
 } finally {
-  for (const file of [fixture, duplicate]) fs.rmSync(file, { force: true });
+  for (const file of [fixture, duplicate, side]) fs.rmSync(file, { force: true });
   fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify(results, null, 2));
 }
 console.log(`${results.length} runner checks passed, artifacts in ${path.relative(root, out)}`);

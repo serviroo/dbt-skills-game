@@ -5,8 +5,8 @@
 import { drawPage, line, pick } from './art-eraser-glow.e2e.mjs';
 import { crystal, restore } from './newer-save-safety.e2e.mjs';
 
-/** A brush line, a soft-glow line and an eraser cutting the brush line, saved, and the Save Crystal with it. */
-async function drawnCrystal(h) {
+/** A brush line, a soft-glow line and an eraser cutting the brush line, saved, and the Save Crystal with it, as <name>.json. */
+async function drawnCrystal(h, name) {
   const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute');
   await drawPage(h, page);
   await line(page, [0.2, 0.4], [0.8, 0.4]);
@@ -18,7 +18,7 @@ async function drawnCrystal(h) {
   await page.getByText('Saved in your Art room.').waitFor();
   await page.evaluate(() => window.__daily.go({ name: 'settings' }, { quiet: true }));
   await page.locator('.dq-settings').waitFor({ timeout: 10000 });
-  const raw = await crystal(h, page, 'drawn');
+  const raw = await crystal(h, page, name);
   h.expect(raw.art?.length === 1 && raw.art[0].strokes.length === 3, 'the Save Crystal does not hold the drawing: ' + JSON.stringify(raw.art?.map((r) => r.strokes.length)));
   h.expect(!errors.length, errors.join('\n'));
   await ctx.close();
@@ -47,7 +47,7 @@ export const scenarios = {
   /** a file holding two copies of one version, neither holding all of the other (as a Restore keeps them), restores both */
   async 'art-restore-two-copies-of-one-version'(h) {
     const { expect } = h;
-    const raw = await drawnCrystal(h);
+    const raw = await drawnCrystal(h, 'drawn-two-copies');
     const rec = raw.art[0];
     const copy = { ...rec, id: `${rec.id}~k1`, strokes: [rec.strokes[0], across(1400)], n: 2 };
     const { ctx, page, errors } = await fresh(h);
@@ -61,7 +61,7 @@ export const scenarios = {
   /** two tabs restoring the same version with different strokes at once both keep what they bring */
   async 'art-restore-two-at-once'(h) {
     const { expect } = h;
-    const raw = await drawnCrystal(h);
+    const raw = await drawnCrystal(h, 'drawn-two-at-once');
     const rec = raw.art[0];
     const { ctx, page, errors } = await fresh(h);
     await restore(h, page, raw);
@@ -85,7 +85,7 @@ export const scenarios = {
   /** a Restore in another tab that moves a version aside between two drawings of this one loses neither */
   async 'art-restore-beside-another-tab'(h) {
     const { expect } = h;
-    const raw = await drawnCrystal(h);
+    const raw = await drawnCrystal(h, 'drawn-beside-another-tab');
     const rec = raw.art[0];
     const { ctx, page, errors } = await fresh(h);
     const withC = [...rec.strokes, across(1400)], newer = [across(300)];
@@ -122,7 +122,7 @@ export const scenarios = {
   /** a version an older build edited without its tools' strokes comes back beside the edit; other edits keep it behind */
   async 'art-restore-after-an-older-build-edit'(h) {
     const { expect } = h;
-    const raw = await drawnCrystal(h);
+    const raw = await drawnCrystal(h, 'drawn-older-build-edit');
     const rec = raw.art[0];
     const edit = (strokes) => ({ ...raw, art: [{ ...rec, rev: 'olderedit1', updated: rec.updated + 1000, from: [`${rec.rev ?? ''}@${rec.updated}`, ...(rec.from ?? [])], strokes, n: strokes.length }] });
     const cases = [

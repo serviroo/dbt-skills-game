@@ -2,11 +2,12 @@
 // it, never a tool's stroke painted as a brush line, and what it saves can't damage the drawing for good: restoring the
 // Save Crystal again once the device is on this build brings the drawing back whole. A Restore of the same version
 // with other content keeps everything: it updates a copy it holds all of, and otherwise comes in beside it.
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { drawPage, inkAt, line, pick, strokes } from './art-eraser-glow.e2e.mjs';
 import { active, build, buildOf, crystal, host, restore, update } from './newer-save-safety.e2e.mjs';
 
@@ -14,8 +15,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 /** The build that was live before the eraser and the soft glow. */
 const BEFORE_TOOLS = 'f320b2cb2eaae6eefab5a319487372aec9fe2d44';
 
-/** A brush line, a soft-glow line and an eraser cutting the brush line, saved, and the Save Crystal with it. */
-async function toolCrystal(h) {
+/** A brush line, a soft-glow line and an eraser cutting the brush line, saved, and the Save Crystal with it, as <name>.json. */
+async function toolCrystal(h, name) {
   const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute');
   await drawPage(h, page);
   await line(page, [0.2, 0.4], [0.8, 0.4]);
@@ -26,7 +27,7 @@ async function toolCrystal(h) {
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.getByText('Saved in your Art room.').waitFor();
   await toSettings(page);
-  const raw = await crystal(h, page, 'tools');
+  const raw = await crystal(h, page, name);
   h.expect(!errors.length, errors.join('\n'));
   await ctx.close();
   return raw;
@@ -56,13 +57,16 @@ const pages = (page) =>
 export const scenarios = {
   async 'art-tools-meet-the-build-before-them'(h) {
     const { expect } = h;
-    const raw = await toolCrystal(h);
+    const raw = await toolCrystal(h, 'tools-before-them');
     const id = raw.art[0].id;
     const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'lantern-before-tools-'));
     try {
       const src = path.join(scratch, 'src-a');
       fs.mkdirSync(src);
-      execFileSync('tar', ['-x', '-C', src], { input: execFileSync('git', ['archive', BEFORE_TOOLS], { cwd: root, maxBuffer: 1 << 30 }) });
+      // not execFileSync: scenarios run side by side in this process, and the copy would stall them all while it runs
+      const tarball = path.join(scratch, 'src-a.tar');
+      await promisify(execFile)('git', ['archive', '-o', tarball, BEFORE_TOOLS], { cwd: root });
+      await promisify(execFile)('tar', ['-x', '-f', tarball, '-C', src]);
       fs.symlinkSync(fs.realpathSync(path.join(root, 'node_modules')), path.join(src, 'node_modules'));
       const [a, b] = await Promise.all([build(src, path.join(scratch, 'a'), 'before-tools'), build(root, path.join(scratch, 'b'), 'this-build')]);
       const site = await host(a.dir);
@@ -122,7 +126,7 @@ export const scenarios = {
 
   async 'art-restore-of-the-same-version-with-other-content'(h) {
     const { expect } = h;
-    const raw = await toolCrystal(h);
+    const raw = await toolCrystal(h, 'tools-same-version');
     const rec = raw.art[0];
     const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute');
     await h.reachHub(page);
