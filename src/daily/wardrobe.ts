@@ -176,9 +176,7 @@ export function wardrobePanel(app: App) {
     tried = {};
     if (keep) st.save();
     paint(st);
-    render();
-    bar.hidden = true;
-    status.textContent = '';
+    refresh();
     body.querySelector<HTMLElement>(`[data-slot="${last}"][aria-checked="true"]`)?.focus({ preventScroll: true });
   };
   const bar = h(
@@ -192,9 +190,8 @@ export function wardrobePanel(app: App) {
       h('div', { class: 'dq-actions w2-try-acts' }, btn(TRY_ON.keep, () => end(true)), btn(TRY_ON.back, () => end(false), { kind: 'quiet' })),
     ),
   );
-  const pick = (slot: Slot) => {
-    last = slot;
-    paint(st);
+  /** Redraws the options and the bar from what is tried on and what is kept now, here or in another open copy. */
+  const refresh = () => {
     render();
     const on = (Object.keys(TABLE) as Slot[]).filter((k) => tried[k]);
     if (!on.length) {
@@ -204,13 +201,18 @@ export function wardrobePanel(app: App) {
     }
     const line = TRY_ON.trying(on.map((k) => TABLE[k].looks[tried[k]!].name));
     say.textContent = line;
-    status.textContent = line;
+    if (status.textContent !== line) status.textContent = line;
     back.innerHTML = backArt(shown(st, 'cardBack'));
     plate.className = `dq-mint w2-plate w2-plate--${shown(st, 'plate')}`;
     plate.textContent = playerName();
     if (!bar.hidden) return;
     bar.hidden = false;
     animate(bar, [{ opacity: 0 }, { opacity: 1 }], { duration: app.reduced() ? WINDOW.reducedFadeMs : CALM.fadeMs, easing: css(CALM.ease) });
+  };
+  const pick = (slot: Slot) => {
+    last = slot;
+    paint(st);
+    refresh();
   };
   const render = () => {
     // a pick redraws the Wardrobe: focus stays on the look just picked
@@ -238,10 +240,12 @@ export function wardrobePanel(app: App) {
     if (on?.slot) body.querySelector<HTMLElement>(`[data-slot="${on.slot}"][data-id="${on.id}"]`)?.focus({ preventScroll: true });
   };
   render();
+  const off = st.onChange(refresh);
   return {
     el: panel({ title: WARDROBE_COPY.title, ic: icon('card'), cls: 'w2-wardrobe-p' }, body, status),
     bar,
     leave: () => {
+      off();
       tried = {};
       paint(st);
     },

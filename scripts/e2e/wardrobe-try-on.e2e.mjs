@@ -170,17 +170,20 @@ export const scenarios = {
       let other = await look(b);
       h.expect(other.theme === 'mint' && other.accent === 'green', `the other tab wears a look only tried on: ${JSON.stringify(other)}`);
 
-      // B keeps Gold while A still tries Night on: A's Go back lands on Gold, and nothing of A's try-on is saved
+      // B keeps Gold and the Gate card back while A still tries Night on: A shows the Gate it would keep with Night, its
+      // Go back lands on Gold, and nothing of A's try-on is saved
       await b.bringToFront();
       await h.openSettings(b);
       await tryOn(b, 'theme', 'gold');
+      await tryOn(b, 'cardBack', 'gate');
       await choose(b, 'Keep this look');
       await a.bringToFront();
       await a.waitForFunction(() => window.__daily.store.state.settings.theme === 'gold', null, { timeout: 5000 });
       let on = await look(a);
       h.expect(on.theme === 'night' && on.accent === 'rose' && on.bar, `the other tab's choice ended this tab's try-on: ${JSON.stringify(on)}`);
+      h.expect(on.gate && on.checked.includes('cardBack:gate'), `this tab's try-on does not show the card back the other tab kept: ${JSON.stringify(on)}`);
       const saved = await kept(h, a);
-      h.expect(saved.theme === 'gold' && saved.accent === 'green', `the other tab's kept look was overwritten: ${JSON.stringify(saved)}`);
+      h.expect(saved.theme === 'gold' && saved.cardBack === 'gate' && saved.accent === 'green', `the other tab's kept look was overwritten: ${JSON.stringify(saved)}`);
       await choose(a, 'Go back');
       await barGone(a);
       on = await look(a);
@@ -192,6 +195,7 @@ export const scenarios = {
       await b.waitForFunction(() => document.documentElement.dataset.dqAccent === 'rose', null, { timeout: 5000 });
       other = await look(b);
       h.expect(other.theme === 'gold' && other.accent === 'rose' && !other.bar, `the other tab after Keep this look: ${JSON.stringify(other)}`);
+      h.expect((await kept(h, a)).cardBack === 'gate', `this tab's Keep this look dropped the other tab's card back: ${JSON.stringify(await kept(h, a))}`);
       h.expect(same(await kept(h, b), await kept(h, a)), 'the two tabs keep different looks');
       h.expect(!errors.length, errors.join(' | '));
     } finally {
