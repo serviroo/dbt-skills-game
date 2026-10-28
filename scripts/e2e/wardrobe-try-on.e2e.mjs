@@ -24,6 +24,12 @@ async function kept(h, page) {
   const p = JSON.parse((await h.ls(page, h.SAVE)) ?? '{}').profile ?? {};
   return Object.fromEntries(SLOTS.flatMap((k) => [[k, p[k]], [`${k}At`, p.setAt?.[k]]]));
 }
+/** The kept look as one tab holds it in memory, in the same shape (open tabs share the stored one). */
+const holds = (page) =>
+  page.evaluate((slots) => {
+    const { settings, setAt } = window.__daily.store.state;
+    return Object.fromEntries(slots.flatMap((k) => [[k, settings[k]], [`${k}At`, setAt[k]]]));
+  }, SLOTS);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 /** What the screen wears and what the Wardrobe and its bar show. */
 const look = (page) =>
@@ -245,7 +251,7 @@ export const scenarios = {
       other = await look(b);
       h.expect(other.theme === 'gold' && other.accent === 'rose' && !other.bar, `the other tab after Keep this look: ${JSON.stringify(other)}`);
       h.expect((await kept(h, a)).cardBack === 'gate', `this tab's Keep this look dropped the other tab's card back: ${JSON.stringify(await kept(h, a))}`);
-      h.expect(same(await kept(h, b), await kept(h, a)), 'the two tabs keep different looks');
+      h.expect(same(await holds(b), await holds(a)), `the two tabs keep different looks: ${JSON.stringify({ a: await holds(a), b: await holds(b) })}`);
 
       // B keeps the very looks A tries on: each one leaves A's bar as it is kept, the bar goes with the last, and A
       // saves nothing of its own
@@ -263,12 +269,12 @@ export const scenarios = {
       await tryOn(b, 'plate', 'gold');
       await choose(b, 'Keep this look');
       await barGone(b);
-      const byB = await kept(h, b);
+      const byB = await holds(b);
       await a.bringToFront();
       await barGone(a);
       on = await look(a);
       h.expect(on.checked.includes('theme:night') && on.checked.includes('plate:gold'), `this tab does not mark the looks the other tab kept: ${on.checked}`);
-      h.expect(byB.theme === 'night' && byB.plate === 'gold' && same(await kept(h, a), byB), `this tab changed the looks the other tab kept: ${JSON.stringify(await kept(h, a))}`);
+      h.expect(byB.theme === 'night' && byB.plate === 'gold' && same(await holds(a), byB) && same(await kept(h, a), byB), `this tab changed the looks the other tab kept: ${JSON.stringify({ b: byB, a: await holds(a), saved: await kept(h, a) })}`);
       h.expect(!errors.length, errors.join(' | '));
     } finally {
       await ctx.close();
