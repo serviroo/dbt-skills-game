@@ -4,7 +4,7 @@ import { SKILL_END } from '../content/daily-lines';
 import type { App, Place, Route, ScreenOut, Visit } from './app';
 import { glyph, icon } from './art';
 import { isSkillId, uid } from './store';
-import { dropDraft, keepDraft, newestDraft, stepLayout, type SkillDraft } from './skilldraft';
+import { dropDraft, keepDraft, newestDraft, stepLayout, worthKeeping, type SkillDraft } from './skilldraft';
 import { btn, chip, copyText, field, h, md, p, panel, segmented, typo } from './ui';
 import { breathRing, counter, holdButton, loadoutArt, pmrView, timerView, type Ctx } from './widgets';
 
@@ -42,8 +42,8 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
   if (!visit.again && visit.handed !== STARTED_OVER) app.store.skillEvent(sk.id);
   const kept = visit.again ? (visit.kept as SkillKept | undefined) : undefined;
   const part = r.entry && sk.steps.some((s) => s.id === r.entry) ? r.entry : '';
-  const picked = kept || visit.handed === STARTED_OVER || visit.handed === PRACTISE_AGAIN ? null : newestDraft(app.store.key, sk.id, part);
-  const draft = picked?.draft;
+  const resumed = kept || visit.handed === STARTED_OVER || visit.handed === PRACTISE_AGAIN ? null : newestDraft(app.store.key, sk.id, part);
+  const draft = resumed?.draft;
   const layout = stepLayout(sk.steps);
   const from = kept ?? draft;
   const answers: Answers = { ...from?.answers };
@@ -107,17 +107,13 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
     const now = words();
     const changed = now !== lastWords;
     lastWords = now;
-    const worthKeeping =
-      Object.values(typed).some((t) => t.some(([, value]) => value.trim())) ||
-      sk.steps.some((s) => ((s.kind === 'input' || s.kind === 'highlight') && String(answers[s.key] ?? '').trim()) ||
-        (s.kind === 'tier' && Array.isArray(answers[s.key]) && (answers[s.key] as string[]).length));
-    if (worthKeeping) keepDraft(app.store.key, snapshot(), changed);
-    else dropDraft(app.store.key, snapshot(), picked);
+    if (worthKeeping(sk.steps, answers, typed)) keepDraft(app.store.key, snapshot(), changed);
+    else dropDraft(app.store.key, snapshot(), resumed);
   };
   const drop = () => {
     snap();
     drafting = false;
-    dropDraft(app.store.key, snapshot(), picked);
+    dropDraft(app.store.key, snapshot(), resumed);
   };
   el.addEventListener('input', persist);
 

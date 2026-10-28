@@ -23,6 +23,11 @@ export const stepLayout = (steps: Step[]): SkillDraft['layout'] => steps.map((s)
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const ordered = (x: object) => Object.fromEntries(Object.entries(x).sort(([a], [b]) => a.localeCompare(b)));
 
+export const worthKeeping = (steps: Step[], answers: Answers, typed: SkillDraft['typed']) =>
+  Object.values(typed).some((t) => t.some(([, value]) => value.trim())) ||
+  steps.some((s) => ((s.kind === 'input' || s.kind === 'highlight') && typeof answers[s.key] === 'string' && (answers[s.key] as string).trim()) ||
+    (s.kind === 'tier' && Array.isArray(answers[s.key]) && (answers[s.key] as string[]).length));
+
 /** Only step positions from this exact layout are trusted. Answers have their own content keys. */
 export function readDraft(raw: unknown): SkillDraft | null {
   if (!object(raw) || !isSkillId(raw.skill)) return null;
@@ -48,7 +53,7 @@ export function readDraft(raw: unknown): SkillDraft | null {
     if (ok) answers[key] = v as Answers[string];
   }
   const typed = byStep(raw.typed, (v): v is [string, string][] => Array.isArray(v) && v.every((x) => strings(x) && x.length === 2));
-  if (!Object.keys(answers).length && !Object.values(typed).some((xs) => xs.some(([, v]) => v.trim()))) return null;
+  if (!worthKeeping(steps, answers, typed)) return null;
   return {
     skill: raw.skill, part, at: same && validStep(raw.at) ? raw.at : -1, layout,
     answers: ordered(answers), typed: ordered(typed), leads: byStep(raw.leads, string),
@@ -71,10 +76,8 @@ function slots(save: string): Slot[] {
     let value: unknown;
     try { value = JSON.parse(raw); } catch { continue; }
     const end = key.slice(prefix(save).length).split('.');
-    // Read the original one-slot-per-skill format too; it had no skill or part in the payload.
-    if (end.length === 1 && isSkillId(end[0]) && object(value)) value = { ...value, skill: end[0], part: '' };
     const draft = readDraft(value);
-    if (!draft || (end.length === 1 ? draft.skill !== end[0] : end.length !== 3 || draft.skill !== end[1] || draft.part !== end[2])) continue;
+    if (!draft || end.length !== 3 || draft.skill !== end[1] || draft.part !== end[2]) continue;
     out.push({ key, raw, draft });
   }
   return out;

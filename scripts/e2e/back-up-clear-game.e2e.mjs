@@ -126,7 +126,7 @@ function seedData() {
       [`${SAVE}.safe-light`]: 'dim',
       'dbt.install-hint.v1': 'dismissed',
       'dbt.cowriter.v1': JSON.stringify({ install: 'seed-install-id', key: 'seed-connection-secret' }),
-      [`${SAVE}.skill-draft.clear-sight`]: JSON.stringify({ at: 3, answers: { fact: 'Seed skill words' }, typed: {}, leads: {}, done: [1, 2] }),
+      [`${SAVE}.skill-draft.seedload.clear-sight.`]: JSON.stringify({ skill: 'clear-sight', part: '', at: 3, answers: { fact: 'Seed skill words' }, typed: {}, leads: {}, done: [1, 2] }),
       [`${SAVE}.story.live.seedload.seed-page`]: JSON.stringify({ chapter: 'seed-page', text: 'Seed page words, and the unsaved ones.', bases: ['r1'], t: t + 5000 }),
       [LAB]: JSON.stringify({ v: 1, created: t, events: [{ id: 'lab-visit', k: 'visit', xp: 10, t, day: '2026-10-01' }] }),
       [`${LAB}.stealth`]: JSON.stringify({ aquarium: false, words: true }),

@@ -9,6 +9,13 @@
 //                                 answer typed in. Finishing the skill clears what was kept: Practise again starts
 //                                 empty. A suggested phrase tapped onto an answer, and picks made after typing, are kept
 //                                 too. What is kept never adds XP or anything else to the save
+//   answers-kept-two-tabs         empty and older tabs leave newer words alone; finishing and starting over keep
+//                                 another tab's different words
+//   answers-kept-old-layout       an outdated step layout drops positions but keeps answers under their content keys
+//   answers-kept-picks-only       a slot with only picks is left alone; a Crystal does not export or restore it
+//   answers-kept-route-part       each requested part resumes its own words
+//   answers-kept-crystal          backup and restore keep answers, validate fields and leave newer local words alone
+//   answers-kept-ranks            ranks survive reload; clearing all ranks leaves no draft
 import { boot, settle } from './layout-fit.e2e.mjs';
 import { crystal, restore } from './newer-save-safety.e2e.mjs';
 
@@ -54,8 +61,10 @@ async function upToFact(page) {
 
 export const scenarios = {
   'answers-kept-two-tabs': async (h) => {
-    const { ctx, page } = await boot(h, PHONE);
+    const { ctx, page, errors } = await boot(h, PHONE);
     const other = await ctx.newPage();
+    other.on('pageerror', (e) => errors.push('second tab pageerror: ' + e.message));
+    other.on('console', (m) => m.type() === 'error' && !/WebGL|GPU stall|AudioContext/i.test(m.text()) && errors.push('second tab console: ' + m.text().slice(0, 300)));
     await other.goto(page.url());
     await home(other);
     await openSkill(other, 'Clear Sight');
@@ -94,16 +103,17 @@ export const scenarios = {
     await openSkill(page, 'Clear Sight');
     h.expect((await value(page)) === 'Different words while the first tab starts over', 'Start over deleted a divergent draft');
     await other.close();
+    h.expect(!errors.length, errors.join('\n'));
   },
 
   'answers-kept-old-layout': async (h) => {
-    const { page } = await boot(h, PHONE);
+    const { page, errors } = await boot(h, PHONE);
     await page.evaluate((key) => {
-      localStorage.setItem(`${key}.skill-draft.clear-sight`, JSON.stringify({
-        at: 3, answers: { judged: 'A judgment kept by its key', fact: 'A fact kept by its key', removed: 'A removed answer' },
+      localStorage.setItem(`${key}.skill-draft.old-layout.clear-sight.`, JSON.stringify({
+        skill: 'clear-sight', part: '', at: 3, answers: { judged: 'A judgment kept by its key', fact: 'A fact kept by its key', removed: 'A removed answer' },
         typed: { 1: [['', 'Words for a removed question']], 3: [['A fact kept by its key', 'More words for a removed question']] },
         leads: { 1: 'An old reply' }, done: [1, 3],
-        layout: ['intro', 'input:removed', 'choice:word', 'input:judged', 'input:fact', 'say'],
+        layout: [['intro', '', ''], ['input', '', 'removed'], ['choice', '', 'word'], ['input', '', 'judged'], ['input', '', 'fact'], ['say', '', '']],
       }));
     }, h.SAVE);
     await openSkill(page, 'Clear Sight');
@@ -113,10 +123,38 @@ export const scenarios = {
     await tap(page, 'Next');
     await tap(page, 'Found it');
     h.expect((await value(page)) === 'A fact kept by its key', 'an answer that still maps to a step was lost');
+    h.expect(!errors.length, errors.join('\n'));
+  },
+
+  'answers-kept-picks-only': async (h) => {
+    const { page, errors } = await boot(h, PHONE);
+    const seeded = await page.evaluate(async (save) => {
+      const { SKILL } = await import('/src/content/dbt.ts');
+      const { stepLayout } = await import('/src/daily/skilldraft.ts');
+      const draft = { skill: 'clear-sight', part: '', at: 1, answers: { word: 'Found it' }, typed: {}, leads: {}, done: [], t: 1, layout: stepLayout(SKILL['clear-sight'].steps) };
+      const key = `${save}.skill-draft.picks-only.clear-sight.`;
+      const old = { ...draft, layout: [...draft.layout, ['input', '', 'removed']], typed: { 1: [['', 'Words from a removed question']] } };
+      const bytes = JSON.stringify(old);
+      localStorage.setItem(key, bytes);
+      return { key, bytes, draft };
+    }, h.SAVE);
+    await openSkill(page, 'Clear Sight');
+    h.expect(!(await page.getByRole('button', { name: 'Start over', exact: true }).count()), 'a draft with only picks was offered for resume');
+    await tap(page, 'Begin');
+    h.expect(await page.evaluate((key) => localStorage.getItem(key), seeded.key) === seeded.bytes, 'an unusable draft was deleted');
+    await page.locator('.dq-top [aria-label="Leave this skill"]').click();
+    await home(page);
+    const file = await crystal(h, page, 'picks-only');
+    h.expect(!file.skillDrafts?.length, 'a draft with only picks was exported');
+    file.skillDrafts = [seeded.draft];
+    await restore(h, page, file, 'picks-only.json');
+    h.expect((await kept(page, h.SAVE)).length === 1, 'a draft with only picks was restored');
+    h.expect(await page.evaluate((key) => localStorage.getItem(key), seeded.key) === seeded.bytes, 'restore changed an unusable local draft');
+    h.expect(!errors.length, errors.join('\n'));
   },
 
   'answers-kept-route-part': async (h) => {
-    const { page } = await boot(h, PHONE);
+    const { page, errors } = await boot(h, PHONE);
     const open = async (entry) => {
       await page.evaluate((entry) => window.__daily.go({ name: 'skill', id: 'abc-please', entry }), entry);
       await onScreen(page, 'skill');
@@ -135,10 +173,11 @@ export const scenarios = {
     await page.locator('.dq-top [aria-label="Leave this skill"]').click();
     await open('a');
     h.expect((await value(page)) === 'Sit by the window', 'opening part C lost part A\'s words');
+    h.expect(!errors.length, errors.join('\n'));
   },
 
   'answers-kept-crystal': async (h) => {
-    const { page } = await boot(h, PHONE);
+    const { page, errors } = await boot(h, PHONE);
     await upToFact(page);
     await page.locator('.dq-top [aria-label="Leave this skill"]').click();
     await home(page);
@@ -179,10 +218,11 @@ export const scenarios = {
     h.expect(await page.getByRole('button', { name: 'Begin', exact: true }).isVisible(), 'restore trusted an unvalidated position');
     await tap(page, 'Begin');
     h.expect((await value(page)) === 'Valid words', 'restore did not validate answers individually');
+    h.expect(!errors.length, errors.join('\n'));
   },
 
   'answers-kept-ranks': async (h) => {
-    const { page } = await boot(h, PHONE);
+    const { page, errors } = await boot(h, PHONE);
     await openSkill(page, 'Flavour Tier List');
     await tap(page, 'Begin');
     await tap(page, 'Something sweet');
@@ -209,7 +249,9 @@ export const scenarios = {
     await openSkill(page, 'Flavour Tier List');
     h.expect(await page.getByRole('button', { name: 'Begin', exact: true }).isVisible(), 'clearing both ranks still offered a draft');
     h.expect(!(await kept(page, h.SAVE)).length, 'clearing both ranks left their slot on the device');
+    h.expect(!errors.length, errors.join('\n'));
   },
+
   'answers-kept-back-and-return': async (h) => {
     const { page, errors } = await boot(h, PHONE);
     const { expect } = h;
