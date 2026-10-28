@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { holdDaily } from './e2e/first-actions.e2e.mjs';
 import { runIconChild } from './e2e/icons.e2e.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -80,6 +81,15 @@ try {
     return true;
   });
   results.push({ label: 'icon-child-failures', cases: 4 });
+  // a sleep that ends early, here at half its time, still holds the companion module 9 s by the clock that measures it
+  const held = [];
+  const loaded = [];
+  let hold;
+  holdDaily({ sleep: (ms) => new Promise((r) => setTimeout(r, ms / 2)) }, held)({ route: (_, fn) => (hold = fn) });
+  const t = performance.now();
+  await hold({ continue: async () => loaded.push(performance.now() - t) });
+  assert(held.length === 1 && held[0] >= 9000 && loaded[0] >= 9000, `the companion module was held ${JSON.stringify(held)} ms and loaded after ${JSON.stringify(loaded)} ms`);
+  results.push({ label: 'companion-hold', held: held[0] });
   fs.writeFileSync(fixture, `
 import fs from 'node:fs';
 import path from 'node:path';
