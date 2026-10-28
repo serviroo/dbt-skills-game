@@ -1,4 +1,3 @@
-import { installAudioRecorder, audioReady, audioRecorded } from './audio-recorder.mjs';
 // The low hum in Give me a moment has its own Hum level. Settings and the companion's speaker control show it beside
 // Master, Music and Effects (100 by default, also for a save from before it), it survives a reload, and moving it
 // changes the playing hum in step with the curve the other sliders use, live and without a click, while Music and
@@ -7,6 +6,7 @@ import { installAudioRecorder, audioReady, audioRecorded } from './audio-recorde
 // Zone and Done still silence it. Measured on the hum's real output, render quantum by render quantum.
 import fs from 'node:fs';
 import path from 'node:path';
+import { installAudioRecorder, audioReady, audioRecorded } from './audio-recorder.mjs';
 
 /** What each check measured, one line a check, in the run's artifacts. */
 const note = (h, name, o) => fs.appendFileSync(path.join(h.out, 'hum-volume.jsonl'), JSON.stringify({ name, ...o }) + '\n');

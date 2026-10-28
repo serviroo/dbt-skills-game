@@ -1,8 +1,8 @@
-import { installAudioRecorder, audioReady, audioRecorded } from './audio-recorder.mjs';
 // The Safe Zone goes quiet at once. Everything heard before the tap (the score, long cues and their echo, the low hum
 // in Give me a moment) is silent at the speakers within a click-free moment of it, a quick visit never brings an old
 // cue or echo back, their levels and mute never change, and a gift or rank cut short by the tap is kept. Measured on
 // the real post-mix output, render quantum by render quantum, against the audio clock at the moment of the tap.
+import { installAudioRecorder, audioReady, audioRecorded } from './audio-recorder.mjs';
 
 const TALL = { width: 390, height: 844 };
 const SMALL = { width: 320, height: 568 };
@@ -100,7 +100,7 @@ const scoreGate = (page) => page.evaluate(() => window.__dbtVolume.gains().score
 const lastMark = (page) => page.evaluate(() => window.__marks.at(-1));
 const now = (page, i = 0) => page.evaluate((i) => window.__taps[i].context.currentTime, i);
 
-/** Waits until tap i's audio clock is past `t` and a read has covered it. */
+/** Waits until tap i has recorded through `t`. */
 const until = audioRecorded;
 
 /** Tap i's output over [from, to] (its audio clock): RMS, peak, how much of it the reads covered, and when silence began. */
