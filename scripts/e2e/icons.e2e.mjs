@@ -48,8 +48,8 @@ export const scenarios = {
     const got = hashes(lost);
     expect(Object.keys(want).length > 0, 'no icons were drawn');
     expect(Object.keys(want).every((f) => got[f] === want[f]) && Object.keys(got).length === Object.keys(want).length, 'icons drawn after a lost context differ: ' + Object.keys(want).filter((f) => got[f] !== want[f]).join(', '));
-    expect(/WebGL context lost, drawing it again \(fresh page\)/.test(run.stderr), 'the context was never lost, so the retry went untested: ' + run.stderr.slice(0, 200));
-    expect(/wrote \d+ images/.test(run.stdout), 'the icon run did not finish: ' + run.stdout.slice(0, 200));
+    expect(/WebGL context lost, drawing it again \(fresh page\)/.test(run.stderr), 'the context was never lost, so the retry went untested: ' + run.stderr);
+    expect(/wrote \d+ images/.test(run.stdout), 'the icon run did not finish: ' + run.stdout);
   },
 
   /** the GPU process stays broken: a fresh page loses it again, so the image is drawn in a software-GL browser */
@@ -65,7 +65,7 @@ export const scenarios = {
     }
     const want = hashes(plain);
     const got = hashes(lost);
-    expect(/drawing it again \(software GL\)/.test(run.stderr), 'the software-GL fallback never ran: ' + run.stderr.slice(0, 200));
+    expect(/drawing it again \(software GL\)/.test(run.stderr), 'the software-GL fallback never ran: ' + run.stderr);
     expect(Object.keys(want).length > 0 && Object.keys(want).every((f) => got[f]), 'an icon is missing after the software-GL fallback');
   },
 };
