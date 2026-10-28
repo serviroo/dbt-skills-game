@@ -957,7 +957,6 @@
   position: sticky;
   bottom: 0;
   z-index: 4;
-  padding: 0 0 var(--safe-bottom);
 }
 .w2-try-in {
   display: flex;
@@ -965,6 +964,7 @@
   align-items: center;
   gap: 10px 14px;
   padding: 10px 12px;
+  padding-bottom: calc(10px + var(--safe-bottom));
   background: linear-gradient(180deg, var(--plate-a), var(--plate-b)), var(--w2-top, #060e1b);
   border: 1px solid;
   border-color: var(--hl) var(--hs) var(--hs) var(--hl);
