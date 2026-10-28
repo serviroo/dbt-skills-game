@@ -121,9 +121,11 @@ export const scenarios = {
           webgl: window.__safeGL,
           scenes: document.querySelectorAll('.dq-safezone canvas, .dq-safezone .dq-scene, .dq-safezone .is-scene-wait, .dq-safezone .is-scene-live').length,
           live: window.__scenes?.live ?? 0,
+          orbTransition: [...document.querySelectorAll('.dq-safezone .dq-mo-svg circle[fill^="url"]')].map((e) => [getComputedStyle(e).transition, getComputedStyle(e.parentElement.querySelector('circle')).transition]),
           talk: window.__seen(document.querySelector('.dq-sz-talk')),
         }));
         h.expect(got.route === 'safe' && got.webgl === 0 && got.scenes === 0 && got.live === 0, `${mode}, ${where}: a scene started inside the Safe Zone: ${JSON.stringify(got)}`);
+        h.expect(got.orbTransition.every(([orb, flat]) => orb === flat), `${mode}, ${where}: the flat orb's transition differs from its outer ring (${JSON.stringify(got.orbTransition)})`);
         h.expect(got.talk, `${mode}, ${where}: "Talk to someone now" is not pinned and tappable`);
       };
       try {

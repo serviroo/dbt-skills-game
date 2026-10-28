@@ -272,7 +272,7 @@ export function momentView(app: App, o: { done: () => void; then?: string; hum?:
   const line = sv('circle', { cx: 100, cy: 100, r: 52, fill: 'none', stroke: 'rgba(170,225,255,.7)', 'stroke-width': 1.2 });
   const echo = sv('circle', { cx: 100, cy: 100, r: 52, fill: 'none', stroke: 'rgba(124,200,255,.22)', 'stroke-width': 0.8 });
   // the breathing light in 3D takes the place of the flat orb and its rings when it can; the ticks stay round it
-  for (const c of [orb, echo, line]) c.classList.add('dq-scene-flat');
+  if (o.scene !== false) for (const c of [orb, echo, line]) c.classList.add('dq-scene-flat');
   svg.append(defs, outer, tickPath, orb, echo, line);
 
   const words = h('p', { class: 'dq-mo-line', 'aria-live': 'polite' });
