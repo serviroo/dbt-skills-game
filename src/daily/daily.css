@@ -3537,7 +3537,7 @@ textarea.dq-input {
 }
 @media (orientation: landscape) and (max-height: 500px) and (min-width: 540px) {
   .dq-sz .dq-mo-stage {
-    width: min(196px, calc(100dvh - 250px));
+    width: clamp(120px, calc(100dvh - 250px), 196px);
   }
 }
 .dq-cardbtn .dq-cf-stat {

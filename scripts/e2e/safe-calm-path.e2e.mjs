@@ -123,6 +123,14 @@ export const scenarios = {
           ok(got.leave === 'Leave', `${tag}: the top bar shows "${got.leave}", not Leave`);
           if (got.route !== 'safe') continue;
 
+          // a short window held sideways still shows the ring beside the words
+          if (size === '390x844' && from === 'Home') {
+            await page.setViewportSize({ width: 540, height: 240 });
+            const ring = await page.evaluate(() => document.querySelector('.dq-sz .dq-mo-stage').getBoundingClientRect().width);
+            ok(ring >= 100, `540x240: the moment's ring is ${ring}px wide`);
+            await page.setViewportSize(viewport);
+          }
+
           // Done comes back to the Safe Zone's first screen, still inside
           await page.locator('.dq-sz-main').getByRole('button', { name: 'Done', exact: true }).click();
           await page.locator('.dq-sz-main').getByRole('button', { name: 'Give me a moment', exact: true }).waitFor({ timeout: 5000 });
