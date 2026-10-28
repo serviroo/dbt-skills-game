@@ -116,7 +116,7 @@ export const CUES: Record<string, CueDef> = {
 
   /** The tear: a crackle cluster, a snap, an inharmonic glass ring and a thump (placed 1 frame after the visual). */
   gate_crack: {
-    gainDb: 5.5,
+    gainDb: 5,
     len: 2.4,
     hall: 0.32,
     room: 0.1,
@@ -133,6 +133,10 @@ export const CUES: Record<string, CueDef> = {
       const e = v.perc(th.gain, t, 0.6, 0.002, 0.085);
       const o = v.osc('sine', 96, t, e, th);
       expTo(o.frequency, t, 96, 46, 0.22);
+      // the thump's knock, the part of it a phone speaker can play
+      const kn = v.gain(0, v.filt('bandpass', 1100, 1.2, v.wet));
+      v.perc(kn.gain, t, 0.9, 0.002, 0.06);
+      v.noise('pink', t, t + 0.3, kn);
     },
   },
 
@@ -140,7 +144,7 @@ export const CUES: Record<string, CueDef> = {
   gate_swell: {
     len: 5.6,
     hall: 0.4,
-    gainDb: -2,
+    gainDb: -2.4,
     fn(v) {
       const t = v.t;
       const stage: [number, number][] = [[0, 0], [0.167, 0.54], [0.267, 0.58], [0.433, 1], [0.6, 0.92]];
@@ -156,6 +160,10 @@ export const CUES: Record<string, CueDef> = {
       const tl = v.filt('lowpass', 300, 1.2, env(0.05));
       pts(tl.frequency, t, [[0, 260], [0.167, 900], [0.267, 950], [0.433, 2600], [2.0, 1100]]);
       for (const [m, d] of [[50, -6], [57, 5], [62, -3], [69, 7]] as const) v.osc("sawtooth", midi(m), t, t + 5.6, v.gain(1, tl)).detune.value = v.cents + d;
+      // what a phone speaker keeps of the swell: a faint singing D6 and A6 riding the same open
+      const sing = env(0.04);
+      v.osc('sine', midi(86), t, t + 5.6, sing);
+      v.osc('sine', midi(93), t, t + 5.6, v.gain(0.7, sing));
       const sh = v.filt('bandpass', 5200, 2.5, env(0.06));
       v.noise("white", t, t + 5.6, sh);
       const sub = v.gain(0, v.dry);
@@ -280,7 +288,7 @@ export const CUES: Record<string, CueDef> = {
 
   /** Eye ignition: a low-band swell -29 -> -9 dB over 140 ms, harmonics for phones, a breath on top. No ding. */
   eye_swell: {
-    gainDb: 6.6,
+    gainDb: 5.2,
     len: 4.2,
     hall: 0.3,
     fn(v) {
@@ -296,7 +304,7 @@ export const CUES: Record<string, CueDef> = {
       v.osc("triangle", midi(45), t, t + 4.2, v.gain(0.35, sat));
       v.noise("brown", t, t + 4.2, v.gain(0.9, v.filt('lowpass', 380, 0.9, env)));
       const br = v.gain(0, v.filt('bandpass', 1500, 1.4, v.wet));
-      pts(br.gain, t, [[0, 0], [0.16, 0.17], [0.45, 0.13]]);
+      pts(br.gain, t, [[0, 0], [0.16, 0.37], [0.45, 0.29]]);
       br.gain.setTargetAtTime(0, t + 0.45, 0.4);
       v.noise("pink", t, t + 4.2, br);
       // what a phone speaker keeps of it: the same swell growled through D3 / A3 (harmonics 300 Hz-1.5 kHz) and a
@@ -310,7 +318,7 @@ export const CUES: Record<string, CueDef> = {
       v.osc('triangle', midi(50), t, t + 2.4, v.gain(0.6, gs));
       v.osc('triangle', midi(57), t, t + 2.4, v.gain(0.4, gs)).detune.value = v.cents + 4;
       const fw = v.gain(0, v.wet);
-      pts(fw.gain, t, [[0, 0], [0.12, 0.3], [0.3, 0.18]]);
+      pts(fw.gain, t, [[0, 0], [0.12, 0.6], [0.3, 0.36]]);
       fw.gain.setTargetAtTime(0, t + 0.3, 0.3);
       const fb = v.filt('bandpass', 500, 1.2, fw);
       expTo(fb.frequency, t, 500, 2200, 0.32);
@@ -349,13 +357,21 @@ export const CUES: Record<string, CueDef> = {
     fn() {},
   },
 
-  /** The one huge moment: +22 dB over the hush in 50 ms. 120 -> 45 Hz sweep, 300-900 Hz noise body, sub tail. */
+  /** The one huge moment: +22 dB over the hush in 50 ms. 120 -> 45 Hz sweep, 300-900 Hz noise body, sub tail, and the
+   *  drop again where a phone speaker can play it. */
   awaken_hit: {
     len: 6.0,
     gainDb: -0.4,
     hall: 0.24,
     fn(v) {
-      boom(v, v.t, { level: 1, f0: 120, f1: 45, body: 1, crack: 1, sub: 1 });
+      const t = v.t;
+      boom(v, t, { level: 1, f0: 120, f1: 45, body: 1, crack: 1, sub: 1 });
+      // the body's noise swelling in with it, falling 1.3 -> 0.8 kHz as the sweep falls
+      const ph = v.gain(0, v.wet);
+      swell(ph.gain, t, 5.5, 0.046, 0.15);
+      const pf = v.filt('bandpass', 1300, 0.9, ph);
+      expTo(pf.frequency, t, 1300, 800, 0.4);
+      v.noise('white', t, t + 1.2, pf);
     },
   },
 
@@ -425,7 +441,7 @@ export const CUES: Record<string, CueDef> = {
   /** The stand-up: the loudest sustained moment. Rises 1.0 s, holds, decays; the director cuts it at 49.84. */
   stand_swell: {
     len: 7.0,
-    gainDb: 5,
+    gainDb: 4,
     hall: 0.25,
     fn(v) {
       const t = v.t;
@@ -440,7 +456,7 @@ export const CUES: Record<string, CueDef> = {
       expTo(roar.frequency, t, 200, 1000, 1.0);
       v.noise("brown", t, t + 7, roar);
       // the part a phone keeps: the mid roar arrives a little sooner, so the rise reads before the stand lands
-      const mid = v.filt("bandpass", 700, 0.8, env(0.6, 0.7, 0.85));
+      const mid = v.filt("bandpass", 700, 0.8, env(1.05, 0.7, 0.85));
       expTo(mid.frequency, t, 600, 1800, 1.0);
       v.noise("pink", t, t + 7, mid);
       v.noise("white", t, t + 7, v.filt("highpass", 5200, 0.7, env(0.025, 0.5)));
