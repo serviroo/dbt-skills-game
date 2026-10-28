@@ -1,8 +1,9 @@
 // The hero's hand in the intro. His pose layer stacked on itself whenever it ran twice in one frame (three.js skips
 // rewriting a bone whose clip value didn't change), so the reach put his hand in front of his face, the lift put it
 // over his head, and the fingers stayed a claw. His aura's glow and smoke also drew over his hands, arms and face.
-// The first scenario steps the real intro frame by frame and checks the hand where the shots frame it; the second
-// checks every pose gives the same bones however often it runs and that a positive curl closes either hand.
+// The first scenarios step the real intro frame by frame and check the hand where the shots frame it, and that the
+// reach draws the same frame however long the scene takes to load; the last checks every pose gives the same bones
+// however often it runs and that a positive curl closes either hand.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -187,6 +188,38 @@ async function introHand(h, viewport, from) {
 export const scenarios = {
   'intro hand in portrait: the reach, lift and grip land where the shots frame them': (h) => introHand(h, { width: 390, height: 844 }, 'silhouette'),
   'intro hand in landscape: the reach, lift and grip land where the shots frame them': (h) => introHand(h, { width: 844, height: 390 }, 'awaken'),
+  // the shots above are only the same every run if loading never moves the scene's clock: a slow runner steps many
+  // frames while the model loads, and the aura's sparks then crossed his hand in one run and missed it in the next
+  'intro hand: the reach draws the same frame however long the scene takes to load': async (h) => {
+    let held;
+    // the model is held back 3 s while the frames go on: the stage clock and frame count at the start and end of it
+    const delay = (ctx) => ctx.route('**/models/hero.glb', async (r) => {
+      const page = r.request().frame().page();
+      const read = () => page.evaluate(() => ({ t: window.__stage.time, n: window.__loadSteps }));
+      const from = await read();
+      await new Promise((s) => setTimeout(s, 3000));
+      held = { from, to: await read() };
+      await r.continue();
+    });
+    const reach = async (slow) => {
+      const { page, errors } = await h.open({}, '?shot=awaken&capture&mute&dpr=1&nopost', { width: 390, height: 844 }, slow ? delay : undefined);
+      await page.waitForFunction(() => !!window.__stage, null, { timeout: 60000 });
+      await probe(page);
+      await page.evaluate(() => { window.__loadSteps = 0; return window.__hand.step(() => window.__hand.visible() || (window.__loadSteps++, false)); });
+      h.expect(await page.evaluate(() => window.__hand.step(() => (window.__awakenLT ?? -1) >= 3.42)), 'the AWAKEN beat never reached 3.42 s');
+      const r = await page.evaluate(() => ({ t: window.__stage.time, frame: window.__stage.canvas.toDataURL('image/png') }));
+      h.expect(!errors.length, errors.join('\n'));
+      await page.close();
+      return r;
+    };
+    const quick = await reach(false);
+    const slow = await reach(true);
+    h.expect(held && held.to.n > held.from.n, 'no frames were stepped while the model was held back');
+    h.expect(held.to.t === held.from.t, `the stage clock moved from ${near(held.from.t)} to ${near(held.to.t)} s while the model loaded`);
+    h.expect(slow.t === quick.t, `the reach came at ${near(slow.t)} s on the stage clock after a slow load, ${near(quick.t)} s after a quick one`);
+    h.expect(slow.frame === quick.frame, 'the reach drew a different picture after a slow load');
+    return { 'frames stepped while the model was held': held.to.n - held.from.n, 'reach at': near(quick.t) };
+  },
   'intro hand: every pose gives the same bones however often it runs, and a positive curl closes either hand': async (h) => {
     const { page, errors } = await h.open({}, '?lab=character&view=front&pose=idle&light=eval&mute&dpr=1');
     await page.waitForFunction(() => !!window.__lab, null, { timeout: 60000 });

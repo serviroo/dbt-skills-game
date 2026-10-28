@@ -178,8 +178,27 @@ export class Stage {
     this.camera.updateProjectionMatrix();
   }
 
+  /** real-time loads a capture is waiting on (see loading) */
+  private loads = 0;
+
+  /**
+   * Waits for a real-time load (a module, a model). A capture holds its clock until the load lands, so the scene starts
+   * at the same stage time however long the load took or how many frames were stepped meanwhile, and every effect that
+   * follows the stage clock draws the same in a given frame every run.
+   */
+  async loading<T>(p: Promise<T>): Promise<T> {
+    if (!this.capture) return p;
+    this.loads++;
+    try {
+      return await p;
+    } finally {
+      this.loads--;
+    }
+  }
+
   /** Advance the world by dt seconds and render one frame. */
   step(dt: number) {
+    if (this.loads) dt = 0;
     if (!this.paused) this.time += dt * this.timeScale;
     for (const f of this.updates) f(this.time, dt * this.timeScale);
     if (params.nopost) this.renderer.render(this.scene, this.camera);
