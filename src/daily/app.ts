@@ -425,12 +425,13 @@ export class App {
     done();
     if (v !== DISMISSED || shut) {
       // the scrim fades with the collapse but takes every tap, and Home stays out of reach, until the window is gone:
-      // a second tap or key meant for the window never lands on what is under it
-      this.scrim.classList.add('is-closing');
-      this.scrim.classList.remove('is-on');
+      // a second tap or key meant for the window never lands on what is under it (unless the Safe Zone already cleared it)
+      if (up) {
+        this.scrim.classList.add('is-closing');
+        this.scrim.classList.remove('is-on');
+      }
       const settled = wait(this.reduced() ? 0.25 : 0.45);
       await w.close();
-      // unless the Safe Zone already cleared it
       if (up) {
         drop();
         if (before?.isConnected && !this.root.contains(document.activeElement)) before.focus({ preventScroll: true });
