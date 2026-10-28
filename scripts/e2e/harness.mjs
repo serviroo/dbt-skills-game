@@ -388,23 +388,36 @@ function launch(flags) {
 /** Home is usable only after any due greeting has opened and closed, including its scrim. */
 export async function reachHub(page) {
   const end = Date.now() + 60000;
-  while (Date.now() < end) {
-    const ready = await page.waitForFunction(() => {
-      const app = window.__daily;
-      const tile = document.querySelector('.dq-tile');
-      if (!app || app.route.name !== 'hub' || !tile?.getClientRects().length || getComputedStyle(tile).visibility === 'hidden') return false;
-      const win = [...document.querySelectorAll('.dq-sw')].find((w) => !w.closest('.pwa-hint-layer'));
-      if (win && document.querySelector('.dq-scrim.is-on')) return win;
-      return !app.greeting && !app.busy && !win && !document.querySelector('.dq-scrim.is-on, .dq-scrim.is-closing') && !document.querySelector('#dq-main')?.inert;
-    }, null, { timeout: Math.max(1, end - Date.now()) });
-    const win = ready.asElement();
-    if (!win) {
-      await ready.dispose();
-      return;
+  try {
+    while (Date.now() < end) {
+      const ready = await page.waitForFunction(() => {
+        const app = window.__daily;
+        const tile = document.querySelector('.dq-tile');
+        if (!app || app.route.name !== 'hub' || !tile?.getClientRects().length || getComputedStyle(tile).visibility === 'hidden') return false;
+        const win = [...document.querySelectorAll('.dq-sw')].find((w) => !w.closest('.pwa-hint-layer'));
+        if (win && document.querySelector('.dq-scrim.is-on')) return win;
+        return !app.greeting && !app.busy && !win && !document.querySelector('.dq-scrim.is-on, .dq-scrim.is-closing') && !document.querySelector('#dq-main')?.inert;
+      }, null, { timeout: Math.max(1, end - Date.now()) });
+      const win = ready.asElement();
+      if (!win) {
+        await ready.dispose();
+        return;
+      }
+      await page.keyboard.press('Escape');
+      await page.waitForFunction((w) => !w.isConnected, win, { timeout: Math.max(1, end - Date.now()) });
+      await win.dispose();
     }
-    await page.keyboard.press('Escape');
-    await page.waitForFunction((w) => !w.isConnected, win, { timeout: Math.max(1, end - Date.now()) });
-    await win.dispose();
+  } catch (e) {
+    if (e.name !== 'TimeoutError') throw e;
+    const state = await page.evaluate(() => JSON.stringify({
+      route: window.__daily?.route.name,
+      greeting: window.__daily?.greeting,
+      busy: window.__daily?.busy,
+      window: !!document.querySelector('.dq-sw'),
+      scrim: !!document.querySelector('.dq-scrim.is-on, .dq-scrim.is-closing'),
+      inert: document.querySelector('#dq-main')?.inert,
+    })).catch(() => 'unreadable');
+    throw new Error(`Home never became idle: ${state}`, { cause: e });
   }
   throw new Error('Home never became idle');
 }

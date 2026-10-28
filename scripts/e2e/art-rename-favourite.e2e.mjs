@@ -95,13 +95,12 @@ async function restore(page, raw) {
 
 export const scenarios = {
   async 'art-home-waits-for-welcome'(h) {
-    let clockReady;
+    let paused = false;
     const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', PHONES[0], async (ctx) => {
-      ctx.on('page', (p) => {
-        clockReady = p.clock.install().then(() => p.clock.pauseAt(Date.now() + 1000));
-      });
-      await ctx.route('**/', async (route) => {
-        await clockReady;
+      await ctx.clock.install();
+      await ctx.route('**/src/daily/index.ts*', async (route) => {
+        await ctx.clock.pauseAt((await route.request().frame().evaluate(() => Date.now())) + 1000);
+        paused = true;
         await route.continue();
       });
     });
@@ -109,6 +108,7 @@ export const scenarios = {
       const state = () => page.evaluate(() => ({ home: !!document.querySelector('.dq-tile'), greeting: window.__daily?.greeting, window: !!document.querySelector('.dq-sw'), inert: document.querySelector('#dq-main')?.inert }));
       for (const end = Date.now() + 30000; !(await state()).home && Date.now() < end; ) await page.clock.runFor(20);
       const before = await state();
+      h.expect(paused, 'the navigation did not pass through the clock gate');
       h.expect(before.home && before.greeting && !before.window, 'the welcome was not pending when Home became ready: ' + JSON.stringify(before));
       let reached;
       let failed;
@@ -121,6 +121,84 @@ export const scenarios = {
       await seed(page);
       await page.locator('.dq-tile--art').click();
       await page.locator('.dq-artroom .dq-galitem').first().waitFor();
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  /** A hidden page retires its rename sheet, including when another tab brings the page back with Undo. */
+  async 'art-rename-closes-when-hidden'(h) {
+    for (const undo of [false, true]) {
+      const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', PHONES[0]);
+      try {
+        await h.reachHub(page);
+        await seed(page);
+        await toArt(h, page);
+        await openPiece(page, 'pg-b');
+        await page.getByRole('button', { name: 'Rename', exact: true }).click();
+        await page.getByLabel('Name this page').fill('An unfinished name');
+        const other = await ctx.newPage();
+        other.on('pageerror', (e) => errors.push(e.message));
+        other.on('console', (m) => m.type() === 'error' && !/WebGL|GPU stall|AudioContext/i.test(m.text()) && errors.push(m.text().slice(0, 300)));
+        await other.goto(h.server.url + '/?mute');
+        await toArt(h, other);
+        await openPiece(other, 'pg-b');
+        await other.getByRole('button', { name: 'Remove', exact: true }).click();
+        await page.getByText('That page is no longer here.', { exact: true }).waitFor();
+        if (undo) {
+          await other.locator('.dq-toast').getByRole('button', { name: 'Undo', exact: true }).click();
+          await page.locator('.dq-piece-labels').waitFor();
+        }
+        await page.waitForFunction(() => history.state?.dq === 1 && !history.state.sheet, null, { timeout: 3000 });
+        await page.goBack({ waitUntil: 'commit' });
+        await page.waitForFunction(() => window.__daily.route.name === 'art', null, { timeout: 3000 });
+        h.expect(!errors.length, errors.join('\n'));
+      } finally {
+        await ctx.close();
+      }
+    }
+  },
+
+  /** A name being typed stays in its field while newer saved artwork and labels show behind it. */
+  async 'art-rename-keeps-other-tab-updates'(h) {
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', PHONES[0]);
+    try {
+      await h.reachHub(page);
+      await seed(page);
+      await toArt(h, page);
+      await openPiece(page, 'pg-a');
+      const before = await page.locator('.dq-piece-art canvas').evaluate((c) => c.toDataURL());
+      await page.getByRole('button', { name: 'Rename', exact: true }).click();
+      await page.getByLabel('Name this page').fill('My draft name');
+      const other = await ctx.newPage();
+      other.on('pageerror', (e) => errors.push(e.message));
+      other.on('console', (m) => m.type() === 'error' && !/WebGL|GPU stall|AudioContext/i.test(m.text()) && errors.push(m.text().slice(0, 300)));
+      await other.goto(h.server.url + '/?mute');
+      await toArt(h, other);
+      await openPiece(other, 'pg-a');
+      await other.evaluate(async (stroke) => {
+        const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+        const rec = await as.get('pg-a');
+        await as.put({ ...rec, strokes: [...rec.strokes, stroke], n: rec.strokes.length + 1 });
+      }, line(100, 1200, 3));
+      await page.waitForFunction((was) => document.querySelector('.dq-piece-art canvas').toDataURL() !== was, before, { timeout: 5000 });
+      await other.getByRole('button', { name: 'Rename', exact: true }).click();
+      await other.getByLabel('Name this page').fill('Named elsewhere');
+      await other.keyboard.press('Enter');
+      await page.waitForFunction(() => document.querySelector('.dq-piece-h')?.textContent === 'Named elsewhere');
+      h.expect(await page.getByLabel('Name this page').inputValue() === 'My draft name', 'a remote update replaced the name being typed');
+      await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+      await page.getByRole('button', { name: 'Rename', exact: true }).click();
+      await other.getByRole('button', { name: 'Rename', exact: true }).click();
+      await other.getByLabel('Name this page').fill('Named twice');
+      await other.keyboard.press('Enter');
+      await page.waitForFunction(() => document.querySelector('.dq-piece-h')?.textContent === 'Named twice');
+      await page.keyboard.press('Enter');
+      await page.locator('.dq-piece-rename').waitFor({ state: 'hidden' });
+      h.expect((await records(page)).find((r) => r.id === 'pg-a')?.name === 'Named twice', 'an untouched name field overwrote the newer name from the other tab');
+      await page.getByRole('button', { name: 'Remove', exact: true }).click();
+      await other.getByText('That page is no longer here.', { exact: true }).waitFor();
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();

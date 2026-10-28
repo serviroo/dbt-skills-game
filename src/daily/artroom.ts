@@ -44,7 +44,6 @@ export function thumbImg(app: App, m: DrawingMeta, alt: string) {
   return img;
 }
 
-/** A shadow ally as a full-art Shadow card. */
 /** Favourites first, each group in the order it came in. */
 export const favFirst = <T extends { fav?: boolean }>(list: T[]) => [...list.filter((m) => m.fav), ...list.filter((m) => !m.fav)];
 /** The drawing an Undo just brought back: the list that shows it next takes focus to it. */
@@ -76,6 +75,7 @@ export function refill(list: HTMLElement, shows: string, cards: () => HTMLElemen
   to?.focus({ preventScroll: true });
 }
 
+/** A shadow ally as a full-art Shadow card. */
 export function allyCard(app: App, m: DrawingMeta, img?: HTMLImageElement | HTMLCanvasElement, star = false) {
   const name = m.name?.trim() || 'Shadow ally';
   return h(
@@ -750,7 +750,11 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
   const as = store(app);
   const body = h('div', { class: 'dq-piece-body' });
   let removed = false;
-  const missing = () => body.replaceChildren(p('That page is no longer here.', 'dq-text dq-empty'), h('div', { class: 'dq-actions' }, btn('Art room', () => app.go({ name: 'art' }), { kind: 'quiet' })));
+  let endRename = () => {};
+  const missing = () => {
+    endRename();
+    body.replaceChildren(p('That page is no longer here.', 'dq-text dq-empty'), h('div', { class: 'dq-actions' }, btn('Art room', () => app.go({ name: 'art' }), { kind: 'quiet' })));
+  };
   const off = as.onRemove((gone) => {
     if (gone !== id) return;
     removed = true;
@@ -822,14 +826,17 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
       labels.classList.remove('is-hidden');
       if (focus) renameB.focus();
     };
+    endRename = () => closeRename(false);
     const openRename = () => {
       const r = rec!;
       const f = field(ally ? ART.nameAsk : ART.pageNameAsk, { value: r.name ?? '', placeholder: ally ? 'Shadow ally' : dayLabel(r.day), max: 24, autocomplete: 'off' });
+      let typed = false;
+      f.input.addEventListener('input', () => (typed = true));
       const save = async () => {
         if (!editing) return;
         const name = f.input.value.trim().slice(0, 24);
-        if (name !== (rec!.name?.trim() ?? '')) await as.setLabels(id, { name });
-        if (removed) return;
+        if (typed && name !== (rec!.name?.trim() ?? '')) await as.setLabels(id, { name });
+        if (removed || !editing) return;
         closeRename(true);
         const now = await as.get(id);
         if (now && !removed) take(now);
@@ -862,7 +869,7 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
     };
     offChange = as.onChange(() => {
       void as.get(id).then((now) => {
-        if (!now || removed || editing) return;
+        if (!now || removed) return;
         take(now);
       });
     });
@@ -910,5 +917,5 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
       ),
     );
   })();
-  return { el, title: 'Your page', mode: 'sub', bubbles: [1.6, 0.6], leave: () => { removed = true; off(); offShown(); offChange(); } };
+  return { el, title: 'Your page', mode: 'sub', bubbles: [1.6, 0.6], leave: () => { removed = true; endRename(); off(); offShown(); offChange(); } };
 }

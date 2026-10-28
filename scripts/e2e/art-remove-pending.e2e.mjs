@@ -49,8 +49,10 @@ async function until(h, read, check, message, tries = 120) {
   throw new Error(message);
 }
 
-async function second(h, ctx, viewport) {
+async function second(h, ctx, errors, viewport) {
   const b = await ctx.newPage();
+  b.on('pageerror', (e) => errors.push(e.message));
+  b.on('console', (m) => m.type() === 'error' && !/WebGL|GPU stall|AudioContext/i.test(m.text()) && errors.push(m.text().slice(0, 300)));
   b.setDefaultTimeout(15000);
   if (viewport) await b.setViewportSize(viewport);
   await b.goto(h.server.url + '/?mute');
@@ -78,6 +80,59 @@ async function stroke(page) {
 }
 
 export const scenarios = {
+  /** The storage event carries a removal and its Undo even when BroadcastChannel is unavailable. */
+  async 'art-remove-storage-signal'(h) {
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', undefined, (c) => c.addInitScript(() => { window.BroadcastChannel = undefined; }));
+    try {
+      await h.reachHub(page);
+      await seed(page);
+      await toArt(h, page);
+      const other = await second(h, ctx, errors);
+      await removePiece(page, 'pg-a');
+      await other.locator('[data-piece="pg-a"]').waitFor({ state: 'detached', timeout: 3000 });
+      await page.locator('.dq-toast').getByRole('button', { name: 'Undo', exact: true }).click();
+      await other.locator('[data-piece="pg-a"]').waitFor();
+      await other.evaluate(async (stroke) => {
+        const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+        const rec = await as.get('pg-a');
+        await as.put({ ...rec, strokes: [...rec.strokes, stroke], n: rec.strokes.length + 1 });
+      }, line(50, 1200, 3));
+      await removePiece(page, 'pg-a');
+      await other.locator('[data-piece="pg-a"]').waitFor({ state: 'detached', timeout: 3000 });
+      await page.locator('.dq-toast').waitFor({ state: 'hidden', timeout: 12000 });
+      await until(h, () => other.evaluate(async () => (await (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).list()).map((r) => r.id)), (ids) => !ids.includes('pg-a'), 'a finished removal returned from the other tab\'s memory');
+      h.expect(!(await other.locator('[data-piece="pg-a"]').count()), 'the finished removal came back in the gallery');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  /** Every valid drawing id is marked as an own key, heard in other tabs and finished after a reload. */
+  async 'art-remove-special-ids'(h) {
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute');
+    try {
+      await h.reachHub(page);
+      await page.evaluate(async (ids) => {
+        const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+        await as.importAll(ids.map((id) => ({ id, kind: 'today', day: '2026-10-20', t: 1, updated: 1, n: 1, strokes: [{ i: 1, w: 4, p: [50, 50, 500, 500] }] })));
+      }, ['__proto__', 'constructor', 'toString']);
+      await toArt(h, page);
+      const other = await second(h, ctx, errors);
+      for (const id of ['__proto__', 'constructor', 'toString']) {
+        await removePiece(page, id);
+        h.expect(await page.evaluate((id) => Object.hasOwn(JSON.parse(localStorage.getItem(`${window.__daily.store.key}.art.gone`) ?? '{}'), id), id), `${id}: the pending removal was not stored as an own key`);
+        await other.locator(`[data-piece="${id}"]`).waitFor({ state: 'detached', timeout: 3000 });
+        await page.reload();
+        await toArt(h, page);
+        h.expect(!(await records(page)).some((r) => r.id === id), `${id}: the removal did not finish after reload`);
+      }
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** An edit saved in another tab during the Undo wins; the other tab hides the page too and gets it back with Undo. */
   async 'art-remove-other-tab'(h) {
     const { ctx, page: a, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute');
@@ -85,7 +140,7 @@ export const scenarios = {
     await h.reachHub(a);
     await seed(a);
     await toArt(h, a);
-    const b = await second(h, ctx, { width: 320, height: 568 });
+    const b = await second(h, ctx, errors, { width: 320, height: 568 });
 
     // B edits pg-a; A removes it; B saves during A's Undo: B's edit stays everywhere
     await b.locator('[data-piece="pg-a"]').click();
@@ -127,7 +182,7 @@ export const scenarios = {
     await seed(a);
     await toArt(h, a);
     await openPiece(a, 'pg-a');
-    const b = await second(h, ctx, { width: 320, height: 568 });
+    const b = await second(h, ctx, errors, { width: 320, height: 568 });
 
     // B saves an edit of the page A has open: A's page shows it, so A's Remove would take the version A sees, and a
     // keyboard player in A keeps focus on Remove
@@ -172,7 +227,7 @@ export const scenarios = {
     await h.reachHub(a);
     await seed(a);
     await toArt(h, a);
-    const b = await second(h, ctx);
+    const b = await second(h, ctx, errors);
 
     await removePiece(a, 'pg-b');
     const t0 = Date.now();
@@ -297,7 +352,7 @@ export const scenarios = {
     await h.reachHub(a);
     await seed(a);
     await toArt(h, a);
-    const b = await second(h, ctx);
+    const b = await second(h, ctx, errors);
     const relabel = (id, name) => b.evaluate(async ([id, name]) => (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).setLabels(id, { name }), [id, name]);
 
     const size = await a.locator('.dq-galitem-d').first().evaluate((e) => parseFloat(getComputedStyle(e).fontSize));

@@ -240,7 +240,7 @@ interface Gone {
 const GONE_WAIT = 60e3;
 const sameGone = (a: Gone | undefined, b: Gone) => !!a && a.rev === b.rev && a.at === b.at && a.tab === b.tab;
 function cleanGone(raw: unknown) {
-  const out: Record<string, Gone> = {};
+  const out: Record<string, Gone> = Object.create(null);
   if (isObj(raw)) for (const [id, g] of Object.entries(raw)) if (isObj(g) && typeof g.rev === 'string' && fin(g.at) && typeof g.tab === 'string') out[id] = { rev: g.rev, at: g.at, tab: g.tab };
   return out;
 }
@@ -285,6 +285,19 @@ export class ArtStore {
   private draftTurn = 0;
   /** Writes under way, so a clear's check waits for them. */
   private writes = new Set<Promise<unknown>>();
+  private onStorage = (e: StorageEvent) => {
+    if (e.key !== this.goneKey) return;
+    this.drop();
+    this.changed();
+    void this.sweep();
+    try {
+      const before = cleanGone(JSON.parse(e.oldValue ?? 'null'));
+      const now = cleanGone(JSON.parse(e.newValue ?? 'null'));
+      for (const id of Object.keys(before)) if (!now[id]) void this.ended(id);
+    } catch {
+      /* an unreadable map says nothing about which removals ended */
+    }
+  };
 
   constructor(
     readonly name: string,
@@ -308,6 +321,7 @@ export class ArtStore {
         this.channel = null;
       }
     }
+    if (typeof window !== 'undefined') window.addEventListener('storage', this.onStorage);
     this.db = this.connect(true);
     void this.sweep();
   }
@@ -355,6 +369,7 @@ export class ArtStore {
 
   /** This game's data is being cleared: the database closes so it can go, and nothing stays in memory. */
   private dispose() {
+    if (typeof window !== 'undefined') window.removeEventListener('storage', this.onStorage);
     const db = this.db;
     this.db = Promise.resolve(null);
     void db.then((d) => d?.close());
@@ -385,6 +400,11 @@ export class ArtStore {
   }
   private changed() {
     this.changes.forEach((fn) => fn());
+  }
+  private async ended(id: string) {
+    if (this.deleted.has(id)) return;
+    const disk = await this.tx(['meta'], 'readonly', (t) => req(t.objectStore('meta').get(id) as IDBRequest<DrawingMeta | undefined>), () => null);
+    if (disk === undefined && !this.deleted.has(id)) this.forget(id);
   }
 
   private forget(id: string) {
@@ -543,7 +563,7 @@ export class ArtStore {
   }
   /** The removals waiting for their Undo: as stored beside the save, and this tab's own. */
   private gone() {
-    let out: Record<string, Gone> = {};
+    let out: Record<string, Gone> = Object.create(null);
     try {
       out = cleanGone(JSON.parse(localStorage.getItem(this.goneKey) ?? 'null'));
     } catch {
