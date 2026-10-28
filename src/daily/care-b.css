@@ -210,24 +210,14 @@
   }
 }
 @media (min-width: 760px) {
-  .dq-hub {
-    grid-template-areas: 't t' 'a b' 'a g' 'c l' 'm l' 'm .';
-  }
   .dq-col--t {
-    grid-area: t;
+    grid-column: 1 / -1;
   }
   .dq-lobby {
     margin: -14px 0 -10px;
   }
 }
 @media (min-width: 1180px) {
-  .dq-hub {
-    grid-template-areas: none;
-  }
-  .dq-col--t {
-    grid-area: auto;
-    grid-column: 1 / -1;
-  }
   .dq-lobby {
     margin: -18px 0 -18px;
   }

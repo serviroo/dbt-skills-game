@@ -1689,24 +1689,8 @@ textarea.dq-input {
   .dq-hub {
     max-width: 980px;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-areas: 'a b' 'g b' 'c b' 'm b';
     align-items: start;
     gap: 28px 32px;
-  }
-  .dq-col--a {
-    grid-area: a;
-  }
-  .dq-col--b {
-    grid-area: b;
-  }
-  .dq-col--c {
-    grid-area: c;
-  }
-  .dq-col--m {
-    grid-area: m;
-  }
-  .dq-col--g {
-    grid-area: g;
   }
   .dq-quest {
     --quest-top: 128px;
@@ -1722,7 +1706,6 @@ textarea.dq-input {
   .dq-hub {
     max-width: 1300px;
     grid-template-columns: minmax(330px, 360px) minmax(0, 1fr) minmax(330px, 360px);
-    grid-template-areas: 'a b c' 'a b m' 'g b m';
     gap: 36px;
     padding-top: 14px;
   }
@@ -3535,32 +3518,40 @@ textarea.dq-input {
 .dq-cardbtn .dq-cf-stat {
   display: none;
 }
-/* hub columns: flat on mobile and tablet (display: contents), real columns on desktop */
+/* hub columns: flat on phones (display: contents). From tablets up each column stacks its own panels, so a tall quest
+   never leaves a hole beside it: two columns (Status, Check-in and Places beside the quest), three on desktop. */
 .dq-hcol {
   display: contents;
 }
-@media (min-width: 1180px) {
+@media (min-width: 760px) {
   .dq-hub {
-    grid-template-areas: none;
+    grid-template-rows: auto auto 1fr;
   }
   .dq-hcol {
     display: flex;
     flex-direction: column;
     gap: 28px;
     min-width: 0;
-    grid-row: 2;
   }
   .dq-hcol--l {
-    grid-column: 1;
+    grid-area: 2 / 1;
   }
   .dq-hcol--m {
-    grid-column: 2;
+    grid-area: 2 / 2 / 4;
   }
   .dq-hcol--r {
-    grid-column: 3;
+    grid-area: 3 / 1;
   }
-  .dq-hcol .dq-col {
-    grid-area: auto;
+}
+@media (min-width: 1180px) {
+  .dq-hub {
+    grid-template-rows: none;
+  }
+  .dq-hcol--m {
+    grid-area: 2 / 2;
+  }
+  .dq-hcol--r {
+    grid-area: 2 / 3;
   }
 }
 /* Bodoni stays for the rank letter and big titles only */
@@ -4580,12 +4571,6 @@ textarea.dq-input {
 }
 
 @media (min-width: 760px) {
-  .dq-hub {
-    grid-template-areas: 'a b' 'a g' 'c l' 'm l' 'm .';
-  }
-  .dq-col--l {
-    grid-area: l;
-  }
   .dq-artentries {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -4864,14 +4849,6 @@ textarea.dq-input {
     border: 1px solid rgba(125, 150, 197, 0.45);
     background: rgba(6, 14, 26, 0.94);
     box-shadow: 0 12px 30px -12px rgba(0, 0, 0, 0.9);
-  }
-}
-@media (min-width: 1180px) {
-  .dq-hub {
-    grid-template-areas: none;
-  }
-  .dq-col--l {
-    grid-area: auto;
   }
 }
 .dq-tile--art .dq-tile-t,
