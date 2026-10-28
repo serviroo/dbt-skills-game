@@ -116,7 +116,8 @@ export const scenarios = {
     await cdp.send('Debugger.disable');
     await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
     await win.waitFor({ state: 'detached', timeout: 5000 });
-    await page.evaluate(() => window.__held);
+    const frozenMs = await page.evaluate(() => window.__held);
+    h.expect(frozenMs >= across * 1000, `the window held across the freeze closed after ${Math.round(frozenMs)} ms, before its ${across} s hold`);
     await still('settings after a freeze and resume');
 
     await page.getByRole('button', { name: 'Safe Zone, help right now' }).click();
