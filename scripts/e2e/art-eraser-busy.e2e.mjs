@@ -94,7 +94,6 @@ function busyPage(n) {
 }
 
 /**
-/**
  * Counts the work on the drawing page's canvases, the bubbles behind it aside: lines and shapes drawn (stroke and fill
  * calls), layers laid onto others (drawImage calls) and the pixels those cover inside their clip. Per frame in which
  * the eraser took more (window.__work.frames), and, with window.__work.on, over any other stretch. Counts, not times,
