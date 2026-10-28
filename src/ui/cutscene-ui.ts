@@ -115,7 +115,9 @@ export async function namePrompt(): Promise<void> {
   let into = name;
   for (const f of [name, comp]) f.addEventListener('focus', () => (into = f));
   const onKey = (e: KeyboardEvent) => {
-    if (e.key.length !== 1 || e.key === ' ' || e.ctrlKey || e.metaKey || e.altKey) return;
+    // AltGr types letters (Ł, ß) and reports Ctrl and Alt with them
+    const altGraph = e.getModifierState('AltGraph');
+    if (e.key.length !== 1 || e.key === ' ' || e.metaKey || (!altGraph && (e.ctrlKey || e.altKey))) return;
     if (document.activeElement?.closest('button, a[href], input, select, textarea, [contenteditable]')) return;
     into.focus({ preventScroll: true });
   };
