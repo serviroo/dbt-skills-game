@@ -61,12 +61,20 @@ async function framesWhileStill(h, page) {
   return { frames: b.n - a.n, from };
 }
 
-/** Opens a Lantern window that holds `sec` on the UI clock, the way lanternMessage does with no buttons. */
+/**
+ * Opens a Lantern window that holds `sec` on the UI clock, the way lanternMessage does with no buttons. `__held`
+ * resolves once it has closed, to the ms from the end of its open to the end of its hold.
+ */
 const hold = (page, sec) =>
   page.evaluate((sec) => {
-    window.__held = import('/src/ui/lantern-window.ts').then(({ lanternMessage }) => {
+    window.__held = Promise.all([import('/src/ui/lantern-window.ts'), import('/src/ui/anim.ts')]).then(async ([{ LanternWindow, lanternLayer }, { wait }]) => {
+      const w = new LanternWindow(lanternLayer(), { kind: 'info', icon: 'info', title: 'Notification', html: '<p class="center">Still here.</p>' });
+      await w.open();
       const t = (window.__heldFrom = performance.now());
-      return lanternMessage({ kind: 'info', icon: 'info', title: 'Notification', html: '<p class="center">Still here.</p>' }, { hold: sec }).then(() => performance.now() - t);
+      await wait(sec);
+      const ms = performance.now() - t;
+      await w.close();
+      return ms;
     });
   }, sec);
 
@@ -91,7 +99,7 @@ export const scenarios = {
     await win.waitFor({ state: 'detached', timeout: 5000 });
     const ms = await page.evaluate(() => window.__held);
     // a clock that failed to wake would never close it; the ceiling only leaves room for a busy machine
-    h.expect(ms >= HOLD_SEC * 1000 && ms < HOLD_SEC * 1000 + 5000, `the held window closed after ${Math.round(ms)} ms, not after its ${HOLD_SEC} s hold`);
+    h.expect(ms >= HOLD_SEC * 1000 && ms < HOLD_SEC * 1000 + 5000, `the window held ${Math.round(ms)} ms, not its ${HOLD_SEC} s`);
     seen.held = { ms: Math.round(ms) };
     await still('settings after a held window');
 
@@ -117,7 +125,7 @@ export const scenarios = {
     await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
     await win.waitFor({ state: 'detached', timeout: 5000 });
     const frozenMs = await page.evaluate(() => window.__held);
-    h.expect(frozenMs >= across * 1000, `the window held across the freeze closed after ${Math.round(frozenMs)} ms, before its ${across} s hold`);
+    h.expect(frozenMs >= across * 1000, `the window held across the freeze ended its ${across} s hold after ${Math.round(frozenMs)} ms`);
     await still('settings after a freeze and resume');
 
     await page.getByRole('button', { name: 'Safe Zone, help right now' }).click();
