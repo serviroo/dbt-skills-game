@@ -74,11 +74,16 @@ async function humOn(h, page) {
   if ((await page.evaluate(() => window.__daily.route.name)) !== 'moment') await page.getByRole('button', { name: 'Give me a moment', exact: true }).click();
   const n = await page.evaluate(() => window.__taps.length);
   await page.getByRole('switch', { name: 'Low hum', exact: true }).check();
-  await page.waitForFunction((n) => window.__taps.length > n && window.__taps.at(-1).context.state === 'running', n, { timeout: 10000 });
+  const found = await page.waitForFunction((n) => {
+    const i = window.__taps.findIndex((t, i) => i >= n && t.context !== window.__taps[0].context && t.node instanceof GainNode && t.context.state === 'running');
+    return i < 0 ? null : { i };
+  }, n, { timeout: 10000 });
+  const { i } = await found.jsonValue();
+  await found.dispose();
   await audioReady(page);
   // past its first swell
-  await recorded(page, n, (await clock(page, n)) + 2.5);
-  return n;
+  await recorded(page, i, (await clock(page, i)) + 2.5);
+  return i;
 }
 
 const clock = (page, n) => page.evaluate((n) => window.__taps[n].context.currentTime, n);
@@ -349,7 +354,6 @@ export const scenarios = {
     const { ctx, page, errors } = await boot(h);
     try {
       let n = await humOn(h, page);
-      const first = n;
       const controls = await soundControls(page);
       await controls.getByRole('button', { name: 'Mute', exact: true }).click();
       const m = await clock(page, n);
@@ -381,7 +385,7 @@ export const scenarios = {
       const left = await page.evaluate(() => window.__daily.route.name);
       h.expect(left !== 'moment', `Done stayed on ${left}`);
       await h.sleep(500);
-      const humming = await page.evaluate((first) => window.__taps.slice(first).filter((t) => t.context.state !== 'closed').length, first);
+      const humming = await page.evaluate(() => new Set(window.__taps.map((t) => t.context).filter((c) => c !== window.__taps[0].context && c.state !== 'closed')).size);
       h.expect(!humming, `${humming} hum(s) still open after the moment ended`);
       h.expect(!errors.length, errors.join('\n'));
     } finally {

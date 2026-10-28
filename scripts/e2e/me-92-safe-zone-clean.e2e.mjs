@@ -940,7 +940,7 @@ export const scenarios = {
       await h.sleep(250);
       const ringing = await outputLevel(page);
       await enterSafe(h, page, 'echo', before);
-      const entered = (await outputLevel(page)).t;
+      const entered = await page.evaluate(() => window.__taps[0].context.currentTime);
       await h.sleep(3000);
       const inside = await listen(h, page, 3);
       c.ok(ringing.rms > 1e-3, `echo: the effects never reached the speakers (${fmt([ringing])})`);
@@ -966,7 +966,7 @@ export const scenarios = {
       const gains = await userGains(page);
       const before = await probe(page);
       await enterSafe(h, page, 'output', before);
-      const entered = (await outputLevel(page)).t;
+      const entered = await page.evaluate(() => window.__taps[0].context.currentTime);
       await page.getByRole('button', { name: 'Calm my body first', exact: true }).click({ timeout: 3000 });
       await h.sleep(9000);
       const inside = await listen(h, page, 14);

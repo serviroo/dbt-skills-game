@@ -200,10 +200,15 @@ async function humOn(h) {
   await page.getByRole('button', { name: 'Give me a moment', exact: true }).click();
   const n = await page.evaluate(() => window.__taps.length);
   await page.getByRole('switch', { name: 'Low hum', exact: true }).check();
-  await page.waitForFunction((n) => window.__taps.length > n && window.__taps.at(-1).context.state === 'running', n, { timeout: 10000 });
+  const found = await page.waitForFunction((n) => {
+    const i = window.__taps.findIndex((t, i) => i >= n && t.context !== window.__taps[0].context && t.node instanceof GainNode && t.context.state === 'running');
+    return i < 0 ? null : { i };
+  }, n, { timeout: 10000 });
+  const { i } = await found.jsonValue();
+  await found.dispose();
   await audioReady(page);
   await h.sleep(2500);
-  return { ctx, page, errors, n };
+  return { ctx, page, errors, n: i };
 }
 
 export const scenarios = {
