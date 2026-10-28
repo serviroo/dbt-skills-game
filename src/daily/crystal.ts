@@ -4,6 +4,7 @@ import { write } from '../core/cleared';
 import { artStore, cleanRec, skippedDrafts } from './artstore';
 import { cleanChapter, cleanStory, skippedCards, storyStore, STORY_CAP, type Story } from './storystore';
 import { isSkillId, normalize, type State, type Store } from './store';
+import { exportSkillDrafts } from './skilldraft';
 
 interface Preferences {
   audio?: AudioLevels & { v: 1 };
@@ -117,8 +118,9 @@ export async function makeCrystal(store: Store, volume?: VolumeCtrl): Promise<{ 
   const choices = exportPreferences(store, volume);
   // a save no version could read is kept beside this one: it goes in as it is, so clearing never loses it
   const unread = exportUnread(store);
-  const missing = [store.readable && !unread.incomplete ? '' : 'progress', drawings.incomplete || unfinished.incomplete ? 'drawings' : '', incomplete ? 'stories' : '', choices.incomplete ? 'choices' : ''].filter(Boolean).join(' and ');
-  const json = store.exportJSON({ art: drawings.records, drafts: unfinished.drafts, stories: { stories, chapters, cards }, preferences: choices.preferences, ...(unread.saves.length ? { unreadSaves: unread.saves } : {}), incomplete: !!missing });
+  const skills = exportSkillDrafts(store.key);
+  const missing = [store.readable && !unread.incomplete && !skills.incomplete ? '' : 'progress', drawings.incomplete || unfinished.incomplete ? 'drawings' : '', incomplete ? 'stories' : '', choices.incomplete ? 'choices' : ''].filter(Boolean).join(' and ');
+  const json = store.exportJSON({ art: drawings.records, drafts: unfinished.drafts, stories: { stories, chapters, cards }, preferences: choices.preferences, ...(unread.saves.length ? { unreadSaves: unread.saves } : {}), ...(skills.drafts.length ? { skillDrafts: skills.drafts } : {}), incomplete: !!missing });
   return { json, missing };
 }
 

@@ -25,6 +25,7 @@ import { canWrite, cleared, clearStatus, holdAll, onClearStatus, write } from '.
 import { siteUrl } from '../core/base';
 import { clearGame } from './clear';
 import { crystalContent, makeCrystal, readCrystal, restorePreferences, restoreUnread, type Peek } from './crystal';
+import { restoreSkillDrafts } from './skilldraft';
 import { supportListsCopy } from './support-lists';
 
 const pageHead = (title: string, sub?: string) => h('header', { class: 'dq-pagehead' }, h('h1', { class: 'dq-h1', 'data-focus': '', text: title }), sub ? p(sub, 'dq-text dq-pagesub') : null);
@@ -979,7 +980,9 @@ export function settingsScreen(app: App): ScreenOut {
   const keeps = browserKeeps();
   const restoreBtn = btn('Restore', () => file.click(), { kind: 'quiet', ic: 'import' });
   const restore = async ({ raw, data, incomplete: fileIncomplete }: Peek) => {
-    const { saving } = st.merge(data);
+    const merged = st.merge(data);
+    const draftsSaved = restoreSkillDrafts(st.key, raw.skillDrafts);
+    const saving = merged.saving && draftsSaved;
     const choicesSaved = restorePreferences((raw as { preferences?: unknown }).preferences, st, app.opts.volume);
     const unreadBack = restoreUnread((raw as { unreadSaves?: unknown }).unreadSaves, st);
     app.applyMotion();

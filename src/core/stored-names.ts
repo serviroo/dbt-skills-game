@@ -15,6 +15,8 @@ export const BESIDE = {
   safeLight: '.safe-light',
   readSize: '.read-size',
   momentLength: '.moment-length',
+  /** unfinished skill answers, per page load and part: `<save>.skill-draft.<load>.<skill>.<part>` */
+  skillDraft: '.skill-draft',
 } as const;
 
 /** How long Give me a moment lasts, kept beside the save on this device: about 1 or 3 minutes, or until the player leaves. */

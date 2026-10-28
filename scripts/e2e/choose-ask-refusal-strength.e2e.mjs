@@ -367,7 +367,9 @@ export const scenarios = {
       h.expect((await credits(h, page, ID)) - had === 1, `${where}: opening and leaving credited it ${(await credits(h, page, ID)) - had} times, not once`);
     }
     const had = await credits(h, page, ID);
+    // the half-typed line is kept, so the skill opens where it was left; Start over begins it again
     await openFromList(h, page, NAME, REAL);
+    await tap(page, 'Start over');
     await toLevels(h, page, 'ask', 'Safe Zone');
     await page.locator('.dq-top .dq-safe').click();
     await page.waitForFunction(() => document.querySelector('.dq')?.dataset.screen === 'safe', null, { timeout: 5000 });

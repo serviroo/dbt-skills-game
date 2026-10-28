@@ -4,6 +4,7 @@ import { SKILL_END } from '../content/daily-lines';
 import type { App, Place, Route, ScreenOut, Visit } from './app';
 import { glyph, icon } from './art';
 import { isSkillId, uid } from './store';
+import { dropDraft, keepDraft, newestDraft, stepLayout, worthKeeping, type SkillDraft } from './skilldraft';
 import { btn, chip, copyText, field, h, md, p, panel, segmented, typo } from './ui';
 import { breathRing, counter, holdButton, loadoutArt, pmrView, timerView, type Ctx } from './widgets';
 
@@ -12,8 +13,8 @@ const tx = (t: Txt | undefined, a: Answers) => (t === undefined ? '' : typeof t 
 const stackable = (labels: string[]) => labels.some((l) => l.length > 18) || (labels.length >= 3 && labels.reduce((n, l) => n + l.length, 0) / labels.length > 11);
 
 /**
- * What a skill visit keeps when the player leaves it with Back or Forward, in memory only (never in history or
- * storage). Coming back to the visit puts it all back, so nothing typed is lost and nothing is credited twice.
+ * What a skill visit keeps when the player leaves it with Back or Forward, in memory (never in history). Coming back
+ * to the visit puts it all back, so nothing typed is lost and nothing is credited twice.
  */
 export interface SkillKept {
   answers: Answers;
@@ -23,19 +24,37 @@ export interface SkillKept {
   fed: string | null;
   /** the line shown above a step (a reply, "Saved on this device."), so it shows there again */
   leads: Record<number, string>;
+  /** steps last left by going on from them: shown again going forward (Make the step smaller), they start empty */
+  done: number[];
+  /** the skill reached its end: nothing of this visit is kept on the device any more */
+  ended: boolean;
 }
+
+/** Handed to the visit Start over opens: the same practice begun again, already credited when it was opened. */
+const STARTED_OVER = Symbol('started over');
+const PRACTISE_AGAIN = Symbol('practise again');
 
 export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const r = route as Extract<Route, { name: 'skill' }>;
   const sk = SKILL[isSkillId(r.id) ? r.id : 'wise-mind'];
   const mod = MODULES[sk.module];
   // opening a skill is practice: credited now, even if the player leaves on the first screen; coming back is not a second open
-  if (!visit.again) app.store.skillEvent(sk.id);
+  if (!visit.again && visit.handed !== STARTED_OVER) app.store.skillEvent(sk.id);
   const kept = visit.again ? (visit.kept as SkillKept | undefined) : undefined;
-  const answers: Answers = { ...kept?.answers };
-  const typed: SkillKept['typed'] = { ...kept?.typed };
-  const leads: SkillKept['leads'] = { ...kept?.leads };
+  const part = r.entry && sk.steps.some((s) => s.id === r.entry) ? r.entry : '';
+  const resumed = kept || visit.handed === STARTED_OVER || visit.handed === PRACTISE_AGAIN ? null : newestDraft(app.store.key, sk.id, part);
+  const draft = resumed?.draft;
+  const layout = stepLayout(sk.steps);
+  const from = kept ?? draft;
+  const answers: Answers = { ...from?.answers };
+  const typed: SkillKept['typed'] = { ...from?.typed };
+  const leads: SkillKept['leads'] = { ...from?.leads };
+  const done = new Set(from?.done);
   let fed = kept?.fed ?? null;
+  /** this visit's typed text is kept on the device: not once the skill has ended or the player starts over */
+  let drafting = !kept?.ended;
+  /** the player is going on from the step on screen (not Back, Forward or leaving the skill) */
+  let going = false;
   /** showing a place again for Back or Forward: it isn't marked, chimes or asks again */
   let replaying = false;
   /** the Safe Zone is opening over this skill (or the game's data is being cleared): what it stops stops quietly */
@@ -60,20 +79,48 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
   let idx = -1;
   /** the step's fields as drawn, so what was typed in them comes back with the step */
   let drawn: [HTMLInputElement | HTMLTextAreaElement, string][] = [];
+  /** the step `drawn` was drawn for: its fields are only ever read back into that step */
+  let drawnAt = -1;
   const snap = () => {
-    if (idx < 0) return;
+    if (idx !== drawnAt || idx < 0 || idx >= sk.steps.length) return;
     const t = drawn.map(([f, was]): [string, string] => [was, f.value]);
     if (t.some(([was, now]) => was !== now)) typed[idx] = t;
-    else delete typed[idx];
+    else if (!typed[idx]?.every(([, value], k) => value === drawn[k]?.[0].value)) delete typed[idx];
   };
 
   const clear = () => {
     snap();
+    if (idx >= 0) {
+      if (going) done.add(idx);
+      else done.delete(idx);
+    }
+    going = false;
     stops.splice(0).forEach((f) => f());
     el.classList.remove('is-dim');
   };
 
+  const snapshot = (): SkillDraft => ({ skill: sk.id, part, at: idx, layout, answers, typed, leads, done: [...done], t: draft?.t ?? 0 });
+  const words = () => JSON.stringify([answers, typed]);
+  let lastWords = words();
+  let restoring = false;
+  const persist = () => {
+    if (!drafting || restoring || idx < 0 || idx >= sk.steps.length) return;
+    snap();
+    const now = words();
+    const changed = now !== lastWords;
+    lastWords = now;
+    if (worthKeeping(sk.steps, answers, typed)) keepDraft(app.store.key, snapshot(), changed);
+    else dropDraft(app.store.key, snapshot(), resumed);
+  };
+  const drop = () => {
+    snap();
+    drafting = false;
+    dropDraft(app.store.key, snapshot(), resumed);
+  };
+  el.addEventListener('input', persist);
+
   const follow = (go: Go | undefined, fallbackNext: number): void => {
+    going = true;
     if (go === 'end') return showEnd();
     if (go === 'end:quiet') return showEnd(true);
     if (go === 'safe') return app.go({ name: 'safe' });
@@ -90,14 +137,18 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const swap = (...kids: (Node | null)[]) => {
     body.replaceChildren(...kids.filter((k): k is Node => !!k));
     drawn = [...body.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('textarea, input:not([type=range]):not([type=checkbox]):not([type=radio])')].map((f) => [f, f.value]);
-    // Back or Forward brings back what was typed; a step shown again going forward (Make the step smaller) starts empty
+    drawnAt = idx;
+    // what was typed comes back with the step (Back, Forward, or Back and then on again); a step shown again after the
+    // player went on from it (Make the step smaller) starts empty
+    restoring = true;
     drawn.forEach(([f, was], k) => {
-      const t = replaying ? typed[idx]?.[k] : undefined;
+      const t = replaying || !done.has(idx) ? typed[idx]?.[k] : undefined;
       if (!t || t[0] !== was || t[1] === was) return;
       f.value = t[1];
       f.closest<HTMLElement>('.is-hidden')?.classList.remove('is-hidden');
       f.dispatchEvent(new Event('input', { bubbles: true }));
     });
+    restoring = false;
     animate(body, app.reduced() ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], {
       duration: app.reduced() ? 180 : 360,
       easing: 'cubic-bezier(.16,1,.3,1)',
@@ -106,6 +157,7 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
     first?.setAttribute('tabindex', '-1');
     first?.focus({ preventScroll: true });
     app.root.scrollTo({ top: 0 });
+    persist();
   };
 
   const optButtons = (opts: Opt[], onPick: (o: Opt) => void, grid = false) =>
@@ -199,6 +251,7 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
                 }
                 b.setAttribute('aria-pressed', String(picked.has(o.label)));
                 answers[s.key] = [...picked];
+                persist();
               },
               o.go ? undefined : picked.has(o.label),
             ),
@@ -239,6 +292,7 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
                   const cur = f.input.value.trim();
                   f.input.value = cur && !cur.endsWith(t) ? `${cur} ${t}` : t;
                   answers[s.key] = f.input.value;
+                  persist();
                   f.input.focus();
                 }),
               ),
@@ -408,6 +462,7 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
               if (v === null) delete ranks[it];
               else ranks[it] = String(v);
               save();
+              persist();
             }, { allowClear: true, cls: 'dq-seg--3 ca-tier' }),
           ),
         );
@@ -503,6 +558,9 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
   function showEnd(quiet = false) {
     clear();
     idx = sk.steps.length;
+    // finished: what was typed is kept no longer (an end shown again by Back or Forward leaves a newer visit's alone)
+    if (replaying) drafting = false;
+    else drop();
     if (!replaying) visit.mark(quiet ? 'end:quiet' : 'end');
     if (!quiet) {
       complete(true);
@@ -510,7 +568,7 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
     }
     const reply = h('p', { class: 'dq-lead', 'aria-live': 'polite' });
     // a quiet end is the player saying "not now", so it doesn't offer a repeat; a repeat opens the same part they opened
-    const again = quiet ? null : btn('Practise again', () => app.go({ name: 'skill', id: sk.id, entry: r.entry }, { replace: true }), { kind: 'quiet' });
+    const again = quiet ? null : btn('Practise again', () => app.go({ name: 'skill', id: sk.id, entry: r.entry }, { replace: true, hand: PRACTISE_AGAIN }), { kind: 'quiet' });
     const after = h('div', { class: 'dq-after is-hidden' }, h('div', { class: 'dq-actions dq-actions--stack' }, btn('Back to the Lantern', () => app.go({ name: 'hub' }), { kind: 'primary' }), again, btn('Another skill', () => app.go({ name: 'library' }, { replace: true }), { kind: 'quiet' })));
     const answered = (a: string) => {
       reply.textContent = typo(SKILL_END.thanks[a]);
@@ -546,16 +604,35 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
     title: `${sk.sl}`,
     mode: 'skill',
     bubbles: [1.6, 0.6],
-    leave: clear,
+    leave: () => {
+      clear();
+      persist();
+    },
     silence: () => {
       hushed = true;
     },
-    // a revisit opens where the player was; a new visit, or one with no place yet, starts and marks the first step
-    after: () => open(visit.at, visit.again && visit.at !== undefined),
+    // a revisit opens where the player was; a new visit, or one with no place yet, starts and marks the first step.
+    // A new visit to a skill left with something typed opens where the player left it, with a way to start over.
+    after: () => {
+      if (visit.again || !draft) return open(visit.at, visit.again && visit.at !== undefined);
+      open(draft.at < 0 ? undefined : draft.at, true);
+      visit.mark(idx);
+      body.prepend(
+        h(
+          'p',
+          { class: 'dq-lead' },
+          h('span', { text: 'Picking up where you left off.' }),
+          btn('Start over', () => {
+            drop();
+            app.go({ name: 'skill', id: sk.id, entry: r.entry }, { replace: true, hand: STARTED_OVER });
+          }, { kind: 'link' }),
+        ),
+      );
+    },
     moveTo: (place) => open(place, true),
     keep: (): SkillKept => {
       snap();
-      return { answers: { ...answers }, typed: { ...typed }, fed, leads: { ...leads } };
+      return { answers: { ...answers }, typed: { ...typed }, fed, leads: { ...leads }, done: [...done], ended: !drafting };
     },
   };
 

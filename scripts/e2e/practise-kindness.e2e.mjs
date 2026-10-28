@@ -210,7 +210,8 @@ export const scenarios = {
     // the Safe Zone, one tap from the middle of the skill
     const had = await credits(h, page, ID);
     await openFromList(h, page);
-    await play(h, page, 'Safe Zone', [[{}, 'Begin'], [{}, 'May this moment be a little gentler'], [{}, 'Me'], [{}, 'start']]);
+    // the half-typed name is kept, so the skill opens where it was left; Start over begins it again
+    await play(h, page, 'Safe Zone', [[{}, 'Start over'], [{}, 'Begin'], [{}, 'May this moment be a little gentler'], [{}, 'Me'], [{}, 'start']]);
     await page.locator('.dq-top .dq-safe').click();
     await page.waitForFunction(() => document.querySelector('.dq')?.dataset.screen === 'safe', null, { timeout: 5000 });
     h.expect(await page.getByRole('button', { name: 'Talk to someone now', exact: true }).isVisible(), 'the Safe Zone opened without "Talk to someone now"');

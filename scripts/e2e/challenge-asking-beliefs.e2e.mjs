@@ -154,7 +154,9 @@ export const scenarios = {
     await sees(h, page, 'own unsafe', { offers: ['People to talk to', 'Done'] });
     await peopleFirst(h, page, 'own unsafe');
     await toHub(h, page);
+    // the belief typed in is kept, so the skill opens where it was left; Start over begins it again
     await openFromList(h, page, NAME, REAL);
+    await tap(page, 'Start over');
     await tap(page, 'Begin');
     await tap(page, UNSAFE);
     await sees(h, page, 'unsafe', { text: "Then that isn't a myth to argue with. It's a real risk, and your safety comes first.", offers: ['People to talk to', 'Done'] });
@@ -192,7 +194,9 @@ export const scenarios = {
     }
     // DEAR MAN is a second choice on the review, and opens only when tapped
     const had = await credits(h, page, ID);
+    // the half-typed answer is kept, so the skill opens where it was left; Start over begins it again
     await openFromList(h, page, NAME, REAL);
+    await tap(page, 'Start over');
     await toChallenge(h, page, 'dear man', PAIRS[2][0]);
     await tap(page, 'Rings true');
     await tap(page, 'Skip');
@@ -244,7 +248,9 @@ export const scenarios = {
       await page.locator('.dq-step-body .dq-other input').fill(OWN_BELIEF);
       await look(h, page, problems, shots, at('09-own'));
       await toHub(h, page);
+      // the belief typed in is kept, so the skill opens where it was left; Start over begins it again
       await openFromList(h, page, NAME, REAL);
+      await tap(page, 'Start over');
       await tap(page, 'Begin');
       await tap(page, UNSAFE);
       await look(h, page, problems, shots, at('10-unsafe'));

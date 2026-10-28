@@ -39,8 +39,8 @@ that list, never taken out.
 
 The first release freezes these names. Backups from unreleased development builds can contain retired skill ids or
 room preferences; those test files are not supported. Saves missing newer fields still load with defaults. Sound,
-motion and room preferences belong to the current device; restoring a backup keeps this device's choices. Drafts,
-thumbnails, co-writer suggestions and credentials are local working data, separate from the backup.
+motion and room preferences belong to the current device; restoring a backup keeps this device's choices. Unfinished
+drawings, skill answers and co-writer cards are included. Thumbnails are not; a restore draws them again from the strokes.
 
 ## Checking a change
 
