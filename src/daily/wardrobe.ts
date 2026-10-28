@@ -100,27 +100,37 @@ function backArt(id: string) {
   return cardBackSVG();
 }
 
-/** One radio option of the Wardrobe; locked ones are disabled and say, calmly, when they arrive. */
+/** Marks one Wardrobe option from what is unlocked, tried on and kept now; locked ones are disabled and say, calmly, when they arrive. */
+function mark(st: Store, b: HTMLButtonElement) {
+  const slot = b.dataset.slot as Slot;
+  const id = b.dataset.id!;
+  const look = TABLE[slot].looks[id];
+  const open = lookUnlocked(st, look);
+  const left = Math.max(1, look.days - st.derived().visitDays.length);
+  const hint = open ? '' : WARDROBE_COPY.locked(left, look.rank !== undefined ? RANKS[look.rank] : undefined);
+  b.disabled = !open;
+  b.classList.toggle('is-locked', !open);
+  b.setAttribute('aria-checked', String(shown(st, slot) === id));
+  b.setAttribute('aria-label', `${look.name}${open ? '' : `. ${hint}`}`);
+  const note = b.querySelector<HTMLElement>('.w2-wopt-h')!;
+  note.textContent = hint;
+  note.hidden = open;
+}
+
+/** One radio option of the Wardrobe. */
 function option(app: App, slot: Slot, id: string, preview: HTMLElement, onPick: (slot: Slot) => void) {
   const st = app.store;
   const look = TABLE[slot].looks[id];
-  const open = lookUnlocked(st, look);
-  const d = st.derived();
-  const left = Math.max(1, look.days - d.visitDays.length);
-  const hint = open ? '' : WARDROBE_COPY.locked(left, look.rank !== undefined ? RANKS[look.rank] : undefined);
   const b = h(
     'button',
     {
       type: 'button',
       role: 'radio',
-      class: `w2-wopt w2-wopt--${slot}${open ? '' : ' is-locked'}`,
+      class: `w2-wopt w2-wopt--${slot}`,
       'data-slot': slot,
       'data-id': id,
-      'aria-checked': String(shown(st, slot) === id),
-      'aria-label': `${look.name}${open ? '' : `. ${hint}`}`,
-      disabled: !open,
       onclick: () => {
-        if (!open) return;
+        if (!lookUnlocked(st, look)) return;
         // tried on only: the look they keep goes back on with one tap of its own option
         if (id === worn(st, slot)) delete tried[slot];
         else tried[slot] = id;
@@ -129,8 +139,9 @@ function option(app: App, slot: Slot, id: string, preview: HTMLElement, onPick: 
     },
     preview,
     h('span', { class: 'w2-wopt-n', text: look.name }),
-    open ? null : h('span', { class: 'w2-wopt-h', text: hint }),
+    h('span', { class: 'w2-wopt-h' }),
   );
+  mark(st, b);
   return b;
 }
 
@@ -191,11 +202,11 @@ export function wardrobePanel(app: App) {
     ),
   );
   /**
-   * Marks the options and fills the bar from what is tried on and what is kept now, here or in another open copy. The
+   * Marks the options and fills the bar from what is unlocked, tried on and kept now, here or in another open copy. The
    * options are marked in place, so a tap already landing on one (as a name field's save on blur fires) still counts.
    */
   const refresh = () => {
-    body.querySelectorAll<HTMLElement>('.w2-wopt').forEach((b) => b.setAttribute('aria-checked', String(shown(st, b.dataset.slot as Slot) === b.dataset.id)));
+    body.querySelectorAll<HTMLButtonElement>('.w2-wopt').forEach((b) => mark(st, b));
     const on = (Object.keys(TABLE) as Slot[]).filter((k) => tried[k]);
     if (!on.length) {
       bar.hidden = true;

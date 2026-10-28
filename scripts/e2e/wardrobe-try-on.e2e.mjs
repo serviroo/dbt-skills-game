@@ -1,16 +1,18 @@
 // The Wardrobe tries a look on before keeping it: the screen wears it and nothing is saved until Keep this look. Go
 // back, the Safe Zone, Back, a reload and another tab's choices all leave the kept look exactly as it was, and the
 // other tab only ever sees kept looks.
+import path from 'node:path';
+
 const dayOf = (ms) => {
   const d = new Date(ms - 6 * 3600e3);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-/** A returning player with every look unlocked (16 visit days) who keeps Mint with a Green accent. */
-function seed(h) {
+/** A returning player with `days` earlier visit days (16 unlocks every look) who keeps Mint with a Green accent. */
+function seed(h, days = 16) {
   const now = Date.now();
   const events = [];
-  for (let i = 16; i >= 0; i--) events.push({ id: `try-v${i}`, k: 'visit', xp: 10, t: now - i * 86400e3 - 60e3, day: dayOf(now - i * 86400e3) });
+  for (let i = days; i >= 0; i--) events.push({ id: `try-v${i}`, k: 'visit', xp: 10, t: now - i * 86400e3 - 60e3, day: dayOf(now - i * 86400e3) });
   const flags = { greetDay: dayOf(now), giftDay: dayOf(now), therapistLineShown: true };
   const profile = { theme: 'mint', accent: 'green', cardBack: 'ring', plate: 'plain', setAt: { theme: now - 3600e3, accent: now - 3600e3 } };
   return { [h.SAVE]: JSON.stringify({ v: 1, events, flags, profile }), 'dbt.app.v1': h.SEEN };
@@ -150,6 +152,37 @@ export const scenarios = {
       await page.reload();
       await page.waitForFunction(() => !!window.__daily, null, { timeout: 20000 });
       await still('reload');
+      h.expect(!errors.length, errors.join(' | '));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'try-on-unlocked-by-restore'(h) {
+    const a = await h.open(seed(h));
+    const file = path.join(h.out, 'try-on-crystal.json');
+    try {
+      await h.openSettings(a.page);
+      const pending = a.page.waitForEvent('download');
+      await a.page.getByRole('button', { name: 'Save Crystal', exact: true }).click();
+      await (await pending).saveAs(file);
+    } finally {
+      await a.ctx.close();
+    }
+    // restored with the Wardrobe open on a device where Night is still locked: it opens right there and tries on
+    const { ctx, page, errors } = await h.open(seed(h, 0));
+    try {
+      await h.openSettings(page);
+      const night = page.locator('.w2-wopt--theme[data-id="night"]');
+      h.expect(await night.isDisabled(), 'Night is open before the restore, so the case proves nothing');
+      await page.locator('input[type=file]').setInputFiles(file);
+      await page.getByRole('button', { name: 'Restore this Save Crystal' }).click();
+      await page.waitForFunction(() => /Restored/.test(document.querySelector('.dq-settings .dq-hint[aria-live]')?.textContent ?? ''), null, { timeout: 15000 });
+      const label = await night.getAttribute('aria-label');
+      h.expect(!(await night.isDisabled()) && label === 'Night', `Night is still locked after the restore: ${label}`);
+      await night.click();
+      const on = await look(page);
+      h.expect(on.theme === 'night' && on.bar, `Night, unlocked by the restore, did not try on: ${JSON.stringify(on)}`);
       h.expect(!errors.length, errors.join(' | '));
     } finally {
       await ctx.close();
