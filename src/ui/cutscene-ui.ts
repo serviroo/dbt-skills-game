@@ -115,9 +115,10 @@ export async function namePrompt(): Promise<void> {
   let into = name;
   for (const f of [name, comp]) f.addEventListener('focus', () => (into = f));
   const onKey = (e: KeyboardEvent) => {
-    // AltGr types letters (Ł, ß) and reports Ctrl and Alt with them
+    // AltGr types letters (Ł, ß) and reports Ctrl and Alt with them; a dead key (the ´ of Á) starts a letter, which
+    // composes only in a focused field
     const altGraph = e.getModifierState('AltGraph');
-    if (e.key.length !== 1 || e.key === ' ' || e.metaKey || (!altGraph && (e.ctrlKey || e.altKey))) return;
+    if ((e.key.length !== 1 && e.key !== 'Dead') || e.key === ' ' || e.metaKey || (!altGraph && (e.ctrlKey || e.altKey))) return;
     if (document.activeElement?.closest('button, a[href], input, select, textarea, [contenteditable]')) return;
     into.focus({ preventScroll: true });
   };
