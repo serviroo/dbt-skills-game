@@ -2,7 +2,7 @@
 // so nothing on these screens moves once their fades are over.
 //   idle-screens-ask-no-frames   Home, Settings and the Safe Zone ask for no animation frames once they are still. A
 //                                Lantern window that holds on the UI clock still closes on time, also when the page is
-//                                frozen in the background and resumed while it holds, and the screen goes quiet again.
+//                                frozen and resumed while it holds, and the screen goes quiet again.
 //   returning-launch-makes-no-3d a returning launch reaches Home without a WebGL context on the intro's canvas or a 3D
 //                                stage (renderer and postprocessing); Replay cutscene in Settings makes the stage and
 //                                draws the intro's first frame behind the title.
@@ -88,17 +88,19 @@ export const scenarios = {
     const win = page.locator('.sw-layer .sw');
     await hold(page, HOLD_SEC);
     await win.waitFor({ timeout: 5000 });
-    const ms = await page.evaluate(() => window.__held);
     await win.waitFor({ state: 'detached', timeout: 5000 });
+    const ms = await page.evaluate(() => window.__held);
     // a clock that failed to wake would never close it; the ceiling only leaves room for a busy machine
     h.expect(ms >= HOLD_SEC * 1000 && ms < HOLD_SEC * 1000 + 5000, `the held window closed after ${Math.round(ms)} ms, not after its ${HOLD_SEC} s hold`);
     seen.held = { ms: Math.round(ms) };
     await still('settings after a held window');
 
-    // frozen in the background mid-hold (as a phone does with a hidden tab) and resumed: the hold still ends. The hold
-    // has begun once the UI clock asks for a frame, which it does only while something waits on it. It lasts the freeze
-    // and HOLD_SEC more, and it must still be holding when the page freezes, or nothing waits across the freeze
+    // frozen mid-hold (as a phone freezes a tab in the background) and resumed: the hold still ends. Chromium freezes
+    // only hidden pages and a test page is never hidden, so the debugger stops it. The hold has begun once the UI clock
+    // asks for a frame, which it does only while something waits on it. It lasts the freeze and HOLD_SEC more, and it
+    // must still be holding when the page freezes, or nothing waits across the freeze
     const cdp = await ctx.newCDPSession(page);
+    await cdp.send('Debugger.enable');
     const asked = await page.evaluate(() => window.__rafs.ui);
     const across = HOLD_SEC + FROZEN_MS / 1000;
     await hold(page, across);
@@ -106,12 +108,15 @@ export const scenarios = {
     await page.waitForFunction((n) => window.__rafs.ui > n, asked, { timeout: 5000, polling: 50 });
     const into = await page.evaluate(() => performance.now() - window.__heldFrom);
     h.expect(into < across * 1000, `the page froze ${Math.round(into)} ms into the window's ${across} s hold, after the hold was over`);
-    await cdp.send('Page.setWebLifecycleState', { state: 'frozen' });
+    const stopped = new Promise((r) => cdp.once('Debugger.paused', () => r(true)));
+    await cdp.send('Debugger.pause');
+    h.expect(await Promise.race([stopped, h.sleep(5000).then(() => false)]), 'the debugger did not stop the page mid-hold');
     await h.sleep(FROZEN_MS);
-    await cdp.send('Page.setWebLifecycleState', { state: 'active' });
+    await cdp.send('Debugger.resume');
+    await cdp.send('Debugger.disable');
     await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-    await page.evaluate(() => window.__held);
     await win.waitFor({ state: 'detached', timeout: 5000 });
+    await page.evaluate(() => window.__held);
     await still('settings after a freeze and resume');
 
     await page.getByRole('button', { name: 'Safe Zone, help right now' }).click();
