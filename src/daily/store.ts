@@ -130,7 +130,7 @@ const LIST_KEYS = ['comfort', 'activities', 'reasons', 'people'] as const;
 const DAY_FLAGS = ['giftDay', 'cardDay', 'greetDay', 'checkinDay'] as const;
 const GONE_CAP = 1000;
 /** Top-level fields this build reads (and the ones only a Save Crystal carries); any other is kept as it was stored. */
-const KNOWN = new Set(['v', 'created', 'events', 'diary', 'lists', 'maps', 'lines', 'settings', 'flags', 'gone', 'setAt', 'profile', 'app', 'exported', 'schema', 'art', 'drafts', 'stories', 'preferences', 'incomplete', 'unreadSaves', 'skillPins']);
+const KNOWN = new Set(['v', 'created', 'events', 'diary', 'lists', 'maps', 'lines', 'settings', 'flags', 'gone', 'setAt', 'profile', 'app', 'exported', 'schema', 'art', 'drafts', 'stories', 'preferences', 'incomplete', 'unreadSaves', 'skillPins', 'skillDrafts']);
 /**
  * What a newer build stored that this one can't use, kept as it was so every write, tab merge and Save Crystal carries
  * it on. Unknown fields of the records this build rebuilds (events and their data, diary days and field times, list

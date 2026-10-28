@@ -19,7 +19,7 @@ class MemoryStorage {
 }
 globalThis.localStorage = new MemoryStorage();
 
-const MAPS = { diary: '<day>', 'diary.<day>.emotions': '<row>', 'diary.<day>.urges': '<row>', 'diary.<day>.ft': '<field>', gone: '<id>', 'profile.names': '<shadow>', skillPins: '<skill>' };
+const MAPS = { diary: '<day>', 'diary.<day>.emotions': '<row>', 'diary.<day>.urges': '<row>', 'diary.<day>.ft': '<field>', gone: '<id>', 'profile.names': '<shadow>', skillPins: '<skill>', 'skillDrafts[].answers': '<answer>', 'skillDrafts[].typed': '<step>', 'skillDrafts[].leads': '<step>' };
 function paths(o, at = '', out = new Set()) {
   if (Array.isArray(o)) {
     if (!o.length) out.add(`${at}[]`);
@@ -85,7 +85,9 @@ async function collect() {
     const tale = story.cleanStory({ id: 's1', title: 'T', created: t, updated: t, rev: 'r1', chapters: ['c1'], notes: 'c2', removed: t });
     const chapter = story.cleanChapter({ id: 'c1', story: 's1', kind: 'page', title: 'C', text: 'x', updated: t, rev: 'r1' });
     const draft = art.cleanDraft({ key: 'edit:a1:t1', kind: 'ally', editId: 'a1', bases: ['r1@1'], base: t, prompt: 'p', strokes: [{ i: 0, w: 4, p: [1, 2, 3, 4] }, { i: 0, w: 4, p: [], m: ink.STROKE_MODES[0], q: [1, 2] }], t });
-    const crystal = JSON.parse(st.exportJSON({ art: [art.storedRec(rec)], drafts: [{ ...draft, strokes: draft.strokes.map(art.storedStroke) }], stories: { stories: [tale], chapters: [chapter] }, unreadSaves: [{ at: String(t), raw: '{' }] }));
+    const skills = await load('src/daily/skilldraft.ts');
+    const skillDraft = skills.readDraft({ skill: 'clear-sight', part: '', at: 1, layout: skills.stepLayout(dbt.SKILL['clear-sight'].steps), answers: { judged: 'x' }, typed: { 1: [['', 'x']] }, leads: { 1: 'x' }, done: [0], t });
+    const crystal = JSON.parse(st.exportJSON({ skillDrafts: [skillDraft], art: [art.storedRec(rec)], drafts: [{ ...draft, strokes: draft.strokes.map(art.storedStroke) }], stories: { stories: [tale], chapters: [chapter] }, unreadSaves: [{ at: String(t), raw: '{' }] }));
     const card = story.cleanCard({ id: 'k1', mode: story.CARD_MODES[0], text: 'x', t, sel: { start: 0, end: 1, text: 'x' } });
     you.writeYou({ name: 'Kit', companion: 'Lumen', nameAt: t, companionAt: t });
     prefs.savePrefs({ master: 1, music: 1, sfx: 1, hum: 1, muted: false });
@@ -113,7 +115,7 @@ async function collect() {
         ...interfaceFields('src/daily/ink.ts', 'Stroke'),
         ...['Story', 'Chapter', 'Card', 'Live'].flatMap((type) => interfaceFields('src/daily/storystore.ts', type)),
         ...interfaceFields('src/cowriter/types.ts', 'Cred'),
-        ...interfaceFields('src/daily/skill.ts', 'SkillDraft'),
+        ...interfaceFields('src/daily/skilldraft.ts', 'SkillDraft'),
       ],
       'app-field': [...fs.readFileSync(path.join(root, 'src/app.ts'), 'utf8').matchAll(/^  (\w+): boolean;/gm)].map((m) => m[1]),
       'stealth-field': [...fs.readFileSync(path.join(root, 'src/daily/pages.ts'), 'utf8').matchAll(/prefs: \{ ([^}]+) \}/g)].flatMap((m) => [...m[1].matchAll(/(\w+): boolean/g)].map((x) => x[1])),

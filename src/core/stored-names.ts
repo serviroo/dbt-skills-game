@@ -15,7 +15,7 @@ export const BESIDE = {
   safeLight: '.safe-light',
   readSize: '.read-size',
   momentLength: '.moment-length',
-  /** what was typed in a skill left part way, one key per skill: `<save>.skill-draft.<skill id>` */
+  /** unfinished skill answers, per page load and part: `<save>.skill-draft.<load>.<skill>.<part>` */
   skillDraft: '.skill-draft',
 } as const;
 

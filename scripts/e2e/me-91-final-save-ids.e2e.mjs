@@ -13,7 +13,7 @@ const dayOf = (ms) => {
   const d = new Date(ms - 6 * 3600e3);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
-const MAPS = { diary: '<day>', 'diary.<day>.emotions': '<row>', 'diary.<day>.urges': '<row>', 'diary.<day>.ft': '<field>', gone: '<id>', 'profile.names': '<shadow>', skillPins: '<skill>' };
+const MAPS = { diary: '<day>', 'diary.<day>.emotions': '<row>', 'diary.<day>.urges': '<row>', 'diary.<day>.ft': '<field>', gone: '<id>', 'profile.names': '<shadow>', skillPins: '<skill>', 'skillDrafts[].answers': '<answer>', 'skillDrafts[].typed': '<step>', 'skillDrafts[].leads': '<step>' };
 function paths(o, at = '', out = new Set()) {
   if (Array.isArray(o)) {
     if (!o.length) out.add(`${at}[]`);
@@ -231,6 +231,15 @@ export const scenarios = {
     const a = await open({ [SAVE]: JSON.stringify(save), [`${SAVE}.unreadable.${now - 5}`]: '{not a save', [YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: save.created, companionAt: save.created }), 'dbt.app.v1': SEEN, 'dbt.audio.v1': audio });
     await reachHub(a.page);
     const seeded = await seedStores(a.page, SAVE, now);
+    await a.page.evaluate(async ({ SAVE, now }) => {
+      const { SKILL } = await import('/src/content/dbt.ts');
+      const { stepLayout } = await import('/src/daily/skilldraft.ts');
+      localStorage.setItem(`${SAVE}.skill-draft.seed.clear-sight.`, JSON.stringify({
+        skill: 'clear-sight', part: '', at: 1, layout: stepLayout(SKILL['clear-sight'].steps),
+        answers: { judged: 'Words still being written' }, typed: { 1: [['', 'Words still being written']] },
+        leads: { 1: 'A reply kept with this step' }, done: [0], t: now,
+      }));
+    }, { SAVE, now });
     await a.page.reload();
     await reachHub(a.page);
     await shot(a.page, 'me91-01-home');
@@ -300,6 +309,7 @@ export const scenarios = {
     expect(y.flags.safeCredit === fresh.flags.safeCredit, 'restore changed device Safe Zone credit preference');
     expect(y.created === x.created, 'restore lost the first visit time');
     expect(same(y.unreadSaves, x.unreadSaves) && same(x.unreadSaves, [{ at: String(now - 5), raw: '{not a save' }]), 'the unreadable save did not round-trip: ' + JSON.stringify([x.unreadSaves, y.unreadSaves]));
+    expect(same(y.skillDrafts, x.skillDrafts), 'unfinished skill answers did not round-trip');
     const pins = (o) => JSON.stringify(Object.entries(o ?? {}).sort((p, q) => (p[0] < q[0] ? -1 : 1)));
     expect(pins(x.skillPins) === pins(save.skillPins) && pins(y.skillPins) === pins(x.skillPins), `pins changed on the way through: ${pins(save.skillPins)} then ${pins(x.skillPins)} then ${pins(y.skillPins)}`);
     expect(same(y.profile.setAt, x.profile.setAt), 'restore lost profile choice times');

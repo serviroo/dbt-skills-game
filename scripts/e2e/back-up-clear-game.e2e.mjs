@@ -323,6 +323,7 @@ const content = (raw) => ({
   rows: [...raw.settings.emotionRows, ...raw.settings.urgeRows],
   art: raw.art.map((a) => `${a.id}:${a.kind}:${a.day}:${a.prompt}:${JSON.stringify(a.strokes)}`).sort(),
   drafts: (raw.drafts ?? []).map((d) => `${d.kind}:${d.prompt}:${JSON.stringify(d.strokes)}`).sort(),
+  skillDrafts: raw.skillDrafts ?? [],
   stories: raw.stories.stories.filter((s) => !s.removed).map((s) => s.title).sort(),
   chapters: raw.stories.chapters.map((c) => `${c.kind}:${c.title}:${c.text}`).sort(),
   cards: Object.values(raw.stories.cards).flat().map((c) => `${c.mode}:${c.text}`).sort(),
@@ -352,7 +353,8 @@ export const scenarios = {
       h.expect(c1.art.length === 1 && c1.drafts.length === 1 && /Something blue/.test(c1.drafts[0]), 'backup drawings or the unfinished drawing missing: ' + JSON.stringify([c1.art, c1.drafts]));
       h.expect(c1.chapters.includes('page:Shore:Seed page words, and the unsaved ones.') && c1.cards.includes('continue:A seed card.'), 'backup story words (latest) or cards missing: ' + JSON.stringify([c1.chapters, c1.cards]));
       h.expect(c1.preferences?.audio?.master === 0.6 && c1.preferences?.room?.aquarium === true && c1.preferences?.safeLight === 'dim', 'backup choices missing: ' + JSON.stringify(c1.preferences));
-      h.expect(!/seed-connection-secret|seed-install-id|dbt\.cowriter|dbt\.install-hint|\.unreadable|story\.live|skill-draft|Seed skill words/.test(first.text) && first.raw.incomplete === false, 'the backup carries raw storage or a connection secret, or says it is incomplete');
+      h.expect(c1.skillDrafts.some((d) => d.skill === 'clear-sight' && d.answers.fact === 'Seed skill words'), 'the backup lost the unfinished skill\'s words');
+      h.expect(!/seed-connection-secret|seed-install-id|dbt\.cowriter|dbt\.install-hint|\.unreadable|story\.live|skill-draft/.test(first.text) && first.raw.incomplete === false, 'the backup carries raw storage or a connection secret, or says it is incomplete');
       h.expect(await page.evaluate(() => document.activeElement?.id === 'dq-clear-h'), 'the confirmation heading did not take focus');
       const ask = await asking(page).innerText();
       h.expect(ask.includes(first.name) && /check you can find that file/i.test(ask) && /progress, names, choices, lists, diary, drawings \(unfinished ones too\), stories and offline files/.test(ask), 'the confirmation does not name the file, ask to keep it, or say what goes: ' + ask);
