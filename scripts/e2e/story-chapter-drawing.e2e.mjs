@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { crystal, restore } from './newer-save-safety.e2e.mjs';
+import { holdStorage } from './story-reading.e2e.mjs';
 
 const OLD = JSON.parse(fs.readFileSync(fileURLToPath(new URL('./fixtures/older-saves/crystal-v1-8761293.json', import.meta.url)), 'utf8'));
 const day = () => {
@@ -267,6 +268,69 @@ export const scenarios = {
       // both at the same moment
       await Promise.all([a, b].map((p, i) => p.evaluate(async ({ id, ch, d }) => (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key).setDrawing(id, ch, d), { id: t.id, ch: i ? t.ch2 : t.ch1, d: i ? null : 'fox-ally' })));
       await placedIs(h, a, t.id, { [t.ch1]: 'fox-ally' }, 'two tabs at the same moment');
+      h.expect(!errors.length, 'errors: ' + errors.join(' | '));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  /** A drawing this device can't store stays on screen for now, and the page says it isn't saving, as it does for words */
+  async 'story-drawing-not-stored-says-so'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await ready(page);
+      await h.reachHub(page);
+      const t = await make(page);
+      await writing(page, t.id, t.ch1);
+      await page.locator('.st-state').filter({ hasText: 'Saved on this device' }).waitFor({ timeout: 5000 });
+      // from here every write to the stories fails, as on a device out of room
+      await page.evaluate(() => {
+        const real = IDBDatabase.prototype.transaction;
+        IDBDatabase.prototype.transaction = function (stores, mode, ...rest) {
+          if (mode === 'readwrite' && /\.story$/.test(this.name)) throw new DOMException('This device is out of room', 'QuotaExceededError');
+          return real.call(this, stores, mode, ...rest);
+        };
+      });
+      await pick(page, 'Add a drawing', 'Brave');
+      await editorShows(h, page, 'Brave', 'a drawing this device could not store');
+      await page.locator('.st-state').filter({ hasText: 'Not saving right now' }).waitFor({ timeout: 5000 });
+      h.expect(!errors.length, 'errors: ' + errors.join(' | '));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  /** The picker opened on one chapter while the next was still coming in places the drawing on the one it opened for */
+  async 'story-drawing-pick-stays-with-its-chapter'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await ready(page);
+      await h.reachHub(page);
+      const t = await make(page);
+      await writing(page, t.id, t.ch1);
+      await editorShows(h, page, null, 'chapter 1');
+      await page.locator('.st-chbtn').click();
+      const list = page.getByRole('dialog', { name: 'Chapters' });
+      await list.waitFor({ timeout: 5000 });
+      // chapter 2 opens as on a slow phone: its page waits for storage while the drawing button can still be tapped
+      const held = await holdStorage(page, ['chapter']);
+      await list.getByRole('button', { name: /Spring/ }).first().click();
+      await held.waitHeld(`chapter ${t.ch2}`);
+      await page.getByRole('button', { name: 'Add a drawing', exact: true }).click();
+      const dlg = page.getByRole('dialog', { name: 'Pick a drawing' });
+      await dlg.waitFor({ timeout: 5000 });
+      await page.evaluate(async () => {
+        const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+        ss.chapter = ss.__real.chapter;
+      });
+      await held.drain();
+      await page.getByRole('textbox', { name: 'Page, Spring' }).waitFor({ timeout: 5000 });
+      await dlg.getByRole('button', { name: 'Brave', exact: true }).click();
+      await dlg.waitFor({ state: 'detached', timeout: 5000 });
+      await placedIs(h, page, t.id, { [t.ch1]: 'fox-ally' }, 'a pick from the picker chapter 1 opened');
+      await editorShows(h, page, null, 'chapter 2, on screen now');
+      await writing(page, t.id, t.ch1);
+      await editorShows(h, page, 'Brave', 'chapter 1');
       h.expect(!errors.length, 'errors: ' + errors.join(' | '));
     } finally {
       await ctx.close();

@@ -1174,11 +1174,13 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     if (m) picBtn.setAttribute('aria-label', `${STORY_DRAWING.change}, ${drawingName(m)}`);
     else picBtn.removeAttribute('aria-label');
   };
-  const placeDrawing = async (id: string | null) => {
-    const at = cur?.kind === 'page' ? cur.id : '';
+  /** `at` is the page the picker opened for, which keeps the pick even if another page came in while it was open */
+  const placeDrawing = async (at: string, id: string | null) => {
     closeSheet();
-    if (!at) return;
     await ss.setDrawing(storyId, at, id);
+    if (!alive) return;
+    // a change this device couldn't store says so, as the words do
+    syncState();
     await showPic();
   };
   const openDrawings = async () => {
@@ -1206,14 +1208,14 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
             list.map((m) =>
               h(
                 'button',
-                { type: 'button', class: 'st-pick', 'aria-current': m.id === placed ? 'true' : null, onclick: () => void placeDrawing(m.id) },
+                { type: 'button', class: 'st-pick', 'aria-current': m.id === placed ? 'true' : null, onclick: () => void placeDrawing(at, m.id) },
                 h('span', { class: `st-pick-img st-pic--${m.kind}` }, drawingImg(app, m, '')),
                 h('span', { class: 'st-pick-t', text: drawingName(m) }),
               ),
             ),
           )
         : h('div', { class: 'st-picks-none' }, p(STORY_DRAWING.none, 'dq-text'), h('div', { class: 'dq-actions st-sheet-acts' }, btn(STORY_DRAWING.toArt, () => void toArt(), { kind: 'quiet', ic: 'brush' }))),
-      ...(list.some((m) => m.id === placed) ? [h('div', { class: 'dq-actions st-sheet-acts' }, btn(STORY_DRAWING.remove, () => void placeDrawing(null), { kind: 'quiet', ic: 'close' }))] : []),
+      ...(list.some((m) => m.id === placed) ? [h('div', { class: 'dq-actions st-sheet-acts' }, btn(STORY_DRAWING.remove, () => void placeDrawing(at, null), { kind: 'quiet', ic: 'close' }))] : []),
     );
     showSheet(wrap, body);
     (body.querySelector<HTMLElement>('.st-pick[aria-current="true"]') ?? body.querySelector<HTMLElement>('.st-pick, .st-picks-none .dq-btn'))?.focus({ preventScroll: true });
