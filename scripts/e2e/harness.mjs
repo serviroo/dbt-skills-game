@@ -438,7 +438,19 @@ export async function startHarness(flags = {}) {
     const pages = browser.contexts().flatMap((c) => c.pages());
     await Promise.all(pages.map((p, i) => evidence(p, `${prefix}-${i + 1}`).catch((e) => console.log(`evidence ${prefix}-${i + 1}: ${e?.message ?? e}`))));
   };
-  const shot = (page, name) => page.screenshot({ path: path.join(out, name + '.png') });
+  // A capture waits behind every canvas frame the GPU still has queued, and a slow machine can be seconds behind after
+  // Home (its bubbles redraw the whole screen 30 times a second). A one-pixel read of a fresh canvas returns only once
+  // that queue is done, so the shot starts from what is drawn now.
+  const shot = async (page, name) => {
+    await page.evaluate(() => {
+      const c = document.createElement('canvas');
+      c.width = c.height = 1;
+      const g = c.getContext('2d');
+      g.fillRect(0, 0, 1, 1);
+      g.getImageData(0, 0, 1, 1);
+    });
+    return page.screenshot({ path: path.join(out, name + '.png') });
+  };
   const ls = (page, k) => page.evaluate((key) => localStorage.getItem(key), k);
   const youOf = async (page) => JSON.parse((await ls(page, YOU)) ?? 'null');
   /** every value stored under `key` anywhere in the save, whatever its shape */
