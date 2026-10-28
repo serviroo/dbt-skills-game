@@ -3,14 +3,9 @@ import path from 'node:path';
 
 async function art(h, page) {
   page.setDefaultTimeout(15000);
-  await page.locator('.dq-tile--art').waitFor({ timeout: 30000 });
-  for (let i = 0; i < 30 && await page.evaluate(() => window.__daily.greeting); i++) {
-    if (await page.locator('.sw').count()) await page.keyboard.press('Enter');
-    await h.sleep(200);
-  }
-  await page.evaluate(() => window.__daily.settled);
   if (await page.locator('.dq-artroom').count()) return;
   await back(page, 'hub');
+  await h.reachHub(page);
   await page.locator('.dq-tile--art').click();
   await page.locator('.dq-artroom').waitFor();
 }

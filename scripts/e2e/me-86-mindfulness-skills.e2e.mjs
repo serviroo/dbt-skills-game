@@ -63,28 +63,8 @@ async function progress(h, page, id) {
   };
 }
 
-async function home(h, page) {
-  let clear = 0;
-  for (let i = 0; i < 80; i++) {
-    const win = page.locator('.dq-sw').first();
-    if (await win.count()) {
-      clear = 0;
-      // a window whose scrim is off is closing: tap it no more, wait until it is gone, so no tap lands on Home
-      if (!(await page.locator('.dq-scrim.is-on').count())) await page.waitForFunction(() => !document.querySelector('.dq-sw') || !!document.querySelector('.dq-scrim.is-on'), null, { timeout: 5000 });
-      else {
-        const b = await win.boundingBox({ timeout: 500 }).catch(() => null);
-        if (b) await page.mouse.click(b.x + b.width / 2, b.y + Math.min(b.height - 8, b.height / 2));
-      }
-    } else if (!(await page.locator('.dq-scrim.is-on').count()) && (await page.locator('.dq-tile').first().isVisible().catch(() => false))) {
-      if (++clear >= 4) return;
-    } else clear = 0;
-    await h.sleep(350);
-  }
-  throw new Error('Home never appeared');
-}
-
 async function tile(h, page, name) {
-  await home(h, page);
+  await h.reachHub(page);
   await page.locator('.dq-tile', { hasText: name }).first().click();
 }
 
@@ -180,7 +160,7 @@ async function play(h, id, steps, vp, tag, opts = {}) {
     await page.reload();
     h.expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches), 'reduced motion is not on');
   }
-  await home(h, page);
+  await h.reachHub(page);
   const before = await progress(h, page, id);
   h.expect(before.mine === 0 && !before.owned, `${id}: credited before it was opened`);
   await openFromLibrary(h, page, id);
@@ -202,7 +182,7 @@ async function play(h, id, steps, vp, tag, opts = {}) {
   await page.goto(page.url().split('?')[0] + (opts.mute ? '?mute' : ''));
   await openFromLibrary(h, page, id);
   await page.getByRole('button', { name: 'Leave this skill' }).click();
-  await home(h, page);
+  await h.reachHub(page);
   const again = await progress(h, page, id);
   h.expect(again.mine === 2 && again.xp >= after.xp + 20 && again.sense === after.sense + 1, `${id}: leaving on screen one did not credit it (${again.mine}, ${after.xp}->${again.xp})`);
   await tile(h, page, 'Shadows');
@@ -279,7 +259,7 @@ export const scenarios = {
     h.expect(at >= 0, 'Spectator Mode is not in the rotation');
     const seed = await returning(h, at);
     const { ctx, page, errors } = await h.open(seed, '?mute');
-    await home(h, page);
+    await h.reachHub(page);
     const s = JSON.parse(await h.ls(page, h.SAVE));
     const was = JSON.parse(seed[h.SAVE]).events;
     h.expect(s.events.filter((e) => e.k === 'skill').length === was.filter((e) => e.k === 'skill').length, 'arriving credited a skill');
@@ -330,12 +310,12 @@ export const scenarios = {
   async 'skills-mind-landscape'(h) {
     const { ctx, page, errors } = await h.open(await returning(h), '?mute', WIDE);
     for (const id of IDS) {
-      await home(h, page);
+      await h.reachHub(page);
       await openFromLibrary(h, page, id);
       await walk(h, page, WALKS[id].a, `skills-mind-${id}-844`, false);
       await page.locator('.dq-skill').getByRole('button', { name: 'Back to the Lantern' }).click();
     }
-    await home(h, page);
+    await h.reachHub(page);
     await openFromLibrary(h, page, 'mindful-thoughts');
     await walk(h, page, WALKS['mindful-thoughts'].b.slice(0, 6), 'skills-mind-mindful-thoughts-844-louder', false);
     await page.locator('.dq-skill').getByRole('button', { name: 'Safe Zone', exact: true }).click();

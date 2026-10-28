@@ -30,42 +30,12 @@ const scenes = (page) => page.evaluate(() => (window.__scenes ? JSON.parse(JSON.
 const pair = (page) => page.evaluate(() => ({ s: window.__scenes ? JSON.parse(JSON.stringify(window.__scenes)) : null, num: document.querySelector('.dq-timer-num')?.textContent ?? '' }));
 const wiseRuns = async (h, page) => JSON.parse((await h.ls(page, h.SAVE)) ?? '{"events":[]}').events.filter((e) => e.k === 'skill' && e.skill === 'wise-mind').length;
 
-/** Taps through any window the companion opens on arrival, then waits for Home. */
-async function home(h, page) {
-  let clear = 0;
-  for (let i = 0; i < 80; i++) {
-    const win = page.locator('.dq-sw').first();
-    if (await win.count()) {
-      clear = 0;
-      // a window whose scrim is off is closing: tap it no more, wait until it is gone, so no tap lands on Home
-      if (!(await page.locator('.dq-scrim.is-on').count())) await page.waitForFunction(() => !document.querySelector('.dq-sw') || !!document.querySelector('.dq-scrim.is-on'), null, { timeout: 5000 });
-      else {
-        const b = await win.boundingBox({ timeout: 500 }).catch(() => null);
-        if (b) await page.mouse.click(b.x + b.width / 2, b.y + Math.min(b.height - 8, b.height / 2));
-      }
-    } else if (!(await page.locator('.dq-scrim.is-on').count()) && (await page.locator('.dq-tile').first().isVisible().catch(() => false))) {
-      if (++clear >= 3) return;
-    } else clear = 0;
-    await h.sleep(300);
-  }
-  await h.shot(page, 'fail-home');
-  throw new Error('Home never appeared');
-}
-
 const tap = (page, name) => page.locator('.dq-skill').getByRole('button', { name, exact: true }).first().click();
 
 /** Home, then Skills, Still Center, Begin and past the breathing to the stone step. */
 async function toStone(h, page) {
-  // the first-visit welcome opens a moment after Home appears, so a tap that lands on its scrim goes home and retries
-  for (let i = 0; ; i++) {
-    await home(h, page);
-    try {
-      await page.locator('.dq-tile', { hasText: 'Skills' }).first().click({ timeout: 4000 });
-      break;
-    } catch (e) {
-      if (i === 2) throw e;
-    }
-  }
+  await h.reachHub(page);
+  await page.locator('.dq-tile', { hasText: 'Skills' }).first().click({ timeout: 4000 });
   await page.locator('.dq-librow', { hasText: 'Still Center' }).first().click();
   await page.locator('.dq-intro-name', { hasText: 'Still Center' }).waitFor({ timeout: 10000 });
   await tap(page, 'Begin');
@@ -253,7 +223,7 @@ async function oneSlowFrame(h, hz) {
   });
   await page.clock.install();
   await page.reload();
-  await home(h, page);
+  await h.reachHub(page);
   await page.evaluate(() => window.__daily.go({ name: 'skill', id: 'wise-mind', entry: 'stone' }));
   await page.locator('.dq-skill').getByRole('button', { name: 'Begin', exact: true }).first().click({ timeout: 10000 });
   await page.locator('.dq-scene canvas').waitFor({ state: 'attached', timeout: 15000 });
@@ -668,7 +638,7 @@ export const scenarios = {
     });
     await page.clock.install();
     await page.reload();
-    await home(h, page);
+    await h.reachHub(page);
     const before = await wiseRuns(h, page);
     await toStone(h, page);
     await h.sleep(1500);
@@ -872,7 +842,7 @@ export const scenarios = {
         }
       });
       await page.reload();
-      await home(h, page);
+      await h.reachHub(page);
       await page.evaluate(() => window.__daily.go({ name: 'skill', id: 'cope-ahead', entry: 'picture' }));
       await page.locator('.dq-skill').getByRole('button', { name: 'Begin', exact: true }).first().click({ timeout: 10000 });
       await page.locator('.dq-timer-svg--drift').waitFor({ timeout: 10000 });

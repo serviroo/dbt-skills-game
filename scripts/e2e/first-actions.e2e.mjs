@@ -213,20 +213,8 @@ async function welcomed(h, page, run, where) {
     if (run.media) {
       await page.emulateMedia({ reducedMotion: run.media });
       await page.reload();
-    } else {
-      for (let i = 0; (await welcome.count()) && i < 4; i++) {
-        // a window whose scrim is off is closing: tap it no more, wait until it is gone, so no tap lands on Home
-        if (!(await page.locator('.dq-scrim.is-on').count())) {
-          await page.waitForFunction(() => !document.querySelector('.dq-sw') || !!document.querySelector('.dq-scrim.is-on'), null, { timeout: 5000 });
-          continue;
-        }
-        await welcome.click({ force: true }).catch(() => {});
-        await h.sleep(400);
-      }
-      h.expect(!(await welcome.count()), `${where}: the welcome window would not close`);
     }
-    await page.waitForFunction(() => !!window.__daily);
-    await page.evaluate(() => window.__daily.settled);
+    await h.reachHub(page);
   } catch (e) {
     await h.evidence(page, `fail-first-visit-${slug(where)}`);
     throw e;

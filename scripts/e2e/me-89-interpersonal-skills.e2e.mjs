@@ -161,26 +161,6 @@ async function oldSave(h, pastDays = 6) {
   return save;
 }
 
-async function home(h, page) {
-  const vp = page.viewportSize();
-  let calm = 0;
-  for (let i = 0; i < 60; i++) {
-    const up = await page.locator('.dq-scrim.is-on').count();
-    const win = (await page.locator('.dq-sw').count()) + up;
-    if (!win && (await page.locator('.dq-tile').first().isVisible().catch(() => false))) {
-      if (++calm >= 3) return;
-    } else {
-      calm = 0;
-      // a window whose scrim is off is closing: tap it no more, wait until it is gone, so no tap lands on Home
-      if (up) await page.mouse.click(vp.width / 2, Math.round(vp.height * 0.83));
-      else if (win) await page.waitForFunction(() => !document.querySelector('.dq-sw') || !!document.querySelector('.dq-scrim.is-on'), null, { timeout: 5000 });
-    }
-    await h.sleep(300);
-  }
-  await h.shot(page, 'fail-ie-no-home');
-  throw new Error('Home never appeared');
-}
-
 const settled = (page) =>
   page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.getComputedTiming().endTime === Infinity), null, { timeout: 3000 }).catch(() => {});
 const tile = (page, name) => page.locator('.dq-tile', { has: page.locator('.dq-tile-t', { hasText: new RegExp(`^${name}$`) }) });
@@ -291,7 +271,7 @@ async function walk(h, page, path, tag, answer) {
   await settled(page);
   await h.shot(page, `${tag}-${String(++k).padStart(2, '0')}-thanks`);
   await tap(h, page, 'Back to the Lantern', `${tag} end`);
-  await home(h, page);
+  await h.reachHub(page);
 }
 
 async function skillScenario(h, id) {
@@ -309,7 +289,7 @@ async function skillScenario(h, id) {
       await page.emulateMedia({ reducedMotion: 'reduce' });
       await page.reload();
     }
-    await home(h, page);
+    await h.reachHub(page);
     if (run.reduced) h.expect(await page.locator('.dq.is-still').count(), `${run.tag}: reduced motion was not picked up`);
     const before = await progress(h, page, id);
     h.expect(!before.owned && before.opened === 0, `${run.tag}: the old save already has ${id}`);
@@ -326,7 +306,7 @@ async function skillScenario(h, id) {
       await openFromLibrary(h, page, id);
       await screenCheck(h, page, `${run.tag} again`);
       await page.getByRole('button', { name: 'Leave this skill' }).click();
-      await home(h, page);
+      await h.reachHub(page);
       const again = await progress(h, page, id);
       h.expect(again.opened === 2 && again.xp >= after.xp + 20 && again.agility === after.agility + 1, `${run.tag}: leaving on screen one was not credited: ${JSON.stringify(again)}`);
 
@@ -335,7 +315,7 @@ async function skillScenario(h, id) {
       h.expect((await page.locator(`.dq-cardbtn[aria-label^="${sk.sl}, ${sk.real}."]`).count()) === 1, `${run.tag}: Shadows does not show ${sk.sl}`);
       await h.shot(page, `${run.tag}-shadows`);
       await page.locator('.dq-top .dq-back').click();
-      await home(h, page);
+      await h.reachHub(page);
       await tile(page, 'Diary card').click();
       const used = page.locator('.dq-skillsused li', { hasText: `${sk.sl} (${sk.real})` });
       await used.first().waitFor({ timeout: 10000 });
@@ -355,7 +335,7 @@ export const scenarios = {
     const seed = await oldSave(h);
     for (const vp of [{ width: 390, height: 844 }, { width: 320, height: 568 }]) {
       const { ctx, page, errors } = await h.open({ [h.SAVE]: JSON.stringify(seed), 'dbt.app.v1': h.SEEN }, '?mute', vp);
-      await home(h, page);
+      await h.reachHub(page);
       await tile(page, 'Skills').click();
       const sec = page.locator(`.dq-libsec.dq-mod-${MOD}`);
       await sec.waitFor({ timeout: 10000 });
@@ -386,7 +366,7 @@ export const scenarios = {
   async 'skills-ie-priorities-links'(h) {
     const seed = await oldSave(h);
     const { ctx, page, errors } = await h.open({ [h.SAVE]: JSON.stringify(seed), 'dbt.app.v1': h.SEEN }, '?mute');
-    await home(h, page);
+    await h.reachHub(page);
     for (const [pick, link, target, chip] of [
       ['The result', 'Plan it with DEAR MAN', 'dear-man', "Commander's Voice"],
       ['The relationship', 'Practise GIVE', 'give', 'Guild Bond'],
@@ -401,7 +381,7 @@ export const scenarios = {
       h.expect(after.opened === before.opened + 1, `${link} did not open and credit ${target}`);
       await h.shot(page, `ie-priorities-link-${target}`);
       await page.getByRole('button', { name: 'Leave this skill' }).click();
-      await home(h, page);
+      await h.reachHub(page);
     }
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
@@ -420,7 +400,7 @@ export const scenarios = {
       h.expect(at >= 0, `${id} is not in the daily rotation`);
       const seed = await oldSave(h, at);
       const { ctx, page, errors } = await h.open({ [h.SAVE]: JSON.stringify(seed), 'dbt.app.v1': h.SEEN }, '?mute', { width: 320, height: 568 });
-      await home(h, page);
+      await h.reachHub(page);
       const before = await progress(h, page, id);
       h.expect(!before.owned, `${id}: Home credited today's card before it was flipped`);
       const card = page.locator('.dq-card');

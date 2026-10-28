@@ -40,7 +40,7 @@ async function boot(h, { save, viewport = TALL, reduced = false, ua, extra = {},
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   page.on('console', (m) => m.type() === 'error' && !/WebGL|GPU stall|AudioContext/i.test(m.text()) && errors.push('console: ' + m.text().slice(0, 300)));
   await page.goto(h.server.url + '/');
-  await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
+  await h.reachHub(page);
   if (init) await audioReady(page);
   await page.evaluate((live) => {
     const a = window.__daily;
@@ -596,7 +596,7 @@ async function everyScreen(h, viewport, { insets } = {}) {
     if (insets) {
       await (await ctx.newCDPSession(page)).send('Emulation.setSafeAreaInsetsOverride', { insets });
       await page.reload();
-      await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
+      await h.reachHub(page);
     }
     await page.locator('header .dq-safe').click();
     let heading = '';
@@ -847,7 +847,7 @@ export const scenarios = {
         if (insets) {
           await (await ctx.newCDPSession(page)).send('Emulation.setSafeAreaInsetsOverride', { insets });
           await page.reload();
-          await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
+          await h.reachHub(page);
         }
         await page.locator('header .dq-safe').click();
         const at = async (title) => {

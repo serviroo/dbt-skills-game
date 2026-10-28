@@ -1,3 +1,4 @@
+import { reachHub } from './harness.mjs';
 const DAY = 864e5;
 const dayKey = (ms) => {
   const d = new Date(ms - 6 * 3600e3);
@@ -167,7 +168,7 @@ async function home(page) {
   const screen = await page.evaluate(() => document.querySelector('.dq')?.dataset.screen);
   if (screen === 'skill') await page.getByRole('button', { name: 'Leave this skill' }).click();
   else if (screen === 'safe') await page.locator('.dq-top .dq-back').click();
-  await page.waitForFunction(() => document.querySelector('.dq')?.dataset.screen === 'hub', null, { timeout: 10000 });
+  await reachHub(page);
 }
 
 async function rotationSlot(h, id) {

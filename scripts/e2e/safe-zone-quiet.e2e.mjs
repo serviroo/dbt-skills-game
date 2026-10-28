@@ -50,6 +50,7 @@ async function boot(h, opts) {
   await page.goto(h.server.url + '/');
   await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile') && window.__taps.length > 0, null, { timeout: 30000 });
   await audioReady(page);
+  await h.reachHub(page);
   // the audio clock at every step into or out of the Safe Zone, and every sound the app asks for
   await page.evaluate(() => {
     const a = window.__daily;

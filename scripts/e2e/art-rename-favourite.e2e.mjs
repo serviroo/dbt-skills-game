@@ -1,5 +1,7 @@
 // Art room: rename a drawing, mark favourites (shown first with a mint star) and bring a removed one back with Undo.
 // Labels are not a new version of a drawing, so two tabs, a Save Crystal and an old save all keep them.
+// art-home-waits-for-welcome holds the browser clock at Home, before the welcome's delay, then checks reaching Home
+// closes the due welcome before Art can be tapped.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -92,6 +94,39 @@ async function restore(page, raw) {
 }
 
 export const scenarios = {
+  async 'art-home-waits-for-welcome'(h) {
+    let clockReady;
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', PHONES[0], async (ctx) => {
+      ctx.on('page', (p) => {
+        clockReady = p.clock.install().then(() => p.clock.pauseAt(Date.now() + 1000));
+      });
+      await ctx.route('**/', async (route) => {
+        await clockReady;
+        await route.continue();
+      });
+    });
+    try {
+      const state = () => page.evaluate(() => ({ home: !!document.querySelector('.dq-tile'), greeting: window.__daily?.greeting, window: !!document.querySelector('.dq-sw'), inert: document.querySelector('#dq-main')?.inert }));
+      for (const end = Date.now() + 30000; !(await state()).home && Date.now() < end; ) await page.clock.runFor(20);
+      const before = await state();
+      h.expect(before.home && before.greeting && !before.window, 'the welcome was not pending when Home became ready: ' + JSON.stringify(before));
+      let reached;
+      let failed;
+      const reaching = h.reachHub(page).then(async () => { reached = await state(); }, (e) => { failed = e; });
+      for (const end = Date.now() + 30000; !reached && !failed && Date.now() < end; ) await page.clock.runFor(50);
+      await reaching;
+      if (failed) throw failed;
+      h.expect(reached && !reached.greeting && !reached.window && !reached.inert, 'reaching Home returned before the pending welcome closed: ' + JSON.stringify(reached));
+      await page.clock.resume();
+      await seed(page);
+      await page.locator('.dq-tile--art').click();
+      await page.locator('.dq-artroom .dq-galitem').first().waitFor();
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** On a phone: favourite, rename (Enter, Escape, empty, the length cap), Remove and Release with Undo, the Safe Zone. */
   async 'art-rename-favourite-undo'(h) {
     for (const vp of PHONES) {

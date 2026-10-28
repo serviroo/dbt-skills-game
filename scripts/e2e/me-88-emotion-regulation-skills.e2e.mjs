@@ -40,16 +40,8 @@ async function progress(h, page, id) {
   };
 }
 
-async function home(h, page) {
-  for (let i = 0; i < 40; i++) {
-    if (await page.locator('.dq-sw').count()) await page.locator('.dq-sw').first().click().catch(() => undefined);
-    else if (await page.locator('.dq-tile').first().isVisible().catch(() => false)) return;
-    await h.sleep(250);
-  }
-  throw new Error('Home never appeared');
-}
 async function library(h, page) {
-  await home(h, page);
+  await h.reachHub(page);
   await page.locator('.dq-tile', { has: page.locator('.dq-tile-t', { hasText: /^Skills$/ }) }).click();
   await page.locator('.dq-library').waitFor({ timeout: 10000 });
 }
@@ -277,7 +269,7 @@ async function playAll(h, id, viewport, tag) {
   const before = await progress(h, page, id);
   await openFromLibrary(h, page, id);
   await page.getByRole('button', { name: 'Leave this skill' }).click();
-  await home(h, page);
+  await h.reachHub(page);
   const after = await progress(h, page, id);
   h.expect(after.uses === before.uses + 1 && after.xp === before.xp + 20 && after.intelligence === before.intelligence + 1, `${tag}: leaving on screen one was not credited: ${JSON.stringify({ before, after })}`);
   h.expect(!errors.length, errors.join('\n'));
@@ -369,7 +361,7 @@ export const scenarios = {
   async 'skills-er-old-save'(h) {
     const old = returning(20, [['skill', 20, { stat: 'intelligence', skill: 'check-facts' }], ['skill', 20, { stat: 'stamina', skill: 'a-skill-from-a-newer-build' }], ['card', 0, { skill: 'current-emotion' }]]);
     const { ctx, page, errors } = await h.open(seedFor(h, old), '?mute', PHONE);
-    await home(h, page);
+    await h.reachHub(page);
     await page.locator('.dq-tile', { has: page.locator('.dq-tile-t', { hasText: /^Shadows$/ }) }).click();
     await page.locator('.dq-shadows').waitFor({ timeout: 10000 });
     const owned = norm(await page.locator('.dq-shadows').textContent());
@@ -385,7 +377,7 @@ export const scenarios = {
       await library(h, page);
     }
     await page.getByRole('button', { name: /Lantern/ }).first().click();
-    await home(h, page);
+    await h.reachHub(page);
     await page.locator('.dq-tile', { has: page.locator('.dq-tile-t', { hasText: /^Shadows$/ }) }).click();
     await page.locator('.dq-shadows').waitFor({ timeout: 10000 });
     for (const { sl, real } of Object.values(NEW)) {
@@ -395,7 +387,7 @@ export const scenarios = {
     }
     await h.shot(page, 'er-old-save-03-shadows-after');
     await page.getByRole('button', { name: /Lantern/ }).first().click();
-    await home(h, page);
+    await h.reachHub(page);
     await page.locator('.dq-tile', { has: page.locator('.dq-tile-t', { hasText: /^Diary card$/ }) }).click();
     const used = page.locator('.dq-skillsused');
     await used.waitFor({ timeout: 10000 });
@@ -415,7 +407,7 @@ export const scenarios = {
     days.push(['wrap', rotation.length]);
     for (const [id, prior] of days) {
       const { ctx, page, errors } = await h.open(seedFor(h, returning(prior)), '?mute', PHONE);
-      await home(h, page);
+      await h.reachHub(page);
       const before = JSON.parse(await h.ls(page, h.SAVE)).events;
       h.expect(before.filter((e) => e.k === 'skill').length === 1 && !before.some((e) => e.k === 'card'), `${id}: opening Home credited something`);
       await page.locator('.dq-card').click({ force: true });
