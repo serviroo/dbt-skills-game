@@ -103,10 +103,9 @@ jobs:
           done < "$RUNNER_TEMP/candidates"
           echo "::notice::No passing run tested this tree: running the e2e parts in full"
 
-  # The e2e parts run on the dev box's runners only when its CI queue has reserved the box's RAM and runners for all of
-  # them at once, and on GitHub's runners otherwise: the queue answers each run with an "e2e runners" commit status. Only
-  # pushes to main and pull requests from this repository's own branches ask; a fork's pull request always stays on
-  # GitHub's runners.
+  # The CI queue on the dev box picks where each run's e2e parts go, its runners or GitHub's, and answers with an
+  # "e2e runners" commit status. Only pushes to main and pull requests from this repository's own branches ask; a fork's
+  # pull request always stays on GitHub's runners.
   route:
     needs: proven
     if: ${{ !cancelled() && needs.proven.outputs.run == '' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) }}
