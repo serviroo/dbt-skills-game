@@ -18,6 +18,7 @@ function returning() {
 /** Home on a returning save. Every quiet() the score gets and every cue asked for is noted, not played. */
 async function boot(h, viewport) {
   const ctx = await h.browser.newContext({ viewport, deviceScaleFactor: 2, serviceWorkers: 'block', locale: 'en-US' });
+  await ctx.clock.install();
   const seed = { [h.YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: Date.now() - 1000, companionAt: Date.now() - 1000 }), 'dbt.app.v1': h.SEEN, [h.SAVE]: returning() };
   await ctx.addInitScript((s) => {
     if (sessionStorage.getItem('e2e-seeded')) return;
@@ -74,6 +75,7 @@ const inside = async (page) => {
       hum: document.querySelectorAll('.dq-mo-hum').length,
       leave: document.querySelector('.dq-top > :first-child')?.textContent.trim(),
       line: document.querySelector('.dq-mo-line')?.textContent.trim() ?? '',
+      done: seen(document.querySelector('.dq-mo-done')),
     };
   });
 };
@@ -129,6 +131,24 @@ export const scenarios = {
             const ring = await page.evaluate(() => document.querySelector('.dq-sz .dq-mo-stage').getBoundingClientRect().width);
             ok(ring >= 100, `540x240: the moment's ring is ${ring}px wide`);
             await page.setViewportSize(viewport);
+          }
+
+          await page.getByRole('radio', { name: '1 minute', exact: true }).check();
+          await page.clock.pauseAt(await page.evaluate(() => Date.now() + 50));
+          await page.clock.fastForward(61000);
+          const ended = await inside(page);
+          ok(/^That[’']s your moment\./.test(ended.line), `${tag}: the timed moment did not end (${ended.line})`);
+          ok(ended.done, `${tag}: Done is missing or covered after the timer ends`);
+          ok(ended.route === 'safe' && ended.mode === 'safe' && ended.talk, `${tag}: the timer left the Safe Zone or hid the pinned help link`);
+          ok(!ended.quiet.includes(false) && !ended.cues.length && ended.hum === 0, `${tag}: sound returned when the timer ended (quiet ${ended.quiet}, cues ${ended.cues})`);
+          ok(ended.bubbles === 0, `${tag}: effects returned when the timer ended`);
+          ok(ended.xp === was.xp && ended.events === was.events, `${tag}: the timer credited something (XP ${was.xp} -> ${ended.xp}, events ${was.events} -> ${ended.events})`);
+          await page.clock.resume();
+          if (size === '390x844' && from === 'Home') {
+            await page.locator('.dq-mo-line').evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+            const settled = await inside(page);
+            ok(settled.done, `${tag}: Done disappeared after the timer's fade`);
+            await h.shot(page, 'safe-calm-ended-390x844');
           }
 
           // Done comes back to the Safe Zone's first screen, still inside
