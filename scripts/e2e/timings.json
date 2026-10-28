@@ -129,6 +129,7 @@
   "dismissed-after-early-tap": 1,
   "ended-controls-out-of-reach": 3,
   "entry-silences-score-and-cues-at-once": 12,
+  "every-cue-reads-on-a-phone-speaker": 20,
   "final-ids-guard": 6,
   "final-ids-old-shape": 2,
   "final-ids-round-trip": 18,
