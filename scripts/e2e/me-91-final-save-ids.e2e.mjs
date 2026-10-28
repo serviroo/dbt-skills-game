@@ -13,7 +13,7 @@ const dayOf = (ms) => {
   const d = new Date(ms - 6 * 3600e3);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
-const MAPS = { diary: '<day>', 'diary.<day>.emotions': '<row>', 'diary.<day>.urges': '<row>', 'diary.<day>.ft': '<field>', gone: '<id>', 'profile.names': '<shadow>', skillPins: '<skill>', 'skillDrafts[].answers': '<answer>', 'skillDrafts[].typed': '<step>', 'skillDrafts[].leads': '<step>' };
+const MAPS = { diary: '<day>', 'diary.<day>.emotions': '<row>', 'diary.<day>.urges': '<row>', 'diary.<day>.ft': '<field>', gone: '<id>', 'profile.names': '<shadow>', skillPins: '<skill>', 'skillDrafts[].answers': '<answer>', 'skillDrafts[].typed': '<step>', 'skillDrafts[].leads': '<step>', 'stories.stories[].drawings': '<chapter>' };
 function paths(o, at = '', out = new Set()) {
   if (Array.isArray(o)) {
     if (!o.length) out.add(`${at}[]`);
@@ -88,7 +88,7 @@ export function seedStores(page, SAVE, now) {
   const draft = { key: `edit:${drawings[0].meta.id}:tab-1`, kind: drawings[0].meta.kind, editId: drawings[0].meta.id, bases: [`r0@${t}`], base: t, prompt: 'Draw a door to somewhere calm.', strokes: [{ i: 2, w: 4, p: [120, 120, 200, 260] }, ...ids['stroke-mode'].map((m, k) => ({ i: 2, w: 4, p: [], m, q: [300 + k * 40, 120, 340 + k * 40, 260] }))], t: t + 50 };
   const story = {
     stories: [
-      { id: 'tale-1', title: 'The Long Night', created: t, updated: t, rev: 's1', chapters: ['ch-1'], notes: 'ch-notes' },
+      { id: 'tale-1', title: 'The Long Night', created: t, updated: t, rev: 's1', chapters: ['ch-1'], notes: 'ch-notes', drawings: { 'ch-1': drawings[0].meta.id } },
       { id: 'tale-gone', title: 'Gone', created: t, updated: t, rev: 's2', chapters: [], notes: 'ch-gone-notes', removed: t + 1 },
     ],
     chapters: [
@@ -283,6 +283,7 @@ export const scenarios = {
     const cx = content(x);
     for (const d of seeded.drawings) expect(same(cx.art[d.meta.id]?.strokes, d.strokes) && cx.art[d.meta.id]?.name === d.meta.name, `drawing ${d.meta.id} not in the Save Crystal intact`);
     for (const c of seeded.story.chapters) expect(cx.chapters[c.id]?.text === c.text, `chapter ${c.id} not in the Save Crystal intact`);
+    for (const s of seeded.story.stories) expect(cx.stories[s.id] && same(cx.stories[s.id].drawings, s.drawings), `story ${s.id} drawings changed on export`);
     expect(same(cx.drafts[seeded.draft.key], seeded.draft), 'the unfinished drawing is not in the Save Crystal intact: ' + JSON.stringify(cx.drafts[seeded.draft.key]));
     expect(ids['event-kind'].every((k) => x.events.some((e) => e.k === k)), 'an event kind is missing from the Save Crystal');
     expect(!a.errors.length, a.errors.join('\n'));
