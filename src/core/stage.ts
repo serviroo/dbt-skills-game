@@ -93,6 +93,9 @@ export class Stage {
   height = 1;
   /** recent frame durations (s), for perf evidence */
   readonly frameLog: number[] = [];
+  /** the WebGL context is gone (a GPU reset, a phone in the background, too many contexts) until the browser restores it */
+  lost = false;
+  private lostFns: (() => void)[] = [];
 
   constructor(readonly canvas: HTMLCanvasElement) {
     this.capture = params.capture;
@@ -109,6 +112,17 @@ export class Stage {
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.NoToneMapping;
     this.renderer = renderer;
+    // three.js asks for a lost context back on its own listener, added before these. Until it comes back nothing is drawn
+    // and the canvas is hidden, so the page never shows the browser's broken-canvas picture in its place
+    canvas.addEventListener('webglcontextlost', () => {
+      this.lost = true;
+      canvas.style.visibility = 'hidden';
+      for (const f of this.lostFns) f();
+    });
+    canvas.addEventListener('webglcontextrestored', () => {
+      this.lost = false;
+      canvas.style.visibility = '';
+    });
 
     const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.userAgent));
     this.maxDpr = params.dpr ?? Math.min(window.devicePixelRatio || 1, isMobile ? 2 : 2);
@@ -166,6 +180,15 @@ export class Stage {
     };
   }
 
+  /** Calls fn when the WebGL context is lost, at once if it is lost now. */
+  onLost(fn: () => void) {
+    this.lostFns.push(fn);
+    if (this.lost) fn();
+    return () => {
+      this.lostFns = this.lostFns.filter((f) => f !== fn);
+    };
+  }
+
   resize() {
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
@@ -201,6 +224,8 @@ export class Stage {
     if (this.loads) dt = 0;
     if (!this.paused) this.time += dt * this.timeScale;
     for (const f of this.updates) f(this.time, dt * this.timeScale);
+    // the clock and the updates go on (the DOM parts of the intro follow them); a lost context gets no frames
+    if (this.lost) return;
     if (params.nopost) this.renderer.render(this.scene, this.camera);
     else this.composer.render(dt);
   }

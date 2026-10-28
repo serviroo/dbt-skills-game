@@ -215,10 +215,14 @@ export class Director {
 
   async play(opts: { skippable?: boolean } = {}): Promise<'replay' | 'enter'> {
     if (opts.skippable) this.removeSkip = skipButton(() => this.skipNow());
+    // the scene can't go on without its WebGL context: losing it ends the scene as Skip does (also on a first run, which
+    // has no Skip), and the rewards, letter and end card need no 3D
+    const offLost = this.stage.onLost(() => this.skipNow());
     const start = params.shot || '';
     const order = ['gate', 'windows', 'silhouette', 'awaken', 'chest', 'rewards'];
     const from = Math.max(0, order.indexOf(start));
     try {
+      this.stopIfSkipped();
       if (from <= 0) await this.beatGate();
       if (from <= 1) await this.beatWindows();
       if (from <= 2) await this.beatSilhouette();
@@ -226,6 +230,8 @@ export class Director {
       if (from <= 4) await this.beatChest();
     } catch (e) {
       if (e !== SKIP) throw e;
+    } finally {
+      offLost();
     }
     this.removeSkip?.();
     return this.beatRewards();
