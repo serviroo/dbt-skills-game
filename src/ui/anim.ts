@@ -136,7 +136,7 @@ export function pauseAfter(on: boolean) {
 export function after(ms: number) {
   if (params.capture) return wait(ms / 1000);
   return new Promise<void>((resolve) => {
-    const d: Delay = { left: ms, at: performance.now(), id: 0, resolve };
+    const d: Delay = { left: ms, at: 0, id: 0, resolve };
     delays.add(d);
     if (!afterPaused) startDelay(d);
   });

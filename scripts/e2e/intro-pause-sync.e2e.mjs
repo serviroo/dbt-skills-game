@@ -204,10 +204,10 @@ export const scenarios = {
     await page.clock.resume();
     await hidden(page, true);
     const untouched = await page.evaluate(async () => {
-      const { after } = await import('/src/ui/anim.ts');
+      const { after, animate } = await import('/src/ui/anim.ts');
       const el = document.createElement('span');
       document.body.append(el);
-      const a = el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 1000 });
+      const a = animate(el, [{ opacity: 0 }, { opacity: 1 }], { duration: 1000 });
       const done = await Promise.race([after(150).then(() => true), new Promise((r) => setTimeout(() => r(false), 1000))]);
       const running = a.playState === 'running';
       a.cancel();
