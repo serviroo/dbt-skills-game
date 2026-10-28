@@ -26,6 +26,8 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Tested tree
+        run: echo "::notice title=Tested tree::$(git rev-parse 'HEAD^{tree}')"
       - uses: actions/setup-node@v7
         with:
           node-version: 20.x
@@ -57,7 +59,53 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  # A push to main after a squash merge of an up-to-date PR has exactly the tree that PR's last run already proved, so
+  # the push reuses that run's e2e parts instead of running them again. Any doubt or lookup error runs them in full.
+  proven:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+    outputs:
+      run: ${{ steps.find.outputs.run }}
+    steps:
+      - id: find
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE: ${{ github.event.before }}
+          TREE: ${{ github.event.head_commit.tree_id }}
+        run: |
+          repo=$GITHUB_REPOSITORY
+          workflow=${GITHUB_WORKFLOW_REF%@*}
+          workflow=${workflow##*/}
+          [[ $BEFORE =~ ^[0-9a-f]{40}$ && $BEFORE != 0000000000000000000000000000000000000000 && $TREE =~ ^[0-9a-f]{40}$ ]] || { echo "::notice::No earlier main commit to compare with: running the e2e parts in full"; exit 0; }
+          # an up-to-date PR contains main's previous commit, so its run is newer than that commit
+          since=$(gh api "repos/$repo/commits/$BEFORE" --jq .commit.committer.date)
+          gh api --paginate "repos/$repo/actions/workflows/$workflow/runs?status=success&exclude_pull_requests=true&per_page=100&created=>=$since" |
+            jq -r --arg repo "$repo" --arg tree "$TREE" '.workflow_runs[] | select(.head_repository.full_name == $repo and .head_commit.tree_id == $tree) | "\(.id) \(.head_sha)"' > "$RUNNER_TEMP/candidates"
+          while read -r id sha; do
+            jobs=$(gh api "repos/$repo/actions/runs/$id/jobs?per_page=100")
+            jq -e --arg me "$GITHUB_JOB" '[.jobs[] | select(.name != $me)] | length > 0 and all(.conclusion == "success")' <<< "$jobs" > /dev/null || continue
+            # a PR run tests its head merged into its base, not the head itself, so trust only the tree its check job saw
+            check=$(jq -r '.jobs[] | select(.name == "check") | .id' <<< "$jobs")
+            tested=$(gh api "repos/$repo/check-runs/$check/annotations" --jq '.[] | select(.title == "Tested tree") | .message')
+            [[ $tested == "$TREE" ]] || continue
+            url="$GITHUB_SERVER_URL/$repo/actions/runs/$id"
+            echo "::notice title=E2E reused::Run $id tested this tree with every job passing: $url"
+            echo "E2E reused from [run $id]($url), which passed every job and tested this commit's tree \`$TREE\` (head \`$sha\`)." >> "$GITHUB_STEP_SUMMARY"
+            echo "run=$id" >> "$GITHUB_OUTPUT"
+            exit 0
+          done < "$RUNNER_TEMP/candidates"
+          echo "::notice::No passing run tested this tree: running the e2e parts in full"
+
   e2e:
+    needs: proven
+    if: ${{ !cancelled() && needs.proven.outputs.run == '' }}
     runs-on: ubuntu-latest
     container:
       image: mcr.microsoft.com/playwright:v1.64.1-noble
