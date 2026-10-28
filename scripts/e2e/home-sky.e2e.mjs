@@ -496,10 +496,10 @@ export const scenarios = {
     expect((await page.evaluate(() => window.__liveTimers('sky.ts'))) >= 1, 'Home does not watch the clock (no sky timer while open)');
     await crossEight(h, page);
     const series = [];
+    // no screenshot while it drifts: on a slow machine one takes seconds, and the fade would end between two looks
     for (let i = 0; i < 140; i++) {
       const s = await skyOf(page);
       series.push({ t: Math.round(s.at - (series[0]?.at0 ?? s.at)), at0: series[0]?.at0 ?? s.at, day: s.layers.day, dawn: s.layers.dawn, mood: s.mood, fading: s.fading });
-      if (i === 25) await shot(page, 'drift-mid');
       if (series.length > 5 && !s.fading && series.at(-2).fading === 0 && s.mood === 'day' && i > 30) break;
       await h.sleep(90);
     }
@@ -509,8 +509,17 @@ export const scenarios = {
     // how fast the picture came in between each two looks, per second of the fades' own clock, so a slow machine
     // that looks less often still measures the fade and not its own pace; an 8 s ease-in-out peaks near 0.19 a second
     const rates = series.slice(1).map((s, i) => Math.abs(s.day - series[i].day) / Math.max(0.001, (s.t - series[i].t) / 1000));
-    const took = moving.length ? moving.at(-1).t - moving[0].t : 0;
-    expect(took >= 4000, `the drift took ${took} ms; it should take several seconds: ` + JSON.stringify(series.slice(0, 12)));
+    // how long the picture took to come in: from the last look before it moved to the first look once it was in. A page
+    // drawing the fade in software can stop answering for seconds, which only makes this longer, never shorter, so the
+    // fade's own length comes from the browser too
+    const after = series.find((s) => s.day >= 0.98);
+    const before = series.slice(0, series.indexOf(after)).findLast((s) => s.day <= 0.02);
+    const took = before && after ? after.t - before.t : 0;
+    const fadeMs = await page.evaluate(() => {
+      const cs = getComputedStyle(document.querySelector('.dq > .dq-sky:not(.dq-sky-top) > .dq-sky-day'));
+      return cs.transitionProperty === 'opacity' ? parseFloat(cs.transitionDuration) * 1000 : 0;
+    });
+    expect(took >= 4000 && fadeMs >= 4000 && moving.length >= 3, `the drift took ${took} ms (the browser runs it ${fadeMs} ms, seen part way ${moving.length} times); it should take several seconds: ` + JSON.stringify(series.slice(0, 12)));
     expect(Math.max(...rates) <= 0.4, `the sky came in at ${Math.round(Math.max(...rates) * 100)}% a second at its fastest, faster than an 8 s fade: ` + JSON.stringify(series.slice(0, 40)));
     const dip = series.find((s) => s.day < 1 && s.dawn < 1);
     expect(!dip, 'dawn went before day had come in, so the sky dipped toward night: ' + JSON.stringify(dip));
@@ -518,7 +527,7 @@ export const scenarios = {
     await shot(page, 'drift-day');
     expect(!errors.length, errors.join('\n'));
     await ctx.close();
-    return { tookMs: took, fastestPerSec: Math.round(Math.max(...rates) * 1000) / 1000, samples: series.length };
+    return { tookMs: took, fadeMs, fastestPerSec: Math.round(Math.max(...rates) * 1000) / 1000, samples: series.length };
   },
 
   /** reduced motion: the same crossing changes the sky at once, with nothing fading */
