@@ -1,14 +1,17 @@
 /**
  * Wave 2 Wardrobe: Lantern window themes, an accent, card backs and name-plate styles. What is unlocked is derived from
  * distinct visit days (or rank) on every render and never shrinks; the picks are SetKeys in settings, so the later pick
- * wins across open copies. A pick that is not (or no longer provably) unlocked shows as the default.
+ * wins across open copies. A pick that is not (or no longer provably) unlocked shows as the default. A tapped look is only
+ * tried on (in memory, never saved) until the player keeps it.
  */
 import { ACCENTS, ACCENT_IDS, CARD_BACKS, CARD_BACK_IDS, PLATES, PLATE_IDS, THEMES, THEME_IDS, WARDROBE_COPY, type Look } from '../content/roster-lines';
-import { RANKS } from '../content/daily-lines';
+import { RANKS, TRY_ON } from '../content/daily-lines';
+import { CALM, css, WINDOW } from '../motion/tokens';
+import { animate } from '../ui/anim';
 import { playerName } from '../core/you';
 import type { App } from './app';
 import { cardBackSVG } from './art';
-import { h, panel, radioKeys } from './ui';
+import { btn, h, panel, radioKeys } from './ui';
 import { icon } from './art';
 import type { Store } from './store';
 
@@ -34,19 +37,27 @@ export function worn(st: Store, slot: Slot): string {
 
 export const plateClass = (app: App) => `w2-plate--${worn(app.store, 'plate')}`;
 
+/** Looks tried on in the Wardrobe and not kept yet: in memory only, gone when the Wardrobe closes. */
+let tried: Partial<Record<Slot, string>> = {};
+/** What the screen wears: a look being tried on, else what they keep. */
+const shown = (st: Store, slot: Slot) => tried[slot] ?? worn(st, slot);
+
 /** Applies theme and accent to the companion and its Lantern windows (both read the attributes on <html>). */
-export function wireWardrobe(app: App) {
+function paint(st: Store) {
   const html = document.documentElement;
-  const apply = () => {
-    html.dataset.dqTheme = worn(app.store, 'theme');
-    html.dataset.dqAccent = worn(app.store, 'accent');
-  };
+  html.dataset.dqTheme = shown(st, 'theme');
+  html.dataset.dqAccent = shown(st, 'accent');
+}
+
+export function wireWardrobe(app: App) {
+  const apply = () => paint(app.store);
   apply();
   const off = app.store.onChange(apply);
   return () => {
     off();
-    delete html.dataset.dqTheme;
-    delete html.dataset.dqAccent;
+    tried = {};
+    delete document.documentElement.dataset.dqTheme;
+    delete document.documentElement.dataset.dqAccent;
   };
 }
 
@@ -90,7 +101,7 @@ function backArt(id: string) {
 }
 
 /** One radio option of the Wardrobe; locked ones are disabled and say, calmly, when they arrive. */
-function option(app: App, slot: Slot, id: string, preview: HTMLElement, onPick: () => void) {
+function option(app: App, slot: Slot, id: string, preview: HTMLElement, onPick: (slot: Slot) => void) {
   const st = app.store;
   const look = TABLE[slot].looks[id];
   const open = lookUnlocked(st, look);
@@ -105,16 +116,15 @@ function option(app: App, slot: Slot, id: string, preview: HTMLElement, onPick: 
       class: `w2-wopt w2-wopt--${slot}${open ? '' : ' is-locked'}`,
       'data-slot': slot,
       'data-id': id,
-      'aria-checked': String(worn(st, slot) === id),
+      'aria-checked': String(shown(st, slot) === id),
       'aria-label': `${look.name}${open ? '' : `. ${hint}`}`,
       disabled: !open,
       onclick: () => {
         if (!open) return;
-        st.sync();
-        (st.state.settings as unknown as Record<Slot, string>)[slot] = id;
-        st.touch(slot);
-        st.save();
-        onPick();
+        // tried on only: the look they keep goes back on with one tap of its own option
+        if (id === worn(st, slot)) delete tried[slot];
+        else tried[slot] = id;
+        onPick(slot);
       },
     },
     preview,
@@ -142,9 +152,66 @@ function platePreview(id: string) {
   return h('span', { class: 'w2-pv-plate-wrap', 'aria-hidden': 'true' }, h('span', { class: `w2-plate w2-plate--${id} dq-mint`, 'data-you-name': '', text: playerName() }));
 }
 
-/** Settings > Wardrobe, below Feel. */
+/**
+ * Settings > Wardrobe, below Feel. A tapped look is tried on: the screen wears its window and accent, and the bar under
+ * the page shows it with its card back and name plate, until Keep this look saves it the usual way or Go back drops it.
+ * Settings calls leave() when the player goes anywhere else, the Safe Zone included, so a look is never kept unasked.
+ */
 export function wardrobePanel(app: App) {
+  const st = app.store;
   const body = h('div', { class: 'w2-wardrobe' });
+  const status = h('p', { class: 'dq-sr', role: 'status' });
+  const say = h('p', { class: 'w2-try-t' });
+  const back = h('span', { class: 'dq-cardface dq-cardface--back w2-try-back', 'aria-hidden': 'true' });
+  const plate = h('span', { 'data-you-name': '' });
+  let last: Slot = 'theme';
+  const end = (keep: boolean) => {
+    if (keep) {
+      st.sync();
+      for (const slot of Object.keys(tried) as Slot[]) {
+        (st.state.settings as unknown as Record<Slot, string>)[slot] = tried[slot]!;
+        st.touch(slot);
+      }
+    }
+    tried = {};
+    if (keep) st.save();
+    paint(st);
+    render();
+    bar.hidden = true;
+    status.textContent = '';
+    body.querySelector<HTMLElement>(`[data-slot="${last}"][aria-checked="true"]`)?.focus({ preventScroll: true });
+  };
+  const bar = h(
+    'div',
+    { class: 'w2-try', role: 'region', 'aria-label': TRY_ON.label, hidden: true },
+    h(
+      'div',
+      { class: 'w2-try-in' },
+      back,
+      h('div', { class: 'w2-try-say' }, say, plate),
+      h('div', { class: 'dq-actions w2-try-acts' }, btn(TRY_ON.keep, () => end(true)), btn(TRY_ON.back, () => end(false), { kind: 'quiet' })),
+    ),
+  );
+  const pick = (slot: Slot) => {
+    last = slot;
+    paint(st);
+    render();
+    const on = (Object.keys(TABLE) as Slot[]).filter((k) => tried[k]);
+    if (!on.length) {
+      bar.hidden = true;
+      status.textContent = '';
+      return;
+    }
+    const line = TRY_ON.trying(on.map((k) => TABLE[k].looks[tried[k]!].name));
+    say.textContent = line;
+    status.textContent = line;
+    back.innerHTML = backArt(shown(st, 'cardBack'));
+    plate.className = `dq-mint w2-plate w2-plate--${shown(st, 'plate')}`;
+    plate.textContent = playerName();
+    if (!bar.hidden) return;
+    bar.hidden = false;
+    animate(bar, [{ opacity: 0 }, { opacity: 1 }], { duration: app.reduced() ? WINDOW.reducedFadeMs : CALM.fadeMs, easing: css(CALM.ease) });
+  };
   const render = () => {
     // a pick redraws the Wardrobe: focus stays on the look just picked
     const on = body.contains(document.activeElement) ? { ...(document.activeElement as HTMLElement).dataset } : null;
@@ -157,7 +224,7 @@ export function wardrobePanel(app: App) {
           h(
             'div',
             { class: 'w2-wopts', role: 'radiogroup', 'aria-label': title },
-            TABLE[slot].ids.map((id) => option(app, slot, id, pv(id), () => render())),
+            TABLE[slot].ids.map((id) => option(app, slot, id, pv(id), pick)),
           ),
         ),
       );
@@ -171,5 +238,12 @@ export function wardrobePanel(app: App) {
     if (on?.slot) body.querySelector<HTMLElement>(`[data-slot="${on.slot}"][data-id="${on.id}"]`)?.focus({ preventScroll: true });
   };
   render();
-  return panel({ title: WARDROBE_COPY.title, ic: icon('card'), cls: 'w2-wardrobe-p' }, body);
+  return {
+    el: panel({ title: WARDROBE_COPY.title, ic: icon('card'), cls: 'w2-wardrobe-p' }, body, status),
+    bar,
+    leave: () => {
+      tried = {};
+      paint(st);
+    },
+  };
 }

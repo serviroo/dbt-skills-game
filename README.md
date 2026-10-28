@@ -24,7 +24,7 @@ back after a long break is always fine.
   It has an optional low hum with its own volume.
 - Diary card: a plain-text card of what you practised, made for sharing with a therapist if you want to.
 - Your name and your companion's: the game asks what to call you the first time (or skip it and stay "Player"), and
-  you can change both any time in Settings. Pick an accent colour in the Wardrobe.
+  you can change both any time in Settings. Try a look on in the Wardrobe and keep it if you like it.
 - The Night Watch, ranks and titles: small rewards that grow as you use things. Nothing is ever taken away.
 - Art room and Story Room: draw or write whatever you like. Paint with glowing ink or a soft glow, and erase what
   you'd rather not keep. It all stays on your device. The Story Room's co-writer can ask you questions, toss in

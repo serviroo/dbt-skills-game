@@ -1304,6 +1304,7 @@ export function settingsScreen(app: App): ScreenOut {
     if (buzzIn) buzzIn.checked = s.settings.vibrate;
   });
   const levels = app.opts.volume ? volumeSliders(app.opts.volume, { hum: true }) : null;
+  const robe = wardrobePanel(app);
   const el = h(
     'div',
     { class: 'dq-page dq-settings' },
@@ -1346,7 +1347,7 @@ export function settingsScreen(app: App): ScreenOut {
         vibrate,
       ),
       panel({ title: 'Crisis lines', ic: icon('phone') }, regionPicker(app, undefined, SAFE.settings)),
-      wardrobePanel(app),
+      robe.el,
       panel(
         { title: 'Intro', ic: icon('replay') },
         p('The cutscene, the shadows and the chest. As many times as you like.', 'dq-text'),
@@ -1383,12 +1384,15 @@ export function settingsScreen(app: App): ScreenOut {
         p(`Crisis lines in the Safe Zone were checked on ${CRISIS_CHECKED} against each service's own site or an official government page.`, 'dq-small'),
       ),
     ),
+    robe.bar,
   );
   return {
     el,
     title: 'Settings',
     mode: 'sub',
+    foot: robe.bar,
     leave: () => {
+      robe.leave();
       offSaving();
       offBuzz();
       keeps.stop();

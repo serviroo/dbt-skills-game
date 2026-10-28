@@ -358,5 +358,13 @@ export const ART_PROMPTS = [
   'Draw anything, with no plan at all.',
 ];
 
+/** The Wardrobe's try-on bar: a tapped look shows on the screen, and nothing is saved until it is kept. */
+export const TRY_ON = {
+  label: 'Trying on a look',
+  trying: (names: string[]) => `Trying on ${names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0]}. Nothing is saved until you keep it.`,
+  keep: 'Keep this look',
+  back: 'Go back',
+};
+
 /** Name ideas for a shadow ally. Original, gentle, no lore names. */
 export const ALLY_NAMES = ['Ember', 'Moss', 'Drift', 'Inkling', 'Hush', 'Pebble', 'Wisp', 'Nightcap', 'Thistle', 'Tidewatch'];
