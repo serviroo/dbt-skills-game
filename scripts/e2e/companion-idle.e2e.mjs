@@ -11,6 +11,8 @@ import { settle } from './layout-fit.e2e.mjs';
 
 const IDLE_MS = 1200;
 const HOLD_SEC = 0.5;
+/** How long the page stays frozen mid-hold. */
+const FROZEN_MS = 1000;
 
 const dayKey = (ms) => {
   const d = new Date(ms - 6 * 3600e3);
@@ -59,14 +61,14 @@ async function framesWhileStill(h, page) {
   return { frames: b.n - a.n, from };
 }
 
-/** Opens a Lantern window that holds HOLD_SEC on the UI clock, the way lanternMessage does with no buttons. */
-const hold = (page) =>
+/** Opens a Lantern window that holds `sec` on the UI clock, the way lanternMessage does with no buttons. */
+const hold = (page, sec) =>
   page.evaluate((sec) => {
     window.__held = import('/src/ui/lantern-window.ts').then(({ lanternMessage }) => {
-      const t = performance.now();
+      const t = (window.__heldFrom = performance.now());
       return lanternMessage({ kind: 'info', icon: 'info', title: 'Notification', html: '<p class="center">Still here.</p>' }, { hold: sec }).then(() => performance.now() - t);
     });
-  }, HOLD_SEC);
+  }, sec);
 
 export const scenarios = {
   async 'idle-screens-ask-no-frames'(h) {
@@ -84,7 +86,7 @@ export const scenarios = {
 
     // the UI clock wakes for a window that holds on it, and sleeps again once it closed
     const win = page.locator('.sw-layer .sw');
-    await hold(page);
+    await hold(page, HOLD_SEC);
     await win.waitFor({ timeout: 5000 });
     const ms = await page.evaluate(() => window.__held);
     await win.waitFor({ state: 'detached', timeout: 5000 });
@@ -94,14 +96,18 @@ export const scenarios = {
     await still('settings after a held window');
 
     // frozen in the background mid-hold (as a phone does with a hidden tab) and resumed: the hold still ends. The hold
-    // has begun once the UI clock asks for a frame, which it does only while something waits on it
+    // has begun once the UI clock asks for a frame, which it does only while something waits on it. It lasts the freeze
+    // and HOLD_SEC more, and it must still be holding when the page freezes, or nothing waits across the freeze
+    const cdp = await ctx.newCDPSession(page);
     const asked = await page.evaluate(() => window.__rafs.ui);
-    await hold(page);
+    const across = HOLD_SEC + FROZEN_MS / 1000;
+    await hold(page, across);
     await win.waitFor({ timeout: 5000 });
     await page.waitForFunction((n) => window.__rafs.ui > n, asked, { timeout: 5000, polling: 50 });
-    const cdp = await ctx.newCDPSession(page);
+    const into = await page.evaluate(() => performance.now() - window.__heldFrom);
+    h.expect(into < across * 1000, `the page froze ${Math.round(into)} ms into the window's ${across} s hold, after the hold was over`);
     await cdp.send('Page.setWebLifecycleState', { state: 'frozen' });
-    await h.sleep(1000);
+    await h.sleep(FROZEN_MS);
     await cdp.send('Page.setWebLifecycleState', { state: 'active' });
     await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
     await page.evaluate(() => window.__held);
