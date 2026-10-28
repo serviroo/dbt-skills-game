@@ -267,7 +267,7 @@ export class AudioEngine {
       const vis = () => {
         const ac = this.ctx as AudioContext;
         if (document.hidden) {
-          if (ac.state === 'running') ac.suspend().catch(() => {});
+          if (ac.state === 'running') ac.suspend().then(() => { if (!document.hidden) vis(); }).catch(() => {});
         } else if (this.unlocked && ac.state !== 'running') ac.resume().catch(() => this.autoUnlock());
       };
       document.addEventListener('visibilitychange', vis);
