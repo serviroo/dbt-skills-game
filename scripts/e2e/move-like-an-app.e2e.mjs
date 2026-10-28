@@ -408,15 +408,22 @@ export const scenarios = {
     await back(page);
     expect((await screenOf(page)) === 'hub', `Back from a Safe Zone opened on Home went to ${await screenOf(page)}`);
 
-    // Safe Zone, Give me a moment, then the Safe Zone again: one Back returns to the moment
-    await page.locator('.dq-top .dq-safe').click();
-    await onScreen(page, 'safe');
-    await page.getByRole('button', { name: 'Give me a moment' }).click();
+    // Give me a moment, then the Safe Zone: one Back returns to the moment
+    await page.locator('.dq-momentbtn').click();
     await onScreen(page, 'moment');
     await page.locator('.dq-top .dq-safe').click();
     await onScreen(page, 'safe');
     await back(page);
     expect((await screenOf(page)) === 'moment', `Back from a Safe Zone opened on Give me a moment went to ${await screenOf(page)}`);
+
+    // Give me a moment inside the Safe Zone is still the Safe Zone: one Back returns to where it was opened
+    await page.locator('.dq-top .dq-safe').click();
+    await onScreen(page, 'safe');
+    await page.locator('.dq-sz-main').getByRole('button', { name: 'Give me a moment' }).click();
+    await page.locator('.dq-sz-body .dq-mo-stage').waitFor();
+    expect((await screenOf(page)) === 'safe', `Give me a moment in the Safe Zone went to ${await screenOf(page)}`);
+    await back(page);
+    expect((await screenOf(page)) === 'moment', `Back from Give me a moment in the Safe Zone went to ${await screenOf(page)}`);
     expect(!errors.length, errors.join('\n'));
   },
 

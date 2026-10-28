@@ -180,7 +180,8 @@
 }
 .dq-safezone.is-lit .dq-sz .dq-text,
 .dq-safezone.is-lit .dq-sz-stop,
-.dq-safezone.is-lit .dq-sz .dq-small {
+.dq-safezone.is-lit .dq-sz .dq-small,
+.dq-safezone.is-lit .dq-sz .dq-mo-len-l {
   color: #f2f8ff;
 }
 .dq-safezone.is-lit .dq-sz-t {
