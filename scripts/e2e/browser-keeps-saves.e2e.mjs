@@ -455,7 +455,7 @@ export const scenarios = {
     await h.openSettings(page);
     h.expect((await stateOf(page)) === 'checking', 'the slow check does not show it is checking');
     h.expect(!(await askBtn(page).isVisible()), 'the ask button shows before the browser answered');
-    await page.locator('.dq-panel', { has: keep(page) }).screenshot({ path: path.join(h.out, 'keep-checking-phone.png') });
+    await h.shot(page.locator('.dq-panel', { has: keep(page) }), 'keep-checking-phone');
     await page.locator('.dq-back').click();
     await h.sleep(2500);
     await h.reachHub(page);
@@ -526,7 +526,7 @@ export const scenarios = {
     let n = await asking(page);
     h.expect(n.asks === 1 && n.most === 1, `with the boot request out, a tap asked again (${n.asks} requests, ${n.most} at once)`);
     await stillAsking(h, page, 'first open');
-    await page.locator('.dq-panel', { has: keep(page) }).screenshot({ path: path.join(h.out, 'keep-boot-asking-phone.png') });
+    await h.shot(page.locator('.dq-panel', { has: keep(page) }), 'keep-boot-asking-phone');
     await page.locator('.dq-back').click();
     await h.openSettings(page);
     await panelReady(page);
@@ -650,7 +650,7 @@ export const scenarios = {
       }
       await h.sleep(400);
       await stillAsking(h, page, way);
-      await page.locator('.dq-panel', { has: keep(page) }).screenshot({ path: path.join(h.out, `keep-answer-read-${way}-phone.png`) });
+      await h.shot(page.locator('.dq-panel', { has: keep(page) }), `keep-answer-read-${way}-phone`);
       await tapHard(page);
       await h.sleep(400);
       let n = await asking(page);
@@ -758,7 +758,7 @@ export const scenarios = {
       h.expect(!fit.bad.length && !fit.wide && fit.right <= fit.vw, `${size} ${state}: clipped or too wide: ${JSON.stringify(fit)}`);
       const cb = await crystalBtn(page).boundingBox();
       h.expect(cb && cb.y + cb.height <= page.viewportSize().height, `${size} ${state}: the Save Crystal button is off screen under the status`);
-      await page.screenshot({ path: path.join(h.out, `keep-${state}-${size}.png`) });
+      await h.shot(page, `keep-${state}-${size}`);
       shots.push(`keep-${state}-${size}`);
     };
     for (const [size, viewport] of Object.entries(SIZES)) {

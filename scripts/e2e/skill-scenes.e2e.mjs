@@ -4,6 +4,7 @@
 // WebGL, never hidden again once the device is known to have none, and never hidden at all in a browser without WebGL 2;
 // one WebGL context however often it opens, let go while the page is hidden; back after a lost context.
 import sharp from 'sharp';
+import { screenshot } from './harness.mjs';
 
 const PHONE = { width: 390, height: 844 };
 const SIDE = { width: 844, height: 390 };
@@ -113,7 +114,7 @@ async function until(page, test, arg) {
 
 /** Brightness of the middle of the scene window as shown on screen: its mean, spread and brightest pixel. */
 async function pixels(page) {
-  const { data, info } = await sharp(await page.locator('.dq-scene').screenshot()).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { data, info } = await sharp(await screenshot(page.locator('.dq-scene'))).removeAlpha().raw().toBuffer({ resolveWithObject: true });
   const { width: w, height: ht, channels: c } = info;
   let n = 0, sum = 0, sq = 0, max = 0;
   for (let y = Math.floor(ht * 0.2); y < ht * 0.8; y++) {

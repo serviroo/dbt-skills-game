@@ -77,6 +77,31 @@ export async function settled(page, selector, { timeout = 15000 } = {}) {
   }
 }
 
+/**
+ * page.screenshot or locator.screenshot, once the GPU has drawn what the page queued. A capture waits at the end of the
+ * GPU's queue, which all of a page's canvases share, and a pixel read back from a fresh canvas returns only when that
+ * queue is done. The wait allows 60 s: CI has kept a capture of Home waiting past 30 s.
+ */
+export async function screenshot(target, options) {
+  const page = target.page?.() ?? target;
+  let timer;
+  try {
+    await Promise.race([
+      page.evaluate(() => {
+        const c = document.createElement('canvas');
+        c.width = c.height = 1;
+        const g = c.getContext('2d');
+        g.fillRect(0, 0, 1, 1);
+        g.getImageData(0, 0, 1, 1);
+      }),
+      new Promise((_, fail) => { timer = setTimeout(() => fail(new Error(`${options?.path ? path.basename(options.path) + ': ' : ''}the GPU did not finish the page's drawing within 60000 ms`)), 60000); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+  return target.screenshot(options);
+}
+
 const SAVE = 'dbt.lantern.v1';
 const YOU = 'dbt.you.v1';
 const SEEN = JSON.stringify({ seenCutscene: true });
@@ -438,28 +463,8 @@ export async function startHarness(flags = {}) {
     const pages = browser.contexts().flatMap((c) => c.pages());
     await Promise.all(pages.map((p, i) => evidence(p, `${prefix}-${i + 1}`).catch((e) => console.log(`evidence ${prefix}-${i + 1}: ${e?.message ?? e}`))));
   };
-  // A capture waits behind every canvas frame the GPU still has queued, and a slow machine can be seconds behind after
-  // Home (its bubbles redraw the whole screen 30 times a second). A one-pixel read of a fresh canvas returns only once
-  // that queue is done, so the shot starts from what is drawn now. A renderer that never answers fails the shot.
-  const shot = async (page, name) => {
-    let timer;
-    const hung = new Promise((_, bad) => (timer = setTimeout(() => bad(new Error(`${name}: the page's drawing never caught up for a screenshot (60 s)`)), 60000)));
-    try {
-      await Promise.race([
-        page.evaluate(() => {
-          const c = document.createElement('canvas');
-          c.width = c.height = 1;
-          const g = c.getContext('2d');
-          g.fillRect(0, 0, 1, 1);
-          g.getImageData(0, 0, 1, 1);
-        }),
-        hung,
-      ]);
-    } finally {
-      clearTimeout(timer);
-    }
-    return page.screenshot({ path: path.join(out, name + '.png') });
-  };
+  /** screenshot() of a page or one element (a locator), saved as <name>.png */
+  const shot = (target, name) => screenshot(target, { path: path.join(out, name + '.png') });
   const ls = (page, k) => page.evaluate((key) => localStorage.getItem(key), k);
   const youOf = async (page) => JSON.parse((await ls(page, YOU)) ?? 'null');
   /** every value stored under `key` anywhere in the save, whatever its shape */
