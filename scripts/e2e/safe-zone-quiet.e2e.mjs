@@ -29,19 +29,24 @@ function returning(xp = 0) {
 }
 const levels = (o) => JSON.stringify({ v: 1, master: 0.8, music: 0.6, sfx: 0.7, muted: false, ...o });
 
-async function boot(h, { save = returning(), viewport = TALL, reduced = false, prefs = levels() } = {}) {
+async function open(h, { save = returning(), viewport = TALL, reduced = false, prefs = levels() } = {}) {
   const ctx = await h.browser.newContext({ viewport, deviceScaleFactor: 2, serviceWorkers: 'block', reducedMotion: reduced ? 'reduce' : 'no-preference', locale: 'en-US' });
   await installAudioRecorder(ctx);
   const seed = { [h.YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: Date.now() - 1000, companionAt: Date.now() - 1000 }), 'dbt.app.v1': h.SEEN, [h.SAVE]: save, [AUDIO]: prefs };
-  await ctx.addInitScript((s) => {
-    if (sessionStorage.getItem('e2e-seeded')) return;
+  await ctx.addInitScript(([s, at]) => {
+    if (location.origin !== at || sessionStorage.getItem('e2e-seeded')) return;
     sessionStorage.setItem('e2e-seeded', '1');
     for (const [k, v] of Object.entries(s)) localStorage.setItem(k, v);
-  }, seed);
-  const page = await ctx.newPage();
+  }, [seed, h.server.url]);
   const errors = [];
-  page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
-  page.on('console', (m) => m.type() === 'error' && !/WebGL|GPU stall|AudioContext/i.test(m.text()) && errors.push('console: ' + m.text().slice(0, 300)));
+  ctx.on('weberror', (e) => errors.push('pageerror: ' + String(e.error()?.message ?? e.error())));
+  ctx.on('console', (m) => m.type() === 'error' && !/WebGL|GPU stall|AudioContext/i.test(m.text()) && errors.push('console: ' + m.text().slice(0, 300)));
+  const page = await ctx.newPage();
+  return { ctx, page, errors };
+}
+
+async function boot(h, opts) {
+  const { ctx, page, errors } = await open(h, opts);
   await page.goto(h.server.url + '/');
   await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile') && window.__taps.length > 0, null, { timeout: 30000 });
   await audioReady(page);
@@ -212,6 +217,47 @@ async function humOn(h) {
 }
 
 export const scenarios = {
+  async 'audio-recorder-starts-on-a-blank-page'(h) {
+    const { ctx, page, errors } = await open(h);
+    try {
+      h.expect(page.url() === 'about:blank' && await page.evaluate(() => window.__taps.length === 0), 'the recorder did not initialize on the blank page');
+      const blank = await page.evaluate(() => {
+        const context = (window.__blankAudio = new AudioContext());
+        let connected = false;
+        let error;
+        try {
+          context.createConstantSource().connect(context.destination);
+          connected = true;
+        } catch (e) { error = e.message; }
+        return { connected, error, taps: window.__taps.length, recorderError: window.__taps[0]?.error };
+      });
+      h.expect(blank.connected && blank.taps === 1 && /Invalid URL/.test(blank.recorderError), 'the blank page changed the native connection or lost its recorder error: ' + JSON.stringify({ ...blank, errors }));
+      let failure;
+      try { await audioReady(page); } catch (e) { failure = e.message; }
+      h.expect(/Invalid URL/.test(failure), 'the recorder did not report the invalid worklet URL: ' + failure);
+      await page.evaluate(() => window.__blankAudio.close());
+      h.expect(!errors.length, errors.join('\n'));
+
+      await page.goto(h.server.url + '/');
+      await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile') && window.__taps.length > 0, null, { timeout: 30000 });
+      await audioReady(page);
+      const from = await now(page);
+      await h.sleep(3500);
+      const mid = await now(page);
+      await h.sleep(500);
+      const to = await now(page);
+      await until(page, 0, to + 0.05);
+      const heard = await hear(page, 0, from, to);
+      const tail = await hear(page, 0, mid, to);
+      h.expect(heard.cover >= 0.99, 'the recorder lost audio after navigation: ' + fmt(heard));
+      h.expect(tail.rms > 1e-3, 'the recorder did not hear the score after its fade: ' + fmt(tail));
+      h.expect(!errors.length, errors.join('\n'));
+      return { coverage: heard.cover };
+    } finally {
+      await ctx.close();
+    }
+  },
+
   async 'audio-recorder-covers-page-stall'(h) {
     const { ctx, page } = await boot(h);
     try {
