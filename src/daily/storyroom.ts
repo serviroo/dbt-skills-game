@@ -225,7 +225,8 @@ export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut 
     list.querySelector<HTMLElement>('.st-row')?.focus({ preventScroll: true });
   };
 
-  const top = h('div', { class: 'st-shelf-acts' }, newBtn, bringBtn());
+  // shown once the shelf is known to have stories (an empty shelf has these in its panel), so nothing tapped moves away
+  const top = h('div', { class: 'st-shelf-acts is-hidden' }, newBtn, bringBtn());
   // ---- search: titles, chapters and notes, matched here on the device and kept nowhere ----
   const findIn = h('input', { id: `st-find-${rid()}`, class: 'dq-input st-find-in', type: 'search', maxlength: 80, placeholder: STORY_FIND.label, autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', enterkeyhint: 'search' });
   const findBox = h('div', { class: 'st-find is-hidden', role: 'search' }, h('label', { for: findIn.id, class: 'dq-sr', text: STORY_FIND.label }), h('span', { class: 'st-find-ic', html: SEARCH_IC }), findIn);
