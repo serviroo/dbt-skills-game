@@ -16,6 +16,7 @@
 //   answers-kept-route-part       each requested part resumes its own words
 //   answers-kept-crystal          backup and restore keep answers, validate fields and leave newer local words alone
 //   answers-kept-ranks            ranks survive reload; clearing all ranks leaves no draft
+//   answers-kept-branch           passing a branch after typing leaves no extra copy behind when the skill ends
 import { boot, settle } from './layout-fit.e2e.mjs';
 import { crystal, restore } from './newer-save-safety.e2e.mjs';
 
@@ -60,6 +61,34 @@ async function upToFact(page) {
 }
 
 export const scenarios = {
+  'answers-kept-branch': async (h) => {
+    const { ctx, page, errors } = await boot(h, PHONE);
+    const open = async (p) => {
+      await p.evaluate(() => window.__daily.go({ name: 'skill', id: 'name-emotion' }));
+      await onScreen(p, 'skill');
+      await settle(p);
+    };
+    await open(page);
+    await tap(page, 'Begin');
+    await tap(page, 'Sadness');
+    await tap(page, 'Next');
+    await tap(page, 'Next');
+    await tap(page, 'Chest');
+    await field(page).fill('The rain changed my plans');
+    const other = await ctx.newPage();
+    other.on('pageerror', (e) => errors.push('second tab pageerror: ' + e.message));
+    other.on('console', (m) => m.type() === 'error' && !/WebGL|GPU stall|AudioContext/i.test(m.text()) && errors.push('second tab console: ' + m.text().slice(0, 300)));
+    await other.goto(page.url());
+    await home(other);
+    await open(other);
+    h.expect((await value(other)) === 'The rain changed my plans', 'the second tab did not hold the same words before the branch');
+    await tap(page, 'Next');
+    await tap(page, 'Done');
+    h.expect(!(await kept(page, h.SAVE)).length, 'passing a branch left a copy of the finished skill behind');
+    await other.close();
+    h.expect(!errors.length, errors.join('\n'));
+  },
+
   'answers-kept-two-tabs': async (h) => {
     const { ctx, page, errors } = await boot(h, PHONE);
     const other = await ctx.newPage();

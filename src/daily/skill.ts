@@ -79,8 +79,10 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
   let idx = -1;
   /** the step's fields as drawn, so what was typed in them comes back with the step */
   let drawn: [HTMLInputElement | HTMLTextAreaElement, string][] = [];
+  /** the step `drawn` was drawn for: its fields are only ever read back into that step */
+  let drawnAt = -1;
   const snap = () => {
-    if (idx < 0 || idx >= sk.steps.length) return;
+    if (idx !== drawnAt || idx < 0 || idx >= sk.steps.length) return;
     const t = drawn.map(([f, was]): [string, string] => [was, f.value]);
     if (t.some(([was, now]) => was !== now)) typed[idx] = t;
     else if (!typed[idx]?.every(([, value], k) => value === drawn[k]?.[0].value)) delete typed[idx];
@@ -135,6 +137,7 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const swap = (...kids: (Node | null)[]) => {
     body.replaceChildren(...kids.filter((k): k is Node => !!k));
     drawn = [...body.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('textarea, input:not([type=range]):not([type=checkbox]):not([type=radio])')].map((f) => [f, f.value]);
+    drawnAt = idx;
     // what was typed comes back with the step (Back, Forward, or Back and then on again); a step shown again after the
     // player went on from it (Make the step smaller) starts empty
     restoring = true;
