@@ -327,6 +327,7 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
                   const cur = f.input.value.trim();
                   f.input.value = cur && !cur.endsWith(t) ? `${cur} ${t}` : t;
                   answers[s.key] = f.input.value;
+                  persist();
                   f.input.focus();
                 }),
               ),

@@ -6,7 +6,8 @@
 //                                 Skills, opens it where the player was with the answer typed in; Start over clears it
 //   answers-kept-reload           a reload mid-skill opens Home; the skill then opens where the player was with the
 //                                 answer typed in. Finishing the skill clears what was kept: Practise again starts
-//                                 empty. What is kept never adds XP or anything else to the save
+//                                 empty. A suggested phrase tapped onto an answer is kept too. What is kept never adds
+//                                 XP or anything else to the save
 import { boot, settle } from './layout-fit.e2e.mjs';
 
 const PHONE = { width: 390, height: 844 };
@@ -128,6 +129,19 @@ export const scenarios = {
     await tap(page, 'Practise again');
     await tap(page, 'Begin');
     expect((await value(page)) === '', `Practise again opened with the old answer typed in: "${await value(page)}"`);
+
+    // a suggested phrase tapped onto a typed answer is kept too
+    await page.locator('.dq-top [aria-label="Leave this skill"]').click();
+    await onScreen(page, 'hub');
+    await openSkill(page, 'Play the Map');
+    await tap(page, 'Begin');
+    await tap(page, 'Something small');
+    await typeInto(page, field(page), 'Make a plan');
+    await tap(page, 'To be heard');
+    await page.reload();
+    await home(page);
+    await openSkill(page, 'Play the Map');
+    expect((await value(page)) === 'Make a plan To be heard', `after a reload the tapped phrase was lost: "${await value(page)}"`);
     expect(!errors.length, errors.join('\n'));
   },
 };
