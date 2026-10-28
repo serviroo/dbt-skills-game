@@ -11,7 +11,7 @@
 }
 /* shown while the scene loads, and for as long as it is mounted (a lost context comes back here); gone if it never starts */
 .w2-camp.is-scene-wait,
-.w2-camp:has(> .dq-scene) {
+.w2-camp.is-scene-mounted {
   display: block;
   background: radial-gradient(60% 42% at 50% 62%, rgba(79, 184, 255, 0.07), transparent 70%);
 }

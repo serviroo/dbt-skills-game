@@ -46,6 +46,8 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   holder.setAttribute('aria-hidden', 'true');
   stage.style.setProperty('--dq-scene-fade', `${SCENE.fadeMs}ms`);
   stage.prepend(holder);
+  // for as long as the scene is in the stage, a lost context included, so styles need no :has()
+  stage.classList.add('is-scene-mounted');
   let vig: Vignette | null = null;
   // the renderer goes to one scene at a time: if another takes it, this one stops and its flat picture comes back
   let evicted = false;
@@ -63,6 +65,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
     if (vig) disposeTree(vig.scene);
     lease?.release();
     holder.remove();
+    stage.classList.remove('is-scene-mounted');
     throw err;
   }
   const v = vig;
@@ -318,6 +321,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
     disposeTree(v.scene);
     lent.release();
     holder.remove();
+    stage.classList.remove('is-scene-mounted');
     const mem = renderer.info.memory;
     sceneStats.left = { geometries: mem.geometries, textures: mem.textures, programs: renderer.info.programs?.length ?? 0 };
   };

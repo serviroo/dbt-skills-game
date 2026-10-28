@@ -436,6 +436,35 @@ export const scenarios = {
     await ctx.close();
   },
 
+  /**
+   * A browser without :has() (Firefox before 121 has WebGL 2 but not :has()) drops every rule that uses it: the camp
+   * still comes on screen, and comes back after a lost context
+   */
+  async 'camp-without-has'(h) {
+    const { ctx, page, errors } = await h.open(seed(h, 30), '?mute', PHONE);
+    // drops each rule that uses :has() as its stylesheet arrives, as such a browser would
+    await page.evaluate(() => {
+      const drop = () => {
+        for (const s of document.styleSheets) for (let i = s.cssRules.length - 1; i >= 0; i--) if (s.cssRules[i].selectorText?.includes(':has(')) s.deleteRule(i);
+      };
+      drop();
+      setInterval(drop, 20);
+    });
+    await toCamp(h, page, 'without :has()');
+    await drawn(h, page, 'without :has()');
+    await page.evaluate(() => {
+      window.__lose = document.querySelector('.w2-camp canvas').getContext('webgl2').getExtension('WEBGL_lose_context');
+      window.__lose.loseContext();
+    });
+    await page.waitForFunction(() => !document.querySelector('.w2-camp.is-scene-live'), null, { timeout: 5000 });
+    await page.evaluate(() => window.__lose.restoreContext());
+    const back = await page.locator('.w2-camp.is-scene-live').waitFor({ timeout: 15000 }).then(() => true, () => false);
+    h.expect(back, `restored: the camp never came back (${await page.locator('.w2-camp').getAttribute('class')})`);
+    await drawn(h, page, 'without :has(), restored');
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
   /** an old save, before flags, settings and names existed, with six visit days: the camp has Sable, Anvil and Bramble */
   /**
    * Every part of every watcher stands in camp where the model file puts it. The file's positions are quantized and
