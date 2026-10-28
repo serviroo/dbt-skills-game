@@ -72,6 +72,15 @@ export const scenarios = {
       const focus = await page.evaluate(() => `${document.activeElement?.dataset.slot}:${document.activeElement?.dataset.id}`);
       h.expect(focus === 'plate:plain', `focus after Go back is on ${focus}, not the look it went back to`);
       h.expect(same(await kept(h, page), was), `Go back changed the kept look: ${JSON.stringify(await kept(h, page))}`);
+
+      // a tap on the kept accent takes Rose off again: with nothing left tried on, the bar goes too
+      await tryOn(page, 'accent', 'rose');
+      await page.locator('.w2-try').waitFor({ timeout: 5000 });
+      await tryOn(page, 'accent', 'green');
+      await barGone(page);
+      on = await look(page);
+      h.expect(on.accent === 'green' && on.checked.includes('accent:green'), `tapping the kept accent did not take Rose off: ${JSON.stringify(on)}`);
+      h.expect(same(await kept(h, page), was), `tapping the kept accent changed the kept look: ${JSON.stringify(await kept(h, page))}`);
       h.expect(!errors.length, errors.join(' | '));
     } finally {
       await ctx.close();
@@ -213,6 +222,7 @@ export const scenarios = {
       await tryOn(b, 'theme', 'gold');
       await tryOn(b, 'cardBack', 'gate');
       await choose(b, 'Keep this look');
+      await barGone(b);
       await a.bringToFront();
       await a.waitForFunction(() => window.__daily.store.state.settings.theme === 'gold', null, { timeout: 5000 });
       let on = await look(a);
@@ -228,6 +238,9 @@ export const scenarios = {
       // A keeps Rose: now B wears it
       await tryOn(a, 'accent', 'rose');
       await choose(a, 'Keep this look');
+      await barGone(a);
+      on = await look(a);
+      h.expect(on.theme === 'gold' && on.accent === 'rose', `this tab after Keep this look: ${JSON.stringify(on)}`);
       await b.waitForFunction(() => document.documentElement.dataset.dqAccent === 'rose', null, { timeout: 5000 });
       other = await look(b);
       h.expect(other.theme === 'gold' && other.accent === 'rose' && !other.bar, `the other tab after Keep this look: ${JSON.stringify(other)}`);
