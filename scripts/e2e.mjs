@@ -11,7 +11,6 @@
 // --cpu-throttle=4 slows every page's CPU work by four through CDP; report.json records the requested rate and any failure.
 // With --ws the browser runs on another machine (one with a real GPU) and loads the dev server bound to --host.
 // Writes screenshots and report.json to artifacts/e2e/<time>/.
-import './gl.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

@@ -42,7 +42,7 @@ export const scenarios = {
       error = e;
     }
     expect(error, 'losing the context twice did not fail the icon build');
-    expect(/context lost/.test(error.message), 'the failure did not name the lost context: ' + error.message);
+    expect(/^Error: \S+: page\.evaluate: Error: context lost/m.test(error.message), 'the failure did not name the lost context: ' + error.message);
     expect(!/software GL/.test(error.message), 'the icon build switched to software: ' + error.message);
   },
 
