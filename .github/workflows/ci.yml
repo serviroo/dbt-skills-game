@@ -103,16 +103,50 @@ jobs:
           done < "$RUNNER_TEMP/candidates"
           echo "::notice::No passing run tested this tree: running the e2e parts in full"
 
-  e2e:
-    needs: proven
-    if: ${{ !cancelled() && needs.proven.outputs.run == '' }}
+  # The e2e parts run on GitHub's runners while those have room for all ten (20 jobs at once), otherwise on the dev box
+  # runners, which a queue there hands out one run at a time. Only pushes to main and pull requests from this
+  # repository's own branches may use the dev box; a fork's pull request always stays on GitHub's runners.
+  route:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/playwright:v1.64.1-noble
-      options: --user 1001
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    outputs:
+      devbox: ${{ steps.pick.outputs.devbox }}
+    steps:
+      - id: pick
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          repo=$GITHUB_REPOSITORY
+          # this repository's jobs waiting for or running on GitHub's runners, this run's own included
+          busy=0
+          for status in queued in_progress; do
+            for id in $(gh api "repos/$repo/actions/runs?status=$status&per_page=100" --jq '.workflow_runs[].id'); do
+              jobs=$(gh api "repos/$repo/actions/runs/$id/jobs?per_page=100" --jq '[.jobs[] | select(.status != "completed" and (.labels | index("ubuntu-latest")))] | length')
+              busy=$((busy + jobs))
+            done
+          done
+          if ((busy + 10 > 20)); then
+            echo "::notice title=E2E runners::GitHub's runners have $busy jobs: the e2e parts run on the dev box"
+            echo "devbox=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=E2E runners::GitHub's runners have $busy jobs: the e2e parts run there"
+          fi
+
+  e2e:
+    needs: [proven, route]
+    if: ${{ !cancelled() && needs.proven.outputs.run == '' }}
+    runs-on: ${{ needs.route.outputs.devbox == 'true' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted", "devbox", "dbt", "{0}"]', github.event_name == 'push' && 'dbt-main' || format('dbt-pr-{0}', github.event.pull_request.number))) || 'ubuntu-latest' }}
+    # the dev box has its own test browser, drawing on its GPU
+    container: ${{ needs.route.outputs.devbox != 'true' && fromJSON('{"image":"mcr.microsoft.com/playwright:v1.64.1-noble","options":"--user 1001"}') || '' }}
     timeout-minutes: 30
     env:
       STORED_IDS_BASE: ${{ github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha }}
+      DEVBOX: ${{ needs.route.outputs.devbox == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -128,9 +162,13 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Browsers come from the container
+        if: env.DEVBOX != 'true'
         run: test "$(npx playwright --version)" = "Version 1.64.1" || { echo "package-lock has $(npx playwright --version); set the same version in the container image above"; exit 1; }
+      - name: Browser on the dev box
+        if: env.DEVBOX == 'true'
+        run: npx playwright install chromium-headless-shell
       - name: E2E part ${{ matrix.shard }} of 10
-        run: node scripts/e2e.mjs --shard=${{ matrix.shard }}/10
+        run: node scripts/e2e.mjs --shard=${{ matrix.shard }}/10 ${{ env.DEVBOX == 'true' && '--gpu' || '' }}
       - uses: actions/upload-artifact@v7
         if: always()
         with:
