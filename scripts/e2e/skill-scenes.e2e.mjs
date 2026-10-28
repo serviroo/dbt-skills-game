@@ -22,8 +22,12 @@ async function home(h, page) {
     const win = page.locator('.dq-sw').first();
     if (await win.count()) {
       clear = 0;
-      const b = await win.boundingBox({ timeout: 500 }).catch(() => null);
-      if (b) await page.mouse.click(b.x + b.width / 2, b.y + Math.min(b.height - 8, b.height / 2));
+      // a window whose scrim is off is closing: tap it no more, wait until it is gone, so no tap lands on Home
+      if (!(await page.locator('.dq-scrim.is-on').count())) await page.waitForFunction(() => !document.querySelector('.dq-sw') || !!document.querySelector('.dq-scrim.is-on'), null, { timeout: 5000 });
+      else {
+        const b = await win.boundingBox({ timeout: 500 }).catch(() => null);
+        if (b) await page.mouse.click(b.x + b.width / 2, b.y + Math.min(b.height - 8, b.height / 2));
+      }
     } else if (!(await page.locator('.dq-scrim.is-on').count()) && (await page.locator('.dq-tile').first().isVisible().catch(() => false))) {
       if (++clear >= 3) return;
     } else clear = 0;

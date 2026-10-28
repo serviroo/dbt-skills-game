@@ -141,6 +141,11 @@ async function arrive(h, page, run, where) {
         await page.reload();
       }
       for (let i = 0; (await welcome.count()) && i < 6; i++) {
+        // a window whose scrim is off is closing: tap it no more, wait until it is gone, so no tap lands on Home
+        if (!(await page.locator('.dq-scrim.is-on').count())) {
+          await page.waitForFunction(() => !document.querySelector('.dq-sw') || !!document.querySelector('.dq-scrim.is-on'), null, { timeout: 5000 });
+          continue;
+        }
         const box = await welcome.boundingBox().catch(() => null);
         if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
         await h.sleep(400);

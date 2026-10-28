@@ -337,6 +337,11 @@ export const scenarios = {
         await route(page, 'hub');
         await page.locator('.dq-sw').waitFor({ timeout: 8000 });
         for (let i = 0; (await page.locator('.dq-sw').count()) && i < 8; i++) {
+          // a window whose scrim is off is closing: tap it no more, wait until it is gone, so no tap lands on Home
+          if (!(await page.locator('.dq-scrim.is-on').count())) {
+            await page.waitForFunction(() => !document.querySelector('.dq-sw') || !!document.querySelector('.dq-scrim.is-on'), null, { timeout: 5000 });
+            continue;
+          }
           await page.locator('.dq-sw').first().click({ force: true }).catch(() => {});
           await h.sleep(500);
         }
