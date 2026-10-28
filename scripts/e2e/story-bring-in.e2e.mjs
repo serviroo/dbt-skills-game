@@ -504,6 +504,38 @@ export const scenarios = {
     }
   },
 
+  /** an empty shelf whose stories are slow to arrive shows its buttons once, where they stay, so a tap as they land counts */
+  async 'story-bring-in-holds-still'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute');
+    try {
+      await h.reachHub(page);
+      // the stories arrive only when let in, as on a slow phone
+      await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const list = ss.list;
+        window.__gate = new Promise((r) => (window.__open = r));
+        ss.list = async function () {
+          await window.__gate;
+          return list.call(this);
+        };
+      });
+      await page.evaluate(() => window.__daily.go({ name: 'stories' }));
+      await page.evaluate(() => Promise.all(document.querySelector('.st-shelfpage').getAnimations().map((a) => a.finished)));
+      await page.evaluate(() => {
+        window.__shown = [...document.querySelectorAll('.st-shelfpage button')].filter((b) => b.checkVisibility()).map((b) => ({ b, r: JSON.stringify(b.getBoundingClientRect()) }));
+        window.__open();
+      });
+      await page.locator('.st-empty').waitFor();
+      const moved = await page.evaluate(() => window.__shown.filter(({ b, r }) => !b.checkVisibility() || JSON.stringify(b.getBoundingClientRect()) !== r).map(({ b }) => b.textContent.trim()));
+      h.expect(!moved.length, `shown before the stories arrived, then gone or moved: ${moved.join(', ')}`);
+      await bringIn(page, write(h, 'still.md', '# Still\n\n## One\n\nA page.\n'));
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** the preview fits at every size, text at 16 px or more, nothing past the edge */
   async 'story-bring-in-fits'(h) {
     for (const vp of [{ width: 390, height: 844 }, { width: 320, height: 568 }, { width: 844, height: 390 }, { width: 1280, height: 800 }]) {
