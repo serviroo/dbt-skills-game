@@ -4,10 +4,11 @@
 //                                 "My own" is still there
 //   answers-kept-leave-and-return leaving the skill (its close button, or Back out of it), then opening it again from
 //                                 Skills, opens it where the player was with the answer typed in; Start over clears it
+//                                 with no second credit
 //   answers-kept-reload           a reload mid-skill opens Home; the skill then opens where the player was with the
 //                                 answer typed in. Finishing the skill clears what was kept: Practise again starts
-//                                 empty. A suggested phrase tapped onto an answer is kept too. What is kept never adds
-//                                 XP or anything else to the save
+//                                 empty. A suggested phrase tapped onto an answer, and picks made after typing, are kept
+//                                 too. What is kept never adds XP or anything else to the save
 import { boot, settle } from './layout-fit.e2e.mjs';
 
 const PHONE = { width: 390, height: 844 };
@@ -30,7 +31,7 @@ const tap = async (page, name) => {
 async function openSkill(page, sl) {
   await page.locator('.dq-tile').filter({ hasText: 'All of them, any time' }).first().click();
   await onScreen(page, 'library');
-  await page.locator('.dq-librow').filter({ has: page.locator('.dq-librow-n', { hasText: new RegExp(`^${sl}$`) }) }).click();
+  await page.locator('.dq-librow').filter({ has: page.locator('.dq-librow-n', { hasText: new RegExp(`^${sl.replace(/'/g, "['’]")}$`) }) }).click();
   await onScreen(page, 'skill');
   await settle(page);
 }
@@ -99,9 +100,9 @@ export const scenarios = {
     expect(!(await kept(page, h.SAVE)).length, `Start over left the answers kept: ${await kept(page, h.SAVE)}`);
     await tap(page, 'Begin');
     expect((await value(page)) === '', `after Start over the first answer was still typed in: "${await value(page)}"`);
-    // every open is credited as before, Start over as a new practice: what was kept adds nothing
+    // every open is credited as before; Start over begins the same practice again and, like what was kept, adds nothing
     const added = (await events(page, h.SAVE)).filter((k) => k === 'skill').length - skills;
-    expect(added === 4, `expected 4 skill credits (three opens and Start over), got ${added}`);
+    expect(added === 3, `expected 3 skill credits (one for each open), got ${added}`);
     expect(!errors.length, errors.join('\n'));
   },
 
@@ -142,6 +143,21 @@ export const scenarios = {
     await home(page);
     await openSkill(page, 'Play the Map');
     expect((await value(page)) === 'Make a plan To be heard', `after a reload the tapped phrase was lost: "${await value(page)}"`);
+
+    // so are picks made after something was typed
+    await page.locator('.dq-top [aria-label="Leave this skill"]').click();
+    await onScreen(page, 'hub');
+    await openSkill(page, "Wanderer's Code");
+    await tap(page, 'Begin');
+    await tap(page, 'Next');
+    await typeInto(page, field(page), 'Can we talk tonight');
+    await tap(page, 'Next');
+    for (const v of ['Honesty', 'My time']) await page.locator('.dq-step-body .dq-opt', { hasText: v }).click();
+    await page.reload();
+    await home(page);
+    await openSkill(page, "Wanderer's Code");
+    const pressed = await page.locator('.dq-step-body .dq-opt[aria-pressed="true"]').allTextContents();
+    expect(pressed.map((t) => t.trim()).join('|') === 'Honesty|My time', `after a reload the picks made after typing were lost: ${JSON.stringify(pressed)}`);
     expect(!errors.length, errors.join('\n'));
   },
 };

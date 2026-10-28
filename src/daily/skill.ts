@@ -67,12 +67,15 @@ function readDraft(key: string, steps: Step[]): SkillDraft | null {
   }
 }
 
+/** Handed to the visit Start over opens: the same practice begun again, already credited when it was opened. */
+const STARTED_OVER = Symbol('started over');
+
 export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const r = route as Extract<Route, { name: 'skill' }>;
   const sk = SKILL[isSkillId(r.id) ? r.id : 'wise-mind'];
   const mod = MODULES[sk.module];
   // opening a skill is practice: credited now, even if the player leaves on the first screen; coming back is not a second open
-  if (!visit.again) app.store.skillEvent(sk.id);
+  if (!visit.again && visit.handed !== STARTED_OVER) app.store.skillEvent(sk.id);
   const kept = visit.again ? (visit.kept as SkillKept | undefined) : undefined;
   const draftKey = `${app.store.key}${BESIDE.skillDraft}.${sk.id}`;
   // what the player typed in this skill and left: a new visit picks it up, as does a visit gone back to after a reload
@@ -287,6 +290,7 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
                 }
                 b.setAttribute('aria-pressed', String(picked.has(o.label)));
                 answers[s.key] = [...picked];
+                persist();
               },
               o.go ? undefined : picked.has(o.label),
             ),
@@ -497,6 +501,7 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
               if (v === null) delete ranks[it];
               else ranks[it] = String(v);
               save();
+              persist();
             }, { allowClear: true, cls: 'dq-seg--3 ca-tier' }),
           ),
         );
@@ -658,7 +663,7 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
           h('span', { text: 'Picking up where you left off.' }),
           btn('Start over', () => {
             drop();
-            app.go({ name: 'skill', id: sk.id, entry: r.entry }, { replace: true });
+            app.go({ name: 'skill', id: sk.id, entry: r.entry }, { replace: true, hand: STARTED_OVER });
           }, { kind: 'link' }),
         ),
       );
