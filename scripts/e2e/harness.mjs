@@ -440,15 +440,24 @@ export async function startHarness(flags = {}) {
   };
   // A capture waits behind every canvas frame the GPU still has queued, and a slow machine can be seconds behind after
   // Home (its bubbles redraw the whole screen 30 times a second). A one-pixel read of a fresh canvas returns only once
-  // that queue is done, so the shot starts from what is drawn now.
+  // that queue is done, so the shot starts from what is drawn now. A renderer that never answers fails the shot.
   const shot = async (page, name) => {
-    await page.evaluate(() => {
-      const c = document.createElement('canvas');
-      c.width = c.height = 1;
-      const g = c.getContext('2d');
-      g.fillRect(0, 0, 1, 1);
-      g.getImageData(0, 0, 1, 1);
-    });
+    let timer;
+    const hung = new Promise((_, bad) => (timer = setTimeout(() => bad(new Error(`${name}: the page's drawing never caught up for a screenshot (60 s)`)), 60000)));
+    try {
+      await Promise.race([
+        page.evaluate(() => {
+          const c = document.createElement('canvas');
+          c.width = c.height = 1;
+          const g = c.getContext('2d');
+          g.fillRect(0, 0, 1, 1);
+          g.getImageData(0, 0, 1, 1);
+        }),
+        hung,
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
     return page.screenshot({ path: path.join(out, name + '.png') });
   };
   const ls = (page, k) => page.evaluate((key) => localStorage.getItem(key), k);
