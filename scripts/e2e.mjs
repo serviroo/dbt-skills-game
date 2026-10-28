@@ -128,15 +128,21 @@ try {
   }));
   report.scenarios = report.scenarios.sort((a, b) => a.i - b.i).map(({ i, ...s }) => s);
 } finally {
+  let stopError;
+  try {
+    await h?.stop();
+  } catch (e) {
+    stopError = e;
+  }
   try {
     if (report) fs.writeFileSync(path.join(h.out, 'report.json'), JSON.stringify(report, null, 2));
+  } catch (e) {
+    if (stopError) console.error(stopError);
+    throw e;
   } finally {
-    try {
-      await h?.stop();
-    } finally {
-      for (const sig of ['SIGINT', 'SIGTERM']) process.removeListener(sig, onSignal);
-    }
+    for (const sig of ['SIGINT', 'SIGTERM']) process.removeListener(sig, onSignal);
   }
+  if (stopError) throw stopError;
 }
 console.log(`${report.scenarios.filter((s) => s.ok).length}/${pick.length} passed, artifacts in ${path.relative(root, h.out)}`);
 process.exitCode = interrupted ? 130 : failed ? 1 : 0;

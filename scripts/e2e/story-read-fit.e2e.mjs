@@ -276,7 +276,7 @@ export const scenarios = {
         for (let n = 0; n < lines; n++) {
           const step = n ? `another ${n}` : 'open';
           await (n ? page.getByRole('button', { name: 'Another' }) : page.getByRole('button', { name: 'Need a starting point?' })).click();
-          await h.settled(page, '.st-start, .st-ta, .dq-top, .dq-dock');
+          await h.settled(page, '.st-start, .st-ta, .dq-top, .st-dock');
           const p = await place();
           if (n < 2) await h.shot(page, `start-${n ? 'another' : 'open'}-${at}`);
           h.expect(p.box.top >= p.bar - 0.5, `${at} ${step}: the starting point's line is under the top bar (${p.box.top.toFixed(1)} < ${p.bar.toFixed(1)})`);

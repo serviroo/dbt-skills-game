@@ -135,7 +135,10 @@ export const scenarios = {
       record(h);
       const ctx = await h.browser.newContext();
       const page = await ctx.newPage();
-      ctx.newCDPSession = async () => { throw new Error('popup throttle refused'); };
+      ctx.newCDPSession = async () => {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        throw new Error('popup throttle refused');
+      };
       const popup = ctx.waitForEvent('page');
       await page.evaluate(() => void window.open('about:blank'));
       await popup;

@@ -263,6 +263,7 @@ export async function startHarness(flags = {}) {
   // every browser this run starts, so stop() closes them all, also one still starting
   const browsers = [];
   const launches = [];
+  const setups = [];
   const throttleErrors = [];
   const start = () => {
     const p = launch(flags).then((browser) => {
@@ -275,11 +276,12 @@ export async function startHarness(flags = {}) {
         await ctx.addInitScript(pageTrail);
         const throttle = flags['cpu-throttle'] ? Number(flags['cpu-throttle']) : 1;
         const prepared = new WeakMap();
+        // Popups that keep their opener share its slowed renderer process.
         ctx.on('page', (page) => {
           track(page, t0);
           const ready = throttle === 1 ? Promise.resolve() : ctx.newCDPSession(page).then((cdp) => cdp.send('Emulation.setCPUThrottlingRate', { rate: throttle }));
           prepared.set(page, ready);
-          ready.catch((e) => throttleErrors.push(`CPU throttle ${throttle}: ${clean(e.message)}`));
+          setups.push(ready.catch((e) => throttleErrors.push(`CPU throttle ${throttle}: ${clean(e.message)}`)));
         });
         const newPage = ctx.newPage.bind(ctx);
         ctx.newPage = async () => {
@@ -460,6 +462,7 @@ export async function startHarness(flags = {}) {
     } finally {
       await server.stop();
     }
+    await Promise.all(setups);
     if (throttleErrors.length) throw new Error(throttleErrors.join('\n'));
   })());
 
