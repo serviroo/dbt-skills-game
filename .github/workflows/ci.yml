@@ -115,6 +115,7 @@ jobs:
       statuses: read
     outputs:
       devbox: ${{ steps.pick.outputs.devbox }}
+      attempt: ${{ steps.pick.outputs.attempt }}
     steps:
       - id: pick
         continue-on-error: true
@@ -132,18 +133,21 @@ jobs:
           done
           [[ -n $pick ]] || pick="No answer from the dev box queue: GitHub's runners"
           echo "::notice title=E2E runners::$pick"
-          if [[ $pick == "dev box"* ]]; then echo "devbox=true" >> "$GITHUB_OUTPUT"; fi
+          if [[ $pick == "dev box"* ]]; then
+            echo "devbox=true" >> "$GITHUB_OUTPUT"
+            echo "attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          fi
 
   e2e:
     needs: [proven, route]
     if: ${{ !cancelled() && needs.proven.outputs.run == '' }}
-    runs-on: ${{ needs.route.outputs.devbox == 'true' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["devbox", "dbt", "dbt-run-{0}"]', github.run_id)) || 'ubuntu-latest' }}
+    runs-on: ${{ needs.route.outputs.devbox == 'true' && needs.route.outputs.attempt == github.run_attempt && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["devbox", "dbt", "dbt-run-{0}"]', github.run_id)) || 'ubuntu-latest' }}
     # the dev box has its own test browser, drawing on its GPU
-    container: ${{ needs.route.outputs.devbox != 'true' && fromJSON('{"image":"mcr.microsoft.com/playwright:v1.64.1-noble","options":"--user 1001"}') || '' }}
+    container: ${{ !(needs.route.outputs.devbox == 'true' && needs.route.outputs.attempt == github.run_attempt && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('{"image":"mcr.microsoft.com/playwright:v1.64.1-noble","options":"--user 1001"}') || '' }}
     timeout-minutes: 30
     env:
       STORED_IDS_BASE: ${{ github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha }}
-      DEVBOX: ${{ needs.route.outputs.devbox == 'true' }}
+      DEVBOX: ${{ needs.route.outputs.devbox == 'true' && needs.route.outputs.attempt == github.run_attempt && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) }}
     strategy:
       fail-fast: false
       matrix:
