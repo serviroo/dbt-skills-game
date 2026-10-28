@@ -401,7 +401,7 @@ export class App {
       if (!up) return;
       up = false;
       this.dropScrim = null;
-      this.scrim.classList.remove('is-on');
+      this.scrim.classList.remove('is-on', 'is-closing');
       this.root.classList.remove('is-windowed');
       this.view.inert = false;
     };
@@ -423,13 +423,22 @@ export class App {
     });
     const v = await w.waitForInput();
     done();
-    drop();
     if (v !== DISMISSED || shut) {
-      void w.close();
-      if (before?.isConnected && !this.root.contains(document.activeElement)) before.focus({ preventScroll: true });
-      await wait(this.reduced() ? 0.25 : 0.45);
+      // the scrim fades with the collapse but takes every tap, and Home stays out of reach, until the window is gone:
+      // a second tap or key meant for the window never lands on what is under it (unless the Safe Zone already cleared it)
+      if (up) {
+        this.scrim.classList.add('is-closing');
+        this.scrim.classList.remove('is-on');
+      }
+      const settled = wait(this.reduced() ? 0.25 : 0.45);
+      await w.close();
+      if (up) {
+        drop();
+        if (before?.isConnected && !this.root.contains(document.activeElement)) before.focus({ preventScroll: true });
+      }
+      await settled;
       w.destroy();
-    }
+    } else drop();
     Object.assign(windowSounds, saved);
     this.busy = false;
     return v;

@@ -165,12 +165,15 @@ async function home(h, page) {
   const vp = page.viewportSize();
   let calm = 0;
   for (let i = 0; i < 60; i++) {
-    const win = (await page.locator('.dq-sw').count()) + (await page.locator('.dq-scrim.is-on').count());
+    const up = await page.locator('.dq-scrim.is-on').count();
+    const win = (await page.locator('.dq-sw').count()) + up;
     if (!win && (await page.locator('.dq-tile').first().isVisible().catch(() => false))) {
       if (++calm >= 3) return;
     } else {
       calm = 0;
-      if (win) await page.mouse.click(vp.width / 2, Math.round(vp.height * 0.83));
+      // a window whose scrim is off is closing: tap it no more, wait until it is gone, so no tap lands on Home
+      if (up) await page.mouse.click(vp.width / 2, Math.round(vp.height * 0.83));
+      else if (win) await page.waitForFunction(() => !document.querySelector('.dq-sw') || !!document.querySelector('.dq-scrim.is-on'), null, { timeout: 5000 });
     }
     await h.sleep(300);
   }

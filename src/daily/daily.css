@@ -3062,6 +3062,10 @@ textarea.dq-input {
   opacity: 1;
   pointer-events: auto;
 }
+/* fading out with a closing window, still catching taps until the window is gone */
+.dq-scrim.is-closing {
+  pointer-events: auto;
+}
 .dq[data-screen='safe'] .dq-scrim {
   transition: none;
 }

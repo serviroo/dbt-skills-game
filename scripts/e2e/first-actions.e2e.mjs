@@ -212,6 +212,11 @@ async function welcomed(h, page, run, where) {
       await page.reload();
     } else {
       for (let i = 0; (await welcome.count()) && i < 4; i++) {
+        // a window whose scrim is off is closing: tap it no more, wait until it is gone, so no tap lands on Home
+        if (!(await page.locator('.dq-scrim.is-on').count())) {
+          await page.waitForFunction(() => !document.querySelector('.dq-sw') || !!document.querySelector('.dq-scrim.is-on'), null, { timeout: 5000 });
+          continue;
+        }
         await welcome.click({ force: true }).catch(() => {});
         await h.sleep(400);
       }
