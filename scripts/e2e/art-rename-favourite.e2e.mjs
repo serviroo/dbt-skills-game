@@ -1,7 +1,7 @@
 // Art room: rename a drawing, mark favourites (shown first with a mint star) and bring a removed one back with Undo.
 // Labels are not a new version of a drawing, so two tabs, a Save Crystal and an old save all keep them.
 // art-home-waits-for-welcome holds the browser clock at Home, before the welcome's delay, then checks reaching Home
-// closes the due welcome before Art can be tapped.
+// closes the due welcome before Art can be tapped, with the page CPU running four times slower.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -105,6 +105,8 @@ export const scenarios = {
       });
     });
     try {
+      const cdp = await ctx.newCDPSession(page);
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
       const state = () => page.evaluate(() => ({ home: !!document.querySelector('.dq-tile'), greeting: window.__daily?.greeting, window: !!document.querySelector('.dq-sw'), inert: document.querySelector('#dq-main')?.inert }));
       for (const end = Date.now() + 30000; !(await state()).home && Date.now() < end; ) await page.clock.runFor(20);
       const before = await state();
