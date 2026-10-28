@@ -108,7 +108,7 @@
   text-shadow: 0 1px 8px #07080f;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 700ms ease-out;
+  transition: opacity var(--dq-scene-fade, 700ms) ease-out;
 }
 .w2-camp.is-scene-live > .w2-camp-hint {
   opacity: 1;
