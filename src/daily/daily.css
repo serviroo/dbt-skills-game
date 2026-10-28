@@ -2365,7 +2365,9 @@ textarea.dq-input {
 .dq-sz .dq-person-n,
 .dq-sz .dq-res-note,
 .dq-sz .dq-setting-t,
-.dq-sz .dq-setting-h {
+.dq-sz .dq-setting-h,
+.dq-sz .dq-mo-len-l,
+.dq-sz .dq-mo-len-o {
   font-size: 20px;
 }
 .dq-sz .dq-small .dq-a {
@@ -3326,7 +3328,8 @@ textarea.dq-input {
   mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
 }
 .dq-sz .dq-ring-stage,
-.dq-sz .dq-timer-stage {
+.dq-sz .dq-timer-stage,
+.dq-sz .dq-mo-stage {
   width: min(228px, 58vw);
 }
 @media (max-width: 759px) {
@@ -3447,7 +3450,8 @@ textarea.dq-input {
     --pad: 20px;
   }
   .dq-sz .dq-ring-stage,
-  .dq-sz .dq-timer-stage {
+  .dq-sz .dq-timer-stage,
+  .dq-sz .dq-mo-stage {
     width: min(196px, 52vw);
   }
 }
@@ -3513,6 +3517,27 @@ textarea.dq-input {
   }
   .dq-sz-talk.is-strong {
     padding: 0 12px;
+  }
+}
+/* Give me a moment inside the Safe Zone: the ring under the heading, the line, How long and Done under it; held
+   sideways the ring stays with the heading and the rest sits beside it, as on the moment's own screen */
+.dq-sz .dq-mo-stage {
+  margin: 8px auto 0;
+}
+.dq-sz .dq-moment {
+  display: flex;
+  min-height: 0;
+}
+.dq-sz .dq-mo-line,
+.dq-sz .dq-mo-foot {
+  align-self: center;
+}
+.dq-sz .dq-mo-row {
+  justify-content: center;
+}
+@media (orientation: landscape) and (max-height: 500px) and (min-width: 540px) {
+  .dq-sz .dq-mo-stage {
+    width: min(196px, calc(100dvh - 250px));
   }
 }
 .dq-cardbtn .dq-cf-stat {

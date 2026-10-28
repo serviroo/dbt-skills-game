@@ -10,6 +10,7 @@ import { write } from '../core/cleared';
 import { REGIONS, regionById, regionFromLocale, type CrisisLine } from '../content/crisis-lines';
 import type { App, Route, ScreenOut } from './app';
 import { icon } from './art';
+import { momentView } from './moment';
 import { uid } from './store';
 import { btn, chip, field, h, p, panel, typo } from './ui';
 import { supportListsCopy } from './support-lists';
@@ -49,7 +50,7 @@ export function regionPicker(app: App, picked?: () => void, text = { label: SAFE
   return h('div', { class: 'dq-setting dq-setting--col dq-region' }, h('label', { for: id, class: 'dq-setting-l' }, h('span', { class: 'dq-setting-t', text: text.label }), h('span', { class: 'dq-setting-h', text: text.hint })), select);
 }
 
-type At = 'start' | 'breathe' | 'cold' | 'squeeze' | 'check' | 'stop' | 'reasons' | 'people' | 'comfort' | 'talk' | 'close';
+type At = 'start' | 'moment' | 'breathe' | 'cold' | 'squeeze' | 'check' | 'stop' | 'reasons' | 'people' | 'comfort' | 'talk' | 'close';
 const FLOW: At[] = ['start', 'breathe', 'squeeze', 'cold', 'check', 'stop', 'reasons', 'comfort', 'people', 'talk', 'close'];
 const lightKey = (key: string) => `${key}${BESIDE.safeLight}`;
 const readLight = (key: string) => {
@@ -165,7 +166,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
           h(
             'div',
             { class: 'dq-actions dq-actions--stack' },
-            btn('Give me a moment', () => app.go({ name: 'moment' }), { kind: 'primary' }),
+            btn('Give me a moment', () => show('moment'), { kind: 'primary' }),
             btn('Calm my body first', () => show('breathe'), { kind: 'quiet' }),
             btn('I need a person now', () => show('talk'), { kind: 'quiet' }),
             btn('I might not be safe', () => {
@@ -174,6 +175,12 @@ export function safeScreen(app: App, route: Route): ScreenOut {
             }, { kind: 'quiet' }),
           ),
         );
+      case 'moment': {
+        // the moment stays in here, with people one tap away and no sound or credit; Done comes back to the first screen
+        const m = momentView(app, { done: () => show('start') });
+        stops.push(m.leave);
+        return swap(at, [h3('Give me a moment'), m.stage], h('div', { class: 'dq-moment' }, m.words, m.foot));
+      }
       case 'breathe': {
         const ring = breathRing(ctx, { inhale: 4, exhale: 6, rounds: 6 });
         stops.push(ring.stop);

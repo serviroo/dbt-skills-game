@@ -220,7 +220,17 @@ export function momentScreen(app: App, route: Route): ScreenOut {
   const st = app.store;
   // a moment is rest: credited quietly once a day, never shown here
   if (!st.state.events.some((e) => e.k === 'rest' && e.day === st.today())) st.add('rest', 10);
+  const m = momentView(app, { then: r.then, hum: true, done: () => app.back() });
+  const el = h('div', { class: 'dq-moment' }, h('h1', { class: 'dq-sr', 'data-focus': '', text: 'Give me a moment' }), m.stage, m.words, m.foot);
+  return { el, title: 'Give me a moment', mode: 'sub', bubbles: [0.6, 0.3], leave: m.leave, silence: m.silence };
+}
 
+/**
+ * The moment itself: the ring, one calm line at a time, How long and Done. The Safe Zone shows it too, without the low
+ * hum (no sound in there) and without a credit. `then` is the skill "Slow breathing, if you like" opens.
+ */
+export function momentView(app: App, o: { done: () => void; then?: string; hum?: boolean }) {
+  const st = app.store;
   const svg = sv('svg', { viewBox: '0 0 200 200', class: 'dq-mo-svg', 'aria-hidden': 'true' });
   const defs = sv('defs');
   const grad = sv('radialGradient', { id: 'dqmo-g', cx: '50%', cy: '50%', r: '50%' });
@@ -244,8 +254,8 @@ export function momentScreen(app: App, route: Route): ScreenOut {
   svg.append(defs, outer, tickPath, orb, echo, line);
 
   const words = h('p', { class: 'dq-mo-line', 'aria-live': 'polite' });
-  const after = r.then ? btn(CHECKIN.momentNext, () => {
-    const [id, entry] = r.then!.split('@');
+  const after = o.then ? btn(CHECKIN.momentNext, () => {
+    const [id, entry] = o.then!.split('@');
     goNext(app, { to: 'skill', id, entry });
   }, { kind: 'quiet', cls: 'dq-mo-next is-hidden' }) : null;
   let hum: ReturnType<typeof lowHum> = null;
@@ -255,15 +265,17 @@ export function momentScreen(app: App, route: Route): ScreenOut {
     return l ? (l.muted ? 0 : taper(l.master) * taper(l.hum)) : (st.state.settings.sound ? 1 : 0);
   };
   const offVolume = app.opts.volume?.subscribe(() => hum?.setScale(humScale()));
-  const humToggle = toggle('Low hum', false, (on) => {
-    if (on) hum = lowHum(humScale());
-    else {
-      hum?.stop();
-      hum = null;
-    }
-  });
-  humToggle.classList.add('dq-mo-hum');
-  const done = btn('Done', () => app.back(), { kind: 'link', cls: 'dq-mo-done' });
+  const humToggle = o.hum
+    ? toggle('Low hum', false, (on) => {
+        if (on) hum = lowHum(humScale());
+        else {
+          hum?.stop();
+          hum = null;
+        }
+      })
+    : null;
+  humToggle?.classList.add('dq-mo-hum');
+  const done = btn('Done', o.done, { kind: 'link', cls: 'dq-mo-done' });
 
   // how long it lasts: a timed moment ends softly that long after it began or after the last change, never counted out
   const LEN = CHECKIN.momentLength;
@@ -311,12 +323,12 @@ export function momentScreen(app: App, route: Route): ScreenOut {
     hum?.stop();
     hum = null;
     const still = app.reduced();
-    const moving = document.activeElement instanceof HTMLElement && (lengthBox.contains(document.activeElement) || humToggle.contains(document.activeElement));
-    const quiet = [lengthBox, humToggle];
+    const moving = document.activeElement instanceof HTMLElement && (lengthBox.contains(document.activeElement) || !!humToggle?.contains(document.activeElement));
+    const quiet = humToggle ? [lengthBox, humToggle] : [lengthBox];
     // out of reach at once, before the fade: a tap there now can't start a hum or change the length
     quiet.forEach((x) => (x.inert = true));
     lengthBox.disabled = true;
-    humToggle.querySelectorAll('input').forEach((i) => (i.disabled = true));
+    humToggle?.querySelectorAll('input').forEach((i) => (i.disabled = true));
     quiet.forEach((x) => animate(x, [{ opacity: 1 }, { opacity: 0 }], { duration: still ? WINDOW.reducedCloseMs : 900, easing: 'ease-in', fill: 'forwards' }));
     setTimeout(() => quiet.forEach((x) => x.classList.add('is-gone')), still ? WINDOW.reducedCloseMs : 900);
     if (moving) done.focus();
@@ -333,7 +345,7 @@ export function momentScreen(app: App, route: Route): ScreenOut {
   let timer = 0;
   const arm = () => {
     clearTimeout(timer);
-    if (length !== 'open') timer = window.setTimeout(() => el.isConnected && endAt < 0 && end(now()), Math.max(0, (from + LENGTH_S[length] - now()) * 1000));
+    if (length !== 'open') timer = window.setTimeout(() => stage.isConnected && endAt < 0 && end(now()), Math.max(0, (from + LENGTH_S[length] - now()) * 1000));
   };
   const stop = onFrame((t) => {
     const e = t - t0;
@@ -372,20 +384,12 @@ export function momentScreen(app: App, route: Route): ScreenOut {
     }
   });
 
-  const el = h(
-    'div',
-    { class: 'dq-moment' },
-    h('h1', { class: 'dq-sr', 'data-focus': '', text: 'Give me a moment' }),
-    stage,
-    words,
-    h('div', { class: 'dq-mo-foot' }, after, lengthBox, h('div', { class: 'dq-mo-row' }, humToggle, done)),
-  );
+  const foot = h('div', { class: 'dq-mo-foot' }, after, lengthBox, h('div', { class: 'dq-mo-row' }, humToggle, done));
   arm();
   return {
-    el,
-    title: 'Give me a moment',
-    mode: 'sub',
-    bubbles: [0.6, 0.3],
+    stage,
+    words,
+    foot,
     leave: () => {
       stop();
       fades.forEach((a) => a.cancel());

@@ -710,7 +710,7 @@ async function safeZone(h, page, problems, tag, act = true) {
   await settle(h, page);
 }
 
-/** The Safe Zone's other ways out of its first screen: a person now, not safe, and a moment. */
+/** The Safe Zone's other ways on from its first screen: a person now, not safe, and a moment, which stays inside. */
 async function safeExits(h, page, problems) {
   for (const [button, to] of [['I need a person now', 'Talk to someone now'], ['I might not be safe', 'Talk to someone now']]) {
     await page.getByRole('button', { name: 'Safe Zone, help right now' }).click();
@@ -725,9 +725,9 @@ async function safeExits(h, page, problems) {
   await page.getByRole('button', { name: 'Safe Zone, help right now' }).click();
   await atScreen(page, 'safe');
   await page.locator('.dq-sz-main').getByRole('button', { name: 'Give me a moment' }).click();
-  await atScreen(page, 'moment');
   await page.waitForFunction(() => document.querySelector('.dq-mo-line')?.textContent.trim().length > 0, null, { timeout: 10000 });
-  h.expect(!problems.length, `safe moment:\n${problems.join('\n')}`);
+  const moment = await safeState(page);
+  h.expect(moment.at === 'safe' && moment.pinned && !moment.cues.length && !problems.length, `safe moment: not inside the Safe Zone and quiet (${moment.at}, pinned ${moment.pinned}, cues ${moment.cues}):\n${problems.join('\n')}`);
   await home(h, page);
 }
 

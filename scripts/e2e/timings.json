@@ -324,6 +324,7 @@
   "restore-races-new-pick": 2,
   "reward-cards-every-card": 5,
   "rewards-keep-their-pace-on-slow-frames": 9,
+  "safe-moment-stays-inside": 26,
   "safe-zone-back": 17,
   "safe-zone-bottom-clear": 26,
   "safe-zone-cancels-closing-actions": 3,
