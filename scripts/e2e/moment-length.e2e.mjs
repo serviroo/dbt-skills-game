@@ -64,6 +64,18 @@ const restToday = async (h, page) => {
   return (save.events ?? []).filter((e) => e.k === 'rest' && e.day === day).length;
 };
 const safeOneTap = (page) => page.locator('.dq-top').getByRole('button', { name: /Safe Zone/ }).isVisible();
+/**
+ * Waits until nothing still moves what is inside `selector`: every running animation that ends, on it, inside it or
+ * on a parent (a screen rises 10 px as it opens), has ended. A box measured sooner is where the entrance has it, not
+ * where it rests.
+ */
+const settled = (page, selector) =>
+  page.locator(selector).evaluate(async (el) => {
+    const all = el.getAnimations({ subtree: true });
+    for (let e = el.parentElement; e; e = e.parentElement) all.push(...e.getAnimations());
+    const moving = all.filter((a) => a.playState === 'running' && a.effect?.getComputedTiming().endTime !== Infinity);
+    await Promise.allSettled(moving.map((a) => a.finished));
+  });
 /** Stops the page's clock, so the test moves time only when it says so. */
 const pause = async (page) => page.clock.pauseAt(await page.evaluate(() => Date.now() + 50));
 
@@ -230,6 +242,7 @@ export const scenarios = {
     const { ctx, page, errors } = await openMoment(h);
     await pause(page);
     await radio(page, '1 minute').check();
+    await settled(page, '.dq-mo-foot');
     const doneAt = await page.locator('.dq-mo-done').boundingBox();
     const sw = await page.locator('.dq-mo-hum .dq-switch').boundingBox();
     const three = await page.locator('.dq-mo-len-o').nth(1).boundingBox();
@@ -357,6 +370,7 @@ export const scenarios = {
       await page.clock.fastForward(9000);
       await h.sleep(1500);
       await h.shot(page, `sizes-${where}-running`);
+      await settled(page, '.dq-mo-foot');
       const fit = await page.evaluate(() => {
         const box = (s) => {
           const r = document.querySelector(s)?.getBoundingClientRect();
