@@ -264,12 +264,7 @@ export class AudioEngine {
 
     if (this.live) {
       this.timer = setInterval(() => this.music.scheduleUntil(this.ctx.currentTime + 0.7), 120);
-      const vis = () => {
-        const ac = this.ctx as AudioContext;
-        if (document.hidden) {
-          if (ac.state === 'running') ac.suspend().then(() => { if (!document.hidden) vis(); }).catch(() => {});
-        } else if (this.unlocked && ac.state !== 'running') ac.resume().catch(() => this.autoUnlock());
-      };
+      const vis = () => { void this.applyVisibility(); };
       document.addEventListener('visibilitychange', vis);
       const sc = () => {
         const ac = this.ctx as AudioContext;
@@ -294,6 +289,17 @@ export class AudioEngine {
     return (this.ctx as AudioContext).state;
   }
 
+  private applyVisibility(): Promise<void> {
+    if (!this.live) return Promise.resolve();
+    const ac = this.ctx as AudioContext;
+    if (document.hidden) {
+      if (ac.state === 'running') return ac.suspend().then(() => this.applyVisibility()).catch(() => {});
+    } else if (this.unlocked && ac.state !== 'running') {
+      return ac.resume().then(() => this.applyVisibility()).catch(() => this.autoUnlock());
+    }
+    return Promise.resolve();
+  }
+
   /** Call synchronously inside a user gesture (pointerup / click / keydown). Safe to call repeatedly. */
   unlock(): Promise<void> {
     if (!this.live) return Promise.resolve();
@@ -315,7 +321,7 @@ export class AudioEngine {
     }
     this.unlocked = true;
     this.music.scheduleUntil(ac.currentTime + 0.7);
-    return ac.state === 'running' ? Promise.resolve() : ac.resume().catch(() => {});
+    return this.applyVisibility();
   }
 
   /** Arms a one-shot unlock on the next tap, click or key press. */

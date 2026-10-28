@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Stage } from '../core/stage';
 import { params } from '../core/params';
 import { clamp, cubicBezier, ease, fbm1, lerp, smoothstep } from '../core/math';
-import { animate, wait, uiNow, pauseAfter } from '../ui/anim';
+import { animate, wait, uiNow, pauseAfter, onAnimate } from '../ui/anim';
 import { LanternWindow, levelBody, lanternLayer, type RevealCtx } from '../ui/lantern-window';
 import { GATE, LEVEL } from '../motion/tokens';
 import { Letterbox, awakenWord, rewardCards, letterView, endCard, fader, skipButton } from '../ui/cutscene-ui';
@@ -217,6 +217,11 @@ export class Director {
 
   async play(opts: { skippable?: boolean } = {}): Promise<'replay' | 'enter'> {
     const paused = new Set<Animation>();
+    const offAnimate = onAnimate((a) => {
+      if (!document.hidden || a.playState !== 'running') return;
+      paused.add(a);
+      a.pause();
+    });
     const show = () => {
       for (const a of paused) if (a.playState === 'paused') a.play();
       paused.clear();
@@ -235,6 +240,7 @@ export class Director {
     this.removeVisibility = () => {
       show();
       document.removeEventListener('visibilitychange', visibility);
+      offAnimate();
       this.removeVisibility = null;
     };
     visibility();

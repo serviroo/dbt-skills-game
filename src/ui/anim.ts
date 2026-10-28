@@ -7,6 +7,7 @@ import type { Stage } from '../core/stage';
 
 type Tracked = { a: Animation; start: number; total: number };
 const tracked = new Set<Tracked>();
+const animationListeners = new Set<(a: Animation) => void>();
 let clockNow = () => performance.now() / 1000;
 const waiters: { at: number; resolve: () => void }[] = [];
 
@@ -72,6 +73,11 @@ export function tickUI() {
   }
 }
 
+export function onAnimate(fn: (a: Animation) => void) {
+  animationListeners.add(fn);
+  return () => { animationListeners.delete(fn); };
+}
+
 export function animate(el: Element, frames: Keyframe[] | PropertyIndexedKeyframes, opts: KeyframeAnimationOptions) {
   const a = el.animate(frames, { fill: 'both', ...opts });
   if (params.capture) {
@@ -84,6 +90,7 @@ export function animate(el: Element, frames: Keyframe[] | PropertyIndexedKeyfram
     tracked.add(tr);
     a.currentTime = 0;
   }
+  if (!params.capture) for (const fn of animationListeners) fn(a);
   return a;
 }
 
