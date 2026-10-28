@@ -138,6 +138,22 @@ const holdRead = () => {
   };
 };
 
+/** An init script: the first part the camp's models settle throws, as a phone short of memory might, once a page. */
+const settleThrowsOnce = () => {
+  window.__watch = {
+    parts: new Proxy({}, {
+      set(parts, name, box) {
+        if (!window.__thrown) {
+          window.__thrown = true;
+          throw new RangeError('out of memory (a test)');
+        }
+        parts[name] = box;
+        return true;
+      },
+    }),
+  };
+};
+
 export const scenarios = {
 
   /**
@@ -461,6 +477,23 @@ export const scenarios = {
     const back = await page.locator('.w2-camp.is-scene-live').waitFor({ timeout: 15000 }).then(() => true, () => false);
     h.expect(back, `restored: the camp never came back (${await page.locator('.w2-camp').getAttribute('class')})`);
     await drawn(h, page, 'without :has(), restored');
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /** a load that fails while it settles the watchers' parts is tried again the next time the camp opens */
+  async 'camp-load-retried'(h) {
+    const { ctx, page, errors } = await h.open(seed(h, 30), '?mute', PHONE);
+    await ctx.addInitScript(settleThrowsOnce);
+    await page.reload();
+    await toCamp(h, page, 'failed load', false);
+    // the stage stops waiting once the load has failed, and the roster is the Watch
+    await page.waitForFunction(() => window.__thrown && !document.querySelector('.w2-camp.is-scene-wait'), null, { timeout: 30000 });
+    h.expect(!(await page.locator('.w2-camp.is-scene-live').count()), 'failed load: the camp came up anyway');
+    h.expect(await page.locator('.w2-roster-row .w2-sh-in').first().isVisible(), 'failed load: the roster is hidden');
+    await page.evaluate(() => window.__daily.go({ name: 'hub' }));
+    await toCamp(h, page, 'next visit');
+    await drawn(h, page, 'next visit');
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },

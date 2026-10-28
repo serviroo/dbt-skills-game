@@ -18,8 +18,9 @@ interface WatchHook {
 const hook: WatchHook = ((window as unknown as { __watch?: WatchHook }).__watch ??= { parts: {} });
 
 export function loadWatch(): Promise<void> {
-  loading ??= new GLTFLoader().loadAsync(siteUrl('models/watch.glb')).then(
-    (g) => {
+  loading ??= new GLTFLoader()
+    .loadAsync(siteUrl('models/watch.glb'))
+    .then((g) => {
       g.scene.updateMatrixWorld(true);
       const made = new Map<string, THREE.BufferGeometry>();
       const box = new THREE.Box3();
@@ -32,12 +33,12 @@ export function loadWatch(): Promise<void> {
         }
       }
       nodes = new Map(g.scene.children.map((c) => [c.name, c]));
-    },
-    (err: unknown) => {
+    })
+    // a throw while settling the parts counts as a failed load too, so the next camp tries again
+    .catch((err: unknown) => {
       loading = null;
       throw err;
-    },
-  );
+    });
   return loading;
 }
 
