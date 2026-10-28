@@ -7,6 +7,7 @@ import type { Stage } from '../core/stage';
 
 type Tracked = { a: Animation; start: number; total: number };
 const tracked = new Set<Tracked>();
+const animationListeners = new Set<(a: Animation) => void>();
 let clockNow = () => performance.now() / 1000;
 const waiters: { at: number; resolve: () => void }[] = [];
 
@@ -72,6 +73,11 @@ export function tickUI() {
   }
 }
 
+export function onAnimate(fn: (a: Animation) => void) {
+  animationListeners.add(fn);
+  return () => { animationListeners.delete(fn); };
+}
+
 export function animate(el: Element, frames: Keyframe[] | PropertyIndexedKeyframes, opts: KeyframeAnimationOptions) {
   const a = el.animate(frames, { fill: 'both', ...opts });
   if (params.capture) {
@@ -84,6 +90,7 @@ export function animate(el: Element, frames: Keyframe[] | PropertyIndexedKeyfram
     tracked.add(tr);
     a.currentTime = 0;
   }
+  if (!params.capture) for (const fn of animationListeners) fn(a);
   return a;
 }
 
@@ -102,10 +109,37 @@ export function wait(sec: number) {
   });
 }
 
+type Delay = { left: number; at: number; id: ReturnType<typeof setTimeout>; resolve: () => void };
+const delays = new Set<Delay>();
+let afterPaused = false;
+
+function startDelay(d: Delay) {
+  d.at = performance.now();
+  d.id = setTimeout(() => {
+    delays.delete(d);
+    d.resolve();
+  }, d.left);
+}
+
+export function pauseAfter(on: boolean) {
+  if (on === afterPaused) return;
+  afterPaused = on;
+  for (const d of delays) {
+    if (on) {
+      clearTimeout(d.id);
+      d.left = Math.max(0, d.left - (performance.now() - d.at));
+    } else startDelay(d);
+  }
+}
+
 /** Resolves `ms` from now on the page clock (the stage clock in captures): for DOM states that must not wait on 3D frames. */
 export function after(ms: number) {
   if (params.capture) return wait(ms / 1000);
-  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+  return new Promise<void>((resolve) => {
+    const d: Delay = { left: ms, at: 0, id: 0, resolve };
+    delays.add(d);
+    if (!afterPaused) startDelay(d);
+  });
 }
 
 export function finished(a: Animation) {

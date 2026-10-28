@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Stage } from '../core/stage';
 import { params } from '../core/params';
 import { clamp, cubicBezier, ease, fbm1, lerp, smoothstep } from '../core/math';
-import { animate, wait, uiNow } from '../ui/anim';
+import { animate, wait, uiNow, pauseAfter, onAnimate } from '../ui/anim';
 import { LanternWindow, levelBody, lanternLayer, type RevealCtx } from '../ui/lantern-window';
 import { GATE, LEVEL } from '../motion/tokens';
 import { Letterbox, awakenWord, rewardCards, letterView, endCard, fader, skipButton } from '../ui/cutscene-ui';
@@ -57,6 +57,7 @@ export class Director {
   private handheld = 0.6;
   skipped = false;
   private removeSkip: (() => void) | null = null;
+  private removeVisibility: (() => void) | null = null;
   private resolveSkip: () => void = () => {};
   /** resolves when the player taps Skip, so whatever the beat in flight is waiting on ends there */
   private readonly skip = new Promise<void>((r) => (this.resolveSkip = r));
@@ -154,6 +155,7 @@ export class Director {
    *  and the picture and sound are left as the rewards expect. */
   private skipNow() {
     if (this.skipped) return;
+    this.removeVisibility?.();
     this.skipped = true;
     for (const tr of this.tracks) tr.fn(tr.until, 0);
     this.tracks.clear();
@@ -214,6 +216,34 @@ export class Director {
   /* ======================================================================================= */
 
   async play(opts: { skippable?: boolean } = {}): Promise<'replay' | 'enter'> {
+    const paused = new Set<Animation>();
+    const offAnimate = onAnimate((a) => {
+      if (!document.hidden || a.playState !== 'running') return;
+      paused.add(a);
+      a.pause();
+    });
+    const show = () => {
+      for (const a of paused) if (a.playState === 'paused') a.play();
+      paused.clear();
+      pauseAfter(false);
+    };
+    const visibility = () => {
+      if (!document.hidden) return show();
+      for (const a of document.getAnimations()) {
+        if (a.playState !== 'running') continue;
+        paused.add(a);
+        a.pause();
+      }
+      pauseAfter(true);
+    };
+    document.addEventListener('visibilitychange', visibility);
+    this.removeVisibility = () => {
+      show();
+      document.removeEventListener('visibilitychange', visibility);
+      offAnimate();
+      this.removeVisibility = null;
+    };
+    visibility();
     if (opts.skippable) this.removeSkip = skipButton(() => this.skipNow());
     // the scene can't go on without its WebGL context: losing it ends the scene as Skip does (also on a first run, which
     // has no Skip), and the rewards, letter and end card need no 3D
@@ -232,6 +262,7 @@ export class Director {
       if (e !== SKIP) throw e;
     } finally {
       offLost();
+      this.removeVisibility?.();
     }
     this.removeSkip?.();
     return this.beatRewards();
