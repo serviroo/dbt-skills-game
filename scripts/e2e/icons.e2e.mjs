@@ -7,10 +7,19 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-// not spawnSync: scenarios run side by side in this process, and a draw would stall them all for the 20 s it takes. A
-// failed draw rejects with execFile's own error, whose message carries the child's stderr, so the report shows why
+// Hosted CI's slowest two-draw scenario took 25.6 s; allow over five times that per child.
+const ICON_DRAW_TIMEOUT_MS = 150000;
+// Keep draws asynchronous so other scenarios can run. Failures carry the exit code or signal and all child output.
+export async function runIconChild(args, { timeout = ICON_DRAW_TIMEOUT_MS } = {}) {
+  try {
+    return await promisify(execFile)(process.execPath, args, { cwd: root, encoding: 'utf8', timeout, killSignal: 'SIGKILL', maxBuffer: Infinity });
+  } catch (cause) {
+    const reason = cause.killed && cause.signal === 'SIGKILL' ? `timed out after ${timeout} ms` : cause.signal ? `signal ${cause.signal}` : `exit code ${cause.code}`;
+    throw new Error(`icon child ${reason}\nstdout:\n${cause.stdout ?? ''}\nstderr:\n${cause.stderr ?? ''}`, { cause });
+  }
+}
 const draw = (out, ...extra) =>
-  promisify(execFile)(process.execPath, [path.join(root, 'scripts/icons.mjs'), `--out=${out}`, '--only=icons', '--quiet', ...extra], { cwd: root, encoding: 'utf8' });
+  runIconChild([path.join(root, 'scripts/icons.mjs'), `--out=${out}`, '--only=icons', '--quiet', ...extra]);
 const hashes = (dir) => {
   const out = {};
   const walk = (d) => {
@@ -33,7 +42,7 @@ export const scenarios = {
     try {
       run = await draw(lost, '--lose-context-at=3');
     } catch (e) {
-      throw new Error('a lost WebGL context failed the icon build: ' + String(e.stderr || e.message).slice(0, 400));
+      throw new Error('a lost WebGL context failed the icon build: ' + e.message, { cause: e });
     }
     const want = hashes(plain);
     const got = hashes(lost);
@@ -52,7 +61,7 @@ export const scenarios = {
     try {
       run = await draw(lost, '--lose-context-at=2', '--lose-context-times=2');
     } catch (e) {
-      throw new Error('losing the context twice failed the icon build: ' + String(e.stderr || e.message).slice(0, 400));
+      throw new Error('losing the context twice failed the icon build: ' + e.message, { cause: e });
     }
     const want = hashes(plain);
     const got = hashes(lost);

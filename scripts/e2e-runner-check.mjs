@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { runIconChild } from './e2e/icons.e2e.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const name = `runner-check-${process.pid}`;
@@ -51,6 +52,34 @@ async function run(label, args, interrupt = null) {
 }
 
 try {
+  await assert.rejects(runIconChild(['-e', "console.log('before the error ' + 'x'.repeat(945)); throw new Error('icon draw failed')"]), (error) => {
+    assert.match(error.message, /exit code 1/);
+    assert(error.message.includes('before the error ' + 'x'.repeat(945)));
+    assert.match(error.message, /Error: icon draw failed\n\s+at /);
+    assert.equal(error.cause.code, 1);
+    assert(error.message.includes(error.cause.stdout));
+    assert(error.message.includes(error.cause.stderr));
+    return true;
+  });
+  await assert.rejects(runIconChild(['-e', "process.kill(process.pid, 'SIGKILL')"]), (error) => {
+    assert.match(error.message, /signal SIGKILL/);
+    assert.equal(error.cause.signal, 'SIGKILL');
+    return true;
+  });
+  await assert.rejects(runIconChild(['-e', 'process.exit(1)']), (error) => {
+    assert.match(error.message, /exit code 1/);
+    assert.equal(error.cause.code, 1);
+    return true;
+  });
+  await assert.rejects(runIconChild(['-e', "console.log('partial stdout'); console.error('partial stderr'); setInterval(() => {}, 1000)"], { timeout: 500 }), (error) => {
+    assert.match(error.message, /timed out after 500 ms/);
+    assert.match(error.message, /partial stdout/);
+    assert.match(error.message, /partial stderr/);
+    assert.equal(error.cause.signal, 'SIGKILL');
+    assert.equal(error.cause.killed, true);
+    return true;
+  });
+  results.push({ label: 'icon-child-failures', cases: 4 });
   fs.writeFileSync(fixture, `
 import fs from 'node:fs';
 import path from 'node:path';
