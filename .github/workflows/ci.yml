@@ -130,7 +130,7 @@ jobs:
               busy=$((busy + jobs))
             done
           done
-          if ((busy + 10 > 20)); then
+          if ((busy + 10 > 0)); then
             echo "::notice title=E2E runners::GitHub's runners have $busy jobs: the e2e parts run on the dev box"
             echo "devbox=true" >> "$GITHUB_OUTPUT"
           else
