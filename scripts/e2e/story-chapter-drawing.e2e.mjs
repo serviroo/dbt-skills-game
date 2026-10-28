@@ -113,7 +113,7 @@ async function readerShows(h, page, want, label) {
     )
     .then(() => true, () => false);
   // a drawing that shouldn't show is given time to turn up anyway
-  if (ok && want.includes(null)) await h.sleep(600);
+  if (ok && want.includes(null)) await h.frames(page, 36);
   const now = await readPics(page);
   h.expect(ok && deep(now, want), `${label}: the chapters show ${JSON.stringify(now)}${ok ? '' : ' (a picture never loaded)'}, not ${JSON.stringify(want)}`);
 }
@@ -406,7 +406,7 @@ export const scenarios = {
         // writing: the drawing's button shares the starting point's line, so the page starts where it did
         await writing(page, t.id, t.ch1);
         await editorShows(h, page, 'Lantern on the step', at);
-        await h.sleep(400);
+        await h.settled(page, '.st-start-tg, .st-pic-thumb');
         await h.shot(page, `drawing-write-${at}`);
         const w = await page.evaluate(() => {
           const r = (s) => document.querySelector(s).getBoundingClientRect();
@@ -420,7 +420,7 @@ export const scenarios = {
         // reading: a calm size, inside the screen, above the chapter's words
         await reading(page, t.id);
         await readerShows(h, page, ['Lantern on the step', null], at);
-        await h.sleep(400);
+        await h.settled(page, '.st-read-pic, .st-read-ch-h');
         await h.shot(page, `drawing-read-${at}`);
         const m = await page.evaluate(() => {
           const f = document.querySelector('.st-read-pic').getBoundingClientRect();
@@ -434,7 +434,7 @@ export const scenarios = {
         await writing(page, t.id, t.ch1);
         await page.getByRole('button', { name: 'Change drawing' }).click();
         await page.getByRole('dialog', { name: 'Pick a drawing' }).waitFor({ timeout: 5000 });
-        await h.sleep(600);
+        await h.settled(page, '.st-picks, .st-pick');
         await h.shot(page, `drawing-pick-${at}`);
         h.expect(!(await wide()), `the drawings at ${at} scroll sideways`);
         h.expect(!errors.length, 'errors: ' + errors.join(' | '));
