@@ -3,10 +3,14 @@
 
 const PROMPT = (page) => page.evaluate(() => ({ name: document.querySelector('#np-name')?.value, comp: document.querySelector('#np-comp')?.value, focus: document.activeElement?.id || document.activeElement?.tagName }));
 
-/** Enter to the companion field, its name, Enter to continue: both names are stored exactly as typed */
+/** Enter to the companion field, a tap beside the fields (focus leaves it), its name, Enter to continue: the name goes
+ * back into the companion field and both names are stored exactly as typed */
 async function finish(page, { youOf, leaves, expect }, label) {
   await page.keyboard.press('Enter');
+  await page.locator('#np-comp').evaluate((el) => el.blur());
   await page.keyboard.type('Pip');
+  const back = await PROMPT(page);
+  expect(back.name === 'Robin' && back.comp === 'Pip' && back.focus === 'np-comp', `${label}: the companion's name did not go back into its field: ${JSON.stringify(back)}`);
   const left = leaves(page, '#np-name');
   await page.keyboard.press('Enter');
   await left(10000);
