@@ -381,14 +381,22 @@ async function showsStopped(h, page, where, stage = '.dq-timer-stage') {
   }
 }
 
+/**
+ * The clock runs again, as when the page comes back. Returns once the scene has drawn 10 more frames and moved on 1 s:
+ * a slow page can still be on one long frame when a fixed wait ends, but a scene that stays put still fails.
+ */
+async function comesBack(page, b) {
+  await page.clock.resume();
+  await until(page, (b) => window.__scenes.frames > b.frames + 10 && window.__scenes.last.e > b.last.e + 1, b.s);
+  return pair(page);
+}
+
 /** The page freezes and comes back: the scene picks up in step with the countdown. Then leaving frees it. */
 async function keepsTime(h, page, kind) {
   await h.pauseClock(page);
   await h.sleep(1200);
   const b = await pair(page);
-  await page.clock.resume();
-  await h.sleep(1500);
-  const c = await pair(page);
+  const c = await comesBack(page, b);
   h.expect(c.s.frames > b.s.frames + 10 && c.s.last.e > b.s.last.e + 1, `${kind} resumed: the scene did not move on (${b.s.frames} -> ${c.s.frames} frames, ${b.s.last.e.toFixed(2)} -> ${c.s.last.e.toFixed(2)} s)`);
   inStep(h, c, `${kind} resumed`);
   await page.getByRole('button', { name: 'Leave this skill' }).click();
@@ -551,9 +559,7 @@ export const scenarios = {
     await h.pauseClock(page);
     await h.sleep(1500);
     const b = await pair(page);
-    await page.clock.resume();
-    await until(page, (b) => window.__scenes.frames > b.frames + 10 && window.__scenes.last.e > b.last.e + 1, b.s);
-    const c = await pair(page);
+    const c = await comesBack(page, b);
     h.expect(c.s.frames > b.s.frames + 10 && c.s.last.e > b.s.last.e + 1, `resumed: the scene did not move on (${b.s.frames} -> ${c.s.frames} frames, ${b.s.last.e.toFixed(2)} -> ${c.s.last.e.toFixed(2)} s)`);
     inStep(h, c, 'resumed');
 
