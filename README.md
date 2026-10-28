@@ -32,9 +32,9 @@ back after a long break is always fine.
   blank page? Ask for a starting point. Read mode shows the whole story at the text size you pick, and remembers it.
   Search finds any word in your stories and notes, even offline.
   A story you downloaded can come back in as a new story.
-- Save Crystal: a backup of your progress, stories, drawings (unfinished ones too) and choices. Restore keeps choices
-  you already made on this device, including mute. If something could not be read, the file and the app say the backup
-  is incomplete.
+- Save Crystal: a backup of your progress, stories, drawings (unfinished ones too), unfinished skill answers and
+  choices. Restore keeps choices you already made on this device, including mute. If something could not be read,
+  the file and the app say the backup is incomplete.
 - Starting over: Settings makes a Save Crystal first, then clears this game's data from the device after one
   confirmation. Nothing else the browser keeps for other sites or apps is touched.
 
