@@ -1,3 +1,4 @@
+import { installAudioRecorder, audioReady } from './audio-recorder.mjs';
 const SAFARI = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
 const TALL = { width: 390, height: 844 };
 const SMALL = { width: 320, height: 568 };
@@ -22,7 +23,10 @@ function returning(xp = 0) {
 
 async function boot(h, { save, viewport = TALL, reduced = false, ua, extra = {}, init, live = false } = {}) {
   const ctx = await h.browser.newContext({ viewport, deviceScaleFactor: 2, serviceWorkers: 'block', reducedMotion: reduced ? 'reduce' : 'no-preference', locale: 'en-US', ...(ua ? { userAgent: ua } : {}) });
-  if (init) await ctx.addInitScript(init);
+  if (init) {
+    await installAudioRecorder(ctx);
+    await ctx.addInitScript(init);
+  }
   const seed = { [h.YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: Date.now() - 1000, companionAt: Date.now() - 1000 }), 'dbt.app.v1': h.SEEN, ...(save ? { [h.SAVE]: save } : {}), ...extra };
   await ctx.addInitScript((s) => {
     if (sessionStorage.getItem('e2e-seeded')) return;
@@ -35,6 +39,7 @@ async function boot(h, { save, viewport = TALL, reduced = false, ua, extra = {},
   page.on('console', (m) => m.type() === 'error' && !/WebGL|GPU stall|AudioContext/i.test(m.text()) && errors.push('console: ' + m.text().slice(0, 300)));
   await page.goto(h.server.url + '/');
   await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
+  if (init) await audioReady(page);
   await page.evaluate((live) => {
     const a = window.__daily;
     window.__cues = [];
@@ -94,19 +99,7 @@ const probe = (page) =>
   });
 
 const tapOutput = () => {
-  const connect = AudioNode.prototype.connect;
-  window.__taps = [];
   window.__starts = [];
-  AudioNode.prototype.connect = function (dest, ...rest) {
-    const out = connect.call(this, dest, ...rest);
-    if (dest instanceof AudioDestinationNode) {
-      const a = this.context.createAnalyser();
-      a.fftSize = 32768;
-      connect.call(this, a);
-      window.__taps.push({ a, from: this.constructor.name });
-    }
-    return out;
-  };
   for (const P of [AudioScheduledSourceNode.prototype, AudioBufferSourceNode.prototype]) {
     const start = P.start;
     P.start = function (...args) {
@@ -119,18 +112,19 @@ const outputLevel = (page) =>
   page.evaluate(() => {
     let rms = 0;
     let peak = 0;
-    for (const { a } of window.__taps) {
-      const x = new Float32Array(a.fftSize);
-      a.getFloatTimeDomainData(x);
+    for (const tap of window.__taps) {
+      if (tap.error) throw new Error(tap.error);
       let sum = 0;
-      for (const v of x) {
-        sum += v * v;
-        peak = Math.max(peak, Math.abs(v));
+      for (let i = tap.end - 255; i <= tap.end; i++) {
+        const q = tap.q.get(i);
+        if (!q) throw new Error('the audio snapshot is missing quantum ' + i);
+        peak = Math.max(peak, q[0]);
+        sum += q[1];
       }
-      rms = Math.max(rms, Math.sqrt(sum / x.length));
+      rms = Math.max(rms, Math.sqrt(sum / 32768));
     }
-    const c = window.__taps[0]?.a.context;
-    return { rms, peak, t: c?.currentTime ?? 0, span: (window.__taps[0]?.a.fftSize ?? 0) / (c?.sampleRate ?? 1), state: c?.state, from: window.__taps.map((x) => x.from) };
+    const c = window.__taps[0]?.context;
+    return { rms, peak, t: c?.currentTime ?? 0, span: 32768 / (c?.sampleRate ?? 1), state: c?.state, from: window.__taps.map((x) => x.from) };
   });
 async function listen(h, page, n) {
   const out = [];
