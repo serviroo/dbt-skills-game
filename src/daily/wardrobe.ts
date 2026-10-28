@@ -131,9 +131,7 @@ function option(app: App, slot: Slot, id: string, preview: HTMLElement, onPick: 
       'data-id': id,
       onclick: () => {
         if (!lookUnlocked(st, look)) return;
-        // tried on only: the look they keep goes back on with one tap of its own option
-        if (id === worn(st, slot)) delete tried[slot];
-        else tried[slot] = id;
+        tried[slot] = id;
         onPick(slot);
       },
     },
@@ -206,6 +204,9 @@ export function wardrobePanel(app: App) {
    * options are marked in place, so a tap already landing on one (as a name field's save on blur fires) still counts.
    */
   const refresh = () => {
+    // a kept look is never only tried on: one tap on the kept look's own option puts it back on, and a look being tried
+    // that another open copy keeps leaves the bar
+    for (const k of Object.keys(tried) as Slot[]) if (tried[k] === worn(st, k)) delete tried[k];
     body.querySelectorAll<HTMLButtonElement>('.w2-wopt').forEach((b) => mark(st, b));
     const on = (Object.keys(TABLE) as Slot[]).filter((k) => tried[k]);
     if (!on.length) {

@@ -246,6 +246,29 @@ export const scenarios = {
       h.expect(other.theme === 'gold' && other.accent === 'rose' && !other.bar, `the other tab after Keep this look: ${JSON.stringify(other)}`);
       h.expect((await kept(h, a)).cardBack === 'gate', `this tab's Keep this look dropped the other tab's card back: ${JSON.stringify(await kept(h, a))}`);
       h.expect(same(await kept(h, b), await kept(h, a)), 'the two tabs keep different looks');
+
+      // B keeps the very looks A tries on: each one leaves A's bar as it is kept, the bar goes with the last, and A
+      // saves nothing of its own
+      await tryOn(a, 'theme', 'night');
+      await tryOn(a, 'plate', 'gold');
+      await b.bringToFront();
+      await tryOn(b, 'theme', 'night');
+      await choose(b, 'Keep this look');
+      await barGone(b);
+      await a.bringToFront();
+      await a.waitForFunction(() => window.__daily.store.state.settings.theme === 'night', null, { timeout: 5000 });
+      on = await look(a);
+      h.expect(on.theme === 'night' && on.bar && on.text.startsWith('Trying on Gold trim.'), `this tab still tries on the theme the other tab kept: ${JSON.stringify(on)}`);
+      await b.bringToFront();
+      await tryOn(b, 'plate', 'gold');
+      await choose(b, 'Keep this look');
+      await barGone(b);
+      const byB = await kept(h, b);
+      await a.bringToFront();
+      await barGone(a);
+      on = await look(a);
+      h.expect(on.checked.includes('theme:night') && on.checked.includes('plate:gold'), `this tab does not mark the looks the other tab kept: ${on.checked}`);
+      h.expect(byB.theme === 'night' && byB.plate === 'gold' && same(await kept(h, a), byB), `this tab changed the looks the other tab kept: ${JSON.stringify(await kept(h, a))}`);
       h.expect(!errors.length, errors.join(' | '));
     } finally {
       await ctx.close();
