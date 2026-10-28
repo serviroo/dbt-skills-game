@@ -145,8 +145,11 @@ The same choice reaches browser children, including icon draws during a build.
 `node scripts/e2e-runner-check.mjs` checks file selection, duplicate names, failure reports and cleanup through the
 real command. It creates temporary scenario files and removes them when it finishes.
 
-The intro is 3D, so for a real-GPU run on another machine, start a Playwright launch server there and pass
-`--ws=<its endpoint> --host=<this machine's address>`, so the dev server is reachable from that browser.
+The intro is 3D, so for a real-GPU run on another machine, start the browser there with
+`node scripts/e2e-browser.mjs --host=<that machine's address>`. It starts with the same flags as a local run, because a
+browser that is already running can't take new ones, and prints its endpoint. Then run the scenarios here with
+`--ws=<that endpoint> --host=<this machine's address>`, so the dev server is reachable from that browser. `--headed`
+goes to the browser's machine; `--software` goes to both commands.
 
 ### Skill check
 

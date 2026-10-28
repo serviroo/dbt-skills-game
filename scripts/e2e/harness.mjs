@@ -223,10 +223,14 @@ function pageState() {
   };
 }
 
+/** How every e2e browser starts. A running browser takes no new flags, so scripts/e2e-browser.mjs starts a --ws one with these. */
+export function launchOptions(flags) {
+  return { headless: flags.headed !== 'true', args: [...glArgs(), '--autoplay-policy=no-user-gesture-required'] };
+}
+
 function launch(flags) {
-  const args = [...glArgs(), '--autoplay-policy=no-user-gesture-required'];
-  if (flags.ws) return chromium.connect(flags.ws, { headers: { 'x-playwright-launch-options': JSON.stringify({ headless: flags.headless === 'true', args }) } });
-  return chromium.launch({ headless: flags.headed !== 'true', handleSIGINT: false, handleSIGTERM: false, args });
+  if (flags.ws) return chromium.connect(flags.ws);
+  return chromium.launch({ ...launchOptions(flags), handleSIGINT: false, handleSIGTERM: false });
 }
 
 export async function startHarness(flags = {}) {
@@ -274,7 +278,7 @@ export async function startHarness(flags = {}) {
       browsers.push(browser);
       const probe = await browser.newPage();
       try {
-        renderer = await checkRenderer(probe);
+        renderer = await checkRenderer(probe, { remote: !!flags.ws });
       } finally {
         await probe.context().close();
       }

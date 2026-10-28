@@ -2,7 +2,7 @@ import './gl.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { holdDaily } from './e2e/first-actions.e2e.mjs';
 import { runIconChild } from './e2e/icons.e2e.mjs';
@@ -17,9 +17,9 @@ const state = path.join(out, 'state.json');
 const results = [];
 fs.mkdirSync(out, { recursive: true });
 
-async function run(label, args, interrupt = null) {
+async function run(label, args, interrupt = null, env = {}) {
   fs.rmSync(state, { force: true });
-  const child = spawn(process.execPath, [path.join(root, 'scripts/e2e.mjs'), ...args], { cwd: out, env: { ...process.env, DEBUG: 'pw:browser' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [path.join(root, 'scripts/e2e.mjs'), ...args], { cwd: out, env: { ...process.env, DEBUG: 'pw:browser', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; child.kill('SIGTERM'); }, 90000);
@@ -51,6 +51,36 @@ async function run(label, args, interrupt = null) {
   }
   results.push({ label, code, report: report ? path.join(JSON.parse(fs.readFileSync(state, 'utf8')).out, 'report.json') : null });
   return { code, log, report };
+}
+
+/** Starts scripts/e2e-browser.mjs as the machine with the GPU would. stop() ends it with Ctrl+C's signal and checks its browser went too. */
+async function startRemote(args) {
+  const child = spawn(process.execPath, [path.join(root, 'scripts/e2e-browser.mjs'), ...args], { cwd: out, stdio: ['ignore', 'pipe', 'pipe'] });
+  let log = '';
+  const exited = new Promise((resolve) => child.once('exit', (code, signal) => resolve({ code, signal })));
+  const timer = setTimeout(() => child.kill('SIGTERM'), 30000);
+  const endpoint = await new Promise((resolve, reject) => {
+    const collect = (data) => {
+      log += data;
+      const m = /^ws:\/\/\S+$/m.exec(log);
+      if (m) resolve(m[0]);
+    };
+    child.stdout.on('data', collect);
+    child.stderr.on('data', collect);
+    exited.then(({ code, signal }) => reject(new Error(`scripts/e2e-browser.mjs ended (code ${code}, signal ${signal}) without an endpoint:\n${log}`)));
+  }).finally(() => clearTimeout(timer));
+  const children = execFileSync('ps', ['-axo', 'pid=,ppid='], { encoding: 'utf8' }).trim().split('\n').map((line) => line.trim().split(/\s+/).map(Number)).filter(([, ppid]) => ppid === child.pid).map(([pid]) => pid);
+  const stop = async () => {
+    const killTimer = setTimeout(() => child.kill('SIGKILL'), 10000);
+    child.kill('SIGINT');
+    const { signal } = await exited;
+    clearTimeout(killTimer);
+    fs.writeFileSync(path.join(out, 'remote-browser.log'), log);
+    assert.notEqual(signal, 'SIGKILL', 'scripts/e2e-browser.mjs did not stop on Ctrl+C');
+    assert.equal(children.length, 1, `scripts/e2e-browser.mjs started ${children.length} processes`);
+    assert.throws(() => process.kill(children[0], 0), { code: 'ESRCH' }, 'the remote browser survived its script');
+  };
+  return { endpoint, stop };
 }
 
 try {
@@ -170,6 +200,24 @@ export const scenarios = {
       await page.evaluate(() => void window.open('about:blank'));
       await popup;
     },
+    async '${name}-autoplay'(h) {
+      record(h);
+      let heard;
+      await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', undefined, (ctx) => {
+        heard = new Promise((done) => ctx.on('console', (m) => m.text().startsWith('autoplay ') && done(m.text())));
+        // the page starts the sound itself: page.evaluate() counts as a tap, and after a tap any browser may play
+        return ctx.addInitScript(() => addEventListener('load', () => {
+          const audio = new AudioContext();
+          const say = () => console.log('autoplay ' + audio.state);
+          if (audio.state === 'running') say();
+          else {
+            audio.onstatechange = say;
+            setTimeout(say, 1500);
+          }
+        }));
+      });
+      return { audio: await heard };
+    },
   };`);
   const reportError = await run('report-write-error', [`--scenario=${name}-report-error`]);
   assert.notEqual(reportError.code, 0);
@@ -178,6 +226,21 @@ export const scenarios = {
   assert.notEqual(throttle.code, 0);
   assert.match(throttle.log, /CPU throttle 4: popup throttle refused/);
   assert.deepEqual(throttle.report.throttleErrors, ['CPU throttle 4: popup throttle refused']);
+  // a browser started for --ws has a local run's flags (with this check's --software choice), and a run that expects the
+  // other renderer says where that browser's flags are set
+  const software = process.env.LANTERN_GL === 'software';
+  const remote = await startRemote(software ? ['--software'] : []);
+  try {
+    const viaWs = await run('remote-browser', [`--scenario=${name}-autoplay`, `--ws=${remote.endpoint}`]);
+    assert.equal(viaWs.code, 0);
+    assert.equal(/SwiftShader/.test(viaWs.report.renderer), software, viaWs.report.renderer);
+    assert.deepEqual(viaWs.report.scenarios.map((s) => [s.ok, s.result]), [[true, { audio: 'autoplay running' }]]);
+    const mismatch = await run('remote-renderer-mismatch', [`--scenario=${name}-autoplay`, `--ws=${remote.endpoint}`], null, { LANTERN_GL: software ? undefined : 'software' });
+    assert.notEqual(mismatch.code, 0);
+    assert(mismatch.log.includes(`; a --ws browser gets its flags where it was started, so start it with node scripts/e2e-browser.mjs${software ? '' : ' --software'}\n`), mismatch.log);
+  } finally {
+    await remote.stop();
+  }
   const signal = await run('signal-cleanup', [`--scenario=${name}-signal`], 'SIGTERM');
   assert.equal(signal.code, 130);
   const sigint = await run('sigint-cleanup', [`--scenario=${name}-signal`], 'SIGINT');
