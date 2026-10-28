@@ -113,6 +113,7 @@ async function collect() {
         ...interfaceFields('src/daily/ink.ts', 'Stroke'),
         ...['Story', 'Chapter', 'Card', 'Live'].flatMap((type) => interfaceFields('src/daily/storystore.ts', type)),
         ...interfaceFields('src/cowriter/types.ts', 'Cred'),
+        ...interfaceFields('src/daily/skill.ts', 'SkillDraft'),
       ],
       'app-field': [...fs.readFileSync(path.join(root, 'src/app.ts'), 'utf8').matchAll(/^  (\w+): boolean;/gm)].map((m) => m[1]),
       'stealth-field': [...fs.readFileSync(path.join(root, 'src/daily/pages.ts'), 'utf8').matchAll(/prefs: \{ ([^}]+) \}/g)].flatMap((m) => [...m[1].matchAll(/(\w+): boolean/g)].map((x) => x[1])),

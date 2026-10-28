@@ -164,7 +164,7 @@ async function storedNamesOk(page, SAVE, expect) {
   });
   const beside = ids['beside-save-key'];
   const bases = [SAVE, ...ids['local-storage'].filter((k) => k !== SAVE && k.startsWith('dbt.lantern.'))];
-  const known = (k) => ids['local-storage'].includes(k) || bases.some((b) => beside.some((s) => k === b + s || ((s === '.story.live' || s === '.unreadable') && k.startsWith(`${b}${s}.`))));
+  const known = (k) => ids['local-storage'].includes(k) || bases.some((b) => beside.some((s) => k === b + s || ((s === '.story.live' || s === '.unreadable' || s === '.skill-draft') && k.startsWith(`${b}${s}.`))));
   const strayLs = inv.ls.filter((k) => !known(k));
   expect(!strayLs.length, `localStorage keys not in stored-ids.json: ${strayLs.join(', ')}`);
   const straySs = inv.ss.filter((k) => k !== 'e2e-seeded' && !ids['session-storage'].includes(k));

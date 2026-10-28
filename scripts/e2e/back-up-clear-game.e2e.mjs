@@ -126,6 +126,7 @@ function seedData() {
       [`${SAVE}.safe-light`]: 'dim',
       'dbt.install-hint.v1': 'dismissed',
       'dbt.cowriter.v1': JSON.stringify({ install: 'seed-install-id', key: 'seed-connection-secret' }),
+      [`${SAVE}.skill-draft.clear-sight`]: JSON.stringify({ at: 3, answers: { fact: 'Seed skill words' }, typed: {}, leads: {}, done: [1, 2] }),
       [`${SAVE}.story.live.seedload.seed-page`]: JSON.stringify({ chapter: 'seed-page', text: 'Seed page words, and the unsaved ones.', bases: ['r1'], t: t + 5000 }),
       [LAB]: JSON.stringify({ v: 1, created: t, events: [{ id: 'lab-visit', k: 'visit', xp: 10, t, day: '2026-10-01' }] }),
       [`${LAB}.stealth`]: JSON.stringify({ aquarium: false, words: true }),
@@ -351,7 +352,7 @@ export const scenarios = {
       h.expect(c1.art.length === 1 && c1.drafts.length === 1 && /Something blue/.test(c1.drafts[0]), 'backup drawings or the unfinished drawing missing: ' + JSON.stringify([c1.art, c1.drafts]));
       h.expect(c1.chapters.includes('page:Shore:Seed page words, and the unsaved ones.') && c1.cards.includes('continue:A seed card.'), 'backup story words (latest) or cards missing: ' + JSON.stringify([c1.chapters, c1.cards]));
       h.expect(c1.preferences?.audio?.master === 0.6 && c1.preferences?.room?.aquarium === true && c1.preferences?.safeLight === 'dim', 'backup choices missing: ' + JSON.stringify(c1.preferences));
-      h.expect(!/seed-connection-secret|seed-install-id|dbt\.cowriter|dbt\.install-hint|\.unreadable|story\.live/.test(first.text) && first.raw.incomplete === false, 'the backup carries raw storage or a connection secret, or says it is incomplete');
+      h.expect(!/seed-connection-secret|seed-install-id|dbt\.cowriter|dbt\.install-hint|\.unreadable|story\.live|skill-draft|Seed skill words/.test(first.text) && first.raw.incomplete === false, 'the backup carries raw storage or a connection secret, or says it is incomplete');
       h.expect(await page.evaluate(() => document.activeElement?.id === 'dq-clear-h'), 'the confirmation heading did not take focus');
       const ask = await asking(page).innerText();
       h.expect(ask.includes(first.name) && /check you can find that file/i.test(ask) && /progress, names, choices, lists, diary, drawings \(unfinished ones too\), stories and offline files/.test(ask), 'the confirmation does not name the file, ask to keep it, or say what goes: ' + ask);
