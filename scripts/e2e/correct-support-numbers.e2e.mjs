@@ -1,5 +1,5 @@
-import { settled } from './harness.mjs';
 import path from 'node:path';
+import { settled } from './harness.mjs';
 
 const CARRIER = [/carrier|network/i, /rates? may apply/i];
 const FACTS = {

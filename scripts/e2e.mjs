@@ -7,6 +7,7 @@
 // --shard=2/4 runs the second of four parts; scenarios are spread by their CI seconds in scripts/e2e/timings.json
 // (15 s for one not listed there; a serial file goes whole to one part), so CI can run the parts in parallel.
 // --file=names runs scripts/e2e/names.e2e.mjs only. --gpu renders on this machine's GPU (Vulkan) instead of SwiftShader.
+// --cpu-throttle=4 slows every page's CPU work by four through CDP; report.json records the requested rate and any failure.
 // With --ws the browser runs on another machine (one with a real GPU) and loads the dev server bound to --host.
 // Writes screenshots and report.json to artifacts/e2e/<time>/.
 import fs from 'node:fs';
@@ -98,7 +99,7 @@ let failed = 0;
 try {
   h = await startHarness(flags);
   const lanes = [h, ...(await Promise.all(Array.from({ length: Math.min(jobs, units.length) - 1 }, () => h.more())))];
-  report = { url: h.server.url, browser: flags.ws ? 'remote ' + flags.ws : 'local', jobs: lanes.length, scenarios: [], renderer: h.renderer, cpuThrottle: Number(flags['cpu-throttle'] ?? 1), zone: h.zone };
+  report = { url: h.server.url, browser: flags.ws ? 'remote ' + flags.ws : 'local', jobs: lanes.length, scenarios: [], renderer: h.renderer, cpuThrottle: Number(flags['cpu-throttle'] ?? 1), throttleErrors: h.throttleErrors, zone: h.zone };
   await Promise.all(lanes.map(async (lane) => {
     for (let unit; !interrupted && (unit = units.shift()); ) {
       for (const { name, file, run, i } of unit.scenarios) {

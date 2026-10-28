@@ -421,8 +421,9 @@ export const scenarios = {
     await toStone(h, page);
     await live(h, page, 'motion');
     // more time, so the countdown outlasts every change below
+    const duration = (await scenes(page)).last.dur;
     await page.locator('.dq-timer').getByRole('button', { name: '+15 s' }).click();
-    await h.settled(page, '.dq-timer-stage');
+    await page.waitForFunction((duration) => window.__scenes?.last.dur > duration, duration, { timeout: 15000 });
     inStep(h, await pair(page), 'motion: full');
     const still = async (where) => {
       await page.waitForFunction(() => window.__scenes?.last.still, null, { timeout: 15000 });
@@ -436,12 +437,12 @@ export const scenarios = {
       await page.waitForFunction((from) => {
         const s = window.__scenes;
         return s?.frames > from.frames + 10 && !s.last.still && s.last.e > from.last.e;
-      }, from, { timeout: 15000 }).catch(async () => {
+      }, from, { timeout: 15000 }).catch(async (e) => {
+        if (e.name !== 'TimeoutError') throw e;
         const s = await scenes(page);
         throw new Error(`${where}: only ${(s?.frames ?? 0) - from.frames} new frames, progress ${((s?.last?.e ?? 0) - from.last.e).toFixed(2)} s (needed 11 frames and advancing time)`);
       });
       const c = await pair(page);
-      h.expect(c.s.frames > from.frames + 10, `${where}: only ${c.s.frames - from.frames} new scene frames`);
       inStep(h, c, where);
     };
     // Settings is a screen of its own, so this copy sets Motion mid-scene the way its Settings screen does
@@ -568,9 +569,10 @@ export const scenarios = {
       await page.evaluate(() => window.scrollTo(0, 0));
       await h.settled(page, '.dq-timer-stage');
       await tap(page, 'Start 30 s');
-      await h.settled(page, '.dq-timer-stage');
+      await h.sleep(900);
       const box = await page.locator('.dq-timer-stage').boundingBox();
-      h.expect(box.y >= -1 && box.y + box.height <= vp.height + 1, `${vp.width}x${vp.height}: after Start settles the scene is still off screen (${Math.round(box.y)}..${Math.round(box.y + box.height)})`);
+      h.expect(box.y >= -1 && box.y + box.height <= vp.height + 1, `${vp.width}x${vp.height}: 900 ms after Start the scene is still off screen (${Math.round(box.y)}..${Math.round(box.y + box.height)})`);
+      await h.settled(page, '.dq-timer-stage');
       await h.sleep(1500);
       const waits = await page.evaluate(() => window.__gpuWaits);
       h.expect(waits === 0 && (await scenes(page)).frames > 3, `${vp.width}x${vp.height}: the scene made the page wait for the GPU ${waits} times`);

@@ -3,9 +3,9 @@
 // early never asks; the rest credit stays once a day; the choice is kept on this device; the low hum stops at the end.
 // A Save Crystal carries the choice, and a newer build's choices beside the save, even ones this build doesn't offer.
 // Time runs on Playwright's clock, so the long waits are fast-forwarded.
-import { settled } from './harness.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
+import { settled } from './harness.mjs';
 import { crystal, restore } from './newer-save-safety.e2e.mjs';
 
 const KEPT_LENGTH = 'dbt.lantern.v1.moment-length';

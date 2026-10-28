@@ -1,9 +1,9 @@
 // Crisis lines by country (ME-97): the Safe Zone's Talk screen shows the verified lines for the player's country,
 // picked from the device language until the player chooses, changeable in one tap there and in Settings. Another open
 // copy's later choice wins; a Save Crystal never replaces a choice made on this device.
-import { settled } from './harness.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
+import { settled } from './harness.mjs';
 
 // Written out by hand from the verified table, so a wrong number in the app fails here.
 const EXPECT = {

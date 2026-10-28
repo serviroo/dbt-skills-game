@@ -263,6 +263,7 @@ export async function startHarness(flags = {}) {
   // every browser this run starts, so stop() closes them all, also one still starting
   const browsers = [];
   const launches = [];
+  const throttleErrors = [];
   const start = () => {
     const p = launch(flags).then((browser) => {
       // every context keeps the scripts' zone, also when the browser runs on another machine (--ws), and every page in it is
@@ -278,7 +279,7 @@ export async function startHarness(flags = {}) {
           track(page, t0);
           const ready = throttle === 1 ? Promise.resolve() : ctx.newCDPSession(page).then((cdp) => cdp.send('Emulation.setCPUThrottlingRate', { rate: throttle }));
           prepared.set(page, ready);
-          ready.catch(() => {});
+          ready.catch((e) => throttleErrors.push(`CPU throttle ${throttle}: ${clean(e.message)}`));
         });
         const newPage = ctx.newPage.bind(ctx);
         ctx.newPage = async () => {
@@ -459,10 +460,11 @@ export async function startHarness(flags = {}) {
     } finally {
       await server.stop();
     }
+    if (throttleErrors.length) throw new Error(throttleErrors.join('\n'));
   })());
 
   const shared = {};
-  const lane = (browser) => ({ browser, server, out, flags, shared, renderer, zone: ZONE, open: opener(browser), evidence, evidenceAll: allEvidence(browser), note, leaves, shot, ls, youOf, deepFind, deepDrop, expect, sleep, frames, settled, reachHub, openSettings, SAVE, YOU, SEEN, stop, more });
+  const lane = (browser) => ({ browser, server, out, flags, shared, renderer, throttleErrors, zone: ZONE, open: opener(browser), evidence, evidenceAll: allEvidence(browser), note, leaves, shot, ls, youOf, deepFind, deepDrop, expect, sleep, frames, settled, reachHub, openSettings, SAVE, YOU, SEEN, stop, more });
   /** Another browser on the same dev server, so scenarios can run side by side: its own profiles, the same `shared`. */
   async function more() {
     if (stopping) throw new Error('the harness is stopping');

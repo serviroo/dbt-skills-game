@@ -179,8 +179,12 @@ export const scenarios = {
           await placed(`${what}, turned back`);
           // a scroll of theirs ends it: the next turn leaves the page where the browser puts it
           await page.mouse.move(from.width / 2, from.height / 2);
+          const scrollTop = await page.evaluate(() => document.querySelector('.dq').scrollTop);
           await page.mouse.wheel(0, -120);
-          await page.waitForFunction(() => document.querySelectorAll('.st-read-ch')[1].getBoundingClientRect().top > document.querySelector('.dq-top').getBoundingClientRect().bottom + 24);
+          await page.waitForFunction((before) => document.querySelector('.dq').scrollTop !== before, scrollTop, { timeout: 15000 }).catch((e) => {
+            if (e.name !== 'TimeoutError') throw e;
+            throw new Error(`${what}: the scroll up did not move the page`);
+          });
           await h.settled(page, '.st-read-ch');
           const up = await chapterPlace(page, 1);
           h.expect(up.top > up.clear + 24, `${what}: the scroll up did not move the page (chapter 2 at ${up.top.toFixed(1)})`);
