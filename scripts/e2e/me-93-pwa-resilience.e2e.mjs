@@ -277,8 +277,14 @@ export const scenarios = {
     const srv = await host(d.dir);
     const { ctx, page, errors } = await context(h, { sw: false });
     try {
-      await page.goto(srv.url + '?mute');
+      await page.route(srv.url + d.file(/^engine-.*\.js$/), async (r) => {
+        await ready(page);
+        await sleep(1500);
+        await r.continue();
+      });
+      await page.goto(srv.url + '?mute', { waitUntil: 'commit' });
       await ready(page);
+      await page.locator('.title-screen').waitFor({ timeout: 20000 });
       expect(await page.evaluate(() => !!window.__stage), 'this check needs the WebGL stage');
       await startIntro(page, sleep);
       await page.locator('.rw-card').first().waitFor({ timeout: 25000 }).catch(async (e) => { await shot(page, 'fail-broken-model'); throw e; });

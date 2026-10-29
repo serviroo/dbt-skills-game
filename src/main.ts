@@ -16,17 +16,25 @@ const labs: Record<string, () => Promise<{ lab?: (s: Stage) => unknown; characte
 
 async function boot() {
   const canvas = document.getElementById('gl') as HTMLCanvasElement;
-  let stage: Stage | null = null;
-  try {
-    stage = new Stage(canvas);
-  } catch (err) {
-    console.warn('[boot] WebGL unavailable, running without the 3D stage', err);
-    canvas.style.display = 'none';
-  }
+  let made: Stage | null | undefined;
+  /** The 3D stage, made the first time it is asked for; null on a device without WebGL. */
+  const makeStage = (): Stage | null => {
+    if (made !== undefined) return made;
+    made = null;
+    try {
+      made = new Stage(canvas);
+      (window as any).__stage = made;
+    } catch (err) {
+      console.warn('[boot] WebGL unavailable, running without the 3D stage', err);
+      canvas.style.display = 'none';
+    }
+    return made;
+  };
+  // labs and captures follow the stage clock from the first frame. The app makes the stage only for the intro and keeps
+  // UI timing on the page clock until the cinematic starts (src/app.ts), so the DOM-only title and name prompt draw no 3D
+  // frames and a returning player's companion never sets up WebGL
+  const stage = params.lab || params.capture ? makeStage() : null;
   const lab = stage && params.lab ? labs[params.lab] : undefined;
-  if (stage) (window as any).__stage = stage;
-  // labs and captures follow the stage clock from the first frame; the app keeps the stage stopped and UI timing on the
-  // page clock until the cinematic starts (src/app.ts), so the DOM-only title and name prompt draw no 3D frames
   if (stage && (lab || params.capture)) {
     const s = stage;
     bindClock(() => s.time);
@@ -44,7 +52,7 @@ async function boot() {
     const app = import('./app');
     const { runApp } = await (stage?.loading(app) ?? app);
     document.documentElement.dataset.ready = '1';
-    await runApp(stage);
+    await runApp(stage, makeStage);
   }
 }
 
