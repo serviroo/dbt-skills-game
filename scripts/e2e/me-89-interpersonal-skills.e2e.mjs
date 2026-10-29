@@ -154,7 +154,7 @@ async function oldSave(h, pastDays = 6) {
     events.push({ id: `seed-v${i}`, t, day, k: 'visit', xp: 10 });
     events.push({ id: `seed-s${i}`, t: t + 1000, day, k: 'skill', xp: 20, stat: { give: 'agility', fast: 'agility', 'dear-man': 'agility', validation: 'agility', 'wise-mind': 'sense', stop: 'stamina' }[skill], skill });
   }
-  const save = { ...base, created: t0, events, flags: { ...base.flags, cardDay: '', greetDay: '', giftDay: '', rankSeen: 5, wardenSeen: true } };
+  const save = { ...base, created: t0, events, flags: { ...base.flags, cardDay: '', greetDay: '', giftDay: '', rankSeen: 5, wardenSeen: true, welcomeOwed: false } };
   const all = JSON.stringify(save);
   h.expect(!Object.keys(SKILLS).some((id) => all.includes(id)), 'the seeded save already knows a new skill id');
   h.shared[key] = save;

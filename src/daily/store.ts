@@ -109,6 +109,8 @@ export interface Flags {
   greetDay: string;
   safeCredit: boolean;
   therapistLineShown: boolean;
+  /** The first open's welcome, owed from that open until it shows (Home was left, or the page closed, before it came). */
+  welcomeOwed: boolean;
   checkinDay: string;
   questAsideDay: string;
   questAsideAt: number | string;
@@ -206,7 +208,7 @@ export function freshState(now = Date.now()): State {
       names: {},
       region: '',
     },
-    flags: { rankSeen: 0, wardenSeen: false, giftDay: '', cardDay: '', greetDay: '', safeCredit: false, therapistLineShown: false, checkinDay: '', questAsideDay: '', questAsideAt: 0, titlesSeen: [] },
+    flags: { rankSeen: 0, wardenSeen: false, giftDay: '', cardDay: '', greetDay: '', safeCredit: false, therapistLineShown: false, welcomeOwed: false, checkinDay: '', questAsideDay: '', questAsideAt: 0, titlesSeen: [] },
     gone: {},
     setAt: {},
     skillPins: {},
@@ -586,7 +588,7 @@ function canon(s: State) {
     set(s.maps),
     Object.entries(s.gone).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
     SET_KEYS.map((k) => [getSet(s, k), s.setAt[k] ?? 0]),
-    [s.flags.rankSeen, s.flags.wardenSeen, s.flags.therapistLineShown, ...DAY_FLAGS.map((k) => s.flags[k]), s.flags.questAsideDay, s.flags.questAsideAt, [...s.flags.titlesSeen].sort()],
+    [s.flags.rankSeen, s.flags.wardenSeen, s.flags.therapistLineShown, s.flags.welcomeOwed, ...DAY_FLAGS.map((k) => s.flags[k]), s.flags.questAsideDay, s.flags.questAsideAt, [...s.flags.titlesSeen].sort()],
     Object.entries(s.skillPins).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).map(([id, p]) => [id, flat(p)]),
     extrasOf(s),
     keptCanon(s),
@@ -892,6 +894,7 @@ export function normalize(raw: unknown): State | null {
     base.flags.greetDay = day(f.greetDay);
     base.flags.safeCredit = f.safeCredit === true;
     base.flags.therapistLineShown = f.therapistLineShown === true;
+    base.flags.welcomeOwed = f.welcomeOwed === true;
     base.flags.checkinDay = day(f.checkinDay);
     base.flags.questAsideDay = day(f.questAsideDay);
     base.flags.questAsideAt = stamp(f.questAsideAt);
@@ -1226,6 +1229,8 @@ export class Store {
     f.rankSeen = Math.max(f.rankSeen, o.rankSeen);
     f.wardenSeen ||= o.wardenSeen;
     f.therapistLineShown ||= o.therapistLineShown;
+    // shown in either copy is shown
+    f.welcomeOwed &&= o.welcomeOwed;
     for (const t of o.titlesSeen) if (!f.titlesSeen.includes(t)) f.titlesSeen.push(t);
     for (const k of DAY_FLAGS) if (validDay(o[k]) && (!validDay(f[k]) || o[k] > f[k])) f[k] = o[k];
     const oa = BigInt(o.questAsideAt), fa = BigInt(f.questAsideAt);
@@ -1393,6 +1398,8 @@ export class Store {
     const today = this.today();
     const d = this.derived();
     const had = d.visitDays.includes(today);
+    // the first open owes its welcome in the same save that counts its visit, so no copy holds one without the other
+    if (this.state.flags.greetDay !== today && !d.visitDays.some((v) => v < today)) this.state.flags.welcomeOwed = true;
     if (!had) this.add('visit', 10);
     const days = this.derived().visitDays;
     const visitIndex = days.indexOf(today);

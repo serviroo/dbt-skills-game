@@ -317,7 +317,7 @@ export class App {
    * first open ever gets one short, silent welcome window. Rank-ups wait until the player moves around the app.
    */
   start() {
-    const day = this.store.openDay();
+    this.store.openDay();
     this.lastDay = this.store.today();
     // Home is always the companion's first history entry. Opened again on a later one (a reload, the intro replayed),
     // it goes back to that first entry: the page opens on Home and nothing is credited again.
@@ -334,28 +334,43 @@ export class App {
     this.greeting = true;
     this.go({ name: 'hub' }, { replace: true });
     this.greeting = false;
-    if (day.kind !== 'first') return;
+    if (this.store.state.flags.welcomeOwed) this.greet();
+  }
+
+  /** The first open's welcome, on Home: one owed since Home was left (the Safe Zone, a tile) or the page closed comes now. */
+  private greet() {
     this.greeting = true;
     this.settled = this.welcome().finally(() => {
       this.greeting = false;
+      // dropped before it opened (the Safe Zone closed the window it waited behind) while Home has already come back
+      if (this.store.state.flags.welcomeOwed && this.route.name === 'hub') this.greet();
     });
   }
 
   private lastDay = '';
-  private dayCheck() {
+  /** Counts the new day's visit when the day has turned since the companion last looked. True when it had. */
+  private turnDay() {
     const today = this.store.today();
-    if (this.lastDay && this.lastDay !== today) {
-      this.store.openDay();
-      if (this.route.name === 'hub') this.go({ name: 'hub' }, { replace: true, quiet: true });
-    }
+    const turned = !!this.lastDay && this.lastDay !== today;
+    if (turned) this.store.openDay();
     this.lastDay = today;
+    return turned;
+  }
+  private dayCheck() {
+    // a day that turns in the Safe Zone waits there: its visit counts as the player leaves (see show)
+    if (this.route.name === 'safe') return;
+    if (this.turnDay() && this.route.name === 'hub') this.go({ name: 'hub' }, { replace: true, quiet: true });
   }
 
   private async welcome() {
     const { FIRST_WELCOME } = await import('../content/daily-lines');
     await wait(this.reduced() ? 0.2 : 0.7);
-    if (this.route.name !== 'hub') return;
-    await this.window({ kind: 'notification', title: 'Notification', html: FIRST_WELCOME.map((l) => `<p>${typo(l)}</p>`).join(''), tapToContinue: true }, true);
+    if (this.route.name !== 'hub' || !this.store.state.flags.welcomeOwed) return;
+    // owed until its window opens: queued behind another window that the Safe Zone then drops, it comes another time
+    await this.window({ kind: 'notification', title: 'Notification', html: FIRST_WELCOME.map((l) => `<p>${typo(l)}</p>`).join(''), tapToContinue: true }, true, () => {
+      this.store.state.flags.welcomeOwed = false;
+      this.store.save();
+    });
   }
 
   /** The chest on Home: today's gift (after a gap, a welcome back first) in a calm window, only when the player taps it. */
@@ -387,11 +402,12 @@ export class App {
     return !!d && typeof d.feel === 'string' && isHeavy(d.feel, typeof d.level === 'number' ? d.level : null);
   }
 
-  /** Shows a Lantern window over a dim scrim. Does not depend on the WebGL stage loop running. */
-  window(spec: WindowSpec, silentOpen = false): Promise<string> {
+  /** Shows a Lantern window over a dim scrim. Does not depend on the WebGL stage loop running. `opened` runs as it opens. */
+  window(spec: WindowSpec, silentOpen = false, opened?: () => void): Promise<string> {
     const gen = this.winGen;
     const run = this.winChain.then(async () => {
       if (gen !== this.winGen || this.route.name === 'safe') return DISMISSED;
+      opened?.();
       const answer = await this.showWindow(spec, silentOpen);
       return gen === this.winGen ? answer : DISMISSED;
     });
@@ -697,6 +713,7 @@ export class App {
     const key = v.key;
     this.visitKey = key;
     if (safe !== wasSafe) this.quietScore(safe);
+    if (wasSafe && !safe) this.turnDay();
     const out = this.screens[route.name](this, route, { again: v.again, kept: v.again ? this.kept.get(key) : undefined, handed: v.again ? undefined : v.hand, at: v.at, mark: (p) => this.mark(key, p) });
     this.current = out;
     this.root.style.setProperty('--dq-foot', '0px');
@@ -727,7 +744,11 @@ export class App {
       else focus.focus({ preventScroll: true });
     }
     out.after?.();
-    if (route.name === 'hub' && !o.quiet && !fromSkill) void this.celebrate();
+    if (route.name === 'hub' && !o.quiet && !fromSkill) {
+      // a first welcome still owed comes before anything to celebrate
+      if (!this.store.state.flags.welcomeOwed) void this.celebrate();
+      else if (!this.greeting) this.greet();
+    }
   }
 
   private clearForSafe() {
