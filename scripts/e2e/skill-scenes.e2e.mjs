@@ -1132,6 +1132,34 @@ export const scenarios = {
     }
   },
 
+  /**
+   * more time after Done: the wave, the light and the tide each pick up where they stopped, however long Done was up,
+   * instead of jumping ahead by that time
+   */
+  async 'water-scenes-more-time'(h) {
+    for (const k of KINDS) {
+      const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
+      await page.clock.install();
+      await page.reload();
+      await toStep(h, page, k.id, k.entry, { pause: true });
+      await showsStopped(h, page, `more time ${k.kind}`);
+      const at = await after(h, page, 0);
+      await after(h, page, (at.dur - at.e) * 1000 + 100);
+      await page.locator('.dq-timer-num', { hasText: 'Done' }).waitFor({ timeout: 5000 });
+      const a = (await scenes(page)).last;
+      // Done stays up for 4 s before more time is asked for
+      await page.clock.fastForward(4000);
+      await page.locator('.dq-timer').getByRole('button', { name: /^\+\d+ s$/ }).click();
+      const b = await after(h, page, 100);
+      const moved = Object.keys(a.probe).filter((key) => key !== 't').map((key) => `${key} ${a.probe[key].toFixed(3)} -> ${b.probe[key].toFixed(3)}`).join(', ');
+      h.expect(a.done && !b.done, `more time ${k.kind}: the countdown did not run again (${JSON.stringify(a)} -> ${JSON.stringify(b)})`);
+      h.expect(b.probe.t - a.probe.t >= 0 && b.probe.t - a.probe.t < 0.5, `more time ${k.kind}: the scene jumped from ${a.probe.t.toFixed(2)} s to ${b.probe.t.toFixed(2)} s (${moved})`);
+      console.log(`  more time ${k.kind}: ${a.probe.t.toFixed(2)} s -> ${b.probe.t.toFixed(2)} s, ${moved}`);
+      h.expect(!errors.length, errors.join('\n'));
+      await ctx.close();
+    }
+  },
+
   /** with reduced motion the wave, the light, the tide and Give me a moment each draw one still frame */
   async 'water-scenes-still'(h) {
     for (const k of [...KINDS, { kind: 'ring', moment: true }]) {

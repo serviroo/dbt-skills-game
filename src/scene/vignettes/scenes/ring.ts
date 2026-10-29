@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { NOISE_GLSL, OUT_GLSL, pointScale, rng } from '../common';
 import { breathAt, ease, SETTLE } from '../../../motion/breath';
+import type { Beat } from '../host';
 import type { BuildScene } from '../runtime';
 
 /**
@@ -147,16 +148,23 @@ export const build: BuildScene = (accent) => {
   // would bend the hue
   for (const m of [light.material, motes.material]) m.toneMapped = false;
   scene.add(space, light, motes);
-  const probe = { scale: SMALL, breath: 0 };
+  // more time after Done picks the breath up where it stopped instead of jumping ahead
+  let gap = 0;
+  let prev: Beat | null = null;
+  const probe = { t: 0, scale: SMALL, breath: 0 };
 
   return {
     scene,
     camera,
     probe,
     pose(b, still) {
+      const e = Math.max(0, b.e);
+      if (prev?.done && !b.done) gap += Math.max(0, e - prev.e);
+      prev = { ...b };
       // past its end (a timed Give me a moment) the breath settles to the exhale, as the flat ring does, and holds still
-      const t = still ? 0 : Math.max(0, Math.min(b.e, b.dur + SETTLE));
-      const s = still ? 0.55 : breathAt(t) * (1 - ease((t - b.dur) / SETTLE));
+      const end = b.dur - gap;
+      const t = still ? 0 : Math.min(e - gap, end + SETTLE);
+      const s = still ? 0.55 : breathAt(t) * (1 - ease((t - end) / SETTLE));
       const r = SMALL + (BIG - SMALL) * s;
       breath.value = s;
       time.value = still ? 12 : t;
@@ -165,7 +173,7 @@ export const build: BuildScene = (accent) => {
       camera.position.set(Math.sin(a) * DIST, 0.35 * Math.sin(0.02 * time.value), Math.cos(a) * DIST);
       camera.lookAt(0, 0, 0);
       camera.updateMatrixWorld();
-      Object.assign(probe, { scale: r, breath: s });
+      Object.assign(probe, { t, scale: r, breath: s });
     },
     resize(width, height) {
       camera.aspect = width / height;
