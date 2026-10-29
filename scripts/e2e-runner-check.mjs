@@ -1,8 +1,10 @@
 import './gl.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { holdDaily } from './e2e/first-actions.e2e.mjs';
 import { runIconChild } from './e2e/icons.e2e.mjs';
@@ -16,6 +18,7 @@ const side = path.join(root, 'scripts/e2e', `${name}-side.e2e.mjs`);
 const state = path.join(out, 'state.json');
 const results = [];
 fs.mkdirSync(out, { recursive: true });
+const freePort = () => new Promise((resolve) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); }); });
 
 async function run(label, args, interrupt = null, env = {}) {
   fs.rmSync(state, { force: true });
@@ -226,13 +229,19 @@ export const scenarios = {
   assert.notEqual(throttle.code, 0);
   assert.match(throttle.log, /CPU throttle 4: popup throttle refused/);
   assert.deepEqual(throttle.report.throttleErrors, ['CPU throttle 4: popup throttle refused']);
-  // a browser started for --ws has a local run's flags (with this check's --software choice), and a run that expects the
-  // other renderer says where that browser's flags are set
+  // a browser started for --ws listens on 127.0.0.1 only and has a local run's flags (with this check's --software
+  // choice), the run keeps its dev server on the --port a tunnel forwards, and a run that expects the other renderer says
+  // where that browser's flags are set
+  const refused = await startRemote(['--host=0.0.0.0']).then(async (r) => { await r.stop(); return 'it listened at ' + r.endpoint; }, (e) => e.message);
+  assert.match(refused, /--host is not an option: the browser listens on 127\.0\.0\.1 only/);
   const software = process.env.LANTERN_GL === 'software';
   const remote = await startRemote(software ? ['--software'] : []);
   try {
-    const viaWs = await run('remote-browser', [`--scenario=${name}-autoplay`, `--ws=${remote.endpoint}`]);
+    assert.equal(new URL(remote.endpoint).hostname, '127.0.0.1', 'the browser server listens at ' + remote.endpoint);
+    const port = await freePort();
+    const viaWs = await run('remote-browser', [`--scenario=${name}-autoplay`, `--ws=${remote.endpoint}`, `--port=${port}`]);
     assert.equal(viaWs.code, 0);
+    assert.equal(viaWs.report.url, `http://127.0.0.1:${port}`);
     assert.equal(/SwiftShader/.test(viaWs.report.renderer), software, viaWs.report.renderer);
     assert.deepEqual(viaWs.report.scenarios.map((s) => [s.ok, s.result]), [[true, { audio: 'autoplay running' }]]);
     const mismatch = await run('remote-renderer-mismatch', [`--scenario=${name}-autoplay`, `--ws=${remote.endpoint}`], null, { LANTERN_GL: software ? undefined : 'software' });
@@ -292,6 +301,13 @@ export const scenarios = {
   const startup = await run('startup-failure', [`--scenario=${name}-signal`, '--host=invalid.invalid']);
   assert.notEqual(startup.code, 0);
   assert.match(startup.log, /no free port/);
+  const busy = net.createServer().listen(0, '127.0.0.1');
+  await once(busy, 'listening');
+  const { port: busyPort } = busy.address();
+  const taken = await run('pinned-port-taken', [`--scenario=${name}-signal`, `--port=${busyPort}`]);
+  busy.close();
+  assert.notEqual(taken.code, 0);
+  assert.match(taken.log, new RegExp(`dev server port ${busyPort} is taken`));
 } finally {
   for (const file of [fixture, duplicate, side]) fs.rmSync(file, { force: true });
   fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify(results, null, 2));

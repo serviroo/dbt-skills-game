@@ -70,7 +70,9 @@ npm run preview  # serves dist/ on http://localhost:4173
 
 Browser checks and icon draws use the GPU through Vulkan by default. On a machine without a GPU, pass
 `--software` to browser scripts, for example `node scripts/e2e.mjs --software`. For builds, use
-`LANTERN_GL=software npm run build`; child browser scripts inherit that explicit choice.
+`LANTERN_GL=software npm run build`; child browser scripts inherit that explicit choice. To run the end-to-end checks
+on another machine's GPU, start `node scripts/e2e-browser.mjs` there and reach it through an SSH tunnel, as
+CONTRIBUTING.md shows. It listens on 127.0.0.1 only, because anyone who can reach it can drive that browser.
 
 `dist/` is a plain static site with an offline service worker, so any static host works. The service worker only runs
 over HTTPS (or on localhost).

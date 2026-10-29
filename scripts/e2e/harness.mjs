@@ -92,9 +92,13 @@ const ZONE = (() => {
 })();
 process.env.TZ = ZONE;
 
-/** Starts Vite on the first free port from 5290. If another run takes the port first, Vite exits and the next port is tried. */
-async function serve(host) {
-  for (let port = 5290; port < 5390; port++) {
+/**
+ * Starts Vite on the first free port from 5290, or only on `pinned` (--port, the port a tunnel forwards). If another run
+ * takes the port first, Vite exits and the next port is tried.
+ */
+async function serve(host, pinned) {
+  const [from, to] = pinned ? [pinned, pinned + 1] : [5290, 5390];
+  for (let port = from; port < to; port++) {
     if (!(await portFree(port, host))) continue;
     const child = spawn(process.execPath, [path.join(root, 'node_modules/vite/bin/vite.js'), '--host', host, '--port', String(port), '--strictPort'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
     let log = '';
@@ -127,7 +131,7 @@ async function serve(host) {
     await stop();
     throw new Error('dev server did not start:\n' + (spawnError?.message ?? log));
   }
-  throw new Error('no free port for the dev server');
+  throw new Error(pinned ? `dev server port ${pinned} is taken` : 'no free port for the dev server');
 }
 
 // What happened inside each page, for evidence(): the intro's title, name prompt and windows coming and going, taps as
@@ -314,7 +318,7 @@ export async function startHarness(flags = {}) {
   let browser;
   try {
     browser = await start();
-    server = await serve(host);
+    server = await serve(host, flags.port && Number(flags.port));
   } catch (e) {
     await Promise.allSettled(browsers.map((b) => b.close()));
     await server?.stop();

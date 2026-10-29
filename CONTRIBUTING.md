@@ -145,11 +145,20 @@ The same choice reaches browser children, including icon draws during a build.
 `node scripts/e2e-runner-check.mjs` checks file selection, duplicate names, failure reports and cleanup through the
 real command. It creates temporary scenario files and removes them when it finishes.
 
-The intro is 3D, so for a real-GPU run on another machine, start the browser there with
-`node scripts/e2e-browser.mjs --host=<that machine's address>`. It starts with the same flags as a local run, because a
-browser that is already running can't take new ones, and prints its endpoint. Then run the scenarios here with
-`--ws=<that endpoint> --host=<this machine's address>`, so the dev server is reachable from that browser. `--headed`
-goes to the browser's machine; `--software` goes to both commands.
+The intro is 3D, so for a real-GPU run on another machine, start the browser there with `node scripts/e2e-browser.mjs`.
+It starts with the same flags as a local run, because a browser that is already running can't take new ones, and
+prints its endpoint, `ws://127.0.0.1:<port>/<path>`. Anyone who can reach that endpoint can drive the browser, so it
+listens on that machine's 127.0.0.1 only. From this machine, open an SSH tunnel both ways and run the scenarios
+through it:
+
+```sh
+ssh -N -L <port>:127.0.0.1:<port> -R 5400:127.0.0.1:5400 <the GPU machine>
+node scripts/e2e.mjs --ws=ws://127.0.0.1:<port>/<path> --port=5400
+```
+
+`-L` brings the browser's port to this machine's 127.0.0.1, and `-R` lets that browser load this run's dev server at
+its own 127.0.0.1. `--port` keeps the dev server on the forwarded port, and the run stops if that port is taken.
+`--headed` goes to the browser's machine; `--software` goes to both commands.
 
 ### Skill check
 

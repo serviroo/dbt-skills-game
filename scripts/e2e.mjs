@@ -1,6 +1,6 @@
 // Runs the end-to-end scenarios in scripts/e2e/*.e2e.mjs against its own Vite dev server and Playwright Chromium, then
 // stops only the processes it started. Exits 1 if any scenario fails.
-// node scripts/e2e.mjs [--file=<name>] [--scenario=<name>] [--shard=<i>/<n>] [--jobs=<n>] [--cpu-throttle=<n>] [--headed] [--software] [--ws=<endpoint from scripts/e2e-browser.mjs> --host=<this machine's address>]
+// node scripts/e2e.mjs [--file=<name>] [--scenario=<name>] [--shard=<i>/<n>] [--jobs=<n>] [--cpu-throttle=<n>] [--headed] [--software] [--ws=<endpoint from scripts/e2e-browser.mjs> --port=<dev server port>]
 // Scenarios run side by side in --jobs browsers (default one for every 4 of this machine's CPU threads, at most 4, and 1
 // with --ws), each browser taking the longest one left. A file that exports `serial = true` runs its scenarios in the
 // order they are written, one at a time in one browser.
@@ -9,9 +9,11 @@
 // --file=names runs scripts/e2e/names.e2e.mjs only. Browsers use this machine's GPU (Vulkan) by default.
 // --software explicitly uses SwiftShader on machines without a GPU, including browser children started by builds.
 // --cpu-throttle=4 slows every page's CPU work by four through CDP; report.json records the requested rate and any failure.
-// With --ws the browser runs on another machine (one with a real GPU) and loads the dev server bound to --host. Start it
-// there with scripts/e2e-browser.mjs, which gives it a local run's flags: --software and --headed go to that script, and
-// --software also here so the renderer check expects SwiftShader.
+// With --ws the browser runs on another machine (one with a real GPU). Start it there with scripts/e2e-browser.mjs,
+// which gives it a local run's flags (--software and --headed go to that script, and --software also here so the
+// renderer check expects SwiftShader) and listens on that machine's 127.0.0.1 only. An SSH tunnel from here forwards
+// its port (-L) and the dev server's (-R), so both sides use 127.0.0.1; --port keeps the dev server on the forwarded
+// port (CONTRIBUTING.md).
 // Writes screenshots and report.json to artifacts/e2e/<time>/.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -22,10 +24,11 @@ import { startHarness } from './e2e/harness.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.join(root, 'scripts/e2e');
 const flags = Object.fromEntries(process.argv.slice(2).filter((a) => a.startsWith('--')).map((a) => { const [k, ...v] = a.slice(2).split('='); return [k, v.length ? v.join('=') : 'true']; }));
-for (const key of ['file', 'scenario', 'shard', 'jobs', 'cpu-throttle']) {
+for (const key of ['file', 'scenario', 'shard', 'jobs', 'cpu-throttle', 'port']) {
   if (flags[key] === '') throw new Error(`--${key} needs a value`);
 }
 if (flags.jobs && !/^[1-9]\d*$/.test(flags.jobs)) throw new Error(`--jobs needs a whole number of 1 or more, got ${flags.jobs}`);
+if (flags.port && !(/^[1-9]\d*$/.test(flags.port) && +flags.port <= 65535)) throw new Error(`--port needs a port number, got ${flags.port}`);
 if (flags['cpu-throttle'] && (!Number.isFinite(Number(flags['cpu-throttle'])) || Number(flags['cpu-throttle']) < 1)) throw new Error(`--cpu-throttle needs a number of 1 or more, got ${flags['cpu-throttle']}`);
 // With --software, one browser drawing the skills' 3D scenes keeps about 1.5 desktop cores busy. On
 // CI's 4-vCPU runners two of them starved each other: short scenarios ran 4 to 12 times slower, and some timed out.
