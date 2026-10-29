@@ -478,6 +478,21 @@
   opacity: 0;
   cursor: pointer;
 }
+/* a phone zoomed to 200% (260 CSS pixels wide or less): the lengths stack, each as wide as the row, so none is too
+   narrow to tap */
+@media (max-width: 260px) {
+  .dq-mo-len-opts {
+    flex-direction: column;
+  }
+  .dq-mo-len-o {
+    flex: none;
+    border-left: 0;
+    border-top: 1px solid rgba(125, 150, 197, 0.22);
+  }
+  .dq-mo-len-o:first-child {
+    border-top: 0;
+  }
+}
 /* gone but still holding their place, so Done stays where the thumb left it */
 .dq-mo-foot .is-gone {
   visibility: hidden;

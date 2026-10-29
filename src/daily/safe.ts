@@ -334,6 +334,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     el,
     title: 'Safe Zone',
     tools: [lightBtn],
+    foot,
     mode: 'safe',
     bubbles: [0, 0],
     leave: () => {

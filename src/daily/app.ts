@@ -185,7 +185,8 @@ export class App {
       this.root.style.setProperty('--dq-top', `${this.top.offsetHeight}px`);
       this.root.style.setProperty('--dq-foot', `${this.current?.foot?.offsetHeight ?? 0}px`);
     });
-    this.pins.observe(this.top);
+    // the whole box, padding too: a bar's padding changes on its own as the screen turns, zooms or the keyboard opens
+    this.pins.observe(this.top, { box: 'border-box' });
     if (opts.volume) {
       // first launch with the speaker: an earlier Sound off carries over as mute
       if (opts.volume.fresh && this.store.state.settings.sound === false) opts.volume.set({ muted: true });
@@ -728,7 +729,7 @@ export class App {
     const out = this.screens[route.name](this, route, { again: v.again, kept: v.again ? this.kept.get(key) : undefined, handed: v.again ? undefined : v.hand, at: v.at, mark: (p) => this.mark(key, p) });
     this.current = out;
     this.root.style.setProperty('--dq-foot', '0px');
-    if (out.foot) this.pins.observe(out.foot);
+    if (out.foot) this.pins.observe(out.foot, { box: 'border-box' });
     this.root.dataset.mode = out.mode;
     this.root.dataset.screen = route.name;
     // only Home's sky follows the clock; the Safe Zone gets the night sky back at once

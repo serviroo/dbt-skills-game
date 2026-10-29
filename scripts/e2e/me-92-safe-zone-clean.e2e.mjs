@@ -411,7 +411,7 @@ const SHOWN = {
   talk: ['.dq-res-list > li:first-child .dq-res-a:first-child', 1],
   close: [ACTS, 2],
 };
-const listed = (n, k) => Array.from({ length: n }, (_, i) => ({ id: `me92-${k}${i}`, text: `${k} ${i + 1}, a few words long`, at: Date.now() - 86400e3 }));
+export const listed = (n, k) => Array.from({ length: n }, (_, i) => ({ id: `me92-${k}${i}`, text: `${k} ${i + 1}, a few words long`, at: Date.now() - 86400e3 }));
 const filled = () => JSON.stringify({ ...JSON.parse(returning()), lists: { reasons: listed(3, 'reason'), comfort: listed(3, 'comfort'), activities: [], people: [{ id: 'me92-p1', name: 'Sam', phone: '+1 555 0100', at: Date.now() - 86400e3 }, { id: 'me92-p2', name: 'Robin', phone: '', at: Date.now() - 86400e3 }] } });
 // an iPhone with a notch held sideways (the smallest is 812x375): 47 px each side, 21 px for the home bar
 const NOTCH = { top: 0, left: 47, right: 47, bottom: 21 };

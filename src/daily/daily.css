@@ -2258,8 +2258,9 @@ textarea.dq-input {
     flex: none;
   }
   /* the scroller runs to the frame's edges so the words scroll right up to its border, and the frame's bottom padding
-     comes after the last choice */
+     comes after the last choice. It holds everything it scrolls, visually hidden labels too, so the page never scrolls */
   .dq-sz-body {
+    position: relative;
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
@@ -2398,6 +2399,32 @@ textarea.dq-input {
   top: var(--dq-top, 0px);
   bottom: auto;
   padding: 0 0 12px;
+}
+/* where the page scrolls, a scroll or focus stops clear of the pinned bars: below the top bar, and above "Talk to someone
+   now" (--dq-foot, its height) or below it once it sits above the frame */
+.dq[data-screen='safe'] {
+  --sz-bar: calc(var(--dq-top, 0px) + var(--top-shade));
+  --sz-over: var(--dq-foot, 0px);
+  scroll-padding: var(--sz-bar) 0 var(--sz-over);
+}
+.dq[data-screen='safe']:has(.dq-sz-foot.is-top) {
+  scroll-padding: calc(var(--sz-bar) + var(--sz-over)) 0 0;
+}
+/* under 230px tall (a phone held sideways at 200% zoom, or with the keyboard up) the top bar and "Talk to someone now"
+   pinned together leave no room for a choice and a line of words: Talk stays pinned and the top bar scrolls away */
+@media (max-height: 230px) {
+  .dq[data-screen='safe'] {
+    --sz-bar: 0px;
+  }
+  .dq[data-screen='safe'] .dq-top {
+    position: relative;
+  }
+  .dq[data-screen='safe'] .dq-sky-top {
+    display: none;
+  }
+  .dq[data-screen='safe'] .dq-sz-foot.is-top {
+    top: 0;
+  }
 }
 /* Copy your lists: the preview reads like the lists, wraps on a phone and stays selectable */
 .dq-lists-row {
@@ -3514,6 +3541,10 @@ textarea.dq-input {
     align-self: flex-start;
     width: calc(1px + 2 * var(--pad) + (100% - 2px - 3 * var(--pad)) * 2 / 5);
     padding: 4px 0 calc(var(--safe-bottom) + 12px);
+  }
+  /* so a scroll or focus needn't stop clear of it */
+  .dq[data-screen='safe'] {
+    --sz-over: 0px;
   }
   .dq-sz-foot.is-top {
     padding: 0 0 8px;
