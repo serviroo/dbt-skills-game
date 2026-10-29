@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { gone } from './harness.mjs';
+import { isSettled, windowCut } from './me-92-safe-zone-clean.e2e.mjs';
 
 const VIEWPORTS = [{ width: 390, height: 844 }, { width: 320, height: 568 }, { width: 844, height: 390 }];
 const PHONE = VIEWPORTS[0];
@@ -167,11 +168,6 @@ const spot = (page, sel) =>
     return { x: r.x + r.width / 2, y: r.y + r.height / 2, opacity };
   }, sel);
 
-const isSettled = (sel) =>
-  document
-    .querySelector(sel)
-    .getAnimations({ subtree: true })
-    .every((a) => a instanceof CSSTransition || a instanceof CSSAnimation || a.playState === 'finished' || a.effect.getComputedTiming().endTime === Infinity);
 const settled = (page, sel) => page.evaluate(isSettled, sel);
 
 const typing = (page) => page.evaluate(() => window.__typing);
@@ -1133,4 +1129,66 @@ export const scenarios = {
       await ctx.close();
     }
   },
+  // every intro window at 200% zoom (the page laid out at half the size), on each phone either way up, as windows over the
+  // companion are checked: never past the sides, its neon bars and buttons whole once scrolled to, and no word a player
+  // can see cut off. The intro shows the name prompt and the chosen, level and quest windows itself; the army and
+  // unlocked windows, from later beats, open here with the intro's own words
+  ...Object.fromEntries(
+    [[390, 844], [320, 568], [844, 390], [568, 320]].map(([w, ht]) => [
+      `intro-window-words-${w}x${ht}-200`,
+      async ({ open, expect }) => {
+        const problems = [];
+        const first = await firstRun(open, { width: w / 2, height: ht / 2 });
+        try {
+          await first.page.locator('.title-screen').click();
+          const prompt = '.sw:has(#np-name)';
+          await first.page.locator(prompt).waitFor({ timeout: 30000 });
+          await first.page.waitForFunction(isSettled, prompt, { polling: 'raf', timeout: 15000 });
+          problems.push(...(await windowCut(first.page, prompt)).map((f) => `name prompt: ${f}`));
+          expect(!first.errors.length, first.errors.join('\n'));
+        } finally {
+          await first.ctx.close();
+        }
+        const { ctx, page, errors } = await open({}, `?shot=windows&mute${LIGHT}`, { width: w / 2, height: ht / 2 });
+        try {
+          await pastStartup(page);
+          await page.locator('.title-screen').click();
+          for (const kind of ['notification', 'level', 'quest']) {
+            const win = `.sw[data-kind="${kind}"]`;
+            await page.locator(win).waitFor({ timeout: 30000 });
+            const p = await spot(page, `${win} .sw-plate`);
+            // the quest's last lines show after its typing: a tap completes it, and every word with it
+            if (kind === 'quest') {
+              await page.waitForFunction((q) => Number(getComputedStyle(document.querySelector(`${q} .sw-title`)).opacity) === 1, win, { polling: 'raf' });
+              await page.mouse.click(p.x, p.y);
+            }
+            await page.waitForFunction(isSettled, win, { polling: 'raf', timeout: 15000 });
+            problems.push(...(await windowCut(page, win)).map((f) => `${kind}: ${f}`));
+            await page.mouse.click(p.x, p.y);
+            await page.locator(win).waitFor({ state: 'detached', timeout: 10000 });
+          }
+          for (const kind of ['army', 'unlocked']) {
+            await page.evaluate(async (kind) => {
+              const { LanternWindow, lanternLayer } = await import('/src/ui/lantern-window.ts');
+              const { WINDOWS } = await import('/src/content/intro.ts');
+              const W = WINDOWS[kind];
+              const win = new LanternWindow(lanternLayer(), { kind: kind === 'army' ? 'notification' : 'reward', title: W.title, html: W.html });
+              win.root.dataset.words = kind;
+              window.__words = win;
+              void win.open();
+            }, kind);
+            const win = `[data-words="${kind}"]`;
+            await page.locator(win).waitFor({ state: 'visible', timeout: 10000 });
+            await page.waitForFunction(isSettled, win, { polling: 'raf', timeout: 15000 });
+            problems.push(...(await windowCut(page, win)).map((f) => `${kind}: ${f}`));
+            await page.evaluate(() => window.__words.destroy());
+          }
+          expect(!problems.length, `${w}x${ht} at 200%: ${problems.join('; ')}`);
+          expect(!errors.length, errors.join('\n'));
+        } finally {
+          await ctx.close();
+        }
+      },
+    ]),
+  ),
 };

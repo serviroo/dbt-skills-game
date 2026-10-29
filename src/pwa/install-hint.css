@@ -54,8 +54,11 @@
 .pwa-steps li:last-child {
   border-bottom: 0;
 }
+/* an icon and its name keep together on one line where they fit, and wrap inside their own box where they don't */
 .pwa-steps .nw {
-  white-space: nowrap;
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: top;
 }
 .pwa-steps .n {
   display: grid;
@@ -100,4 +103,21 @@
 .pwa-hint .sw-btn {
   font-size: 14px;
   padding: 0.85em 1.6em 0.85em 1.76em;
+}
+/* a phone zoomed to 200%: the same narrow plate and title every Lantern window takes (lantern-window.css), the whole
+   width of the room, and closer steps, so each icon and its name fit beside the step's number */
+@media (max-width: 260px) {
+  .pwa-hint-layer .sw {
+    --w: 100%;
+  }
+  .pwa-hint .sw-plate {
+    padding: 14px 10px 18px;
+  }
+  .pwa-hint .sw-title {
+    font-size: 13px;
+  }
+  .pwa-steps li {
+    gap: 0.5em;
+    padding-inline: 0;
+  }
 }

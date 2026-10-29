@@ -3245,30 +3245,11 @@ textarea.dq-input {
 .dq[data-screen='safe'] .dq-scrim {
   transition: none;
 }
-/* Lantern windows over the companion: beside the page (src/daily/app.ts winLayer) and below its top bar, so the Safe
-   Zone button is never under one; centred in the room left, or from its top and scrolling when taller than that room.
-   The padding holds the window's neon bars, which reach 24 px above and below it and 6.5% past its sides, glow and all */
-.dq-sw-layer {
-  position: fixed;
+/* Lantern windows over the companion (src/daily/app.ts winLayer), laid out as every window layer is
+   (lantern-window.css), below the top bar, so the Safe Zone button is never under one */
+.sw-layer.dq-sw-layer {
   inset: var(--dq-top, 0px) 0 0;
-  z-index: 20;
-  display: grid;
-  /* one column as wide as the room, so a window is never wider than it */
-  grid-template-columns: minmax(0, 1fr);
-  align-items: start;
-  justify-items: center;
-  padding: 32px max(14px, calc(6vw + 4px)) calc(var(--safe-bottom) + 32px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  pointer-events: none;
-}
-.dq-sw-layer > .sw {
-  max-width: 100%;
-  margin-block: auto;
-}
-/* a window's choices wrap where they don't fit side by side */
-.dq-sw .sw-actions {
-  flex-wrap: wrap;
+  padding-top: 32px;
 }
 .dq.is-windowed .dq-top {
   z-index: 16;

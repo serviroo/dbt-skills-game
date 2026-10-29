@@ -183,7 +183,7 @@ export class App {
     this.toastEl = h('div', { class: 'dq-toast', role: 'status', 'aria-live': 'polite' });
     this.sheetLayer = h('div', { class: 'dq-sheets' });
     this.root.append(this.sky.back, this.bubbles.canvas, h('div', { class: 'dq-vignette', 'aria-hidden': 'true' }), this.sheetLayer, this.sky.shade, this.top, this.view, this.toastEl, this.scrim);
-    this.winLayer = h('div', { class: 'dq-sw-layer' });
+    this.winLayer = h('div', { class: 'sw-layer dq-sw-layer' });
     host.append(this.root, this.winLayer);
     this.pins = new ResizeObserver(() => {
       host.style.setProperty('--dq-top', `${this.top.offsetHeight}px`);
