@@ -1,4 +1,9 @@
 // The harness waits for layout to rest, including delayed entrances and animated parents, without waiting on paint.
+
+/** A timeout naming `target` and its bob, either moving (its box before and after) or, on a slow compositor, still
+ *  waiting to start. */
+const namesBob = (message, target) => new RegExp(`${target}.*did not settle`).test(message) && /bob/.test(message) && /transform/.test(message) && (/before.*after/.test(message) || /"started":false/.test(message));
+
 export const scenarios = {
   async 'settled-svg-child-scale'(h) {
     const ctx = await h.browser.newContext();
@@ -75,8 +80,20 @@ export const scenarios = {
       const page = await ctx.newPage();
       await page.setContent('<style>@keyframes bob { to { transform:translateY(50px) } } button { animation:bob 1s infinite alternate linear }</style><button id="moving">Bob</button>');
       let message = '';
-      try { await h.settled(page, '#moving', { timeout: 300 }); } catch (e) { message = e.message; }
-      h.expect(/#moving.*did not settle/.test(message) && /bob/.test(message) && /transform/.test(message) && /before.*after/.test(message), `the timeout did not name the moving target and animation: ${message}`);
+      try { await h.settled(page, '#moving', { timeout: 1000 }); } catch (e) { message = e.message; }
+      h.expect(namesBob(message, '#moving'), `the timeout did not name the moving target and animation: ${message}`);
+    } finally { await ctx.close(); }
+  },
+  // an endless bob holds still until it starts, in its delay here, and on CI for the frames a new animation waits to
+  // start on a slow compositor: two still frames then must not pass for rest
+  async 'settled-bob-waits-to-start'(h) {
+    const ctx = await h.browser.newContext();
+    try {
+      const page = await ctx.newPage();
+      await page.setContent('<style>@keyframes bob { to { transform:translateY(50px) } } button { animation:bob 1s 500ms infinite alternate linear }</style><button id="waiting">Bob</button>');
+      let message = '';
+      try { await h.settled(page, '#waiting', { timeout: 1500 }); } catch (e) { message = e.message; }
+      h.expect(namesBob(message, '#waiting'), `a bob still waiting to start passed for rest: ${message}`);
     } finally { await ctx.close(); }
   },
 };

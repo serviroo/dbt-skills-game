@@ -55,11 +55,14 @@ export async function settled(page, selector, { timeout = 15000 } = {}) {
               const reflows = !owner.ownerSVGElement && props.some((k) => !paint.test(k) && !['transform', 'translate', 'rotate', 'scale'].includes(k));
               if (!direct && !(reflows && els.some((el) => el.contains(owner)))) continue;
               const timing = a.effect.getComputedTiming();
-              blocking.push({ owner: label(owner), animation: a.animationName ?? a.transitionProperty ?? 'animation', properties: props, progress: timing.progress, endless: timing.endTime === Infinity });
+              // until it is past its first instant (pending on the compositor, in its delay, or right at its start) an
+              // animation holds its box still, so two equal frames can't tell an endless one from rest yet
+              const started = !a.pending && timing.localTime > Math.max(0, timing.delay);
+              blocking.push({ owner: label(owner), animation: a.animationName ?? a.transitionProperty ?? 'animation', properties: props, progress: timing.progress, endless: timing.endTime === Infinity, started });
             }
             const rects = els.map((el) => ({ owner: label(el), rect: ['x', 'y', 'width', 'height'].map((k) => el.getBoundingClientRect()[k]) }));
             const changed = rects.flatMap((r, i) => JSON.stringify(r) === JSON.stringify(before[i]) ? [] : [{ owner: r.owner, before: before[i]?.rect ?? null, after: r.rect }]);
-            return { rects, blocking, changed, stable: els.length > 0 && before.length === rects.length && !changed.length && !blocking.some((a) => !a.endless) };
+            return { rects, blocking, changed, stable: els.length > 0 && before.length === rects.length && !changed.length && !blocking.some((a) => !a.endless || !a.started) };
           }, { selector, before });
         })(),
         new Promise((_, fail) => { timer = setTimeout(() => fail(new Error(`${selector} did not settle within ${timeout} ms: ${moving}`)), Math.max(0, end - Date.now())); }),
