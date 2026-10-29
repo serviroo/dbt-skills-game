@@ -9,9 +9,14 @@
 // as the device's own setting changes while it is up) and leaves its flat picture with no WebGL. The breathing light is
 // a small hot core in a halo gone by half its ring, with the countdown readable (3:1) under it all breath long; the
 // wave's moon is a light that shows whole at every size.
+import fs from 'node:fs';
 import sharp from 'sharp';
 import { deviceMotion } from './device-motion.e2e.mjs';
 import { gone, screenshot } from './harness.mjs';
+
+/** how long a scene's stage hides its flat picture while the scene loads (SCENE.waitMs) */
+const WAIT_MS = Number(/\bwaitMs:\s*(\d+)/.exec(fs.readFileSync(new URL('../../src/motion/tokens.ts', import.meta.url), 'utf8'))?.[1]);
+if (!(WAIT_MS > 0)) throw new Error('SCENE.waitMs is missing from src/motion/tokens.ts');
 
 const PHONE = { width: 390, height: 844 };
 const SIDE = { width: 844, height: 390 };
@@ -180,6 +185,23 @@ const countWaits = () => {
 };
 async function flat(page) {
   return page.$$eval('.dq-scene-flat', (els) => els.map((e) => { const s = getComputedStyle(e); return s.visibility !== 'hidden' && Number(s.opacity) > 0.5; }));
+}
+
+/**
+ * Waits for the flat picture to hand over to the live scene. Once its first frame is drawn the scene fades in and its
+ * flat picture fades out (SCENE.fadeMs), and a first frame slower than SCENE.waitMs finds the flat picture back on
+ * screen, so a scene is looked at once that cross-fade is over. It looks from here, as drawn() does, since the page
+ * clock may be stopped; a flat picture left over a live scene never hands over and fails here.
+ */
+async function handedOver(h, page, where) {
+  for (const end = Date.now() + 5000; ; await h.sleep(50)) {
+    const now = await page.evaluate(() => ({
+      scene: Number(getComputedStyle(document.querySelector('.dq-scene')).opacity),
+      flat: [...document.querySelectorAll('.dq-scene-flat')].filter((e) => getComputedStyle(e).visibility !== 'hidden').length,
+    }));
+    if (now.scene > 0.99 && !now.flat) return;
+    h.expect(Date.now() < end, `${where}: the flat picture never handed over to the 3D scene (${JSON.stringify(now)})`);
+  }
 }
 
 /** The countdown shows whole seconds left, rounded up; the scene draws at most 30 times a second, so it may trail a frame. */
@@ -357,7 +379,7 @@ async function looks(h, page, tag, kind, vp, stage = '.dq-timer-stage', { stoppe
   h.expect(s.live === 1 && s.contexts === 1 && s.frames - s0.frames >= 3, `${kind} ${tag}: ${s.frames - s0.frames} frames in ${stopped ? '0.5 s of page time' : '1.5 s'}, ${JSON.stringify(s)}`);
   h.expect(s.last.kind === kind && !s.last.still, `${kind} ${tag}: expected a moving ${kind} scene, got ${JSON.stringify(s.last)}`);
   h.expect((await page.locator('.dq-scene canvas').count()) === 1, `${kind} ${tag}: expected one canvas in the scene window`);
-  h.expect((await flat(page)).every((on) => !on), `${kind} ${tag}: the flat picture still shows over the 3D scene`);
+  await handedOver(h, page, `${kind} ${tag}`);
   const p = await drawn(h, page, `${kind} ${tag}`);
   const [box, win] = await Promise.all([page.locator(stage).boundingBox(), page.locator('.dq-scene').boundingBox()]);
   h.expect(win.x >= box.x - 0.5 && win.x + win.width <= box.x + box.width + 0.5 && win.y >= box.y - 0.5 && win.y + win.height <= box.y + box.height + 0.5, `${kind} ${tag}: the scene window spills out of its stage`);
@@ -537,7 +559,7 @@ export const scenarios = {
       h.expect(s.live === 1 && s.contexts === 1 && s.frames > 10, `${tag}: ${JSON.stringify(s)}`);
       h.expect(s.last.kind === 'drift' && !s.last.still && s.last.e > 0.5, `${tag}: the scene is not following the timer: ${JSON.stringify(s.last)}`);
       h.expect((await page.locator('.dq-scene canvas').count()) === 1, `${tag}: expected one canvas in the scene window`);
-      h.expect((await flat(page)).every((on) => !on), `${tag}: the flat picture still shows over the 3D scene`);
+      await handedOver(h, page, tag);
       const p = await drawn(h, page, tag);
       const [stage, win] = await Promise.all([page.locator('.dq-timer-stage').boundingBox(), page.locator('.dq-scene').boundingBox()]);
       h.expect(win.x >= stage.x - 0.5 && win.x + win.width <= stage.x + stage.width + 0.5 && win.y >= stage.y - 0.5 && win.y + win.height <= stage.y + stage.height + 0.5, `${tag}: the scene window spills out of the timer`);
@@ -891,6 +913,40 @@ export const scenarios = {
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },
+  /**
+   * a first frame slower than the scene's wait (SCENE.waitMs), as on CI's software GPU: the flat picture comes back
+   * meanwhile, then hands over to the stone, the wave, the light and the tide once each comes on screen
+   */
+  async 'scene-flat-handoff'(h) {
+    for (const k of [{ kind: 'drift', id: 'wise-mind', entry: 'stone' }, ...KINDS]) {
+      const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
+      await ctx.addInitScript((hold) => {
+        // each scene's first frame is drawn a second after the wait is over, on the page's clock
+        const P = WebGL2RenderingContext.prototype, make = P.fenceSync, get = P.getSyncParameter, asked = new Map();
+        P.fenceSync = function (...args) {
+          const f = make.apply(this, args);
+          if (this.canvas.closest?.('.dq-scene')) asked.set(f, performance.now());
+          return f;
+        };
+        P.getSyncParameter = function (f, pname) {
+          if (asked.has(f) && pname === this.SYNC_STATUS && performance.now() - asked.get(f) < hold) return this.UNSIGNALED;
+          return get.call(this, f, pname);
+        };
+      }, WAIT_MS + 1000);
+      await page.clock.install();
+      await page.reload();
+      await toStep(h, page, k.id, k.entry, { pause: true });
+      // just past the wait the flat picture is back, with the scene not yet on screen: the case this checks
+      await page.clock.runFor(WAIT_MS + 100);
+      const stage = await page.locator('.dq-timer-stage').getAttribute('class');
+      h.expect(!/\bis-scene-(wait|live)\b/.test(stage), `slow first frame ${k.kind}: the flat picture did not come back before the scene (${stage})`);
+      await showsStopped(h, page, `slow first frame ${k.kind}`);
+      await looks(h, page, 'slow-first-frame', k.kind, PHONE, undefined, { stopped: true });
+      h.expect(!errors.length, errors.join('\n'));
+      await ctx.close();
+    }
+  },
+
   /** the wave: the board rides the swell, low at first, high on the first crest, low again after */
   async 'wave-scene'(h) {
     for (const [tag, vp] of VIEWS) {

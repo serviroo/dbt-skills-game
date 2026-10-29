@@ -428,6 +428,7 @@
   "scene-clock": 21,
   "scene-context-restored": 20,
   "scene-cycles": 93,
+  "scene-flat-handoff": 55,
   "scene-hidden": 19,
   "scene-live": 53,
   "scene-motion": 20,
