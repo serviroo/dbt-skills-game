@@ -241,9 +241,11 @@ const WINDOWS = {
       await page.locator('.dq-sw').waitFor({ state: 'visible', timeout: 5000 });
       const tap = async () => {
         const p = await page.evaluate(() => {
+          // the middle of the part that shows: a window taller than the room scrolls in its layer
           const r = document.querySelector('.dq-sw .sw-plate').getBoundingClientRect();
+          const l = document.querySelector('.dq-sw').parentElement.getBoundingClientRect();
           const x = r.x + r.width / 2;
-          const y = r.y + r.height / 2;
+          const y = (Math.max(r.top, l.top) + Math.min(r.bottom, l.bottom, innerHeight)) / 2;
           return { x, y, hit: !!document.elementFromPoint(x, y)?.closest('.dq-sw') };
         });
         h.expect(p.hit, 'gift: the window is not what a tap on it reaches');
@@ -345,20 +347,41 @@ async function windowCase(h, kind, { viewport, reduced = false, score = true }) 
     await w.open(page);
     await page.locator(w.sel ?? '.dq-sw').first().waitFor({ state: 'visible', timeout: 12000 });
     await h.sleep(400);
-    // a window itself: its top shows at the top of its layer, and each of its buttons can be scrolled to whole
+    // a window itself, scrolled only the way its layer lets the player, up and down: it never runs past the sides, and
+    // each of its neon bars and buttons shows whole, inside the screen and every box that clips it
     const cut = w.sheet ? [] : await page.evaluate(async (sel) => {
       const win = document.querySelector(sel);
       const layer = win.parentElement;
+      const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      // how much of e shows: inside the screen and inside every box around it that clips
+      const shows = (e) => {
+        const r = e.getBoundingClientRect();
+        let [l, t, rt, b] = [Math.max(r.left, 0), Math.max(r.top, 0), Math.min(r.right, innerWidth), Math.min(r.bottom, innerHeight)];
+        for (let p = e.parentElement; p; p = p.parentElement) {
+          const cs = getComputedStyle(p);
+          if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
+          const q = p.getBoundingClientRect();
+          const [x, y] = [q.left + p.clientLeft, q.top + p.clientTop];
+          [l, t, rt, b] = [Math.max(l, x), Math.max(t, y), Math.min(rt, x + p.clientWidth), Math.min(b, y + p.clientHeight)];
+        }
+        return { r, w: rt - l, h: b - t };
+      };
+      const name = (e) => (e.matches('.sw-bar') ? `its ${e.matches('.sw-bar--top') ? 'top' : 'bottom'} bar` : `"${e.textContent.trim()}"`);
+      for (const s of [layer, ...win.querySelectorAll('*')]) s.scrollLeft = 0;
       layer.scrollTop = 0;
-      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      await frame();
       const out = [];
-      const l = layer.getBoundingClientRect();
-      if (win.getBoundingClientRect().top < l.top - 0.5) out.push(`its top is cut off above ${Math.round(l.top)}`);
-      for (const b of win.querySelectorAll('button')) {
-        if (!b.checkVisibility({ checkVisibilityCSS: true })) continue;
-        b.scrollIntoView({ block: 'nearest', behavior: 'instant' });
-        const r = b.getBoundingClientRect();
-        if (r.top < Math.max(0, l.top) - 0.5 || r.bottom > Math.min(innerHeight, l.bottom) + 0.5) out.push(`"${b.textContent.trim()}" can't be scrolled to whole`);
+      const all = shows(win);
+      if (all.w < all.r.width - 1) out.push(`it runs past the sides (${Math.round(all.r.left)} to ${Math.round(all.r.right)} of ${innerWidth})`);
+      for (const e of [...win.querySelectorAll('.sw-bar'), ...win.querySelectorAll('button')]) {
+        if (!e.checkVisibility({ checkVisibilityCSS: true })) continue;
+        const r = e.getBoundingClientRect();
+        const room = layer.getBoundingClientRect().top + layer.clientTop;
+        if (r.top < room) layer.scrollTop -= room - r.top;
+        else if (r.bottom > room + layer.clientHeight) layer.scrollTop += r.bottom - room - layer.clientHeight;
+        await frame();
+        const s = shows(e);
+        if (s.w < s.r.width - 1 || s.h < s.r.height - 1) out.push(`${name(e)} doesn't show whole (${[s.r.left, s.r.top, s.r.right, s.r.bottom].map(Math.round).join(', ')})`);
       }
       layer.scrollTop = 0;
       return out;

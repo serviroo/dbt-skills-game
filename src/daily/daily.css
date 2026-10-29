@@ -3246,21 +3246,29 @@ textarea.dq-input {
   transition: none;
 }
 /* Lantern windows over the companion: beside the page (src/daily/app.ts winLayer) and below its top bar, so the Safe
-   Zone button is never under one; centred in the room left, or from its top and scrolling when taller than that room */
+   Zone button is never under one; centred in the room left, or from its top and scrolling when taller than that room.
+   The padding holds the window's neon bars, which reach 24 px above and below it and 6.5% past its sides, glow and all */
 .dq-sw-layer {
   position: fixed;
   inset: var(--dq-top, 0px) 0 0;
   z-index: 20;
   display: grid;
+  /* one column as wide as the room, so a window is never wider than it */
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   justify-items: center;
-  padding: 8px 14px calc(var(--safe-bottom) + 16px);
+  padding: 32px max(14px, calc(6vw + 4px)) calc(var(--safe-bottom) + 32px);
   overflow-y: auto;
   overscroll-behavior: contain;
   pointer-events: none;
 }
 .dq-sw-layer > .sw {
-  margin: auto;
+  max-width: 100%;
+  margin-block: auto;
+}
+/* a window's choices wrap where they don't fit side by side */
+.dq-sw .sw-actions {
+  flex-wrap: wrap;
 }
 .dq.is-windowed .dq-top {
   z-index: 16;

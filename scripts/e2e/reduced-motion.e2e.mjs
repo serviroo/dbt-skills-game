@@ -49,7 +49,7 @@ const ACT = {
       await page.locator('.dq-card').click({ force: true });
       await page.locator('.dq-quest-go').waitFor({ timeout: 5000 });
       await page.locator('.dq-stats-toggle').click();
-      const win = page.locator('.sw-layer .dq-sw');
+      const win = page.locator('.dq-sw-layer .dq-sw');
       // with motion on, the first tap finishes the typing and the next one closes the window
       for (let opening = 0; opening < 2; opening++) {
         await page.locator('.dq-chest').click();
