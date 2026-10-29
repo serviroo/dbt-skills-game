@@ -8,8 +8,8 @@
 // glow breathes, the cat bleps and the shark swims again once it is turned off; A quiet minute's glow rests while it is
 // on, breathes once it is turned off, and settles again when it comes back on. With Motion saved as Full, the glint on
 // the card's back and the Story Room's scan keep moving whatever the device says. The title's pulses and the end card's
-// drift end with their screen, however it goes, and the Stealth Room's Breathing words still breathe with its glow
-// once motion is back.
+// drift end with their screen, however it goes, a capture's wait on a dismissed window's typing ends with it, and the
+// Stealth Room's Breathing words still breathe with its glow once motion is back.
 
 const PHONE = { width: 390, height: 844 };
 
@@ -300,6 +300,36 @@ export const scenarios = {
       h.expect(!errors.length, errors.join('\n'));
       await ctx.close();
     }
+  },
+
+  /**
+   * in a capture, a Lantern window dismissed while it types cancels its typing, and a wait for that typing to finish ends
+   * then, with an AbortError as in real time, instead of looking again on every step for the rest of the capture
+   */
+  async 'capture-wait-ends-with-a-dismissed-window'(h) {
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?lab=window&kind=notification&mute&capture', PHONE);
+    await page.waitForFunction(() => !!window.__stage && !!window.__win, null, { timeout: 30000 });
+    const ended = await page.evaluate(async () => {
+      const step = async (n) => {
+        for (let i = 0; i < n; i++) {
+          window.__stage.step(1 / 15);
+          await new Promise((r) => setTimeout(r));
+        }
+      };
+      const w = window.__win;
+      for (let i = 0; i < 200 && !w.typeAnims.length; i++) await step(1);
+      if (!w.typeAnims.length) return 'no typing';
+      // the same module the window's own waits come from
+      const { finished } = await import('/src/ui/anim.ts');
+      let how = 'still waiting';
+      finished(w.typeAnims[0]).then(() => (how = 'finished'), (e) => (how = e.name));
+      w.destroy();
+      await step(5);
+      return how;
+    });
+    h.expect(ended === 'AbortError', `in a capture, a wait on a dismissed window's typing ${ended === 'still waiting' ? 'never ends' : `ended as ${ended}`}`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
   },
 
   /**

@@ -149,8 +149,13 @@ export function after(ms: number) {
 
 export function finished(a: Animation) {
   if (params.capture) {
-    return new Promise<void>((resolve) => {
-      const check = () => (a.playState === 'finished' || Number(a.currentTime ?? 0) >= Number(a.effect?.getComputedTiming().endTime ?? 0) - 1 ? resolve() : waiters.push({ at: clockNow() + 1 / 120, resolve: check }));
+    return new Promise<void>((resolve, reject) => {
+      const check = () => {
+        // cancelled: the capture clock no longer plays it, so the wait ends as Animation.finished does on cancel
+        if (a.playState === 'idle') return reject(new DOMException('The animation was cancelled', 'AbortError'));
+        if (a.playState === 'finished' || Number(a.currentTime ?? 0) >= Number(a.effect?.getComputedTiming().endTime ?? 0) - 1) return resolve();
+        waiters.push({ at: clockNow() + 1 / 120, resolve: check });
+      };
       check();
     });
   }
