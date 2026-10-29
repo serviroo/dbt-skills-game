@@ -44,11 +44,12 @@ export type Step =
   | (Base & { kind: 'input'; text: Txt; key: string; placeholder?: string; fills?: string[]; skip?: string; cta?: string; lines?: number; prefix?: (a: Answers) => string })
   | (Base & { kind: 'slider'; text: Txt; key: string; min: number; max: number; ends?: [string, string]; words?: string[] })
   | (Base & { kind: 'breath'; text: Txt; inhale: number; exhale: number; rounds: number; alt?: [number, number]; words?: [string, string] })
-  | (Base & { kind: 'timer'; text: Txt; seconds: number | ((a: Answers) => number); start?: string; visual?: Visual; extend?: 0; small?: string; options?: Opt[]; big?: Txt; dim?: boolean })
+  | (Base & { kind: 'timer'; text: Txt; seconds: number | ((a: Answers) => number); start?: string; visual?: Visual; small?: string; options?: Opt[]; big?: Txt; dim?: boolean })
   | (Base & { kind: 'hold'; text: Txt; seconds: number; label: string; done: string; tone?: 'heal' })
   | (Base & { kind: 'tier'; text: Txt; key: string; from: string; tiers: string[] })
   | (Base & { kind: 'count'; text: Txt; n: number; label: string })
   | (Base & { kind: 'pmr'; text: Txt; rounds: number })
+  | (Base & { kind: 'cool'; options?: Opt[] })
   | (Base & { kind: 'cards'; text: Txt; cards: [string, string][] })
   | (Base & { kind: 'list'; text: Txt; list: ListId; key: string; empty: string; fallback: string[] })
   | (Base & { kind: 'checks'; text: Txt; rows: string[] })
@@ -78,8 +79,17 @@ export interface Skill {
 const CONDITION = 'have a heart or other medical condition';
 const EATING = 'have found eating hard lately';
 const DOCTOR_OK = "unless a doctor says it's okay";
-export const TIPP_CAUTION = `Skip cold water and hard exercise if you ${CONDITION}, take a beta-blocker or other heart-slowing medicine, are allergic to cold, or ${EATING}, ${DOCTOR_OK}. Breathing works for everyone.`;
-const COLD_CAUTION = `Skip cold water if you ${CONDITION}, take a beta-blocker or other heart-slowing medicine, are allergic to cold, or ${EATING}, ${DOCTOR_OK}.`;
+/**
+ * Cool air or cold water, offered side by side as equal choices wherever cold is (principle 11). Either one starts the
+ * same 30 seconds. The caution sits right under the two choices, so it's read before anything starts.
+ */
+export const COOL = {
+  title: 'Cool air or cold water',
+  text: 'Open a window or step outside into cool air. Or cold water on your face, or something cold over your eyes and cheeks.',
+  air: 'Cool air',
+  water: 'Cold water',
+  caution: 'Cool, not icy. Skip cold water with a heart or medical condition, heart-slowing medicine, a cold allergy, or if eating has been hard lately.',
+};
 /** Hard movement always comes last, behind "More", with this line. */
 export const MOVE_CAUTION = `Skip if you feel dizzy, sick or sore. Skip it too if you ${CONDITION}, take a beta-blocker or other heart-slowing medicine, or ${EATING}, ${DOCTOR_OK}. Standing only, easy on the knees.`;
 /** "Not this time" is always an answer on a loadout card. */
@@ -608,7 +618,7 @@ export const SKILLS: Skill[] = [
     minutes: '1-3 min',
     card: "Turn your body's volume down fast when feelings are way too loud.",
     steps: [
-      { kind: 'intro', text: "Fast ways to turn your body's volume down when feelings are way too loud.", small: TIPP_CAUTION },
+      { kind: 'intro', text: "Fast ways to turn your body's volume down when feelings are way too loud." },
       {
         id: 'pick',
         kind: 'choice',
@@ -621,20 +631,7 @@ export const SKILLS: Skill[] = [
           { label: 'More', go: 'more' },
         ],
       },
-      {
-        id: 'cold',
-        kind: 'timer',
-        title: 'T. Temperature',
-        seconds: 30,
-        // cold stays about 30 seconds (principle 11), so this timer has no "+15 s"
-        extend: 0,
-        start: 'Start 30 s',
-        visual: 'cold',
-        text: 'Open a window or step outside into cool air. Or cold water on your face, or something cold over your eyes and cheeks. Cool, not icy.',
-        small: COLD_CAUTION,
-        options: [{ label: 'Breathe instead', go: 'paced', instead: true }],
-        go: 'check',
-      },
+      { id: 'cold', kind: 'cool', title: 'T. Temperature', options: [{ label: 'Breathe instead', go: 'paced' }], go: 'check' },
       {
         id: 'more',
         kind: 'say',
@@ -2063,12 +2060,6 @@ export function suggestFor(feel: Feeling, level: number | null, todaySkill: stri
 export const SAFE = {
   intro: ["You're here.", 'One small step at a time.'],
   breathe: { title: 'Breathe with the light', text: 'In for 4. Out for 6. Slower out than in.' },
-  cold: {
-    title: 'Cool air, or something cool',
-    text: 'Open a window or step outside for cool air. Or cold water on your face, or something cold over your eyes and cheeks. Thirty seconds.',
-    small: 'Cool, not icy. Skip cold water with a heart or medical condition, heart-slowing medicine, a cold allergy, or if eating has been hard lately.',
-    during: 'Cool tells your body to slow down.',
-  },
   light: { up: 'Lights up', down: 'Lights down', hint: 'Dim or bright. Whichever sits better right now.' },
   squeeze: { title: 'Squeeze and release', text: 'Breathe in and squeeze your fists and shoulders. Hold. Breathe out, think "relax", and let everything drop.' },
   check: 'Is it even a little lower?',

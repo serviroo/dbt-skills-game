@@ -1,8 +1,7 @@
 // How each skill's flows finish, on a seeded returning save at 390x844. skill-check makes every timer and every screen
 // with a way out carry a step id; these open each one in its real skill (from Home, past the intro) and play it.
 // skill-timers: every timer offers "+N s" once it runs (+15 s up to 30 s, +30 s above), and it adds N seconds both
-// while running and after Done, on the same screen, with Next still there and no extra credit. Cold water is the one
-// exception (principle 11: about 30 s), so its timer has no "+N s".
+// while running and after Done, on the same screen, with Next still there and no extra credit.
 // skill-exits: on a screen that offers another skill or the Safe Zone, the first button finishes this skill on its own
 // end screen (or opens the Safe Zone when that leads), crediting this skill once and no other. After a "Higher" answer
 // the first button is people to talk to, which opens the Safe Zone at its talk screen.
@@ -48,8 +47,7 @@ export const scenarios = {
       (await import('/src/content/dbt.ts')).SKILLS.flatMap((sk) =>
         sk.steps.flatMap((st, i) => {
           if (st.kind !== 'timer') return [];
-          const text = typeof st.text === 'function' ? st.text({}) : st.text;
-          return [{ skill: sk.id, step: st.id, where: `${sk.id} step ${i + 1}`, dim: !!st.dim, cold: /\bcold water\b/i.test(`${text} ${st.small ?? ''}`) }];
+          return [{ skill: sk.id, step: st.id, where: `${sk.id} step ${i + 1}`, dim: !!st.dim }];
         }),
       ),
     );
@@ -78,9 +76,7 @@ export const scenarios = {
         if (await start.count()) await start.first().click();
         const more = timer.locator('button', { hasText: /^\+\d+ s$/ });
         const next = page.locator('.dq-step-body > .dq-actions > button', { hasText: /^Next$/ });
-        if (t.cold) {
-          if (await more.count()) bad.push(`${where}: cold water offers "${await more.first().textContent()}"; it stays about 30 s`);
-        } else if (!(await more.count())) {
+        if (!(await more.count())) {
           bad.push(`${where}: the running timer has no "+N s"`);
         } else {
           const n = Number(/\d+/.exec(await more.first().textContent())[0]);

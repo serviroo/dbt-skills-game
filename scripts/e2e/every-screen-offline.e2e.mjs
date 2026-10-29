@@ -240,6 +240,7 @@ const stepKind = (page) =>
     const typing = [...b.querySelectorAll('textarea, input[type=text]')].some((e) => !e.closest('.dq-addrow, .dq-other, .is-hidden'));
     const copy = [...b.querySelectorAll('button')].some((e) => e.textContent.trim() === 'Copy');
     if (has('.dq-intro')) return 'intro';
+    if (has('.dq-cool')) return 'cool';
     if (has('.dq-timer')) return 'timer';
     if (has('.dq-hold')) return 'hold';
     if (has('.dq-counter')) return 'count';
@@ -266,6 +267,7 @@ async function answer(page, kind) {
   if (kind === 'count') while (await body.locator('.dq-counter button:enabled').count()) await body.locator('.dq-counter button').click();
   if (kind === 'tier' || kind === 'checks') for (const row of await body.locator('.dq-check').all()) await row.getByRole('radio').first().click();
   if (kind === 'timer' && (await body.locator('.dq-timer .dq-actions .dq-btn--primary').count())) await body.locator('.dq-timer .dq-actions .dq-btn--primary').first().click();
+  if (kind === 'cool') await body.locator('.dq-cool-pick .dq-btn').first().click();
   if (kind === 'hold') {
     const box = await body.locator('.dq-hold').boundingBox();
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
@@ -282,7 +284,7 @@ const markFirst = (page, prefer) =>
     const shown = (e) => !!e.getClientRects().length && !e.disabled && !e.closest('.is-hidden');
     const label = (e) => e.textContent.trim().replace(/[‘’]/g, "'");
     const chips = [...body.querySelectorAll('.dq-opts:not(.dq-opts--fills) > .dq-opt')].filter(shown);
-    const acts = [...body.querySelectorAll('.dq-actions > button')].filter((b) => shown(b) && !b.closest('.dq-timer') && !b.classList.contains('ca-hl-ask') && label(b) !== 'Copy');
+    const acts = [...body.querySelectorAll('.dq-actions > button')].filter((b) => shown(b) && !b.closest('.dq-timer, .dq-cool-pick') && !b.classList.contains('ca-hl-ask') && label(b) !== 'Copy');
     const pick = [...chips, ...acts].find((e) => prefer.includes(label(e))) ?? chips[0] ?? acts[0];
     if (!pick) return null;
     pick.setAttribute('data-offline', 'tap');
@@ -321,6 +323,7 @@ async function walkSkill(page, where, prefer = []) {
 /** Skills that between them show every kind of step, with the answers that lead there (sl and real names come from SKILLS). */
 const COVER = [
   ['tipp', ['Squeeze and release, 1 min']],
+  ['tipp', ['Cool air or cold, 30 s']],
   ['stop', []],
   ['sense-up', []],
   ['pros-cons', []],
@@ -332,7 +335,7 @@ const COVER = [
   ['flavour-tier', ['Skip the timer']],
   ['urge-surf', ['Done']],
 ];
-const KINDS = ['intro', 'say', 'choice', 'input', 'slider', 'breath', 'timer', 'hold', 'count', 'pmr', 'cards', 'list', 'tier', 'checks', 'draft', 'map', 'highlight'];
+const KINDS = ['intro', 'say', 'choice', 'input', 'slider', 'breath', 'timer', 'cool', 'hold', 'count', 'pmr', 'cards', 'list', 'tier', 'checks', 'draft', 'map', 'highlight'];
 
 const saved = async (page) => JSON.parse((await page.evaluate((k) => localStorage.getItem(k), SAVE)) ?? 'null');
 const skillCredits = async (page, id) => ((await saved(page))?.events ?? []).filter((e) => e.k === 'skill' && (!id || e.skill === id)).length;
@@ -414,10 +417,10 @@ async function homeAndToday(h, page, problems) {
 /** The library, then every kind of step in a skill opened from it and walked to its end, each credited once. */
 async function skills(h, page, problems, names) {
   const met = new Set();
-  for (const [id, prefer] of COVER) {
+  for (const [i, [id, prefer]] of COVER.entries()) {
     await tile(page, 'Skills').click();
     await atScreen(page, 'library');
-    if (id === COVER[0][0]) await arrived(h, page, problems, 'offline-library', 'Skills');
+    if (i === 0) await arrived(h, page, problems, 'offline-library', 'Skills');
     const { sl, real } = names[id];
     const found = await page.evaluate(({ sl, real }) => {
       const plain = (t) => t.replace(/[‘’]/g, "'").replace(/[“”]/g, '"').trim();
@@ -436,7 +439,7 @@ async function skills(h, page, problems, names) {
     if (id === 'pros-cons') h.expect(((await saved(page))?.maps?.length ?? 0) === maps + 1, 'the save step of Strategy Map kept nothing');
     h.expect(!problems.length, `skill ${id}:\n${problems.join('\n')}`);
     await calm(page);
-    await h.shot(page, `offline-skill-${id}-end`);
+    await h.shot(page, `offline-skill-${i + 1}-${id}-end`);
     await home(h, page);
     h.expect((await skillCredits(page, id)) === before + 1, `${id} was credited ${(await skillCredits(page, id)) - before} times, not once`);
   }
@@ -684,7 +687,7 @@ async function safeZone(h, page, problems, tag, act = true) {
     await h.shot(page, `${tag}-safe-${at}`);
     const main = page.locator('.dq-sz-main');
     if (at === 'start') await main.getByRole('button', { name: 'Calm my body first' }).click();
-    if (at === 'cold' && act) await main.getByRole('button', { name: /^Start 30 seconds/ }).click();
+    if (at === 'cold' && act) await main.getByRole('button', { name: 'Cool air', exact: true }).click();
     if (at === 'stop') while (await main.getByRole('button', { name: 'Next line' }).count()) await main.getByRole('button', { name: 'Next line' }).click();
     if (at === 'reasons' && act) {
       await main.getByRole('button', { name: 'Add one' }).click();
@@ -764,7 +767,7 @@ async function everyPlace(h, page, problems, tag) {
 async function skillNames(h) {
   const { ctx, page } = await h.open({ 'dbt.app.v1': h.SEEN });
   try {
-    const ids = COVER.map(([id]) => id);
+    const ids = [...new Set(COVER.map(([id]) => id))];
     const list = await page.evaluate(async (ids) => (await import('/src/content/dbt.ts')).SKILLS.filter((s) => ids.includes(s.id)).map(({ id, sl, real }) => ({ id, sl, real })), ids);
     h.expect(list.length === ids.length, `SKILLS has ${list.length} of the ${ids.length} skills this check walks`);
     return Object.fromEntries(list.map((s) => [s.id, s]));

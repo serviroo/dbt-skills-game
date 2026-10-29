@@ -525,6 +525,20 @@
 .dq-timer > .dq-actions--pair {
   margin-bottom: 16px;
 }
+.dq-timer > .dq-actions:empty {
+  display: none;
+}
+/* cool air or cold water: the caution sits right under the two choices, as plain and as big as the words around it */
+.dq-cool {
+  margin-top: 14px;
+}
+.dq-cool-pick > .dq-btn[aria-pressed='true'] {
+  border-color: var(--blue);
+  background: linear-gradient(180deg, rgba(79, 184, 255, 0.32), rgba(31, 109, 243, 0.2));
+}
+.dq-cool-care {
+  margin: 12px 0 0;
+}
 .dq-btn {
   position: relative;
   display: inline-flex;

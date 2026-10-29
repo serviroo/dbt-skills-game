@@ -115,9 +115,10 @@ All timings live in `src/motion/tokens.ts`. Change them there, not in the compon
    or weight numbers. No "compare yourself to those less fortunate"; compare to a time you felt different instead.
 10. **No nagging.** No push notifications (never request the permission), no badges, no "you haven't visited", no
     count of days away. Welcome back reads the same after one day or three months.
-11. **Medically safe instructions.** Cold water and intense exercise always carry a short caution and an
-    equal-weight "breathe instead" option, visible without scrolling. Cold, not icy (above 10 °C / 50 °F, about 30
-    seconds).
+11. **Medically safe instructions.** Cold water is only ever offered beside cool air, as two choices of the same
+    weight, with a short caution right under them before anything starts (`COOL` in `src/content/dbt.ts`). Intense
+    exercise always carries a short caution and an equal-weight "breathe instead" option. Both show without
+    scrolling. Cold, not icy (above 10 °C / 50 °F, about 30 seconds).
 12. **Nobody else in the flows.** The skills, diary and Safe Zone never mention who made the game or anyone the
     player didn't add themselves. Nothing that could feel like being watched or owing someone.
 13. **Calm by default** in the companion. The cinematic language belongs to the intro.
@@ -129,8 +130,8 @@ All timings live in `src/motion/tokens.ts`. Change them there, not in the compon
 Body first, then a pause, then the player's own lists, then people and services, with services one tap away the
 whole time:
 
-1. Calm the body: cold water (with its caution), paced breathing (in 4, out 6), squeeze and release, an optional
-   minute of movement.
+1. Calm the body: cool air or cold water (the caution right with it), paced breathing (in 4, out 6), squeeze and
+   release, an optional minute of movement.
 2. "Is it even a little lower?" A "Higher" answer brings "Talk to someone now" to the top.
 3. STOP: stop, step back, notice, next step. One line per tap.
 4. The player's reasons, people (call or text buttons) and comfort kit, each with a kind empty state.

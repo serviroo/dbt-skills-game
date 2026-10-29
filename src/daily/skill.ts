@@ -6,7 +6,7 @@ import { glyph, icon } from './art';
 import { isSkillId, uid } from './store';
 import { dropDraft, keepDraft, newestDraft, stepLayout, worthKeeping, type SkillDraft } from './skilldraft';
 import { btn, chip, copyText, field, h, md, p, panel, segmented, typo } from './ui';
-import { breathRing, counter, holdButton, loadoutArt, pmrView, timerView, type Ctx } from './widgets';
+import { breathRing, coolChoice, counter, holdButton, loadoutArt, pmrView, timerView, type Ctx } from './widgets';
 
 const tx = (t: Txt | undefined, a: Answers) => (t === undefined ? '' : typeof t === 'function' ? t(a) : t);
 /** Long option labels read better as a stacked menu; short ones (Yes, Same, 5 min) stay inline. */
@@ -359,8 +359,8 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
           seconds: secs,
           visual: s.visual,
           start: s.start,
-          // every timer can take more time (principle 3): +15 s up to 30 s, +30 s above; extend: 0 keeps cold water about 30 s
-          extend: s.extend === 0 ? undefined : secs <= 30 ? 15 : 30,
+          // every timer can take more time (principle 3): +15 s up to 30 s, +30 s above
+          extend: secs <= 30 ? 15 : 30,
           peers,
           // with choices beside Start, Next sits below the countdown and has to show too
           reveal: peers.length ? nextBtn : undefined,
@@ -380,6 +380,22 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
         });
         const alts = s.options?.filter((o) => !o.instead).map((o) => btn(o.label, go(o), { kind: 'link' })) ?? [];
         return swap(...head(s), textEl(tx(s.text, answers), !titled), s.small ? p(s.small, 'dq-small') : null, tv.el, h('div', { class: 'dq-actions dq-actions--center' }, nextBtn, ...alts));
+      }
+      case 'cool': {
+        const nextBtn = btn('Next', next, { kind: 'quiet' });
+        const cc = coolChoice(ctx, {
+          reveal: nextBtn,
+          onDone: () => {
+            nextBtn.classList.remove('dq-btn--quiet');
+            nextBtn.classList.add('dq-btn--primary');
+          },
+        });
+        stops.push(() => {
+          if (cc.running() && !hushed) ctx.buzz?.('end');
+          cc.stop();
+        });
+        const alts = s.options?.map((o) => btn(o.label, () => follow(o.go, i + 1), { kind: 'link' })) ?? [];
+        return swap(...head(s), cc.el, h('div', { class: 'dq-actions dq-actions--center' }, nextBtn, ...alts));
       }
       case 'hold': {
         const nextBtn = btn('Next', next, { kind: 'quiet' });
