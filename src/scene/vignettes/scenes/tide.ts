@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { NIGHT_GLSL, nightBackdrop, OUT_GLSL } from '../common';
-import type { Beat } from '../host';
 import type { BuildScene } from '../runtime';
 
 /**
@@ -166,20 +165,14 @@ export const build: BuildScene = () => {
   shore.frustumCulled = false;
   scene.add(nightBackdrop(camera, moon, time), shore);
 
-  // more time after Done picks the tide up where it stopped instead of jumping ahead
-  let gap = 0;
-  let prev: Beat | null = null;
-  const probe = { t: 0, shore: LOW };
+  const probe = { shore: LOW };
 
   return {
     scene,
     camera,
     probe,
     pose(b, still) {
-      const e = Math.max(0, b.e);
-      if (prev?.done && !b.done) gap += Math.max(0, e - prev.e);
-      prev = { ...b };
-      const t = still ? STILL_T : e - gap;
+      const t = still ? STILL_T : Math.max(0, b.e);
       const k = Math.floor(t / PERIOD);
       const u = t / PERIOD - k;
       const reach = reachOf(k);
@@ -191,7 +184,7 @@ export const build: BuildScene = () => {
       camera.lookAt(look);
       camera.updateMatrixWorld();
       time.value = t;
-      Object.assign(probe, { t, shore: edgeAt(0, t) });
+      probe.shore = edgeAt(0, t);
     },
     resize(width, height) {
       camera.aspect = width / height;

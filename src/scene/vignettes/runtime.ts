@@ -8,7 +8,10 @@ import type { Beat, SceneOpts } from './host';
 export interface Vignette {
   readonly scene: THREE.Scene;
   readonly camera: THREE.PerspectiveCamera;
-  /** poses the scene for this beat; `still` asks for the one calm frame shown with reduced motion */
+  /**
+   * poses the scene for this beat, whose time and length leave out any time the countdown stood at Done, so more time
+   * after Done carries the scene on from where it stopped; `still` asks for the one calm frame shown with reduced motion
+   */
   pose(b: Beat, still: boolean): void;
   /** the drawing size in device pixels changed */
   resize(width: number, height: number): void;
@@ -83,6 +86,8 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   let sub: (() => void) | null = null;
   let last = -Infinity;
   let drawn: Beat | null = null;
+  /** how long the countdown stood at Done before more time was asked for, left out of every beat a scene is posed on */
+  let atDone = 0;
 
   /**
    * Fewer pixels on a slow device. A scene draws at the device's own pixel ratio until it is shown to be too slow. Its
@@ -221,7 +226,9 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
     if (on) stage.classList.remove('is-scene-wait');
   }
   const draw = (t: number, b: Beat, calm: boolean) => {
-    v.pose(b, calm);
+    if (drawn?.done && !b.done) atDone += Math.max(0, b.e - drawn.e);
+    const seen = { ...b, e: b.e - atDone, dur: b.dur - atDone };
+    v.pose(seen, calm);
     renderer.render(v.scene, v.camera);
     if (--timeIn === 0) {
       fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
@@ -232,7 +239,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
     last = t;
     drawn = { ...b };
     sceneStats.frames++;
-    sceneStats.last = { kind: opts.kind, e: b.e, dur: b.dur, done: b.done, still: calm, probe: v.probe && { ...v.probe } };
+    sceneStats.last = { kind: opts.kind, e: seen.e, dur: seen.dur, done: b.done, still: calm, probe: v.probe && { ...v.probe } };
     sceneStats.dpr = renderer.getPixelRatio();
     if (ready) setLive(true);
   };

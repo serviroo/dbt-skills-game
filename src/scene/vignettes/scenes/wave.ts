@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { glow, NIGHT_GLSL, nightBackdrop, OUT_GLSL } from '../common';
-import type { Beat } from '../host';
 import type { BuildScene } from '../runtime';
 
 /**
@@ -354,9 +353,6 @@ export const build: BuildScene = (accent) => {
 
   scene.add(nightBackdrop(camera, moon, time), moonSky, seaMesh, rider);
 
-  // more time after Done picks the sea up where it stopped instead of jumping ahead
-  let gap = 0;
-  let prev: Beat | null = null;
   const probe = { t: 0, board: 0 };
   const fwd = new THREE.Vector3(), up = new THREE.Vector3(), side = new THREE.Vector3(), basis = new THREE.Matrix4();
 
@@ -365,10 +361,7 @@ export const build: BuildScene = (accent) => {
     camera,
     probe,
     pose(b, still) {
-      const e = Math.max(0, b.e);
-      if (prev?.done && !b.done) gap += Math.max(0, e - prev.e);
-      prev = { ...b };
-      const t = still ? STILL_T : e - gap;
+      const t = still ? STILL_T : Math.max(0, b.e);
       ridgesAt(t, ridges);
 
       // the board rides the surface: its middle on the water, its deck along the slope

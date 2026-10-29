@@ -1129,11 +1129,11 @@ export const scenarios = {
   },
 
   /**
-   * more time after Done: the wave, the light and the tide each pick up where they stopped, however long Done was up,
-   * instead of jumping ahead by that time
+   * more time after Done: the stone, the wave, the light and the tide each pick up where they stopped, however long Done
+   * was up, instead of jumping ahead by that time
    */
-  async 'water-scenes-more-time'(h) {
-    for (const k of KINDS) {
+  async 'scenes-more-time'(h) {
+    for (const k of [{ kind: 'drift', id: 'wise-mind', entry: 'stone' }, ...KINDS]) {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
       await page.clock.install();
       await page.reload();
@@ -1147,10 +1147,11 @@ export const scenarios = {
       await page.clock.fastForward(4000);
       await page.locator('.dq-timer').getByRole('button', { name: /^\+\d+ s$/ }).click();
       const b = await after(h, page, 100);
-      const moved = Object.keys(a.probe).filter((key) => key !== 't').map((key) => `${key} ${a.probe[key].toFixed(3)} -> ${b.probe[key].toFixed(3)}`).join(', ');
+      const probe = (p) => Object.entries(p ?? {}).map(([key, v]) => `${key} ${typeof v === 'number' ? v.toFixed(3) : v}`).join(' ');
+      const seen = `${a.e.toFixed(2)} s -> ${b.e.toFixed(2)} s${a.probe ? ` (${probe(a.probe)} -> ${probe(b.probe)})` : ''}`;
       h.expect(a.done && !b.done, `more time ${k.kind}: the countdown did not run again (${JSON.stringify(a)} -> ${JSON.stringify(b)})`);
-      h.expect(b.probe.t - a.probe.t >= 0 && b.probe.t - a.probe.t < 0.5, `more time ${k.kind}: the scene jumped from ${a.probe.t.toFixed(2)} s to ${b.probe.t.toFixed(2)} s (${moved})`);
-      console.log(`  more time ${k.kind}: ${a.probe.t.toFixed(2)} s -> ${b.probe.t.toFixed(2)} s, ${moved}`);
+      h.expect(b.e - a.e >= 0 && b.e - a.e < 0.5, `more time ${k.kind}: the scene jumped (${seen})`);
+      console.log(`  more time ${k.kind}: ${seen}`);
       h.expect(!errors.length, errors.join('\n'));
       await ctx.close();
     }
