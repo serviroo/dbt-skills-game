@@ -215,9 +215,9 @@ node scripts/pwa-verify.mjs --path=/dbt-skills-game/ --browser=chromium --update
 node scripts/pwa-csp-sweep.mjs --path=/dbt-skills-game/ --check
 ```
 
-The live check opens a fresh browser profile at phone size. It checks the name prompt, Home, the one-tap Safe Zone,
-offline reload and launch, query links, the CSP and requests to other origins. Screenshots and a pass/fail report go
-in `artifacts/live/`. It exits with a non-zero status if a check fails.
+The live check opens a fresh browser profile at phone size. It checks the renderer, the name prompt, Home, the one-tap
+Safe Zone, offline reload and launch, query links, the CSP and requests to other origins. Screenshots and a pass/fail
+report go in `artifacts/live/`. It exits with a non-zero status if a check fails.
 
 GitHub Pages builds the newest commit on `main` once CI has passed on that exact commit, and `main` as it is on a
 manual dispatch. A CI run that ends after a newer commit reached `main` deploys nothing; the newer commit deploys when

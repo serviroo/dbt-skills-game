@@ -110,12 +110,16 @@ let assetCount = 0;
 let metaCache = '';
 let built = null;
 try {
-  const probe = await browser.newPage();
-  try {
-    console.log('renderer:', await checkRenderer(probe));
-  } finally {
-    await probe.context().close();
-  }
+  await check('renderer', async () => {
+    const probe = await browser.newPage();
+    try {
+      const renderer = await checkRenderer(probe);
+      console.log('renderer:', renderer);
+      return { renderer };
+    } finally {
+      await probe.context().close();
+    }
+  });
   await check('build-id', async () => {
     const deadline = Date.now() + Number(flags.wait ?? 180) * 1000;
     for (;;) {

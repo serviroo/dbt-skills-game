@@ -275,6 +275,7 @@
   "leaving-and-reopening-stops-hum": 7,
   "legacy-sound-off-silences-hum": 4,
   "library-focus": 8,
+  "live-check-reports-renderer-failure": 31,
   "live-names": 22,
   "lone-stall-keeps-quality": 11,
   "master-zero-silences-hum": 15,
