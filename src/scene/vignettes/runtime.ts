@@ -15,8 +15,8 @@ export interface Vignette {
   /** frees anything the scene made outside its scene graph (the graph itself is freed by the runtime) */
   dispose?(): void;
 }
-/** What a scene file exports as `build`: makes the scene, lit with `accent` as its rim colour. */
-export type BuildScene = (accent: THREE.Color) => Vignette;
+/** What a scene file exports as `build`: makes the scene, lit with `accent` as its rim colour, from its mount options. */
+export type BuildScene = (accent: THREE.Color, opts: SceneOpts) => Vignette;
 
 const STEP = 1 / SCENE.fps;
 /** the longest a scene's frame may take to draw, in ms */
@@ -46,6 +46,8 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   holder.setAttribute('aria-hidden', 'true');
   stage.style.setProperty('--dq-scene-fade', `${SCENE.fadeMs}ms`);
   stage.prepend(holder);
+  // for as long as the scene is in the stage, a lost context included, so styles need no :has()
+  stage.classList.add('is-scene-mounted');
   let vig: Vignette | null = null;
   // the renderer goes to one scene at a time: if another takes it, this one stops and its flat picture comes back
   let evicted = false;
@@ -58,11 +60,12 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   let lease: Lease | undefined;
   try {
     lease = lendRenderer(holder, evict);
-    vig = build(new THREE.Color(opts.accent ?? '#4fb8ff'));
+    vig = build(new THREE.Color(opts.accent ?? '#4fb8ff'), opts);
   } catch (err) {
     if (vig) disposeTree(vig.scene);
     lease?.release();
     holder.remove();
+    stage.classList.remove('is-scene-mounted');
     throw err;
   }
   const v = vig;
@@ -70,8 +73,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   const { renderer, canvas } = lent;
 
   const { clock } = opts;
-  const media = matchMedia('(prefers-reduced-motion: reduce)');
-  const still = () => (opts.reduced ? opts.reduced() : media.matches);
+  const still = () => opts.reduced();
   let onScreen = false;
   let sized = false;
   let lost = renderer.getContext().isContextLost();
@@ -300,8 +302,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   };
   canvas.addEventListener('webglcontextlost', onLost);
   canvas.addEventListener('webglcontextrestored', onRestored);
-  media.addEventListener('change', resync);
-  const offMotion = opts.onMotion?.(resync);
+  const offMotion = opts.onMotion(resync);
 
   return () => {
     sub?.();
@@ -311,13 +312,13 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
     ro.disconnect();
     canvas.removeEventListener('webglcontextlost', onLost);
     canvas.removeEventListener('webglcontextrestored', onRestored);
-    media.removeEventListener('change', resync);
-    offMotion?.();
+    offMotion();
     setLive(false);
     v.dispose?.();
     disposeTree(v.scene);
     lent.release();
     holder.remove();
+    stage.classList.remove('is-scene-mounted');
     const mem = renderer.info.memory;
     sceneStats.left = { geometries: mem.geometries, textures: mem.textures, programs: renderer.info.programs?.length ?? 0 };
   };

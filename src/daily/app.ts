@@ -119,6 +119,12 @@ export interface DailyOpts {
 
 export class App {
   readonly root: HTMLDivElement;
+  /**
+   * Where screens put their sheets (a card, a chapter list, a naming sheet): next to the page, not in it, so the page's
+   * own entrance animation never moves them, and under the top bar, so Back and the Safe Zone stay above them. A route
+   * change empties it, after the screen's own leave.
+   */
+  readonly sheetLayer: HTMLElement;
   readonly store: Store;
   readonly bubbles: Bubbles;
   private top: HTMLElement;
@@ -172,7 +178,8 @@ export class App {
     this.view = h('main', { class: 'dq-view', id: 'dq-main' });
     this.scrim = h('div', { class: 'dq-scrim', 'aria-hidden': 'true' });
     this.toastEl = h('div', { class: 'dq-toast', role: 'status', 'aria-live': 'polite' });
-    this.root.append(this.sky.back, this.bubbles.canvas, h('div', { class: 'dq-vignette', 'aria-hidden': 'true' }), this.sky.shade, this.top, this.view, this.toastEl, this.scrim);
+    this.sheetLayer = h('div', { class: 'dq-sheets' });
+    this.root.append(this.sky.back, this.bubbles.canvas, h('div', { class: 'dq-vignette', 'aria-hidden': 'true' }), this.sheetLayer, this.sky.shade, this.top, this.view, this.toastEl, this.scrim);
     host.append(this.root);
     this.pins = new ResizeObserver(() => {
       this.root.style.setProperty('--dq-top', `${this.top.offsetHeight}px`);
@@ -683,6 +690,7 @@ export class App {
     if (safe) this.clearForSafe();
     if (this.current?.keep) this.kept.set(this.visitKey, this.current.keep());
     this.current?.leave?.();
+    this.sheetLayer.replaceChildren();
     if (this.current?.foot) this.pins.unobserve(this.current.foot);
     if (route.name !== 'hub') this.toastEl.classList.remove('is-on');
     this.route = route;
@@ -703,10 +711,12 @@ export class App {
     const [dens, bright] = out.bubbles ?? [3, 0.8];
     if (dens !== this.bubbles.density || bright !== this.bubbles.brightness) this.bubbles.set(dens, bright);
     if (!o.quiet) {
-      animate(out.el, this.reduced() ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], {
+      const a = animate(out.el, this.reduced() ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], {
         duration: this.reduced() ? WINDOW.reducedFadeMs : 300,
         easing: 'cubic-bezier(.16,1,.3,1)',
       });
+      // drop the entrance transform so fixed elements inside the page (the story co-writer) sit on the screen
+      a.finished.then(() => a.cancel(), () => {});
     }
     const focus = out.el.querySelector<HTMLElement>('[data-focus]') ?? out.el.querySelector<HTMLElement>('h1');
     if (focus && !o.quiet) {

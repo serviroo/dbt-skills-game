@@ -41,6 +41,9 @@ export const ROSTER_COPY = {
   nameLabel: 'Your name for them',
   namePlaceholder: 'Optional',
   arrives: (n: number) => (n <= 1 ? 'Arrives next visit' : n > 10 ? 'Arrives in its own time' : `Arrives in ${n} visits`),
+  campLabel: 'The Night Watch in camp',
+  campHint: 'Tap anyone in camp to see their card.',
+  closeCard: 'Close the card',
 };
 
 /** Titles are earned by using things and never lost. 'night-warden' keeps its own rank window. */

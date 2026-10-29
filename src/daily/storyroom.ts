@@ -1100,7 +1100,10 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
       if (e.key === 'Escape') (e.stopPropagation(), closeSheet());
     });
     await render();
-    el.append(wrap);
+    // the player may have left while the list loaded (Back, the Safe Zone), or opened it again: the sheet layer outlives
+    // this screen, so a late sheet would open over the next one, and its Back entry would land on the next screen too
+    if (!alive || sheet !== wrap) return;
+    app.sheetLayer.append(wrap);
     sheetDone = app.sheet(closeSheet);
     if (!app.reduced()) animate(body, [{ opacity: 0, transform: 'translateY(16px)' }, { opacity: 1, transform: 'none' }], { duration: 280, easing: 'cubic-bezier(.16,1,.3,1)' });
     list.querySelector<HTMLElement>('[aria-current="true"]')?.focus({ preventScroll: true });
@@ -1799,8 +1802,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     mode: 'sub',
     bubbles: [0.9, 0.45],
     foot: dock,
-    // the screen's entry animation holds an identity transform, which would pin the fixed sheets to this element
-    after: () => el.getAnimations().forEach((a) => void a.finished.then(() => a.cancel()).catch(() => undefined)),
     leave: () => {
       commit();
       pinLive();

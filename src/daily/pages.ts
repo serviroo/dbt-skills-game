@@ -250,6 +250,7 @@ export function shadowsScreen(app: App): ScreenOut {
     h('span', { class: 'dq-cardface dq-allyslot-face' }, h('span', { class: 'dq-allyslot-ic', html: icon('brush') }), h('span', { class: 'dq-allyslot-t', text: 'Design an ally' }), h('span', { class: 'dq-allyslot-s', text: 'Draw one. It joins your army.' })),
   );
   const allies = h('div', { class: 'dq-collection dq-allies' }, designSlot);
+  const roster = rosterSection(app);
   void artStore(app.store.key)
     .list()
     .then((list) => {
@@ -266,7 +267,7 @@ export function shadowsScreen(app: App): ScreenOut {
     { class: 'dq-page dq-shadows' },
     pageHead('Shadows', 'Every skill you meet joins the Night Watch as a shadow ally, and so does every ally you draw. They stay.'),
     first,
-    rosterSection(app),
+    roster.el,
     h('h2', { class: 'dq-sec-h' }, h('span', { text: 'Designed by you' }), h('span', { class: 'dq-sec-sub', text: 'From the Art room' })),
     allies,
     h('h2', { class: 'dq-sec-h' }, h('span', { text: 'Skill shadows' }), h('span', { class: 'dq-sec-sub', text: 'Every skill you have met' })),
@@ -274,7 +275,7 @@ export function shadowsScreen(app: App): ScreenOut {
     inventorySection(app),
     h('div', { class: 'dq-actions' }, btn('All skills', () => app.go({ name: 'library' }), { kind: 'quiet', ic: 'book' })),
   );
-  return { el, title: 'Shadows', mode: 'sub' };
+  return { el, title: 'Shadows', mode: 'sub', leave: roster.leave };
 }
 
 // ---------------- Library ----------------

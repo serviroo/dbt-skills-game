@@ -1,7 +1,7 @@
 /**
  * The companion's calm 3D scenes, all through this one host.
  *
- *   const unmount = mountScene(stage, { kind: 'drift', clock, accent?, reduced? });
+ *   const unmount = mountScene(stage, { kind: 'drift', clock, reduced, onMotion, accent? });
  *
  * puts the scene into `stage` (any positioned element) and returns the function that takes it down and frees it.
  * Adding a scene is one file, scenes/<kind>.ts, exporting `build: BuildScene` (see ./runtime), plus one line in SCENES.
@@ -22,6 +22,8 @@ import './scenes.css';
 
 const SCENES = {
   drift: () => import('./scenes/drift'),
+  // the camp's figures are models, loaded before it is built
+  camp: () => import('../watch/camp').then((m) => m.ready().then(() => m)),
 } satisfies Record<string, () => Promise<{ build: BuildScene }>>;
 
 export type SceneKind = keyof typeof SCENES;
@@ -53,10 +55,17 @@ export interface SceneOpts {
   clock: SceneClock;
   /** the rim light's colour, lantern blue (#4FB8FF) when left out */
   accent?: string;
-  /** the game's motion setting; prefers-reduced-motion when left out */
-  reduced?: () => boolean;
-  /** calls fn whenever that setting changes; returns the function that stops it */
-  onMotion?: (fn: () => void) => () => void;
+  /** the game's motion setting */
+  reduced: () => boolean;
+  /** calls fn whenever that setting changes, here or in another open copy; returns the function that stops it */
+  onMotion: (fn: () => void) => () => void;
+  /** what the scene needs from its screen (the camp: who has arrived), handed to its build as it is */
+  input?: unknown;
+  /**
+   * the longest the flat picture stays hidden while this scene loads, SCENE.waitMs when left out; Infinity keeps it
+   * hidden until the scene draws or fails (the camp, whose flat picture is the roster under it, not in its place)
+   */
+  waitMs?: number;
 }
 
 /**
@@ -77,7 +86,8 @@ export function mountScene(stage: HTMLElement, opts: SceneOpts): () => void {
     up = true;
     const me = ++run;
     stage.classList.add('is-scene-wait');
-    wait = window.setTimeout(() => stage.classList.remove('is-scene-wait'), SCENE.waitMs);
+    const waitMs = opts.waitMs ?? SCENE.waitMs;
+    wait = Number.isFinite(waitMs) ? window.setTimeout(() => stage.classList.remove('is-scene-wait'), waitMs) : 0;
     Promise.all([import('./runtime'), SCENES[opts.kind]()])
       .then(([runtime, { build }]) => (me === run ? runtime.runScene(stage, build, opts) : () => {}))
       .then((stop) => {

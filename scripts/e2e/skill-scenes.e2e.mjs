@@ -463,6 +463,8 @@ export const scenarios = {
     const [other] = await Promise.all([ctx.waitForEvent('page'), page.evaluate(() => void window.open('/?mute'))]);
     other.on('pageerror', (e) => errors.push('pageerror, other copy: ' + e.message));
     await h.openSettings(other);
+    // the copy with the scene is the one in view: a window left under another draws hardly any frames
+    await page.bringToFront();
     await other.getByRole('radio', { name: 'Motion: Reduced', exact: true }).click();
     s = await still('Reduced in another copy');
     await other.getByRole('radio', { name: 'Motion: Full', exact: true }).click();
@@ -509,6 +511,7 @@ export const scenarios = {
   async 'scene-slow-gpu'(h) {
     const { ctx, page, errors } = await h.open(seed(h), '?mute', DESK);
     await ctx.addInitScript(() => {
+      window.__gpuMs = 0;
       const P = WebGL2RenderingContext.prototype;
       for (const name of ['drawArrays', 'drawElements']) {
         const draw = P[name];
@@ -516,7 +519,9 @@ export const scenarios = {
           const r = draw.apply(this, args);
           // only the scene's own canvas is slow; the rest of the page draws as usual
           if (!this.canvas.closest?.('.dq-scene')) return r;
-          const until = performance.now() + Math.max(0, this.drawingBufferWidth * this.drawingBufferHeight - 60000) / 1000;
+          const ms = Math.max(0, this.drawingBufferWidth * this.drawingBufferHeight - 60000) / 1000;
+          window.__gpuMs += ms;
+          const until = performance.now() + ms;
           while (performance.now() < until);
           return r;
         };
@@ -526,18 +531,22 @@ export const scenarios = {
     await toStone(h, page);
     await live(h, page, 'slow');
     await h.sleep(4000);
-    const a = await scenes(page);
+    const read = () => page.evaluate(() => ({ ...window.__scenes, gpuMs: window.__gpuMs }));
+    const a = await read();
     await h.sleep(2000);
-    const b = await scenes(page);
+    const b = await read();
     const full = await page.evaluate(() => Math.min(window.devicePixelRatio, 2));
-    // left at the full ratio under this cost a scene draws about 5 frames in 2 s; stepped down it draws 14 or more even on
-    // one busy CPU (40 on CI, 61 on a GPU), so 12 tells the two apart without failing a loaded machine
-    h.expect(b.frames - a.frames >= 12, `slow GPU: only ${b.frames - a.frames} frames in 2 s at pixel ratio ${b.dpr}`);
+    const frames = b.frames - a.frames;
+    h.expect(frames > 0, 'slow GPU: the scene stopped drawing');
+    const ms = (b.gpuMs - a.gpuMs) / frames;
+    // Full size costs about 400 ms per frame here; adaptation must fit that work into the scene's 30 fps budget.
+    // Count the work this fixture adds, since a busy browser can present fewer frames even after the scene adapts.
+    h.expect(ms <= 1000 / 30, `slow GPU: ${ms.toFixed(1)} ms per frame at pixel ratio ${b.dpr}`);
     h.expect(b.dpr < full, `slow GPU: the scene still draws at the full pixel ratio ${b.dpr}`);
     inStep(h, await pair(page), 'slow');
     await drawn(h, page, 'slow');
     await h.shot(page, 'slow-gpu-desk');
-    console.log(`  slow GPU: pixel ratio ${b.dpr}, ${b.frames - a.frames} frames in 2 s`);
+    console.log(`  slow GPU: pixel ratio ${b.dpr}, ${frames} frames in 2 s, ${ms.toFixed(1)} ms per frame`);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },
