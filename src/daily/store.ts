@@ -1398,6 +1398,8 @@ export class Store {
     const today = this.today();
     const d = this.derived();
     const had = d.visitDays.includes(today);
+    // the first open owes its welcome in the same save that counts its visit, so no copy holds one without the other
+    if (this.state.flags.greetDay !== today && !d.visitDays.some((v) => v < today)) this.state.flags.welcomeOwed = true;
     if (!had) this.add('visit', 10);
     const days = this.derived().visitDays;
     const visitIndex = days.indexOf(today);

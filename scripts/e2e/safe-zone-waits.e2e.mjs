@@ -2,7 +2,9 @@
 //   safe-zone-welcome-waits  the first open's welcome when Home is left before it comes. For the Safe Zone, at 390x844
 //                            and 320x568: nothing over the Safe Zone, the welcome kept in the save and a Save Crystal,
 //                            then shown on Home once the player leaves. For Settings: shown back on Home. Through a
-//                            reload: shown on Home. Shown in another open copy: not shown again here
+//                            reload: shown on Home. Shown in another open copy: not shown again here. Queued behind the
+//                            daily gift when the Safe Zone opens: still owed, and shown on Home after leaving. The
+//                            first save that counts the first visit already owes it
 //   safe-zone-new-day-waits  a day that turns while the Safe Zone is open: nothing is credited inside, and the new
 //                            day's visit counts as the player leaves. On Home a new day still counts at once
 //   safe-zone-nothing-opens  due while inside, from elsewhere: a rank-up earned in another open copy, and the Home
@@ -28,9 +30,13 @@ function returning(xp = 0) {
   return JSON.stringify({ v: 1, created: t, events, flags: { greetDay: day, giftDay: day, cardDay: day } });
 }
 
-async function open(h, { save, device, viewport = PHONE } = {}) {
+async function open(h, { save, device, viewport = PHONE, init } = {}) {
   const seed = { [h.YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: Date.now() - 1000, companionAt: Date.now() - 1000 }), 'dbt.app.v1': h.SEEN, ...(save ? { [h.SAVE]: save } : {}) };
-  const { ctx, page, errors } = await h.open(seed, '?mute', viewport, (c) => c.clock.install(), device);
+  const prepare = async (c) => {
+    await c.clock.install();
+    if (init) await c.addInitScript(init, h.SAVE);
+  };
+  const { ctx, page, errors } = await h.open(seed, '?mute', viewport, prepare, device);
   await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
   return { ctx, page, errors };
 }
@@ -111,6 +117,38 @@ export const scenarios = {
       await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
       if (!(await welcome(page))) problems.push(`reload: the owed welcome did not come on Home: ${JSON.stringify(await opened(page))}`);
       problems.push(...errors.map((e) => `reload: ${e}`));
+      await ctx.close();
+    }
+    {
+      // the daily gift opened first: the welcome queues behind it, and the Safe Zone then closes both
+      const { ctx, page, errors } = await firstOpen('gift', (p) => p.locator('.dq-chest').click());
+      const queued = await opened(page);
+      if (queued.windows.length !== 1 || !/Daily gift/.test(queued.windows[0])) problems.push(`gift: the gift is not the one window open: ${JSON.stringify(queued)}`);
+      if (!(await owed(page))) problems.push('gift: the welcome waiting behind the gift is no longer owed');
+      await toSafe(page);
+      await page.clock.resume();
+      await page.locator('.dq-top .dq-back').click();
+      if (!(await welcome(page))) problems.push(`gift: back on Home the welcome did not come: ${JSON.stringify(await opened(page))}`);
+      problems.push(...errors.map((e) => `gift: ${e}`));
+      await ctx.close();
+    }
+    {
+      // every save the first open writes: the one that counts the first visit already owes the welcome
+      const record = (key) => {
+        window.__saves = [];
+        const set = Storage.prototype.setItem;
+        Storage.prototype.setItem = function (k, v) {
+          if (k === key) {
+            const s = JSON.parse(v);
+            window.__saves.push({ visits: s.events.filter((e) => e.k === 'visit').length, owed: s.flags?.welcomeOwed === true });
+          }
+          return set.call(this, k, v);
+        };
+      };
+      const { ctx, page, errors } = await open(h, { init: record });
+      const first = await page.evaluate(() => window.__saves.find((s) => s.visits > 0));
+      if (!first?.owed) problems.push(`first save: the save that counts the first visit does not owe the welcome: ${JSON.stringify(first)}`);
+      problems.push(...errors.map((e) => `first save: ${e}`));
       await ctx.close();
     }
     {
