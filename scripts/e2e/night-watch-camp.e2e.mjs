@@ -10,6 +10,7 @@ import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { getBounds } from '@gltf-transform/functions';
 import sharp from 'sharp';
+import { screenshot } from './harness.mjs';
 
 const PHONE = { width: 390, height: 844 };
 const SIDE = { width: 844, height: 390 };
@@ -56,7 +57,7 @@ async function toCamp(h, page, where, wait = true) {
 
 /** Brightness of the camp as shown on screen: its mean, spread and brightest pixel. */
 async function pixels(page) {
-  const { data, info } = await sharp(await page.locator('.w2-camp').screenshot()).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { data, info } = await sharp(await screenshot(page.locator('.w2-camp'))).removeAlpha().raw().toBuffer({ resolveWithObject: true });
   const { width: w, height: ht, channels: c } = info;
   let n = 0, sum = 0, sq = 0, max = 0;
   for (let y = Math.floor(ht * 0.15); y < ht * 0.8; y++) {
