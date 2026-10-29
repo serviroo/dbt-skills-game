@@ -39,6 +39,8 @@ const MOON_EL = Math.asin(MOON_DIR.y);
 const CLOUD_SLOTS = Math.ceil(CLOUDS.crossSec / CLOUDS.spaceSec);
 /** where the cloud in the still frame is: a little left of the middle of the sky (in half widths of the frame) */
 const STILL_X = -0.15;
+/** how far past the frame's edge a cloud starts and ends its crossing, so it drifts in and out rather than appearing */
+const CLOUD_MARGIN = 9 * DEG;
 /** the most of the moon's light a cloud holds back: the clouds are thin, so the moon only dims */
 const CLOUD_COVER = 0.65;
 
@@ -248,8 +250,8 @@ export const build: BuildScene = (_accent, opts) => {
   const clouds = { value: Array.from({ length: CLOUD_SLOTS }, () => new THREE.Vector4()) };
   const shapes = { value: Array.from({ length: CLOUD_SLOTS }, () => new THREE.Vector2()) };
   /** the frame's half width as an angle, and how far a cloud travels either side of the middle to come in and go out */
-  let half = 18 * DEG;
-  let drift = half + 9 * DEG;
+  let half = (FOV / 2) * DEG;
+  let drift = half + CLOUD_MARGIN;
 
   // the shore: a grid that is fine near the viewer and coarser towards the horizon
   const geo = new THREE.PlaneGeometry(1, 1, 120, 150);
@@ -309,7 +311,7 @@ export const build: BuildScene = (_accent, opts) => {
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       half = Math.atan(Math.tan((FOV / 2) * DEG) * camera.aspect);
-      drift = half + 9 * DEG;
+      drift = half + CLOUD_MARGIN;
     },
   };
 };
