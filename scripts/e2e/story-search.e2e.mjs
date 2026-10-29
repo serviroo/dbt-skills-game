@@ -124,7 +124,7 @@ async function noneTyped(page, when, bad) {
 export const scenarios = {
   /** every way of finding words, at phone sizes, offline, storing nothing */
   async 'story-search-finds'(h) {
-    for (const vp of [{ width: 390, height: 844 }, { width: 320, height: 568 }]) {
+    for (const vp of [{ width: 390, height: 844 }, { width: 320, height: 568 }, { width: 568, height: 320 }]) {
       const at = `${vp.width}x${vp.height}`;
       const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
       try {
