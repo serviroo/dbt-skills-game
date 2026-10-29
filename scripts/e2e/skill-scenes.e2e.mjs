@@ -5,10 +5,12 @@
 // one WebGL context however often it opens, let go while the page is hidden; back after a lost context.
 // The wave, the breathing light and the tide go through the same host: each is live and drawn at four screen sizes and
 // does what its picture promises (the board rides the swell, the light swells with the breath in the player's colour,
-// the water comes in and goes out), keeps to its timer's clock, stops on leaving, holds still with reduced motion and
-// leaves its flat picture with no WebGL. The breathing light is a small hot core in a halo gone by half its ring, with
-// the countdown readable (3:1) under it all breath long; the wave's moon is a light that shows whole at every size.
+// the water comes in and goes out), keeps to its timer's clock, stops on leaving, holds still with reduced motion (and
+// as the device's own setting changes while it is up) and leaves its flat picture with no WebGL. The breathing light is
+// a small hot core in a halo gone by half its ring, with the countdown readable (3:1) under it all breath long; the
+// wave's moon is a light that shows whole at every size.
 import sharp from 'sharp';
+import { deviceMotion } from './device-motion.e2e.mjs';
 import { screenshot } from './harness.mjs';
 
 const PHONE = { width: 390, height: 844 };
@@ -116,12 +118,13 @@ async function live(h, page, where, stage = '.dq-timer-stage') {
 }
 
 /**
- * 15 s more on the countdown, once its first frame has put the scene on screen: the scene draws only while its
- * countdown runs, and that first frame can take most of it. Done once the scene has drawn a frame with the new length.
+ * More time on the countdown (the step's own +15 s or +30 s), once its first frame has put the scene on screen: the scene
+ * draws only while its countdown runs, and that first frame can take most of it. Done once the scene has drawn a frame
+ * with the new length.
  */
 async function moreTime(page) {
   const dur = (await scenes(page)).last.dur;
-  await page.locator('.dq-timer').getByRole('button', { name: '+15 s' }).click();
+  await page.locator('.dq-timer').getByRole('button', { name: /^\+\d+ s$/ }).click();
   await page.waitForFunction((dur) => window.__scenes?.last.dur > dur, dur, { timeout: 15000 });
 }
 
@@ -1253,6 +1256,50 @@ export const scenarios = {
       const b = (await scenes(page)).last;
       h.expect(a.still && clouds(a).some(([, x]) => Math.abs(x) < 0.35) && b.probe.clouds === a.probe.clouds, `tide clouds, reduced motion: no cloud standing still mid-sky (${a.probe.clouds} -> ${b.probe.clouds})`);
       await h.shot(page, 'tide-clouds-still-phone');
+      h.expect(!errors.length, errors.join('\n'));
+      await ctx.close();
+    }
+  },
+
+  /**
+   * the device's reduce-motion turned on while a scene is up, with Motion on Auto: the wave, the light, the tide with and
+   * without its clouds and Give me a moment's light each settle on one still frame (the clouds with one mid-sky), and
+   * move again once it is turned off
+   */
+  async 'scenes-follow-device-motion'(h) {
+    for (const k of [...KINDS, { kind: 'tide', id: 'mindful-thoughts', entry: 'watch', clouds: true }, { kind: 'ring', moment: true }]) {
+      const name = k.moment ? 'moment' : k.clouds ? 'tide with clouds' : k.kind;
+      const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
+      const device = await deviceMotion(ctx, page);
+      if (k.moment) {
+        await home(h, page);
+        await page.evaluate(() => window.__daily.go({ name: 'moment' }));
+        await live(h, page, name, '.dq-mo-stage');
+      } else {
+        await toStep(h, page, k.id, k.entry);
+        await live(h, page, name);
+        // the scene draws only while its countdown runs, so it gets time to be watched through every change
+        await moreTime(page);
+      }
+      const moving = async (where) => {
+        const a = await scenes(page);
+        await until(page, (n) => window.__scenes.frames > n + 10 && !window.__scenes.last.still, a.frames);
+        const b = await scenes(page);
+        h.expect(b.frames > a.frames + 10 && !b.last.still, `${name}, ${where}: the scene is not moving (${a.frames} -> ${b.frames}, still ${b.last.still})`);
+      };
+      await moving('motion on');
+      await device('reduce');
+      await until(page, () => window.__scenes.last.still);
+      const c = await scenes(page);
+      await h.frames(page, 60);
+      const d = await scenes(page);
+      h.expect(c.last.still && d.frames === c.frames, `${name}, device set to reduce motion: not one still frame (${c.frames} -> ${d.frames}, still ${c.last.still})`);
+      if (k.clouds) {
+        const mid = c.last.probe.clouds.split(' ').filter(Boolean).some((x) => Math.abs(Number(x.split(':')[1])) < 0.35);
+        h.expect(mid, `${name}, device set to reduce motion: no cloud standing mid-sky (${c.last.probe.clouds})`);
+      }
+      await device('no-preference');
+      await moving('device back to motion');
       h.expect(!errors.length, errors.join('\n'));
       await ctx.close();
     }

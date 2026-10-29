@@ -430,6 +430,7 @@
   "scene-slow-gpu": 28,
   "scene-slow-gpu-late-start": 35,
   "scene-still": 34,
+  "scenes-follow-device-motion": 45,
   "scenes-more-time": 28,
   "screens-hidden-button-key": 5,
   "screens-tap-completes": 19,
