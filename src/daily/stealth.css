@@ -158,19 +158,6 @@
     transform: scale(0.85);
   }
 }
-@keyframes dq-st-breath-still {
-  0% {
-    opacity: 0.35;
-    animation-timing-function: cubic-bezier(0.37, 0, 0.63, 1);
-  }
-  40% {
-    opacity: 1;
-    animation-timing-function: cubic-bezier(0.37, 0, 0.63, 1);
-  }
-  100% {
-    opacity: 0.35;
-  }
-}
 .dq-st-sea {
   position: absolute;
   left: 50%;
@@ -849,10 +836,10 @@
   color: var(--t-dim);
 }
 
-/* still: daily.css stops every animation; nothing travels or sways here, but the breath keeps fading
-   (opacity only, as the Rest room always did) so the glow and Breathing words still pace a breath */
+/* still: daily.css stops every animation; nothing travels, sways or breathes here. The glow rests halfway through its
+   breath, and only the Breathing words the player turned on keep fading (opacity only), so they still pace a breath */
 .dq.is-still .dq-st-glow {
-  animation: dq-st-breath-still 10s infinite !important;
+  opacity: 0.7;
 }
 .dq.is-still .dq-st-word .dq-st-in {
   animation: dq-st-in 10s infinite !important;

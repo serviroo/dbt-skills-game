@@ -158,7 +158,7 @@ export function restScreen(app: App): ScreenOut {
   const rnd = (a: number, b: number) => a + Math.random() * (b - a);
   let catBusy = '';
   const blep = () => {
-    if (catBusy === 'nudge') return;
+    if (catBusy === 'nudge' || app.reduced()) return;
     cat.classList.add('is-blep');
     later(1, () => cat.classList.remove('is-blep'));
   };

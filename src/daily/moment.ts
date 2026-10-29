@@ -58,16 +58,35 @@ export function easeScreen(app: App, route: Route): ScreenOut {
     h('button', { type: 'button', class: 'dq-ease-safe', onclick: () => app.go({ name: 'safe' }) }, h('span', { class: 'dq-ease-safe-ic', html: icon('safe') }), h('span', { text: 'Safe Zone' })),
   );
   const t0 = now();
-  const stop = onFrame((t) => {
-    const s = breath(t - t0);
-    glow.style.opacity = String(0.4 + s * 0.6);
-    if (!app.reduced()) {
+  let stop = () => {};
+  // the glow breathes and the moth floats while motion is on; with it off (now or later) both rest, and no frame runs
+  const move = () => {
+    stop();
+    stop = () => {};
+    glow.style.opacity = '0.7';
+    glow.style.transform = '';
+    sea.style.transform = '';
+    if (app.reduced()) return;
+    stop = onFrame((t) => {
+      const s = breath(t - t0);
+      glow.style.opacity = String(0.4 + s * 0.6);
       glow.style.transform = `translate(-50%, -50%) scale(${(0.88 + s * 0.2).toFixed(3)})`;
       sea.style.transform = `translateY(${(Math.sin((t - t0) * 0.45) * 4).toFixed(2)}px)`;
-    }
-  });
+    });
+  };
+  move();
+  const offMotion = app.onMotion(move);
   const el = h('div', { class: 'dq-ease' }, h('h1', { class: 'dq-sr', text: 'A quiet minute' }), glow, panelEl);
-  return { el, title: 'A quiet minute', mode: 'sub', bubbles: [1, 0.4], leave: () => stop() };
+  return {
+    el,
+    title: 'A quiet minute',
+    mode: 'sub',
+    bubbles: [1, 0.4],
+    leave: () => {
+      stop();
+      offMotion();
+    },
+  };
 }
 
 // ---------------- Give me a moment ----------------

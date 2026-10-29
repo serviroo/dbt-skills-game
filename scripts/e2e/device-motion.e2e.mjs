@@ -4,7 +4,10 @@
 // it is turned off, and a closed window leaves nothing moving behind; turned on before the chest is held, the chest
 // doesn't rattle as it charges; with Motion saved as Full the title's breath carries on through a change. In the
 // companion, the daily gift opened while it is on starts moving once it is turned off and stills again when it comes
-// back on, and the Stealth Room's shark, opened while it is on, swims again once it is turned off.
+// back on; in the Stealth Room, opened while it is on, the glow rests and the cat doesn't blep, then the glow breathes,
+// the cat bleps and the shark swims again once it is turned off; A quiet minute's glow rests while it is on, breathes
+// once it is turned off, and settles again when it comes back on. With Motion saved as Full, the glint on the card's
+// back and the Story Room's scan keep moving whatever the device says.
 
 const PHONE = { width: 390, height: 844 };
 
@@ -191,6 +194,14 @@ export const scenarios = {
     await page.waitForFunction(() => window.__daily.reduced(), null, { timeout: 5000 });
     await page.evaluate(() => window.__daily.go({ name: 'rest' }));
     await page.locator('.dq-st-shark').waitFor({ state: 'attached', timeout: 10000 });
+    // the glow rests, and a blep's turn comes and goes with no blep
+    const room = () => page.evaluate(() => ({ glow: document.querySelector('.dq-st-glow').getAnimations().length, opacity: getComputedStyle(document.querySelector('.dq-st-glow')).opacity }));
+    const blep = () => page.evaluate(() => {
+      window.__stealth.blep();
+      return document.querySelector('.dq-st-cat').classList.contains('is-blep');
+    });
+    const still = { ...(await room()), blep: await blep() };
+    h.expect(still.glow === 0 && Number(still.opacity) === 0.7 && !still.blep, `with reduce-motion on, the glow kept breathing or the cat blepped: ${JSON.stringify(still)}`);
     // every time the shark sets off
     await page.evaluate(() => {
       window.__swims = 0;
@@ -203,6 +214,78 @@ export const scenarios = {
     // the next swim is due 45 to 100 s after the first
     await page.clock.runFor(110000);
     h.expect((await page.evaluate(() => window.__swims)) > 0, 'with the device\'s reduce-motion turned off, the shark never swam');
+    const moving = { ...(await room()), blep: await blep() };
+    h.expect(moving.glow === 1 && moving.blep, `with it turned off, the glow did not breathe again or the cat did not blep: ${JSON.stringify(moving)}`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  async 'quiet-minute-follows-device-motion'(h) {
+    const day = (ms) => new Date(ms - 6 * 3600e3).toISOString().slice(0, 10);
+    const t = Date.now() - 86400e3;
+    const save = JSON.stringify({ v: 1, created: t, events: [{ id: 'motion-visit', t, day: day(t), k: 'visit', xp: 10 }], flags: { greetDay: day(t), cardDay: day(t), giftDay: day(t) } });
+    const you = JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: Date.now() - 1000, companionAt: Date.now() - 1000 });
+    const { ctx, page, errors } = await h.open({ [h.SAVE]: save, [h.YOU]: you, 'dbt.app.v1': h.SEEN }, '?mute', PHONE, (c) => c.clock.install());
+    const device = await deviceMotion(ctx, page);
+    await h.reachHub(page);
+    await device('reduce');
+    await page.waitForFunction(() => window.__daily.reduced(), null, { timeout: 5000 });
+    await page.evaluate(() => window.__daily.go({ name: 'ease' }));
+    await page.locator('.dq-ease-glow').waitFor({ state: 'attached', timeout: 10000 });
+    /** The glow's opacity every half second for four seconds: one value while it rests, several while it breathes. */
+    const glow = async () => {
+      const seen = new Set();
+      for (let i = 0; i < 8; i++) {
+        await page.clock.runFor(500);
+        seen.add(await page.evaluate(() => getComputedStyle(document.querySelector('.dq-ease-glow')).opacity));
+      }
+      return [...seen];
+    };
+    const still = await glow();
+    h.expect(still.length === 1 && Number(still[0]) === 0.7, `with reduce-motion on, A quiet minute's glow kept breathing: ${JSON.stringify(still)}`);
+    await device('no-preference');
+    await page.waitForFunction(() => !window.__daily.reduced(), null, { timeout: 5000 });
+    const moving = await glow();
+    h.expect(moving.length > 3, `with it turned off, A quiet minute's glow did not breathe again: ${JSON.stringify(moving)}`);
+    // turned on again mid-breath: the glow and the moth settle where they rest, not wherever the breath had them
+    await device('reduce');
+    await page.waitForFunction(() => window.__daily.reduced(), null, { timeout: 5000 });
+    // the still page's near-instant transitions end on the next real frames
+    await h.frames(page, 2);
+    const settled = await glow();
+    const placed = await page.evaluate(() => ({ glow: document.querySelector('.dq-ease-glow').style.transform, moth: document.querySelector('.dq-ease-sea').style.transform }));
+    h.expect(settled.length === 1 && Number(settled[0]) === 0.7 && !placed.glow && !placed.moth, `turned on mid-visit, A quiet minute did not settle: ${JSON.stringify({ settled, placed })}`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  async 'full-motion-wins-over-device'(h) {
+    const day = (ms) => new Date(ms - 6 * 3600e3).toISOString().slice(0, 10);
+    const t = Date.now() - 86400e3;
+    const save = JSON.stringify({ v: 1, created: t, events: [{ id: 'motion-visit', t, day: day(t), k: 'visit', xp: 10 }], flags: { greetDay: day(t), cardDay: day(t), giftDay: day(t) }, settings: { motion: 'full' } });
+    const you = JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: Date.now() - 1000, companionAt: Date.now() - 1000 });
+    const { ctx, page, errors } = await h.open({ [h.SAVE]: save, [h.YOU]: you, 'dbt.app.v1': h.SEEN }, '?mute', PHONE);
+    const device = await deviceMotion(ctx, page);
+    await h.reachHub(page);
+    await device('reduce');
+    await h.frames(page, 2);
+    h.expect(!(await page.evaluate(() => window.__daily.reduced())), 'with Motion on Full, the device setting took over');
+    // today's card, still face down on Home, keeps the glint on its back
+    await page.locator('.dq-slit').first().waitFor({ state: 'attached', timeout: 10000 });
+    const glint = await page.evaluate(() => document.querySelector('.dq-slit').getAnimations().length);
+    h.expect(glint === 1, `with Motion on Full, the device's reduce-motion stopped the glint on the card's back (${glint})`);
+    // the Story Room's scan, shown while the co-writer works, keeps moving
+    const id = await page.evaluate(async () => {
+      const { storyStore } = await import('/src/daily/storystore.ts');
+      return (await storyStore(window.__daily.store.key).create('A story')).story.id;
+    });
+    await page.evaluate((id) => window.__daily.go({ name: 'write', id }), id);
+    await page.locator('.st-wait').waitFor({ state: 'attached', timeout: 10000 });
+    const scan = await page.evaluate(() => {
+      document.querySelector('.st-wait').classList.remove('is-hidden');
+      return document.querySelector('.st-scan').getAnimations().length;
+    });
+    h.expect(scan === 1, `with Motion on Full, the device's reduce-motion stopped the Story Room's scan (${scan})`);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },

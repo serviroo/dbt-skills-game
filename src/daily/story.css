@@ -774,11 +774,6 @@
 .dq.is-still .st-scan {
   display: none;
 }
-@media (prefers-reduced-motion: reduce) {
-  .st-scan {
-    display: none;
-  }
-}
 
 /* cards */
 .st-cards {
