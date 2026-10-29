@@ -315,10 +315,27 @@ export async function startHarness(flags = {}) {
     launches.push(p);
     return p;
   };
+  /**
+   * Over --ws the browser's 127.0.0.1 is another machine's, where the port could be someone else's dev server if the
+   * tunnel forwards a different one, so the browser must read back a file only this run wrote.
+   */
+  async function reachesServer(browser) {
+    const token = crypto.randomUUID();
+    fs.writeFileSync(path.join(out, 'run-token.txt'), token);
+    const page = await browser.newPage();
+    try {
+      const res = await page.goto(`${server.url}/${path.relative(root, out)}/run-token.txt`).catch((e) => e);
+      const got = res instanceof Error ? res.message.split('\n')[0] : res?.ok() ? await res.text() : `HTTP ${res?.status()}`;
+      if (got !== token) throw new Error(`the browser does not reach this run's dev server at ${server.url} (${got.slice(0, 120)}); with --ws, the tunnel's -R must forward --port`);
+    } finally {
+      await page.context().close();
+    }
+  }
   let browser;
   try {
     browser = await start();
     server = await serve(host, flags.port && Number(flags.port));
+    await reachesServer(browser);
   } catch (e) {
     await Promise.allSettled(browsers.map((b) => b.close()));
     await server?.stop();

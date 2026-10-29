@@ -158,9 +158,10 @@ node scripts/e2e.mjs --ws=ws://127.0.0.1:<port>/<path> --port=5400
 
 `-L` brings the browser's port to this machine's 127.0.0.1, and `-R` lets that browser load this run's dev server at
 its own 127.0.0.1. Naming 127.0.0.1 on both ends and `ExitOnForwardFailure` stop the tunnel if either port is already
-taken there, so that browser never loads another dev server on the same port. `--port` keeps the dev server on the
-forwarded port, and the run stops if that port is taken here. `--headed` goes to the browser's machine; `--software`
-goes to both commands.
+taken on its side. `--ws` needs `--port`, which keeps the dev server on the forwarded port; the run stops if that port
+is taken here, and before any scenario it checks that the browser reaches this run's dev server rather than another
+one. `--headed` goes to `scripts/e2e-browser.mjs`; `--software` goes to both `scripts/e2e-browser.mjs` and
+`scripts/e2e.mjs`.
 
 ### Skill check
 

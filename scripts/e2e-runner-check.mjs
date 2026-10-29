@@ -1,11 +1,12 @@
 import './gl.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { holdDaily } from './e2e/first-actions.e2e.mjs';
 import { runIconChild } from './e2e/icons.e2e.mjs';
 
@@ -57,8 +58,8 @@ async function run(label, args, interrupt = null, env = {}) {
 }
 
 /** Starts scripts/e2e-browser.mjs as the machine with the GPU would. stop() ends it with Ctrl+C's signal and checks its browser went too. */
-async function startRemote(args) {
-  const child = spawn(process.execPath, [path.join(root, 'scripts/e2e-browser.mjs'), ...args], { cwd: out, stdio: ['ignore', 'pipe', 'pipe'] });
+async function startRemote(args, nodeArgs = []) {
+  const child = spawn(process.execPath, [...nodeArgs, path.join(root, 'scripts/e2e-browser.mjs'), ...args], { cwd: out, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';
   const exited = new Promise((resolve) => child.once('exit', (code, signal) => resolve({ code, signal })));
   const timer = setTimeout(() => child.kill('SIGTERM'), 30000);
@@ -244,11 +245,32 @@ export const scenarios = {
     assert.equal(viaWs.report.url, `http://127.0.0.1:${port}`);
     assert.equal(/SwiftShader/.test(viaWs.report.renderer), software, viaWs.report.renderer);
     assert.deepEqual(viaWs.report.scenarios.map((s) => [s.ok, s.result]), [[true, { audio: 'autoplay running' }]]);
-    const mismatch = await run('remote-renderer-mismatch', [`--scenario=${name}-autoplay`, `--ws=${remote.endpoint}`], null, { LANTERN_GL: software ? undefined : 'software' });
+    const mismatch = await run('remote-renderer-mismatch', [`--scenario=${name}-autoplay`, `--ws=${remote.endpoint}`, `--port=${await freePort()}`], null, { LANTERN_GL: software ? undefined : 'software' });
     assert.notEqual(mismatch.code, 0);
     assert(mismatch.log.includes(`; a --ws browser gets its flags where it was started, so start it with node scripts/e2e-browser.mjs${software ? '' : ' --software'}\n`), mismatch.log);
   } finally {
     await remote.stop();
+  }
+  // a run over --ws must name the port its tunnel forwards, and stops before any scenario when the browser reaches some
+  // other server there: this browser sends everything, loopback included, to a stand-in for another dev server
+  const unforwarded = await run('ws-without-port', [`--scenario=${name}-autoplay`, '--ws=ws://127.0.0.1:9/unused']);
+  assert.notEqual(unforwarded.code, 0);
+  assert.match(unforwarded.log, /--ws needs --port/);
+  const decoy = http.createServer((req, res) => res.end('<!doctype html><title>Another dev server</title>')).listen(0, '127.0.0.1');
+  await once(decoy, 'listening');
+  const toDecoy = path.join(out, 'to-decoy.mjs');
+  fs.writeFileSync(toDecoy, `import { chromium } from ${JSON.stringify(pathToFileURL(path.join(root, 'node_modules/playwright/index.mjs')).href)};
+const launchServer = chromium.launchServer.bind(chromium);
+chromium.launchServer = (options) => launchServer({ ...options, args: [...options.args, '--proxy-server=http://127.0.0.1:${decoy.address().port}', '--proxy-bypass-list=<-loopback>'] });
+`);
+  const elsewhere = await startRemote(software ? ['--software'] : [], ['--import', pathToFileURL(toDecoy).href]);
+  try {
+    const wrong = await run('remote-wrong-server', [`--scenario=${name}-autoplay`, `--ws=${elsewhere.endpoint}`, `--port=${await freePort()}`]);
+    assert.notEqual(wrong.code, 0);
+    assert.match(wrong.log, /the browser does not reach this run's dev server at http:\/\/127\.0\.0\.1:\d+ \(<!doctype html><title>Another dev server/);
+  } finally {
+    await elsewhere.stop();
+    decoy.close();
   }
   const signal = await run('signal-cleanup', [`--scenario=${name}-signal`], 'SIGTERM');
   assert.equal(signal.code, 130);

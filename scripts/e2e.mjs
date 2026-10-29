@@ -12,8 +12,8 @@
 // With --ws the browser runs on another machine (one with a real GPU). Start it there with scripts/e2e-browser.mjs,
 // which gives it a local run's flags (--software and --headed go to that script, and --software also here so the
 // renderer check expects SwiftShader) and listens on that machine's 127.0.0.1 only. An SSH tunnel from here forwards
-// its port (-L) and the dev server's (-R), so both sides use 127.0.0.1; --port keeps the dev server on the forwarded
-// port (CONTRIBUTING.md).
+// its port (-L) and the dev server's (-R), so both sides use 127.0.0.1. --ws needs --port, which keeps the dev server
+// on the forwarded port, and the run first checks that the browser reaches this run's dev server (CONTRIBUTING.md).
 // Writes screenshots and report.json to artifacts/e2e/<time>/.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -28,6 +28,7 @@ for (const key of ['file', 'scenario', 'shard', 'jobs', 'cpu-throttle', 'port'])
   if (flags[key] === '') throw new Error(`--${key} needs a value`);
 }
 if (flags.jobs && !/^[1-9]\d*$/.test(flags.jobs)) throw new Error(`--jobs needs a whole number of 1 or more, got ${flags.jobs}`);
+if (flags.ws && !flags.port) throw new Error('--ws needs --port, the dev server port the tunnel forwards with -R');
 if (flags.port && !(/^[1-9]\d*$/.test(flags.port) && +flags.port <= 65535)) throw new Error(`--port needs a port number, got ${flags.port}`);
 if (flags['cpu-throttle'] && (!Number.isFinite(Number(flags['cpu-throttle'])) || Number(flags['cpu-throttle']) < 1)) throw new Error(`--cpu-throttle needs a number of 1 or more, got ${flags['cpu-throttle']}`);
 // With --software, one browser drawing the skills' 3D scenes keeps about 1.5 desktop cores busy. On
