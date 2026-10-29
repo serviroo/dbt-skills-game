@@ -7,7 +7,8 @@
 // when it comes back on; in the Stealth Room, opened while it is on, the glow rests and the cat doesn't blep, then the
 // glow breathes, the cat bleps and the shark swims again once it is turned off; A quiet minute's glow rests while it is
 // on, breathes once it is turned off, and settles again when it comes back on. With Motion saved as Full, the glint on
-// the card's back and the Story Room's scan keep moving whatever the device says.
+// the card's back and the Story Room's scan keep moving whatever the device says. The title's pulses end with the title,
+// however it goes.
 
 const PHONE = { width: 390, height: 844 };
 
@@ -245,6 +246,44 @@ export const scenarios = {
     h.expect(moving.glow === 1 && moving.blep, `with it turned off, the glow did not breathe again or the cat did not blep: ${JSON.stringify(moving)}`);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
+  },
+
+  /** the title's slit and prompt stop pulsing once the title has gone, however it went: a tap, Enter, Space, ?shot= and ?capture */
+  async 'title-pulses-end-with-it'(h) {
+    const ways = [
+      ['a tap', '?lab=window&kind=title&mute', (t) => t.click()],
+      ['Enter', '?lab=window&kind=title&mute', (t) => t.press('Enter')],
+      ['Space', '?lab=window&kind=title&mute', (t) => t.press(' ')],
+      ['?shot=', '?shot=gate&mute', (t) => t.click()],
+      // a capture leaves the title on its own, a moment into its frames, which the capture steps 1/15 s at a time
+      [
+        '?capture',
+        '?shot=gate&capture&mute&dpr=1&nopost',
+        (t) =>
+          t.page().evaluate(async () => {
+            for (let i = 0; i < 300 && document.querySelector('.title-screen'); i++) {
+              window.__stage.step(1 / 15);
+              await new Promise((r) => setTimeout(r));
+            }
+          }),
+      ],
+    ];
+    for (const [how, query, close] of ways) {
+      const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, query, PHONE);
+      const title = page.locator('.title-screen');
+      await title.waitFor({ timeout: 30000 });
+      // the pulses themselves, kept from while the title shows, so they can be looked at once it has gone
+      const pulsing = await page.evaluate(() => (window.__pulses = [...document.querySelectorAll('.title-slit, .title-prompt')].flatMap((e) => e.getAnimations())).length);
+      h.expect(pulsing === 2, `${how}: the title's slit and prompt are not pulsing to begin with (${pulsing})`);
+      await close(title);
+      await title.waitFor({ state: 'detached', timeout: 15000 }).catch(() => {
+        throw new Error(`${how}: the title never went`);
+      });
+      const running = await page.evaluate(() => window.__pulses.filter((a) => a.playState === 'running').length);
+      h.expect(running === 0, `${how}: ${running} of the title's pulses still run after it has gone`);
+      h.expect(!errors.length, errors.join('\n'));
+      await ctx.close();
+    }
   },
 
   async 'quiet-minute-follows-device-motion'(h) {

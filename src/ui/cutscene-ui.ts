@@ -64,6 +64,8 @@ export function showTitle(onGesture?: () => void): Promise<void> {
       root.removeEventListener('keydown', onKey);
       resolve();
       await finished(animate(root, [{ opacity: 1 }, { opacity: 0 }], { duration: 700, easing: 'ease-in' }));
+      // the pulses end with the title: endless, they would run on in the removed slit and prompt
+      pulses.forEach((a) => a.cancel());
       root.remove();
     };
     const onUp = (e: PointerEvent) => {
