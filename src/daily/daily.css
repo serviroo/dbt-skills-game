@@ -448,7 +448,7 @@
   padding: 3px 14px 3px 15px;
   border: 1px solid var(--rule);
   background: radial-gradient(120% 140% at 50% 50%, rgba(53, 119, 163, 0.22), transparent 70%), rgba(4, 18, 32, 0.6);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale, 1));
   font-weight: 500;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -843,7 +843,7 @@
   width: 100%;
   min-height: 48px;
   padding: 12px 14px;
-  font: 400 17px/1.45 var(--font-ui);
+  font: 400 calc(17px * var(--text-scale, 1))/1.45 var(--font-ui);
   color: #e6f1ff;
   caret-color: var(--blue);
   background: rgba(4, 12, 24, 0.78);
@@ -1959,7 +1959,7 @@ textarea.dq-input {
   padding-top: 2%;
 }
 .dq-ring-word {
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale, 1));
   font-weight: 500;
   letter-spacing: 0.14em;
   white-space: nowrap;
@@ -1968,7 +1968,7 @@ textarea.dq-input {
 }
 .dq-ring-count,
 .dq-timer-num {
-  font-size: 46px;
+  font-size: calc(46px * var(--text-scale, 1));
   font-weight: 300;
   line-height: 1.05;
   color: #eaf6ff;
@@ -1987,7 +1987,7 @@ textarea.dq-input {
 .dq-timer-svg--hands ~ .dq-timer-center .dq-timer-num,
 .dq-timer-svg--cold ~ .dq-timer-center .dq-timer-num,
 .dq-timer-stage.is-wide .dq-timer-num {
-  font-size: 26px;
+  font-size: calc(26px * var(--text-scale, 1));
 }
 .dq-timer-svg--hands ~ .dq-timer-center,
 .dq-timer-svg--cold ~ .dq-timer-center {
@@ -1995,7 +1995,7 @@ textarea.dq-input {
   padding-bottom: 14%;
 }
 .dq-ring-round {
-  font-size: 14.5px;
+  font-size: calc(14.5px * var(--text-scale, 1));
   color: var(--t-dim);
   text-align: center;
 }
@@ -2197,6 +2197,13 @@ textarea.dq-input {
 }
 
 /* ---------- Safe Zone ---------- */
+/* Text size in Settings: every font size the Safe Zone shows is multiplied by --text-scale (1 everywhere else) */
+.dq-safezone[data-size='large'] {
+  --text-scale: 1.15;
+}
+.dq-safezone[data-size='largest'] {
+  --text-scale: 1.3;
+}
 .dq-safezone {
   --pad: 24px;
   max-width: 600px;
@@ -2216,16 +2223,16 @@ textarea.dq-input {
   color: #d6e9f8;
 }
 .dq-sz .dq-text {
-  font-size: 20px;
+  font-size: calc(20px * var(--text-scale, 1));
   line-height: 1.6;
   color: #cfe0f1;
 }
 .dq-sz .dq-small {
-  font-size: 20px;
+  font-size: calc(20px * var(--text-scale, 1));
 }
 .dq-sz-t {
   margin: 0 0 12px;
-  font-size: 25px;
+  font-size: calc(25px * var(--text-scale, 1));
   font-weight: 500;
   line-height: 1.3;
   color: #e3f1fd;
@@ -2238,14 +2245,14 @@ textarea.dq-input {
 }
 .dq-sz .dq-btn {
   min-height: 52px;
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale, 1));
   letter-spacing: 0.08em;
 }
 .dq-sz .dq-btn--primary {
 }
 .dq-sz .dq-opt {
   min-height: 54px;
-  font-size: 19px;
+  font-size: calc(19px * var(--text-scale, 1));
 }
 .dq-sz-list {
   margin: 12px 0 0;
@@ -2259,7 +2266,7 @@ textarea.dq-input {
   padding: 12px 14px;
   border-left: 2px solid rgba(137, 207, 157, 0.55);
   background: rgba(10, 26, 30, 0.45);
-  font-size: 20px;
+  font-size: calc(20px * var(--text-scale, 1));
   color: #dcefe2;
 }
 .dq-sz-empty {
@@ -2276,7 +2283,7 @@ textarea.dq-input {
   gap: 14px;
 }
 .dq-sz-stop {
-  font-size: 20px;
+  font-size: calc(20px * var(--text-scale, 1));
   line-height: 1.5;
   color: #cfe0f1;
 }
@@ -2368,7 +2375,7 @@ textarea.dq-input {
   padding: 0 14px;
   border: 0;
   background: none;
-  font: 500 17px/1.2 var(--font-ui);
+  font: 500 calc(17px * var(--text-scale, 1))/1.2 var(--font-ui);
   letter-spacing: 0.02em;
   color: #cfe8fb;
   text-decoration: underline;
@@ -2421,13 +2428,13 @@ textarea.dq-input {
   gap: 10px;
 }
 .dq-res-n {
-  font-size: 20px;
+  font-size: calc(20px * var(--text-scale, 1));
   font-weight: 500;
   color: #e3f1fd;
 }
 .dq-res-how {
   margin-top: 10px !important;
-  font-size: 20px;
+  font-size: calc(20px * var(--text-scale, 1));
   color: #c3d7eb;
 }
 .dq-res-acts {
@@ -2466,7 +2473,7 @@ textarea.dq-input {
 .dq-sz .dq-setting-h,
 .dq-sz .dq-mo-len-l,
 .dq-sz .dq-mo-len-o {
-  font-size: 20px;
+  font-size: calc(20px * var(--text-scale, 1));
 }
 .dq-sz .dq-small .dq-a {
   display: inline-flex;
@@ -2524,7 +2531,7 @@ textarea.dq-input {
 }
 .dq-sz .dq-lists-copy .dq-pre,
 .dq-sz .dq-lists-copy .dq-hint {
-  font-size: 20px;
+  font-size: calc(20px * var(--text-scale, 1));
 }
 /* a phone zoomed to 200% (260 CSS pixels wide or less): the Safe Zone gives its words the room, so every call and text
    button fits; the label already says Call or Text, so the icon steps aside. Its top bar keeps Leave in words and its

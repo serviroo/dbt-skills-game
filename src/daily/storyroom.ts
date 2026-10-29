@@ -5,7 +5,7 @@
 import { animate } from '../ui/anim';
 import { cowrite } from '../cowriter/local';
 import type { CowriteReq, CowriteRes, CowriteTurn } from '../cowriter/types';
-import { BESIDE, CARE_KEY, READ_SIZES, type ReadSize } from '../core/stored-names';
+import { CARE_KEY, READ_SIZES, type ReadSize } from '../core/stored-names';
 import { STORY_DRAWING, STORY_FIND, STORY_IMPORT, STORY_READ, STORY_START } from '../content/story-lines';
 import { write } from '../core/cleared';
 import type { App, Route, ScreenOut, Visit } from './app';
@@ -16,6 +16,7 @@ import { dayDiff, dayKey } from './store';
 import { match, spans, terms, type Span } from './storyfind';
 import { creditStory, STORY_CAP, storyStore, type Card, type CardMode, type Chapter, type Story } from './storystore';
 import { storyFromText, storyToText, type StoryText } from './storytext';
+import { keepTextSize, textSize } from './text-size';
 import { btn, h, p, segmented, shareOrSave, typo } from './ui';
 
 export const STORY = {
@@ -1928,16 +1929,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
 }
 
 // ---------------- reading ----------------
-const sizeKey = (app: App) => `${app.store.key}${BESIDE.readSize}`;
-/** The reading size chosen on this device. Nothing stored, or a size this version doesn't know, reads as the first. */
-function storedSize(app: App): ReadSize {
-  try {
-    const v = localStorage.getItem(sizeKey(app));
-    return READ_SIZES.find((x) => x === v) ?? READ_SIZES[0];
-  } catch {
-    return READ_SIZES[0];
-  }
-}
 
 /** The story to read straight through, every chapter in order, at the text size they pick. Nothing here changes it. */
 export function readScreen(app: App, route: Route): ScreenOut {
@@ -1962,16 +1953,9 @@ export function readScreen(app: App, route: Route): ScreenOut {
   const setSize = (v: ReadSize, keep = false) => {
     page.dataset.size = v;
     sizeBtns.forEach((b, i) => b.setAttribute('aria-pressed', String(READ_SIZES[i] === v)));
-    if (keep)
-      write(() => {
-        try {
-          localStorage.setItem(sizeKey(app), v);
-        } catch {
-          /* storage blocked or full: the size still holds while this screen is open */
-        }
-      });
+    if (keep) keepTextSize(app, v);
   };
-  setSize(storedSize(app));
+  setSize(textSize(app));
 
   let unkeep = () => {};
   /**

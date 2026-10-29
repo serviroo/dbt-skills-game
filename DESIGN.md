@@ -148,8 +148,12 @@ Every step is skippable. The lists are set up only when the player chooses to, a
 - Nothing depends on sound.
 - Every control has a label a screen reader can read, and every tap target is at least 44 px.
 - Back and Forward (and a phone's back gesture) follow the companion. Back closes whatever is open on top first, and
-  coming back to a screen never credits it twice. Escape closes whatever is open on top too.
+  coming back to a screen never credits it twice. Escape closes whatever is open on top too, and with nothing open
+  it leaves the Safe Zone the way Leave does.
 - Every radio group is one Tab stop: arrow keys, Home and End move through it.
 - A hold ends when focus or the key leaves it, and never finishes later on its own.
-- The Safe Zone starts each screen at the top with "Talk to someone now" one Tab away, says each step politely to a
-  screen reader, and fits at 200% zoom on a 320 px phone.
+- Focus never lands on nothing or out of sight: when the control it is on goes away or scrolls off (Start on a
+  countdown, a preview opening below), it moves to what takes its place.
+- The Safe Zone starts each screen at the top with "Talk to someone now" one Tab away, and Tab reaches every control
+  in reading order. It says each step politely to a screen reader, and a countdown as it starts and ends, never each
+  second. Its words follow Text size in Settings, and it fits at 200% zoom on a 320 px phone at any text size.

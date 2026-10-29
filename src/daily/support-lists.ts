@@ -26,7 +26,7 @@ export function supportListsCopy(app: App) {
   const st = app.store;
   let said: boolean | undefined;
   const hint = p('', 'dq-small');
-  const pre = h('pre', { class: 'dq-pre dq-lists-pre', tabindex: '0', 'aria-label': LISTS_COPY.open });
+  const pre = h('pre', { class: 'dq-pre dq-lists-pre', tabindex: '0', 'aria-label': LISTS_COPY.preview });
   const empty = p(LISTS_COPY.empty, 'dq-text');
   const status = h('span', { class: 'dq-hint', 'aria-live': 'polite' });
   const render = () => {
@@ -41,7 +41,8 @@ export function supportListsCopy(app: App) {
     const text = render();
     status.textContent = text && (await copyText(text)) ? LISTS_COPY.copied : LISTS_COPY.failed;
   }, { kind: 'quiet', ic: 'copy' });
-  const box = h('div', { class: 'dq-lists-copy is-hidden', id: `dq-lists-${uid()}` }, hint, pre, empty, h('div', { class: 'dq-actions' }, copy, btn(LISTS_COPY.close, () => show(false), { kind: 'quiet' }), status));
+  const close = btn(LISTS_COPY.close, () => show(false), { kind: 'quiet' });
+  const box = h('div', { class: 'dq-lists-copy is-hidden', id: `dq-lists-${uid()}` }, hint, pre, empty, h('div', { class: 'dq-actions' }, copy, close, status));
   const open = btn(LISTS_COPY.open, () => show(box.classList.contains('is-hidden')), { kind: 'quiet', ic: 'copy' });
   open.setAttribute('aria-expanded', 'false');
   open.setAttribute('aria-controls', box.id);
@@ -52,7 +53,9 @@ export function supportListsCopy(app: App) {
     if (!on) return open.focus();
     said ??= mayMentionTherapist();
     hint.textContent = said ? `${LISTS_COPY.therapist} ${LISTS_COPY.local}` : LISTS_COPY.local;
-    render();
+    const text = render();
+    // bringing it into view can hide the button under the top bar, so focus on that button moves into the preview
+    if (document.activeElement === open) (text ? pre : close).focus({ preventScroll: true });
     // on a small screen it opens below the fold
     box.scrollIntoView({ block: 'nearest', behavior: app.reduced() ? 'auto' : 'smooth' });
   }
