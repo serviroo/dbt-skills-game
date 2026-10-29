@@ -377,9 +377,12 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; in
   };
   const tapped = () => {
     const had = document.activeElement === startB;
+    // a choice the keys started it from (a held timer's caller) stays in view: the countdown shows as far as it can below
+    const keyed = !had && document.activeElement instanceof HTMLElement && document.activeElement.matches(':focus-visible') ? document.activeElement : null;
     begin();
     if (had) actions.querySelector('button')?.focus({ preventScroll: true });
-    (opts.reveal ?? stageEl).scrollIntoView({ block: 'nearest', behavior: ctx.reduced() ? 'auto' : 'smooth' });
+    (opts.reveal ?? stageEl).scrollIntoView({ block: 'nearest', behavior: ctx.reduced() || keyed ? 'auto' : 'smooth' });
+    keyed?.scrollIntoView({ block: 'nearest' });
   };
   const startB = opts.start ? btn(opts.start, tapped, { kind: 'primary' }) : null;
   if (startB) actions.append(startB, ...extra);

@@ -2248,6 +2248,18 @@ textarea.dq-input {
   font-size: calc(15px * var(--text-scale, 1));
   letter-spacing: 0.08em;
 }
+/* a long word wraps (.dq-safezone above) only in a box that doesn't grow to hold it: so a button's words, the note under a
+   call or text button and the breathing ring's word stay inside their box, at the largest text on a zoomed phone too */
+.dq-sz .dq-btn-t,
+.dq-sz .dq-res-note,
+.dq-sz .dq-ring-word {
+  min-width: 0;
+  max-width: 100%;
+}
+.dq-sz .dq-ring-word {
+  white-space: normal;
+  text-align: center;
+}
 .dq-sz .dq-btn--primary {
 }
 .dq-sz .dq-opt {
@@ -2533,9 +2545,9 @@ textarea.dq-input {
 .dq-sz .dq-lists-copy .dq-hint {
   font-size: calc(20px * var(--text-scale, 1));
 }
-/* a phone zoomed to 200% (260 CSS pixels wide or less): the Safe Zone gives its words the room, so every call and text
-   button fits; the label already says Call or Text, so the icon steps aside. Its top bar keeps Leave in words and its
-   two tools as icons, each still named for a screen reader, so all three stay on one line */
+/* a phone zoomed to 200% (260 CSS pixels wide or less): the Safe Zone gives its words the room, so every button fits;
+   its words already say what it does (Call, Text, Add, Copy), so its icon steps aside. Its top bar keeps Leave in words
+   and its two tools as icons, each still named for a screen reader, so all three stay on one line */
 @media (max-width: 260px) {
   .dq[data-screen='safe'] .dq-top {
     gap: 4px;
@@ -2565,11 +2577,17 @@ textarea.dq-input {
   .dq-res {
     padding: 10px 8px;
   }
+  /* smaller, closer capitals, as a Lantern window's buttons take here, so each word on a button fits whole; the note
+     under a call or text button goes back to its Regular size for the same reason */
   .dq-sz .dq-btn {
-    padding: 0 10px;
+    padding: 0 8px;
+    font-size: 13px;
+    letter-spacing: 0.06em;
   }
-  .dq-res-a .dq-btn-ic,
-  .dq-person-acts .dq-btn-ic,
+  .dq-sz .dq-res-note {
+    font-size: 20px;
+  }
+  .dq-sz .dq-btn-ic,
   .dq-sz-talk > span:first-child {
     display: none;
   }
@@ -3585,6 +3603,34 @@ textarea.dq-input {
   .dq-sz .dq-timer-stage,
   .dq-sz .dq-mo-stage {
     width: min(196px, 52vw);
+  }
+}
+/* a phone at 200% zoom, held either way (300 CSS pixels wide or less): the breathing ring's word doesn't fit inside the
+   ring, so it sits just under it at its full size, on lines as wide as the frame; the count stays in the ring */
+@media (max-width: 300px) {
+  .dq-sz .dq-ring-stage {
+    display: grid;
+    width: 100%;
+    aspect-ratio: auto;
+  }
+  .dq-sz .dq-ring-svg {
+    position: static;
+    grid-area: 1 / 1;
+    justify-self: center;
+    width: min(196px, 52vw);
+    height: auto;
+    aspect-ratio: 1;
+  }
+  .dq-sz .dq-ring-center {
+    display: contents;
+  }
+  .dq-sz .dq-ring-count {
+    grid-area: 1 / 1;
+    place-self: center;
+  }
+  .dq-sz .dq-ring-word {
+    grid-area: 2 / 1;
+    margin-top: 8px;
   }
 }
 .dq-sz-lead,

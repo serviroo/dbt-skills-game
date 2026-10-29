@@ -2,8 +2,8 @@
 //   safe-zone-keys       every Safe Zone screen used with the keyboard alone, at 390x844, 320x568 and 844x390. On each
 //                        screen Tab reaches every control once, in the order they read ("Talk to someone now" first),
 //                        each one in view with its focus ring, then goes on out of the Safe Zone, so nothing holds
-//                        focus. Enter and Space do what a tap does. Starting the cool-air countdown leaves focus on the
-//                        control beside it, the arrow keys move through countries without losing the picker, and
+//                        focus. Enter and Space do what a tap does. Choosing Cool air starts its countdown with focus
+//                        kept on that choice, the arrow keys move through countries without losing the picker, and
 //                        nothing is credited
 //   safe-zone-escape     Escape leaves the Safe Zone from every kind of screen exactly as Leave does, with nothing
 //                        asked: a running countdown, a half-typed list item, the country picker, Give me a moment. An
@@ -12,10 +12,15 @@
 //                        by their words but never the count, and the countdown once as it starts but not each second
 //   timer-said-each-time a skill's countdown is said as it starts, each time it gets more time (the same words twice
 //                        are heard twice) and as it ends
+//   start-keeps-focus    a skill countdown's Start pressed by key hands focus to "+15 s", which takes its place, in
+//                        view with its ring, so focus is never left on nothing
 //   safe-zone-text-size  Text size in Settings: at Largest every word in the Safe Zone is at least 1.3 times its
-//                        Regular size and the Story Room reads at the same size. Nothing scrolls sideways, is cut off
-//                        or sits out of reach at 320x568, 390x844, 844x390 and 568x320, nor at 200% browser zoom on
-//                        320x568
+//                        Regular size and the Story Room reads at the same size. Nothing scrolls sideways, is cut off,
+//                        runs outside its button or box or sits out of reach at 320x568, 390x844, 844x390 and 568x320,
+//                        nor at 200% browser zoom on 320x568 upright and sideways
+//   safe-zone-zoom-keys  at Largest and 200% zoom on 320x568, upright and sideways, every Safe Zone screen used with
+//                        the keyboard alone: each control, and each choice of a group (How long's "Until I'm ready"
+//                        among them), shows whole and clear of the top bar and "Talk to someone now" as it gets focus
 import { boot, settle } from './layout-fit.e2e.mjs';
 import { fits } from './move-like-an-app.e2e.mjs';
 
@@ -49,24 +54,108 @@ const xp = (page) => page.evaluate(() => JSON.stringify(window.__daily.store.sta
 /** What a control is called: its aria-label, else its label's words, else its own. Runs in the page. */
 const nameOf = (e) => (e?.getAttribute('aria-label') || (e?.labels?.length ? e.labels[0].textContent : e?.textContent) || '').replace(/\s+/g, ' ').trim();
 
+/**
+ * Whether `e` shows whole: each of its lines on the screen and, at its corners, its middle and between them, not under
+ * anything, a pinned bar most of all. A choice inside its label shows as the label. One taller than half the screen is
+ * centred as it gets focus, so it need only show its first line, 22px down, across its width. Runs in the page.
+ */
+const whole = (e) => {
+  if (e.matches('input') && e.closest('label')) e = e.closest('label');
+  const rs = [...e.getClientRects()].filter((r) => r.width && r.height);
+  return (
+    !!rs.length &&
+    rs.every((r) => {
+      const tall = r.height > innerHeight / 2;
+      const bottom = tall ? r.top + Math.min(r.height / 2, 22) : r.bottom;
+      if (r.top < -0.5 || bottom > innerHeight + 0.5 || r.left < -0.5 || r.right > innerWidth + 0.5) return false;
+      const i = Math.min(2, r.width / 4, (bottom - r.top) / 4);
+      const xs = [r.left + i, (r.left + r.right) / 2, r.right - i];
+      const ys = tall ? [bottom] : [r.top + i, (r.top + bottom) / 2, bottom - i];
+      return xs.every((x) => ys.every((y) => {
+        const hit = document.elementFromPoint(x, y);
+        return !!hit && (hit === e || e.contains(hit));
+      }));
+    })
+  );
+};
+
 /** What has focus: its name, whether it is in the Safe Zone, and whether it shows its ring (a field its border and glow), whole and clear of the bars. */
 const focusNow = (page) =>
   page.evaluate(`(() => {
     const nameOf = ${nameOf};
+    const whole = ${whole};
     const a = document.activeElement;
     if (!a || a === document.body) return { k: null, name: 'nothing', inside: false };
-    const r = a.getBoundingClientRect();
     const cs = getComputedStyle(a);
-    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + Math.min(r.height / 2, 22));
     return {
       k: a.dataset.k ?? null,
       name: nameOf(a).slice(0, 40),
       inside: !!a.closest('.dq-safezone'),
       ring: (a.matches(':focus-visible') && cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0) || (a.matches('.dq-input:focus') && cs.boxShadow !== 'none'),
-      // one taller than the screen shows its top
-      inView: r.top >= -0.5 && (r.bottom <= innerHeight + 0.5 || r.height > innerHeight / 2) && r.left >= -0.5 && r.right <= innerWidth + 0.5 && !!hit && (a === hit || a.contains(hit)),
+      inView: whole(a),
     };
   })()`);
+
+/**
+ * Words out of place: a line of words that runs outside a box it sits in (each box around it, up to the page), a word
+ * broken across two lines in a button, a choice or a note, and a breathing ring's word that reaches past the ring
+ * instead of sitting inside it or just under it.
+ */
+const spills = (page) =>
+  page.evaluate(() => {
+    const out = new Set();
+    const tag = (e) => `${e.tagName.toLowerCase()}.${(e.getAttribute('class') ?? '').trim().split(/\s+/).join('.')}`;
+    for (const e of document.querySelectorAll('.dq-top *, .dq-safezone *')) {
+      if (!e.checkVisibility({ visibilityProperty: true }) || e.closest('.dq-sr')) continue;
+      const label = e.closest('.dq-btn, .dq-opt, .dq-mo-len-o, .dq-sz-talk, .dq-res-note, .dq-ring-word');
+      for (const n of e.childNodes) {
+        if (n.nodeType !== 3 || !n.textContent.trim()) continue;
+        const words = document.createRange();
+        words.selectNodeContents(n);
+        for (const line of words.getClientRects())
+          for (let box = e; box && !box.matches('.dq'); box = box.parentElement) {
+            if (/^(contents|inline)$/.test(getComputedStyle(box).display)) continue;
+            const b = box.getBoundingClientRect();
+            if (line.left < b.left - 1 || line.right > b.right + 1) {
+              out.add(`"${n.textContent.trim().slice(0, 30)}" runs outside ${tag(box)}`);
+              break;
+            }
+          }
+        // a label or a note is sized so each word fits whole; it may still break after a hyphen
+        if (label)
+          for (const m of n.textContent.matchAll(/[^\s-]+-?/g)) {
+            const word = document.createRange();
+            word.setStart(n, m.index);
+            word.setEnd(n, m.index + m[0].length);
+            if (new Set([...word.getClientRects()].filter((r) => r.width).map((r) => Math.round(r.top))).size > 1) out.add(`"${m[0]}" breaks inside the word in ${tag(label)}`);
+          }
+      }
+    }
+    for (const w of document.querySelectorAll('.dq-safezone .dq-ring-word')) {
+      const ring = w.closest('.dq-ring-stage')?.querySelector('svg')?.getBoundingClientRect();
+      if (!ring || !w.textContent.trim()) continue;
+      const [x, y, r] = [ring.left + ring.width / 2, ring.top + ring.height / 2, ring.width / 2 + 1];
+      const words = document.createRange();
+      words.selectNodeContents(w);
+      for (const q of words.getClientRects()) {
+        const inside = [[q.left, q.top], [q.right, q.top], [q.left, q.bottom], [q.right, q.bottom]].every(([a, b]) => Math.hypot(a - x, b - y) <= r);
+        if (!inside && q.top < ring.bottom - 1) out.add(`the ring's "${w.textContent.trim()}" reaches past the ring, neither inside it nor under it`);
+      }
+    }
+    return [...out];
+  });
+
+/**
+ * Opens the companion on a returning save at `w` by `ht`, at 200% zoom when `zoom` is 2 (half the CSS pixels, each
+ * drawn four times as on a 2x phone), with the Safe Zone's text at Largest.
+ */
+async function largest(h, w, ht, zoom) {
+  const view = { width: w / zoom, height: ht / zoom };
+  const opened = await boot(h, view, { edit: (s) => (s.profile.region = 'us') });
+  if (zoom > 1) await (await opened.ctx.newCDPSession(opened.page)).send('Emulation.setDeviceMetricsOverride', { ...view, deviceScaleFactor: 4, mobile: false });
+  await opened.page.evaluate((key) => localStorage.setItem(`${key}.read-size`, 'largest'), h.SAVE);
+  return opened;
+}
 
 /**
  * Tabs through the screen from its top. Problems: two controls with the same name, a control skipped, reached twice or
@@ -158,12 +247,13 @@ export const scenarios = {
       await heading(page, 'Squeeze and release');
       await walk('squeeze');
       await press(page, 'Next');
-      await heading(page, 'Cool air, or something cool');
+      await heading(page, 'Cool air or cold water');
       await walk('cold');
-      await press(page, 'Start 30 seconds');
+      await press(page, 'Cool air');
       await settle(page);
       const started = await focusNow(page);
-      if (!started.inside || !started.ring || !started.inView) problems.push(`${size} cold: after Start focus went to ${started.name} (${JSON.stringify(started)})`);
+      if (started.name !== 'Cool air' || !started.ring || !started.inView) problems.push(`${size} cold: after Cool air focus went to ${started.name} (${JSON.stringify(started)})`);
+      if (!(await page.evaluate(() => document.querySelector('.dq-cool .dq-btn[aria-pressed=true]')?.textContent.trim()))) problems.push(`${size} cold: Cool air by key did not start the countdown`);
       await press(page, 'Next');
       await heading(page, 'Is it even a little lower?');
       await walk('check');
@@ -245,7 +335,7 @@ export const scenarios = {
     const cases = {
       'the first screen': async () => {},
       'a running countdown': async () => {
-        await page.getByRole('button', { name: 'Start 30 seconds' }).click();
+        await page.getByRole('button', { name: 'Cool air' }).click();
       },
       'a half-typed list item': async () => {
         await page.getByRole('button', { name: 'Add one' }).click();
@@ -320,7 +410,7 @@ export const scenarios = {
     await page.locator('.dq-sz-main').getByRole('button', { name: 'Next', exact: true }).last().click();
     await run(300);
     await said();
-    await page.getByRole('button', { name: 'Start 30 seconds' }).click();
+    await page.getByRole('button', { name: 'Cool air' }).click();
     await run(500);
     const start = (await said()).map((s) => s.text);
     if (start.length !== 1 || !/30 seconds/.test(start[0])) problems.push(`starting the countdown said ${JSON.stringify(start)}`);
@@ -363,6 +453,23 @@ export const scenarios = {
     const end = await timerSaid();
     if (JSON.stringify(end) !== JSON.stringify(['Done. (polite)'])) problems.push(`running to its end the timer said ${JSON.stringify(end)}`);
     h.expect(!problems.length && !errors.length, [...problems, ...errors].join('\n'));
+    await ctx.close();
+  },
+
+  async 'start-keeps-focus'(h) {
+    const seed = { [h.YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: Date.now() - 1000, companionAt: Date.now() - 1000 }), 'dbt.app.v1': h.SEEN, [h.SAVE]: JSON.stringify({ v: 1, created: Date.now() - 86400e3, events: [] }) };
+    const { ctx, page, errors } = await h.open(seed, '?mute', PHONE);
+    await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
+    // Kind Light's wish for yourself waits for its Start button
+    await page.evaluate(() => window.__daily.go({ name: 'skill', id: 'loving-kindness' }));
+    await page.getByRole('button', { name: 'Begin' }).click();
+    await page.locator('.dq-opt').first().click();
+    await page.getByRole('button', { name: 'Me', exact: true }).click();
+    await page.getByRole('button', { name: 'Start 20 s' }).waitFor();
+    await press(page, 'Start 20 s');
+    await settle(page);
+    const f = await focusNow(page);
+    h.expect(f.name === '+15 s' && f.ring && f.inView && !errors.length, [`after Start by key focus was on ${f.name} (${JSON.stringify(f)})`, ...errors].join('\n'));
     await ctx.close();
   },
 
@@ -415,22 +522,47 @@ export const scenarios = {
       await ctx.close();
     }
     // everything fits at Largest, a phone either way up and at 200% browser zoom
-    for (const [w, ht, zoom] of [[320, 568, 1], [390, 844, 1], [844, 390, 1], [568, 320, 1], [320, 568, 2]]) {
+    for (const [w, ht, zoom] of [[320, 568, 1], [390, 844, 1], [844, 390, 1], [568, 320, 1], [320, 568, 2], [568, 320, 2]]) {
       const tag = `${w}x${ht}${zoom > 1 ? ' at 200%' : ''}`;
-      const view = { width: w / zoom, height: ht / zoom };
-      const { ctx, page, errors } = await boot(h, view, { edit: (s) => (s.profile.region = 'us') });
-      if (zoom > 1) {
-        const cdp = await ctx.newCDPSession(page);
-        await cdp.send('Emulation.setDeviceMetricsOverride', { ...view, deviceScaleFactor: 4, mobile: false });
-      }
-      await page.evaluate((key) => localStorage.setItem(`${key}.read-size`, 'largest'), h.SAVE);
+      const { ctx, page, errors } = await largest(h, w, ht, zoom);
       for (const at of AT) {
         await page.evaluate((r) => window.__daily.go(r, { replace: true }), { name: 'safe', at });
         await page.locator('.dq-sz-t').first().waitFor();
         await settle(page);
         if (!(await page.evaluate(() => document.querySelector('.dq-safezone')?.dataset.size === 'largest'))) problems.push(`${tag} ${at}: the Safe Zone is not at Largest`);
-        for (const p of await fits(page, at)) problems.push(`${tag} ${at}: ${p}`);
+        for (const p of [...(await spills(page)), ...(await fits(page, at))]) problems.push(`${tag} ${at}: ${p}`);
         if (['start', 'breathe', 'talk'].includes(at) || (w === 320 && zoom > 1)) await h.shot(page, `text-size-largest-${w}x${ht}${zoom > 1 ? '-200' : ''}-${at}`);
+      }
+      problems.push(...errors.map((e) => `${tag}: ${e}`));
+      await ctx.close();
+    }
+    h.expect(!problems.length, problems.join('\n'));
+  },
+
+  async 'safe-zone-zoom-keys'(h) {
+    const problems = [];
+    for (const [w, ht] of [[320, 568], [568, 320]]) {
+      const tag = `${w}x${ht} at 200%`;
+      const { ctx, page, errors } = await largest(h, w, ht, 2);
+      for (const at of AT) {
+        await page.evaluate((r) => window.__daily.go(r, { replace: true }), { name: 'safe', at });
+        await page.locator('.dq-sz-t').first().waitFor();
+        await settle(page);
+        problems.push(...(await tabWalk(page, `${tag} ${at}`)));
+        // Tab stops once in a group of choices and the arrow keys move through it: each choice shows whole with focus
+        const hidden = await page.evaluate(`(async () => {
+          const nameOf = ${nameOf};
+          const whole = ${whole};
+          const out = [];
+          for (const r of document.querySelectorAll('.dq-safezone input[type=radio]')) {
+            r.focus();
+            await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+            if (!whole(r)) out.push(nameOf(r));
+          }
+          return out;
+        })()`);
+        for (const n of hidden) problems.push(`${tag} ${at}: "${n}" is not whole, or sits under something, as it gets focus`);
+        if (['moment', 'breathe', 'check', 'people', 'talk', 'close'].includes(at)) await h.shot(page, `zoom-keys-${w}x${ht}-${at}`);
       }
       problems.push(...errors.map((e) => `${tag}: ${e}`));
       await ctx.close();
