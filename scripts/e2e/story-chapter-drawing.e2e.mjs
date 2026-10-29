@@ -337,6 +337,35 @@ export const scenarios = {
     }
   },
 
+  /**
+   * The picker reads the story before it opens. Left in that moment for the Safe Zone, it never opens: sheets sit in a
+   * layer that outlives the page, so a late one would cover "Talk to someone now".
+   */
+  async 'story-drawing-picker-after-leaving'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await ready(page);
+      await h.reachHub(page);
+      const t = await make(page);
+      await writing(page, t.id, t.ch1);
+      await editorShows(h, page, null, 'chapter 1');
+      const held = await holdStorage(page, ['story']);
+      await page.getByRole('button', { name: 'Add a drawing', exact: true }).click();
+      await held.waitHeld(`story ${t.id}`);
+      await page.locator('.dq-top .dq-safe').click();
+      await page.getByRole('button', { name: 'Talk to someone now', exact: true }).waitFor({ timeout: 10000 });
+      await held.drain();
+      // the read has answered; whatever it was going to open has had its turn
+      await h.frames(page, 2);
+      const sheets = await page.locator('.st-sheet').count();
+      h.expect(!sheets, `after leaving for the Safe Zone the drawing picker opened over it (${sheets} sheets)`);
+      h.expect((await page.evaluate(() => window.__daily.route.name)) === 'safe', 'the Safe Zone did not stay open');
+      h.expect(!errors.length, 'errors: ' + errors.join(' | '));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** An old Save Crystal's story takes a drawing, a new Save Crystal carries it, and restoring it keeps it */
   async 'story-drawing-old-save-and-crystal'(h) {
     let raw;
