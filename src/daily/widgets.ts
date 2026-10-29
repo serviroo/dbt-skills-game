@@ -224,7 +224,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
     water.append(parts.rays, parts.stone);
     svg.append(water);
   } else if (visual === 'tide') {
-    parts.tide = sv('g', { fill: 'none', 'stroke-linecap': 'round', ...(hasScene(visual) ? { class: 'dq-scene-flat' } : {}) });
+    parts.tide = sv('g', { fill: 'none', 'stroke-linecap': 'round', class: 'dq-scene-flat' });
     for (let i = 0; i < 4; i++) parts.tide.append(sv('path', { d: '', stroke: `rgba(150,205,255,${0.6 - i * 0.12})`, 'stroke-width': 1.4 }));
     svg.append(parts.tide);
   } else if (visual === 'wave') {
@@ -232,7 +232,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
     parts.wave2 = sv('path', { d: '', fill: 'none', stroke: 'rgba(160,215,255,.25)', 'stroke-width': 1 });
     parts.board = sv('g');
     parts.board.append(sv('rect', { x: -13, y: -3, width: 26, height: 5, rx: 2.5, fill: '#cfe9ff' }), sv('circle', { cx: 0, cy: -8, r: 3.2, fill: '#89cf9d' }));
-    const sea = sv('g', hasScene(visual) ? { class: 'dq-scene-flat' } : {});
+    const sea = sv('g', { class: 'dq-scene-flat' });
     sea.append(parts.wave2, parts.wave, parts.board);
     svg.append(sea);
   } else if (visual === 'hands') {
