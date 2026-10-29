@@ -1170,6 +1170,56 @@ export const scenarios = {
     await ctx.close();
   },
 
+  /**
+   * the clouds over the tide on Spectator Mode's watch step: one drifts in from the left, crosses the middle of the sky
+   * and drifts out on the right; the moon dims while one passes it and comes back after; with reduced motion one cloud
+   * stands still in the middle of the sky
+   */
+  async 'tide-clouds'(h) {
+    const clouds = (last) => last.probe.clouds.split(' ').filter(Boolean).map((c) => c.split(':').map(Number));
+    {
+      const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
+      await page.clock.install();
+      await page.reload();
+      await toStep(h, page, 'mindful-thoughts', 'watch', { pause: true });
+      await showsStopped(h, page, 'tide clouds');
+      // two seconds at a time through most of the minute, each cloud's place across the frame and the moon's light
+      const path = new Map();
+      const moon = [];
+      let shot = false;
+      for (let at = await after(h, page, 0); at.e < at.dur - 3; at = await after(h, page, 2000)) {
+        for (const [n, x] of clouds(at)) path.set(n, [...(path.get(n) ?? []), x]);
+        moon.push(at.probe.moon);
+        if (!shot && at.probe.moon < 0.5) {
+          shot = true;
+          await h.shot(page, 'tide-clouds-moon-phone');
+        }
+      }
+      const crossed = [...path].filter(([, xs]) => xs[0] < -1 && xs.some((x) => Math.abs(x) < 0.25) && xs[xs.length - 1] > 1 && xs.every((x, i) => !i || x > xs[i - 1]));
+      const where = [...path].map(([n, xs]) => `${n}: ${xs.map((x) => x.toFixed(2)).join(' ')}`).join('; ');
+      h.expect(crossed.length > 0, `tide clouds: no cloud drifted in, crossed the sky and drifted out (${where})`);
+      const low = moon.indexOf(Math.min(...moon));
+      h.expect(moon[low] < 0.5 && moon.slice(low).some((m) => m > 0.95), `tide clouds: the moon did not dim behind a cloud and come back (${moon.map((m) => m.toFixed(2)).join(' ')})`);
+      console.log(`  tide clouds: ${crossed.length} crossed; moon ${moon.map((m) => m.toFixed(2)).join(' ')}`);
+      h.expect(!errors.length, errors.join('\n'));
+      await ctx.close();
+    }
+    {
+      const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await page.reload();
+      await toStep(h, page, 'mindful-thoughts', 'watch');
+      await live(h, page, 'tide clouds still');
+      const a = (await scenes(page)).last;
+      await h.frames(page, 60);
+      const b = (await scenes(page)).last;
+      h.expect(a.still && clouds(a).some(([, x]) => Math.abs(x) < 0.35) && b.probe.clouds === a.probe.clouds, `tide clouds, reduced motion: no cloud standing still mid-sky (${a.probe.clouds} -> ${b.probe.clouds})`);
+      await h.shot(page, 'tide-clouds-still-phone');
+      h.expect(!errors.length, errors.join('\n'));
+      await ctx.close();
+    }
+  },
+
   /** with reduced motion the wave, the light, the tide and Give me a moment each draw one still frame */
   async 'water-scenes-still'(h) {
     for (const k of [...KINDS, { kind: 'ring', moment: true }]) {
