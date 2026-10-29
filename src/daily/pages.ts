@@ -102,13 +102,22 @@ export function restScreen(app: App): ScreenOut {
     el.classList.toggle('is-aquarium', on);
     app.bubbles.set(on ? 13 : 7, on ? 1.2 : 1);
   };
+  /**
+   * The room's one breath, counted from when the room opened on the clock its animations run on. The glow and the
+   * Breathing words take their place in it whenever either starts again (the words turned on, or the glow breathing
+   * again once motion is back), so they always breathe together.
+   */
+  const opened = Number(document.timeline.currentTime);
+  const inStep = () => {
+    const since = Number(document.timeline.currentTime) - opened;
+    for (const a of [glow, ...word.querySelectorAll('span')].flatMap((e) => e.getAnimations())) a.currentTime = since % Number(a.effect?.getTiming().duration);
+  };
   const setWords = (on: boolean) => {
     prefs.words = on;
     el.classList.toggle('is-words', on);
-    // the words only run while shown; start them in step with the glow's breath
-    const t = glow.getAnimations()[0]?.currentTime;
-    if (on && typeof t === 'number') word.querySelectorAll('span').forEach((s) => s.getAnimations().forEach((a) => (a.currentTime = t)));
+    if (on) inStep();
   };
+  const offMotion = app.onMotion(inStep);
   const mode = (label: string, ic: string, on: boolean, set: (v: boolean) => void, aria?: string) => {
     const b = h(
       'button',
@@ -204,6 +213,7 @@ export function restScreen(app: App): ScreenOut {
     mode: 'sub',
     bubbles: prefs.aquarium ? [13, 1.2] : [7, 1],
     leave: () => {
+      offMotion();
       timers.forEach((id) => clearTimeout(id));
       timers.clear();
       slime.destroy();

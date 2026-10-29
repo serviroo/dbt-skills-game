@@ -7,7 +7,9 @@
 // when it comes back on; in the Stealth Room, opened while it is on, the glow rests and the cat doesn't blep, then the
 // glow breathes, the cat bleps and the shark swims again once it is turned off; A quiet minute's glow rests while it is
 // on, breathes once it is turned off, and settles again when it comes back on. With Motion saved as Full, the glint on
-// the card's back and the Story Room's scan keep moving whatever the device says.
+// the card's back and the Story Room's scan keep moving whatever the device says. The title's pulses and the end card's
+// drift end with their screen, however it goes, a capture's wait on a dismissed window's typing ends with it, and the
+// Stealth Room's Breathing words still breathe with its glow once motion is back.
 
 const PHONE = { width: 390, height: 844 };
 
@@ -243,6 +245,128 @@ export const scenarios = {
     h.expect((await page.evaluate(() => window.__swims)) > 0, 'with the device\'s reduce-motion turned off, the shark never swam');
     const moving = { ...(await room()), blep: await blep() };
     h.expect(moving.glow === 1 && moving.blep, `with it turned off, the glow did not breathe again or the cat did not blep: ${JSON.stringify(moving)}`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /**
+   * the title's slit and prompt and the end card's drift stop for good once their screen has gone, however it went: the
+   * title by a tap, Enter, Space, ?shot= or a capture, the end card by Enter the Lantern, Replay or a capture. A capture
+   * steps its stage 1/15 s at a time, and every step would bring back an animation it still kept
+   */
+  async 'endless-motion-ends-with-its-screen'(h) {
+    const title = ['.title-screen', '.title-slit, .title-prompt', 2];
+    const card = ['.endcard', '.ec-stage', 1];
+    const tap = (sel) => (page) => page.locator(sel).click();
+    // the end card drifts, so a wait for its button to hold still never ends: a player taps where it is once it is live
+    const press = (v) => async (page) => {
+      await page.locator('.ec-actions:not([inert])').waitFor({ timeout: 15000 });
+      const b = await page.locator(`.ec-actions [data-v="${v}"]`).boundingBox();
+      await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
+    };
+    const capture = (screen) => (page) =>
+      page.evaluate(async (sel) => {
+        for (let i = 0; i < 600 && document.querySelector(sel); i++) {
+          window.__stage.step(1 / 15);
+          await new Promise((r) => setTimeout(r));
+        }
+      }, screen);
+    const ways = [
+      ['the title, a tap', '?lab=window&kind=title&mute', title, tap('.title-screen')],
+      ['the title, Enter', '?lab=window&kind=title&mute', title, (page) => page.locator('.title-screen').press('Enter')],
+      ['the title, Space', '?lab=window&kind=title&mute', title, (page) => page.locator('.title-screen').press(' ')],
+      ['the title, ?shot=', '?shot=gate&mute', title, tap('.title-screen')],
+      ['the title, a capture', '?lab=window&kind=title&mute&capture', title, capture('.title-screen')],
+      ['the end card, Enter the Lantern', '?lab=window&kind=endcard&mute', card, press('enter')],
+      ['the end card, Replay', '?lab=window&kind=endcard&mute', card, press('replay')],
+      ['the end card, a capture', '?lab=window&kind=endcard&mute&capture', card, capture('.endcard')],
+    ];
+    for (const [how, query, [screen, parts, n], close] of ways) {
+      const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, query, PHONE);
+      await page.locator(screen).waitFor({ timeout: 30000 });
+      // the endless animations themselves, kept from while the screen shows, so they can be looked at once it has gone
+      const endless = await page.evaluate(
+        (parts) => (window.__endless = [...document.querySelectorAll(parts)].flatMap((e) => e.getAnimations()).filter((a) => a.effect.getTiming().iterations === Infinity)).length,
+        parts,
+      );
+      h.expect(endless === n, `${how}: ${endless} endless animations to begin with, not ${n}`);
+      await close(page);
+      await page.locator(screen).waitFor({ state: 'detached', timeout: 15000 }).catch(() => {
+        throw new Error(`${how}: the screen never went`);
+      });
+      if (query.includes('capture')) await page.evaluate(() => window.__stage.step(1 / 15));
+      const left = await page.evaluate(() => window.__endless.map((a) => a.playState).filter((p) => p !== 'idle'));
+      h.expect(!left.length, `${how}: ${left.length} of its endless animations are still ${left.join(', ')} after it has gone`);
+      h.expect(!errors.length, errors.join('\n'));
+      await ctx.close();
+    }
+  },
+
+  /**
+   * in a capture, a Lantern window dismissed while it types cancels its typing, and a wait for that typing to finish ends
+   * then, with an AbortError as in real time, instead of looking again on every step for the rest of the capture
+   */
+  async 'capture-wait-ends-with-a-dismissed-window'(h) {
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?lab=window&kind=notification&mute&capture', PHONE);
+    await page.waitForFunction(() => !!window.__stage && !!window.__win, null, { timeout: 30000 });
+    const ended = await page.evaluate(async () => {
+      const step = async (n) => {
+        for (let i = 0; i < n; i++) {
+          window.__stage.step(1 / 15);
+          await new Promise((r) => setTimeout(r));
+        }
+      };
+      const w = window.__win;
+      for (let i = 0; i < 200 && !w.typeAnims.length; i++) await step(1);
+      if (!w.typeAnims.length) return 'no typing';
+      // the same module the window's own waits come from
+      const { finished } = await import('/src/ui/anim.ts');
+      let how = 'still waiting';
+      finished(w.typeAnims[0]).then(() => (how = 'finished'), (e) => (how = e.name));
+      w.destroy();
+      await step(5);
+      return how;
+    });
+    h.expect(ended === 'AbortError', `in a capture, a wait on a dismissed window's typing ${ended === 'still waiting' ? 'never ends' : `ended as ${ended}`}`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /**
+   * the Stealth Room's Breathing words keep pacing the breath while the glow rests with reduce-motion on; once it is
+   * off again the glow breathes in step with them, not from the start of its own breath
+   */
+  async 'stealth-words-breathe-with-glow'(h) {
+    const day = (ms) => new Date(ms - 6 * 3600e3).toISOString().slice(0, 10);
+    const t = Date.now() - 86400e3;
+    const save = JSON.stringify({ v: 1, created: t, events: [{ id: 'motion-visit', t, day: day(t), k: 'visit', xp: 10 }], flags: { greetDay: day(t), cardDay: day(t), giftDay: day(t) } });
+    const you = JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: Date.now() - 1000, companionAt: Date.now() - 1000 });
+    const { ctx, page, errors } = await h.open({ [h.SAVE]: save, [h.YOU]: you, 'dbt.app.v1': h.SEEN }, '?mute', PHONE);
+    const device = await deviceMotion(ctx, page);
+    await h.reachHub(page);
+    await page.evaluate(() => window.__daily.go({ name: 'rest' }));
+    await page.locator('.dq-st-glow').waitFor({ timeout: 10000 });
+    await page.getByRole('button', { name: /^Breathing words/ }).click();
+    // how far apart the glow's breath and the words' are, in ms either way round the breath; null while the glow rests
+    const apart = () =>
+      page.evaluate(() => {
+        const [glow] = document.querySelector('.dq-st-glow').getAnimations();
+        const [words] = document.querySelector('.dq-st-in').getAnimations();
+        if (!glow || !words) return null;
+        const p = glow.effect.getTiming().duration;
+        const d = (((glow.currentTime - words.currentTime) % p) + p) % p;
+        return Math.round(Math.min(d, p - d));
+      });
+    const first = await apart();
+    h.expect(first !== null && first < 100, `the words start ${first} ms out of step with the glow`);
+    await device('reduce');
+    await page.waitForFunction(() => window.__daily.reduced() && !document.querySelector('.dq-st-glow').getAnimations().length, null, { timeout: 5000 });
+    // the glow rests a while; the words keep pacing the breath
+    await h.sleep(3300);
+    await device('no-preference');
+    await page.waitForFunction(() => !window.__daily.reduced() && document.querySelector('.dq-st-glow').getAnimations().length === 1, null, { timeout: 5000 });
+    const back = await apart();
+    h.expect(back !== null && back < 100, `once reduce-motion was off again, the words are ${back} ms out of step with the glow`);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },
