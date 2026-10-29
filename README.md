@@ -31,7 +31,8 @@ back after a long break is always fine.
   a what-if, suggest a next line or tidy up a messy bit. It's scripted and runs on your device too. Stuck on a
   blank page? Ask for a starting point. Read mode shows the whole story at the text size you pick, and remembers it.
   Search finds any word in your stories and notes, even offline.
-  A story you downloaded can come back in as a new story.
+  A story you downloaded can come back in as a new story. Put one of your own drawings above a chapter and it shows
+  there when you read.
 - Save Crystal: a backup of your progress, stories, drawings (unfinished ones too), unfinished skill answers and
   choices. Restore keeps choices you already made on this device, including mute. If something could not be read,
   the file and the app say the backup is incomplete.

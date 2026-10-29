@@ -19,7 +19,7 @@ class MemoryStorage {
 }
 globalThis.localStorage = new MemoryStorage();
 
-const MAPS = { diary: '<day>', 'diary.<day>.emotions': '<row>', 'diary.<day>.urges': '<row>', 'diary.<day>.ft': '<field>', gone: '<id>', 'profile.names': '<shadow>', skillPins: '<skill>', 'skillDrafts[].answers': '<answer>', 'skillDrafts[].typed': '<step>', 'skillDrafts[].leads': '<step>' };
+const MAPS = { diary: '<day>', 'diary.<day>.emotions': '<row>', 'diary.<day>.urges': '<row>', 'diary.<day>.ft': '<field>', gone: '<id>', 'profile.names': '<shadow>', skillPins: '<skill>', 'skillDrafts[].answers': '<answer>', 'skillDrafts[].typed': '<step>', 'skillDrafts[].leads': '<step>', 'stories.stories[].drawings': '<chapter>' };
 function paths(o, at = '', out = new Set()) {
   if (Array.isArray(o)) {
     if (!o.length) out.add(`${at}[]`);
@@ -82,7 +82,7 @@ async function collect() {
     const st = new store.Store('check.save', () => t, back);
     const saved = JSON.parse(localStorage.getItem('check.save') ?? 'null');
     const rec = art.cleanRec({ id: 'a1', kind: 'ally', day, t, updated: t, prompt: 'p', name: 'n', rev: 'r1', from: ['r0@1'], strokes: [{ i: 0, w: 4, p: [1, 2, 3, 4] }, { i: 0, w: 4, p: [], m: ink.STROKE_MODES[0], q: [1, 2] }] });
-    const tale = story.cleanStory({ id: 's1', title: 'T', created: t, updated: t, rev: 'r1', chapters: ['c1'], notes: 'c2', removed: t });
+    const tale = story.cleanStory({ id: 's1', title: 'T', created: t, updated: t, rev: 'r1', chapters: ['c1'], notes: 'c2', removed: t, drawings: { c1: 'a1' } });
     const chapter = story.cleanChapter({ id: 'c1', story: 's1', kind: 'page', title: 'C', text: 'x', updated: t, rev: 'r1' });
     const draft = art.cleanDraft({ key: 'edit:a1:t1', kind: 'ally', editId: 'a1', bases: ['r1@1'], base: t, prompt: 'p', strokes: [{ i: 0, w: 4, p: [1, 2, 3, 4] }, { i: 0, w: 4, p: [], m: ink.STROKE_MODES[0], q: [1, 2] }], t });
     const skills = await load('src/daily/skilldraft.ts');

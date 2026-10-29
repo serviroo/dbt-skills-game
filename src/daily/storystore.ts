@@ -24,6 +24,8 @@ export interface Story {
   chapters: string[];
   notes: string;
   removed?: number;
+  /** The drawing placed above a page, by chapter id: the drawing's id in the Art room. */
+  drawings?: Record<string, string>;
 }
 export interface Chapter {
   id: string;
@@ -105,6 +107,9 @@ export function cleanStory(x: unknown): Story | null {
     notes,
   };
   if (fin(x.removed) && x.removed > 0) s.removed = stampOf(x.removed);
+  // a drawing id is any Art room id (cleanRec's rule); an entry that isn't a page id and a drawing id is left out
+  const drawings = isObj(x.drawings) ? Object.entries(x.drawings).filter((e): e is [string, string] => validId(e[0]) && typeof e[1] === 'string' && !!e[1] && e[1].length <= 40).slice(0, LISTED) : [];
+  if (drawings.length) s.drawings = Object.fromEntries(drawings);
   return s;
 }
 
@@ -751,6 +756,17 @@ export class StoryStore {
     });
   }
 
+  /** Places a drawing above a page (its Art room id), or with null takes it off. Read and written in one go, so a page another tab gave a drawing keeps it. */
+  setDrawing(storyId: string, chapterId: string, drawingId: string | null) {
+    return this.mutate(storyId, (s) => {
+      const { [chapterId]: had, ...rest } = s.drawings ?? {};
+      if ((had ?? null) === drawingId) return null;
+      const next: Story = { ...s, drawings: drawingId ? { ...rest, [chapterId]: drawingId } : rest };
+      if (!Object.keys(next.drawings!).length) delete next.drawings;
+      return next;
+    });
+  }
+
   async cards(chapterId: string): Promise<Card[]> {
     const m = this.mem.cards.get(chapterId);
     if (m && !this.cardImports.has(chapterId)) return m.map((c) => ({ ...c, ...(c.sel ? { sel: { ...c.sel } } : {}) }));
@@ -1051,7 +1067,7 @@ export class StoryStore {
    * and reads differently takes its place and the version here stays as a "(kept copy)" right after it; an older or
    * identical one changes nothing, whatever kind of chapter it is. Every version written gets a fresh rev, so an editor
    * still holding the file's rev keeps a copy instead of writing over it. The file's Notes pointer is used only when it
-   * names a notes chapter of that story in the same file. Story lists are united, the newer title wins. Counts are per story; skipped counts the
+   * names a notes chapter of that story in the same file. Story lists and drawings are united, the newer title (and drawing on a page both give one) wins. Counts are per story; skipped counts the
    * unreadable entries (and chapters whose story is in neither place); unsaved counts stories from the file that live
    * only in memory on this device for now.
    */
@@ -1197,6 +1213,13 @@ export class StoryStore {
           if (extraAdded && !next.chapters.includes(extraNotes)) add.push(extraNotes);
           if (add.length) {
             next.chapters.push(...add);
+            changed = true;
+          }
+          // drawings as the title: the file's for pages with none here, and in place of these when the file's story is newer
+          const mine = local.drawings ?? {};
+          const theirs = Object.entries(fs?.drawings ?? {}).filter(([c, d]) => mine[c] !== d && (fs!.updated > local.updated || !Object.hasOwn(mine, c)));
+          if (theirs.length) {
+            next.drawings = { ...mine, ...Object.fromEntries(theirs) };
             changed = true;
           }
           if (fs && fs.updated > local.updated) {
