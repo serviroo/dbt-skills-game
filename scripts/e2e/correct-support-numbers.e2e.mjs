@@ -1,4 +1,3 @@
-import path from 'node:path';
 import { settled } from './harness.mjs';
 
 const CARRIER = [/carrier|network/i, /rates? may apply/i];
@@ -220,7 +219,7 @@ export const scenarios = {
               h.expect(n.top >= a.bottom - 1 && n.top - a.bottom <= 16 && Math.abs(n.left - a.left) <= 2 && n.right <= m.row.right, `${label}: the note for "${a.label}" isn't right under it: ${JSON.stringify({ a, n })}`);
               h.expect(n.font >= 16, `${label}: the note for "${a.label}" is ${n.font}px`);
             });
-            await row.screenshot({ path: path.join(h.out, `q8-row-${id}-${name.replace(/\W+/g, '-').toLowerCase()}-${size}.png`) });
+            await h.shot(row, `q8-row-${id}-${name.replace(/\W+/g, '-').toLowerCase()}-${size}`);
           }
           expectClean(h, `${size} ${id}`, b);
         } finally {

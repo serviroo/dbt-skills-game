@@ -556,7 +556,7 @@ export const scenarios = {
                   h.expect(a.note.top >= a.bottom - 1 && a.note.top - a.bottom <= 16 && Math.abs(a.note.left - a.left) <= 2 && a.note.right <= m.row.right, `${label} ${name}: the note for "${a.label}" isn't right under it`);
                 }
               }
-              if (!danger && size !== '1280x800') await row.screenshot({ path: path.join(h.out, `q10-row-${id}-${name.replace(/\W+/g, '-').toLowerCase()}-${size}.png`) });
+              if (!danger && size !== '1280x800') await h.shot(row, `q10-row-${id}-${name.replace(/\W+/g, '-').toLowerCase()}-${size}`);
             }
             const picker = b.page.locator('.dq-safezone .dq-region');
             await picker.evaluate((el) => el.scrollIntoView({ block: 'center', behavior: 'instant' }));
@@ -569,7 +569,7 @@ export const scenarios = {
               return { left: r.left, right: r.right, sh: s.height, font: parseFloat(getComputedStyle(el.querySelector('select')).fontSize), covered, hit, innerWidth };
             });
             h.expect(p.left >= 0 && p.right <= p.innerWidth && p.sh >= 44 && p.font >= 16 && !p.covered && p.hit, `${label}: the country picker is cut off, covered or small: ${JSON.stringify(p)}`);
-            if (!danger) await picker.screenshot({ path: path.join(h.out, `q10-picker-${id}-${size}.png`) });
+            if (!danger) await h.shot(picker, `q10-picker-${id}-${size}`);
           }
         }
         expectClean(h, size, b, await read(b.page));

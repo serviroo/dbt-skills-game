@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
+import { screenshot } from './harness.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -152,7 +153,7 @@ async function capture(page, css) {
     document.adoptedStyleSheets = [...document.adoptedStyleSheets, still, look];
   }, css);
   await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
-  const png = await page.screenshot();
+  const png = await screenshot(page);
   await page.evaluate(() => {
     const [still, look] = window.__shotSheets;
     document.adoptedStyleSheets = document.adoptedStyleSheets.filter((s) => s !== look);

@@ -6,6 +6,7 @@
 // Zone and Done still silence it. Measured on the hum's real output, render quantum by render quantum.
 import fs from 'node:fs';
 import path from 'node:path';
+import { installAudioRecorder, audioReady, audioRecorded } from './audio-recorder.mjs';
 
 /** What each check measured, one line a check, in the run's artifacts. */
 const note = (h, name, o) => fs.appendFileSync(path.join(h.out, 'hum-volume.jsonl'), JSON.stringify({ name, ...o }) + '\n');
@@ -35,52 +36,9 @@ function returning() {
 // a save from before the Hum level: no `hum` field
 const levels = (o) => JSON.stringify({ v: 1, master: 1, music: 0, sfx: 1, muted: false, ...o });
 
-// Runs before the app (safe-zone-quiet's recorder): every gain that feeds a speaker also feeds an analyser holding the
-// last 32768 frames, read every 10 ms and cut into 128-frame render quanta keyed by frame index. Each quantum keeps its
-// peak, sum of squares and its biggest step between two samples, so a click shows wherever it falls.
-const recorder = () => {
-  const connect = AudioNode.prototype.connect;
-  const taps = (window.__taps = []);
-  AudioNode.prototype.connect = function (dest, ...rest) {
-    const out = connect.call(this, dest, ...rest);
-    if (dest instanceof AudioDestinationNode && this instanceof GainNode && !taps.some((t) => t.node === this)) {
-      const a = this.context.createAnalyser();
-      a.fftSize = 32768;
-      connect.call(this, a);
-      taps.push({ node: this, a, q: new Map() });
-    }
-    return out;
-  };
-  const Q = 128;
-  const buf = new Float32Array(32768);
-  setInterval(() => {
-    for (const tap of taps) {
-      const c = tap.a.context;
-      if (c.state !== 'running') continue;
-      tap.a.getFloatTimeDomainData(buf);
-      const n = buf.length / Q;
-      const end = Math.round((c.currentTime * c.sampleRate) / Q);
-      // the quanta since the last read, plus two again (the clock and the analyser can be a quantum apart)
-      const from = tap.end === undefined ? 0 : Math.max(0, n - (end - tap.end) - 2);
-      tap.end = end;
-      for (let j = from; j < n; j++) {
-        let peak = 0;
-        let ss = 0;
-        let step = 0;
-        for (let k = j * Q; k < (j + 1) * Q; k++) {
-          ss += buf[k] * buf[k];
-          peak = Math.max(peak, Math.abs(buf[k]));
-          if (k) step = Math.max(step, Math.abs(buf[k] - buf[k - 1]));
-        }
-        tap.q.set(end - n + j, [peak, ss, step]);
-      }
-    }
-  }, 10);
-};
-
 async function boot(h, { viewport = TALL, prefs = levels() } = {}) {
   const ctx = await h.browser.newContext({ viewport, deviceScaleFactor: 2, serviceWorkers: 'block', locale: 'en-US' });
-  await ctx.addInitScript(recorder);
+  await installAudioRecorder(ctx);
   const seed = { [h.YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: Date.now() - 1000, companionAt: Date.now() - 1000 }), 'dbt.app.v1': h.SEEN, [h.SAVE]: returning() };
   if (prefs !== null) seed[AUDIO] = prefs;
   await ctx.addInitScript((s) => {
@@ -95,6 +53,7 @@ async function boot(h, { viewport = TALL, prefs = levels() } = {}) {
   page.on('console', (m) => m.type() === 'error' && !/WebGL|GPU stall|AudioContext/i.test(m.text()) && errors.push('console: ' + m.text().slice(0, 300)));
   await page.goto(h.server.url + '/');
   await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile') && window.__taps.length > 0, null, { timeout: 30000 });
+  await audioReady(page);
   // the hum's audio clock at every step into or out of the Safe Zone
   await page.evaluate(() => {
     const a = window.__daily;
@@ -102,7 +61,7 @@ async function boot(h, { viewport = TALL, prefs = levels() } = {}) {
     const go = a.go.bind(a);
     a.go = (route, o) => {
       const was = a.route.name;
-      const at = window.__taps.map((t) => t.a.context.currentTime);
+      const at = window.__taps.map((t) => t.context.currentTime);
       go(route, o);
       window.__marks.push({ from: was, to: a.route.name, at });
     };
@@ -115,25 +74,28 @@ async function humOn(h, page) {
   if ((await page.evaluate(() => window.__daily.route.name)) !== 'moment') await page.getByRole('button', { name: 'Give me a moment', exact: true }).click();
   const n = await page.evaluate(() => window.__taps.length);
   await page.getByRole('switch', { name: 'Low hum', exact: true }).check();
-  await page.waitForFunction((n) => window.__taps.length > n && window.__taps.at(-1).a.context.state === 'running', n, { timeout: 10000 });
+  const found = await page.waitForFunction((n) => {
+    const i = window.__taps.findIndex((t, i) => i >= n && t.context !== window.__taps[0].context && t.node instanceof GainNode && t.context.state === 'running');
+    return i < 0 ? null : { i };
+  }, n, { timeout: 10000 });
+  const { i } = await found.jsonValue();
+  await found.dispose();
+  await audioReady(page);
   // past its first swell
-  await recorded(page, n, (await clock(page, n)) + 2.5);
-  return n;
+  await recorded(page, i, (await clock(page, i)) + 2.5);
+  return i;
 }
 
-const clock = (page, n) => page.evaluate((n) => window.__taps[n].a.context.currentTime, n);
+const clock = (page, n) => page.evaluate((n) => window.__taps[n].context.currentTime, n);
 /** Waits until tap n has recorded its output up to audio time t. */
-const recorded = (page, n, t) => page.waitForFunction(([n, t]) => {
-  const tap = window.__taps[n];
-  return tap.end !== undefined && (tap.end * 128) / tap.a.context.sampleRate >= t;
-}, [n, t], { timeout: Math.max(10000, (t + 5) * 1000) });
+const recorded = (page, n, t) => audioRecorded(page, n, t, Math.max(10000, (t + 5) * 1000));
 /** Tap n's quanta in [t0, t1) of audio time, in order: [start s, peak, rms, biggest step]. */
 const quanta = (page, n, t0, t1) => page.evaluate(([n, t0, t1, Q]) => {
   const tap = window.__taps[n];
-  const per = Q / tap.a.context.sampleRate;
+  const per = Q / tap.context.sampleRate;
   return [...tap.q].filter(([i]) => i * per >= t0 && i * per < t1).sort((a, b) => a[0] - b[0]).map(([i, [peak, ss, step]]) => [i * per, peak, Math.sqrt(ss / Q), step]);
 }, [n, t0, t1, Q]);
-const rate = (page, n) => page.evaluate((n) => window.__taps[n].a.context.sampleRate, n);
+const rate = (page, n) => page.evaluate((n) => window.__taps[n].context.sampleRate, n);
 
 const rms = (qs) => Math.sqrt(qs.reduce((s, q) => s + q[2] ** 2, 0) / Math.max(1, qs.length));
 const steepest = (qs) => Math.max(...qs.map((q) => q[3]));
@@ -319,7 +281,7 @@ export const scenarios = {
 
       const hide = await clock(page, n);
       await setHidden(page, true);
-      await page.waitForFunction((n) => window.__taps[n].a.context.state === 'suspended', n, { timeout: 3000 }).catch(() => {
+      await page.waitForFunction((n) => window.__taps[n].context.state === 'suspended', n, { timeout: 3000 }).catch(() => {
         throw new Error('the hum kept playing on a hidden page');
       });
       const frozen = await clock(page, n);
@@ -344,7 +306,7 @@ export const scenarios = {
         const at = await clock(page, n);
         await recorded(page, n, at + 1);
         const sys = await page.evaluate(async (n) => {
-          const c = window.__taps[n].a.context;
+          const c = window.__taps[n].context;
           let frozen = null;
           c.addEventListener('statechange', () => frozen ??= c.state === 'suspended' ? c.currentTime : null);
           await c.suspend();
@@ -352,9 +314,9 @@ export const scenarios = {
           return frozen ?? c.currentTime;
         }, n);
         h.expect((await clock(page, n)) === sys, `paused by the system, the hum woke itself before ${how} let it go`);
-        if (how === 'the system') await page.evaluate((n) => window.__taps[n].a.context.resume(), n);
+        if (how === 'the system') await page.evaluate((n) => window.__taps[n].context.resume(), n);
         else await page.keyboard.press(hum ? 'ArrowLeft' : 'Shift');
-        await page.waitForFunction((n) => window.__taps[n].a.context.state === 'running', n, { timeout: 3000 }).catch(() => {
+        await page.waitForFunction((n) => window.__taps[n].context.state === 'running', n, { timeout: 3000 }).catch(() => {
           throw new Error(`the hum stayed paused after ${how} let it go`);
         });
         await recorded(page, n, sys + 1.6);
@@ -368,7 +330,7 @@ export const scenarios = {
 
       // Shown again while the hum's own pause is still landing (stretched here to 300 ms): it wakes once it lands.
       await page.evaluate((n) => {
-        const c = window.__taps[n].a.context;
+        const c = window.__taps[n].context;
         const suspend = c.suspend.bind(c);
         c.suspend = () => {
           window.__napAsked = true;
@@ -378,7 +340,7 @@ export const scenarios = {
       await setHidden(page, true);
       await page.waitForFunction(() => window.__napAsked, null, { timeout: 3000 });
       await setHidden(page, false);
-      await page.waitForFunction((n) => window.__napLanded && window.__taps[n].a.context.state === 'running', n, { timeout: 3000 }).catch(() => {
+      await page.waitForFunction((n) => window.__napLanded && window.__taps[n].context.state === 'running', n, { timeout: 3000 }).catch(() => {
         throw new Error('shown again while its pause was landing, the hum stayed paused on a visible page');
       });
       h.expect(!errors.length, errors.join('\n'));
@@ -392,7 +354,6 @@ export const scenarios = {
     const { ctx, page, errors } = await boot(h);
     try {
       let n = await humOn(h, page);
-      const first = n;
       const controls = await soundControls(page);
       await controls.getByRole('button', { name: 'Mute', exact: true }).click();
       const m = await clock(page, n);
@@ -407,7 +368,7 @@ export const scenarios = {
 
       await page.locator('header .dq-safe').click({ timeout: 4000 });
       await page.waitForFunction(() => window.__daily.route.name === 'safe', null, { timeout: 3000 });
-      await page.waitForFunction((n) => window.__taps[n].a.context.state === 'closed', n, { timeout: 3000 }).catch(() => {
+      await page.waitForFunction((n) => window.__taps[n].context.state === 'closed', n, { timeout: 3000 }).catch(() => {
         throw new Error('the hum kept going in the Safe Zone');
       });
       const tap = (await page.evaluate(() => window.__marks.filter((k) => k.to === 'safe'))).at(-1).at[n];
@@ -418,13 +379,13 @@ export const scenarios = {
 
       n = await humOn(h, page);
       await page.getByRole('button', { name: 'Done', exact: true }).click();
-      await page.waitForFunction((n) => window.__taps[n].a.context.state === 'closed', n, { timeout: 4000 }).catch(() => {
+      await page.waitForFunction((n) => window.__taps[n].context.state === 'closed', n, { timeout: 4000 }).catch(() => {
         throw new Error('the hum kept going after Done');
       });
       const left = await page.evaluate(() => window.__daily.route.name);
       h.expect(left !== 'moment', `Done stayed on ${left}`);
       await h.sleep(500);
-      const humming = await page.evaluate((first) => window.__taps.slice(first).filter((t) => t.a.context.state !== 'closed').length, first);
+      const humming = await page.evaluate(() => new Set(window.__taps.map((t) => t.context).filter((c) => c !== window.__taps[0].context && c.state !== 'closed')).size);
       h.expect(!humming, `${humming} hum(s) still open after the moment ended`);
       h.expect(!errors.length, errors.join('\n'));
     } finally {
