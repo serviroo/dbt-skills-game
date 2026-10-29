@@ -407,9 +407,7 @@ async function keepsTime(h, page, kind) {
 
 /** The average hue (degrees) of the lit middle of the scene window, with the countdown hidden. */
 async function hueOfMiddle(page) {
-  await page.addStyleTag({ content: '.dq-timer-center{visibility:hidden!important}' });
-  const { data, info } = await sharp(await page.locator('.dq-scene').screenshot()).removeAlpha().raw().toBuffer({ resolveWithObject: true });
-  await page.evaluate(() => document.querySelectorAll('style').forEach((s) => s.textContent.includes('dq-timer-center{visibility') && s.remove()));
+  const { data, info } = await sceneShot(page);
   const { width: w, height: ht, channels: c } = info;
   let r = 0, g = 0, b = 0;
   for (let y = Math.floor(ht * 0.4); y < ht * 0.6; y++) {
@@ -441,7 +439,7 @@ async function countdownContrast(page) {
   const num = page.locator('.dq-timer-num');
   const [box, color] = [await num.boundingBox(), await num.evaluate((e) => getComputedStyle(e).color)];
   await num.evaluate((e) => (e.style.visibility = 'hidden'));
-  const { data, info } = await raw(await page.screenshot({ clip: box }));
+  const { data, info } = await raw(await screenshot(page, { clip: box }));
   await num.evaluate((e) => (e.style.visibility = ''));
   const ls = [];
   for (let i = 0; i < data.length; i += info.channels) ls.push(lum(data[i], data[i + 1], data[i + 2]));
@@ -454,7 +452,7 @@ async function countdownContrast(page) {
 /** Shoots the scene window with the countdown hidden. */
 async function sceneShot(page) {
   await page.addStyleTag({ content: '.dq-timer-center{visibility:hidden!important}' });
-  const png = await page.locator('.dq-scene').screenshot();
+  const png = await screenshot(page.locator('.dq-scene'));
   await page.evaluate(() => document.querySelectorAll('style').forEach((s) => s.textContent.includes('dq-timer-center{visibility') && s.remove()));
   return raw(png);
 }
