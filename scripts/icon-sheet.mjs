@@ -1,9 +1,10 @@
 // QA sheet: the icons at 60, 120 and 180 px on a dark and a light Home Screen, masked like iOS, next to plain neighbour tiles.
 // node scripts/icon-sheet.mjs <iconDir> <out.png>
 import { chromium } from 'playwright';
+import { glArgs, checkRenderer } from './gl.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
-const [dir, out] = process.argv.slice(2);
+const [dir, out] = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const b64 = (f) => 'data:image/png;base64,' + fs.readFileSync(path.join(dir, f)).toString('base64');
 const touch = b64('icons/apple-touch-icon-180.png');
 const mask = b64('icons/icon-maskable-512.png');
@@ -34,9 +35,13 @@ const html = `<!doctype html><html><head><style>
   ${row('linear-gradient(160deg,#e9eef6,#cfd8e6)', '#1c1c1e', 'LIGHT HOME SCREEN')}
   <section style="background:#000;color:#ccc"><h2>512 SOURCE</h2><div class="row"><img src="${big}" style="width:512px;height:512px"><img src="${mask}" style="width:512px;height:512px"></div></section>
 </body></html>`;
-const browser = await chromium.launch({ headless: true });
-const page = await browser.newPage({ viewport: { width: 1180, height: 400 }, deviceScaleFactor: 1 });
-await page.setContent(html);
-await page.screenshot({ path: out, fullPage: true });
-await browser.close();
+const browser = await chromium.launch({ headless: true, args: glArgs() });
+try {
+  const page = await browser.newPage({ viewport: { width: 1180, height: 400 }, deviceScaleFactor: 1 });
+  console.log('renderer:', await checkRenderer(page));
+  await page.setContent(html);
+  await page.screenshot({ path: out, fullPage: true });
+} finally {
+  await browser.close();
+}
 console.log(out);

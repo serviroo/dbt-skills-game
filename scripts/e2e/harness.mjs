@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { glArgs, checkRenderer } from '../gl.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -91,9 +92,13 @@ const ZONE = (() => {
 })();
 process.env.TZ = ZONE;
 
-/** Starts Vite on the first free port from 5290. If another run takes the port first, Vite exits and the next port is tried. */
-async function serve(host) {
-  for (let port = 5290; port < 5390; port++) {
+/**
+ * Starts Vite on the first free port from 5290, or only on `pinned` (--port, the port a tunnel forwards). If another run
+ * takes the port first, Vite exits and the next port is tried.
+ */
+async function serve(host, pinned) {
+  const [from, to] = pinned ? [pinned, pinned + 1] : [5290, 5390];
+  for (let port = from; port < to; port++) {
     if (!(await portFree(port, host))) continue;
     const child = spawn(process.execPath, [path.join(root, 'node_modules/vite/bin/vite.js'), '--host', host, '--port', String(port), '--strictPort'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
     let log = '';
@@ -126,7 +131,7 @@ async function serve(host) {
     await stop();
     throw new Error('dev server did not start:\n' + (spawnError?.message ?? log));
   }
-  throw new Error('no free port for the dev server');
+  throw new Error(pinned ? `dev server port ${pinned} is taken` : 'no free port for the dev server');
 }
 
 // What happened inside each page, for evidence(): the intro's title, name prompt and windows coming and going, taps as
@@ -222,10 +227,14 @@ function pageState() {
   };
 }
 
+/** How every e2e browser starts. A running browser takes no new flags, so scripts/e2e-browser.mjs starts a --ws one with these. */
+export function launchOptions(flags) {
+  return { headless: flags.headed !== 'true', args: [...glArgs(), '--autoplay-policy=no-user-gesture-required'] };
+}
+
 function launch(flags) {
-  if (flags.ws) return chromium.connect(flags.ws, { headers: { 'x-playwright-launch-options': JSON.stringify({ headless: flags.headless === 'true', args: ['--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] }) } });
-  const gl = flags.gpu ? ['--use-angle=vulkan', '--ignore-gpu-blocklist'] : ['--use-gl=angle', '--use-angle=swiftshader'];
-  return chromium.launch({ headless: flags.headed !== 'true', handleSIGINT: false, handleSIGTERM: false, args: [...gl, '--autoplay-policy=no-user-gesture-required'] });
+  if (flags.ws) return chromium.connect(flags.ws);
+  return chromium.launch({ ...launchOptions(flags), handleSIGINT: false, handleSIGTERM: false });
 }
 
 export async function startHarness(flags = {}) {
@@ -269,7 +278,14 @@ export async function startHarness(flags = {}) {
   const setups = [];
   const throttleErrors = [];
   const start = () => {
-    const p = launch(flags).then((browser) => {
+    const p = launch(flags).then(async (browser) => {
+      browsers.push(browser);
+      const probe = await browser.newPage();
+      try {
+        renderer = await checkRenderer(probe, { remote: !!flags.ws });
+      } finally {
+        await probe.context().close();
+      }
       // every context keeps the scripts' zone, also when the browser runs on another machine (--ws), and every page in it is
       // followed for evidence()
       const newContext = browser.newContext.bind(browser);
@@ -294,20 +310,34 @@ export async function startHarness(flags = {}) {
         };
         return ctx;
       };
-      browsers.push(browser);
       return browser;
     });
     launches.push(p);
     return p;
   };
-  const browser = await start();
+  /**
+   * Over --ws the browser's 127.0.0.1 is another machine's, where the port could be someone else's dev server if the
+   * tunnel forwards a different one, so the browser must read back a file only this run wrote.
+   */
+  async function reachesServer(browser) {
+    const token = crypto.randomUUID();
+    fs.writeFileSync(path.join(out, 'run-token.txt'), token);
+    const page = await browser.newPage();
+    try {
+      const res = await page.goto(`${server.url}/${path.relative(root, out)}/run-token.txt`).catch((e) => e);
+      const got = res instanceof Error ? res.message.split('\n')[0] : res?.ok() ? await res.text() : `HTTP ${res?.status()}`;
+      if (got !== token) throw new Error(`the browser does not reach this run's dev server at ${server.url} (${got.slice(0, 120)}); with --ws, the tunnel's -R must forward --port`);
+    } finally {
+      await page.context().close();
+    }
+  }
+  let browser;
   try {
-    server = await serve(host);
-    const p = await (await browser.newContext()).newPage();
-    renderer = await p.evaluate(() => { const g = document.createElement('canvas').getContext('webgl2'); const x = g?.getExtension('WEBGL_debug_renderer_info'); return g ? String(g.getParameter(x ? x.UNMASKED_RENDERER_WEBGL : g.RENDERER)) : 'no webgl'; });
-    await p.context().close();
+    browser = await start();
+    server = await serve(host, flags.port && Number(flags.port));
+    await reachesServer(browser);
   } catch (e) {
-    await browser.close().catch(() => {});
+    await Promise.allSettled(browsers.map((b) => b.close()));
     await server?.stop();
     throw e;
   }

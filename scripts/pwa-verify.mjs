@@ -4,6 +4,7 @@
 // --update builds its extra versions in a scratch folder under the system temp dir (TMPDIR) and deletes it after.
 // Exits 1 if the report shows any problem or a browser can't start. (--check, which older callers pass, changes nothing.)
 import { chromium, webkit } from 'playwright';
+import { glArgs, checkRenderer } from './gl.mjs';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -136,10 +137,11 @@ async function offlineRun(name, launcher) {
   try {
     srv = await serve(dist);
     const base = srv.url;
-    browser = await launcher.launch({ headless: true, args: name === 'chromium' ? ['--use-angle=vulkan', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-features=Vulkan'] : [] });
+    browser = await launcher.launch({ headless: true, args: name === 'chromium' ? glArgs() : [] });
     const ctx = await browser.newContext({ viewport: { width: 375, height: 800 }, serviceWorkers: 'allow', ...(flags.video ? { recordVideo: { dir: `${out}/video-${name}`, size: { width: 375, height: 800 } } } : {}) });
     await ctx.addInitScript(INIT);
     const page = await ctx.newPage();
+    if (name === 'chromium') report.renderer = await checkRenderer(page);
     mark('online: first visit');
     let b = bucket();
     watch(page, b);
@@ -272,10 +274,11 @@ async function updateRun(name, launcher) {
     srv = await serve(v1.dir);
     const port = srv.port;
     const base = srv.url;
-    browser = await launcher.launch({ headless: true, args: name === 'chromium' ? ['--use-angle=vulkan', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-features=Vulkan'] : [] });
+    browser = await launcher.launch({ headless: true, args: name === 'chromium' ? glArgs() : [] });
     const ctx = await browser.newContext({ viewport: { width: 375, height: 800 }, serviceWorkers: 'allow' });
     await ctx.addInitScript(INIT);
     const page = await ctx.newPage();
+    if (name === 'chromium') report.renderer = await checkRenderer(page);
     const b = bucket();
     watch(page, b);
     await page.goto(base);

@@ -1,4 +1,4 @@
-// The build draws the PWA icons in headless Chromium; a lost WebGL context (as on GPU-less CI runners) must not fail it.
+// The build draws icons on the requested renderer: one lost context recovers, repeated loss fails.
 import { execFile } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -34,6 +34,18 @@ const hashes = (dir) => {
 };
 
 export const scenarios = {
+  async 'icons-stop-on-repeated-lost-context'({ out, expect }) {
+    let error;
+    try {
+      await draw(path.join(out, 'icons-repeated-loss'), '--lose-context-at=2', '--lose-context-times=2');
+    } catch (e) {
+      error = e;
+    }
+    expect(error, 'losing the context twice did not fail the icon build');
+    expect(/^Error: \S+: page\.evaluate: Error: context lost/m.test(error.message), 'the failure did not name the lost context: ' + error.message);
+    expect(!/software GL/.test(error.message), 'the icon build switched to software: ' + error.message);
+  },
+
   async 'icons-survive-lost-context'({ out, expect }) {
     const plain = path.join(out, 'icons-plain');
     const lost = path.join(out, 'icons-lost-context');
@@ -52,20 +64,4 @@ export const scenarios = {
     expect(/wrote \d+ images/.test(run.stdout), 'the icon run did not finish: ' + run.stdout);
   },
 
-  /** the GPU process stays broken: a fresh page loses it again, so the image is drawn in a software-GL browser */
-  async 'icons-fall-back-to-software-gl'({ out, expect }) {
-    const plain = path.join(out, 'icons-plain-2');
-    const lost = path.join(out, 'icons-software');
-    await draw(plain);
-    let run;
-    try {
-      run = await draw(lost, '--lose-context-at=2', '--lose-context-times=2');
-    } catch (e) {
-      throw new Error('losing the context twice failed the icon build: ' + e.message, { cause: e });
-    }
-    const want = hashes(plain);
-    const got = hashes(lost);
-    expect(/drawing it again \(software GL\)/.test(run.stderr), 'the software-GL fallback never ran: ' + run.stderr);
-    expect(Object.keys(want).length > 0 && Object.keys(want).every((f) => got[f]), 'an icon is missing after the software-GL fallback');
-  },
 };

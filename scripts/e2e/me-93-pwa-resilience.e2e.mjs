@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { firefox } from 'playwright';
 import { writeServiceWorker } from '../sw-build.mjs';
+import '../gl.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const KIT = JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: 1, companionAt: 1 });

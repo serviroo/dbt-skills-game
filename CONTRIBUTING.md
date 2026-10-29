@@ -138,14 +138,30 @@ To fix a screen, give each control a short, accurate name that says what it does
 decorative. Never hide a control or a picture a player needs just to pass the check.
 
 Run one file with `node scripts/e2e.mjs --file=<name>`, or one scenario with `--scenario=<scenario name>`. The browser
-renders with SwiftShader by default so local runs match CI. Add `--gpu` to render on this machine's GPU instead, or
-`--headed` to watch it.
+uses this machine's GPU through Vulkan by default. Add `--software` to use SwiftShader on a machine without a GPU,
+or `--headed` to watch it. The requested renderer is checked before any scenario runs; a mismatch fails the run.
+The same choice reaches browser children, including icon draws during a build.
 
 `node scripts/e2e-runner-check.mjs` checks file selection, duplicate names, failure reports and cleanup through the
 real command. It creates temporary scenario files and removes them when it finishes.
 
-The intro is 3D, so for a real-GPU run on another machine, start a Playwright launch server there and pass
-`--ws=<its endpoint> --host=<this machine's address>`, so the dev server is reachable from that browser.
+The intro is 3D, so for a real-GPU run on another machine, start the browser there with `node scripts/e2e-browser.mjs`.
+It starts with the same flags as a local run, because a browser that is already running can't take new ones, and
+prints its endpoint, `ws://127.0.0.1:<port>/<path>`. Anyone who can reach that endpoint can drive the browser, so it
+listens on that machine's 127.0.0.1 only. From this machine, open an SSH tunnel both ways and run the scenarios
+through it:
+
+```sh
+ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:<port>:127.0.0.1:<port> -R 127.0.0.1:5400:127.0.0.1:5400 <the GPU machine>
+node scripts/e2e.mjs --ws=ws://127.0.0.1:<port>/<path> --port=5400
+```
+
+`-L` brings the browser's port to this machine's 127.0.0.1, and `-R` lets that browser load this run's dev server at
+its own 127.0.0.1. Naming 127.0.0.1 on both ends and `ExitOnForwardFailure` stop the tunnel if either port is already
+taken on its side. `--ws` needs `--port`, which keeps the dev server on the forwarded port; the run stops if that port
+is taken here, and before any scenario it checks that the browser reaches this run's dev server rather than another
+one. `--headed` goes to `scripts/e2e-browser.mjs`; `--software` goes to both `scripts/e2e-browser.mjs` and
+`scripts/e2e.mjs`.
 
 ### Skill check
 
@@ -211,9 +227,9 @@ node scripts/pwa-verify.mjs --path=/dbt-skills-game/ --browser=chromium --update
 node scripts/pwa-csp-sweep.mjs --path=/dbt-skills-game/ --check
 ```
 
-The live check opens a fresh browser profile at phone size. It checks the name prompt, Home, the one-tap Safe Zone,
-offline reload and launch, query links, the CSP and requests to other origins. Screenshots and a pass/fail report go
-in `artifacts/live/`. It exits with a non-zero status if a check fails.
+The live check opens a fresh browser profile at phone size. It checks the renderer, the name prompt, Home, the one-tap
+Safe Zone, offline reload and launch, query links, the CSP and requests to other origins. Screenshots and a pass/fail
+report go in `artifacts/live/`. It exits with a non-zero status if a check fails.
 
 GitHub Pages builds the newest commit on `main` once CI has passed on that exact commit, and `main` as it is on a
 manual dispatch. A CI run that ends after a newer commit reached `main` deploys nothing; the newer commit deploys when

@@ -1,8 +1,12 @@
+import './gl.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import http from 'node:http';
+import net from 'node:net';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { holdDaily } from './e2e/first-actions.e2e.mjs';
 import { runIconChild } from './e2e/icons.e2e.mjs';
 
@@ -15,10 +19,11 @@ const side = path.join(root, 'scripts/e2e', `${name}-side.e2e.mjs`);
 const state = path.join(out, 'state.json');
 const results = [];
 fs.mkdirSync(out, { recursive: true });
+const freePort = () => new Promise((resolve) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); }); });
 
-async function run(label, args, interrupt = null) {
+async function run(label, args, interrupt = null, env = {}) {
   fs.rmSync(state, { force: true });
-  const child = spawn(process.execPath, [path.join(root, 'scripts/e2e.mjs'), ...args], { cwd: out, env: { ...process.env, DEBUG: 'pw:browser' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [path.join(root, 'scripts/e2e.mjs'), ...args], { cwd: out, env: { ...process.env, DEBUG: 'pw:browser', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; child.kill('SIGTERM'); }, 90000);
@@ -50,6 +55,36 @@ async function run(label, args, interrupt = null) {
   }
   results.push({ label, code, report: report ? path.join(JSON.parse(fs.readFileSync(state, 'utf8')).out, 'report.json') : null });
   return { code, log, report };
+}
+
+/** Starts scripts/e2e-browser.mjs as the machine with the GPU would. stop() ends it with Ctrl+C's signal and checks its browser went too. */
+async function startRemote(args, nodeArgs = []) {
+  const child = spawn(process.execPath, [...nodeArgs, path.join(root, 'scripts/e2e-browser.mjs'), ...args], { cwd: out, stdio: ['ignore', 'pipe', 'pipe'] });
+  let log = '';
+  const exited = new Promise((resolve) => child.once('exit', (code, signal) => resolve({ code, signal })));
+  const timer = setTimeout(() => child.kill('SIGTERM'), 30000);
+  const endpoint = await new Promise((resolve, reject) => {
+    const collect = (data) => {
+      log += data;
+      const m = /^ws:\/\/\S+$/m.exec(log);
+      if (m) resolve(m[0]);
+    };
+    child.stdout.on('data', collect);
+    child.stderr.on('data', collect);
+    exited.then(({ code, signal }) => reject(new Error(`scripts/e2e-browser.mjs ended (code ${code}, signal ${signal}) without an endpoint:\n${log}`)));
+  }).finally(() => clearTimeout(timer));
+  const children = execFileSync('ps', ['-axo', 'pid=,ppid='], { encoding: 'utf8' }).trim().split('\n').map((line) => line.trim().split(/\s+/).map(Number)).filter(([, ppid]) => ppid === child.pid).map(([pid]) => pid);
+  const stop = async () => {
+    const killTimer = setTimeout(() => child.kill('SIGKILL'), 10000);
+    child.kill('SIGINT');
+    const { signal } = await exited;
+    clearTimeout(killTimer);
+    fs.writeFileSync(path.join(out, 'remote-browser.log'), log);
+    assert.notEqual(signal, 'SIGKILL', 'scripts/e2e-browser.mjs did not stop on Ctrl+C');
+    assert.equal(children.length, 1, `scripts/e2e-browser.mjs started ${children.length} processes`);
+    assert.throws(() => process.kill(children[0], 0), { code: 'ESRCH' }, 'the remote browser survived its script');
+  };
+  return { endpoint, stop };
 }
 
 try {
@@ -94,6 +129,7 @@ try {
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { checkRenderer } from '../gl.mjs';
 const state = ${JSON.stringify(state)};
 function record(h) {
   const children = execFileSync('ps', ['-axo', 'pid=,ppid=,comm='], { encoding: 'utf8' }).trim().split(String.fromCharCode(10)).map((line) => line.trim().split(/\\s+/)).filter((fields) => Number(fields[1]) === process.pid && path.basename(fields[2]) !== 'ps').map((fields) => Number(fields[0]));
@@ -120,11 +156,26 @@ export const scenarios = {
     await h.shot(page, '${name}-clean');
     return { kept: [h.flags.probe] };
   },
+  async '${name}-masked-renderer'(h) {
+    record(h);
+    const { page } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', undefined, (ctx) => ctx.addInitScript(() => {
+      const get = WebGL2RenderingContext.prototype.getExtension;
+      WebGL2RenderingContext.prototype.getExtension = function (name) {
+        return name === 'WEBGL_debug_renderer_info' ? null : get.call(this, name);
+      };
+    }));
+    let error;
+    try { await checkRenderer(page); } catch (e) { error = e; }
+    h.expect(error?.message === 'WebGL renderer cannot be verified: WebKit WebGL', 'a masked renderer was not rejected: ' + error?.message);
+  },
 };
 `, { flag: 'wx' });
   const selected = await run('scenario-from-other-cwd', [`--scenario=${name}-clean`, '--probe=a=b']);
   assert.equal(selected.code, 0);
   assert.deepEqual(selected.report.scenarios.map((s) => [s.name, s.file, s.ok, s.result]), [[`${name}-clean`, name, true, { kept: ['a=b'] }]]);
+  const masked = await run('masked-renderer', [`--scenario=${name}-masked-renderer`]);
+  assert.equal(masked.code, 0);
+  assert.equal(masked.report.scenarios[0].ok, true);
   const failed = await run('failure-and-continuation', [`--file=${name}`, '--probe=a=b']);
   assert.notEqual(failed.code, 0);
   assert(failed.report.scenarios.some((s) => s.name === `${name}-fail` && !s.ok && /deliberate runner failure/.test(s.error)));
@@ -153,6 +204,24 @@ export const scenarios = {
       await page.evaluate(() => void window.open('about:blank'));
       await popup;
     },
+    async '${name}-autoplay'(h) {
+      record(h);
+      let heard;
+      await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', undefined, (ctx) => {
+        heard = new Promise((done) => ctx.on('console', (m) => m.text().startsWith('autoplay ') && done(m.text())));
+        // the page starts the sound itself: page.evaluate() counts as a tap, and after a tap any browser may play
+        return ctx.addInitScript(() => addEventListener('load', () => {
+          const audio = new AudioContext();
+          const say = () => console.log('autoplay ' + audio.state);
+          if (audio.state === 'running') say();
+          else {
+            audio.onstatechange = say;
+            setTimeout(say, 1500);
+          }
+        }));
+      });
+      return { audio: await heard };
+    },
   };`);
   const reportError = await run('report-write-error', [`--scenario=${name}-report-error`]);
   assert.notEqual(reportError.code, 0);
@@ -161,6 +230,48 @@ export const scenarios = {
   assert.notEqual(throttle.code, 0);
   assert.match(throttle.log, /CPU throttle 4: popup throttle refused/);
   assert.deepEqual(throttle.report.throttleErrors, ['CPU throttle 4: popup throttle refused']);
+  // a browser started for --ws listens on 127.0.0.1 only and has a local run's flags (with this check's --software
+  // choice), the run keeps its dev server on the --port a tunnel forwards, and a run that expects the other renderer says
+  // where that browser's flags are set
+  const refused = await startRemote(['--host=0.0.0.0']).then(async (r) => { await r.stop(); return 'it listened at ' + r.endpoint; }, (e) => e.message);
+  assert.match(refused, /--host is not an option: the browser listens on 127\.0\.0\.1 only/);
+  const software = process.env.LANTERN_GL === 'software';
+  const remote = await startRemote(software ? ['--software'] : []);
+  try {
+    assert.equal(new URL(remote.endpoint).hostname, '127.0.0.1', 'the browser server listens at ' + remote.endpoint);
+    const port = await freePort();
+    const viaWs = await run('remote-browser', [`--scenario=${name}-autoplay`, `--ws=${remote.endpoint}`, `--port=${port}`]);
+    assert.equal(viaWs.code, 0);
+    assert.equal(viaWs.report.url, `http://127.0.0.1:${port}`);
+    assert.equal(/SwiftShader/.test(viaWs.report.renderer), software, viaWs.report.renderer);
+    assert.deepEqual(viaWs.report.scenarios.map((s) => [s.ok, s.result]), [[true, { audio: 'autoplay running' }]]);
+    const mismatch = await run('remote-renderer-mismatch', [`--scenario=${name}-autoplay`, `--ws=${remote.endpoint}`, `--port=${await freePort()}`], null, { LANTERN_GL: software ? undefined : 'software' });
+    assert.notEqual(mismatch.code, 0);
+    assert(mismatch.log.includes(`; a --ws browser gets its flags where it was started, so start it with node scripts/e2e-browser.mjs${software ? '' : ' --software'}\n`), mismatch.log);
+  } finally {
+    await remote.stop();
+  }
+  // a run over --ws must name the port its tunnel forwards, and stops before any scenario when the browser reaches some
+  // other server there: this browser sends everything, loopback included, to a stand-in for another dev server
+  const unforwarded = await run('ws-without-port', [`--scenario=${name}-autoplay`, '--ws=ws://127.0.0.1:9/unused']);
+  assert.notEqual(unforwarded.code, 0);
+  assert.match(unforwarded.log, /--ws needs --port/);
+  const decoy = http.createServer((req, res) => res.end('<!doctype html><title>Another dev server</title>')).listen(0, '127.0.0.1');
+  await once(decoy, 'listening');
+  const toDecoy = path.join(out, 'to-decoy.mjs');
+  fs.writeFileSync(toDecoy, `import { chromium } from ${JSON.stringify(pathToFileURL(path.join(root, 'node_modules/playwright/index.mjs')).href)};
+const launchServer = chromium.launchServer.bind(chromium);
+chromium.launchServer = (options) => launchServer({ ...options, args: [...options.args, '--proxy-server=http://127.0.0.1:${decoy.address().port}', '--proxy-bypass-list=<-loopback>'] });
+`);
+  const elsewhere = await startRemote(software ? ['--software'] : [], ['--import', pathToFileURL(toDecoy).href]);
+  try {
+    const wrong = await run('remote-wrong-server', [`--scenario=${name}-autoplay`, `--ws=${elsewhere.endpoint}`, `--port=${await freePort()}`]);
+    assert.notEqual(wrong.code, 0);
+    assert.match(wrong.log, /the browser does not reach this run's dev server at http:\/\/127\.0\.0\.1:\d+ \(<!doctype html><title>Another dev server/);
+  } finally {
+    await elsewhere.stop();
+    decoy.close();
+  }
   const signal = await run('signal-cleanup', [`--scenario=${name}-signal`], 'SIGTERM');
   assert.equal(signal.code, 130);
   const sigint = await run('sigint-cleanup', [`--scenario=${name}-signal`], 'SIGINT');
@@ -212,6 +323,13 @@ export const scenarios = {
   const startup = await run('startup-failure', [`--scenario=${name}-signal`, '--host=invalid.invalid']);
   assert.notEqual(startup.code, 0);
   assert.match(startup.log, /no free port/);
+  const busy = net.createServer().listen(0, '127.0.0.1');
+  await once(busy, 'listening');
+  const { port: busyPort } = busy.address();
+  const taken = await run('pinned-port-taken', [`--scenario=${name}-signal`, `--port=${busyPort}`]);
+  busy.close();
+  assert.notEqual(taken.code, 0);
+  assert.match(taken.log, new RegExp(`dev server port ${busyPort} is taken`));
 } finally {
   for (const file of [fixture, duplicate, side]) fs.rmSync(file, { force: true });
   fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify(results, null, 2));

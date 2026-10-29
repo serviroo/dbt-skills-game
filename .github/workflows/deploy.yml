@@ -24,7 +24,7 @@ jobs:
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.head_repository.full_name == github.repository)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       sha: ${{ steps.tip.outputs.sha }}
@@ -51,7 +51,7 @@ jobs:
       cancel-in-progress: false
     env:
       BUILD_ID: ${{ needs.newest.outputs.sha }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container:
       image: mcr.microsoft.com/playwright:v1.64.1-noble
       options: --user 1001
@@ -72,16 +72,18 @@ jobs:
         run: npx tsc --noEmit -p .
       - name: Build for the Pages subpath
         run: npm run build
+        env:
+          LANTERN_GL: software
       - name: Offline install and boot
-        run: node scripts/pwa-verify.mjs --path="$BASE_PATH" --browser=chromium --out=artifacts/pwa --check
+        run: node scripts/pwa-verify.mjs --software --path="$BASE_PATH" --browser=chromium --out=artifacts/pwa --check
       - name: Quiet update to the next deploy
-        run: node scripts/pwa-verify.mjs --path="$BASE_PATH" --browser=chromium --update --out=artifacts/pwa --check
+        run: node scripts/pwa-verify.mjs --software --path="$BASE_PATH" --browser=chromium --update --out=artifacts/pwa --check
       - name: CSP sweep
-        run: node scripts/pwa-csp-sweep.mjs --path="$BASE_PATH" --check
+        run: node scripts/pwa-csp-sweep.mjs --software --path="$BASE_PATH" --check
       - name: Live check on a Pages-like server
         run: |
           node scripts/serve-static.mjs --dir=dist --base="$BASE_PATH" --port=4180 &
-          node scripts/live-check.mjs "http://127.0.0.1:4180$BASE_PATH" --expect="$BUILD_ID" --wait=30
+          node scripts/live-check.mjs --software "http://127.0.0.1:4180$BASE_PATH" --expect="$BUILD_ID" --wait=30
       - if: failure()
         uses: actions/upload-artifact@v7
         with:
@@ -97,7 +99,7 @@ jobs:
     concurrency:
       group: pages
       cancel-in-progress: false
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       pages: write
