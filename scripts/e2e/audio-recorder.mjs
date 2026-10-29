@@ -23,12 +23,27 @@ export async function installAudioRecorder(ctx) {
         modules.get(context).then(() => {
           tap.status = 'loaded';
           const node = (tap.recorder = new AudioWorkletNode(context, 'e2e-recorder', { numberOfOutputs: 1, outputChannelCount: [1], channelCount: 1, channelCountMode: 'explicit', channelInterpretation: 'speakers' }));
+          // block n starts at frame 128 n of the context's clock, so a ramp through n there numbers each block, for an hour.
+          // A ramp the audio thread first sees after its start would start late and shift every number, so it starts 50 ms
+          // ahead: the audio thread renders up to 512 frames ahead of this clock, and the page paused here 1.3 ms at most at CPU ×6.
+          const rate = context.sampleRate;
+          const from = Math.ceil(((context.currentTime + 0.05) * rate) / 128);
+          const to = from + Math.round((3600 * rate) / 128);
+          const block = node.parameters.get('block');
+          block.setValueAtTime(from, (from * 128) / rate);
+          block.linearRampToValueAtTime(to, (to * 128) / rate);
+          if (Math.round((context.currentTime * rate) / 128) >= from) tap.error = `worklet ${tap.url}: the page paused past block ${from} while numbering blocks, so every number would be late`;
           node.port.onmessage = ({ data }) => {
             if (!Array.isArray(data)) {
               tap.last = data.last;
               return tap.answered?.();
             }
             for (const [i, ...levels] of data) {
+              // block numbers only rise: one that doesn't would overwrite a block already heard
+              if (i <= tap.end) {
+                tap.error ??= `worklet ${tap.url}: block ${i} came after block ${tap.end}`;
+                continue;
+              }
               tap.status = 'recording';
               tap.q.set(i, levels);
               tap.start ??= i;
@@ -45,8 +60,8 @@ export async function installAudioRecorder(ctx) {
       }
       return out;
     };
-    // A closed context's clock can count blocks no node ran, and its recorders answer nothing more. So a close stops the
-    // context first, asks each recorder for the last block it rendered, and closes once all have answered.
+    // A closed context's recorders answer nothing more. So a close stops the context first, asks each recorder for the last
+    // block it rendered (its answer comes after every block it posted), and closes once all have answered.
     const askEnds = async (context) => {
       const asked = taps.filter((t) => t.context === context && t.recorder && !t.error);
       if (!asked.length) return;
