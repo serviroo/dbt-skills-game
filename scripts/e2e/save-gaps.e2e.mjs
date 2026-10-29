@@ -254,14 +254,10 @@ export const scenarios = {
     const before = (await status.textContent()) ?? '';
     await page.evaluate(() => window.__release());
     // the first Restore finishes: its drawing lands
-    await page.waitForFunction(
-      async () => {
-        const { artStore } = await import('/src/daily/artstore.ts');
-        return (await artStore(window.__daily.store.key).list()).some((d) => d.id === 'race-art');
-      },
-      null,
-      { timeout: 10000, polling: 100 },
-    );
+    await h.until(page, async () => {
+      const { artStore } = await import('/src/daily/artstore.ts');
+      return (await artStore(window.__daily.store.key).list()).some((d) => d.id === 'race-art');
+    });
     await page.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok))));
     const after = (await status.textContent()) ?? '';
     h.expect(after === before && !/Restored/.test(after), `the first Restore wrote over the second file's status line: ${JSON.stringify({ before, after })}`);

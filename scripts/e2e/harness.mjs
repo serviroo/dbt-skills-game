@@ -31,6 +31,26 @@ export async function frames(page, n) {
   }
 }
 
+/**
+ * Waits for check(arg), run in the page, to come true: for a check that awaits something, such as a database read, which
+ * page.waitForFunction would take as true at once (it counts the promise as the answer). A check still unanswered at
+ * the deadline fails it too, and no check starts after it.
+ */
+export async function until(page, check, arg, { timeout = 10000, polling = 100 } = {}) {
+  const end = Date.now() + timeout;
+  const late = () => new Error(`waited ${timeout} ms for ${String(check).replace(/\s+/g, ' ').slice(0, 160)}`);
+  for (;;) {
+    if (Date.now() >= end) throw late();
+    let timer;
+    try {
+      if (await Promise.race([page.evaluate(check, arg), new Promise((_, fail) => { timer = setTimeout(() => fail(late()), Math.max(0, end - Date.now())); })])) return;
+    } finally {
+      clearTimeout(timer);
+    }
+    await sleep(Math.min(polling, end - Date.now()));
+  }
+}
+
 /** Waits for entry motion to finish on boxes that come to rest, then compares consecutive frame rects. */
 export async function settled(page, selector, { timeout = 15000 } = {}) {
   const end = Date.now() + timeout;
@@ -526,7 +546,7 @@ export async function startHarness(flags = {}) {
   })());
 
   const shared = {};
-  const lane = (browser) => ({ browser, server, out, flags, shared, renderer, throttleErrors, zone: ZONE, open: opener(browser), evidence, evidenceAll: allEvidence(browser), note, leaves, shot, ls, youOf, deepFind, deepDrop, expect, sleep, frames, settled, reachHub, openSettings, SAVE, YOU, SEEN, stop, more });
+  const lane = (browser) => ({ browser, server, out, flags, shared, renderer, throttleErrors, zone: ZONE, open: opener(browser), evidence, evidenceAll: allEvidence(browser), note, leaves, shot, ls, youOf, deepFind, deepDrop, expect, sleep, frames, settled, until, reachHub, openSettings, SAVE, YOU, SEEN, stop, more });
   /** Another browser on the same dev server, so scenarios can run side by side: its own profiles, the same `shared`. */
   async function more() {
     if (stopping) throw new Error('the harness is stopping');

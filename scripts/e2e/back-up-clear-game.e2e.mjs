@@ -293,6 +293,27 @@ const safeZoneOneTap = async (h, page, how) => {
   h.expect(!(await page.locator('.lw, .dq-sw, [role=alertdialog]').count()), `${how}: leaving the Safe Zone asked something`);
 };
 const finished = (page, title = DONE) => page.locator('.dq-cleared-h', { hasText: title }).waitFor({ timeout: 30000 });
+/**
+ * Freezes the page while `during` runs, as a phone freezes a tab in the background, then wakes it: the resume event
+ * first, as a browser fires it, then `pending`, run in the page as the first thing that was waiting. Chromium freezes
+ * only hidden pages and a test page is never hidden, so the debugger stops it.
+ */
+async function frozen(ctx, page, during, pending = () => {}) {
+  const cdp = await ctx.newCDPSession(page);
+  await cdp.send('Debugger.enable');
+  const stopped = new Promise((r) => cdp.once('Debugger.paused', () => r(true)));
+  const woke = cdp.send('Runtime.evaluate', { expression: `document.dispatchEvent(new Event('freeze')); debugger; document.dispatchEvent(new Event('resume')); (${pending})()` }).catch((e) => ({ exceptionDetails: { text: e.message } }));
+  // a page that ran straight through, or went away, never stops
+  if (!(await Promise.race([stopped, woke.then(() => false)]))) throw new Error('the page never stopped to freeze: ' + ((await woke).exceptionDetails?.text ?? 'it ran straight through'));
+  try {
+    await during();
+  } finally {
+    await cdp.send('Debugger.resume');
+  }
+  const { exceptionDetails } = await woke;
+  await cdp.detach();
+  if (exceptionDetails) throw new Error('waking the frozen page failed: ' + (exceptionDetails.exception?.description ?? exceptionDetails.text));
+}
 /** Live lines inside something marked busy: a screen reader may hold them back until it isn't. */
 const busyLive = (page) =>
   page.evaluate(() => [...document.querySelectorAll('[aria-live]')].filter((n) => n.closest('[aria-busy="true"]')).map((n) => n.textContent.trim().slice(0, 60)));
@@ -418,17 +439,18 @@ export const scenarios = {
       await tab.mouse.down();
       await tab.mouse.move(...at(0.5, 0.5), { steps: 6 });
       await tab.mouse.up();
-      // its unfinished drawing lands in the database (read there, not through the app)
-      await tab.waitForFunction(
+      // its unfinished drawing lands in the database (read there, not through the app): the one it carried on, which it
+      // keeps as its own draft from the moment it opens, now with the new stroke
+      await h.until(
+        tab,
         async (name) => {
           const req = (r) => new Promise((ok, bad) => ((r.onsuccess = () => ok(r.result)), (r.onerror = () => bad(r.error))));
           const db = await req(indexedDB.open(name));
-          const n = await req(db.transaction('drafts').objectStore('drafts').count());
+          const drafts = await req(db.transaction('drafts').objectStore('drafts').getAll());
           db.close();
-          return n === 2;
+          return drafts.some((d) => d.strokes.length === 2);
         },
         `${SAVE}.art`,
-        { timeout: 10000, polling: 100 },
       );
       await page.bringToFront();
       await page.getByRole('button', { name: CONFIRM }).click();
@@ -443,7 +465,7 @@ export const scenarios = {
       const second = path.join(h.out, 'crystal-fresh.json');
       await dl.saveAs(second);
       const raw2 = JSON.parse(fs.readFileSync(second, 'utf8'));
-      h.expect(raw2.drafts.length === 2, 'the fresh Save Crystal does not hold the other tab\'s unfinished drawing: ' + raw2.drafts.length);
+      h.expect(raw2.drafts.length === 2 && raw2.drafts.some((d) => d.strokes.length === 2), 'the fresh Save Crystal does not hold the other tab\'s unfinished drawing: ' + JSON.stringify(raw2.drafts.map((d) => d.strokes.length)));
       await asking(page).waitFor();
 
       // the other tab is mid-stroke as the player confirms, so its draft save is still to come when clearing starts
@@ -466,9 +488,7 @@ export const scenarios = {
 
       // the other tab: its pending save, a freeze and resume, focus, and closing it bring nothing back
       h.expect(await tab.evaluate(() => window.__marker === 'no reload'), 'the other tab reloaded');
-      const cdp = await ctx.newCDPSession(tab);
-      await cdp.send('Page.setWebLifecycleState', { state: 'frozen' });
-      await cdp.send('Page.setWebLifecycleState', { state: 'active' });
+      await frozen(ctx, tab, () => h.sleep(1000));
       await tab.bringToFront();
       await tab.evaluate(() => {
         window.__daily.store.save();
@@ -582,6 +602,50 @@ export const scenarios = {
       await h.shot(stale, 'missed-reloaded');
       const last = JSON.parse(await next.evaluate((k) => localStorage.getItem(k), SAVE));
       h.expect(!last.events.some((e) => /^seed-/.test(e.id)) && last.created === fresh.created, 'the reloaded copy brought old progress into the new game');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+      await srv.close();
+    }
+  },
+
+  /**
+   * a copy frozen in the background through the clear hears none of it. Woken, it stops before the typing it had
+   * waiting can keep the player's words, and lets go of its databases so the clear finishes
+   */
+  async 'clear-frozen-copy'(h) {
+    const srv = await host(await build(h.shared));
+    const { ctx, errors } = await context(h);
+    try {
+      const page = await ctx.newPage();
+      await seed(page, srv.origin, seedData());
+      const away = await ctx.newPage();
+      await openGame(away, srv.origin);
+      await h.reachHub(away);
+      await away.evaluate(() => window.__daily.go({ name: 'skill', id: 'abc-please', entry: 'c' }));
+      await away.locator('.dq-step-body textarea, .dq-step-body input.dq-input').first().fill('Words typed before the clear');
+      await away.evaluate(() => (window.__typing = document.activeElement));
+
+      await page.bringToFront();
+      await openGame(page, srv.origin);
+      await settings(page);
+      await backUp(h, page, 'crystal-frozen');
+      await frozen(
+        ctx,
+        away,
+        async () => {
+          await page.getByRole('button', { name: CONFIRM }).click();
+          await page.waitForFunction((k) => localStorage.getItem(k) === null, SAVE, { timeout: 15000 });
+        },
+        () => {
+          window.__typing.value += ' and a few more';
+          window.__typing.dispatchEvent(new Event('input', { bubbles: true }));
+        },
+      );
+      await finished(page, /^(All clear|Not finished)$/);
+      onlyNeighbours(h, await device(page), 'after a copy frozen through the clear woke');
+      h.expect((await page.locator('.dq-cleared-h').innerText()) === DONE, 'the clear did not finish once the frozen copy woke');
+      await away.locator('.dq-cleared').waitFor({ timeout: 15000 });
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();
