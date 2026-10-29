@@ -410,6 +410,7 @@
   "settings": 21,
   "settled-ancestor-transition": 1,
   "settled-bob-times-out": 1,
+  "settled-bob-waits-to-start": 2,
   "settled-button-transform": 1,
   "settled-delayed-entry": 1,
   "settled-descendant-height": 1,

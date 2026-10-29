@@ -75,8 +75,20 @@ export const scenarios = {
       const page = await ctx.newPage();
       await page.setContent('<style>@keyframes bob { to { transform:translateY(50px) } } button { animation:bob 1s infinite alternate linear }</style><button id="moving">Bob</button>');
       let message = '';
-      try { await h.settled(page, '#moving', { timeout: 300 }); } catch (e) { message = e.message; }
+      try { await h.settled(page, '#moving', { timeout: 1000 }); } catch (e) { message = e.message; }
       h.expect(/#moving.*did not settle/.test(message) && /bob/.test(message) && /transform/.test(message) && /before.*after/.test(message), `the timeout did not name the moving target and animation: ${message}`);
+    } finally { await ctx.close(); }
+  },
+  // an endless bob holds still until it starts, in its delay here, and on CI for the frames a new animation waits to
+  // start on a slow compositor: two still frames then must not pass for rest
+  async 'settled-bob-waits-to-start'(h) {
+    const ctx = await h.browser.newContext();
+    try {
+      const page = await ctx.newPage();
+      await page.setContent('<style>@keyframes bob { to { transform:translateY(50px) } } button { animation:bob 1s 500ms infinite alternate linear }</style><button id="waiting">Bob</button>');
+      let message = '';
+      try { await h.settled(page, '#waiting', { timeout: 1500 }); } catch (e) { message = e.message; }
+      h.expect(/#waiting.*did not settle/.test(message) && /bob/.test(message) && /before.*after/.test(message), `a bob still waiting to start passed for rest: ${message}`);
     } finally { await ctx.close(); }
   },
 };

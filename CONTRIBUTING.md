@@ -96,8 +96,9 @@ scenario gets an `h` object from `scripts/e2e/harness.mjs`, the same but for `br
   first. Returns `{ ctx, page, errors }`; close `ctx` when done.
 - `reachHub(page)`, `openSettings(page)`: tap through to Home or the Settings screen.
 - `settled(page, selector, { timeout = 15000 } = {})`: wait for finite layout animations affecting the matched boxes
-  to end, then for identical rectangles across two frames. Select elements that come to rest after entry. On timeout,
-  it names the animations or rectangles still moving. Wait for the app's own state first when script delays an entry.
+  to end and endless ones to start, then for identical rectangles across two frames. Select elements that come to rest
+  after entry. On timeout, it names the animations or rectangles still moving. Wait for the app's own state first when
+  script delays an entry.
 - `frames(page, n)`: wait for real browser frames, even with the page clock paused, with a 15 s deadline. Use this
   for an observation window, and a drawn-frame count for a scene's progress. Intentional endless motion keeps playing;
   measure its layout box or a still parent when testing layout. Keep separate performance deadlines such as 900 ms.
