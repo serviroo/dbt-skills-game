@@ -4,13 +4,15 @@ export async function installAudioRecorder(ctx) {
   await ctx.addInitScript(() => {
     const WORKLET = 'scripts/e2e/audio-recorder-worklet.mjs';
     const connect = AudioNode.prototype.connect;
+    const close = AudioContext.prototype.close;
     const modules = new WeakMap();
+    const ending = new WeakMap();
     const taps = (window.__taps = []);
     AudioNode.prototype.connect = function (dest, ...rest) {
       const out = connect.call(this, dest, ...rest);
       if (dest instanceof AudioDestinationNode && this.context instanceof AudioContext && !taps.some((t) => t.node === this)) {
         const context = this.context;
-        const tap = { node: this, context, from: this.constructor.name, url: null, status: 'loading', q: new Map(), start: undefined, end: undefined, error: null };
+        const tap = { node: this, context, from: this.constructor.name, url: null, status: 'loading', q: new Map(), start: undefined, end: undefined, recorder: null, last: undefined, answered: null, error: null };
         taps.push(tap);
         try { tap.url = new URL(WORKLET, document.baseURI).href; }
         catch (e) {
@@ -20,8 +22,12 @@ export async function installAudioRecorder(ctx) {
         if (!modules.has(context)) modules.set(context, context.audioWorklet.addModule(tap.url));
         modules.get(context).then(() => {
           tap.status = 'loaded';
-          const node = new AudioWorkletNode(context, 'e2e-recorder', { numberOfOutputs: 1, outputChannelCount: [1], channelCount: 1, channelCountMode: 'explicit', channelInterpretation: 'speakers' });
+          const node = (tap.recorder = new AudioWorkletNode(context, 'e2e-recorder', { numberOfOutputs: 1, outputChannelCount: [1], channelCount: 1, channelCountMode: 'explicit', channelInterpretation: 'speakers' }));
           node.port.onmessage = ({ data }) => {
+            if (!Array.isArray(data)) {
+              tap.last = data.last;
+              return tap.answered?.();
+            }
             for (const [i, ...levels] of data) {
               tap.status = 'recording';
               tap.q.set(i, levels);
@@ -29,12 +35,35 @@ export async function installAudioRecorder(ctx) {
               tap.end = i;
             }
           };
-          node.onprocessorerror = () => (tap.error = `worklet ${tap.url}: processor failed (context ${context.state})`);
+          node.onprocessorerror = () => {
+            tap.error = `worklet ${tap.url}: processor failed (context ${context.state})`;
+            tap.answered?.();
+          };
           connect.call(this, node);
           connect.call(node, context.destination);
         }).catch((e) => (tap.error = `worklet ${tap.url}: ${e.message} (context ${context.state})`));
       }
       return out;
+    };
+    // A closed context's clock can count blocks no node ran, and its recorders answer nothing more. So a close stops the
+    // context first, asks each recorder for the last block it rendered, and closes once all have answered.
+    const askEnds = async (context) => {
+      const asked = taps.filter((t) => t.context === context && t.recorder && !t.error);
+      if (!asked.length) return;
+      await context.suspend();
+      await Promise.all(asked.map((t) => new Promise((done) => {
+        t.answered = done;
+        t.recorder.port.postMessage(null);
+      })));
+    };
+    AudioContext.prototype.close = async function () {
+      if (this.state !== 'closed' && !ending.has(this)) {
+        ending.set(this, askEnds(this).catch((e) => {
+          for (const t of taps) if (t.context === this) t.error ??= `recorder could not stop its context before it closed: ${e.message}`;
+        }));
+      }
+      await ending.get(this);
+      return close.call(this);
     };
   });
 }
@@ -52,7 +81,7 @@ export async function audioReady(page) {
   }
 }
 
-/** Wait for delivery through audio time t, including the final quantum of a suspended or closed context. */
+/** Wait for delivery through audio time t. Where a closed context's recording ends, audioEnded says. */
 export async function audioRecorded(page, i, t, timeout = 15000) {
   try {
     const v = await (await page.waitForFunction(([i, t]) => {
@@ -66,5 +95,26 @@ export async function audioRecorded(page, i, t, timeout = 15000) {
       return { url: tap.url, status: tap.status, state: tap.context.state, end: tap.end, error: tap.error };
     }, i);
     throw new Error(`audio tap ${i} did not record through ${t} s: ${JSON.stringify(state)}`, { cause });
+  }
+}
+
+/** The audio time where tap i's recording ends once its context has closed, with every block of it delivered. */
+export async function audioEnded(page, i, timeout = 15000) {
+  try {
+    const v = await (await page.waitForFunction((i) => {
+      const tap = window.__taps[i];
+      if (tap.error) return { error: tap.error };
+      if (tap.context.state === 'closed' && tap.last !== undefined) return { last: tap.last, end: tap.end ?? -1, rate: tap.context.sampleRate };
+    }, i, { timeout, polling: 20 })).jsonValue();
+    if (v.error) throw new Error(v.error);
+    // the recorder's answer came after every block it reported
+    if (v.end !== v.last) throw new Error(`the recorder rendered through block ${v.last} but reported only through ${v.end}`);
+    return ((v.last + 1) * 128) / v.rate;
+  } catch (cause) {
+    const state = await page.evaluate((i) => {
+      const tap = window.__taps[i];
+      return { url: tap.url, status: tap.status, state: tap.context.state, end: tap.end, last: tap.last, error: tap.error };
+    }, i);
+    throw new Error(`audio tap ${i} has no finished recording of a closed context: ${JSON.stringify(state)}`, { cause });
   }
 }

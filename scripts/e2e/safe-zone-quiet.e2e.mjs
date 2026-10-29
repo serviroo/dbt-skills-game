@@ -2,7 +2,7 @@
 // in Give me a moment) is silent at the speakers within a click-free moment of it, a quick visit never brings an old
 // cue or echo back, their levels and mute never change, and a gift or rank cut short by the tap is kept. Measured on
 // the real post-mix output, render quantum by render quantum, against the audio clock at the moment of the tap.
-import { installAudioRecorder, audioReady, audioRecorded } from './audio-recorder.mjs';
+import { installAudioRecorder, audioReady, audioRecorded, audioEnded } from './audio-recorder.mjs';
 
 const TALL = { width: 390, height: 844 };
 const SMALL = { width: 320, height: 568 };
@@ -280,6 +280,38 @@ export const scenarios = {
     }
   },
 
+  /** A context the page closes, then collects garbage: its recording still ends with every block it rendered. */
+  async 'audio-recorder-keeps-a-closed-context'(h) {
+    const { ctx, page } = await boot(h);
+    try {
+      const n = await page.evaluate(() => {
+        const context = (window.__closing = new AudioContext());
+        const tone = context.createOscillator();
+        tone.connect(context.destination);
+        tone.start();
+        return window.__taps.length - 1;
+      });
+      await audioReady(page);
+      await h.sleep(250);
+      const from = await now(page, n);
+      await h.sleep(500);
+      await page.evaluate(() => window.__closing.close());
+      await (await ctx.newCDPSession(page)).send('HeapProfiler.collectGarbage');
+      const end = await audioEnded(page, n);
+      const missing = await page.evaluate(([n, from]) => {
+        const t = window.__taps[n];
+        let m = 0;
+        for (let k = Math.ceil((from * t.context.sampleRate) / 128); k <= t.last; k++) m += !t.q.has(k);
+        return m;
+      }, [n, from]);
+      const heard = await hear(page, n, from, end);
+      h.expect(!missing && heard.rms > 0.1, `the closed context's recording misses ${missing} blocks or has no tone: ${fmt(heard)}`);
+      return { seconds: end - from };
+    } finally {
+      await ctx.close();
+    }
+  },
+
   async 'entry-silences-score-and-cues-at-once'(h) {
     const c = step();
     await entryCase(h, c, { tag: 'entry' });
@@ -367,16 +399,18 @@ export const scenarios = {
     try {
       const m = await enter(page);
       const tIn = m.at[n];
-      await page.waitForFunction((n) => window.__taps[n].context.state === 'closed', n, { timeout: 5000 }).catch(() => {});
-      // a closed context plays nothing more: its clock stops where its last sound was rendered
-      const { state, end } = await page.evaluate((n) => ({ state: window.__taps[n].context.state, end: window.__taps[n].context.currentTime }), n);
-      await until(page, n, end);
+      // the hum's audio closes within a few seconds; its recording then ends with the last block its graph ran
+      const end = await audioEnded(page, n, 5000);
+      // reads come in whole blocks, so past WITHIN starts with the first block after it; the block it falls in is never read
+      const past = await page.evaluate(([n, t]) => {
+        const sr = window.__taps[n].context.sampleRate;
+        return (Math.ceil((t * sr) / 128) * 128) / sr;
+      }, [n, tIn + WITHIN]);
       const pre = await hear(page, n, tIn - 0.25, tIn);
-      const inside = await hear(page, n, tIn + WITHIN, end);
+      const inside = await hear(page, n, past, end);
       const start = await hear(page, n, tIn, end);
       c.ok(pre.rms > 1e-4, `hum: the hum was not audible before the tap (${fmt(pre)})`);
-      c.ok(state === 'closed', `hum: the hum's audio is still ${state} a few seconds into the Safe Zone`);
-      c.ok(end <= tIn + WITHIN || (covered(inside) && silent(inside)), `hum: the hum played on until ${((end - tIn) * 1000).toFixed(0)} ms after the tap (RMS/peak past ${WITHIN * 1000} ms ${fmt(inside)}, silent from ${quietAt(start, tIn)})`);
+      c.ok(end <= past || (covered(inside) && silent(inside)), `hum: the hum played on until ${((end - tIn) * 1000).toFixed(0)} ms after the tap (RMS/peak past ${WITHIN * 1000} ms ${fmt(inside)}, silent from ${quietAt(start, tIn)})`);
       await until(page, 0, m.at[0] + 0.5 + 0.05);
       const eng = await hear(page, 0, m.at[0] + WITHIN, m.at[0] + 0.5);
       c.ok(covered(eng) && silent(eng), `hum: the engine is not silent inside, or the reads missed it (${fmt(eng)})`);
@@ -403,7 +437,6 @@ export const scenarios = {
       await page.waitForFunction((n) => window.__taps[n].context.state === 'closed', n, { timeout: 3000, polling: 20 }).catch(() => {});
       const ms = Date.now() - t0;
       const { state, end } = await page.evaluate((n) => ({ state: window.__taps[n].context.state, end: window.__taps[n].context.currentTime }), n);
-      await until(page, n, end);
       c.ok(state === 'closed', `suspended: the hum's audio is still ${state} 3 s into the Safe Zone`);
       c.ok(end === held && m.at[n] === held, `suspended: the hum's clock moved while suspended (${held} -> ${end}), so it may have played`);
       c.ok(!errors.length, `suspended: page errors: ${errors.join(' | ')}`);

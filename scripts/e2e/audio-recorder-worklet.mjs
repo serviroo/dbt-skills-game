@@ -1,5 +1,11 @@
 registerProcessor('e2e-recorder', class extends AudioWorkletProcessor {
   prev = 0;
+  last = -1;
+  constructor() {
+    super();
+    // the answer leaves after every block this processor posted, so once it arrives the recording is all there
+    this.port.onmessage = () => this.port.postMessage({ last: this.last });
+  }
   process([input]) {
     const samples = input[0];
     let peak = 0;
@@ -12,7 +18,8 @@ registerProcessor('e2e-recorder', class extends AudioWorkletProcessor {
       step = Math.max(step, Math.abs(v - this.prev));
       this.prev = v;
     }
-    this.port.postMessage([[currentFrame / 128, peak, ss, step]]);
+    this.last = currentFrame / 128;
+    this.port.postMessage([[this.last, peak, ss, step]]);
     return true;
   }
 });
