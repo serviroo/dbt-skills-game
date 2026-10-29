@@ -393,8 +393,9 @@ export const isSettled = (sel) =>
 
 /**
  * What of a Lantern window doesn't show, scrolled only the way its layer lets the player, up and down: the window
- * running past the sides, one of its neon bars or buttons not whole on screen and inside every box that clips it, or any
- * word a player can see, its title and headings included, cut off at the sides.
+ * running past the sides, one of its neon bars (the glowing bar itself: the faint circuit lines beside it reach past a
+ * phone's edge, as designed) or buttons not whole on screen and inside every box that clips it, or any word a player can
+ * see, its title and headings included, cut off at the sides.
  */
 export const windowCut = (page, sel) =>
   page.evaluate(async (sel) => {
@@ -414,14 +415,14 @@ export const windowCut = (page, sel) =>
       }
       return { r, w: rt - l, h: b - t };
     };
-    const name = (e) => (e.matches('.sw-bar') ? `its ${e.matches('.sw-bar--top') ? 'top' : 'bottom'} bar` : `"${e.textContent.trim()}"`);
+    const name = (e) => (e.matches('.core') ? `its ${e.closest('.sw-bar--top') ? 'top' : 'bottom'} bar` : `"${e.textContent.trim()}"`);
     for (const s of [layer, ...win.querySelectorAll('*')]) s.scrollLeft = 0;
     layer.scrollTop = 0;
     await paint();
     const out = [];
     const all = shows(win);
     if (all.w < all.r.width - 1) out.push(`it runs past the sides (${Math.round(all.r.left)} to ${Math.round(all.r.right)} of ${innerWidth})`);
-    for (const e of [...win.querySelectorAll('.sw-bar'), ...win.querySelectorAll('button')]) {
+    for (const e of [...win.querySelectorAll('.sw-bar > .core'), ...win.querySelectorAll('button')]) {
       if (!e.checkVisibility({ checkVisibilityCSS: true })) continue;
       const r = e.getBoundingClientRect();
       const room = layer.getBoundingClientRect().top + layer.clientTop;

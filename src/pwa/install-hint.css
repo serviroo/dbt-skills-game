@@ -1,6 +1,6 @@
 /* Install hint: a small Lantern window resting low on the screen, near Safari's own toolbar. Over the companion it stays
    below the top bar (--dq-top), so the Safe Zone button is never under it; taller than the room left, it starts at the
-   top of that room and scrolls. The padding holds its neon bars, 24 px above and below it and 6.5% past its sides. */
+   top of that room and scrolls. The padding above and below holds its neon bars, which reach 24 px past it. */
 .pwa-hint-layer {
   position: fixed;
   inset: var(--dq-top, 0px) 0 0;
@@ -10,7 +10,7 @@
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
   justify-items: center;
-  padding: calc(var(--safe-top) + 32px) max(16px, calc(6vw + 4px)) calc(var(--safe-bottom) + 60px);
+  padding: calc(var(--safe-top) + 32px) 16px calc(var(--safe-bottom) + 60px);
   overflow-y: auto;
   overscroll-behavior: contain;
   pointer-events: none;

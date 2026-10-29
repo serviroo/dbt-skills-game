@@ -1,7 +1,7 @@
 /* Lantern window. */
 
-/* a window sits centred in the room, never wider than it, and starts at its top and scrolls where it's taller; the
-   padding holds its neon bars, which reach 24 px above and below it and 6.5% past its sides, glow and all */
+/* a window sits centred in the room at its own width, narrower only where the room is, and starts at its top and
+   scrolls where it's taller; the padding above and below holds its neon bars, which reach 24 px past it */
 .sw-layer {
   position: fixed;
   inset: 0;
@@ -11,7 +11,7 @@
   justify-items: center;
   pointer-events: none;
   z-index: 20;
-  padding: calc(var(--safe-top) + 32px) max(14px, calc(6vw + 4px)) calc(var(--safe-bottom) + 32px);
+  padding: calc(var(--safe-top) + 32px) 14px calc(var(--safe-bottom) + 32px);
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -203,6 +203,7 @@
   text-transform: uppercase;
   text-align: center;
   color: var(--title);
+  white-space: nowrap;
   text-shadow:
     0 0 1px rgba(232, 254, 255, 0.95),
     0 0 6px rgba(89, 172, 217, 0.85),
@@ -255,6 +256,7 @@
   font-optical-sizing: auto;
   font-size: clamp(34px, min(3.7em, 14.5vw), 92px);
   line-height: 1;
+  white-space: nowrap;
   letter-spacing: 0.07em;
   text-align: center;
   color: var(--ice);
@@ -689,6 +691,15 @@
 .sw-pip > .sw-marker {
   left: -1px;
   bottom: calc(-0.65em - 1px);
+}
+
+/* a screen narrower than a window's own width (a phone under 350 px wide, or one zoomed to 200%): its title and big
+   line wrap rather than run past it */
+@media (max-width: 349.98px) {
+  .sw-title,
+  .sw-big {
+    white-space: normal;
+  }
 }
 
 /* a phone zoomed to 200% (260 CSS pixels wide or less): the plate gives its words the room; the title sits under its
