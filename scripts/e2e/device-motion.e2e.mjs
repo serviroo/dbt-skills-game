@@ -7,8 +7,9 @@
 // when it comes back on; in the Stealth Room, opened while it is on, the glow rests and the cat doesn't blep, then the
 // glow breathes, the cat bleps and the shark swims again once it is turned off; A quiet minute's glow rests while it is
 // on, breathes once it is turned off, and settles again when it comes back on. With Motion saved as Full, the glint on
-// the card's back and the Story Room's scan keep moving whatever the device says. The title's pulses end with the title,
-// however it goes, and the Stealth Room's Breathing words still breathe with its glow once motion is back.
+// the card's back and the Story Room's scan keep moving whatever the device says. The title's pulses and the end card's
+// drift end with their screen, however it goes, and the Stealth Room's Breathing words still breathe with its glow
+// once motion is back.
 
 const PHONE = { width: 390, height: 844 };
 
@@ -248,39 +249,54 @@ export const scenarios = {
     await ctx.close();
   },
 
-  /** the title's slit and prompt stop pulsing once the title has gone, however it went: a tap, Enter, Space, ?shot= and ?capture */
-  async 'title-pulses-end-with-it'(h) {
+  /**
+   * the title's slit and prompt and the end card's drift stop for good once their screen has gone, however it went: the
+   * title by a tap, Enter, Space, ?shot= or a capture, the end card by Enter the Lantern, Replay or a capture. A capture
+   * steps its stage 1/15 s at a time, and every step would bring back an animation it still kept
+   */
+  async 'endless-motion-ends-with-its-screen'(h) {
+    const title = ['.title-screen', '.title-slit, .title-prompt', 2];
+    const card = ['.endcard', '.ec-stage', 1];
+    const tap = (sel) => (page) => page.locator(sel).click();
+    // the end card drifts, so a wait for its button to hold still never ends: a player taps where it is once it is live
+    const press = (v) => async (page) => {
+      await page.locator('.ec-actions:not([inert])').waitFor({ timeout: 15000 });
+      const b = await page.locator(`.ec-actions [data-v="${v}"]`).boundingBox();
+      await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
+    };
+    const capture = (screen) => (page) =>
+      page.evaluate(async (sel) => {
+        for (let i = 0; i < 600 && document.querySelector(sel); i++) {
+          window.__stage.step(1 / 15);
+          await new Promise((r) => setTimeout(r));
+        }
+      }, screen);
     const ways = [
-      ['a tap', '?lab=window&kind=title&mute', (t) => t.click()],
-      ['Enter', '?lab=window&kind=title&mute', (t) => t.press('Enter')],
-      ['Space', '?lab=window&kind=title&mute', (t) => t.press(' ')],
-      ['?shot=', '?shot=gate&mute', (t) => t.click()],
-      // a capture leaves the title on its own, a moment into its frames, which the capture steps 1/15 s at a time
-      [
-        '?capture',
-        '?shot=gate&capture&mute&dpr=1&nopost',
-        (t) =>
-          t.page().evaluate(async () => {
-            for (let i = 0; i < 300 && document.querySelector('.title-screen'); i++) {
-              window.__stage.step(1 / 15);
-              await new Promise((r) => setTimeout(r));
-            }
-          }),
-      ],
+      ['the title, a tap', '?lab=window&kind=title&mute', title, tap('.title-screen')],
+      ['the title, Enter', '?lab=window&kind=title&mute', title, (page) => page.locator('.title-screen').press('Enter')],
+      ['the title, Space', '?lab=window&kind=title&mute', title, (page) => page.locator('.title-screen').press(' ')],
+      ['the title, ?shot=', '?shot=gate&mute', title, tap('.title-screen')],
+      ['the title, a capture', '?lab=window&kind=title&mute&capture', title, capture('.title-screen')],
+      ['the end card, Enter the Lantern', '?lab=window&kind=endcard&mute', card, press('enter')],
+      ['the end card, Replay', '?lab=window&kind=endcard&mute', card, press('replay')],
+      ['the end card, a capture', '?lab=window&kind=endcard&mute&capture', card, capture('.endcard')],
     ];
-    for (const [how, query, close] of ways) {
+    for (const [how, query, [screen, parts, n], close] of ways) {
       const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, query, PHONE);
-      const title = page.locator('.title-screen');
-      await title.waitFor({ timeout: 30000 });
-      // the pulses themselves, kept from while the title shows, so they can be looked at once it has gone
-      const pulsing = await page.evaluate(() => (window.__pulses = [...document.querySelectorAll('.title-slit, .title-prompt')].flatMap((e) => e.getAnimations())).length);
-      h.expect(pulsing === 2, `${how}: the title's slit and prompt are not pulsing to begin with (${pulsing})`);
-      await close(title);
-      await title.waitFor({ state: 'detached', timeout: 15000 }).catch(() => {
-        throw new Error(`${how}: the title never went`);
+      await page.locator(screen).waitFor({ timeout: 30000 });
+      // the endless animations themselves, kept from while the screen shows, so they can be looked at once it has gone
+      const endless = await page.evaluate(
+        (parts) => (window.__endless = [...document.querySelectorAll(parts)].flatMap((e) => e.getAnimations()).filter((a) => a.effect.getTiming().iterations === Infinity)).length,
+        parts,
+      );
+      h.expect(endless === n, `${how}: ${endless} endless animations to begin with, not ${n}`);
+      await close(page);
+      await page.locator(screen).waitFor({ state: 'detached', timeout: 15000 }).catch(() => {
+        throw new Error(`${how}: the screen never went`);
       });
-      const running = await page.evaluate(() => window.__pulses.filter((a) => a.playState === 'running').length);
-      h.expect(running === 0, `${how}: ${running} of the title's pulses still run after it has gone`);
+      if (query.includes('capture')) await page.evaluate(() => window.__stage.step(1 / 15));
+      const left = await page.evaluate(() => window.__endless.map((a) => a.playState).filter((p) => p !== 'idle'));
+      h.expect(!left.length, `${how}: ${left.length} of its endless animations are still ${left.join(', ')} after it has gone`);
       h.expect(!errors.length, errors.join('\n'));
       await ctx.close();
     }

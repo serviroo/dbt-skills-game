@@ -56,6 +56,11 @@ export function tickUI() {
   const t = clockNow();
   if (params.capture) {
     for (const tr of tracked) {
+      // cancelled (the only way a tracked animation goes idle): the capture clock lets it go rather than bring it back
+      if (tr.a.playState === 'idle') {
+        tracked.delete(tr);
+        continue;
+      }
       const local = (t - tr.start) * 1000;
       tr.a.currentTime = Math.max(0, Math.min(local, tr.total));
       if (local >= tr.total && tr.total !== Infinity) {

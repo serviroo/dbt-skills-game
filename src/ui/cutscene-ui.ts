@@ -410,11 +410,13 @@ export async function endCard(): Promise<'replay' | 'enter'> {
   e.buttons(acts, e.animate(acts, [{ opacity: 0 }, { opacity: 1 }], { duration: 900, delay: 2600, easing: 'ease-out' }));
   // breathing drift on the held card, stopped and started again as the device's reduce-motion changes
   let drift: Animation | null = null;
+  const rest = () => {
+    drift?.cancel();
+    drift = null;
+  };
   const sway = () => {
-    if (params.reduced) {
-      drift?.cancel();
-      drift = null;
-    } else drift ??= animate(stage, [{ transform: 'scale(1)' }, { transform: 'scale(.985)' }], { duration: 9000, delay: 1600, iterations: Infinity, direction: 'alternate', easing: 'ease-in-out' });
+    if (params.reduced) rest();
+    else drift ??= animate(stage, [{ transform: 'scale(1)' }, { transform: 'scale(.985)' }], { duration: 9000, delay: 1600, iterations: Infinity, direction: 'alternate', easing: 'ease-in-out' });
   };
   sway();
   const offSway = onSystemMotion(sway);
@@ -424,6 +426,8 @@ export async function endCard(): Promise<'replay' | 'enter'> {
   });
   offSway();
   await e.leave(root, 600);
+  // the drift ends with the end card: endless, it would run on in the removed stage
+  rest();
   return v;
 }
 
