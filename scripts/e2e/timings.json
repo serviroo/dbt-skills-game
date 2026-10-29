@@ -88,6 +88,7 @@
   "clear-blocked-and-failed": 11,
   "clear-carries-unreadable-saves": 56,
   "clear-elsewhere": 9,
+  "clear-frozen-copy": 5,
   "clear-left-during-check": 8,
   "clear-missed-then-new-game": 30,
   "clear-offline": 4,
