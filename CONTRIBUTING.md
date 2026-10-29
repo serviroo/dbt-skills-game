@@ -152,13 +152,15 @@ listens on that machine's 127.0.0.1 only. From this machine, open an SSH tunnel 
 through it:
 
 ```sh
-ssh -N -L <port>:127.0.0.1:<port> -R 5400:127.0.0.1:5400 <the GPU machine>
+ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:<port>:127.0.0.1:<port> -R 127.0.0.1:5400:127.0.0.1:5400 <the GPU machine>
 node scripts/e2e.mjs --ws=ws://127.0.0.1:<port>/<path> --port=5400
 ```
 
 `-L` brings the browser's port to this machine's 127.0.0.1, and `-R` lets that browser load this run's dev server at
-its own 127.0.0.1. `--port` keeps the dev server on the forwarded port, and the run stops if that port is taken.
-`--headed` goes to the browser's machine; `--software` goes to both commands.
+its own 127.0.0.1. Naming 127.0.0.1 on both ends and `ExitOnForwardFailure` stop the tunnel if either port is already
+taken there, so that browser never loads another dev server on the same port. `--port` keeps the dev server on the
+forwarded port, and the run stops if that port is taken here. `--headed` goes to the browser's machine; `--software`
+goes to both commands.
 
 ### Skill check
 
