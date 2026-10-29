@@ -1,4 +1,5 @@
 import { installAudioRecorder, audioReady } from './audio-recorder.mjs';
+import { settle } from './layout-fit.e2e.mjs';
 const SAFARI = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
 const TALL = { width: 390, height: 844 };
 const SMALL = { width: 320, height: 568 };
@@ -165,6 +166,15 @@ function step() {
 
 async function enterSafe(h, page, label, before) {
   const c = step();
+  // one tap away whatever is open: the Safe Zone button shows whole, and a tap on its middle reaches it
+  const button = await page.evaluate(() => {
+    const b = document.querySelector('header .dq-safe');
+    const r = b.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return { whole: r.left >= -0.5 && r.top >= -0.5 && r.right <= innerWidth + 0.5 && r.bottom <= innerHeight + 0.5, hit: hit && !b.contains(hit) ? `${hit.tagName.toLowerCase()}.${[...hit.classList].join('.')}` : null, at: [r.left, r.top, r.right, r.bottom].map(Math.round).join(', ') };
+  });
+  c.ok(button.whole && !button.hit, `${label}: the Safe Zone button at ${button.at} in ${page.viewportSize().width}x${page.viewportSize().height} is ${button.whole ? '' : 'not whole on screen'}${!button.whole && button.hit ? ' and ' : ''}${button.hit ? `under ${button.hit}` : ''}`);
+  if (!button.whole || button.hit) c.end();
   await page.locator('header .dq-safe').click({ timeout: 4000 });
   const s = await probe(page);
   c.ok(s.route === 'safe', `${label}: route is ${s.route}, not the Safe Zone`);
@@ -285,6 +295,36 @@ const WINDOWS = {
       h.expect(kept, 'story-delete: the story was deleted after the confirm window was closed by the Safe Zone');
     },
   },
+  // sheets: next to the page and under the top bar
+  'story-chapters': {
+    save: () => returning(),
+    sel: '.st-sheet',
+    sheet: true,
+    open: async (page) => {
+      await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const { story } = await storyStore(window.__daily.store.key).create('Kept story');
+        window.__daily.go({ name: 'write', id: story.id });
+      });
+      await page.locator('.st-chbtn').click({ timeout: 10000 });
+    },
+  },
+  'art-name': {
+    save: () => returning(),
+    sel: '.dq-sheet:not(.is-hidden)',
+    sheet: true,
+    open: async (page) => {
+      await page.evaluate(() => window.__daily.go({ name: 'draw', kind: 'ally' }));
+      await page.locator('.dq-draw-frame').waitFor({ timeout: 10000 });
+      await settle(page);
+      const pad = await page.locator('.dq-draw-frame').boundingBox();
+      await page.mouse.move(pad.x + pad.width * 0.3, pad.y + pad.height * 0.3);
+      await page.mouse.down();
+      await page.mouse.move(pad.x + pad.width * 0.6, pad.y + pad.height * 0.5, { steps: 8 });
+      await page.mouse.up();
+      await page.locator('.dq-save').click();
+    },
+  },
   'install-hint': {
     save: () => returning(),
     ua: SAFARI,
@@ -305,6 +345,25 @@ async function windowCase(h, kind, { viewport, reduced = false, score = true }) 
     await w.open(page);
     await page.locator(w.sel ?? '.dq-sw').first().waitFor({ state: 'visible', timeout: 12000 });
     await h.sleep(400);
+    // a window itself: its top shows at the top of its layer, and each of its buttons can be scrolled to whole
+    const cut = w.sheet ? [] : await page.evaluate(async (sel) => {
+      const win = document.querySelector(sel);
+      const layer = win.parentElement;
+      layer.scrollTop = 0;
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const out = [];
+      const l = layer.getBoundingClientRect();
+      if (win.getBoundingClientRect().top < l.top - 0.5) out.push(`its top is cut off above ${Math.round(l.top)}`);
+      for (const b of win.querySelectorAll('button')) {
+        if (!b.checkVisibility({ checkVisibilityCSS: true })) continue;
+        b.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+        const r = b.getBoundingClientRect();
+        if (r.top < Math.max(0, l.top) - 0.5 || r.bottom > Math.min(innerHeight, l.bottom) + 0.5) out.push(`"${b.textContent.trim()}" can't be scrolled to whole`);
+      }
+      layer.scrollTop = 0;
+      return out;
+    }, w.sel ?? '.dq-sw');
+    h.expect(!cut.length, `${tag}: the window doesn't show whole: ${cut.join('; ')}`);
     const before = await probe(page);
     await h.shot(page, `me92-${tag}-1-window`);
     await enterSafe(h, page, tag, before);
@@ -580,6 +639,8 @@ export const scenarios = {
   'safe-zone-over-windows-320-reduced': (h) => allWindows(h, { viewport: SMALL, reduced: true, score: false }),
   'safe-zone-over-windows-landscape': (h) => allWindows(h, { viewport: WIDE, score: false }),
   'safe-zone-over-windows-landscape-reduced': (h) => allWindows(h, { viewport: WIDE, reduced: true, score: false }),
+  // at 200% zoom (the page laid out at half the size), on each phone either way up
+  ...Object.fromEntries([TALL, SMALL, WIDE, SHORT].map((v) => [`safe-zone-over-windows-${v.width}x${v.height}-200`, (h) => allWindows(h, { viewport: { width: v.width / 2, height: v.height / 2 }, score: false })])),
   'safe-zone-from-every-route': async (h) => {
     await allRoutes(h, { viewport: TALL });
     await allRoutes(h, { viewport: SMALL, reduced: true });

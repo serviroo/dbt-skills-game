@@ -3190,6 +3190,23 @@ textarea.dq-input {
 .dq[data-screen='safe'] .dq-scrim {
   transition: none;
 }
+/* Lantern windows over the companion: beside the page (src/daily/app.ts winLayer) and below its top bar, so the Safe
+   Zone button is never under one; centred in the room left, or from its top and scrolling when taller than that room */
+.dq-sw-layer {
+  position: fixed;
+  inset: var(--dq-top, 0px) 0 0;
+  z-index: 20;
+  display: grid;
+  align-items: start;
+  justify-items: center;
+  padding: 8px 14px calc(var(--safe-bottom) + 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: none;
+}
+.dq-sw-layer > .sw {
+  margin: auto;
+}
 .dq.is-windowed .dq-top {
   z-index: 16;
   pointer-events: none;

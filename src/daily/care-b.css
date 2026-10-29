@@ -209,6 +209,23 @@
     padding: 0 12px 0 10px;
   }
 }
+/* a phone at 200% zoom, held either way (300 CSS pixels wide or less): where the whole chest and Give me a moment don't
+   fit side by side, Give me a moment takes the next line, at its end, and its own words wrap if they still don't fit */
+@media (max-width: 300px) {
+  .dq-lobby {
+    flex-wrap: wrap;
+  }
+  .dq-chest {
+    flex: 1 1 0;
+    min-width: auto;
+    max-width: max-content;
+  }
+  .dq-momentbtn {
+    max-width: 100%;
+    margin-left: auto;
+    white-space: normal;
+  }
+}
 @media (min-width: 760px) {
   .dq-col--t {
     grid-column: 1 / -1;

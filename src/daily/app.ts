@@ -3,7 +3,7 @@ import { onSystemMotion, params, setMotion } from '../core/params';
 import { cleared, onClear } from '../core/cleared';
 import { animate } from '../ui/anim';
 import { BUZZ, BUZZ_GAP, SKY, WINDOW } from '../motion/tokens';
-import { DISMISSED, dismissWindows, LanternWindow, lanternLayer, windowSounds, type WindowSpec } from '../ui/lantern-window';
+import { DISMISSED, dismissWindows, LanternWindow, windowSounds, type WindowSpec } from '../ui/lantern-window';
 import { revealRank } from '../ui/rank-reveal';
 import { isHeavy, MODULE_ORDER, MODULES, type Next, type StatId } from '../content/dbt';
 import { RANK_UP, RANKS, SAFE_CREDIT } from '../content/daily-lines';
@@ -125,6 +125,8 @@ export class App {
    * change empties it, after the screen's own leave.
    */
   readonly sheetLayer: HTMLElement;
+  /** Where Lantern windows open: beside the page and below its top bar, so the Safe Zone button is never under one. */
+  private winLayer: HTMLElement;
   readonly store: Store;
   readonly bubbles: Bubbles;
   private top: HTMLElement;
@@ -132,7 +134,8 @@ export class App {
   private scrim: HTMLElement;
   private toastEl: HTMLElement;
   private sky: Sky;
-  /** keeps --dq-top and --dq-foot at the pinned bars' real heights (scroll-padding in daily.css) */
+  /** keeps --dq-top and --dq-foot at the pinned bars' real heights (scroll-padding in daily.css), on the host so the
+   * window layer beside the page reads them too */
   private pins: ResizeObserver;
   route: Route = { name: 'hub' };
   /** The companion's history entries from Home at 0, forward ones included; `at` is the one the player is on. */
@@ -180,10 +183,11 @@ export class App {
     this.toastEl = h('div', { class: 'dq-toast', role: 'status', 'aria-live': 'polite' });
     this.sheetLayer = h('div', { class: 'dq-sheets' });
     this.root.append(this.sky.back, this.bubbles.canvas, h('div', { class: 'dq-vignette', 'aria-hidden': 'true' }), this.sheetLayer, this.sky.shade, this.top, this.view, this.toastEl, this.scrim);
-    host.append(this.root);
+    this.winLayer = h('div', { class: 'dq-sw-layer' });
+    host.append(this.root, this.winLayer);
     this.pins = new ResizeObserver(() => {
-      this.root.style.setProperty('--dq-top', `${this.top.offsetHeight}px`);
-      this.root.style.setProperty('--dq-foot', `${this.current?.foot?.offsetHeight ?? 0}px`);
+      host.style.setProperty('--dq-top', `${this.top.offsetHeight}px`);
+      host.style.setProperty('--dq-foot', `${this.current?.foot?.offsetHeight ?? 0}px`);
     });
     // the whole box, padding too: a bar's padding changes on its own as the screen turns, zooms or the keyboard opens
     this.pins.observe(this.top, { box: 'border-box' });
@@ -441,7 +445,7 @@ export class App {
     this.scrim.classList.add('is-on');
     this.root.classList.add('is-windowed');
     this.view.inert = true;
-    const w = new LanternWindow(lanternLayer(), { width: 'min(92vw, 540px)', ...spec });
+    const w = new LanternWindow(this.winLayer, { width: 'min(92vw, 540px)', ...spec });
     w.root.classList.add('dq-sw');
     if (this.reduced()) w.root.classList.add('dq-sw--still');
     // Motion changed while it is up, here or in another copy: the window follows
@@ -728,7 +732,7 @@ export class App {
     if (wasSafe && !safe) this.turnDay();
     const out = this.screens[route.name](this, route, { again: v.again, kept: v.again ? this.kept.get(key) : undefined, handed: v.again ? undefined : v.hand, at: v.at, mark: (p) => this.mark(key, p) });
     this.current = out;
-    this.root.style.setProperty('--dq-foot', '0px');
+    this.host.style.setProperty('--dq-foot', '0px');
     if (out.foot) this.pins.observe(out.foot, { box: 'border-box' });
     this.root.dataset.mode = out.mode;
     this.root.dataset.screen = route.name;
@@ -832,6 +836,7 @@ export class App {
     this.offs.forEach((f) => f());
     this.bubbles.destroy();
     this.root.remove();
-    document.querySelectorAll('.dq-sw').forEach((n) => n.remove());
+    this.winLayer.remove();
+    for (const v of ['--dq-top', '--dq-foot']) this.host.style.removeProperty(v);
   }
 }

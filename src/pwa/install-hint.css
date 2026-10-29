@@ -1,16 +1,21 @@
-/* Install hint: a small Lantern window resting low on the screen, near Safari's own toolbar. */
+/* Install hint: a small Lantern window resting low on the screen, near Safari's own toolbar. Over the companion it stays
+   below the top bar (--dq-top), so the Safe Zone button is never under it; taller than the room left, it starts at the
+   top of that room and scrolls. */
 .pwa-hint-layer {
   position: fixed;
-  inset: 0;
+  inset: var(--dq-top, 0px) 0 0;
   z-index: 40;
   display: grid;
-  align-items: end;
+  align-items: start;
   justify-items: center;
   padding: calc(var(--safe-top) + 16px) 16px calc(var(--safe-bottom) + 60px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   pointer-events: none;
 }
 .pwa-hint-layer .sw {
   --w: min(calc(100vw - 44px), 420px);
+  margin-top: auto;
   font-size: 16px;
 }
 .pwa-hint .sw-plate {
