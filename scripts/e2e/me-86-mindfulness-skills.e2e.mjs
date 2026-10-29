@@ -41,7 +41,7 @@ async function returning(h, days = 12) {
   const { save, today } = await baseSave(h);
   const s = structuredClone(save);
   s.events = s.events.filter((e) => e.day !== today);
-  if (s.flags) Object.assign(s.flags, { greetDay: '', giftDay: '', cardDay: '', checkinDay: '' });
+  if (s.flags) Object.assign(s.flags, { greetDay: '', giftDay: '', cardDay: '', checkinDay: '', welcomeOwed: false });
   const old = Object.keys(STAT);
   for (let i = days; i >= 1; i--) {
     const day = addDays(today, -i), t = Date.now() - i * 86400e3, skill = old[i % old.length];
