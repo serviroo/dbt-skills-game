@@ -64,8 +64,9 @@ run side by side, longest first, each in a browser of its own: `--jobs=<n>` brow
 machine's CPU threads and at most 4, so one on CI's 4-vCPU runners. CI runs the same checks on every pull request and
 splits the scenarios into parts with `--shard=<i>/<n>`, spread by the seconds each one took on CI, kept in
 `scripts/e2e/timings.json`. A scenario not listed there counts as 15 s; after adding a long one, refresh the file from
-a CI run's `e2e-*` artifacts with `node scripts/e2e-timings.mjs <every part's report.json>`. For anything visual, also
-look at it in a browser at phone width (390 and 320 px) with motion on and off.
+the `e2e-*` artifacts of one or more CI runs with `node scripts/e2e-timings.mjs <every part's report.json>`, which keeps
+each scenario's median. For anything visual, also look at it in a browser at phone width (390 and 320 px) with motion
+on and off.
 
 `--cpu-throttle=4` slows each Chromium page's CPU work by four through CDP, including new tabs. The rate must be at
 least 1. The report records `cpuThrottle` and `throttleErrors`; a failure to apply it fails the run.

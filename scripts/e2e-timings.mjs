@@ -1,7 +1,8 @@
-// Rewrites scripts/e2e/timings.json, the seconds each E2E scenario takes on CI, from the report.json files of a run,
-// so --shard keeps the parts even: node scripts/e2e-timings.mjs <report.json>...
-// Give it every part's report (CI keeps them as the e2e-<part> artifacts). Scenarios not in a report keep their old
-// time, and names no scenario file has any more are dropped.
+// Rewrites scripts/e2e/timings.json, the seconds each E2E scenario takes on CI, from the report.json files of one or
+// more runs, so --shard keeps the parts even: node scripts/e2e-timings.mjs <report.json>...
+// Give it every part's report (CI keeps them as the e2e-<part> artifacts). A scenario in several runs' reports gets its
+// median time, so one slow run doesn't skew it. Scenarios not in a report keep their old time, and names no scenario
+// file has any more are dropped.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -17,12 +18,18 @@ for (const f of fs.readdirSync(dir).filter((f) => f.endsWith('.e2e.mjs'))) {
 }
 const file = path.join(dir, 'timings.json');
 const timings = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
+const runs = new Map();
 let n = 0;
 for (const report of reports) {
   for (const s of JSON.parse(fs.readFileSync(report, 'utf8')).scenarios) {
-    timings[s.name] = Math.max(1, Math.round(s.ms / 1000));
+    runs.set(s.name, [...(runs.get(s.name) ?? []), s.ms]);
     n++;
   }
+}
+for (const [name, ms] of runs) {
+  ms.sort((a, b) => a - b);
+  const mid = ms.length >> 1;
+  timings[name] = Math.max(1, Math.round((ms.length % 2 ? ms[mid] : (ms[mid - 1] + ms[mid]) / 2) / 1000));
 }
 const kept = Object.fromEntries(Object.entries(timings).filter(([name]) => names.has(name)).sort(([a], [b]) => (a < b ? -1 : 1)));
 fs.writeFileSync(file, JSON.stringify(kept, null, 2) + '\n');
