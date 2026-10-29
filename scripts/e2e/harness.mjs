@@ -33,11 +33,22 @@ export async function frames(page, n) {
 
 /**
  * Waits for check(arg), run in the page, to come true: for a check that awaits something, such as a database read, which
- * page.waitForFunction would take as true at once (it counts the promise as the answer).
+ * page.waitForFunction would take as true at once (it counts the promise as the answer). A check still unanswered at
+ * the deadline fails it too.
  */
 export async function until(page, check, arg, { timeout = 10000, polling = 100 } = {}) {
-  for (const end = Date.now() + timeout; !(await page.evaluate(check, arg)); await sleep(polling))
-    if (Date.now() > end) throw new Error(`waited ${timeout} ms for ${String(check).replace(/\s+/g, ' ').slice(0, 160)}`);
+  const end = Date.now() + timeout;
+  const late = () => new Error(`waited ${timeout} ms for ${String(check).replace(/\s+/g, ' ').slice(0, 160)}`);
+  for (;;) {
+    let timer;
+    try {
+      if (await Promise.race([page.evaluate(check, arg), new Promise((_, fail) => { timer = setTimeout(() => fail(late()), Math.max(0, end - Date.now())); })])) return;
+    } finally {
+      clearTimeout(timer);
+    }
+    if (Date.now() >= end) throw late();
+    await sleep(polling);
+  }
 }
 
 /** Waits for entry motion to finish on boxes that come to rest, then compares consecutive frame rects. */
