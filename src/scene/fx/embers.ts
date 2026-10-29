@@ -117,6 +117,7 @@ export function createEmbers(o: EmberOpts = {}): Emitter {
       if (origin instanceof THREE.Object3D) origin.getWorldPosition(wp);
       else wp.copy(origin);
       sys.uniforms.uOrigin.value.copy(wp);
+      sys.uniforms.uFlicker.value = o.flicker === false || params.reduced ? 0 : 1;
       base(t);
     },
   };

@@ -277,7 +277,8 @@ export function buildChest(arg: Stage | ChestOpts = {}): Chest {
   const opts: ChestOpts = isStage(arg) ? { stage: arg } : arg;
   const stage = opts.stage;
   const fx = opts.fx !== false;
-  const reduced = params.reduced;
+  // fewer particles under reduced motion, decided as the chest is built; how it moves reads the setting each frame
+  const few = params.reduced;
   const u = chestUniforms();
   const G = (geoCache ??= buildGeometry());
 
@@ -322,29 +323,28 @@ export function buildChest(arg: Stage | ChestOpts = {}): Chest {
   rig.add(column.group);
 
   // particles
-  const nMotes = reduced ? 18 : 46;
-  const nStars = reduced ? 10 : 26;
+  const nMotes = few ? 18 : 46;
+  const nStars = few ? 10 : 26;
   const motes = streaks(nMotes, MOTES_GLSL, { uCharge: { value: 0 }, uOpen: { value: 0 }, uShow: { value: 0 } }, 11);
-  const nConv = reduced ? 10 : 30;
+  const nConv = few ? 10 : 30;
   const conv = streaks(nConv, CONVERGE_GLSL, { uCharge: { value: 0 } }, 23);
-  const nSparks = reduced ? 20 : 56;
+  const nSparks = few ? 20 : 56;
   const sparks = streaks(nSparks, SPARKS_GLSL, { uBurst: { value: -1 } }, 37, 'mix(G_WARM, G_CORE, 0.7) * 3.0');
-  const nShards = reduced ? 14 : 30;
+  const nShards = few ? 14 : 30;
   const shard = shards(nShards, 51);
   const ring = shockRing();
   motes.uniforms.uDt.value = 1 / 80;
   conv.uniforms.uDt.value = 1 / 70;
   sparks.uniforms.uDt.value = 1 / 40;
   rig.add(motes.mesh, conv.mesh, sparks.mesh, shard.mesh, ring.mesh);
-  const stars = risingStars(reduced ? 10 : 26, 71);
-  stars.uniforms.uTw.value = reduced ? 0 : 1;
+  const stars = risingStars(few ? 10 : 26, 71);
   rig.add(stars.mesh);
   const gB = glints(G.glintsBody, 61);
   rig.add(gB.mesh);
   const gL = glints(G.glintsLid, 67);
   lid.add(gL.mesh);
   // the burst throws a few falling stars, and one crimson feather of light drifts down out of the column
-  const nFall = reduced ? 3 : 7;
+  const nFall = few ? 3 : 7;
   const fall = fallingStars(nFall, 83);
   rig.add(fall.mesh);
   const feather = lightFeather(0.27);
@@ -367,6 +367,7 @@ export function buildChest(arg: Stage | ChestOpts = {}): Chest {
 
   /** The feather: born in the column, drifting out to the right and down above the reward window, rocking as it falls. */
   function poseFeather(since: number) {
+    const reduced = params.reduced;
     const FEATHER = { start: 0.3, dur: 3.8 };
     const tf = since - FEATHER.start;
     const on = since >= 0 && tf > 0 && tf < FEATHER.dur;
@@ -400,6 +401,8 @@ export function buildChest(arg: Stage | ChestOpts = {}): Chest {
   }
 
   function apply() {
+    const reduced = params.reduced;
+    stars.uniforms.uTw.value = reduced ? 0 : 1;
     const T = CHEST_TIMING;
     const t = state.t;
     const rs = state.reveal * T.reveal;

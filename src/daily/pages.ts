@@ -190,12 +190,11 @@ export function restScreen(app: App): ScreenOut {
     const arm = (r: [number, number]) => later(rnd(r[0], r[1]), () => (fn(), arm(next)));
     arm(first);
   };
+  // each one rests while motion is off when its time comes, so they all follow the setting as it changes
   every([18, 40], [55, 140], blep);
-  if (!app.reduced()) {
-    every([8, 16], [45, 100], swim);
-    every([35, 70], [100, 190], sprawl);
-    every([65, 100], [120, 230], nudge);
-  }
+  every([8, 16], [45, 100], swim);
+  every([35, 70], [100, 190], sprawl);
+  every([65, 100], [120, 230], nudge);
   const hook = { blep, sprawl, nudge, swim, slime };
   (window as unknown as { __stealth?: typeof hook }).__stealth = hook;
 

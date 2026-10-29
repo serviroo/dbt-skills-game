@@ -1,7 +1,7 @@
 import '../styles/cutscene.css';
 import { after, animate, complete, el, finished, wait } from './anim';
 import { inertUntil, onTaps } from './taps';
-import { params } from '../core/params';
+import { onSystemMotion, params } from '../core/params';
 import { EASE, WINDOW as W, css } from '../motion/tokens';
 import { ICON_LETTER, ICON_LANTERN, ICON_MOTH, ICON_STAR, FLOURISH } from './icons';
 import type { RewardItem } from '../content/intro';
@@ -34,14 +34,30 @@ export function showTitle(onGesture?: () => void): Promise<void> {
     );
     root.append(slit, prompt, hint);
     ui().append(root);
-    animate(slit, [{ opacity: 0.35, transform: 'translateX(-50%) scaleY(.96)' }, { opacity: 1, transform: 'translateX(-50%) scaleY(1)' }], {
-      duration: 2600,
-      iterations: Infinity,
-      direction: 'alternate',
-      easing: 'ease-in-out',
-    });
-    animate(prompt, [{ opacity: 0.62 }, { opacity: 1 }], { duration: 1800, iterations: Infinity, direction: 'alternate', easing: 'ease-in-out' });
+    // the slit breathes and the prompt pulses while motion is on; with reduce-motion (now or later) both rest
+    let pulses: Animation[] = [];
+    let still: boolean | null = null;
+    const pulse = () => {
+      if (params.reduced === still) return;
+      still = params.reduced;
+      pulses.forEach((a) => a.cancel());
+      pulses = still
+        ? []
+        : [
+            animate(slit, [{ opacity: 0.35, transform: 'translateX(-50%) scaleY(.96)' }, { opacity: 1, transform: 'translateX(-50%) scaleY(1)' }], {
+              duration: 2600,
+              iterations: Infinity,
+              direction: 'alternate',
+              easing: 'ease-in-out',
+            }),
+            animate(prompt, [{ opacity: 0.62 }, { opacity: 1 }], { duration: 1800, iterations: Infinity, direction: 'alternate', easing: 'ease-in-out' }),
+          ];
+      prompt.style.opacity = still ? '0.85' : '';
+    };
+    pulse();
+    const offPulse = onSystemMotion(pulse);
     const go = async () => {
+      offPulse();
       onGesture?.();
       root.style.pointerEvents = 'none';
       root.removeEventListener('pointerup', onUp);
@@ -390,12 +406,21 @@ export async function endCard(): Promise<'replay' | 'enter'> {
   e.animate(curls, [{ opacity: 0, transform: 'translate(-50%,-50%) scale(.94)' }, { opacity: 1, transform: 'translate(-50%,-50%) scale(1)' }], { duration: 1600, delay: 300, easing: 'cubic-bezier(.16,1,.3,1)' });
   e.animate(line, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 900, delay: 700, easing: 'cubic-bezier(.16,1,.3,1)' });
   e.buttons(acts, e.animate(acts, [{ opacity: 0 }, { opacity: 1 }], { duration: 900, delay: 2600, easing: 'ease-out' }));
-  // breathing drift on the held card
-  if (!params.reduced) animate(stage, [{ transform: 'scale(1)' }, { transform: 'scale(.985)' }], { duration: 9000, delay: 1600, iterations: Infinity, direction: 'alternate', easing: 'ease-in-out' });
+  // breathing drift on the held card, stopped and started again as the device's reduce-motion changes
+  let drift: Animation | null = null;
+  const sway = () => {
+    if (params.reduced) {
+      drift?.cancel();
+      drift = null;
+    } else drift ??= animate(stage, [{ transform: 'scale(1)' }, { transform: 'scale(.985)' }], { duration: 9000, delay: 1600, iterations: Infinity, direction: 'alternate', easing: 'ease-in-out' });
+  };
+  sway();
+  const offSway = onSystemMotion(sway);
   const v = await new Promise<'replay' | 'enter'>((resolve) => {
     acts.querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => resolve(b.dataset.v as 'replay' | 'enter'), { once: true }));
     if (params.capture) wait(6).then(() => resolve('enter'));
   });
+  offSway();
   await e.leave(root, 600);
   return v;
 }

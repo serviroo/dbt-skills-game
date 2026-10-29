@@ -1,7 +1,7 @@
 import '../styles/lantern-window.css';
 import { after, animate, complete, el, finished, wait } from './anim';
 import { inertUntil, onTaps } from './taps';
-import { params } from '../core/params';
+import { onSystemMotion, params } from '../core/params';
 import { EASE, LEVEL, WINDOW as W, css, fr } from '../motion/tokens';
 
 export type WindowKind = 'notification' | 'quest' | 'level' | 'reward' | 'info';
@@ -229,6 +229,10 @@ export class LanternWindow {
   private slices: HTMLElement[];
   private next: HTMLDivElement;
   private plasmaAnims: Animation[] = [];
+  /** the waiting arrow's pulse, while it shows and motion is on */
+  private pulse: Animation | null = null;
+  private waiting = false;
+  private offMotion: (() => void) | null = null;
   private typeAnims: Animation[] = [];
   private typing = false;
   private skipRes: (() => void) | null = null;
@@ -348,6 +352,7 @@ export class LanternWindow {
     this.root.style.visibility = 'visible';
     windowSounds.open?.(kind);
     this.listen();
+    this.offMotion = onSystemMotion(() => this.setStill(params.reduced || this.root.classList.contains('dq-sw--still')));
     let hookAt = 0;
     const ctx: RevealCtx = {
       root: this.root,
@@ -502,8 +507,26 @@ export class LanternWindow {
     this.skipRes?.();
     this.spec.onCue?.('typed');
     if (!this.spec.tapToContinue || !this.root.isConnected) return;
-    if (this.reduced) this.next.style.opacity = '0.85';
-    else animate(this.next, [{ opacity: W.nextPulseLow }, { opacity: 1 }], { duration: W.nextPulseMs, iterations: Infinity, direction: 'alternate', easing: css(EASE.inOutSine) });
+    this.waiting = true;
+    this.arrow();
+  }
+
+  /** The arrow that waits for a tap: pulsing, or steady while motion is off. */
+  private arrow() {
+    this.pulse?.cancel();
+    this.pulse = null;
+    this.next.style.opacity = this.reduced ? '0.85' : '';
+    if (!this.reduced) this.pulse = animate(this.next, [{ opacity: W.nextPulseLow }, { opacity: 1 }], { duration: W.nextPulseMs, iterations: Infinity, direction: 'alternate', easing: css(EASE.inOutSine) });
+  }
+
+  /** Motion turned off or on while the window is up: the plasma along its bars and the waiting arrow follow at once. */
+  setStill(still: boolean) {
+    if (this.gone || still === this.reduced) return;
+    this.reduced = still;
+    this.plasmaAnims.forEach((a) => a.cancel());
+    this.plasmaAnims = [];
+    this.startPlasma();
+    if (this.waiting) this.arrow();
   }
 
   /** Answers the wait for input. One that comes while the window still opens, before anyone waits, is kept for
@@ -578,10 +601,12 @@ export class LanternWindow {
     live.delete(this);
     this.gone = true;
     this.offInput?.();
+    this.offMotion?.();
     this.typing = false;
     this.skipRes?.();
     this.typeAnims.forEach((a) => a.cancel());
     this.plasmaAnims.forEach((a) => a.cancel());
+    this.pulse?.cancel();
     this.root.remove();
   }
 }

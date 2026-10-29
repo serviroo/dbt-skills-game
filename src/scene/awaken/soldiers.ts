@@ -340,7 +340,7 @@ export function buildSoldiers(opts: { focus?: THREE.Vector3; armyCount?: number;
         h.glow.uniforms.uEye.value = lv.eye;
         h.glow.uniforms.uPlate.value = h.spec.kind === 'commander' ? lv.plate : Math.min(lv.plate, PLATE_CAP);
         h.glow.uniforms.uTime.value = t;
-        h.glow.uniforms.uShimmer.value = reduced ? 0 : 1;
+        h.glow.uniforms.uShimmer.value = params.reduced ? 0 : 1;
         const clipGlow = r > 0 && r < 0.98 ? (1 - smoothstep(0.75, 0.98, r)) * 0.25 : 0;
         for (const m of h.toons) (m.uniforms.uClipColor.value as THREE.Color).copy(GLOW.clip).multiplyScalar(clipGlow);
       }
@@ -385,7 +385,7 @@ export function buildSoldiers(opts: { focus?: THREE.Vector3; armyCount?: number;
       a.st.needsUpdate = true;
       a.st2.needsUpdate = true;
       a.mat.uniforms.uTime.value = t;
-      a.mat.uniforms.uShimmer.value = reduced ? 0 : 1;
+      a.mat.uniforms.uShimmer.value = params.reduced ? 0 : 1;
     }
   };
 

@@ -152,7 +152,6 @@ function markup(label: string) {
  */
 export function holdToCharge(opts: HoldOpts): Promise<void> {
   const dur = Math.max(0.2, opts.durationSec ?? 1.5);
-  const reduced = params.reduced;
   const label = opts.label ?? 'Hold to open';
   const root = el('div', 'chest-hold') as HTMLDivElement;
   root.innerHTML = markup(label);
@@ -285,7 +284,7 @@ export function holdToCharge(opts: HoldOpts): Promise<void> {
   let si = 0;
 
   // ---- entry
-  if (reduced) {
+  if (params.reduced) {
     animate(root, [{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: 'linear' });
   } else {
     animate(target, [{ opacity: 0, transform: 'scale(.86)' }, { opacity: 1, transform: 'scale(1)' }], { duration: 320, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' });
@@ -299,6 +298,8 @@ export function holdToCharge(opts: HoldOpts): Promise<void> {
     const a = c * Math.PI * 2 - Math.PI / 2;
     head.setAttribute('transform', `translate(${(60 + Math.cos(a) * R).toFixed(2)} ${(60 + Math.sin(a) * R).toFixed(2)})`);
     const breath = 0.5 + 0.5 * Math.sin(Math.PI * 2 * 0.25 * (now - born) - Math.PI / 2);
+    // read each frame: the device's reduce-motion can change while the hold waits on the player
+    const reduced = params.reduced;
     // the star keeps falling in place: the trail stretches with the charge and its speed lines stream back
     const b = reduced ? 0.5 : breath;
     const ce = c * c * (3 - 2 * c);
@@ -322,7 +323,7 @@ export function holdToCharge(opts: HoldOpts): Promise<void> {
     chestSounds.full?.();
     opts.onProgress(1);
     render(1, at);
-    if (!reduced) animate(pulse, [{ opacity: 0.9, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(1.45)' }], { duration: 420, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' });
+    if (!params.reduced) animate(pulse, [{ opacity: 0.9, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(1.45)' }], { duration: 420, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' });
     const out = animate(root, [{ opacity: 1 }, { opacity: 0 }], { duration: 190, delay: 0, easing: 'ease-out' });
     chestSounds.charge?.(1);
     const after = () => {
