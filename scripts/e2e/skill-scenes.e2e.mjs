@@ -203,6 +203,20 @@ async function handedOver(h, page, where) {
     h.expect(Date.now() < end, `${where}: the flat picture never handed over to the 3D scene (${JSON.stringify(now)})`);
   }
 }
+/**
+ * Waits for the stage's flat picture to be back on screen as it is drawn (the drift's orb is drawn at 0.6): it fades
+ * back in over 500 ms, on this clock too.
+ */
+async function flatBack(h, page, where) {
+  for (const end = Date.now() + 3000; ; await h.sleep(50)) {
+    const now = await page.$$eval('.dq-timer-stage .dq-scene-flat', (els) => els.map((e) => {
+      const s = getComputedStyle(e), r = e.getBoundingClientRect(), drawn = Number(e.getAttribute('opacity') ?? 1);
+      return s.display !== 'none' && s.visibility !== 'hidden' && drawn > 0 && Math.abs(Number(s.opacity) - drawn) < 0.01 && r.width > 0 && r.height > 0;
+    }));
+    if (now.length && now.every(Boolean)) return;
+    h.expect(Date.now() < end, `${where}: the flat picture did not come back before the scene (${JSON.stringify(now)})`);
+  }
+}
 
 /** The countdown shows whole seconds left, rounded up; the scene draws at most 30 times a second, so it may trail a frame. */
 function inStep(h, { s, num }, where) {
@@ -920,19 +934,20 @@ export const scenarios = {
   async 'scene-flat-handoff'(h) {
     for (const k of [{ kind: 'drift', id: 'wise-mind', entry: 'stone' }, ...KINDS]) {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
-      await ctx.addInitScript((hold) => {
-        // each scene's first frame is drawn a second after the wait is over, on the page's clock
-        const P = WebGL2RenderingContext.prototype, make = P.fenceSync, get = P.getSyncParameter, asked = new Map();
+      await ctx.addInitScript(() => {
+        // each scene's first frame stays undrawn until the scenario lets it through, however long the page took to get here
+        const P = WebGL2RenderingContext.prototype, make = P.fenceSync, get = P.getSyncParameter, held = new WeakSet();
+        window.__holdFirstFrame = true;
         P.fenceSync = function (...args) {
           const f = make.apply(this, args);
-          if (this.canvas.closest?.('.dq-scene')) asked.set(f, performance.now());
+          if (this.canvas.closest?.('.dq-scene')) held.add(f);
           return f;
         };
         P.getSyncParameter = function (f, pname) {
-          if (asked.has(f) && pname === this.SYNC_STATUS && performance.now() - asked.get(f) < hold) return this.UNSIGNALED;
+          if (window.__holdFirstFrame && held.has(f) && pname === this.SYNC_STATUS) return this.UNSIGNALED;
           return get.call(this, f, pname);
         };
-      }, WAIT_MS + 1000);
+      });
       await page.clock.install();
       await page.reload();
       await toStep(h, page, k.id, k.entry, { pause: true });
@@ -940,6 +955,8 @@ export const scenarios = {
       await page.clock.runFor(WAIT_MS + 100);
       const stage = await page.locator('.dq-timer-stage').getAttribute('class');
       h.expect(!/\bis-scene-(wait|live)\b/.test(stage), `slow first frame ${k.kind}: the flat picture did not come back before the scene (${stage})`);
+      await flatBack(h, page, `slow first frame ${k.kind}`);
+      await page.evaluate(() => (window.__holdFirstFrame = false));
       await showsStopped(h, page, `slow first frame ${k.kind}`);
       await looks(h, page, 'slow-first-frame', k.kind, PHONE, undefined, { stopped: true });
       h.expect(!errors.length, errors.join('\n'));
