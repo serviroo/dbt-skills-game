@@ -115,7 +115,10 @@ const hear = (page, i, from, to) =>
       const tap = window.__taps[i];
       const sr = tap.context.sampleRate;
       const Q = 128;
-      const qs = [...tap.q].filter(([k]) => (k * Q) / sr >= from && ((k + 1) * Q) / sr <= to).sort((x, y) => x[0] - y[0]);
+      const inside = (k) => (k * Q) / sr >= from && ((k + 1) * Q) / sr <= to;
+      const qs = [...tap.q].filter(([k]) => inside(k)).sort((x, y) => x[0] - y[0]);
+      // a block the graph never rendered played nothing, so there was nothing to read
+      const unrendered = [...tap.unrendered].filter(inside).length;
       let peak = 0;
       let ss = 0;
       for (const [, [p, s]] of qs) {
@@ -125,14 +128,14 @@ const hear = (page, i, from, to) =>
       let k = qs.length;
       while (k > 0 && qs[k - 1][1][0] < P && Math.sqrt(qs[k - 1][1][1] / Q) < R) k--;
       const quietFrom = k === qs.length ? null : k === 0 ? from : (qs[k][0] * Q) / sr;
-      return { rms: qs.length ? Math.sqrt(ss / (qs.length * Q)) : 0, peak, cover: (qs.length * Q) / sr / (to - from), quietFrom };
+      return { rms: qs.length ? Math.sqrt(ss / (qs.length * Q)) : 0, peak, cover: (qs.length * Q) / sr / (to - from - (unrendered * Q) / sr), unrendered, quietFrom };
     },
     [i, from, to, SILENT_PEAK, SILENT_RMS],
   );
 const silent = (x) => x.peak < SILENT_PEAK && x.rms < SILENT_RMS;
 // a stalled recorder must not pass for silence: every stretch judged silent has to be at least 90% read
 const covered = (x) => x.cover >= 0.9;
-const fmt = (x) => `${x.rms.toExponential(1)}/${x.peak.toExponential(1)}, ${(x.cover * 100).toFixed(0)}% read`;
+const fmt = (x) => `${x.rms.toExponential(1)}/${x.peak.toExponential(1)}, ${(x.cover * 100).toFixed(0)}% read${x.unrendered ? `, ${x.unrendered} blocks never rendered` : ''}`;
 const quietAt = (x, t) => (x.quietFrom === null ? 'never' : `${((x.quietFrom - t) * 1000).toFixed(1)} ms after the tap`);
 
 function step() {
@@ -301,7 +304,7 @@ export const scenarios = {
       const missing = await page.evaluate(([n, from]) => {
         const t = window.__taps[n];
         let m = 0;
-        for (let k = Math.ceil((from * t.context.sampleRate) / 128); k <= t.last; k++) m += !t.q.has(k);
+        for (let k = Math.ceil((from * t.context.sampleRate) / 128); k <= t.last; k++) m += !t.q.has(k) && !t.unrendered.has(k);
         return m;
       }, [n, from]);
       const heard = await hear(page, n, from, end);

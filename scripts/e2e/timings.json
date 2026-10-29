@@ -366,6 +366,7 @@
   "quiet-entry-at-every-size": 137,
   "quiet-minute-follows-device-motion": 4,
   "radio-keys": 40,
+  "recording-across-pauses-has-no-hole": 11,
   "reduced-motion-art": 14,
   "reduced-motion-diary": 19,
   "reduced-motion-draw": 14,

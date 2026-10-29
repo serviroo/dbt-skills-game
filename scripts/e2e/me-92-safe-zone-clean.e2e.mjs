@@ -117,6 +117,8 @@ const outputLevel = (page) =>
       if (tap.end === undefined) throw new Error(`the audio snapshot has no recorded quanta (status ${tap.status}, context ${tap.context.state})`);
       let sum = 0;
       for (let i = tap.end - 255; i <= tap.end; i++) {
+        // a quantum the graph never rendered played nothing
+        if (tap.unrendered.has(i)) continue;
         const q = tap.q.get(i);
         if (!q) throw new Error('the audio snapshot is missing quantum ' + i);
         peak = Math.max(peak, q[0]);

@@ -6,6 +6,7 @@ registerProcessor('e2e-recorder', class extends AudioWorkletProcessor {
   }
   prev = 0;
   last = -1;
+  posted = 0;
   constructor() {
     super();
     // the answer leaves after every block this processor posted, so once it arrives the recording is all there
@@ -26,7 +27,9 @@ registerProcessor('e2e-recorder', class extends AudioWorkletProcessor {
       this.prev = v;
     }
     this.last = n;
-    this.port.postMessage([[n, peak, ss, step]]);
+    // with how many blocks this processor has posted: the page can tell a block that never arrived from one the clock
+    // counted (as the context paused or woke) but this processor never ran for
+    this.port.postMessage([[n, peak, ss, step, ++this.posted]]);
     return true;
   }
 });

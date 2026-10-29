@@ -12,7 +12,7 @@ export async function installAudioRecorder(ctx) {
       const out = connect.call(this, dest, ...rest);
       if (dest instanceof AudioDestinationNode && this.context instanceof AudioContext && !taps.some((t) => t.node === this)) {
         const context = this.context;
-        const tap = { node: this, context, from: this.constructor.name, url: null, status: 'loading', q: new Map(), start: undefined, end: undefined, recorder: null, last: undefined, answered: null, error: null };
+        const tap = { node: this, context, from: this.constructor.name, url: null, status: 'loading', q: new Map(), unrendered: new Set(), posted: undefined, start: undefined, end: undefined, recorder: null, last: undefined, answered: null, error: null };
         taps.push(tap);
         try { tap.url = new URL(WORKLET, document.baseURI).href; }
         catch (e) {
@@ -38,14 +38,19 @@ export async function installAudioRecorder(ctx) {
               tap.last = data.last;
               return tap.answered?.();
             }
-            for (const [i, ...levels] of data) {
+            for (const [i, peak, ss, step, posted] of data) {
               // block numbers only rise: one that doesn't would overwrite a block already heard
               if (i <= tap.end) {
                 tap.error ??= `worklet ${tap.url}: block ${i} came after block ${tap.end}`;
                 continue;
               }
+              if (tap.posted !== undefined && posted !== tap.posted + 1) tap.error ??= `worklet ${tap.url}: ${posted - tap.posted - 1} blocks before block ${i} never arrived`;
+              // the processor ran for nothing between its last block and this one: blocks the clock counted in between
+              // (as the context paused or woke) were never rendered, so nothing played in them
+              else if (tap.end !== undefined) for (let b = tap.end + 1; b < i; b++) tap.unrendered.add(b);
+              tap.posted = posted;
               tap.status = 'recording';
-              tap.q.set(i, levels);
+              tap.q.set(i, [peak, ss, step]);
               tap.start ??= i;
               tap.end = i;
             }
