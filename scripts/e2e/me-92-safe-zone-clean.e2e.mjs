@@ -387,9 +387,9 @@ async function windowCase(h, kind, { viewport, reduced = false, score = true }) 
   }
 }
 
-async function allWindows(h, opts) {
+async function allWindows(h, opts, kinds = Object.keys(WINDOWS)) {
   const failed = [];
-  for (const kind of Object.keys(WINDOWS)) {
+  for (const kind of kinds) {
     try {
       await windowCase(h, kind, opts);
     } catch (e) {
@@ -639,8 +639,10 @@ export const scenarios = {
   'safe-zone-over-windows-320-reduced': (h) => allWindows(h, { viewport: SMALL, reduced: true, score: false }),
   'safe-zone-over-windows-landscape': (h) => allWindows(h, { viewport: WIDE, score: false }),
   'safe-zone-over-windows-landscape-reduced': (h) => allWindows(h, { viewport: WIDE, reduced: true, score: false }),
-  // at 200% zoom (the page laid out at half the size), on each phone either way up
-  ...Object.fromEntries([TALL, SMALL, WIDE, SHORT].map((v) => [`safe-zone-over-windows-${v.width}x${v.height}-200`, (h) => allWindows(h, { viewport: { width: v.width / 2, height: v.height / 2 }, score: false })])),
+  // at 200% zoom (the page laid out at half the size), on each phone either way up, the windows: the sheets sit under the
+  // top bar by their layer at every size, and the drawing page and story editor that open them are wider than a phone at
+  // 200% (their own fit, not the Safe Zone's)
+  ...Object.fromEntries([TALL, SMALL, WIDE, SHORT].map((v) => [`safe-zone-over-windows-${v.width}x${v.height}-200`, (h) => allWindows(h, { viewport: { width: v.width / 2, height: v.height / 2 }, score: false }, Object.keys(WINDOWS).filter((k) => !WINDOWS[k].sheet))])),
   'safe-zone-from-every-route': async (h) => {
     await allRoutes(h, { viewport: TALL });
     await allRoutes(h, { viewport: SMALL, reduced: true });

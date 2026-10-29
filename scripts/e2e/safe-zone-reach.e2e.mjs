@@ -1,12 +1,11 @@
 // Safe Zone reach: every control on every Safe Zone screen, in every state the player can put it in, can be reached
 // and tapped. Each phone (390x844 and 320x568, upright and held sideways) is checked at normal text and at 200% zoom,
 // which DESIGN.md asks the Safe Zone to fit on a 320 px phone (the page laid out at half the size, as browser zoom
-// does). Each phone walks
-// the Safe Zone twice, "Talk to someone now" under the frame and then, after "I might not be safe", above it, through
-// Give me a moment, cool air counting down, every STOP line, each list with "Add one" and "Copy your lists" open, Talk
-// for three countries (many lines, notes under the buttons, none), the empty lists, and the Sound panel opened from the
-// top bar (there only its own controls, the button that closes it and where it sits are checked, since it covers part
-// of the page while open). In each state:
+// does). Each phone walks the Safe Zone twice, "Talk to someone now" under the frame and then, after "I might not be
+// safe", above it, through Give me a moment (its ring whole too), cool air counting down, every STOP line, each list with
+// "Add one" and "Copy your lists" open, Talk for three countries (many lines, notes under the buttons, none), the empty
+// lists, and the Sound panel opened from the top bar (there only its own controls, the bar's buttons and where it sits
+// are checked, since it covers part of the page while open). In each state:
 //   audit       layout-fit's checks: nothing scrolls sideways or is cut off at the side, every button, link and field
 //               is at least 44 px, none sits under a pinned bar when scrolled to from either end. How each screen
 //               opens is layout-fit's own check; here a state is often reached by a tap that scrolls, and at 200% held
@@ -20,7 +19,8 @@
 //               under 100 px, less than "Talk to someone now" and the field need together, so typing at 200% is
 //               checked upright (a phone that keeps the page's full height under its keyboard is the check without it)
 // And on every other screen with a top bar, at 200%, the Safe Zone button stays one tap away: it and the rest of the bar
-// show whole and take their taps, and Give me a moment's Done shows whole once scrolled to.
+// show whole and take their taps, with the Sound panel open too, and Give me a moment's Done shows whole once scrolled
+// to; Home and Settings also fit whole, with no text on top of other text.
 import { audit, boot, PAGE, SCREENS, settle, SKIP } from './layout-fit.e2e.mjs';
 import { listed } from './me-92-safe-zone-clean.e2e.mjs';
 
@@ -35,7 +35,8 @@ const PHONES = {
 /**
  * Whatever on the Safe Zone and its top bar can't be scrolled to whole and tapped, as the screen stands now. `typing`:
  * also the field that has focus and its Save, each scrolled to the least it takes, as a phone brings the field into
- * view. `sound`: only the open Sound panel's own controls and the button that closes it. `controls`: only these.
+ * view. `sound`: only the open Sound panel's own controls and the button that closes it, and the bar it opens below.
+ * `controls`: only these.
  */
 const unreachable = (page, { typing = false, sound = false, controls = null } = {}) =>
   page.evaluate(async ({ typing, sound, controls: only }) => {
@@ -82,19 +83,14 @@ const unreachable = (page, { typing = false, sound = false, controls = null } = 
       else if (taken(e)) out.push(`${name(e)} is under ${taken(e)} when scrolled to (${box(e.getBoundingClientRect())})`);
     }
     if (sound) {
-      // at rest its title and first slider show whole; it sits under its button, clear of Leave and Lights up, wherever
-      // the room there holds them, and moves up only where it doesn't
+      // it opens below everything in the top bar, so each of the bar's buttons, the Safe Zone's above all, still takes
+      // its own tap
       const pop = document.querySelector('.dq-top .vol-pop');
-      const sl = pop.querySelector('.vol-sl');
-      sl.scrollTop = 0;
-      await frame();
-      const [p, s, r, b] = [pop, sl, sl.querySelector('.vol-row'), document.querySelector('.dq-top .vol-btn')].map((e) => e.getBoundingClientRect());
-      const need = r.bottom - p.top + (p.bottom - s.bottom);
-      if (r.bottom > s.bottom + 0.5) out.push(`the Sound panel's first slider doesn't show whole before scrolling (it ends at ${Math.round(r.bottom)}, the sliders at ${Math.round(s.bottom)})`);
-      if (b.bottom + 8 + need <= innerHeight - 14 + 0.5) {
-        if (p.top < b.bottom - 0.5) out.push(`the Sound panel moved up over its button (top at ${Math.round(p.top)}, the button ends at ${Math.round(b.bottom)}) though ${Math.round(need)} px fit under it`);
-        for (const e of document.querySelectorAll('.dq-top :is(.dq-back, .ca-sz-light)')) if (taken(e)) out.push(`${name(e)} is under ${taken(e)} with the Sound panel open`);
-      }
+      const bar = [...document.querySelectorAll('.dq-top :is(button, a[href], .dq-brand)')].filter((e) => !pop.contains(e) && e.checkVisibility());
+      const under = Math.max(...bar.map((e) => e.getBoundingClientRect().bottom));
+      const top = pop.getBoundingClientRect().top;
+      if (top < under - 0.5) out.push(`the Sound panel reaches up into the top bar (its top at ${Math.round(top)}, the bar's buttons end at ${Math.round(under)})`);
+      for (const e of bar) if (!e.matches('.dq-brand') && taken(e)) out.push(`${name(e)} is under ${taken(e)} with the Sound panel open`);
     }
     if (!sound && talk?.checkVisibility()) {
       for (const end of ['top', 'end']) {
@@ -208,6 +204,8 @@ function walk(phone, zoom) {
       await tap(page, 'Give me a moment');
       await at(page, 'Give me a moment');
       await look(page, 'Give me a moment');
+      // its ring too shows whole and clear of the pinned bars once scrolled to
+      for (const f of await unreachable(page, { controls: '.dq-sz .dq-mo-stage' })) problems.push(`${size}, Give me a moment's ring: ${f}`);
       await page.locator('.dq-sz-body .dq-mo-done').evaluate((b) => b.click());
       await at(page, 'here.');
       await tap(page, 'Calm my body first');
@@ -238,6 +236,30 @@ function walk(phone, zoom) {
   };
 }
 
+/**
+ * Runs of text that sit on top of other text, anywhere on the page: each pair once. A flip card shows one side at a time,
+ * and lines whose letter boxes only touch aren't on top of each other.
+ */
+const crowded = (page) =>
+  page.evaluate(() => {
+    const runs = [];
+    const walk = document.createTreeWalker(document.querySelector('#dq-main'), NodeFilter.SHOW_TEXT);
+    for (let t = walk.nextNode(); t; t = walk.nextNode()) {
+      const el = t.parentElement;
+      if (!t.data.trim() || el.closest('.dq-sr, .dq-card:not(.is-open) .dq-cardface--front, .dq-card.is-open .dq-cardface--back') || !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) continue;
+      const range = document.createRange();
+      range.selectNodeContents(t);
+      for (const r of range.getClientRects()) if (r.width > 1 && r.height > 1) runs.push([t, r]);
+    }
+    const out = new Set();
+    for (let i = 0; i < runs.length; i++)
+      for (let j = i + 1; j < runs.length; j++) {
+        const [[ta, a], [tb, b]] = [runs[i], runs[j]];
+        if (ta !== tb && Math.min(a.right, b.right) - Math.max(a.left, b.left) > 2 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.4 * Math.min(a.height, b.height)) out.add(`"${ta.data.trim().slice(0, 24)}" and "${tb.data.trim().slice(0, 24)}"`);
+      }
+    return [...out];
+  });
+
 // every screen layout-fit checks, each route once
 const ROUTES = [...new Map(Object.values(SCREENS).map(({ route }) => [JSON.stringify(route), route])).values()];
 const BAR = '.dq-top :is(button, a[href]), .dq-mo-done';
@@ -246,8 +268,9 @@ const BAR = '.dq-top :is(button, a[href]), .dq-mo-done';
  * The Safe Zone stays one tap from every screen at 200%: on every screen with a top bar, the Safe Zone button and the
  * rest of the bar show whole inside the screen, at least 44 px each way, and take their own taps; on Give me a moment
  * its Done does too once scrolled to. The bar takes no more rows than its buttons need with the back control down to
- * its arrow (44 px) and Home's name down to its mark. With Sound open, wherever its panel opens below its button, the
- * Safe Zone button stays clear of it.
+ * its arrow (44 px) and Home's name down to its mark. With Sound open, the panel sits below the whole bar and each of the
+ * bar's buttons still takes its own tap. Home and Settings have nothing cut off, scrolling sideways, too small to tap or
+ * under a pinned bar, and no two runs of text on top of each other.
  */
 function bars(phone) {
   return async (h) => {
@@ -283,11 +306,14 @@ function bars(phone) {
       });
       if (bar.rows > bar.need) problems.push(`${at}: the top bar takes ${bar.rows} rows where its buttons need ${bar.need} in ${bar.room} px with the back control down to its arrow and Home's name to its mark`);
       for (const f of await unreachable(page, { controls: BAR })) problems.push(`${at}: ${f}`);
+      if (route.name === 'hub' || route.name === 'settings') {
+        for (const f of await audit(page, PAGE, SKIP)) if (!f.detail.endsWith('as the screen opens')) problems.push(`${at}: ${f.kind} ${f.what} (${f.detail})`);
+        for (const pair of await crowded(page)) problems.push(`${at}: ${pair} sit on top of each other`);
+      }
       await h.shot(page, `safe-zone-button-${phone}-200-${route.name}`);
       await page.locator('.dq-top .vol-btn').click();
       await page.locator('.vol.is-open .vol-pop').waitFor();
-      const rose = await page.evaluate(() => document.querySelector('.dq-top .vol-pop').getBoundingClientRect().top < document.querySelector('.dq-top .vol-btn').getBoundingClientRect().bottom);
-      if (!rose) for (const f of await unreachable(page, { controls: '.dq-top .dq-safe' })) problems.push(`${at}, Sound open: ${f}`);
+      for (const f of await unreachable(page, { sound: true })) problems.push(`${at}, Sound open: ${f}`);
       await page.keyboard.press('Escape');
       // gone once its fade out ends, so it takes no taps meant for the next screen
       await page.locator('.dq-top .vol-pop').waitFor({ state: 'hidden' });

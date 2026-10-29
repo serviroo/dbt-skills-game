@@ -166,7 +166,10 @@ export function volumeButton(ctrl: VolumeCtrl, o: { placement: 'cutscene' | 'top
   title.textContent = 'Sound';
   head.append(title);
   const sliders = volumeSliders(ctrl, { compact: true, hum: o.placement === 'top' });
-  pop.append(frame, head, sliders);
+  // the title and sliders scroll together inside the frame when the panel is shorter than they are
+  const body = el('div', 'vol-body');
+  body.append(head, sliders);
+  pop.append(frame, body);
   root.append(btn, pop);
   isolate(root, ctrl);
 
@@ -177,18 +180,13 @@ export function volumeButton(ctrl: VolumeCtrl, o: { placement: 'cutscene' | 'top
     const r = btn.getBoundingClientRect();
     const vw = document.documentElement.clientWidth || innerWidth;
     const vh = document.documentElement.clientHeight || innerHeight;
-    pop.style.maxHeight = '';
     const w = pop.offsetWidth;
     let left = o.align === 'left' ? r.left : r.right - w;
     left = Math.max(14, Math.min(vw - 14 - w, left));
-    // under the button, and under the rest of the bar it sits in when that bar wraps onto more rows, its sliders scrolling
-    // inside the height left there; on a screen too short for the title and one slider there, it moves up as far as that
-    // takes (never above 14 px from the top) and the button stays over it
+    // under the button and the rest of the bar it sits in, all of its rows when it wraps, so it never covers the Safe
+    // Zone button beside it; what doesn't fit in the height left there scrolls inside it
     const bar = root.closest('header');
-    const under = bar ? Math.max(r.bottom, bar.getBoundingClientRect().bottom - parseFloat(getComputedStyle(bar).paddingBottom)) : r.bottom;
-    const row = sliders.querySelector<HTMLElement>('.vol-row')!;
-    const one = pop.offsetHeight - sliders.offsetHeight + row.offsetTop + row.offsetHeight;
-    const top = Math.max(14, Math.min(under + 8, vh - 14 - one));
+    const top = (bar ? Math.max(r.bottom, bar.getBoundingClientRect().bottom - parseFloat(getComputedStyle(bar).paddingBottom)) : r.bottom) + 8;
     pop.style.left = `${Math.round(left)}px`;
     pop.style.top = `${Math.round(top)}px`;
     pop.style.maxHeight = `${Math.floor(vh - 14 - top)}px`;

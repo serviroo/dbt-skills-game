@@ -84,10 +84,6 @@
 .vol--top .vol-btn:hover {
   color: var(--ice);
 }
-/* a panel moved up over its button on a very short screen leaves the button on top, so one tap still closes it */
-.vol.is-open .vol-btn {
-  z-index: 62;
-}
 .vol-btn.is-silent {
   color: rgba(147, 171, 200, 0.75);
 }
@@ -182,7 +178,6 @@
 }
 .vol-head {
   position: relative;
-  flex: none;
   display: flex;
   justify-content: center;
   margin: 0 0 6px;
@@ -215,9 +210,9 @@
   gap: 2px;
   font-family: var(--font-ui);
 }
-/* the panel is never taller than the screen (place() in src/ui/volume.ts): its title stays and the sliders scroll, with
-   room all round for a thumb's glow and Mute's focus ring */
-.vol-pop .vol-sl {
+/* the panel is never taller than the screen (place() in src/ui/volume.ts): its title and sliders scroll inside the frame,
+   with room all round for a thumb's glow and Mute's focus ring */
+.vol-body {
   min-height: 0;
   margin: -6px;
   padding: 6px;

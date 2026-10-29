@@ -369,7 +369,8 @@
   font-family: var(--font-display);
   font-weight: 600;
   font-optical-sizing: auto;
-  font-size: 38px;
+  /* the longest one-word title, Settings, still fits a phone at 200% zoom */
+  font-size: min(38px, 20vw);
   line-height: 1.08;
   letter-spacing: 0.01em;
   color: #e4f2ff;
@@ -671,6 +672,24 @@
   opacity: 0.45;
   cursor: default;
 }
+/* a phone zoomed to 200% (260 CSS pixels wide or less): the page, its panels and buttons give their words the room, as
+   the Safe Zone does; a button's label already says what it does, so its icon steps aside */
+@media (max-width: 260px) {
+  .dq-view {
+    padding-right: max(10px, var(--safe-right));
+    padding-left: max(10px, var(--safe-left));
+  }
+  .dq {
+    --pad: 12px;
+  }
+  .dq-btn {
+    padding: 0 10px;
+    letter-spacing: 0.06em;
+  }
+  .dq-btn-ic {
+    display: none;
+  }
+}
 
 .dq-opts {
   display: flex;
@@ -697,6 +716,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  /* never wider than its row: a long choice's words wrap on a phone at 200% zoom */
+  max-width: 100%;
   min-height: 46px;
   padding: 9px 16px;
   font: 400 16.5px/1.3 var(--font-ui);
@@ -796,6 +817,20 @@
 .dq-seg--range .dq-seg-b {
   font-size: 14.5px;
   letter-spacing: 0.02em;
+}
+/* a phone zoomed to 200% (260 CSS pixels wide or less): Motion's three choices stack, each as wide as the row, so no
+   word runs into the next or past the screen */
+@media (max-width: 260px) {
+  .dq-seg--3 {
+    flex-direction: column;
+  }
+  .dq-seg--3 .dq-seg-b {
+    border-left: 0;
+    border-top: 1px solid rgba(125, 150, 197, 0.22);
+  }
+  .dq-seg--3 .dq-seg-b:first-child {
+    border-top: 0;
+  }
 }
 
 .dq-field {
@@ -1151,6 +1186,17 @@ textarea.dq-input {
 }
 .dq-kv.is-up dd {
   color: #bfe9ff;
+}
+/* a phone zoomed to 200% (260 CSS pixels wide or less): the crystal above the name, title and class, each label above
+   its value, so none runs past the screen */
+@media (max-width: 260px) {
+  .dq-player {
+    flex-direction: column;
+  }
+  .dq-kv {
+    flex-direction: column;
+    gap: 0;
+  }
 }
 .dq-num {
   font-variant-numeric: tabular-nums;
@@ -1573,6 +1619,9 @@ textarea.dq-input {
   .dq-quest {
     --quest-room: calc(100dvh - var(--safe-top) - var(--safe-bottom) - var(--quest-top) - 20px);
   }
+}
+/* the card beside its words and buttons wherever they have the room: not on a phone at 200% zoom, which stacks them */
+@media (orientation: landscape) and (max-height: 540px) and (min-width: 301px) {
   .dq-quest:not(.is-aside) {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
@@ -1679,6 +1728,12 @@ textarea.dq-input {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+/* a phone zoomed to 200% (260 CSS pixels wide or less): one place a row, its name and line whole */
+@media (max-width: 260px) {
+  .dq-menu {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .dq-tile {
   position: relative;
@@ -3605,8 +3660,10 @@ textarea.dq-input {
   }
 }
 /* Give me a moment inside the Safe Zone: the ring under the heading, the line, How long and Done under it; held
-   sideways the ring stays with the heading and the rest sits beside it, as on the moment's own screen */
+   sideways the ring stays with the heading and the rest sits beside it, as on the moment's own screen. The ring is never
+   taller than the room the pinned bars leave, so it shows whole once scrolled to */
 .dq-sz .dq-mo-stage {
+  max-width: calc(100dvh - var(--sz-bar, 0px) - var(--dq-foot, 0px) - 8px);
   margin: 8px auto 0;
 }
 .dq-sz .dq-moment {
