@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { siteUrl } from '../../../core/base';
 import { motes, OUT_GLSL, pointScale, rng, WATER_GLSL, WORLD_VERT, waterBackdrop } from '../common';
-import type { Beat } from '../host';
 import type { BuildScene } from '../runtime';
 
 /**
@@ -242,8 +241,6 @@ export const build: BuildScene = (accent) => {
 
   // the timer can stretch: the stone's path is kept continuous from wherever it is when that happens
   const path = { e: 0, d: 0, land: NaN, landed: NaN };
-  let gap = 0;
-  let prev: Beat | null = null;
   const landOf = (dur: number) => (Number.isFinite(dur) ? Math.max(1, dur - Math.min(4, dur * 0.2)) : 16);
   const depthAt = (e: number) => {
     if (path.d >= 1) return 1;
@@ -263,10 +260,7 @@ export const build: BuildScene = (accent) => {
         const d = depthAt(e);
         Object.assign(path, { e, d, landed: d >= 1 ? path.landed : l, land: l });
       }
-      // more time after Done picks the water up where it stopped instead of jumping ahead
-      if (prev?.done && !b.done) gap += Math.max(0, e - prev.e);
-      prev = { ...b };
-      const t = still ? 7.3 : e - gap;
+      const t = still ? 7.3 : e;
       const d = still ? 1 : depthAt(e);
       const settled = still ? -1 : d >= 1 ? e - path.landed : -1;
 

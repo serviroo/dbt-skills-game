@@ -16,6 +16,8 @@ import { icon, mothSVG } from './art';
 import { now, onFrame } from './clock';
 import { btn, h, toggle, typo } from './ui';
 import { isSkillId } from './store';
+import { mountScene, playerAccent } from '../scene/vignettes/host';
+import { breathAt, ease, SETTLE } from '../motion/breath';
 
 export function goNext(app: App, n: Next, replace = false) {
   if (n.to === 'rest') return app.go({ name: 'rest' }, { replace });
@@ -29,14 +31,6 @@ const sv = (tag: string, attrs: Record<string, string | number> = {}) => {
   const e = document.createElementNS(NS, tag);
   for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
   return e;
-};
-const ease = (t: number) => 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, Math.max(0, t)));
-const INHALE = 4;
-const EXHALE = 6;
-/** 0..1 breath size at time e (seconds): rises over 4 s, falls over 6 s. */
-const breath = (e: number) => {
-  const c = e % (INHALE + EXHALE);
-  return c < INHALE ? ease(c / INHALE) : 1 - ease((c - INHALE) / EXHALE);
 };
 
 // ---------------- comfort-first (after a heavy check-in) ----------------
@@ -68,7 +62,7 @@ export function easeScreen(app: App, route: Route): ScreenOut {
     sea.style.transform = '';
     if (app.reduced()) return;
     stop = onFrame((t) => {
-      const s = breath(t - t0);
+      const s = breathAt(t - t0);
       glow.style.opacity = String(0.4 + s * 0.6);
       glow.style.transform = `translate(-50%, -50%) scale(${(0.88 + s * 0.2).toFixed(3)})`;
       sea.style.transform = `translateY(${(Math.sin((t - t0) * 0.45) * 4).toFixed(2)}px)`;
@@ -220,8 +214,6 @@ function lowHum(scale: number) {
 }
 
 const LINE_S = 7;
-/** How long the ring takes to settle once a timed moment ends. */
-const SETTLE_S = 2.4;
 const LENGTH_S: Record<MomentLength, number> = { '1': 60, '3': 180, open: Infinity };
 const lengthKey = (key: string) => `${key}${BESIDE.momentLength}`;
 /** The length chosen on this device. None chosen means until the player is ready, as it was before the choice. */
@@ -246,9 +238,9 @@ export function momentScreen(app: App, route: Route): ScreenOut {
 
 /**
  * The moment itself: the ring, one calm line at a time, How long and Done. The Safe Zone shows it too, without the low
- * hum (no sound in there) and without a credit. `then` is the skill "Slow breathing, if you like" opens.
+ * hum, 3D scene or credit. `then` is the skill "Slow breathing, if you like" opens.
  */
-export function momentView(app: App, o: { done: () => void; then?: string; hum?: boolean }) {
+export function momentView(app: App, o: { done: () => void; then?: string; hum?: boolean; scene?: boolean }) {
   const st = app.store;
   const svg = sv('svg', { viewBox: '0 0 200 200', class: 'dq-mo-svg', 'aria-hidden': 'true' });
   const defs = sv('defs');
@@ -270,6 +262,8 @@ export function momentView(app: App, o: { done: () => void; then?: string; hum?:
   const orb = sv('circle', { cx: 100, cy: 100, r: 60, fill: 'url(#dqmo-g)' });
   const line = sv('circle', { cx: 100, cy: 100, r: 52, fill: 'none', stroke: 'rgba(170,225,255,.7)', 'stroke-width': 1.2 });
   const echo = sv('circle', { cx: 100, cy: 100, r: 52, fill: 'none', stroke: 'rgba(124,200,255,.22)', 'stroke-width': 0.8 });
+  // the breathing light in 3D takes the place of the flat orb and its rings when it can; the ticks stay round it
+  if (o.scene !== false) for (const c of [orb, echo, line]) c.classList.add('dq-scene-flat');
   svg.append(defs, outer, tickPath, orb, echo, line);
 
   const words = h('p', { class: 'dq-mo-line', 'aria-live': 'polite' });
@@ -336,6 +330,26 @@ export function momentView(app: App, o: { done: () => void; then?: string; hum?:
   let passes = 0;
   const fades: Animation[] = [];
   const stage = h('div', { class: 'dq-mo-stage' }, h('div', { class: 'dq-mo-halo', 'aria-hidden': 'true' }), svg);
+  // the same breath as the flat ring: both count from t0, and once the moment ends both settle, then hold still
+  const unmount = o.scene === false ? null : mountScene(stage, {
+    kind: 'ring',
+    accent: playerAccent(),
+    reduced: () => app.reduced(),
+    onMotion: (fn) => app.onMotion(fn),
+    clock: {
+      now,
+      onFrame: (fn) => {
+        // the first frame past the settle draws the light at rest, however late it comes; then it holds that frame
+        let rested = false;
+        return onFrame((t) => {
+          if (rested) return;
+          rested = endAt >= 0 && t - endAt > SETTLE;
+          fn(t);
+        });
+      },
+      beat: () => ({ e: now() - t0, dur: endAt < 0 ? Infinity : endAt - t0, started: true, done: endAt >= 0 }),
+    },
+  });
   /** The chosen time has passed: the hum fades as when leaving, the ring settles, one calm line stays, and the way back is Done. */
   const end = (t: number) => {
     endAt = t;
@@ -351,7 +365,7 @@ export function momentView(app: App, o: { done: () => void; then?: string; hum?:
     quiet.forEach((x) => animate(x, [{ opacity: 1 }, { opacity: 0 }], { duration: still ? WINDOW.reducedCloseMs : 900, easing: 'ease-in', fill: 'forwards' }));
     setTimeout(() => quiet.forEach((x) => x.classList.add('is-gone')), still ? WINDOW.reducedCloseMs : 900);
     if (moving) done.focus();
-    animate(stage, [{ opacity: 1 }, { opacity: 0.55 }], { duration: still ? WINDOW.reducedFadeMs : SETTLE_S * 1000, easing: 'ease-out', fill: 'forwards' });
+    animate(stage, [{ opacity: 1 }, { opacity: 0.55 }], { duration: still ? WINDOW.reducedFadeMs : SETTLE * 1000, easing: 'ease-out', fill: 'forwards' });
     fades.splice(0).forEach((a) => a.cancel());
     words.textContent = typo(LEN.end);
     fades.push(animate(words, still ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }], { duration: still ? WINDOW.reducedFadeMs : 1300, easing: 'cubic-bezier(.16,1,.3,1)', fill: 'both' }));
@@ -370,8 +384,8 @@ export function momentView(app: App, o: { done: () => void; then?: string; hum?:
     const e = t - t0;
     if (endAt < 0 && t - from >= LENGTH_S[length]) end(t);
     // once ended, the breath settles to a slow exhale and the ring holds still
-    const settle = endAt < 0 ? 0 : ease((t - endAt) / SETTLE_S);
-    const s = breath(e) * (1 - settle);
+    const settle = endAt < 0 ? 0 : ease((t - endAt) / SETTLE);
+    const s = breathAt(e) * (1 - settle);
     const still = app.reduced();
     const rr = still ? 64 : 44 + s * 32;
     line.setAttribute('r', rr.toFixed(2));
@@ -411,6 +425,7 @@ export function momentView(app: App, o: { done: () => void; then?: string; hum?:
     foot,
     leave: () => {
       stop();
+      unmount?.();
       fades.forEach((a) => a.cancel());
       offVolume?.();
       hum?.stop();

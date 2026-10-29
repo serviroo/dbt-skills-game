@@ -281,6 +281,11 @@ chromium.launchServer = (options) => launchServer({ ...options, args: [...option
   assert.notEqual(collision.code, 0);
   assert.match(collision.log, /is in both/);
   assert(!collision.log.includes('renderer:'));
+  fs.writeFileSync(duplicate, `export const scenarios = {\n  async '${name}-twice'() {},\n  async '${name}-twice'() {},\n};`);
+  const twice = await run('duplicate-key', [`--scenario=${name}-twice`]);
+  assert.notEqual(twice.code, 0);
+  assert.match(twice.log, new RegExp(`"${name}-twice" on line 3 a second time`));
+  assert(!twice.log.includes('renderer:'));
   fs.unlinkSync(duplicate);
   const missing = await run('missing-file', ['--file=does-not-exist']);
   assert.notEqual(missing.code, 0);

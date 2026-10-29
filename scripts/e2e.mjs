@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { parseAst } from 'vite';
 import { startHarness } from './e2e/harness.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -35,11 +36,29 @@ if (flags['cpu-throttle'] && (!Number.isFinite(Number(flags['cpu-throttle'])) ||
 // CI's 4-vCPU runners two of them starved each other: short scenarios ran 4 to 12 times slower, and some timed out.
 const jobs = flags.jobs ? +flags.jobs : flags.ws ? 1 : Math.max(1, Math.min(4, Math.floor(os.availableParallelism() / 4)));
 
+// A key written twice in one object literal keeps only its last copy, so a scenario or a seed field would vanish unseen.
+function twice(node, found = []) {
+  if (node.type === 'ObjectExpression') {
+    const seen = new Set();
+    for (const p of node.properties) {
+      if (p.type !== 'Property' || p.computed) continue;
+      const key = (p.kind === 'init' ? '' : p.kind + ' ') + (p.key.name ?? p.key.value);
+      if (seen.has(key)) found.push({ key, start: p.start });
+      else seen.add(key);
+    }
+  }
+  for (const v of Object.values(node)) if (v && typeof v === 'object') twice(v, found);
+  return found;
+}
+
 const all = [];
 const fileOf = new Map();
 const serial = new Set();
 for (const f of fs.readdirSync(dir).filter((f) => f.endsWith('.e2e.mjs')).sort()) {
   const file = f.slice(0, -'.e2e.mjs'.length);
+  const source = fs.readFileSync(path.join(dir, f), 'utf8');
+  const repeats = twice(parseAst(source)).map(({ key, start }) => `"${key}" on line ${source.slice(0, start).split('\n').length}`);
+  if (repeats.length) throw new Error(`${f} writes ${repeats.join(', ')} a second time in the same object, so the first copy never counts`);
   const mod = await import(pathToFileURL(path.join(dir, f)).href);
   const { scenarios } = mod;
   if (!scenarios || typeof scenarios !== 'object') throw new Error(`${f} does not export scenarios`);

@@ -118,6 +118,15 @@ export const SCORE = {
   safeBackSec: 3,
 } as const;
 
+/**
+ * The slow breath Give me a moment's ring and the 3D breathing light share (src/motion/breath.ts), in seconds: in, out,
+ * and the settle once a timed moment ends.
+ */
+export const BREATH = { inSec: 4, outSec: 6, settleSec: 2.4 } as const;
+
+/** The clouds over the tide (src/scene/vignettes/scenes/tide.ts): each crosses in crossSec, the next spaceSec behind */
+export const CLOUDS = { crossSec: 32, spaceSec: 13 } as const;
+
 /** Home's sky (src/daily/sky.ts): a slow drift when the hour turns while Home is open, a short fade in and out */
 export const SKY = {
   driftMs: 8000,

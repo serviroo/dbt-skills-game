@@ -12,7 +12,7 @@
 const PHONE = { width: 390, height: 844 };
 
 /** Sets the device's reduce-motion setting on `page` through CDP, as a change in the phone's own settings does. */
-async function deviceMotion(ctx, page) {
+export async function deviceMotion(ctx, page) {
   const cdp = await ctx.newCDPSession(page);
   return (value) => cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value }] });
 }
