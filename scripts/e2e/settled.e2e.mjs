@@ -47,7 +47,7 @@ export const scenarios = {
       const page = await ctx.newPage();
       await page.setContent('<style>section { transform:translateY(50px); transition:transform 300ms } section.on { transform:translateY(0) }</style><section><button>One</button></section>');
       await page.clock.install();
-      await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
+      await h.pauseClock(page);
       const paused = await page.evaluate(() => Date.now());
       await page.locator('section').evaluate((el) => { el.getBoundingClientRect(); el.classList.add('on'); });
       await h.settled(page, 'button');

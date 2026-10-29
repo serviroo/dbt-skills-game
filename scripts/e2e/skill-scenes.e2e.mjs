@@ -61,17 +61,6 @@ async function toStone(h, page) {
   await page.locator('.dq-timer-stage').scrollIntoViewIfNeeded();
 }
 
-/** Stops the page clock a moment from now; a slow page can pass a moment asked for too soon, so it asks again. */
-async function pauseSoon(page) {
-  for (let i = 0; ; i++) {
-    try {
-      return await page.clock.pauseAt(await page.evaluate(() => Date.now() + 250));
-    } catch (e) {
-      if (i === 4) throw e;
-    }
-  }
-}
-
 /** The page goes to the background (hidden, as in another tab) or comes back, as the page sees it. */
 const hide = (page, on) =>
   page.evaluate((hidden) => {
@@ -195,7 +184,7 @@ async function oneSlowFrame(h, hz) {
   await page.evaluate(() => window.__daily.go({ name: 'skill', id: 'wise-mind', entry: 'stone' }));
   await page.locator('.dq-skill').getByRole('button', { name: 'Begin', exact: true }).first().click({ timeout: 10000 });
   await page.locator('.dq-scene canvas').waitFor({ state: 'attached', timeout: 15000 });
-  await pauseSoon(page);
+  await h.pauseClock(page);
   // a page held to 30 frames a second: every animation frame callback waits for the frame after the one it asked for
   if (hz === 30) {
     await page.evaluate(() => {
@@ -357,7 +346,7 @@ export const scenarios = {
     inStep(h, await pair(page), 'running');
 
     // the page freezes (its clock and its frames stop together, as in a background tab), then comes back
-    await pauseSoon(page);
+    await h.pauseClock(page);
     await h.sleep(1500);
     const b = await pair(page);
     await page.clock.resume();

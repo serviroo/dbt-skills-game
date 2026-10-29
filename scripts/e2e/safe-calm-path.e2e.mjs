@@ -134,7 +134,7 @@ export const scenarios = {
           }
 
           await page.getByRole('radio', { name: '1 minute', exact: true }).check();
-          await page.clock.pauseAt(await page.evaluate(() => Date.now() + 50));
+          await h.pauseClock(page);
           await page.clock.fastForward(61000);
           const ended = await inside(page);
           ok(/^That[’']s your moment\./.test(ended.line), `${tag}: the timed moment did not end (${ended.line})`);

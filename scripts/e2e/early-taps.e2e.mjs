@@ -5,16 +5,15 @@
 
 export const scenarios = {
   /** Reload, tapped while the new-version notice is still opening, reloads the page */
-  async 'reload-while-opening'({ open, expect }) {
+  async 'reload-while-opening'({ open, expect, pauseClock }) {
     let left = null;
     const { ctx, page, errors } = await open({}, '?mute', undefined, async (c) => {
       await c.clock.install();
       // the scene's code is gone, as after a new version replaced it: the intro offers a reload in its place. The
       // notice waits on this file, so the page clock stops before the notice starts opening, and the opening (timed on
-      // page timers) cannot end until the clock moves again. (The page's time runs until the pause lands, so it pauses
-      // a second ahead.)
+      // page timers) cannot end until the clock moves again
       await c.route('**/src/cutscene/director.ts*', async (r) => {
-        await c.clock.pauseAt((await r.request().frame().evaluate(() => Date.now())) + 1000);
+        await pauseClock(r.request().frame().page());
         await r.abort('failed');
       });
       // at the tap, how much of the opening was still to come on the page clock: the buttons fade in last, so their
@@ -73,7 +72,7 @@ export const scenarios = {
   /** A second tap as a companion window closes is still the window's: what is under it never takes it, the Safe Zone
    *  stays one tap away (then and while the window waits, with nothing left over it), and Home takes taps again once
    *  the window is gone, with motion on and off */
-  async 'second-tap-while-closing'({ open, expect, SEEN }) {
+  async 'second-tap-while-closing'({ open, expect, pauseClock, SEEN }) {
     for (const reducedMotion of ['no-preference', 'reduce']) {
       for (const second of ['look', 'safe', 'safe alone']) {
         const where = `${reducedMotion}, ${second === 'safe alone' ? 'Safe Zone while the welcome waits' : `second tap on ${second}`}`;
@@ -82,7 +81,7 @@ export const scenarios = {
         await page.waitForFunction(() => Number(getComputedStyle(document.querySelector('.dq-sw .sw-next')).opacity) > 0, null, { timeout: 20000 });
         // the close runs on the page clock, which stands still from before the first tap, so the second always lands
         // while the window still closes however slow the machine is
-        await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000);
+        await pauseClock(page);
         const box = async (sel) => {
           const b = await page.locator(sel).first().boundingBox();
           return [b.x + b.width / 2, b.y + b.height / 2];
