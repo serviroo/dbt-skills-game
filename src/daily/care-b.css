@@ -390,10 +390,12 @@
   margin-top: auto;
   padding-top: 18px;
 }
+/* the hum fills the line beside Done; where they don't fit side by side, Done takes the next line, at its end */
 .dq-mo-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
   width: 100%;
 }

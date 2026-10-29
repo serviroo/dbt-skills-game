@@ -296,6 +296,34 @@
   width: 22px;
   height: 22px;
 }
+/* outside the Safe Zone the bar wraps where it must (a phone at 200% zoom), its right-hand buttons one by one, so the Safe
+   Zone button always shows whole and full size, at the right; on one line it looks as it always has */
+.dq:not([data-screen='safe']) .dq-top {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 2px;
+}
+.dq:not([data-screen='safe']) .dq-top > :first-child {
+  margin-right: auto;
+}
+.dq:not([data-screen='safe']) .dq-top-end {
+  display: contents;
+}
+/* a phone at 200% zoom, held either way (300 CSS pixels wide or less): the back control keeps only its arrow and Home's
+   name only its mark, so the bar takes as few rows as its buttons allow */
+@media (max-width: 300px) {
+  .dq-brand > span:last-child {
+    display: none;
+  }
+  .dq:not([data-screen='safe']) .dq-back {
+    justify-content: center;
+    min-width: 44px;
+    padding: 0;
+  }
+  .dq:not([data-screen='safe']) .dq-back span:last-child {
+    display: none;
+  }
+}
 .dq-icbtn {
   width: 44px;
   height: 44px;

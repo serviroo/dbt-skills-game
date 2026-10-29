@@ -803,7 +803,8 @@ export class App {
     else if (out.mode === 'skill') left = h('button', { type: 'button', class: 'dq-icbtn', 'aria-label': 'Leave this skill', onclick: () => this.go({ name: 'hub' }), html: icon('close') });
     else if (out.mode === 'safe')
       left = h('button', { type: 'button', class: 'dq-back', onclick: () => this.go({ name: 'hub' }) }, h('span', { html: icon('close') }), h('span', { text: 'Leave' }));
-    else left = h('button', { type: 'button', class: 'dq-back', onclick: () => this.back() }, h('span', { html: icon('back') }), h('span', { text: 'Lantern' }));
+    // named for a screen reader in its own right: on a phone at 200% only its arrow shows
+    else left = h('button', { type: 'button', class: 'dq-back', 'aria-label': 'Lantern', onclick: () => this.back() }, h('span', { html: icon('back') }), h('span', { text: 'Lantern' }));
     const mid = h('span', { class: 'dq-sr', text: typo(out.title) });
     const tools = out.tools ?? [];
     let right: HTMLElement = out.mode === 'safe' ? (tools.length ? h('div', { class: 'dq-top-end' }, tools) : h('span', { class: 'dq-top-spacer' })) : safeBtn;

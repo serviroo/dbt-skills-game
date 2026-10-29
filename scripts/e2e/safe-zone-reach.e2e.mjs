@@ -19,7 +19,9 @@
 //               show whole and take a tap, and the rest still passes reach. Held sideways at 200% the keyboard leaves
 //               under 100 px, less than "Talk to someone now" and the field need together, so typing at 200% is
 //               checked upright (a phone that keeps the page's full height under its keyboard is the check without it)
-import { audit, boot, PAGE, settle, SKIP } from './layout-fit.e2e.mjs';
+// And on every other screen with a top bar, at 200%, the Safe Zone button stays one tap away: it and the rest of the bar
+// show whole and take their taps, and Give me a moment's Done shows whole once scrolled to.
+import { audit, boot, PAGE, SCREENS, settle, SKIP } from './layout-fit.e2e.mjs';
 import { listed } from './me-92-safe-zone-clean.e2e.mjs';
 
 // a phone and about how tall its keyboard is with the suggestion bar, held each way
@@ -33,10 +35,10 @@ const PHONES = {
 /**
  * Whatever on the Safe Zone and its top bar can't be scrolled to whole and tapped, as the screen stands now. `typing`:
  * also the field that has focus and its Save, each scrolled to the least it takes, as a phone brings the field into
- * view. `sound`: only the open Sound panel's own controls and the button that closes it.
+ * view. `sound`: only the open Sound panel's own controls and the button that closes it. `controls`: only these.
  */
-const unreachable = (page, { typing = false, sound = false } = {}) =>
-  page.evaluate(async ({ typing, sound }) => {
+const unreachable = (page, { typing = false, sound = false, controls = null } = {}) =>
+  page.evaluate(async ({ typing, sound, controls: only }) => {
     const out = [];
     const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     const name = (e) => `"${(e.getAttribute('aria-label') || e.textContent || e.value || e.tagName).replace(/\s+/g, ' ').trim().slice(0, 32)}"`;
@@ -67,9 +69,14 @@ const unreachable = (page, { typing = false, sound = false } = {}) =>
     const scrollers = [...document.querySelectorAll('.dq, .dq-sz-body')];
     const was = scrollers.map((s) => s.scrollTop);
     const talk = document.querySelector('.dq-sz-talk');
-    const controls = [...document.querySelectorAll(sound ? '.dq-top :is(.vol-btn, .vol-pop button, .vol-pop input)' : '.dq-top :is(button, a[href]), .dq-safezone :is(button, a[href], input, select, textarea)')].filter((e) => e !== talk && e.checkVisibility({ checkVisibilityCSS: true }) && !e.closest('.dq-sr'));
+    const controls = [...document.querySelectorAll(only ?? (sound ? '.dq-top :is(.vol-btn, .vol-pop button, .vol-pop input)' : '.dq-top :is(button, a[href]), .dq-safezone :is(button, a[href], input, select, textarea)'))].filter((e) => e !== talk && e.checkVisibility({ checkVisibilityCSS: true }) && !e.closest('.dq-sr'));
+    // scrolled to the way the player can: the page never scrolls sideways, though a script can still move it there
+    const to = (e, block) => {
+      e.scrollIntoView({ block, inline: 'nearest', behavior: 'instant' });
+      for (const s of [document.scrollingElement, document.querySelector('.dq')]) s.scrollLeft = 0;
+    };
     for (const e of controls) {
-      e.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+      to(e, 'center');
       await frame();
       if (!whole(e)) out.push(`${name(e)} doesn't show whole when scrolled to (${box(e.getBoundingClientRect())})`);
       else if (taken(e)) out.push(`${name(e)} is under ${taken(e)} when scrolled to (${box(e.getBoundingClientRect())})`);
@@ -89,7 +96,7 @@ const unreachable = (page, { typing = false, sound = false } = {}) =>
         for (const e of document.querySelectorAll('.dq-top :is(.dq-back, .ca-sz-light)')) if (taken(e)) out.push(`${name(e)} is under ${taken(e)} with the Sound panel open`);
       }
     }
-    if (!sound && talk.checkVisibility()) {
+    if (!sound && talk?.checkVisibility()) {
       for (const end of ['top', 'end']) {
         for (const s of scrollers) s.scrollTop = end === 'top' ? 0 : s.scrollHeight;
         await frame();
@@ -102,14 +109,14 @@ const unreachable = (page, { typing = false, sound = false } = {}) =>
       if (!field?.matches('.dq-safezone input')) return [...out, `focus is on ${field?.tagName.toLowerCase()}, not the field being typed in`];
       const save = [...field.closest('.dq-addrow, .dq-person-add').querySelectorAll('button')].find((b) => b.textContent.trim() === 'Save');
       for (const e of [field, save]) {
-        e.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+        to(e, 'nearest');
         await frame();
         if (!whole(e) || taken(e)) out.push(`${e === save ? 'Save' : 'the field'} doesn't show whole and clear above the keyboard (${box(e.getBoundingClientRect())}${taken(e) ? `, under ${taken(e)}` : ''})`);
       }
       field.focus({ preventScroll: true });
     }
     return out;
-  }, { typing, sound });
+  }, { typing, sound, controls });
 
 function walk(phone, zoom) {
   return async (h) => {
@@ -152,8 +159,8 @@ function walk(phone, zoom) {
       await tap(page, 'Next');
       await at(page, 'Cool air');
       await look(page, `cold${t}`);
-      await tap(page, 'Start 30 seconds');
-      await look(page, `cold counting down${t}`);
+      await tap(page, 'Cool air');
+      await look(page, `cold, cool air counting down${t}`);
       await tap(page, 'Next');
       await at(page, 'Is it even a little lower?');
       await look(page, `check${t}`);
@@ -231,4 +238,67 @@ function walk(phone, zoom) {
   };
 }
 
-export const scenarios = Object.fromEntries(Object.keys(PHONES).flatMap((phone) => [1, 2].map((zoom) => [`safe-zone-reach-${phone}${zoom > 1 ? '-200' : ''}`, walk(phone, zoom)])));
+// every screen layout-fit checks, each route once
+const ROUTES = [...new Map(Object.values(SCREENS).map(({ route }) => [JSON.stringify(route), route])).values()];
+const BAR = '.dq-top :is(button, a[href]), .dq-mo-done';
+
+/**
+ * The Safe Zone stays one tap from every screen at 200%: on every screen with a top bar, the Safe Zone button and the
+ * rest of the bar show whole inside the screen, at least 44 px each way, and take their own taps; on Give me a moment
+ * its Done does too once scrolled to. The bar takes no more rows than its buttons need with the back control down to
+ * its arrow (44 px) and Home's name down to its mark. With Sound open, wherever its panel opens below its button, the
+ * Safe Zone button stays clear of it.
+ */
+function bars(phone) {
+  return async (h) => {
+    const p = PHONES[phone];
+    const problems = [];
+    const { ctx, page, errors } = await boot(h, { width: p.width / 2, height: p.height / 2 });
+    for (const route of ROUTES) {
+      await page.evaluate((r) => window.__daily.go(r), route);
+      await page.waitForFunction((n) => window.__daily.route.name === n && !!document.querySelector('.dq-top .dq-safe'), route.name, { timeout: 10000 });
+      await settle(page);
+      const at = `${phone} at 200%, ${route.name}`;
+      const small = await page.evaluate((sel) => [...document.querySelectorAll(sel)].filter((e) => e.checkVisibility({ checkVisibilityCSS: true })).map((e) => [(e.getAttribute('aria-label') || e.textContent).trim().slice(0, 32), e.getBoundingClientRect()]).filter(([, r]) => r.width < 43.5 || r.height < 43.5).map(([n, r]) => `"${n}" ${Math.round(r.width)}x${Math.round(r.height)}`), BAR);
+      for (const s of small) problems.push(`${at}: ${s}, under 44 px`);
+      if (route.name === 'moment' && !(await page.locator('.dq-mo-done').isVisible())) problems.push(`${at}: Done doesn't show`);
+      const bar = await page.evaluate(() => {
+        const top = document.querySelector('.dq-top');
+        const parts = [top.firstElementChild, ...top.querySelectorAll(':scope > .dq-top-end > *, :scope > .dq-safe')].filter((e) => e.checkVisibility());
+        const cs = getComputedStyle(top);
+        const room = top.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+        const narrow = (e) => (e.matches('.dq-back') ? 44 : e.matches('.dq-brand') ? parseFloat(getComputedStyle(e).paddingLeft) + e.querySelector('.dq-brand-mark').getBoundingClientRect().width : e.getBoundingClientRect().width);
+        const gap = parseFloat(cs.columnGap);
+        // as many rows as wrapping them in order takes, each part at its narrowest
+        let need = 1;
+        let line = 0;
+        for (const w of parts.map(narrow)) {
+          if (line && line + gap + w > room + 0.5) {
+            need++;
+            line = w;
+          } else line = line ? line + gap + w : w;
+        }
+        const tops = parts.map((e) => e.getBoundingClientRect().top).sort((x, y) => x - y);
+        return { rows: 1 + tops.filter((t, i) => i && t - tops[i - 1] > 20).length, need, room: Math.round(room) };
+      });
+      if (bar.rows > bar.need) problems.push(`${at}: the top bar takes ${bar.rows} rows where its buttons need ${bar.need} in ${bar.room} px with the back control down to its arrow and Home's name to its mark`);
+      for (const f of await unreachable(page, { controls: BAR })) problems.push(`${at}: ${f}`);
+      await h.shot(page, `safe-zone-button-${phone}-200-${route.name}`);
+      await page.locator('.dq-top .vol-btn').click();
+      await page.locator('.vol.is-open .vol-pop').waitFor();
+      const rose = await page.evaluate(() => document.querySelector('.dq-top .vol-pop').getBoundingClientRect().top < document.querySelector('.dq-top .vol-btn').getBoundingClientRect().bottom);
+      if (!rose) for (const f of await unreachable(page, { controls: '.dq-top .dq-safe' })) problems.push(`${at}, Sound open: ${f}`);
+      await page.keyboard.press('Escape');
+      // gone once its fade out ends, so it takes no taps meant for the next screen
+      await page.locator('.dq-top .vol-pop').waitFor({ state: 'hidden' });
+    }
+    if (errors.length) problems.push(`${phone} at 200%: ${errors.join(' | ')}`);
+    await ctx.close();
+    h.expect(!problems.length, `${problems.length} problems:\n${problems.join('\n')}`);
+  };
+}
+
+export const scenarios = {
+  ...Object.fromEntries(Object.keys(PHONES).flatMap((phone) => [1, 2].map((zoom) => [`safe-zone-reach-${phone}${zoom > 1 ? '-200' : ''}`, walk(phone, zoom)]))),
+  ...Object.fromEntries(Object.keys(PHONES).map((phone) => [`safe-zone-button-${phone}-200`, bars(phone)])),
+};

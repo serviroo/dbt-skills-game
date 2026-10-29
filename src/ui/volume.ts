@@ -181,11 +181,14 @@ export function volumeButton(ctrl: VolumeCtrl, o: { placement: 'cutscene' | 'top
     const w = pop.offsetWidth;
     let left = o.align === 'left' ? r.left : r.right - w;
     left = Math.max(14, Math.min(vw - 14 - w, left));
-    // under the button, its sliders scrolling inside the height left there; on a screen too short for the title and one
-    // slider under it, it moves up as far as that takes (never above 14 px from the top) and the button stays over it
+    // under the button, and under the rest of the bar it sits in when that bar wraps onto more rows, its sliders scrolling
+    // inside the height left there; on a screen too short for the title and one slider there, it moves up as far as that
+    // takes (never above 14 px from the top) and the button stays over it
+    const bar = root.closest('header');
+    const under = bar ? Math.max(r.bottom, bar.getBoundingClientRect().bottom - parseFloat(getComputedStyle(bar).paddingBottom)) : r.bottom;
     const row = sliders.querySelector<HTMLElement>('.vol-row')!;
     const one = pop.offsetHeight - sliders.offsetHeight + row.offsetTop + row.offsetHeight;
-    const top = Math.max(14, Math.min(r.bottom + 8, vh - 14 - one));
+    const top = Math.max(14, Math.min(under + 8, vh - 14 - one));
     pop.style.left = `${Math.round(left)}px`;
     pop.style.top = `${Math.round(top)}px`;
     pop.style.maxHeight = `${Math.floor(vh - 14 - top)}px`;
