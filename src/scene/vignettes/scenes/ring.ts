@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { NOISE_GLSL, OUT_GLSL, pointScale, rng } from '../common';
+import { breathAt, ease, SETTLE } from '../../../motion/breath';
 import type { BuildScene } from '../runtime';
 
 /**
@@ -11,23 +12,12 @@ import type { BuildScene } from '../runtime';
  */
 
 const FOV = 30;
-const INHALE = 4;
-const EXHALE = 6;
-/** seconds the breath takes to settle once it has ended (the same as Give me a moment's ring) */
-const SETTLE = 2.4;
 /** the light's size breathed out and breathed in (the probe's scale) */
 const SMALL = 0.5;
 const BIG = 0.7;
 /** the light's square, in world units from its middle: the halo is gone well inside it */
 const REACH = 0.62;
 const DIST = 4;
-
-const ease = (t: number) => 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, Math.max(0, t)));
-/** 0..1 breath size at time e: rises over 4 s, falls over 6 s (the same curve as Give me a moment) */
-const breathAt = (e: number) => {
-  const c = ((e % (INHALE + EXHALE)) + INHALE + EXHALE) % (INHALE + EXHALE);
-  return c < INHALE ? ease(c / INHALE) : 1 - ease((c - INHALE) / EXHALE);
-};
 
 const LIGHT_VERT = /* glsl */ `
 uniform float uSize;
