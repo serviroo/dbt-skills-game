@@ -115,8 +115,9 @@ jobs:
       STORED_IDS_BASE: ${{ github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha }}
     strategy:
       fail-fast: false
+      # GitHub runs at most 20 jobs at once here: with no other run holding runners, all 18 parts start with check and secrets
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -129,8 +130,8 @@ jobs:
       - run: npm ci
       - name: Browsers come from the container
         run: test "$(npx playwright --version)" = "Version 1.64.1" || { echo "package-lock has $(npx playwright --version); set the same version in the container image above"; exit 1; }
-      - name: E2E part ${{ matrix.shard }} of 11
-        run: node scripts/e2e.mjs --shard=${{ matrix.shard }}/11
+      - name: E2E part ${{ matrix.shard }} of 18
+        run: node scripts/e2e.mjs --shard=${{ matrix.shard }}/18
       - uses: actions/upload-artifact@v7
         if: always()
         with:
