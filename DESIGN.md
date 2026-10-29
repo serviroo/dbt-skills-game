@@ -102,8 +102,8 @@ All timings live in `src/motion/tokens.ts`. Change them there, not in the compon
    network calls are links the player taps. The Home Screen name and icon say nothing about mental health.
 6. **The Safe Zone is one tap away** from every screen after the intro. Inside it, "Talk to someone now" is pinned on
    every screen and numbers dial with one tap. No XP, toasts, particles, glow bursts, sound effects or vibration
-   inside, and leaving never asks "are you sure". The button says "Safe Zone", plainly: in a crisis, clarity beats
-   theme.
+   inside, and leaving never asks "are you sure". Whatever comes due while it is open (a rank-up, the first welcome, a
+   new day) waits until the player leaves. The button says "Safe Zone", plainly: in a crisis, clarity beats theme.
 7. **Point to real support, gently.** The framing is "skills practice that goes with real support". At most one
    therapist mention per session, never on back-to-back screens. The diary card exports plain text "for your
    therapist, if you want". Inside a skill, distress that climbs or doesn't move (a "Higher" answer, or a rating
