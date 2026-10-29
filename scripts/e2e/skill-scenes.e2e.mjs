@@ -83,10 +83,31 @@ const hide = (page, on) =>
     document.dispatchEvent(new Event('visibilitychange'));
   }, on);
 
+/** The scene is on screen: its first frame is drawn, which took CI's software GPU about 16 s in some runs. */
 async function live(h, page, where) {
-  await page.locator('.dq-timer-stage.is-scene-live').waitFor({ timeout: 15000 }).catch(async () => {
+  await page.locator('.dq-timer-stage.is-scene-live').waitFor({ timeout: 30000 }).catch(async () => {
     await h.shot(page, `fail-${where}`);
     throw new Error(`${where}: the 3D scene never came on screen`);
+  });
+}
+
+/**
+ * 15 s more on the countdown, once its first frame has put the scene on screen: the scene draws only while its
+ * countdown runs, and that first frame can take most of it. Done once the scene has drawn a frame with the new length.
+ */
+async function moreTime(page) {
+  const dur = (await scenes(page)).last.dur;
+  await page.locator('.dq-timer').getByRole('button', { name: '+15 s' }).click();
+  await page.waitForFunction((dur) => window.__scenes?.last.dur > dur, dur, { timeout: 15000 });
+}
+
+/**
+ * Waits up to 30 s for `test` in the page, so a busy GPU holding frames back only slows this down. On a timeout the check
+ * that follows says what is missing.
+ */
+async function until(page, test, arg) {
+  await page.waitForFunction(test, arg, { timeout: 30000 }).catch((e) => {
+    if (e.name !== 'TimeoutError') throw e;
   });
 }
 
@@ -216,6 +237,88 @@ async function oneSlowFrame(h, hz) {
   await ctx.close();
 }
 
+/**
+ * A GPU that copes with a small canvas but not a big one (here a draw costs 1 ms for every 1000 pixels over 60000): the
+ * scene draws fewer pixels within a few frames and keeps moving smoothly instead of a frame every half second. It is
+ * counted in frames the scene drew, not in time, since a slow GPU can hold frames back for seconds. `late`: the first
+ * frame takes until the countdown is nearly over, as CI's software GPU did in the runs where this drew no frames.
+ */
+async function slowGpu(h, late) {
+  const { ctx, page, errors } = await h.open(seed(h), '?mute', DESK);
+  await ctx.addInitScript((late) => {
+    window.__gpuMs = 0;
+    // frames whose added work went over the scene's 30 fps budget
+    window.__overBudget = 0;
+    let frame = -1, work = 0;
+    const P = WebGL2RenderingContext.prototype;
+    for (const name of ['drawArrays', 'drawElements']) {
+      const draw = P[name];
+      P[name] = function (...args) {
+        const r = draw.apply(this, args);
+        // only the scene's own canvas is slow; the rest of the page draws as usual
+        if (!this.canvas.closest?.('.dq-scene')) return r;
+        const ms = Math.max(0, this.drawingBufferWidth * this.drawingBufferHeight - 60000) / 1000;
+        window.__gpuMs += ms;
+        // a frame's draws all come before the scene counts that frame
+        if (window.__scenes.frames !== frame) (frame = window.__scenes.frames), (work = 0);
+        const before = work;
+        work += ms;
+        if (before <= 1000 / 30 && work > 1000 / 30) window.__overBudget++;
+        const until = performance.now() + ms;
+        while (performance.now() < until);
+        return r;
+      };
+    }
+    if (!late) return;
+    const make = P.fenceSync, get = P.getSyncParameter;
+    let first = null;
+    P.fenceSync = function (...args) {
+      const f = make.apply(this, args);
+      if (!first && this.canvas.closest?.('.dq-scene')) first = f;
+      return f;
+    };
+    // the first frame is done once the countdown shows 3 s left
+    P.getSyncParameter = function (f, pname) {
+      if (f === first && pname === this.SYNC_STATUS && Number(document.querySelector('.dq-timer-num')?.textContent) > 3) return this.UNSIGNALED;
+      return get.call(this, f, pname);
+    };
+  }, late);
+  await page.reload();
+  await toStone(h, page);
+  // held that long, the first frame outlasts live()'s wait
+  if (late) await page.waitForFunction(() => !(Number(document.querySelector('.dq-timer-num')?.textContent) > 3), null, { timeout: 30000 });
+  await live(h, page, 'slow');
+  // 30 s more, so the countdown outlasts the measuring however late the scene came on screen
+  await moreTime(page);
+  await moreTime(page);
+  const full = await page.evaluate(() => Math.min(window.devicePixelRatio, 2));
+  const read = () => page.evaluate(() => ({ ...window.__scenes, gpuMs: window.__gpuMs, overBudget: window.__overBudget }));
+  // only sustained slowness keeps a ratio for the visit; a slow first frame lowers it for now, then it comes back
+  await until(page, (full) => window.__scenes.kept != null && window.__scenes.dpr < full, full);
+  const a = await read();
+  h.expect(a.kept != null && a.dpr < full, `slow GPU: the scene kept no lower ratio (ratio ${a.dpr}, kept ${a.kept})`);
+  // five here: the first frame, then four that show the slowness is sustained; a page that stalls may add a few, since
+  // the scene leaves out gaps over 1.5 s
+  h.expect(a.overBudget <= 8, `slow GPU: ${a.overBudget} frames over budget before the scene kept a lower ratio`);
+  const t0 = Date.now();
+  await until(page, (n) => window.__scenes.frames >= n, a.frames + 20);
+  const b = await read();
+  const secs = (Date.now() - t0) / 1000;
+  const frames = b.frames - a.frames;
+  h.expect(frames >= 20, `slow GPU: the scene drew only ${frames} frames once it kept a ratio (countdown done: ${b.last.done})`);
+  const ms = (b.gpuMs - a.gpuMs) / frames;
+  // Full size costs about 400 ms per frame here; adaptation must fit that work into the scene's 30 fps budget.
+  // Count the work this fixture adds, since a busy browser can present fewer frames even after the scene adapts.
+  h.expect(ms <= 1000 / 30, `slow GPU: ${ms.toFixed(1)} ms per frame at pixel ratio ${b.dpr}`);
+  h.expect(b.dpr < full, `slow GPU: the scene still draws at the full pixel ratio ${b.dpr}`);
+  inStep(h, await pair(page), 'slow');
+  await drawn(h, page, 'slow');
+  await h.shot(page, late ? 'slow-gpu-late-desk' : 'slow-gpu-desk');
+  console.log(`  slow GPU${late ? ', late first frame' : ''}: ${a.overBudget} frames over budget, then pixel ratio ${b.dpr}, ${frames} frames in ${secs.toFixed(1)} s, ${ms.toFixed(1)} ms per frame`);
+  h.expect(!errors.length, errors.join('\n'));
+  await ctx.close();
+}
+
 export const scenarios = {
   /** the stone step is a live, drawn 3D scene at phone, sideways and desktop sizes, with the flat picture hidden */
   async 'scene-live'(h) {
@@ -223,7 +326,8 @@ export const scenarios = {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
       await toStone(h, page);
       await live(h, page, tag);
-      await h.sleep(1500);
+      await moreTime(page);
+      await until(page, () => window.__scenes.frames > 10);
       const s = await scenes(page);
       h.expect(s.live === 1 && s.contexts === 1 && s.frames > 10, `${tag}: ${JSON.stringify(s)}`);
       h.expect(s.last.kind === 'drift' && !s.last.still && s.last.e > 0.5, `${tag}: the scene is not following the timer: ${JSON.stringify(s.last)}`);
@@ -247,6 +351,7 @@ export const scenarios = {
     await page.reload();
     await toStone(h, page);
     await live(h, page, 'clock');
+    await moreTime(page);
     await h.sleep(1200);
     inStep(h, await pair(page), 'running');
 
@@ -255,18 +360,17 @@ export const scenarios = {
     await h.sleep(1500);
     const b = await pair(page);
     await page.clock.resume();
-    await h.sleep(1500);
+    await until(page, (b) => window.__scenes.frames > b.frames + 10 && window.__scenes.last.e > b.last.e + 1, b.s);
     const c = await pair(page);
     h.expect(c.s.frames > b.s.frames + 10 && c.s.last.e > b.s.last.e + 1, `resumed: the scene did not move on (${b.s.frames} -> ${c.s.frames} frames, ${b.s.last.e.toFixed(2)} -> ${c.s.last.e.toFixed(2)} s)`);
     inStep(h, c, 'resumed');
 
-    await page.locator('.dq-timer').getByRole('button', { name: '+15 s' }).click();
-    await h.sleep(400);
+    await moreTime(page);
     const d = await pair(page);
-    h.expect(d.s.last.dur === 35, `more time mid-way: the scene still thinks the timer is ${d.s.last.dur} s`);
+    h.expect(d.s.last.dur === c.s.last.dur + 15, `more time mid-way: the scene thinks the timer is ${d.s.last.dur} s, not ${c.s.last.dur + 15} s`);
     inStep(h, d, 'more time mid-way');
 
-    await page.clock.fastForward(40000);
+    await page.clock.fastForward(60000);
     await page.locator('.dq-timer-num', { hasText: 'Done' }).waitFor({ timeout: 5000 });
     await h.sleep(300);
     const e = await pair(page);
@@ -278,7 +382,7 @@ export const scenarios = {
     await h.shot(page, 'clock-done');
 
     await page.locator('.dq-timer').getByRole('button', { name: '+15 s' }).click();
-    await h.sleep(1200);
+    await until(page, (f) => window.__scenes.frames > f.frames + 10, f.s);
     const g = await pair(page);
     h.expect(!g.s.last.done && g.s.last.dur > e.s.last.dur + 14 && g.s.frames > f.s.frames + 10, `more time after done: the scene did not start again (${JSON.stringify(g.s.last)})`);
     inStep(h, g, 'more time after done');
@@ -392,7 +496,7 @@ export const scenarios = {
     await toStone(h, page);
     await live(h, page, 'before hiding');
     // more time, so the countdown outlasts the time spent hidden
-    await page.locator('.dq-timer').getByRole('button', { name: '+15 s' }).click();
+    await moreTime(page);
     await h.sleep(800);
     inStep(h, await pair(page), 'before hiding');
     await hide(page, true);
@@ -405,7 +509,8 @@ export const scenarios = {
     h.expect(b.contexts === 0, `hidden past the idle period: the shared renderer kept its WebGL context: ${JSON.stringify(b)}`);
     await hide(page, false);
     await live(h, page, 'shown again');
-    await h.sleep(1200);
+    await moreTime(page);
+    await until(page, (n) => window.__scenes.frames > n, b.frames + 10);
     const c = await pair(page);
     h.expect(c.s.live === 1 && c.s.contexts === 1 && c.s.frames > b.frames + 10, `shown again: ${JSON.stringify(c.s)}`);
     inStep(h, c, 'shown again');
@@ -421,9 +526,7 @@ export const scenarios = {
     await toStone(h, page);
     await live(h, page, 'motion');
     // more time, so the countdown outlasts every change below
-    const duration = (await scenes(page)).last.dur;
-    await page.locator('.dq-timer').getByRole('button', { name: '+15 s' }).click();
-    await page.waitForFunction((duration) => window.__scenes?.last.dur > duration, duration, { timeout: 15000 });
+    await moreTime(page);
     inStep(h, await pair(page), 'motion: full');
     const still = async (where) => {
       await page.waitForFunction(() => window.__scenes?.last.still, null, { timeout: 15000 });
@@ -504,51 +607,11 @@ export const scenarios = {
     await ctx.close();
   },
 
-  /**
-   * a GPU that copes with a small canvas but not a big one (here a draw costs 1 ms for every 1000 pixels over 60000):
-   * the scene draws fewer pixels straight away and keeps moving smoothly instead of a frame every half second
-   */
   async 'scene-slow-gpu'(h) {
-    const { ctx, page, errors } = await h.open(seed(h), '?mute', DESK);
-    await ctx.addInitScript(() => {
-      window.__gpuMs = 0;
-      const P = WebGL2RenderingContext.prototype;
-      for (const name of ['drawArrays', 'drawElements']) {
-        const draw = P[name];
-        P[name] = function (...args) {
-          const r = draw.apply(this, args);
-          // only the scene's own canvas is slow; the rest of the page draws as usual
-          if (!this.canvas.closest?.('.dq-scene')) return r;
-          const ms = Math.max(0, this.drawingBufferWidth * this.drawingBufferHeight - 60000) / 1000;
-          window.__gpuMs += ms;
-          const until = performance.now() + ms;
-          while (performance.now() < until);
-          return r;
-        };
-      }
-    });
-    await page.reload();
-    await toStone(h, page);
-    await live(h, page, 'slow');
-    await h.sleep(4000);
-    const read = () => page.evaluate(() => ({ ...window.__scenes, gpuMs: window.__gpuMs }));
-    const a = await read();
-    await h.sleep(2000);
-    const b = await read();
-    const full = await page.evaluate(() => Math.min(window.devicePixelRatio, 2));
-    const frames = b.frames - a.frames;
-    h.expect(frames > 0, 'slow GPU: the scene stopped drawing');
-    const ms = (b.gpuMs - a.gpuMs) / frames;
-    // Full size costs about 400 ms per frame here; adaptation must fit that work into the scene's 30 fps budget.
-    // Count the work this fixture adds, since a busy browser can present fewer frames even after the scene adapts.
-    h.expect(ms <= 1000 / 30, `slow GPU: ${ms.toFixed(1)} ms per frame at pixel ratio ${b.dpr}`);
-    h.expect(b.dpr < full, `slow GPU: the scene still draws at the full pixel ratio ${b.dpr}`);
-    inStep(h, await pair(page), 'slow');
-    await drawn(h, page, 'slow');
-    await h.shot(page, 'slow-gpu-desk');
-    console.log(`  slow GPU: pixel ratio ${b.dpr}, ${frames} frames in 2 s, ${ms.toFixed(1)} ms per frame`);
-    h.expect(!errors.length, errors.join('\n'));
-    await ctx.close();
+    await slowGpu(h, false);
+  },
+  async 'scene-slow-gpu-late-start'(h) {
+    await slowGpu(h, true);
   },
 
   /**
@@ -615,7 +678,8 @@ export const scenarios = {
     h.expect((await flat(page)).every(Boolean), 'lost: the flat picture did not come back');
     await page.evaluate(() => window.__lose.restoreContext());
     await live(h, page, 'restored');
-    await h.sleep(1200);
+    await moreTime(page);
+    await until(page, (n) => window.__scenes.frames > n, b.frames + 10);
     const c = await scenes(page);
     h.expect(c.live === 1 && c.contexts === 1 && c.frames > b.frames + 10, `restored: ${JSON.stringify(c)}`);
     inStep(h, await pair(page), 'restored');

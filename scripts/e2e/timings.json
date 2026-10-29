@@ -402,6 +402,7 @@
   "scene-one-slow-frame": 16,
   "scene-one-slow-frame-30fps": 15,
   "scene-slow-gpu": 28,
+  "scene-slow-gpu-late-start": 35,
   "scene-still": 34,
   "screens-hidden-button-key": 5,
   "screens-tap-completes": 19,
