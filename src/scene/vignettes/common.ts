@@ -124,14 +124,14 @@ void main() {
   ${OUT_GLSL}
 }`;
 
-/** The open water behind everything, seen from `camera`, with slow shafts of light from the surface. */
-export function waterBackdrop(camera: THREE.PerspectiveCamera, time: { value: number }) {
+/** Whatever is behind everything, seen from `camera`: `fragmentShader` colours each view direction, given as vDir. */
+export function backdrop(camera: THREE.PerspectiveCamera, fragmentShader: string, uniforms: Record<string, THREE.IUniform>) {
   const mesh = new THREE.Mesh(
     new THREE.PlaneGeometry(2, 2),
     new THREE.ShaderMaterial({
       vertexShader: BACK_VERT,
-      fragmentShader: BACK_FRAG,
-      uniforms: { uTime: time, uInvProj: { value: camera.projectionMatrixInverse }, uCamWorld: { value: camera.matrixWorld } },
+      fragmentShader,
+      uniforms: { ...uniforms, uInvProj: { value: camera.projectionMatrixInverse }, uCamWorld: { value: camera.matrixWorld } },
       depthTest: false,
       depthWrite: false,
     }),
@@ -140,6 +140,9 @@ export function waterBackdrop(camera: THREE.PerspectiveCamera, time: { value: nu
   mesh.renderOrder = -1;
   return mesh;
 }
+
+/** The open water behind everything, seen from `camera`, with slow shafts of light from the surface. */
+export const waterBackdrop = (camera: THREE.PerspectiveCamera, time: { value: number }) => backdrop(camera, BACK_FRAG, { uTime: time });
 
 const MOTE_VERT = /* glsl */ `
 attribute vec4 seed;
@@ -301,21 +304,8 @@ void main() {
 }`;
 
 /** The night sky behind everything, seen from `camera`, with the moon along `moon` (a unit vector). */
-export function nightBackdrop(camera: THREE.PerspectiveCamera, moon: { value: THREE.Vector3 }, time: { value: number }) {
-  const mesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(2, 2),
-    new THREE.ShaderMaterial({
-      vertexShader: BACK_VERT,
-      fragmentShader: NIGHT_FRAG,
-      uniforms: { uTime: time, uMoon: moon, uInvProj: { value: camera.projectionMatrixInverse }, uCamWorld: { value: camera.matrixWorld } },
-      depthTest: false,
-      depthWrite: false,
-    }),
-  );
-  mesh.frustumCulled = false;
-  mesh.renderOrder = -1;
-  return mesh;
-}
+export const nightBackdrop = (camera: THREE.PerspectiveCamera, moon: { value: THREE.Vector3 }, time: { value: number }) =>
+  backdrop(camera, NIGHT_FRAG, { uTime: time, uMoon: moon });
 
 const GLOW_VERT = /* glsl */ `
 uniform float uSize;
