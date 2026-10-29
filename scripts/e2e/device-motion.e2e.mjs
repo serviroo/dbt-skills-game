@@ -8,7 +8,7 @@
 // glow breathes, the cat bleps and the shark swims again once it is turned off; A quiet minute's glow rests while it is
 // on, breathes once it is turned off, and settles again when it comes back on. With Motion saved as Full, the glint on
 // the card's back and the Story Room's scan keep moving whatever the device says. The title's pulses end with the title,
-// however it goes.
+// however it goes, and the Stealth Room's Breathing words still breathe with its glow once motion is back.
 
 const PHONE = { width: 390, height: 844 };
 
@@ -284,6 +284,45 @@ export const scenarios = {
       h.expect(!errors.length, errors.join('\n'));
       await ctx.close();
     }
+  },
+
+  /**
+   * the Stealth Room's Breathing words keep pacing the breath while the glow rests with reduce-motion on; once it is
+   * off again the glow breathes in step with them, not from the start of its own breath
+   */
+  async 'stealth-words-breathe-with-glow'(h) {
+    const day = (ms) => new Date(ms - 6 * 3600e3).toISOString().slice(0, 10);
+    const t = Date.now() - 86400e3;
+    const save = JSON.stringify({ v: 1, created: t, events: [{ id: 'motion-visit', t, day: day(t), k: 'visit', xp: 10 }], flags: { greetDay: day(t), cardDay: day(t), giftDay: day(t) } });
+    const you = JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: Date.now() - 1000, companionAt: Date.now() - 1000 });
+    const { ctx, page, errors } = await h.open({ [h.SAVE]: save, [h.YOU]: you, 'dbt.app.v1': h.SEEN }, '?mute', PHONE);
+    const device = await deviceMotion(ctx, page);
+    await h.reachHub(page);
+    await page.evaluate(() => window.__daily.go({ name: 'rest' }));
+    await page.locator('.dq-st-glow').waitFor({ timeout: 10000 });
+    await page.getByRole('button', { name: /^Breathing words/ }).click();
+    // how far apart the glow's breath and the words' are, in ms either way round the breath; null while the glow rests
+    const apart = () =>
+      page.evaluate(() => {
+        const [glow] = document.querySelector('.dq-st-glow').getAnimations();
+        const [words] = document.querySelector('.dq-st-in').getAnimations();
+        if (!glow || !words) return null;
+        const p = glow.effect.getTiming().duration;
+        const d = (((glow.currentTime - words.currentTime) % p) + p) % p;
+        return Math.round(Math.min(d, p - d));
+      });
+    const first = await apart();
+    h.expect(first !== null && first < 100, `the words start ${first} ms out of step with the glow`);
+    await device('reduce');
+    await page.waitForFunction(() => window.__daily.reduced() && !document.querySelector('.dq-st-glow').getAnimations().length, null, { timeout: 5000 });
+    // the glow rests a while; the words keep pacing the breath
+    await h.sleep(3300);
+    await device('no-preference');
+    await page.waitForFunction(() => !window.__daily.reduced() && document.querySelector('.dq-st-glow').getAnimations().length === 1, null, { timeout: 5000 });
+    const back = await apart();
+    h.expect(back !== null && back < 100, `once reduce-motion was off again, the words are ${back} ms out of step with the glow`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
   },
 
   async 'quiet-minute-follows-device-motion'(h) {
