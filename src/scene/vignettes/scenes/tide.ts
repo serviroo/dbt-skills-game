@@ -8,9 +8,15 @@ import type { BuildScene } from '../runtime';
  * thin foam line, washes up the beach in a thin sheet, slows, and slides back, leaving the sand dark and wet where it
  * reached; the wet sand catches the moon and slowly dries. Further out the sea is calm, with the moon's path on it and a
  * soft mist far out. Nothing crashes and nothing chases: the water simply comes and goes. The moon is the only light.
- * Overhead, a few soft clouds drift in, cross the sky and drift out, the way the step asks thoughts to: lit from
- * behind by the moon, silver where they thin near it, and the moon and its light on the water dim while one passes.
+ * When the step's thoughts are clouds, a few soft clouds drift in overhead, cross the sky and drift out, the way the
+ * words ask: lit from behind by the moon, silver where they thin near it, and the moon and its light on the water dim
+ * while one passes. Other steps keep the clear sky.
  */
+
+/** what the tide's step tells it: whether its thoughts are clouds */
+interface TideInput {
+  clouds?: boolean;
+}
 
 const FOV = 36;
 /** one wash up the beach and back every PERIOD seconds */
@@ -229,7 +235,8 @@ void main() {
   ${OUT_GLSL}
 }`;
 
-export const build: BuildScene = () => {
+export const build: BuildScene = (_accent, opts) => {
+  const cloudy = (opts.input as TideInput | undefined)?.clouds === true;
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(FOV, 1, 0.05, 120);
   const look = new THREE.Vector3();
@@ -286,7 +293,7 @@ export const build: BuildScene = () => {
       for (let i = 0; i < CLOUD_SLOTS; i++) {
         const n = last - i;
         const age = t - startOf(n);
-        const on = age >= 0 && age < CLOUDS.crossSec;
+        const on = cloudy && age >= 0 && age < CLOUDS.crossSec;
         const az = -drift + (2 * drift * age) / CLOUDS.crossSec;
         const c = cloudOf(n);
         clouds.value[i].set(az, c.el, c.rx, c.ry);

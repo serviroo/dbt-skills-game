@@ -80,11 +80,8 @@ const hide = (page, on) =>
     document.dispatchEvent(new Event('visibilitychange'));
   }, on);
 
-/**
- * Home, then straight to one step of a skill (Begin on its intro goes to the step). With `pause` the page clock stops
- * the moment the step shows, so a check can see the step's first seconds however slowly the page draws.
- */
-async function toStep(h, page, id, entry, { pause = false } = {}) {
+/** Home, then a skill's intro and Begin, which goes to its first step, or straight to step `entry` when given. */
+async function toSkill(h, page, id, entry) {
   // the first-visit welcome opens a moment after Home appears, so a tap it covers goes back Home and tries again
   for (let i = 0; ; i++) {
     if (i) await page.evaluate(() => window.__daily.go({ name: 'hub' }));
@@ -92,11 +89,19 @@ async function toStep(h, page, id, entry, { pause = false } = {}) {
     await page.evaluate(([id, entry]) => window.__daily.go({ name: 'skill', id, entry }), [id, entry]);
     try {
       await page.locator('.dq-skill').getByRole('button', { name: 'Begin', exact: true }).first().click({ timeout: 10000 });
-      break;
+      return;
     } catch (e) {
       if (i === 2) throw e;
     }
   }
+}
+
+/**
+ * Home, then straight to one timer step of a skill. With `pause` the page clock stops the moment the step shows, so a
+ * check can see the step's first seconds however slowly the page draws.
+ */
+async function toStep(h, page, id, entry, { pause = false } = {}) {
+  await toSkill(h, page, id, entry);
   await page.locator('.dq-timer-stage').waitFor({ timeout: 10000 });
   if (pause) await h.pauseClock(page);
   await page.locator('.dq-timer-stage').scrollIntoViewIfNeeded();
@@ -1171,12 +1176,45 @@ export const scenarios = {
   },
 
   /**
-   * the clouds over the tide on Spectator Mode's watch step: one drifts in from the left, crosses the middle of the sky
-   * and drifts out on the right; the moon dims while one passes it and comes back after; with reduced motion one cloud
-   * stands still in the middle of the sky
+   * the clouds over the tide on Spectator Mode's watch step, when the player's thoughts are clouds: one drifts in from the
+   * left, crosses the middle of the sky and drifts out on the right; the moon dims while one passes it and comes back
+   * after; with reduced motion one cloud stands still in the middle of the sky. With cars or leaves, and on the emotion
+   * skill's watch step, the sky stays clear
    */
   async 'tide-clouds'(h) {
     const clouds = (last) => last.probe.clouds.split(' ').filter(Boolean).map((c) => c.split(':').map(Number));
+    /** twenty seconds of the tide on a stopped clock: no cloud comes up and the moon never dims */
+    const clear = async (page, where) => {
+      await showsStopped(h, page, where);
+      const seen = [];
+      for (let at = await after(h, page, 0); seen.length < 10; at = await after(h, page, 2000)) seen.push(at.probe);
+      h.expect(seen.every((p) => p.clouds === '' && p.moon === 1), `${where}: clouds over the tide (${seen.map((p) => p.clouds || '-').join(' | ')})`);
+    };
+    for (const [pick, words] of [['Cars on a quiet road', /car going past/], ['Leaves on a stream', /sits on a leaf/]]) {
+      const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
+      await page.clock.install();
+      await page.reload();
+      await toSkill(h, page, 'mindful-thoughts');
+      await tap(page, pick);
+      await tap(page, 'Ready');
+      await page.locator('.dq-timer-stage').waitFor({ timeout: 10000 });
+      await h.pauseClock(page);
+      await page.locator('.dq-timer-stage').scrollIntoViewIfNeeded();
+      h.expect(words.test(await page.locator('.dq-skill').innerText()), `${pick}: the watch step does not say ${words}`);
+      await clear(page, `tide with ${pick}`);
+      h.expect(!errors.length, errors.join('\n'));
+      await ctx.close();
+    }
+    {
+      // emotions as waves, which the tide already is
+      const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
+      await page.clock.install();
+      await page.reload();
+      await toStep(h, page, 'current-emotion', 'watch', { pause: true });
+      await clear(page, 'tide for an emotion');
+      h.expect(!errors.length, errors.join('\n'));
+      await ctx.close();
+    }
     {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
       await page.clock.install();

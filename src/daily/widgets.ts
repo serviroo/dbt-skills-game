@@ -194,7 +194,7 @@ function frost() {
  * that start brings `reveal` (the countdown unless the caller names something further down) into view if it isn't,
  * stopping clear of anything pinned.
  */
-export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; start?: string; held?: boolean; extend?: number; big?: string; extra?: HTMLElement[]; peers?: HTMLElement[]; reveal?: HTMLElement; onStart?: () => void; onDone: () => void }) {
+export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; input?: unknown; start?: string; held?: boolean; extend?: number; big?: string; extra?: HTMLElement[]; peers?: HTMLElement[]; reveal?: HTMLElement; onStart?: () => void; onDone: () => void }) {
   let dur = opts.seconds;
   const visual = opts.visual ?? 'ring';
   const wide = visual === 'wave';
@@ -260,6 +260,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
         kind: visual,
         // the breathing light is the player's own light, in their accent colour
         accent: visual === 'ring' ? playerAccent() : undefined,
+        input: opts.input,
         reduced: () => ctx.reduced(),
         onMotion: (fn) => ctx.onMotion(fn),
         clock: {
