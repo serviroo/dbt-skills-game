@@ -62,6 +62,12 @@ async function intro(h, beat, reduced = false, hiddenStart = false) {
       return a;
     };
   });
+  // the window's opening runs on the page's animation clock, which page.clock does not fake: that clock stays still until
+  // the scenario has seen the page hide, so the hide lands while the window is opening however slow the machine is
+  if (beat === 'windows' && !hiddenStart) {
+    opened.timeline = await opened.ctx.newCDPSession(page);
+    await opened.timeline.send('Animation.setPlaybackRate', { playbackRate: 0 });
+  }
   if (beat === 'windows') await page.clock.pauseAt(await page.evaluate(() => Date.now() + 50));
   await page.locator('.title-screen').press('Enter');
   await page.locator('.ui-skip').waitFor({ timeout: 60000 });
@@ -80,6 +86,22 @@ const read = (page) => page.evaluate(() => ({
   cues: window.__introCues.length,
 }));
 const hidden = (page, on) => page.evaluate((on) => window.__introHide(on), on);
+/** The window's opening once its pending play or pause has taken effect, so its time no longer moves by itself. */
+async function opening(page) {
+  let timeout;
+  try {
+    await Promise.race([
+      page.evaluate(() => window.__introOpening.ready),
+      new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('the window opening never settled')), 5000); }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+  return page.evaluate(() => {
+    const a = window.__introOpening;
+    return { state: a.playState, time: a.currentTime, end: a.effect.getComputedTiming().endTime };
+  });
+}
 async function audioState(page, state) {
   let timeout;
   try {
@@ -143,17 +165,21 @@ export const scenarios = {
     h.expect(!errors.length, errors.join('\n'));
   }])),
   ...Object.fromEntries([false, true].map((reduced) => [`intro-pause-window-${reduced ? 'reduced' : 'full'}`, async (h) => {
-    const { page, errors } = await intro(h, 'windows', reduced);
+    const { page, errors, timeline } = await intro(h, 'windows', reduced);
     await suspended(page);
+    const before = await opening(page);
+    h.expect(before.time < before.end, `the window had finished opening before the page hid: ${JSON.stringify(before)}`);
+    // the animation clock runs again: an opening left playing would reach its end in the real time waited below
+    await timeline.send('Animation.setPlaybackRate', { playbackRate: 1 });
     await page.evaluate(async () => {
       const { after } = await import('/src/ui/anim.ts');
       window.__introDelayDone = false;
       void after(300).then(() => { window.__introDelayDone = true; });
     });
-    const before = await page.evaluate(() => window.__introOpening.currentTime);
     await page.clock.fastForward(800);
+    await h.sleep(before.end);
     const after = await page.evaluate(() => ({ time: window.__introOpening.currentTime, done: window.__introDelayDone, existing: window.__introExistingDelayDone }));
-    h.expect(after.time === before, 'the window opening animation ran while hidden');
+    h.expect(after.time === before.time, 'the window opening animation ran while hidden');
     h.expect(!after.existing, 'a pending window delay expired while hidden');
     h.expect(!after.done, 'a window delay created while hidden ran before returning');
     await hidden(page, false);
@@ -175,7 +201,7 @@ export const scenarios = {
   async 'intro-pause-window-hidden-start'(h) {
     const { page, errors } = await intro(h, 'windows', false, true);
     await suspended(page);
-    const before = await page.evaluate(() => window.__introOpening.currentTime);
+    const before = (await opening(page)).time;
     await h.sleep(300);
     const held = await page.evaluate(() => ({ time: window.__introOpening.currentTime, state: window.__introOpening.playState }));
     h.expect(held.state === 'paused' && held.time === before, 'a window created while hidden kept animating');
