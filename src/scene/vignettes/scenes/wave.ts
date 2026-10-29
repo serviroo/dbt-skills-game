@@ -303,7 +303,7 @@ export const build: BuildScene = (accent) => {
   const rest = new THREE.PerspectiveCamera(FOV, 2, 0.1, 120);
   const ridges = [new THREE.Vector2(), new THREE.Vector2(), new THREE.Vector2(), new THREE.Vector2()];
   const lampAt = { value: new THREE.Vector3() };
-  const lampCol = { value: new THREE.Color().copy(LAMP).multiplyScalar(1) };
+  const lampCol = { value: LAMP.clone() };
   const boardAt = { value: new THREE.Vector4(0, 0, Math.cos(YAW), Math.sin(YAW)) };
   const lit = { value: 1 };
 
@@ -357,7 +357,7 @@ export const build: BuildScene = (accent) => {
   // more time after Done picks the sea up where it stopped instead of jumping ahead
   let gap = 0;
   let prev: Beat | null = null;
-  const probe = { t: 0, board: 0, sea: 0, gap: 0, tilt: 0 };
+  const probe = { t: 0, board: 0 };
   const fwd = new THREE.Vector3(), up = new THREE.Vector3(), side = new THREE.Vector3(), basis = new THREE.Matrix4();
 
   return {
@@ -394,7 +394,7 @@ export const build: BuildScene = (accent) => {
       camera.updateMatrixWorld();
       moonSky.position.copy(camera.position).addScaledVector(moon.value, MOON_FAR);
       time.value = t;
-      Object.assign(probe, { t, board: rider.position.y, sea: y, gap: rider.position.y - y, tilt: Math.atan(gx * fwd.x + gz * fwd.z) });
+      Object.assign(probe, { t, board: rider.position.y });
     },
     resize(width, height) {
       camera.aspect = width / height;
