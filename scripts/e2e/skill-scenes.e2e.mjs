@@ -328,7 +328,7 @@ export const scenarios = {
       await toStone(h, page);
       await live(h, page, tag);
       await moreTime(page);
-      await until(page, () => window.__scenes.frames > 10);
+      await until(page, () => window.__scenes.frames > 10 && window.__scenes.last.e > 0.5);
       const s = await scenes(page);
       h.expect(s.live === 1 && s.contexts === 1 && s.frames > 10, `${tag}: ${JSON.stringify(s)}`);
       h.expect(s.last.kind === 'drift' && !s.last.still && s.last.e > 0.5, `${tag}: the scene is not following the timer: ${JSON.stringify(s.last)}`);
