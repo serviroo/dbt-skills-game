@@ -40,7 +40,7 @@ export const scenarios = {
     await tap(page, 'Next');
     await sees(h, page, 'picture', { text: ["Imagine you're there now: a meeting with my manager on Monday.", 'Notice worry and an urge to leave starting.', 'using your plan: slow breathing, and saying "I can take a breath before I answer".', 'Words or sounds are fine'] });
     h.expect((await num(page)) === '30', `the first rehearsal shows ${await num(page)}, not 30`);
-    await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000);
+    await h.pauseClock(page);
     await startTimer(page);
     await page.clock.runFor(2500);
     await page.locator('.dq-step-body .dq-timer button', { hasText: /^\+15 s$/ }).click();

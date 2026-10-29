@@ -51,6 +51,18 @@ export async function until(page, check, arg, { timeout = 10000, polling = 100 }
   }
 }
 
+/**
+ * Stops the page clock where it is, so time moves only when the scenario says. clock.pauseAt alone takes a wall time,
+ * which a running clock may pass before the call lands on a slow page. Holding Date still first makes the pause land
+ * exactly there; then Date catches up with the time the clock ran on before it stopped.
+ */
+export async function pauseClock(page) {
+  const [wall, ticks] = await page.evaluate(() => [Date.now(), performance.now()]);
+  await page.clock.setFixedTime(wall);
+  await page.clock.pauseAt(wall);
+  await page.clock.setSystemTime(wall + (await page.evaluate((t) => performance.now() - t, ticks)));
+}
+
 /** Waits for entry motion to finish on boxes that come to rest, then compares consecutive frame rects. */
 export async function settled(page, selector, { timeout = 15000 } = {}) {
   const end = Date.now() + timeout;
@@ -546,7 +558,7 @@ export async function startHarness(flags = {}) {
   })());
 
   const shared = {};
-  const lane = (browser) => ({ browser, server, out, flags, shared, renderer, throttleErrors, zone: ZONE, open: opener(browser), evidence, evidenceAll: allEvidence(browser), note, leaves, shot, ls, youOf, deepFind, deepDrop, expect, sleep, frames, settled, until, reachHub, openSettings, SAVE, YOU, SEEN, stop, more });
+  const lane = (browser) => ({ browser, server, out, flags, shared, renderer, throttleErrors, zone: ZONE, open: opener(browser), evidence, evidenceAll: allEvidence(browser), note, leaves, shot, ls, youOf, deepFind, deepDrop, expect, sleep, frames, settled, until, pauseClock, reachHub, openSettings, SAVE, YOU, SEEN, stop, more });
   /** Another browser on the same dev server, so scenarios can run side by side: its own profiles, the same `shared`. */
   async function more() {
     if (stopping) throw new Error('the harness is stopping');

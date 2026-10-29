@@ -229,7 +229,7 @@ export const scenarios = {
     await h.reachHub(page);
     const had = await credits(h, page, ID);
     // The page clock stands still and moves only when told to, so a reading can't drift between a tap and a check.
-    await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000);
+    await h.pauseClock(page);
     await openFromList(h, page);
     await play(h, page, 'timer', [[{}, 'Begin'], [{}, 'May this moment be a little gentler'], [{}, 'Me']]);
     const num = page.locator('.dq-step-body .dq-timer-num');

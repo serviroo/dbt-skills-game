@@ -102,6 +102,12 @@ scenario gets an `h` object from `scripts/e2e/harness.mjs`, the same but for `br
 - `frames(page, n)`: wait for real browser frames, even with the page clock paused, with a 15 s deadline. Use this
   for an observation window, and a drawn-frame count for a scene's progress. Intentional endless motion keeps playing;
   measure its layout box or a still parent when testing layout. Keep separate performance deadlines such as 900 ms.
+- `pauseClock(page)`: stop the page clock where it is, after `page.clock.install()`, so time moves only with
+  `runFor` or `fastForward`. Use it instead of `page.clock.pauseAt` with a time read from the page: a running clock
+  on a slow page can pass that time before the call lands, and the pause then fails.
+- `until(page, check, arg?, { timeout = 10000, polling = 100 } = {})`: wait for a check in the page that awaits
+  something, such as a database read. `page.waitForFunction` counts the promise an async check returns as true, so
+  it returns at once.
 - `shot(page, name)`: a screenshot in the run's folder (`out`). Start the name with your file's name, and give
   whatever a scenario writes there a name no other scenario uses, as they run at once.
 - `ls(page, key)`, `youOf(page)`, `deepFind(obj, key)`, `deepDrop(obj, keys)`, `expect(cond, msg)`, `sleep(ms)`.

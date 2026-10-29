@@ -68,6 +68,15 @@ async function turnOn(h, page) {
   await page.evaluate(() => window.__daily.go({ name: 'hub' }));
 }
 
+/**
+ * The page clock stands still from a second on, so a pulse given just before (the switch turned on) is long over, as
+ * it is for a player, and a timer's start pulse plays on its own.
+ */
+async function standStill(h, page) {
+  await h.pauseClock(page);
+  await page.clock.runFor(1000);
+}
+
 /** Wise Mind's 20 second timer, which starts by itself after the breathing step. The page clock stands still from here. */
 async function wiseMind(h, page) {
   await page.waitForFunction(() => !!window.__daily, null, { timeout: 30000 });
@@ -75,7 +84,7 @@ async function wiseMind(h, page) {
   await page.evaluate(() => window.__daily.go({ name: 'hub' }));
   await h.reachHub(page);
   await page.evaluate(() => window.__daily.go({ name: 'skill', id: 'wise-mind' }));
-  await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000);
+  await standStill(h, page);
   await tap(page, 'Begin');
   await tap(page, 'Next');
   await timer(page).waitFor({ timeout: 5000 });
@@ -330,7 +339,7 @@ export const scenarios = {
     await h.reachHub(page);
     // Open Gauntlets: three 20 second timers in a row, each starting by itself
     await page.evaluate(() => window.__daily.go({ name: 'skill', id: 'willing-hands' }));
-    await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000);
+    await standStill(h, page);
     await tap(page, 'Begin');
     await timer(page).waitFor({ timeout: 5000 });
     h.expect((await buzzes(page)) === only(START), 'the first timer did not give one start pulse');

@@ -65,8 +65,6 @@ const restToday = async (h, page) => {
   return (save.events ?? []).filter((e) => e.k === 'rest' && e.day === day).length;
 };
 const safeOneTap = (page) => page.locator('.dq-top').getByRole('button', { name: /Safe Zone/ }).isVisible();
-/** Stops the page's clock, so the test moves time only when it says so. */
-const pause = async (page) => page.clock.pauseAt(await page.evaluate(() => Date.now() + 50));
 
 async function noCountdown(h, page, where) {
   const text = await page.locator('.dq-moment').innerText();
@@ -98,7 +96,7 @@ export const scenarios = {
   async 'one-minute-ends'(h) {
     const { ctx, page, errors, dialogs } = await openMoment(h);
     // time stands still between steps, so 59 s means 59 s after the choice
-    await pause(page);
+    await h.pauseClock(page);
     await radio(page, '1 minute').check();
     h.expect((await h.ls(page, KEPT_LENGTH)) === '1', 'the 1 minute choice was not kept on this device');
     await page.clock.fastForward(5000);
@@ -136,7 +134,7 @@ export const scenarios = {
     await h.reachHub(page);
     await page.getByRole('button', { name: 'Give me a moment', exact: true }).click();
     await page.locator('.dq-moment').waitFor({ timeout: 15000 });
-    await pause(page);
+    await h.pauseClock(page);
     h.expect(await radio(page, '3 minutes').isChecked(), 'the 3 minutes choice did not survive a reload');
     await page.clock.fastForward(65000);
     h.expect(!(await ended(page)), 'the 3 minute moment ended at 1 minute');
@@ -229,7 +227,7 @@ export const scenarios = {
   /** once a timed moment ends, the fading Low hum and How long can't be tapped, and Done stays where it was */
   async 'ended-controls-out-of-reach'(h) {
     const { ctx, page, errors } = await openMoment(h);
-    await pause(page);
+    await h.pauseClock(page);
     await radio(page, '1 minute').check();
     await settled(page, '.dq-mo-foot');
     const doneAt = await page.locator('.dq-mo-done').boundingBox();
@@ -299,7 +297,7 @@ export const scenarios = {
   /** choosing a length while a line promises no timing takes that line down at once, not at the next line */
   async 'timed-drops-open-line'(h) {
     const { ctx, page, errors } = await openMoment(h);
-    await pause(page);
+    await h.pauseClock(page);
     await page.clock.fastForward(37000);
     await page.clock.runFor(100);
     h.expect(/Nothing here is timed/.test(await line(page)), 'the open-ended line did not show 37 s in: ' + (await line(page)));
@@ -313,7 +311,7 @@ export const scenarios = {
   /** with reduced motion a timed moment's end goes to its finished state with only a short soft fade, the ring too */
   async 'reduced-motion-end'(h) {
     const { ctx, page, errors } = await openMoment(h, {}, undefined, '?mute&reduced');
-    await pause(page);
+    await h.pauseClock(page);
     await radio(page, '1 minute').check();
     await page.clock.fastForward(61000);
     await page.locator('.dq-mo-line', { hasText: END }).waitFor({ timeout: 5000 });
