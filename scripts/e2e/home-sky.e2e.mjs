@@ -375,6 +375,49 @@ async function safeAtOnce(h, page, move, what) {
   return { from: before.layers, first: after.layers };
 }
 
+/** A returning player with today's gift opened, in one mood: every text at every scroll position, on phones upright
+ *  and sideways and on laptop and desktop screens. Every size runs even when one fails, so a failure names all it
+ *  reaches. */
+async function contrastIn(h, mood) {
+  const { expect, out, shot } = h;
+  const [hh, mm] = MOODS[mood];
+  const bad = [];
+  const table = {};
+  const time = at(hh, mm);
+  const { ctx, page, errors } = await home(h, time, '?mute', SCREENS[0][1], returning(h, time));
+  await settle(h, page);
+  expect((await skyOf(page)).mood === mood, `Home at ${hh}h is not ${mood}: ` + JSON.stringify(await skyOf(page)));
+  expect(await page.locator('.dq-gift:not(.is-hidden) .dq-gift-k').isVisible(), "today's gift is not open on Home");
+  for (const [name, size] of SCREENS) {
+    await page.setViewportSize(size);
+    await h.sleep(500);
+    // the sweep only means something over the mood's own picture, so it starts once that is painted at this size
+    const pic = await paintsPicture(page, mood);
+    const shape = size.width >= size.height ? 'wide' : 'tall';
+    if (pic.url !== `/sky/${mood}-${shape}.webp` || !pic.same || !(pic.miss <= 10)) {
+      bad.push(`${mood} at ${name} does not paint its own ${shape} picture: ` + JSON.stringify(pic));
+      continue;
+    }
+    const rows = await sweep(h, page);
+    const low = rows.filter((r) => r.score < FLOOR);
+    const w = weakest(rows);
+    // the three weakest lines, each at its weakest place, so the report shows the sky's own margin next to any text
+    // that sits on a panel of its own
+    const least = [...new Map([...rows].sort((a, b) => b.score - a.score).map((r) => [r.text, r])).values()].sort((a, b) => a.score - b.score);
+    table[name] = { positions: new Set(rows.map((r) => r.y)).size, weakest: least.slice(0, 3).map((r) => ({ text: r.text, where: r.where, score: r.score, y: r.y })) };
+    if (rows.length < 10) bad.push(`${mood} at ${name}: only ${rows.length} text pieces found`);
+    if (!low.length) continue;
+    bad.push(`${mood} at ${name}: ${low.length} text below ${FLOOR}:1, weakest ${JSON.stringify(w)}`);
+    await page.evaluate((top) => document.querySelector('.dq').scrollTo({ top, behavior: 'instant' }), w.y);
+    await shot(page, `low-${mood}-${name}-y${w.y}`);
+  }
+  if (errors.length) bad.push(errors.join('\n'));
+  await ctx.close();
+  fs.writeFileSync(path.join(out, `home-sky-contrast-${mood}.json`), JSON.stringify(table, null, 2));
+  expect(!bad.length, bad.join('\n'));
+  return Object.fromEntries(Object.entries(table).map(([n, r]) => [n, r.weakest[0].score]));
+}
+
 export const scenarios = {
   /** each mood at its hour: the attribute, the painted sky at three sizes and the Safe Zone button, and the closed
    *  card's text at three sizes */
@@ -440,51 +483,6 @@ export const scenarios = {
       expect(ratio(s.inside, seen.night.safe.inside) <= 1.1, `the Safe Zone button itself looks different at ${m}: ${s.inside} vs night ${seen.night.safe.inside}`);
     }
     return { moods: Object.fromEntries(names.map((m) => [m, { top: seen[m].px.top, band: seen[m].px.band, safe: seen[m].safe.label }])) };
-  },
-
-  /** a returning player with today's gift opened: every text at every scroll position, in each mood, on phones upright
-   *  and sideways and on laptop and desktop screens. Every mood and size runs even when one fails, so a failure names
-   *  all it reaches. */
-  async 'home-sky-contrast'(h) {
-    const { expect, out, shot } = h;
-    const bad = [];
-    const table = {};
-    for (const [mood, [hh, mm]] of Object.entries(MOODS)) {
-      const time = at(hh, mm);
-      const { ctx, page, errors } = await home(h, time, '?mute', SCREENS[0][1], returning(h, time));
-      await settle(h, page);
-      expect((await skyOf(page)).mood === mood, `Home at ${hh}h is not ${mood}: ` + JSON.stringify(await skyOf(page)));
-      expect(await page.locator('.dq-gift:not(.is-hidden) .dq-gift-k').isVisible(), "today's gift is not open on Home");
-      table[mood] = {};
-      for (const [name, size] of SCREENS) {
-        await page.setViewportSize(size);
-        await h.sleep(500);
-        // the sweep only means something over the mood's own picture, so it starts once that is painted at this size
-        const pic = await paintsPicture(page, mood);
-        const shape = size.width >= size.height ? 'wide' : 'tall';
-        if (pic.url !== `/sky/${mood}-${shape}.webp` || !pic.same || !(pic.miss <= 10)) {
-          bad.push(`${mood} at ${name} does not paint its own ${shape} picture: ` + JSON.stringify(pic));
-          continue;
-        }
-        const rows = await sweep(h, page);
-        const low = rows.filter((r) => r.score < FLOOR);
-        const w = weakest(rows);
-        // the three weakest lines, each at its weakest place, so the report shows the sky's own margin next to any text
-        // that sits on a panel of its own
-        const least = [...new Map([...rows].sort((a, b) => b.score - a.score).map((r) => [r.text, r])).values()].sort((a, b) => a.score - b.score);
-        table[mood][name] = { positions: new Set(rows.map((r) => r.y)).size, weakest: least.slice(0, 3).map((r) => ({ text: r.text, where: r.where, score: r.score, y: r.y })) };
-        if (rows.length < 10) bad.push(`${mood} at ${name}: only ${rows.length} text pieces found`);
-        if (!low.length) continue;
-        bad.push(`${mood} at ${name}: ${low.length} text below ${FLOOR}:1, weakest ${JSON.stringify(w)}`);
-        await page.evaluate((top) => document.querySelector('.dq').scrollTo({ top, behavior: 'instant' }), w.y);
-        await shot(page, `low-${mood}-${name}-y${w.y}`);
-      }
-      if (errors.length) bad.push(errors.join('\n'));
-      await ctx.close();
-    }
-    fs.writeFileSync(path.join(out, 'home-sky-contrast.json'), JSON.stringify(table, null, 2));
-    expect(!bad.length, bad.join('\n'));
-    return Object.fromEntries(Object.entries(table).map(([m, t]) => [m, Object.fromEntries(Object.entries(t).map(([n, r]) => [n, r.weakest[0].score]))]));
   },
 
   /** 07:58 to 08:00 with Home open: day's picture comes in over dawn's over seconds, never in one frame, and dawn's
@@ -670,3 +668,6 @@ export const scenarios = {
     await ctx.close();
   },
 };
+
+// one scenario per mood, so CI can run the four sweeps side by side
+for (const mood of Object.keys(MOODS)) scenarios[`home-sky-contrast-${mood}`] = (h) => contrastIn(h, mood);
