@@ -196,9 +196,11 @@ async function history(page, row) {
 export const slug = (s) => s.replace(/[^\w]+/g, '-').replace(/^-|-$/g, '');
 export const holdDaily = (h, held) => (ctx) =>
   ctx.route('**/src/daily/index.ts', async (r) => {
-    const t = Date.now();
-    await h.sleep(9000);
-    held.push(Date.now() - t);
+    // held until 9 s have passed on the clock that measures it: a 9000 ms timer can end a millisecond short by Date.now()
+    const t = performance.now();
+    let ms;
+    while ((ms = performance.now() - t) < 9000) await h.sleep(9000 - ms);
+    held.push(ms);
     await r.continue().catch(() => {});
   });
 

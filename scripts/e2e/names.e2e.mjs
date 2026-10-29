@@ -263,7 +263,7 @@ export const scenarios = {
             o.disconnect();
             requestAnimationFrame(() => {
               const t0 = performance.now();
-              for (const end = t0 + 11000; performance.now() < end; );
+              while (performance.now() - t0 < 11000);
               window.__stall = performance.now() - t0;
             });
           }
