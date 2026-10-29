@@ -8,10 +8,11 @@
 // words (DESIGN.md principle 8), none of principle 9's wording a lint can catch, no hard-coded "Player" or unknown
 // token, every timer 20 to 90 s with a step id (skill-flows opens each one), a screen that offers another skill or the
 // Safe Zone leads with this skill's own way forward (its finish, a later step, or the Safe Zone; never another skill or
-// a repeat), and cold-water or intense-exercise steps carry a caution that names the heart risk and a
-// "breathe instead" option (principle 11). Each of those steps is then opened at 390x844, 844x390 and 320x568: its
-// caution, its own action and "Breathe instead" must show without scrolling, and the last two must be buttons of the same
-// weight. On a timer, once Start is tapped, the countdown, Next and "Breathe instead" must all be on screen.
+// a repeat), cold water shows only in a cool choice (cold-water-choices checks those), and intense-exercise steps carry
+// a caution that names the heart risk and a "breathe instead" option (principle 11). Each intense-exercise step is then
+// opened at 390x844, 844x390 and 320x568: its caution, its own action and "Breathe instead" must show without scrolling,
+// and the last two must be buttons of the same weight. On a timer, once Start is tapped, the countdown, Next and
+// "Breathe instead" must all be on screen.
 // Skills in ENFORCED fail the run. Every other skill's problems are printed as a todo list and returned, so the runner
 // keeps them in report.json. Once a skill passes, add it to ENFORCED.
 // copy-everywhere holds every other string the app ships (the Safe Zone, Home, the intro, labels in code) to the same
@@ -54,7 +55,8 @@ const COPY = {
   bodyNumber: String.raw`\b\d+(?:[.,]\d+)?\s?(?:kg|kgs|kilos?|kilograms?|lbs?|pounds?|calories|kcal)\b`,
   player: String.raw`\bPlayer\b`,
   token: String.raw`\{(?!(?:name|companion)\})[^}]*\}`,
-  coldOrHard: String.raw`\bcold (water|shower)|\bice\b|(?<!not )\bicy\b|\bcool shower|intense (exercise|movement)|hard exercise|fast movement|move fast|\bjog\b|sprint|jumping jacks|star jumps|burpees`,
+  cold: String.raw`\bcold (water|shower)|\bice\b|(?<!not )\bicy\b|\bcool shower`,
+  hard: String.raw`intense (exercise|movement)|hard exercise|fast movement|move fast|\bjog\b|sprint|jumping jacks|star jumps|burpees`,
   caution: String.raw`^(?=[\s\S]*\bskip\b)(?=[\s\S]*\bheart\b)`,
 };
 
@@ -157,15 +159,16 @@ function copyProblems(page) {
             if (!forward(o)) bad.add(`${where}: leads with "${o.label}", which ${o.go.startsWith('skill:') ? 'opens another skill' : 'goes back to an earlier step'}; lead with this skill's own way forward`);
           }
         }
-        // Cold water or hard exercise, named in the step itself or in an option that has no step of its own to warn on
+        // Cold water only ever shows in a cool choice, beside cool air with its caution under both
         const said = texts([st.title, st.text, st.big], sets).join(' ');
-        const isColdOrHard = (s) => !!s && re.coldOrHard.test(texts([s.title, s.text, s.big], sets).join(' '));
-        const coldOrHard = re.coldOrHard.test(said) || opts.some((o) => re.coldOrHard.test(o.label) && !isColdOrHard(byId.get(o.go)));
-        if (coldOrHard) {
+        if (st.kind !== 'cool' && (re.cold.test(said) || opts.some((o) => re.cold.test(o.label) && byId.get(o.go)?.kind !== 'cool'))) bad.add(`${where}: cold water outside a cool choice`);
+        // Hard exercise, named in the step itself or in an option that has no step of its own to warn on
+        const isHard = (s) => !!s && re.hard.test(texts([s.title, s.text, s.big], sets).join(' '));
+        if (re.hard.test(said) || opts.some((o) => re.hard.test(o.label) && !isHard(byId.get(o.go)))) {
           risky[sk.id].push({ where, step: st.id ?? null, first: i === 0 });
           const small = texts(st.small, sets).join(' ');
-          if (!re.caution.test(small)) bad.add(`${where}: cold water or hard exercise with no caution`);
-          if (!opts.some((o) => /breath/i.test(o.label) && byId.get(o.go)?.kind === 'breath')) bad.add(`${where}: cold water or hard exercise with no "breathe instead" option`);
+          if (!re.caution.test(small)) bad.add(`${where}: hard exercise with no caution`);
+          if (!opts.some((o) => /breath/i.test(o.label) && byId.get(o.go)?.kind === 'breath')) bad.add(`${where}: hard exercise with no "breathe instead" option`);
         }
       });
       for (const item of lines) {
@@ -287,7 +290,7 @@ async function insteadProblems(h, risky) {
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
-function shippedStrings() {
+export function shippedStrings() {
   const out = [];
   const lineOf = (src) => {
     const starts = [...src.matchAll(/\n/g)].map((m) => m.index + 1);

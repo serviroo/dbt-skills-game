@@ -400,7 +400,7 @@ const SHOWN = {
   start: [ACTS, 4],
   breathe: ['.dq-ring-count', 1],
   squeeze: ['.dq-ring-count', 1],
-  cold: ['.dq-small, .dq-timer .dq-btn', 3],
+  cold: ['.dq-cool-pick .dq-btn, .dq-cool-care', 3],
   check: ['.dq-opt', 3],
   stop: [`.dq-sz-stop:not(.is-hidden), ${ACTS}:first-child`, 2],
   reasons: ['.dq-sz-list > li:first-child', 1],
@@ -493,10 +493,10 @@ async function everyScreen(h, viewport, { insets } = {}) {
       };
       judge(`${label} on arrival`, await look(sel), sel, n);
       if (at === 'cold') {
-        // principle 11: "Breathe instead" carries the same weight as Start, not a quieter link under it
-        const pair = await page.locator('.dq-sz-body .dq-timer .dq-btn').evaluateAll((bs) => bs.map((b) => `${b.textContent.trim()}: ${b.className} ${Math.round(b.getBoundingClientRect().height)}px`));
+        // principle 11: cold water sits beside cool air, two choices of the same weight
+        const pair = await page.locator('.dq-sz-body .dq-cool-pick .dq-btn').evaluateAll((bs) => bs.map((b) => `${b.textContent.trim()}: ${b.className} ${Math.round(b.getBoundingClientRect().height)}px`));
         const weights = new Set(pair.map((p) => p.slice(p.indexOf(':'))));
-        if (pair.length !== 2 || !/^Breathe instead:/.test(pair[1]) || weights.size !== 1) failed.push(`${label}: Start and "Breathe instead" are not two choices of the same weight: ${pair.join(' | ')}`);
+        if (pair.length !== 2 || !/^Cool air:/.test(pair[0]) || !/^Cold water:/.test(pair[1]) || weights.size !== 1) failed.push(`${label}: cool air and cold water are not two choices of the same weight: ${pair.join(' | ')}`);
       }
       await h.shot(page, `me92-every-${at}-${size.replace(/ /g, '-')}`);
       const lists = page.locator('.dq-sz-body').getByRole('button', { name: 'Copy your lists' });
@@ -531,11 +531,11 @@ async function everyScreen(h, viewport, { insets } = {}) {
         if (grouped.length !== flat.length || moved.length) failed.push(`${label}: grouping the heading moved ${moved.length} of ${grouped.length} boxes: ${moved.slice(0, 3).join(' | ')}`);
       }
       if (at === 'cold') {
-        // once Start is tapped, the countdown and "Breathe instead" are on screen together (principle 11)
-        await page.getByRole('button', { name: 'Start 30 seconds', exact: true }).click();
+        // once a choice is tapped, its countdown is on screen
+        await page.getByRole('button', { name: 'Cool air', exact: true }).click();
         await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
-        const running = '.dq-timer-num, .dq-timer .dq-btn';
-        judge(`${label} after Start`, await look(running), running, 2);
+        const running = '.dq-timer-num';
+        judge(`${label} after Cool air`, await look(running), running, 1);
         await h.shot(page, `me92-every-cold-started-${size.replace(/ /g, '-')}`);
       }
     }
@@ -591,15 +591,15 @@ export const scenarios = {
     const failed = [...(await everyScreen(h, TALL)), ...(await everyScreen(h, MID)), ...(await everyScreen(h, SMALL))];
     h.expect(!failed.length, failed.join('\n'));
   },
-  // principle 11: "Breathe instead" goes straight to breathing, whose Next then skips past cool water; the quiet Next
-  // skips too. Each screen is told apart by the heading the player sees.
+  // "Breathe instead" goes straight to breathing, whose Next then skips past cool air or cold water; the quiet Next skips
+  // too. Each screen is told apart by the heading the player sees.
   'safe-zone-cold-breathe-instead': async (h) => {
     const { ctx, page, errors } = await boot(h, { save: returning(), reduced: true });
     const c = step();
     await page.evaluate(async () => {
-      const { SAFE } = await import('/src/content/dbt.ts');
+      const { COOL, SAFE } = await import('/src/content/dbt.ts');
       const { typo } = await import('/src/daily/ui.ts');
-      const by = new Map([[SAFE.breathe.title, 'breathe'], [SAFE.squeeze.title, 'squeeze'], [SAFE.cold.title, 'cold'], [SAFE.check, 'check']].map(([t, at]) => [typo(t), at]));
+      const by = new Map([[SAFE.breathe.title, 'breathe'], [SAFE.squeeze.title, 'squeeze'], [COOL.title, 'cold'], [SAFE.check, 'check']].map(([t, at]) => [typo(t), at]));
       window.__me92at = () => {
         const t = document.querySelector('.dq-sz-body [data-focus]')?.textContent ?? '';
         return by.get(t) ?? t;
@@ -619,9 +619,9 @@ export const scenarios = {
     try {
       await page.locator('header .dq-safe').click();
       for (const start of [true, false]) {
-        const tag = start ? 'after Start' : 'before Start';
+        const tag = start ? 'after Cool air' : 'before a choice';
         await open('cold');
-        if (start) await page.getByRole('button', { name: 'Start 30 seconds', exact: true }).click();
+        if (start) await page.getByRole('button', { name: 'Cool air', exact: true }).click();
         c.ok((await tap('Breathe instead', 'breathe')) === 'breathe', `${tag}: "Breathe instead" did not open breathing (at ${await at()})`);
         c.ok((await tap('Next', 'check')) === 'check', `${tag}: Next after breathing instead went to ${await at()}, not past cool water`);
       }

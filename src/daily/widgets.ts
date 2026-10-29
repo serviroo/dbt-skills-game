@@ -2,10 +2,10 @@
  * Guided-practice widgets. Every visual is a pure function of elapsed time from clock.onFrame, so they pause,
  * seek and capture cleanly. Reduced motion keeps the pacing (numbers, words, fades) and drops movement.
  */
-import type { Skill, Visual } from '../content/dbt';
+import { COOL, type Skill, type Visual } from '../content/dbt';
 import { hasScene, mountScene, type Beat } from '../scene/vignettes/host';
 import { onFrame, now, backInSight } from './clock';
-import { btn, h, typo } from './ui';
+import { btn, h, p, typo } from './ui';
 
 const LN = 'fill="none" stroke="#a9dcff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"';
 const MINT = 'fill="none" stroke="#89cf9d" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"';
@@ -190,10 +190,11 @@ function frost() {
 }
 
 /**
- * Countdown with an optional visual. Waits for a tap when `start` is given; that tap brings `reveal` (the countdown
- * unless the caller names something further down) into view if it isn't, stopping clear of anything pinned.
+ * Countdown with an optional visual. Waits for a tap when `start` is given, or for the caller's own start() when `held`;
+ * that start brings `reveal` (the countdown unless the caller names something further down) into view if it isn't,
+ * stopping clear of anything pinned.
  */
-export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; start?: string; extend?: number; big?: string; extra?: HTMLElement[]; peers?: HTMLElement[]; reveal?: HTMLElement; onStart?: () => void; onDone: () => void }) {
+export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; start?: string; held?: boolean; extend?: number; big?: string; extra?: HTMLElement[]; peers?: HTMLElement[]; reveal?: HTMLElement; onStart?: () => void; onDone: () => void }) {
   let dur = opts.seconds;
   const visual = opts.visual ?? 'ring';
   const wide = visual === 'wave';
@@ -352,7 +353,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
     (opts.reveal ?? stageEl).scrollIntoView({ block: 'nearest', behavior: ctx.reduced() ? 'auto' : 'smooth' });
   };
   if (opts.start) actions.append(btn(opts.start, tapped, { kind: 'primary' }), ...extra);
-  else begin();
+  else if (!opts.held) begin();
   render(now());
   // running by the clock: a hidden page draws no frames, so a timer can be over before it shows Done
   return {
@@ -363,9 +364,33 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; st
       unmount?.();
     },
     begin,
+    start: tapped,
     started: () => t0 >= 0,
     running: () => t0 >= 0 && !finished && now() - t0 < dur,
   };
+}
+
+/**
+ * Cool air or cold water: two choices of the same weight, with the caution right under them so it's read before anything
+ * starts (DESIGN.md principle 11), then the countdown and how to do each. Either one starts the 30 seconds, about as
+ * long as cold should last, so there is no "+15 s"; picking the other one after that only moves the mark.
+ */
+export function coolChoice(ctx: Ctx, opts: { reveal?: HTMLElement; onDone: () => void }) {
+  const tv = timerView(ctx, { seconds: 30, visual: 'cold', held: true, reveal: opts.reveal, onDone: opts.onDone });
+  const pick = (b: HTMLElement) => {
+    for (const x of picks) x.setAttribute('aria-pressed', String(x === b));
+    if (!tv.started()) tv.start();
+  };
+  const picks = [COOL.air, COOL.water].map((label) => {
+    const b = btn(label, () => pick(b), { kind: 'primary' });
+    b.setAttribute('aria-pressed', 'false');
+    return b;
+  });
+  const caution = p(COOL.caution, 'dq-text dq-text--step dq-cool-care');
+  caution.id = `dq-cool-${++gid}`;
+  picks[1].setAttribute('aria-describedby', caution.id);
+  const el = h('div', { class: 'dq-cool' }, h('div', { class: 'dq-actions dq-actions--pair dq-cool-pick' }, picks), caution, tv.el, p(COOL.text, 'dq-text dq-text--step'));
+  return { el, stop: tv.stop, running: tv.running };
 }
 
 /** Press and hold. Letting go early simply drains the ring back; nothing is lost. */

@@ -1,10 +1,10 @@
 /**
- * Safe Zone: body first (breathing, squeeze and release, then optional cool air), then STOP, then their own lists, then
- * people and services. No XP, toasts, glows or sound effects in here. One calm link to people on every screen, and a
- * lights-up toggle beside the dim default.
+ * Safe Zone: body first (breathing, squeeze and release, then cool air or cold water), then STOP, then their own
+ * lists, then people and services. No XP, toasts, glows or sound effects in here. One calm link to people on every
+ * screen, and a lights-up toggle beside the dim default.
  */
 import { animate } from '../ui/anim';
-import { SAFE } from '../content/dbt';
+import { COOL, SAFE } from '../content/dbt';
 import { BESIDE } from '../core/stored-names';
 import { write } from '../core/cleared';
 import { REGIONS, regionById, regionFromLocale, type CrisisLine } from '../content/crisis-lines';
@@ -14,7 +14,7 @@ import { momentView } from './moment';
 import { uid } from './store';
 import { btn, chip, field, h, p, panel, typo } from './ui';
 import { supportListsCopy } from './support-lists';
-import { breathRing, pmrView, timerView, type Ctx } from './widgets';
+import { breathRing, coolChoice, pmrView, type Ctx } from './widgets';
 
 const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.userAgent));
 
@@ -187,16 +187,10 @@ export function safeScreen(app: App, route: Route): ScreenOut {
         return swap(at, [h3(SAFE.breathe.title), p(SAFE.breathe.text, 'dq-text')], ring.el, h('div', { class: 'dq-actions dq-actions--center' }, btn('Next', () => show(then ?? nextOf(at)), { kind: 'quiet' })));
       }
       case 'cold': {
-        const instead = btn('Breathe instead', () => show('breathe', nextOf(at)), { kind: 'primary' });
-        const tv = timerView(ctx, {
-          seconds: 30,
-          visual: 'cold',
-          start: 'Start 30 seconds',
-          peers: [instead],
-          onDone: () => show(nextOf(at)),
-        });
-        stops.push(tv.stop);
-        return swap(at, [h3(SAFE.cold.title)], p(SAFE.cold.small, 'dq-small'), tv.el, p(SAFE.cold.text, 'dq-text'), h('div', { class: 'dq-actions dq-actions--center' }, nextBtn(at, 'Next', 'quiet')));
+        const nb = nextBtn(at, 'Next', 'quiet');
+        const cc = coolChoice(ctx, { onDone: () => show(nextOf(at)) });
+        stops.push(cc.stop);
+        return swap(at, [h3(COOL.title)], cc.el, h('div', { class: 'dq-actions dq-actions--center' }, nb, btn('Breathe instead', () => show('breathe', nextOf(at)), { kind: 'quiet' })));
       }
       case 'squeeze': {
         const nb = nextBtn(at, 'Next', 'quiet');

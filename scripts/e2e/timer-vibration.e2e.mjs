@@ -199,7 +199,7 @@ export const scenarios = {
     let got = await buzzes(page);
     h.expect(got === none, `opening the Safe Zone over a running timer buzzed: ${got}`);
     await page.evaluate(() => window.__daily.go({ name: 'safe', at: 'cold' }));
-    await tap(page, 'Start 30 seconds');
+    await tap(page, 'Cool air');
     await page.clock.runFor(32000);
     got = await buzzes(page);
     h.expect(got === none, `the Safe Zone's own timer buzzed: ${got}`);
