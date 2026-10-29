@@ -1157,6 +1157,19 @@ export const scenarios = {
     }
   },
 
+  /** TIPP's minute of fast movement shows the countdown ring alone: no breathing light while the player moves */
+  async 'tipp-move-no-light'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
+    await toStep(h, page, 'tipp', 'move');
+    // a scene starts as its step shows: the stage waits for it, then shows it
+    const scene = await page.locator('.dq-timer-stage.is-scene-wait, .dq-timer-stage.is-scene-live, .dq-scene').count();
+    h.expect(scene === 0, `TIPP move: a 3D scene started (${JSON.stringify(await scenes(page))})`);
+    h.expect((await page.locator('.dq-timer-svg--count .dq-timer-arc').count()) === 1, 'TIPP move: the countdown ring is not there');
+    await h.shot(page, 'tipp-move-phone');
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
   /** with reduced motion the wave, the light, the tide and Give me a moment each draw one still frame */
   async 'water-scenes-still'(h) {
     for (const k of [...KINDS, { kind: 'ring', moment: true }]) {

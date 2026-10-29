@@ -30,7 +30,8 @@ export interface Opt {
 
 export type ListId = 'comfort' | 'activities' | 'reasons';
 export type Effect = 'saveSoothe' | 'saveMap';
-export type Visual = 'ring' | 'drift' | 'wave' | 'tide' | 'hands' | 'cold' | 'glow';
+/** a timer's picture: `ring` is the breathing light, `count` the countdown ring alone, for a timer that isn't a breath */
+export type Visual = 'ring' | 'count' | 'drift' | 'wave' | 'tide' | 'hands' | 'cold' | 'glow';
 
 interface Base {
   id?: string;
@@ -648,7 +649,7 @@ export const SKILLS: Skill[] = [
         title: 'I. Intense exercise',
         seconds: 60,
         start: 'Start 60 s',
-        visual: 'ring',
+        visual: 'count',
         text: 'Standing, move fast for a minute: march or jog on the spot, shake out your arms and hands. Stop any time.',
         small: MOVE_CAUTION,
         options: [{ label: 'Breathe instead', go: 'paced', instead: true }],
