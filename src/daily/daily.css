@@ -3224,11 +3224,6 @@ textarea.dq-input {
   transition-duration: 0.01ms !important;
   animation: none !important;
 }
-@media (prefers-reduced-motion: reduce) {
-  .dq-slit {
-    animation: none;
-  }
-}
 
 /* ---------- round 2 additions ---------- */
 .dq-cat svg {

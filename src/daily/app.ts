@@ -1,5 +1,5 @@
 import { companionName, playerName } from '../core/you';
-import { params, setMotion } from '../core/params';
+import { onSystemMotion, params, setMotion } from '../core/params';
 import { cleared, onClear } from '../core/cleared';
 import { animate } from '../ui/anim';
 import { BUZZ, BUZZ_GAP, SKY, WINDOW } from '../motion/tokens';
@@ -192,6 +192,8 @@ export class App {
       this.volBtn = volumeButton(opts.volume, { placement: 'top', align: 'right' });
     }
     this.applyMotion();
+    // the device's own setting changed while the page is open: with Motion on Auto, every scene and animation follows it
+    this.offs.push(onSystemMotion(() => this.applyMotion()));
     // names chosen in another open copy: Home is redrawn, name plates elsewhere take the new name in place
     let shown = `${playerName()}\n${companionName()}`;
     this.store.onChange(() => {
@@ -246,7 +248,10 @@ export class App {
     this.stillShown = still;
     this.motionFns.forEach((f) => f());
   }
-  /** Calls fn whenever the motion setting changes, here or in another open copy. Returns the function that stops it. */
+  /**
+   * Calls fn whenever motion turns on or off: the setting changed here or in another open copy, or the device's own
+   * setting changed while Motion is on Auto. Returns the function that stops it.
+   */
   onMotion(fn: () => void) {
     this.motionFns.add(fn);
     return () => void this.motionFns.delete(fn);
@@ -438,6 +443,11 @@ export class App {
     const w = new LanternWindow(lanternLayer(), { width: 'min(92vw, 540px)', ...spec });
     w.root.classList.add('dq-sw');
     if (this.reduced()) w.root.classList.add('dq-sw--still');
+    // Motion changed while it is up, here or in another copy: the window follows
+    const offMotion = this.onMotion(() => {
+      w.root.classList.toggle('dq-sw--still', this.reduced());
+      w.setStill(this.reduced());
+    });
     w.root.tabIndex = -1;
     void w.open();
     w.root.focus({ preventScroll: true });
@@ -449,6 +459,7 @@ export class App {
     });
     const v = await w.waitForInput();
     done();
+    offMotion();
     if (v !== DISMISSED || shut) {
       // the scrim fades with the collapse but takes every tap, and Home stays out of reach, until the window is gone:
       // a second tap or key meant for the window never lands on what is under it (unless the Safe Zone already cleared it)

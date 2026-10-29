@@ -1,10 +1,10 @@
 // The Night Watch gathers around a 3D camp on the Shadows screen: live and drawn at phone, sideways and desktop sizes
 // with everyone who has arrived (and only them); a tap or the keyboard on a watcher opens their own card, name field
 // and all, while the Safe Zone stays one tap away and takes the camp down; one still frame with reduced motion, and
-// moving or still again as Motion changes (here or in another copy); the roster as before with no WebGL; one WebGL
-// context however often it opens; back after a lost context; every part of every watcher where the model file puts it;
-// an old save; no :has(); a failed load retried on the next visit; a card opened during the page's entrance; a late
-// chapter list stays closed after leaving.
+// moving or still again as Motion changes while the camp is up (here, in another copy, or on the device with Motion on
+// Auto); the roster as before with no WebGL; one WebGL context however often it opens; back after a lost context; every
+// part of every watcher where the model file puts it; an old save; no :has(); a failed load retried on the next visit;
+// a card opened during the page's entrance; a late chapter list stays closed after leaving.
 import { fileURLToPath } from 'node:url';
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
@@ -38,6 +38,31 @@ const state = (page) =>
     canvases: document.querySelectorAll('.dq-scene canvas').length,
     route: window.__daily?.route?.name,
   }));
+
+/** The camp settles on one still frame and draws no more. Returns what it had drawn. */
+async function still(h, page, where) {
+  await page.waitForFunction(() => window.__scenes?.last.still, null, { timeout: 15000 }).catch(async (e) => {
+    if (e.name !== 'TimeoutError') throw e;
+    throw new Error(`${where}: the camp kept moving (${JSON.stringify((await state(page)).scenes.last)})`);
+  });
+  const a = (await state(page)).scenes;
+  await h.frames(page, 60);
+  const b = (await state(page)).scenes;
+  h.expect(a.last.still && b.frames === a.frames, `${where}: the camp did not settle on one still frame (${a.frames} -> ${b.frames}, still ${a.last.still})`);
+  return b;
+}
+/** The camp draws more than ten moving frames after `from`, its time going on. Returns what it has drawn. */
+async function moving(page, where, from) {
+  await page.waitForFunction((from) => {
+    const s = window.__scenes;
+    return s?.frames > from.frames + 10 && !s.last.still && s.last.e > from.last.e;
+  }, from, { timeout: 15000 }).catch(async (e) => {
+    if (e.name !== 'TimeoutError') throw e;
+    const s = (await state(page)).scenes;
+    throw new Error(`${where}: the camp drew ${s.frames - from.frames} new frames (still ${s.last.still}), needed 11 moving ones`);
+  });
+  return (await state(page)).scenes;
+}
 
 /** Home, then the Shadows screen with the camp scrolled into view (it draws only while on screen). */
 async function toCamp(h, page, where, wait = true) {
@@ -372,28 +397,6 @@ export const scenarios = {
    */
   async 'camp-motion'(h) {
     const { ctx, page, errors } = await h.open(seed(h, 30), '?mute', PHONE);
-    const still = async (where) => {
-      await page.waitForFunction(() => window.__scenes?.last.still, null, { timeout: 15000 }).catch(async (e) => {
-        if (e.name !== 'TimeoutError') throw e;
-        throw new Error(`${where}: the camp kept moving (${JSON.stringify((await state(page)).scenes.last)})`);
-      });
-      const a = (await state(page)).scenes;
-      await h.frames(page, 60);
-      const b = (await state(page)).scenes;
-      h.expect(a.last.still && b.frames === a.frames, `${where}: the camp did not settle on one still frame (${a.frames} -> ${b.frames}, still ${a.last.still})`);
-      return b;
-    };
-    const moving = async (where, from) => {
-      await page.waitForFunction((from) => {
-        const s = window.__scenes;
-        return s?.frames > from.frames + 10 && !s.last.still && s.last.e > from.last.e;
-      }, from, { timeout: 15000 }).catch(async (e) => {
-        if (e.name !== 'TimeoutError') throw e;
-        const s = (await state(page)).scenes;
-        throw new Error(`${where}: the camp drew ${s.frames - from.frames} new frames (still ${s.last.still}), needed 11 moving ones`);
-      });
-      return (await state(page)).scenes;
-    };
     // Motion set on this copy's own Settings screen, then back to the camp
     const here = async (name) => {
       await page.evaluate(() => window.__daily.go({ name: 'settings' }));
@@ -403,9 +406,9 @@ export const scenarios = {
       await page.locator('.w2-camp.is-scene-live').waitFor({ timeout: 20000 });
     };
     await toCamp(h, page, 'motion');
-    let s = await moving('Full at first', (await state(page)).scenes);
+    let s = await moving(page, 'Full at first', (await state(page)).scenes);
     await here('Reduced');
-    s = await still('Reduced here');
+    s = await still(h, page, 'Reduced here');
     // another open copy (a second tab of this one) changes it on its own Settings screen while this camp stays up
     const [other] = await Promise.all([ctx.waitForEvent('page'), page.evaluate(() => void window.open('/?mute'))]);
     other.on('pageerror', (e) => errors.push('pageerror, other copy: ' + e.message));
@@ -413,13 +416,47 @@ export const scenarios = {
     // the copy with the camp is the one in view: a window left under another draws hardly any frames
     await page.bringToFront();
     await other.getByRole('radio', { name: 'Motion: Full', exact: true }).click();
-    s = await moving('Full in another copy', s);
+    s = await moving(page, 'Full in another copy', s);
     await other.getByRole('radio', { name: 'Motion: Reduced', exact: true }).click();
-    s = await still('Reduced in another copy');
+    s = await still(h, page, 'Reduced in another copy');
     h.expect((await page.evaluate(() => document.visibilityState)) === 'visible', 'the copy with the camp was hidden meanwhile, so it was not followed while in view');
     await here('Full');
-    await moving('Full here', s);
+    await moving(page, 'Full here', s);
     await drawn(h, page, 'motion');
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /**
+   * The device's reduce-motion setting changed while the camp is up, with no reload: on Auto, turning it on stills the
+   * camp and the page, and turning it off moves them again; with Motion on Full the camp keeps moving through it
+   */
+  async 'camp-follows-device-motion'(h) {
+    const { ctx, page, errors } = await h.open(seed(h, 30), '?mute', PHONE);
+    const cdp = await ctx.newCDPSession(page);
+    const device = (value) => cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value }] });
+    const page$ = () => page.evaluate(() => ({ still: document.querySelector('.dq').classList.contains('is-still'), reduced: window.__daily.reduced() }));
+    await toCamp(h, page, 'device motion');
+    let s = await moving(page, 'Auto, device motion on', (await state(page)).scenes);
+    await device('reduce');
+    s = await still(h, page, 'Auto, device turned to reduce');
+    const off = await page$();
+    h.expect(off.still && off.reduced, `Auto, device turned to reduce: the page is not still (${JSON.stringify(off)})`);
+    await h.shot(page, 'device-reduce');
+    await device('no-preference');
+    s = await moving(page, 'Auto, device turned back', s);
+    const on = await page$();
+    h.expect(!on.still && !on.reduced, `Auto, device turned back: the page is still (${JSON.stringify(on)})`);
+    // Motion on Full is the player's own choice: the device setting doesn't change it
+    await page.evaluate(() => window.__daily.go({ name: 'settings' }));
+    await page.getByRole('radio', { name: 'Motion: Full', exact: true }).click();
+    await page.evaluate(() => window.__daily.go({ name: 'shadows' }));
+    await page.locator('.w2-camp').evaluate((e) => e.scrollIntoView({ block: 'center' }));
+    await page.locator('.w2-camp.is-scene-live').waitFor({ timeout: 20000 });
+    s = (await state(page)).scenes;
+    await device('reduce');
+    await moving(page, 'Full, device turned to reduce', s);
+    h.expect(!(await page$()).reduced, 'Full, device turned to reduce: the game took the device setting over its own');
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },

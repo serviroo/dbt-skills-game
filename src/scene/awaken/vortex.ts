@@ -348,7 +348,7 @@ export function buildVortex() {
     const tq = Math.floor(t * 12) / 12;
     const erupt = smoothstep(0, 0.27, t);
     const over = 1 + 0.1 * Math.exp(-Math.pow((t - 0.3) / 0.12, 2));
-    const pulse = 1 + (reduced ? 0.03 : 0.11) * Math.sin(Math.PI * 2 * 2.5 * tq);
+    const pulse = 1 + (params.reduced ? 0.03 : 0.11) * Math.sin(Math.PI * 2 * 2.5 * tq);
     const end = 1 - smoothstep(VORTEX_DUR - 0.42, VORTEX_DUR, t);
     const amt = erupt * over * pulse * end;
     sheetU.uT.value = tq;
