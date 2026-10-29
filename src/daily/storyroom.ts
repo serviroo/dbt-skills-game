@@ -81,12 +81,12 @@ const shownTitle = (t: string) => t.trim() || STORY.untitled;
 
 /** What a drawing is called: its own name, else what the Art room calls it. */
 const drawingName = (m: DrawingMeta) => typo(m.name?.trim() || (m.kind === 'ally' ? STORY_DRAWING.ally : STORY_DRAWING.page(dayLabel(m.day))));
-/** The drawing above each page of the story that this device holds, by chapter id. One gone or kept elsewhere is simply not here. */
+/** The drawing above each page of the story that this device shows, by chapter id. One gone, waiting for its Undo or kept elsewhere is simply not here. */
 async function drawingsOf(app: App, s: Story) {
   const out = new Map<string, DrawingMeta>();
   if (!s.drawings) return out;
   const list = await artStore(app.store.key)
-    .list()
+    .shown()
     .catch((): DrawingMeta[] => []);
   for (const [c, id] of Object.entries(s.drawings)) {
     const m = list.find((x) => x.id === id);
@@ -1187,7 +1187,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const openDrawings = async () => {
     const at = cur?.kind === 'page' ? cur.id : '';
     if (!at) return;
-    const [list, s] = await Promise.all([artStore(app.store.key).list().catch((): DrawingMeta[] => []), ss.story(storyId)]);
+    const [list, s] = await Promise.all([artStore(app.store.key).shown().catch((): DrawingMeta[] => []), ss.story(storyId)]);
     if (!alive || cur?.id !== at) return;
     closeSheet();
     const placed = s?.drawings?.[at];
