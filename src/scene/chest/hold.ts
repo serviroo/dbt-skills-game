@@ -1,6 +1,6 @@
 import './hold.css';
-import { animate, el, uiNow } from '../../ui/anim';
-import { params } from '../../core/params';
+import { animate, complete, el, uiNow } from '../../ui/anim';
+import { onSystemMotion, params } from '../../core/params';
 import { LanternWindow, lanternLayer } from '../../ui/lantern-window';
 import { chestSounds } from './sounds';
 
@@ -284,12 +284,16 @@ export function holdToCharge(opts: HoldOpts): Promise<void> {
   let si = 0;
 
   // ---- entry
-  if (params.reduced) {
-    animate(root, [{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: 'linear' });
-  } else {
-    animate(target, [{ opacity: 0, transform: 'scale(.86)' }, { opacity: 1, transform: 'scale(1)' }], { duration: 320, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' });
-    animate(chip, [{ opacity: 0, clipPath: 'inset(0 50% 0 50%)' }, { opacity: 1, clipPath: 'inset(0 0% 0 0%)' }], { duration: 260, delay: 120, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' });
-  }
+  const entry = params.reduced
+    ? [animate(root, [{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: 'linear' })]
+    : [
+        animate(target, [{ opacity: 0, transform: 'scale(.86)' }, { opacity: 1, transform: 'scale(1)' }], { duration: 320, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' }),
+        animate(chip, [{ opacity: 0, clipPath: 'inset(0 50% 0 50%)' }, { opacity: 1, clipPath: 'inset(0 0% 0 0%)' }], { duration: 260, delay: 120, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' }),
+      ];
+  // reduce-motion turned on while it comes in: it is in place at once
+  const offEntry = onSystemMotion(() => {
+    if (params.reduced) entry.forEach(complete);
+  });
   const born = uiNow();
 
   function render(c: number, now: number) {
@@ -340,6 +344,7 @@ export function holdToCharge(opts: HoldOpts): Promise<void> {
     if (cleaned) return;
     cleaned = true;
     stop();
+    offEntry();
     root.removeEventListener('pointerdown', onDown);
     window.removeEventListener('keydown', onKeyDown);
     window.removeEventListener('keyup', onKeyUp);

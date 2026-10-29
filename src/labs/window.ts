@@ -49,7 +49,7 @@ export function windowLab(stage: Stage) {
   stage.camera.position.set(0, 1.4, 4);
   stage.camera.lookAt(0, 1.6, -10);
   const kind = q.get('kind') ?? 'notification';
-  if (['title', 'awaken', 'rewards', 'letter', 'endcard'].includes(kind)) {
+  if (['title', 'awaken', 'rewards', 'letter', 'endcard', 'hold'].includes(kind)) {
     env.skyMat.uniforms.uGlow.value = 0.25;
     overlayDemo(kind, stage);
     return;
@@ -72,6 +72,11 @@ export function windowLab(stage: Stage) {
 }
 
 export async function overlayDemo(kind: string, stage: Stage) {
+  // the chest's hold to open, alone on the light stage: no chest to draw, so it shows at once on any renderer
+  if (kind === 'hold') {
+    const { holdToCharge } = await stage.loading(import('../scene/chest/hold'));
+    return holdToCharge({ onProgress: () => {}, onFrame: (fn) => stage.onUpdate(() => fn()) });
+  }
   // a capture's clock holds while the overlay's modules load; the overlay itself then plays on that clock
   const [ui, { REWARDS }] = await stage.loading(Promise.all([import('../ui/cutscene-ui'), import('../content/intro')]));
   if (kind === 'title') return ui.showTitle();

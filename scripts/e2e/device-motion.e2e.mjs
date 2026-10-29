@@ -1,13 +1,13 @@
 // The game follows the device's reduce-motion setting while it shows, with no reload; on a first visit, and with
 // Motion on Auto, it is the player's only one. In the intro, the title's slit and prompt, the chest hold's breathing,
 // a Lantern window's plasma and waiting arrow, and the end card's slow drift stop as it is turned on and start again as
-// it is turned off, and a closed window leaves nothing moving behind; turned on before the chest is held, the chest
-// doesn't rattle as it charges; with Motion saved as Full the title's breath carries on through a change. In the
-// companion, the daily gift opened while it is on starts moving once it is turned off and stills again when it comes
-// back on; in the Stealth Room, opened while it is on, the glow rests and the cat doesn't blep, then the glow breathes,
-// the cat bleps and the shark swims again once it is turned off; A quiet minute's glow rests while it is on, breathes
-// once it is turned off, and settles again when it comes back on. With Motion saved as Full, the glint on the card's
-// back and the Story Room's scan keep moving whatever the device says.
+// it is turned off, and a closed window leaves nothing moving behind; turned on, the chest doesn't rattle as it
+// charges and the hold's entrance is in place at once; with Motion saved as Full the title's breath carries on through
+// a change. In the companion, the daily gift opened while it is on starts moving once it is turned off and stills again
+// when it comes back on; in the Stealth Room, opened while it is on, the glow rests and the cat doesn't blep, then the
+// glow breathes, the cat bleps and the shark swims again once it is turned off; A quiet minute's glow rests while it is
+// on, breathes once it is turned off, and settles again when it comes back on. With Motion saved as Full, the glint on
+// the card's back and the Story Room's scan keep moving whatever the device says.
 
 const PHONE = { width: 390, height: 844 };
 
@@ -43,24 +43,31 @@ const windowMotion = (page) =>
     return { endless: endless.length, arrow: endless.some((a) => a.effect.target.matches('.sw-next')), opacity: getComputedStyle(w.querySelector('.sw-next')).opacity };
   });
 
-/** How far the chest rocks (its rig's tilt) on every frame while it charges, over `ms`. */
-const rattle = (page, ms) =>
-  page.evaluate(
-    (ms) =>
-      new Promise((done) => {
-        const rig = window.__lab.chest.group.children[0];
-        const tilts = [];
-        const end = performance.now() + ms;
-        const tick = () => {
-          const c = window.__lab.charge;
-          if (c > 0 && c < 0.999) tilts.push(Math.abs(rig.rotation.z));
-          if (performance.now() < end && c < 0.999) requestAnimationFrame(tick);
-          else done(tilts);
-        };
-        tick();
-      }),
-    ms,
-  );
+/**
+ * How far the chest rocks (its rig's tilt) as it charges, at forty moments: the charge and the time are handed to the
+ * chest as the stage would hand them. The lab's stage clock moves only as frames are drawn, which a software renderer
+ * does slowly, so nothing here waits on it.
+ */
+const rattle = (page) =>
+  page.evaluate(() => {
+    const { chest } = window.__lab;
+    const rig = chest.group.children[0];
+    const tilts = [];
+    for (let i = 0; i < 40; i++) {
+      chest.setCharge(0.6);
+      chest.update(10 + i * 0.037);
+      tilts.push(Math.abs(rig.rotation.z));
+    }
+    return tilts;
+  });
+
+/** True once the game has the device's setting: it hears of it as the next frame is drawn, so this waits frame by frame. */
+const reducedHere = (page, on) =>
+  page.evaluate(async (on) => {
+    const { params } = await import('/src/core/params.ts');
+    for (let i = 0; i < 120 && params.reduced !== on; i++) await new Promise((r) => requestAnimationFrame(r));
+    return params.reduced === on;
+  }, on);
 
 /** Animations under `selector` that never end. */
 const endless = (page, selector) => page.evaluate((sel) => document.querySelector(sel).getAnimations({ subtree: true }).filter((a) => a.effect.getTiming().iterations === Infinity && a.playState !== 'idle').length, selector);
@@ -70,19 +77,35 @@ const drifts = (page) => page.evaluate(() => document.querySelector('.ec-stage')
 
 export const scenarios = {
   async 'intro-hold-follows-device-motion'(h) {
-    const { ctx, page, errors } = await h.open({}, '?lab=chest&mute', PHONE);
-    const device = await deviceMotion(ctx, page);
-    await page.locator('.chest-hold').waitFor({ timeout: 30000 });
-    const moving = await breaths(page, 1500);
-    h.expect(moving.length > 3, `the hold does not breathe with motion on: ${JSON.stringify(moving)}`);
+    // the hold alone in the window lab, which draws no chest. The page's animation clock stands still at first, so the
+    // hold's entrance is still under way when the device setting changes, however slow the machine
+    const ctx = await h.browser.newContext({ viewport: PHONE, deviceScaleFactor: 2, serviceWorkers: 'block' });
+    const page = await ctx.newPage();
+    const errors = [];
+    page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+    page.on('console', (m) => m.type() === 'error' && !/WebGL|GPU stall|AudioContext/i.test(m.text()) && errors.push('console: ' + m.text().slice(0, 300)));
+    const cdp = await ctx.newCDPSession(page);
+    await cdp.send('Animation.enable');
+    await cdp.send('Animation.setPlaybackRate', { playbackRate: 0 });
+    const device = (value) => cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value }] });
+    await page.goto(h.server.url + '/?lab=window&kind=hold&mute');
+    await page.locator('.chest-hold').waitFor({ state: 'attached' });
+    /** Each of the entrance's animations, by its play state. */
+    const entrance = () => page.evaluate(() => document.querySelector('.chest-hold').getAnimations({ subtree: true }).filter((a) => a.effect.getTiming().iterations !== Infinity).map((a) => a.playState));
+    const coming = await entrance();
+    h.expect(coming.length === 2 && coming.every((s) => s === 'running'), `the hold's entrance is not under way: ${JSON.stringify(coming)}`);
     await device('reduce');
-    await h.frames(page, 2);
+    h.expect(await reducedHere(page, true), 'the game never heard the device turn reduce-motion on');
+    const placed = await entrance();
+    h.expect(placed.every((s) => s === 'finished'), `with the device's reduce-motion turned on, the hold kept coming in: ${JSON.stringify(placed)}`);
+    // the breath runs on the same animation clock, which moves again from here
+    await cdp.send('Animation.setPlaybackRate', { playbackRate: 1 });
     const still = await breaths(page, 1500);
     h.expect(still.length === 1 && Number(still[0]) === 0.5, `with the device's reduce-motion turned on, the hold kept breathing: ${JSON.stringify(still)}`);
     await device('no-preference');
-    await h.frames(page, 2);
+    h.expect(await reducedHere(page, false), 'the game never heard the device turn reduce-motion off');
     const again = await breaths(page, 1500);
-    h.expect(again.length > 3, `with it turned off again, the hold stayed still: ${JSON.stringify(again)}`);
+    h.expect(again.length > 3, `with it turned off again, the hold did not breathe: ${JSON.stringify(again)}`);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },
@@ -113,15 +136,19 @@ export const scenarios = {
   },
 
   async 'intro-chest-follows-device-motion'(h) {
-    // the chest is built as the beat starts; the device turns reduce-motion on before the scripted hold at 3.3 s
-    const { ctx, page, errors } = await h.open({}, '?lab=chest&autohold=1&mute', PHONE);
+    const { ctx, page, errors } = await h.open({}, '?lab=chest&mute', PHONE);
     const device = await deviceMotion(ctx, page);
-    await page.waitForFunction(() => !!window.__lab?.chest, null, { timeout: 30000 });
-    h.expect(await page.evaluate(() => window.__lab.charge === 0), 'the hold had begun before the device setting could change');
+    // the lab is ready once its chest is built
+    await page.waitForFunction(() => !!window.__lab?.chest);
+    const moving = await rattle(page);
+    h.expect(moving.some((t) => t > 0), `the chest does not rattle as it charges with motion on: ${JSON.stringify(moving)}`);
     await device('reduce');
-    await page.waitForFunction(() => window.__lab.charge > 0, null, { timeout: 30000 });
-    const tilts = await rattle(page, 4000);
-    h.expect(tilts.length > 10 && tilts.every((t) => t === 0), `with the device's reduce-motion turned on, the chest rattled as it charged: ${tilts.length} frames, up to ${Math.max(...tilts)}`);
+    h.expect(await reducedHere(page, true), 'the game never heard the device turn reduce-motion on');
+    const still = await rattle(page);
+    h.expect(still.every((t) => t === 0), `with the device's reduce-motion turned on, the chest rattled as it charged: up to ${Math.max(...still)}`);
+    await device('no-preference');
+    h.expect(await reducedHere(page, false), 'the game never heard the device turn reduce-motion off');
+    h.expect((await rattle(page)).some((t) => t > 0), 'with it turned off again, the chest no longer rattled');
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },
@@ -232,12 +259,12 @@ export const scenarios = {
     await page.waitForFunction(() => window.__daily.reduced(), null, { timeout: 5000 });
     await page.evaluate(() => window.__daily.go({ name: 'ease' }));
     await page.locator('.dq-ease-glow').waitFor({ state: 'attached', timeout: 10000 });
-    /** The glow's opacity every half second for four seconds: one value while it rests, several while it breathes. */
+    /** The opacity the screen gives its glow every half second for four seconds: one while it rests, several while it breathes. */
     const glow = async () => {
       const seen = new Set();
       for (let i = 0; i < 8; i++) {
         await page.clock.runFor(500);
-        seen.add(await page.evaluate(() => getComputedStyle(document.querySelector('.dq-ease-glow')).opacity));
+        seen.add(await page.evaluate(() => document.querySelector('.dq-ease-glow').style.opacity));
       }
       return [...seen];
     };
@@ -250,8 +277,6 @@ export const scenarios = {
     // turned on again mid-breath: the glow and the moth settle where they rest, not wherever the breath had them
     await device('reduce');
     await page.waitForFunction(() => window.__daily.reduced(), null, { timeout: 5000 });
-    // the still page's near-instant transitions end on the next real frames
-    await h.frames(page, 2);
     const settled = await glow();
     const placed = await page.evaluate(() => ({ glow: document.querySelector('.dq-ease-glow').style.transform, moth: document.querySelector('.dq-ease-sea').style.transform }));
     h.expect(settled.length === 1 && Number(settled[0]) === 0.7 && !placed.glow && !placed.moth, `turned on mid-visit, A quiet minute did not settle: ${JSON.stringify({ settled, placed })}`);
