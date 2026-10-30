@@ -12,7 +12,7 @@
 import fs from 'node:fs';
 import sharp from 'sharp';
 import { deviceMotion } from './device-motion.e2e.mjs';
-import { gone, screenshot } from './harness.mjs';
+import { gone, screenshot, until as pageUntil } from './harness.mjs';
 
 /** how long a scene's stage hides its flat picture while the scene loads (SCENE.waitMs) */
 const WAIT_MS = Number(/\bwaitMs:\s*(\d+)/.exec(fs.readFileSync(new URL('../../src/motion/tokens.ts', import.meta.url), 'utf8'))?.[1]);
@@ -134,11 +134,11 @@ async function moreTime(page) {
 }
 
 /**
- * Waits up to 30 s for `test` in the page, so a busy GPU holding frames back only slows this down. On a timeout the check
- * that follows says what is missing.
+ * Waits up to 30 s of the page running for `test` in the page, so a busy GPU holding frames back only slows this down. On
+ * a timeout the check that follows says what is missing.
  */
 async function until(page, test, arg) {
-  await page.waitForFunction(test, arg, { timeout: 30000 }).catch((e) => {
+  await pageUntil(page, test, arg, { timeout: 30000 }).catch((e) => {
     if (e.name !== 'TimeoutError') throw e;
   });
 }
@@ -162,10 +162,7 @@ async function pixels(page) {
 async function drawn(h, page, where) {
   // a scene fades in over its flat picture once it shows, so it is judged once fully in (the page clock may be stopped,
   // so this looks from here rather than from the page)
-  for (const end = Date.now() + 5000; Number(await page.locator('.dq-scene').evaluate((e) => getComputedStyle(e).opacity)) < 0.99; ) {
-    h.expect(Date.now() < end, `${where}: the scene never finished fading in`);
-    await h.sleep(50);
-  }
+  await h.poll(page, () => page.locator('.dq-scene').evaluate((e) => Number(getComputedStyle(e).opacity)), (o) => o >= 0.99, `${where}: the scene never finished fading in`, { timeout: 5000, polling: 50 });
   const p = await pixels(page);
   h.expect(p.sd > 4 && p.max > 40 && p.mean > 6, `${where}: the scene looks blank (${JSON.stringify(p)})`);
   return p;
@@ -194,28 +191,24 @@ async function flat(page) {
  * clock may be stopped; a flat picture left over a live scene never hands over and fails here.
  */
 async function handedOver(h, page, where) {
-  for (const end = Date.now() + 5000; ; await h.sleep(50)) {
-    const now = await page.evaluate(() => ({
+  const now = () =>
+    page.evaluate(() => ({
       scene: Number(getComputedStyle(document.querySelector('.dq-scene')).opacity),
       flat: [...document.querySelectorAll('.dq-scene-flat')].filter((e) => getComputedStyle(e).visibility !== 'hidden').length,
     }));
-    if (now.scene > 0.99 && !now.flat) return;
-    h.expect(Date.now() < end, `${where}: the flat picture never handed over to the 3D scene (${JSON.stringify(now)})`);
-  }
+  await h.poll(page, now, (n) => n.scene > 0.99 && !n.flat, (n) => `${where}: the flat picture never handed over to the 3D scene (${JSON.stringify(n)})`, { timeout: 5000, polling: 50 });
 }
 /**
  * Waits for the stage's flat picture to be back on screen as it is drawn (the drift's orb is drawn at 0.6): it fades
  * back in over 500 ms, on this clock too.
  */
 async function flatBack(h, page, where) {
-  for (const end = Date.now() + 3000; ; await h.sleep(50)) {
-    const now = await page.$$eval('.dq-timer-stage .dq-scene-flat', (els) => els.map((e) => {
+  const now = () =>
+    page.$$eval('.dq-timer-stage .dq-scene-flat', (els) => els.map((e) => {
       const s = getComputedStyle(e), r = e.getBoundingClientRect(), drawn = Number(e.getAttribute('opacity') ?? 1);
       return s.display !== 'none' && s.visibility !== 'hidden' && drawn > 0 && Math.abs(Number(s.opacity) - drawn) < 0.01 && r.width > 0 && r.height > 0;
     }));
-    if (now.length && now.every(Boolean)) return;
-    h.expect(Date.now() < end, `${where}: the flat picture did not come back before the scene (${JSON.stringify(now)})`);
-  }
+  await h.poll(page, now, (n) => n.length && n.every(Boolean), (n) => `${where}: the flat picture did not come back before the scene (${JSON.stringify(n)})`, { timeout: 3000, polling: 50 });
 }
 
 /** The countdown shows whole seconds left, rounded up; the scene draws at most 30 times a second, so it may trail a frame. */
@@ -281,13 +274,11 @@ async function oneSlowFrame(h, hz) {
   });
   const full = await page.evaluate(() => Math.min(window.devicePixelRatio, 2));
   // the scene shows once its first frame is drawn: the page clock is stepped until then (600 ms at least)
-  for (const t0 = Date.now(); !(await page.locator('.dq-timer-stage.is-scene-live').count()); ) {
-    if (Date.now() - t0 > 30000) {
-      await h.shot(page, 'fail-one-slow-frame');
-      throw new Error('one slow frame: the 3D scene never came on screen');
-    }
-    await page.clock.runFor(100);
-  }
+  const live = async () => (await page.locator('.dq-timer-stage.is-scene-live').count()) > 0 || (await page.clock.runFor(100), false);
+  await h.poll(page, live, Boolean, 'one slow frame: the 3D scene never came on screen', { timeout: 30000, polling: 0 }).catch(async (e) => {
+    await h.shot(page, 'fail-one-slow-frame');
+    throw e;
+  });
   const low = await scenes(page);
   h.expect(low.dpr < full, `${hz} fps: the slow first frame did not lower the scene (${low.dpr})`);
   await page.clock.runFor(6000);
@@ -415,13 +406,11 @@ async function after(h, page, ms) {
  * first shows, however long the GPU took, and moves only when a check moves it.
  */
 async function showsStopped(h, page, where, stage = '.dq-timer-stage') {
-  for (const t0 = Date.now(); !(await page.locator(`${stage}.is-scene-live`).count()); ) {
-    if (Date.now() - t0 > 30000) {
-      await h.shot(page, `fail-${where.replace(/\W+/g, '-')}`);
-      throw new Error(`${where}: the 3D scene never came on screen`);
-    }
-    await page.clock.runFor(16);
-  }
+  const live = async () => (await page.locator(`${stage}.is-scene-live`).count()) > 0 || (await page.clock.runFor(16), false);
+  await h.poll(page, live, Boolean, `${where}: the 3D scene never came on screen`, { timeout: 30000, polling: 0 }).catch(async (e) => {
+    await h.shot(page, `fail-${where.replace(/\W+/g, '-')}`);
+    throw e;
+  });
 }
 
 /**

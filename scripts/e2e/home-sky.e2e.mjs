@@ -126,8 +126,7 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2], ((a[3] 
 const skyOf = (page) => page.evaluate(() => window.__readSky());
 
 async function settle(h, page) {
-  for (const end = Date.now() + 8000; Date.now() < end; await h.sleep(100)) if (!(await skyOf(page)).fading) return;
-  throw new Error('the sky never stopped fading');
+  await h.poll(page, () => skyOf(page), (s) => !s.fading, 'the sky never stopped fading', { timeout: 8000 });
 }
 
 /** Screenshot with extra CSS applied through constructed sheets (no inline style, so the page's CSP never matters).
@@ -623,7 +622,7 @@ export const scenarios = {
     ({ ctx, page, errors } = await home(h, at(7, 58, 0)));
     await settle(h, page);
     await crossEight(h, page);
-    for (const end = Date.now() + 5000; !(await skyOf(page)).fading; await h.sleep(50)) expect(Date.now() < end, 'dawn never started drifting into day');
+    await h.poll(page, () => skyOf(page), (s) => s.fading, 'dawn never started drifting into day', { timeout: 5000, polling: 50 });
     seen.drift = await safeAtOnce(h, page, () => moveAndRead(page, 'tap', SAFE), 'the Safe Zone while the hour turns');
     expect(!errors.length, errors.join('\n'));
     await ctx.close();

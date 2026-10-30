@@ -26,8 +26,7 @@ const stored = (page) =>
     return s ? ((await ss.onDisk(s.chapters[0]))?.text ?? null) : null;
   });
 async function storedIs(h, page, text, label) {
-  for (const end = Date.now() + 8000; Date.now() < end; await h.sleep(200)) if ((await stored(page)) === text) return;
-  throw new Error(`${label}: the page stored ${JSON.stringify(await stored(page))}, not ${JSON.stringify(text)}`);
+  await h.poll(page, () => stored(page), (s) => s === text, (s) => `${label}: the page stored ${JSON.stringify(s)}, not ${JSON.stringify(text)}`, { timeout: 8000, polling: 200 });
 }
 /** From here the story store's `kinds` of reads and saves wait until the test lets them through, as on a slow phone where
  *  storage answers after the next tap: `release()` lets the oldest through, `release(what)` that one, `drain()` all. */
@@ -338,13 +337,9 @@ export const scenarios = {
       const { waitHeld, release, drain } = await holdStorage(page, ['chapter', 'saveChapter', 'cards', 'onDisk']);
       const notesTab = page.getByRole('radio', { name: 'Show: Notes' });
       const card = (text) => page.locator('.st-card', { hasText: text });
-      // lets every held read and save through until `ok`, including ones the app asks for only after an earlier one answers
-      const settle = async (ok) => {
-        for (const end = Date.now() + 5000; Date.now() < end; await h.sleep(50)) {
-          await drain();
-          if (await ok()) return;
-        }
-      };
+      // lets every held read and save through until `ok`, including ones the app asks for only after an earlier one answers,
+      // for up to 5 s of the page running
+      const settle = (ok) => h.poll(page, async () => (await drain(), ok()), Boolean, 'the held reads and saves never let it through', { timeout: 5000, polling: 50 });
       const boxIs = (re) => async () => re.test((await shownIn(page)).box ?? '');
       const notesOnDisk = () =>
         page.evaluate(async (n) => {

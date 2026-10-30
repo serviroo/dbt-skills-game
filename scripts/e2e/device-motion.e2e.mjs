@@ -39,12 +39,6 @@ const breaths = (page, frames) =>
     return [...seen];
   }, frames);
 
-/** Resolves once the page has drawn `n` more frames, however long it is stopped meanwhile. */
-const drawn = (page, n) =>
-  page.evaluate(async (n) => {
-    for (let i = 0; i < n; i++) await new Promise((r) => requestAnimationFrame(r));
-  }, n);
-
 /** The window's endless animations (the plasma along its bars, the waiting arrow's pulse), and the arrow's opacity. */
 const windowMotion = (page) =>
   page.evaluate(() => {
@@ -106,7 +100,7 @@ const drifts = (page) => page.evaluate(() => document.querySelector('.ec-stage')
  * until resume(), so whatever comes meanwhile, a change from another tab among it, waits for it. read(fn, arg) looks into
  * it meanwhile, where page.evaluate would wait for it to run again. Resolves once the page has stopped.
  */
-const pause = async (ctx, page) => {
+export const pause = async (ctx, page) => {
   const cdp = await ctx.newCDPSession(page);
   await cdp.send('Debugger.enable');
   const stopped = new Promise((r) => cdp.once('Debugger.paused', r));
@@ -377,7 +371,7 @@ export const scenarios = {
       const shows = async (want) => {
         for (let i = 0; i < 60; i++) {
           if (await k[want](piece)) return true;
-          await drawn(piece, 5);
+          await h.frames(piece, 5);
         }
         return false;
       };

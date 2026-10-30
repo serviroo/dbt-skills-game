@@ -37,10 +37,14 @@ async function shelfOf(h, page) {
   await page.getByRole('button', { name: 'Bring in a story' }).first().waitFor();
 }
 /** taps Bring in a story and picks the file through the real chooser */
-async function bringIn(page, file) {
-  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByRole('button', { name: 'Bring in a story' }).first().click()]);
-  await chooser.setFiles(file);
-  await page.locator('.st-bring-box:not(.is-hidden) .st-bring-h').waitFor();
+/**
+ * Brings `file` in through the real chooser; each step takes `timeout` as Playwright does (0: none, for a caller that bounds
+ * them all).
+ */
+async function bringIn(page, file, timeout) {
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser', { timeout }), page.getByRole('button', { name: 'Bring in a story' }).first().click({ timeout })]);
+  await chooser.setFiles(file, { timeout });
+  await page.locator('.st-bring-box:not(.is-hidden) .st-bring-h').waitFor({ timeout });
   return page.evaluate(() => ({
     head: document.querySelector('.st-bring-h').textContent,
     count: document.querySelector('.st-bring-box .st-bring-t')?.textContent ?? '',
@@ -227,18 +231,15 @@ export const scenarios = {
       fs.writeFileSync(path.join(h.out, 'spaces-timing.json'), JSON.stringify(timed, null, 1));
       for (const t of timed) h.expect(t.read < 200 && t.write < 200, `${t.name}: read in ${Math.round(t.read)} ms, written in ${Math.round(t.write)} ms`);
 
-      const quick = async (what, ms, step) => {
-        const t0 = Date.now();
-        await step();
-        h.expect(Date.now() - t0 < ms, `${what} took ${Date.now() - t0} ms`);
-      };
+      // each step takes the page under `ms`, the app's own work counted in full
+      const quick = (what, ms, step) => h.quick(page, ms, what, step);
       for (const [name, body, first] of files) {
         // through the real chooser: the preview comes up at once and the Safe Zone opens on the first tap
         const file = write(h, name, body);
-        await quick(`${name}: the preview`, 2000, () => bringIn(page, file));
+        await quick(`${name}: the preview`, 2000, () => bringIn(page, file, 0));
         await quick(`${name}: the Safe Zone`, 1000, async () => {
-          await page.locator('.dq-top .dq-safe').click({ timeout: 1000 });
-          await page.waitForFunction(() => window.__daily?.route.name === 'safe', null, { timeout: 1000 });
+          await page.locator('.dq-top .dq-safe').click({ timeout: 0 });
+          await page.waitForFunction(() => window.__daily?.route.name === 'safe', null, { timeout: 0 });
         });
         await shelfOf(h, page);
         // added, it keeps its words and reads at once, the Safe Zone still one tap away
@@ -248,13 +249,13 @@ export const scenarios = {
         await page.locator('.st-bring-said:not(:empty)').waitFor();
         const story = (await everything(page)).find((s) => !was.some((w) => w.id === s.id));
         h.expect(story?.chapters[0]?.text === first, `${name}: the first chapter came in as ${JSON.stringify(story?.chapters[0]?.text.slice(0, 40))}…`);
-        await quick(`${name}: the reading view`, 2000, async () => {
-          await page.evaluate((r) => window.__daily.go(r), { name: 'read', id: story.id });
-          await page.locator('.st-read-text').first().waitFor({ timeout: 2000 });
+        await quick(`${name}: the reading view`, 2000, async (ran) => {
+          await ran.evaluate((r) => window.__daily.go(r), { name: 'read', id: story.id });
+          await page.locator('.st-read-text').first().waitFor({ timeout: 0 });
         });
         await quick(`${name}: the Safe Zone from the reading view`, 1000, async () => {
-          await page.locator('.dq-top .dq-safe').click({ timeout: 1000 });
-          await page.waitForFunction(() => window.__daily?.route.name === 'safe', null, { timeout: 1000 });
+          await page.locator('.dq-top .dq-safe').click({ timeout: 0 });
+          await page.waitForFunction(() => window.__daily?.route.name === 'safe', null, { timeout: 0 });
         });
         await shelfOf(h, page);
       }
@@ -313,14 +314,14 @@ export const scenarios = {
       }
       await page.locator('.st-cw .st-mode--polish').click();
       await quick('Polish after 4,000 blank lines', 2000, async () => {
-        await page.locator('.st-cw .st-ask').click();
-        await page.locator('.st-cards > .st-batch:first-child .st-card').first().waitFor({ timeout: 2000 });
+        await page.locator('.st-cw .st-ask').click({ timeout: 0 });
+        await page.locator('.st-cards > .st-batch:first-child .st-card').first().waitFor({ timeout: 0 });
       });
       const card = await page.locator('.st-cards > .st-batch:first-child .st-card-t').first().textContent();
       h.expect(card === 'smiled', `Polish came back as ${JSON.stringify(card)}`);
       await quick('the Safe Zone after Polish', 1000, async () => {
-        await page.locator('.dq-top .dq-safe').click({ timeout: 1000 });
-        await page.waitForFunction(() => window.__daily?.route.name === 'safe', null, { timeout: 1000 });
+        await page.locator('.dq-top .dq-safe').click({ timeout: 0 });
+        await page.waitForFunction(() => window.__daily?.route.name === 'safe', null, { timeout: 0 });
       });
       h.expect(!errors.length, errors.join('\n'));
     } finally {
