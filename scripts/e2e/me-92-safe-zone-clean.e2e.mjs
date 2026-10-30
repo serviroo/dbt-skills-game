@@ -593,7 +593,8 @@ const HOME_BAR = { top: 47, left: 0, right: 0, bottom: 34 };
 
 /**
  * Every Safe Zone screen at one size (ME-127, ME-210). On arrival: what SHOWN names is whole on screen, clear of the top
- * bar, the pinned foot and the screen's safe-area insets, and taps land on it; "Talk to someone now" stays pinned and
+ * bar, the pinned foot and the screen's safe-area insets, and taps land on it (held sideways, where the choices scroll in
+ * their own column, the first of them, and each one once scrolled to); "Talk to someone now" stays pinned and
  * tappable; every text is at least 20 px and every button, link and picker at least 44 px; nothing scrolls sideways.
  * With notch insets, the top bar's buttons and the Safe Zone keep clear of them. Held sideways, an opened "Add one" box
  * keeps the column's width. Upright, grouping the heading apart from the rest moves no box at all. With "Copy your lists"
@@ -622,7 +623,7 @@ async function everyScreen(h, viewport, { insets } = {}) {
       // fonts in and the screen's fade-in done, so the boxes and screenshots are what the player sees
       await page.evaluate(() => Promise.all([document.fonts.ready, ...[...document.querySelectorAll('.dq-sz-body, .dq-sz-body > *')].flatMap((e) => e.getAnimations()).map((a) => a.finished)]));
       heading = await page.locator('.dq-sz-body [data-focus]').textContent();
-      const look = (sel) => page.evaluate(([sel, insets]) => {
+      const look = (sel, { first = false, scrolled = false } = {}) => page.evaluate(async ([sel, insets, first, scrolled]) => {
         const left = insets?.left ?? 0;
         const right = innerWidth - (insets?.right ?? 0);
         const bottom = innerHeight - (insets?.bottom ?? 0);
@@ -639,6 +640,18 @@ async function everyScreen(h, viewport, { insets } = {}) {
           return whole && clear ? null : `${name(e)} at ${[r.left, r.top, r.right, r.bottom].map(Math.round).join(', ')}`;
         };
         const shown = [...document.querySelectorAll(`.dq-sz-body :is(${sel})`)];
+        // each scrolled to the least it takes, then everything back where it was
+        const scrollers = [...document.querySelectorAll('.dq, .dq-sz-body, .dq-sz-lead, .dq-sz-main')];
+        const was = scrollers.map((s) => s.scrollTop);
+        const offs = [];
+        for (const e of first ? shown.slice(0, 1) : shown) {
+          if (scrolled) {
+            e.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+            await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+          }
+          offs.push(off(e));
+        }
+        scrollers.forEach((s, i) => (s.scrollTop = was[i]));
         const talk = document.querySelector('.dq-sz-talk:not(.is-hidden)');
         const t = talk?.getBoundingClientRect();
         const tap = [...document.querySelectorAll('.dq-safezone :is(button, a[href], select), .dq-top .ca-sz-light')].filter((e) => !e.closest('.is-hidden'));
@@ -647,7 +660,7 @@ async function everyScreen(h, viewport, { insets } = {}) {
         const zone = document.querySelector('.dq-safezone').getBoundingClientRect();
         return {
           count: shown.length,
-          off: shown.map(off).filter(Boolean),
+          off: offs.filter(Boolean),
           talk: !talk || (t.bottom <= bottom + 0.5 && talk.contains(document.elementFromPoint(t.left + t.width / 2, t.top + t.height / 2))),
           tiny: tap.map((e) => [name(e), e.getBoundingClientRect()]).filter(([, r]) => r.width < 44 || r.height < 44).map(([t, r]) => `${t} ${Math.round(r.width)}x${Math.round(r.height)}`),
           small: [...new Set(words.map((e) => [e.textContent.trim().slice(0, 24), parseFloat(getComputedStyle(e).fontSize)]).filter(([, px]) => px < 20).map(([t, px]) => `"${t}" ${px}px`))],
@@ -655,7 +668,7 @@ async function everyScreen(h, viewport, { insets } = {}) {
           zone: zone.left >= left - 0.5 && zone.right <= right + 0.5,
           wide: document.documentElement.scrollWidth <= innerWidth,
         };
-      }, [sel, insets]);
+      }, [sel, insets, first, scrolled]);
       const judge = (label, got, sel, n) => {
         if (got.count !== n) failed.push(`${label}: found ${got.count} of the ${n} things (${sel}) it should show`);
         if (got.off.length) failed.push(`${label}: not whole on screen, or covered: ${got.off.join('; ')}`);
@@ -666,7 +679,8 @@ async function everyScreen(h, viewport, { insets } = {}) {
         if (!got.zone) failed.push(`${label}: the Safe Zone runs into the notch`);
         if (!got.wide) failed.push(`${label}: the page scrolls sideways`);
       };
-      judge(`${label} on arrival`, await look(sel), sel, n);
+      judge(`${label} on arrival`, await look(sel, { first: sideways }), sel, n);
+      if (sideways) judge(`${label} scrolled to`, await look(sel, { scrolled: true }), sel, n);
       if (at === 'cold') {
         // principle 11: cold water sits beside cool air, two choices of the same weight
         const pair = await page.locator('.dq-sz-body .dq-cool-pick .dq-btn').evaluateAll((bs) => bs.map((b) => `${b.textContent.trim()}: ${b.className} ${Math.round(b.getBoundingClientRect().height)}px`));
@@ -846,14 +860,13 @@ export const scenarios = {
   /**
    * The bottom stays clear wherever "Talk to someone now" is: under the frame, hidden on Talk, and above the frame after
    * "I might not be safe". Scrolled to the end, nothing ends inside an iPhone's home bar, nor within 8 px of the bottom
-   * edge without one. Upright nothing passes under the foot, so it has no backdrop (lights up too); held sideways the page
-   * scrolls under it, so it keeps one.
+   * edge without one. Nothing passes under the foot, upright or held sideways (where the frame's two columns scroll
+   * inside it), so it has no backdrop, lights up too.
    */
   'safe-zone-bottom-clear': async (h) => {
     const failed = [];
     for (const [viewport, insets] of [[TALL, HOME_BAR], [SMALL, HOME_BAR], [WIDE, NOTCH], [{ width: 1280, height: 800 }, null]]) {
       const size = `${viewport.width}x${viewport.height}${insets ? ` with a ${insets.bottom} px home bar` : ''}`;
-      const sideways = viewport.width > viewport.height && viewport.height <= 500;
       const { ctx, page, errors } = await boot(h, { save: filled(), viewport, reduced: true });
       try {
         if (insets) {
@@ -868,7 +881,7 @@ export const scenarios = {
         };
         const check = async (label, backdrop) => {
           const got = await page.evaluate(async (inset) => {
-            for (const s of [document.querySelector('.dq-sz-body'), document.querySelector('.dq')]) s.scrollTop = s.scrollHeight;
+            for (const s of document.querySelectorAll('.dq, .dq-sz-body, .dq-sz-lead, .dq-sz-main')) s.scrollTop = s.scrollHeight;
             await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
             const limit = innerHeight - inset - 8;
             const frame = document.querySelector('.dq-sz');
@@ -881,19 +894,19 @@ export const scenarios = {
             };
           }, insets?.bottom ?? 0);
           if (got.low.length) failed.push(`${size} ${label}: in the home bar or at the bottom edge: ${got.low.join('; ')}`);
-          if (backdrop !== undefined && got.backdrop !== backdrop) failed.push(`${size} ${label}: the foot ${got.backdrop ? 'has' : 'has no'} backdrop ${sideways ? 'though the page scrolls under it' : 'though nothing passes under it'}`);
+          if (backdrop !== undefined && got.backdrop !== backdrop) failed.push(`${size} ${label}: the foot ${got.backdrop ? 'has' : 'has no'} backdrop though nothing passes under it`);
           await h.shot(page, `me92-bottom-${label.replace(/[^a-z]+/gi, '-')}-${size.replace(/ /g, '-')}`);
         };
         await at('');
-        await check('start, Talk under the frame', sideways);
+        await check('start, Talk under the frame', false);
         await page.getByRole('button', { name: 'I might not be safe' }).click();
         await at('Talk to someone now');
         await check('Talk, its link hidden');
         await page.getByRole('button', { name: 'Back to breathing' }).click();
         await at('Breathe with the light');
-        await check('breathing, Talk above the frame', sideways);
+        await check('breathing, Talk above the frame', false);
         await page.locator('.dq-top .ca-sz-light').click();
-        await check('breathing with lights up', sideways);
+        await check('breathing with lights up', false);
         if (errors.length) failed.push(`${size}: ${errors.join(' | ')}`);
       } finally {
         await ctx.close();
@@ -920,7 +933,7 @@ export const scenarios = {
             const step = (await page.locator('.dq-sz-body [data-focus]').first().textContent()).trim().slice(0, 24);
             for (const end of [false, true]) {
               const got = await page.evaluate(async (end) => {
-                if (end) for (const s of [document.querySelector('.dq-sz-body'), document.querySelector('.dq')]) s.scrollTop = s.scrollHeight;
+                if (end) for (const s of document.querySelectorAll('.dq, .dq-sz-body, .dq-sz-lead, .dq-sz-main')) s.scrollTop = s.scrollHeight;
                 await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
                 const talk = document.querySelector('.dq-sz-talk');
                 if (!talk?.checkVisibility()) return [];
@@ -977,12 +990,12 @@ export const scenarios = {
     h.expect(!failed.length, failed.join('\n'));
   },
   /**
-   * Held sideways the foot can be as narrow as 219 px (540 px wide). "Talk to someone now" fits it on one line, and with
-   * its text at twice the size (as text-only zoom does) it wraps inside the foot instead of spilling past it, plain under
-   * the frame and strong above it.
+   * Held sideways under 300 px tall (the keyboard up), where the page scrolls and the foot pins under the words, it can be
+   * as narrow as 219 px (540 px wide). "Talk to someone now" fits it on one line, and with its text at twice the size (as
+   * text-only zoom does) it wraps inside the foot instead of spilling past it, plain under the frame and strong above it.
    */
   'safe-zone-talk-big-text': async (h) => {
-    const { ctx, page, errors } = await boot(h, { save: returning(), viewport: { width: 540, height: 320 }, reduced: true });
+    const { ctx, page, errors } = await boot(h, { save: returning(), viewport: { width: 540, height: 290 }, reduced: true });
     const failed = [];
     try {
       await page.locator('header .dq-safe').click();

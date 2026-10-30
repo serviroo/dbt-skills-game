@@ -12,8 +12,13 @@
 //               opens is layout-fit's own check; here a state is often reached by a tap that scrolls, and at 200% held
 //               sideways the fold falls behind the pinned "Talk to someone now", so reach is checked by scrolling
 //   reach       every control scrolled to shows whole, inside the screen and every box that clips it, and a tap on its
-//               middle or near any corner lands on it, not on the top bar or the pinned foot
+//               middle or near any corner lands on it, not on the top bar or the pinned foot; so does every ring
+//               (breathing, a countdown, Give me a moment's)
 //   talk        "Talk to someone now" shows whole and takes a tap, with the page and the frame scrolled to either end
+//   under Talk  where the Safe Zone is one screen tall (normal text and the phone's own text at 200%, the keyboard
+//               down), none of the frame's words or controls show under "Talk to someone now", as the screen opens or
+//               scrolled to either end. At 200% zoom or with the keyboard up the page scrolls under it, and reach and
+//               audit check that each control still scrolls clear of it
 //   keyboard    while a list item or a person is typed, the on-screen keyboard takes the bottom of the screen (the page
 //               gets the height above it, as a phone that resizes for the keyboard gives it): the field and its Save
 //               show whole and take a tap, and the rest still passes reach. Held sideways at 200% zoom the keyboard
@@ -71,7 +76,7 @@ const unreachable = (page, { typing = false, sound = false, controls = null } = 
       const hit = at.map(([x, y]) => document.elementFromPoint(x, y)).find((x) => !mine(x));
       return hit === undefined ? null : hit ? `${hit.tagName.toLowerCase()}.${[...hit.classList].join('.')}` : 'nothing';
     };
-    const scrollers = [...document.querySelectorAll('.dq, .dq-sz-body')];
+    const scrollers = [...document.querySelectorAll('.dq, .dq-sz-body, .dq-sz-lead, .dq-sz-main')];
     const was = scrollers.map((s) => s.scrollTop);
     const talk = document.querySelector('.dq-sz-talk');
     const controls = [...document.querySelectorAll(only ?? (sound ? '.dq-top :is(.vol-btn, .vol-pop button, .vol-pop input)' : '.dq-top :is(button, a[href]), .dq-safezone :is(button, a[href], input, select, textarea)'))].filter((e) => e !== talk && e.checkVisibility({ checkVisibilityCSS: true }) && !e.closest('.dq-sr'));
@@ -118,6 +123,55 @@ const unreachable = (page, { typing = false, sound = false, controls = null } = 
     return out;
   }, { typing, sound, controls });
 
+/**
+ * What of the Safe Zone's frame, a run of its words or one of its controls, shows under "Talk to someone now": as much of
+ * each as shows inside the boxes that clip or scroll it, as the screen stands and with it scrolled to either end.
+ */
+const underTalk = (page) =>
+  page.evaluate(async () => {
+    const talk = document.querySelector('.dq-sz-talk');
+    if (!talk?.checkVisibility()) return [];
+    const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const scrollers = [...document.querySelectorAll('.dq, .dq-sz-body, .dq-sz-lead, .dq-sz-main')];
+    const was = scrollers.map((s) => s.scrollTop);
+    const out = new Set();
+    const shown = (e, r) => {
+      let [l, t, rt, b] = [Math.max(r.left, 0), Math.max(r.top, 0), Math.min(r.right, innerWidth), Math.min(r.bottom, innerHeight)];
+      for (let p = e; p; p = p.parentElement) {
+        const cs = getComputedStyle(p);
+        if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
+        const q = p.getBoundingClientRect();
+        const [x, y] = [q.left + p.clientLeft, q.top + p.clientTop];
+        [l, t, rt, b] = [Math.max(l, x), Math.max(t, y), Math.min(rt, x + p.clientWidth), Math.min(b, y + p.clientHeight)];
+      }
+      return [l, t, rt, b];
+    };
+    const look = (when) => {
+      const k = talk.getBoundingClientRect();
+      const parts = [];
+      const texts = document.createTreeWalker(document.querySelector('.dq-sz'), NodeFilter.SHOW_TEXT);
+      for (let n = texts.nextNode(); n; n = texts.nextNode()) {
+        if (!n.data.trim() || n.parentElement.closest('.dq-sr') || !n.parentElement.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) continue;
+        const range = document.createRange();
+        range.selectNodeContents(n);
+        for (const r of range.getClientRects()) parts.push([n.data.trim(), n.parentElement, r]);
+      }
+      for (const e of document.querySelectorAll('.dq-sz :is(button, a[href], input, select, textarea)')) if (e.checkVisibility({ checkVisibilityCSS: true })) parts.push([e.getAttribute('aria-label') || e.textContent.trim() || e.tagName, e, e.getBoundingClientRect()]);
+      for (const [what, e, r] of parts) {
+        const [l, t, rt, b] = shown(e, r);
+        if (Math.min(rt, k.right) - Math.max(l, k.left) > 1 && Math.min(b, k.bottom) - Math.max(t, k.top) > 1) out.add(`"${what.replace(/\s+/g, ' ').slice(0, 32)}" shows under "Talk to someone now" ${when}`);
+      }
+    };
+    look('as the screen opens');
+    for (const end of ['top', 'end']) {
+      for (const s of scrollers) s.scrollTop = end === 'top' ? 0 : s.scrollHeight;
+      await frame();
+      look(`with it scrolled to the ${end}`);
+    }
+    scrollers.forEach((s, i) => (s.scrollTop = was[i]));
+    return [...out];
+  });
+
 function walk(phone, zoom, { font = false } = {}) {
   return async (h) => {
     const p = PHONES[phone];
@@ -127,8 +181,11 @@ function walk(phone, zoom, { font = false } = {}) {
     let shots = 0;
     const look = async (page, label, o = {}) => {
       await settle(page);
+      if (zoom === 1 && !o.typing) for (const f of await underTalk(page)) problems.push(`${size}, ${label}: ${f}`);
       for (const f of await audit(page, o.sound ? ['.dq-top .vol-pop'] : PAGE, SKIP)) if (!f.detail.endsWith('as the screen opens')) problems.push(`${size}, ${label}: ${f.kind} ${f.what} (${f.detail})`);
       for (const f of await unreachable(page, o)) problems.push(`${size}, ${label}: ${f}`);
+      // a ring (breathing, a countdown, Give me a moment's) too shows whole and clear of the pinned bars once scrolled to
+      if (!o.sound) for (const f of await unreachable(page, { controls: '.dq-sz :is(.dq-ring-stage, .dq-timer-stage, .dq-mo-stage)' })) problems.push(`${size}, ${label}, its ring: ${f}`);
       await h.shot(page, `safe-zone-reach-${phone}-${font ? 'text-200' : zoom * 100}-${String(++shots).padStart(2, '0')}-${label.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`);
     };
     // where the room above the keyboard holds "Talk to someone now" and the field (see the top)
@@ -211,8 +268,6 @@ function walk(phone, zoom, { font = false } = {}) {
       await tap(page, 'Give me a moment');
       await at(page, 'Give me a moment');
       await look(page, 'Give me a moment');
-      // its ring too shows whole and clear of the pinned bars once scrolled to
-      for (const f of await unreachable(page, { controls: '.dq-sz .dq-mo-stage' })) problems.push(`${size}, Give me a moment's ring: ${f}`);
       await page.locator('.dq-sz-body .dq-mo-done').evaluate((b) => b.click());
       await at(page, 'here.');
       await tap(page, 'Calm my body first');
@@ -296,13 +351,16 @@ const cutMarks = (page) =>
     }),
   );
 
-/** Words a box cuts short (an ellipsis, or a hidden overflow at the side) on the page and its top bar. */
+/**
+ * Words a box cuts short (an ellipsis, or a hidden overflow at the side) on the page and its top bar, leaving out names
+ * kept only for a screen reader (clipped to nothing, as .dq-sr is).
+ */
 const cutShort = (page) =>
   page.evaluate(() =>
     [...document.querySelectorAll('.dq-top *, #dq-main *')].flatMap((e) => {
-      if (e.closest('.dq-sr') || !e.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return [];
-      const text = [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
       const cs = getComputedStyle(e);
+      if (e.closest('.dq-sr') || cs.clipPath === 'inset(50%)' || !e.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return [];
+      const text = [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
       const cuts = /hidden|clip/.test(cs.overflowX) || cs.textOverflow === 'ellipsis';
       return text && cuts && e.scrollWidth > e.clientWidth + 1 ? [`"${e.textContent.trim().slice(0, 32)}" is cut short (${e.clientWidth} of ${e.scrollWidth} px)`] : [];
     }),
@@ -317,9 +375,9 @@ const BAR = '.dq-top :is(button, a[href]), .dq-mo-done';
  * bar, the Safe Zone button and the rest of the bar show whole inside the screen, at least 44 px each way, and take their
  * own taps, its mark and icons whole; on Give me a moment its Done does too once scrolled to. The bar takes no more rows
  * than its buttons need with the back control down to its arrow (44 px) and Home's name down to its mark. With Sound open,
- * the panel sits below the whole bar and each of the bar's buttons still takes its own tap. Home, with its stats open,
- * and Settings have nothing cut off, cut short or scrolling sideways, too small to tap or under a pinned bar, and no two
- * runs of text on top of each other.
+ * the panel sits below the whole bar and each of the bar's buttons still takes its own tap. No screen cuts its words
+ * short. Home, with its stats open, and Settings have nothing cut off or scrolling sideways, too small to tap or under a
+ * pinned bar, and no two runs of text on top of each other.
  */
 function bars(phone, { font = false } = {}) {
   return async (h) => {
@@ -367,8 +425,8 @@ function bars(phone, { font = false } = {}) {
         }
         for (const f of await audit(page, PAGE, SKIP)) if (!f.detail.endsWith('as the screen opens')) problems.push(`${at}: ${f.kind} ${f.what} (${f.detail})`);
         for (const pair of await crowded(page)) problems.push(`${at}: ${pair} sit on top of each other`);
-        for (const words of await cutShort(page)) problems.push(`${at}: ${words}`);
       }
+      for (const words of await cutShort(page)) problems.push(`${at}: ${words}`);
       await h.shot(page, `safe-zone-button-${phone}-${font ? 'text-' : ''}200-${route.name}`);
       await page.locator('.dq-top .vol-btn').click();
       await page.locator('.vol.is-open .vol-pop').waitFor();
@@ -388,7 +446,7 @@ function bars(phone, { font = false } = {}) {
  * twice its size in a page as wide as before, where browser zoom would narrow the page instead. Chrome's text autosizer,
  * which that text zoom drives, takes it as text-size-adjust on a phone's page.
  */
-const scaleText = (page) => page.addStyleTag({ content: 'html { -webkit-text-size-adjust: 200%; text-size-adjust: 200%; }' });
+export const scaleText = (page) => page.addStyleTag({ content: 'html { -webkit-text-size-adjust: 200%; text-size-adjust: 200%; }' });
 
 /**
  * On a phone at 200%, where the Sound panel's sliders scroll inside it: a finger that swipes up across a slider's track,

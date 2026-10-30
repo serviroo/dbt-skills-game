@@ -2374,11 +2374,12 @@ textarea.dq-input {
   padding: 14px 0 calc(var(--safe-bottom) + 14px);
   background: linear-gradient(0deg, rgba(7, 8, 15, 0.97) 60%, rgba(7, 8, 15, 0));
 }
-/* upright and on a desktop the Safe Zone is one screen tall, like the drawing page: only its words and choices scroll,
-   inside the frame, and the foot sits under the frame, so nothing ever rests or scrolls under "Talk to someone now".
-   Held sideways the page scrolls and the foot sits beside the choices (below). A screen under 361px tall (a phone at
-   200% zoom) has no room for a frame that scrolls inside, so there the page scrolls and the foot pins to the bottom. */
-@media (orientation: portrait) and (min-height: 361px), (min-height: 501px), (max-width: 539px) and (min-height: 361px) {
+/* upright, held sideways and on a desktop the Safe Zone is one screen tall, like the drawing page: only its words and
+   choices scroll, inside the frame, and the foot sits under the frame, so nothing ever rests or scrolls under "Talk to
+   someone now", whatever the text size. A screen under 361px tall upright (a phone at 200% zoom) or under 300px held
+   sideways (the keyboard up) has no room for a frame that scrolls inside, so there the page scrolls and the foot pins to
+   the bottom. */
+@media (orientation: portrait) and (min-height: 361px), (orientation: landscape) and (min-height: 300px) and (min-width: 540px), (min-height: 501px), (max-width: 539px) and (min-height: 361px) {
   .dq[data-screen='safe'] {
     overflow: hidden;
     display: flex;
@@ -3673,12 +3674,14 @@ textarea.dq-input {
     width: min(196px, 52vw);
   }
 }
-/* a phone at 200% zoom, held either way (300 CSS pixels wide or less): the breathing ring's word doesn't fit inside the
-   ring, so it sits just under it at its full size, on lines as wide as the frame; the count stays in the ring */
-@media (max-width: 300px) {
+/* a phone at 200% zoom, held either way (300 CSS pixels wide or less), or held sideways where the ring shares a column
+   one screen tall (below): the breathing ring's word doesn't fit inside the ring at every text size, so it sits just
+   under it at its full size, on lines as wide as the frame; the count stays in the ring */
+@media (max-width: 300px), (orientation: landscape) and (min-height: 300px) and (max-height: 500px) and (min-width: 540px) {
   .dq-sz .dq-ring-stage {
     display: grid;
     width: 100%;
+    max-width: none;
     aspect-ratio: auto;
   }
   .dq-sz .dq-ring-svg {
@@ -3702,8 +3705,8 @@ textarea.dq-input {
   }
 }
 /* held sideways there, the word sits beside the ring instead, and the ring is never taller than the room the pinned bars
-   leave, so the ring with its count and its word show together above "Talk to someone now" */
-@media (max-width: 300px) and (orientation: landscape) {
+   leave, nor than its column, so the ring with its count and its word show together above "Talk to someone now" */
+@media (max-width: 300px) and (orientation: landscape), (orientation: landscape) and (min-height: 300px) and (max-height: 500px) and (min-width: 540px) {
   .dq-sz .dq-ring-stage {
     grid-template-columns: auto auto;
     justify-content: center;
@@ -3711,7 +3714,7 @@ textarea.dq-input {
     column-gap: 12px;
   }
   .dq-sz .dq-ring-svg {
-    width: min(196px, 52vw, calc(100dvh - var(--sz-bar, 0px) - var(--dq-foot, 0px) - 8px));
+    width: min(196px, 52vw, calc(100dvh - var(--sz-bar, 0px) - var(--dq-foot, 0px) - 8px), 100cqh - 8px);
   }
   .dq-sz .dq-ring-word {
     grid-area: 1 / 2;
@@ -3762,6 +3765,55 @@ textarea.dq-input {
   .dq-sz .dq-addrow .dq-field {
     flex-basis: 100%;
   }
+}
+/* held sideways 300px tall or more, where the Safe Zone is one screen tall (above), the words and the choices each scroll
+   in their own column, right up to the frame's border, and the frame's bottom padding comes after the last of each.
+   Each holds everything it scrolls, visually hidden labels too, and no ring is taller than its column, so each shows
+   whole once scrolled to */
+@media (orientation: landscape) and (min-height: 300px) and (max-height: 500px) and (min-width: 540px) {
+  /* the body is no box here, so it scrolls nothing: its two halves do */
+  .dq-sz-body {
+    overflow: visible;
+  }
+  .dq-sz-lead,
+  .dq-sz-main {
+    position: relative;
+    container-type: size;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(125, 150, 197, 0.35) transparent;
+  }
+  .dq-sz-lead {
+    margin: 0 calc(-0.5 * var(--pad)) 0 calc(-1 * var(--pad));
+    padding: 0 calc(0.5 * var(--pad)) var(--pad) var(--pad);
+  }
+  .dq-sz-main {
+    margin: 0 calc(-1 * var(--pad)) 0 calc(-0.5 * var(--pad));
+    padding: 0 var(--pad) var(--pad) calc(0.5 * var(--pad));
+  }
+  .dq-sz :is(.dq-timer-stage:not(.is-wide), .dq-mo-stage) {
+    width: min(196px, 52vw, 100cqh - 8px);
+  }
+  /* Give me a moment's ring takes the room its heading leaves, at least 120px or the whole column, so the words' column
+     scrolls only where they run longer (enlarged text) and the ring always fits it */
+  .dq-sz-lead:has(> .dq-mo-stage) {
+    display: grid;
+    grid-template-rows: auto minmax(min(120px, 100%), 1fr);
+  }
+  .dq-sz .dq-sz-lead > .dq-mo-stage {
+    width: auto;
+    height: min(196px, 100% - 8px, 100cqw);
+  }
+  /* the copy of the lists is never taller than its column, and scrolls inside, so it shows whole as it gets focus */
+  .dq-sz-main .dq-lists-copy .dq-pre {
+    max-height: 100cqh;
+    overflow-y: auto;
+  }
+}
+/* held sideways under 300px tall the page scrolls instead */
+@media (orientation: landscape) and (max-height: 299px) and (min-width: 540px) {
   /* "Talk to someone now" pins under the words, from the panel's edge to where the choices start (its 1px border, the
      padding, the words' two fifths and the gap), so it never covers a choice; 12px below it keeps it on screen while a
      screen slides in */
@@ -3794,6 +3846,10 @@ textarea.dq-input {
   max-width: calc(100dvh - var(--sz-bar, 0px) - var(--dq-foot, 0px) - 8px);
   margin: 8px auto 0;
 }
+/* so is a breathing or a countdown ring (a phone at 200% zoom held sideways) */
+.dq-sz :where(.dq-ring-stage, .dq-timer-stage:not(.is-wide)) {
+  max-width: calc(100dvh - var(--sz-bar, 0px) - var(--dq-foot, 0px) - 8px);
+}
 .dq-sz .dq-moment {
   display: flex;
   min-height: 0;
@@ -3805,9 +3861,9 @@ textarea.dq-input {
 .dq-sz .dq-mo-row {
   justify-content: center;
 }
-/* held sideways "Talk to someone now" pins under the heading and the ring, and enlarged text can take it up over the
-   ring, so a scroll to the ring stops clear of it */
-@media (orientation: landscape) and (max-height: 500px) and (min-width: 540px) {
+/* where the page scrolls held sideways, "Talk to someone now" pins under the heading and the ring, and enlarged text can
+   take it up over the ring, so a scroll to the ring stops clear of it */
+@media (orientation: landscape) and (max-height: 299px) and (min-width: 540px) {
   .dq-sz .dq-mo-stage {
     width: clamp(120px, calc(100dvh - 250px), 196px);
     scroll-margin-bottom: var(--dq-foot, 0px);
