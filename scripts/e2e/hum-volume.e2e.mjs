@@ -99,9 +99,15 @@ const rate = (page, n) => page.evaluate((n) => window.__taps[n].context.sampleRa
 
 const rms = (qs) => Math.sqrt(qs.reduce((s, q) => s + q[2] ** 2, 0) / Math.max(1, qs.length));
 const steepest = (qs) => Math.max(...qs.map((q) => q[3]));
-/** Every quantum from t0 to t1 was recorded: none lost between reads. */
-function whole(h, name, qs, per, t0, t1) {
-  const missing = qs.findIndex((q, i) => i && q[0] - qs[i - 1][0] > per * 1.5);
+/** Every quantum from t0 to t1 was recorded: none lost between reads. One the graph never rendered played nothing. */
+async function whole(h, page, n, name, qs, per, t0, t1) {
+  const read = qs.map((q) => Math.round(q[0] / per));
+  const unrendered = new Set(await page.evaluate(([n, a, b]) => [...window.__taps[n].unrendered].filter((i) => i > a && i < b), [n, read[0], read.at(-1)]));
+  const missing = read.findIndex((k, i) => {
+    if (!i) return false;
+    for (let j = read[i - 1] + 1; j < k; j++) if (!unrendered.has(j)) return true;
+    return false;
+  });
   h.expect(qs.length && missing === -1 && qs[0][0] - t0 < per * 3 && t1 - qs.at(-1)[0] < per * 3, `${name}: the recording has a hole at ${missing === -1 ? 'an end' : qs[missing][0].toFixed(3) + ' s'} (${qs.length} quanta)`);
 }
 /** 8-quantum blocks (two periods of the hum's lowest note), for gaps: [start s, rms]. */
@@ -239,7 +245,7 @@ export const scenarios = {
       const c2 = await clock(page, n);
       await recorded(page, n, c2 + 10.4);
       const qs = await quanta(page, n, t0, c2 + 10.4);
-      whole(h, 'levels', qs, per, t0, c2 + 10.4);
+      await whole(h, page, n, 'levels', qs, per, t0, c2 + 10.4);
       const span = (a, b) => qs.filter((q) => q[0] >= a && q[0] < b);
       const A = span(t0, t0 + 10);
       const B = span(c1 + 0.4, c1 + 10.4);
@@ -290,7 +296,7 @@ export const scenarios = {
       await setHidden(page, false);
       await recorded(page, n, frozen + 1.6);
       const qs = await quanta(page, n, hide - 0.5, frozen + 1.6);
-      whole(h, 'hidden', qs, per, hide - 0.5, frozen + 1.6);
+      await whole(h, page, n, 'hidden', qs, per, hide - 0.5, frozen + 1.6);
       const faded = rms(qs.filter((q) => q[0] < frozen - 2 * per).slice(-8));
       h.expect(faded < 0.02 * ref.rms, `the hum was at ${((faded / ref.rms) * 100).toFixed(1)}% when the page paused it, not faded out`);
       // faded out and back in, so nothing clicks across the pause either
@@ -323,7 +329,7 @@ export const scenarios = {
         // the system cut it off at full level, so the wake is set against the hum just before the cut (the same point
         // of its breath and beat), and only what the page played after the cut must be free of clicks
         const around = await quanta(page, n, sys - 0.5, sys + 1.6);
-        whole(h, `system pause, ${how}`, around, per, sys - 0.5, sys + 1.6);
+        await whole(h, page, n, `system pause, ${how}`, around, per, sys - 0.5, sys + 1.6);
         const cut = rms(around.filter((q) => q[0] < sys - 2 * per).slice(-5));
         wokeSoftly(h, `woken by ${how}`, around, per, sys, cut, ref, sys + 4 * per);
       }
@@ -344,6 +350,47 @@ export const scenarios = {
         throw new Error('shown again while its pause was landing, the hum stayed paused on a visible page');
       });
       h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  /**
+   * A context that pauses and wakes again and again: its clock now and then counts a few blocks the graph never renders,
+   * so its recording has no hole but those, and no block it rendered goes missing.
+   */
+  async 'recording-across-pauses-has-no-hole'(h) {
+    const { ctx, page, errors } = await boot(h);
+    try {
+      const n = await page.evaluate(() => {
+        const c = (window.__pausing = new AudioContext());
+        const tone = c.createOscillator();
+        tone.connect(c.destination);
+        tone.start();
+        return window.__taps.length - 1;
+      });
+      await audioReady(page);
+      const per = Q / (await rate(page, n));
+      const from = await clock(page, n);
+      // it pauses until its clock has skipped blocks three times (about one pause in a hundred does), or 1500 times
+      const skips = await page.evaluate(async (n) => {
+        const c = window.__pausing;
+        const q = window.__taps[n].q;
+        const skips = () => [...q.keys()].sort((a, b) => a - b).filter((k, i, ks) => i && k > ks[i - 1] + 1).length;
+        for (let i = 1; i <= 1500; i++) {
+          await new Promise((r) => setTimeout(r, 10));
+          await c.suspend();
+          await new Promise((r) => setTimeout(r, 5));
+          await c.resume();
+          if (i % 25 === 0 && skips() >= 3) break;
+        }
+        return skips();
+      }, n);
+      const to = await clock(page, n);
+      await recorded(page, n, to);
+      await whole(h, page, n, 'pauses', await quanta(page, n, from, to), per, from, to);
+      h.expect(!errors.length, errors.join('\n'));
+      return { skips };
     } finally {
       await ctx.close();
     }
