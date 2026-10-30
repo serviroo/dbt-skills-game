@@ -139,18 +139,20 @@ async function until(h, read, check, message, tries = 120) {
 async function fits(h, page, where) {
   const r = await page.evaluate(() => {
     const w = innerWidth;
-    const out = [...document.querySelectorAll('.dq-piece-labels button, .dq-piece-rename input, .dq-piece-rename button, .dq-piece-h, .dq-galitem-d')]
+    const out = [...document.querySelectorAll('.dq-piece-labels button, .dq-piece-rename input, .dq-piece-rename button, .dq-piece-h, .dq-galitem-d, .dq-toast, .dq-toast-btn')]
       .filter((e) => e.getClientRects().length)
       .filter((e) => {
         const b = e.getBoundingClientRect();
         return b.left < -0.5 || b.right > w + 0.5;
       })
       .map((e) => e.className);
-    const input = document.querySelector('.dq-piece-rename input');
-    return { scroll: document.documentElement.scrollWidth, w, out, input: input && input.getClientRects().length ? parseFloat(getComputedStyle(input).fontSize) : null };
+    const px = (e) => (e && e.getClientRects().length ? parseFloat(getComputedStyle(e).fontSize) : null);
+    const toast = [...document.querySelectorAll('.dq-toast, .dq-toast-btn')].map(px).filter((v) => v !== null);
+    return { scroll: document.documentElement.scrollWidth, w, out, input: px(document.querySelector('.dq-piece-rename input')), toast };
   });
   h.expect(r.scroll <= r.w + 1 && !r.out.length, `${where}: something runs off the screen: ${JSON.stringify(r)}`);
   h.expect(r.input === null || r.input >= 16, `${where}: the name field's text is under 16 px: ${r.input}`);
+  h.expect(r.toast.every((v) => v >= 16), `${where}: the toast's text is under 16 px: ${r.toast}`);
 }
 
 async function crystalOf(h, page, name) {

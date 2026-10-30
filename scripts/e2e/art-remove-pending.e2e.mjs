@@ -1,8 +1,8 @@
 // Art room: a removal waiting for its Undo is stored beside the save, one key per drawing, with the version it hides.
 // Every tab hides it, tabs removing at once keep both, a copy of a tab waits for its Undo, a newer save in any tab wins,
-// a reload finishes it, a Save Crystal restore neither brings it back nor loses it, Undo works until the toast is gone
-// or they leave for another screen (Home keeps it), Forward can't reopen it, and a change in another tab keeps the
-// focused card.
+// a Restore in another tab that brings other strokes under the version on screen redraws it, a reload finishes it, a
+// Save Crystal restore neither brings it back nor loses it, Undo works until the toast is gone or they leave for another
+// screen (Home keeps it), Forward can't reopen it, and a change in another tab keeps the focused card.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -16,6 +16,14 @@ const goneMarks = (page) =>
     const keys = Object.keys(localStorage).filter((k) => k.startsWith(at));
     return keys.length ? Object.fromEntries(keys.map((k) => [k.slice(at.length), JSON.parse(localStorage.getItem(k))])) : null;
   });
+/** Whether the open page draws the version of drawing id stored now. */
+const showsStored = (page, id) =>
+  page.evaluate(async (id) => {
+    const rec = await (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).get(id);
+    const { renderDrawing } = await import('/src/daily/ink.ts');
+    const c = document.querySelector('.dq-piece-art canvas');
+    return !!rec && !!c && renderDrawing(rec.strokes, rec.kind, c.width).toDataURL() === c.toDataURL();
+  }, id);
 const focused = (page) => page.evaluate(() => document.activeElement?.dataset?.piece ?? document.activeElement?.className ?? null);
 
 async function seed(page) {
@@ -229,14 +237,7 @@ export const scenarios = {
     await stroke(b);
     await b.getByRole('button', { name: 'Save', exact: true }).click();
     await until(h, () => records(b), (rs) => rs.find((r) => r.id === 'pg-a')?.strokes.length === 2, 'the other tab\'s edit was not saved');
-    const showsStored = () =>
-      a.evaluate(async () => {
-        const rec = await (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).get('pg-a');
-        const { renderDrawing } = await import('/src/daily/ink.ts');
-        const c = document.querySelector('.dq-piece-art canvas');
-        return !!rec && !!c && renderDrawing(rec.strokes, rec.kind, c.width).toDataURL() === c.toDataURL();
-      });
-    await until(h, showsStored, (v) => v, 'the open page still shows the drawing from before the other tab saved its edit', 40);
+    await until(h, () => showsStored(a, 'pg-a'), (v) => v, 'the open page still shows the drawing from before the other tab saved its edit', 40);
     const at = await a.evaluate(() => document.activeElement?.textContent?.trim() ?? null);
     h.expect(at === 'Remove', `the redraw took focus off Remove: ${at}`);
 
@@ -252,6 +253,66 @@ export const scenarios = {
     await until(h, async () => (await sub.textContent()).trim(), (t) => t !== before, `Home still counts the released ally: ${before}`, 30);
     await b.locator('.dq-toast').getByRole('button', { name: 'Undo', exact: true }).click();
     await until(h, async () => (await sub.textContent()).trim(), (t) => t === before, 'Home did not count the ally again after Undo', 30);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /**
+   * A Restore in another tab that brings other strokes under the version an open page shows redraws the page, so Remove
+   * takes what is on screen, and no copy of that version's strokes is lost or doubled, however often the files come back.
+   */
+  async 'art-remove-restored-version'(h) {
+    const { ctx, page: a, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute');
+    a.setDefaultTimeout(15000);
+    await h.reachHub(a);
+    const s1 = line(200, 500), s2 = line(100, 1200, 3), s3 = line(300, 900, 2);
+    // a page's copy as a crafted Save Crystal holds it: the same id, revision and time each time, only the strokes differ
+    const copy = (id, strokes) => ({ id, kind: 'today', day: '2026-10-20', t: id === 'pg-r' ? 1 : 2, updated: 5, rev: `crafted-${id}`, n: strokes.length, strokes });
+    const bring = (page, art) => page.evaluate(async (art) => (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).importAll(art), art);
+    await bring(a, [copy('pg-r', [s1]), copy('pg-s', [s1])]);
+    await toArt(h, a);
+    await openPiece(a, 'pg-r');
+    const b = await second(h, ctx, errors);
+    // A's page is the one watched and tapped, so A goes in front, where it draws: B only restores
+    await a.bringToFront();
+
+    // B's copy holds the stroke A shows and one more: A's page shows both, Remove hides that version and Undo keeps both
+    const said = await bring(b, [copy('pg-r', [s1, s2])]);
+    h.expect(said.updated === 1, `the Restore did not update the page: ${JSON.stringify(said)}`);
+    await until(h, () => showsStored(a, 'pg-r'), (v) => v, 'the open page still shows the strokes from before the other tab\'s Restore', 40);
+    await a.getByRole('button', { name: 'Remove', exact: true }).click();
+    await a.locator('.dq-toast').getByText('Page removed.', { exact: true }).waitFor();
+    const shown = await a.evaluate(async () => {
+      const { artStore, revOf } = await import('/src/daily/artstore.ts');
+      return revOf(await artStore(window.__daily.store.key).get('pg-r'));
+    });
+    const hid = (await goneMarks(a))?.['pg-r']?.rev;
+    h.expect(hid === shown, `Remove hid ${hid}, not the version on screen (${shown})`);
+    await a.locator('.dq-toast').getByRole('button', { name: 'Undo', exact: true }).click();
+    await a.locator('[data-piece="pg-r"]').waitFor();
+
+    // B's copy holds other strokes than A's page and not the one there: A's page shows B's, and A's comes in as its own page
+    await openPiece(a, 'pg-s');
+    const other = await bring(b, [copy('pg-s', [s3])]);
+    h.expect(other.kept === 1, `the Restore did not keep both copies: ${JSON.stringify(other)}`);
+    await until(h, () => showsStored(a, 'pg-s'), (v) => v, 'the open page still shows the strokes from before the other tab\'s Restore of other strokes', 40);
+
+    // each copy restored again changes nothing; a third copy of the version, holding a stroke no page here has, comes in,
+    // and so does one holding a field from a newer build, which it keeps
+    for (const art of [[copy('pg-r', [s1])], [copy('pg-r', [s1, s2])], [copy('pg-s', [s1])], [copy('pg-s', [s3])]]) {
+      const again = await bring(b, art);
+      h.expect(again.unchanged === 1, `restoring a copy again changed something: ${JSON.stringify({ again, strokes: art[0].strokes.length })}`);
+    }
+    const third = await bring(b, [copy('pg-r', [s1, s3])]);
+    h.expect(third.kept === 1, `a third copy of the version did not come in as its own page: ${JSON.stringify(third)}`);
+    const newer = await bring(b, [{ ...copy('pg-r', [s1, s2]), glaze: { k: 1 } }]);
+    h.expect(newer.kept === 1, `a copy with a newer build's field did not come in as its own page: ${JSON.stringify(newer)}`);
+    const rs = await records(a);
+    h.expect(rs.filter((r) => r.glaze?.k === 1).length === 1, 'the newer build\'s field is not kept on exactly one page');
+    const got = rs.map((r) => JSON.stringify(r.strokes)).sort();
+    const want = [[s1, s2], [s1, s2], [s1, s3], [s3], [s1]].map((s) => JSON.stringify(s)).sort();
+    h.expect(JSON.stringify(got) === JSON.stringify(want), `strokes were lost or doubled: ${JSON.stringify(got)}`);
+    h.expect(await showsStored(a, 'pg-s'), 'the open page no longer shows the version stored under it');
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },

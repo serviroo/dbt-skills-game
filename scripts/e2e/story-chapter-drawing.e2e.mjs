@@ -283,6 +283,8 @@ export const scenarios = {
       await b.goto(h.server.url + '/?mute');
       await ready(b);
       await h.reachHub(b);
+      // the story's tab is the one watched, so it goes in front, where it draws: the other only runs the Art room's steps
+      await page.bringToFront();
       // the other tab's Art room, as its Remove button and the toast's Undo do it
       const art = (step) =>
         b.evaluate(async (step) => {

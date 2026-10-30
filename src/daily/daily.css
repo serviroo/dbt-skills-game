@@ -3305,7 +3305,7 @@ textarea.dq-input {
   width: max-content;
   max-width: min(92vw, 460px);
   padding: 12px 18px;
-  font-size: 15.5px;
+  font-size: 16px;
   color: var(--t-title);
   border: 1px solid rgba(125, 150, 197, 0.55);
   background: rgba(8, 20, 36, 0.95);

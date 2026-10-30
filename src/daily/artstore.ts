@@ -139,9 +139,12 @@ export const extrasOf = (r: DrawingMeta) => restOf(r, REC_KEYS);
 /** A drawing or a draft as it is stored and goes into a Save Crystal. */
 export const storedRec = (r: DrawingRec) => ({ ...r, strokes: r.strokes.map(storedStroke) });
 const storedDraft = (d: Draft) => ({ ...d, strokes: d.strokes.map(storedStroke) });
-/** Whether drawing a holds everything b does: each of b's fields but its labels, and b's strokes in their order among a's. */
-function holds(a: DrawingRec, b: DrawingRec) {
-  const bare = (r: DrawingRec): Record<string, unknown> => ({ ...metaOf(r), id: '', n: 0, name: undefined, nameAt: undefined, fav: undefined, favAt: undefined });
+/**
+ * Whether drawing a holds everything b does: each of b's fields but its labels, and b's strokes in their order among a's.
+ * A re-stamp of b (see importOne) holds it with a time and lineage of its own.
+ */
+function holds(a: DrawingRec, b: DrawingRec, restamp = false) {
+  const bare = (r: DrawingRec): Record<string, unknown> => ({ ...metaOf(r), id: '', n: 0, name: undefined, nameAt: undefined, fav: undefined, favAt: undefined, ...(restamp ? { updated: 0, from: undefined } : {}) });
   const fa = bare(a), fb = bare(b);
   if (Object.entries(fb).some(([k, v]) => JSON.stringify(fa[k]) !== JSON.stringify(v))) return false;
   return within(a.strokes, b.strokes);
@@ -1093,9 +1096,10 @@ export class ArtStore {
    * dropped the tools' strokes: then the file's copy comes in as its own page. A different version of a page that is here keeps both: the newer one under the page's id, the other as
    * its own page, in one transaction. The same version stored here with other content was saved by a build that
    * couldn't read all of it: the file's copy updates it when it holds everything the one here does, and comes in with
-   * the other kept as its own page when neither does. Each drawing counts once as added, updated, kept (both versions
-   * kept), unchanged or skipped (unreadable). unsaved counts the drawings from the file whose copy in use lives only in
-   * memory for this session.
+   * the other kept as its own page when neither does; either way the page takes the file's copy as a version of its own
+   * (see importOne), so no version ever holds two contents. Each drawing counts once as added, updated, kept (both
+   * versions kept), unchanged or skipped (unreadable). unsaved counts the drawings from the file whose copy in use lives
+   * only in memory for this session.
    */
   async importAll(raw: unknown): Promise<{ added: number; updated: number; kept: number; unchanged: number; skipped: number; unsaved: number }> {
     const out = { added: 0, updated: 0, kept: 0, unchanged: 0, skipped: 0, unsaved: 0 };
@@ -1135,10 +1139,13 @@ export class ArtStore {
         const here = await this.familyNow(family(rec.id));
         const same = here.filter((d) => revOf(d) === me);
         // a page edited from this version holds it, unless a build from before the tools made the edit: that keeps the
-        // strokes it can read and drops the tools' strokes, so the file's copy comes in as its own page
+        // strokes it can read and drops the tools' strokes, so the file's copy comes in as its own page. A page a Restore
+        // re-stamped from this version (see importOne) holds only what it has.
         const later = here.filter((d) => fromOf(d.from)?.includes(me));
-        const lost = !later.some((d) => within(d.strokes, rec.strokes)) && later.some((d) => within(d.strokes, rec.strokes.filter((s) => !storedStroke(s).m)));
-        const by = same.find((d) => holds(d, rec)) ?? (!same.length && !lost ? later[0] : undefined);
+        const restamped = later.filter((d) => revId(d.rev) === revId(rec.rev));
+        const edits = later.filter((d) => !restamped.includes(d));
+        const lost = !edits.some((d) => within(d.strokes, rec.strokes)) && edits.some((d) => within(d.strokes, rec.strokes.filter((s) => !storedStroke(s).m)));
+        const by = same.find((d) => holds(d, rec)) ?? restamped.find((d) => holds(d, rec, true)) ?? (!same.length && !lost ? edits[0] : undefined);
         if (by) {
           out.unchanged++;
           inUse.push(by.id);
@@ -1182,6 +1189,9 @@ export class ArtStore {
   /**
    * One drawing from a backup that no page here holds; see importAll. `at` is where it landed. The same version stored
    * under its id with other content is updated when the file's copy holds all of it, and otherwise kept beside it.
+   * Either way the page then holds other content than that version, so it is re-stamped: the same revision at a later
+   * time, drawn from that version. Every screen showing the version stored here draws the page again, and a removal
+   * waiting on that version leaves the page.
    */
   private async importOne(rec: DrawingRec, scanned: DrawingMeta | undefined): Promise<{ result: 'added' | 'updated' | 'kept' | 'unchanged'; at: string; wrote: boolean; moved?: { id: string; rev: string } }> {
     const me = revOf(rec);
@@ -1198,6 +1208,7 @@ export class ArtStore {
     let same = false;
     let moved: { id: string; rev: string } | undefined;
     let relabeled = false;
+    let restamp: Pick<DrawingMeta, 'updated' | 'from'> | undefined;
     const stored = await this.tx(
       ['meta', 'strokes', 'thumbs'],
       'readwrite',
@@ -1212,8 +1223,8 @@ export class ArtStore {
               return;
             }
           };
-          const put = (id: string, labels: Labels = rec) => {
-            metaS.put(metaOf({ ...rec, ...labels, id }), id);
+          const put = (id: string, labels: Labels = rec, version?: Pick<DrawingMeta, 'updated' | 'from'>) => {
+            metaS.put(metaOf({ ...rec, ...labels, ...version, id }), id);
             strokeS.put(kept, id);
             if (buf) thumbS.put({ type: 'image/jpeg', buf }, id);
           };
@@ -1260,8 +1271,9 @@ export class ArtStore {
                       }
                       return ok('unchanged');
                     }
+                    restamp = { updated: Math.max(rec.updated, ...tops) + 1, from: fromOf([...(was.from ?? []), ...(rec.from ?? []), me]) };
                     if (page && holds(rec, page)) {
-                      put(rec.id, labelsAt(was));
+                      put(rec.id, labelsAt(was), restamp);
                       return ok('updated');
                     }
                   }
@@ -1271,7 +1283,7 @@ export class ArtStore {
                     if (th.result) thumbS.put(th.result, cid);
                     moved = { id: cid, rev: revOf(was) };
                   }
-                  put(rec.id, labelsAt(was));
+                  put(rec.id, labelsAt(was), restamp);
                   ok('kept');
                 } catch (e) {
                   fail(e);
@@ -1319,7 +1331,7 @@ export class ArtStore {
     }
     // what this copy held of that version in memory is the stored one it replaced or moved aside
     if (same && at === rec.id && M && revOf(M) === me) memDrop(rec.id);
-    this.landed.add(landKey(at, me));
+    this.landed.add(landKey(at, restamp ? revOf({ rev: rec.rev, updated: restamp.updated }) : me));
     if (moved) this.landed.add(landKey(moved.id, moved.rev));
     if (at === rec.id && M && revOf(M) !== me) {
       const ms = this.mem.strokes.get(rec.id), mt = this.mem.thumbs.get(rec.id);
