@@ -1,5 +1,5 @@
 import { companionName, playerName } from '../core/you';
-import { onSystemMotion, params, setMotion } from '../core/params';
+import { onMotion, params, releaseMotion, setMotion } from '../core/params';
 import { cleared, onClear } from '../core/cleared';
 import { animate } from '../ui/anim';
 import { BUZZ, BUZZ_GAP, SKY, WINDOW } from '../motion/tokens';
@@ -153,7 +153,7 @@ export class App {
   private current: ScreenOut | null = null;
   private offs: (() => void)[] = [];
   private motionFns = new Set<() => void>();
-  /** the motion setting as last applied, so a change made in another open copy is applied here once */
+  /** whether the page was last shown still, so each turn of motion on or off is applied once */
   private stillShown: boolean | null = null;
   /** numbers already shown on the status panel, so new gains count up once */
   shown: { xp: number; stats: Record<StatId, number> } | null = null;
@@ -196,14 +196,15 @@ export class App {
       if (opts.volume.fresh && this.store.state.settings.sound === false) opts.volume.set({ muted: true });
       this.volBtn = volumeButton(opts.volume, { placement: 'top', align: 'right' });
     }
+    // motion turning on or off while the page is open (the device's own setting with Motion on Auto, or the Motion
+    // setting here or in another open copy): every scene and animation follows it
+    this.offs.push(onMotion(() => this.showMotion()), releaseMotion);
     this.applyMotion();
-    // the device's own setting changed while the page is open: with Motion on Auto, every scene and animation follows it
-    this.offs.push(onSystemMotion(() => this.applyMotion()));
     // names chosen in another open copy: Home is redrawn, name plates elsewhere take the new name in place
     let shown = `${playerName()}\n${companionName()}`;
     this.store.onChange(() => {
-      // Motion chosen in another open copy applies here too, to the scenes already moving
-      if (this.reduced() !== this.stillShown) this.applyMotion();
+      // Motion chosen in another open copy, merged into this store, applies here too, to the scenes already moving
+      this.applyMotion();
       const now = `${playerName()}\n${companionName()}`;
       if (now === shown) return;
       shown = now;
@@ -247,16 +248,19 @@ export class App {
   }
 
   reduced() {
-    const m = this.store.state.settings.motion;
-    return m === 'reduce' || (m === 'system' && params.systemReduced);
+    return params.reduced;
   }
+  /** Hands this store's Motion setting, as it is now, to everything that moves. */
   applyMotion() {
     setMotion(this.store.state.settings.motion);
+    this.showMotion();
+  }
+  private showMotion() {
     const still = this.reduced();
-    this.root.classList.toggle('is-still', still);
-    this.bubbles.resize();
     if (still === this.stillShown) return;
     this.stillShown = still;
+    this.root.classList.toggle('is-still', still);
+    this.bubbles.resize();
     this.motionFns.forEach((f) => f());
   }
   /**

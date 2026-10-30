@@ -1,7 +1,7 @@
 import '../styles/cutscene.css';
 import { after, animate, complete, el, finished, wait } from './anim';
 import { inertUntil, onTaps } from './taps';
-import { onSystemMotion, params } from '../core/params';
+import { onMotion, params } from '../core/params';
 import { EASE, WINDOW as W, css } from '../motion/tokens';
 import { ICON_LETTER, ICON_LANTERN, ICON_MOTH, ICON_STAR, FLOURISH } from './icons';
 import type { RewardItem } from '../content/intro';
@@ -55,7 +55,7 @@ export function showTitle(onGesture?: () => void): Promise<void> {
       prompt.style.opacity = still ? '0.85' : '';
     };
     pulse();
-    const offPulse = onSystemMotion(pulse);
+    const offPulse = onMotion(pulse);
     const go = async () => {
       offPulse();
       onGesture?.();
@@ -411,7 +411,7 @@ export async function endCard(): Promise<'replay' | 'enter'> {
   e.animate(curls, [{ opacity: 0, transform: 'translate(-50%,-50%) scale(.94)' }, { opacity: 1, transform: 'translate(-50%,-50%) scale(1)' }], { duration: 1600, delay: 300, easing: 'cubic-bezier(.16,1,.3,1)' });
   e.animate(line, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 900, delay: 700, easing: 'cubic-bezier(.16,1,.3,1)' });
   e.buttons(acts, e.animate(acts, [{ opacity: 0 }, { opacity: 1 }], { duration: 900, delay: 2600, easing: 'ease-out' }));
-  // breathing drift on the held card, stopped and started again as the device's reduce-motion changes
+  // breathing drift on the held card, stopped and started again as motion turns on and off
   let drift: Animation | null = null;
   const rest = () => {
     drift?.cancel();
@@ -422,7 +422,7 @@ export async function endCard(): Promise<'replay' | 'enter'> {
     else drift ??= animate(stage, [{ transform: 'scale(1)' }, { transform: 'scale(.985)' }], { duration: 9000, delay: 1600, iterations: Infinity, direction: 'alternate', easing: 'ease-in-out' });
   };
   sway();
-  const offSway = onSystemMotion(sway);
+  const offSway = onMotion(sway);
   const v = await new Promise<'replay' | 'enter'>((resolve) => {
     acts.querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => resolve(b.dataset.v as 'replay' | 'enter'), { once: true }));
     if (params.capture) wait(6).then(() => resolve('enter'));

@@ -1,6 +1,6 @@
 import './hold.css';
 import { animate, complete, el, uiNow } from '../../ui/anim';
-import { onSystemMotion, params } from '../../core/params';
+import { onMotion, params } from '../../core/params';
 import { LanternWindow, lanternLayer } from '../../ui/lantern-window';
 import { chestSounds } from './sounds';
 
@@ -291,7 +291,7 @@ export function holdToCharge(opts: HoldOpts): Promise<void> {
         animate(chip, [{ opacity: 0, clipPath: 'inset(0 50% 0 50%)' }, { opacity: 1, clipPath: 'inset(0 0% 0 0%)' }], { duration: 260, delay: 120, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' }),
       ];
   // reduce-motion turned on while it comes in: it is in place at once
-  const offEntry = onSystemMotion(() => {
+  const offEntry = onMotion(() => {
     if (params.reduced) entry.forEach(complete);
   });
   const born = uiNow();
@@ -302,7 +302,7 @@ export function holdToCharge(opts: HoldOpts): Promise<void> {
     const a = c * Math.PI * 2 - Math.PI / 2;
     head.setAttribute('transform', `translate(${(60 + Math.cos(a) * R).toFixed(2)} ${(60 + Math.sin(a) * R).toFixed(2)})`);
     const breath = 0.5 + 0.5 * Math.sin(Math.PI * 2 * 0.25 * (now - born) - Math.PI / 2);
-    // read each frame: the device's reduce-motion can change while the hold waits on the player
+    // read each frame: motion can turn on or off while the hold waits on the player
     const reduced = params.reduced;
     // the star keeps falling in place: the trail stretches with the charge and its speed lines stream back
     const b = reduced ? 0.5 : breath;

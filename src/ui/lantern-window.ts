@@ -1,7 +1,7 @@
 import '../styles/lantern-window.css';
 import { after, animate, complete, el, finished, wait } from './anim';
 import { inertUntil, onTaps } from './taps';
-import { onSystemMotion, params } from '../core/params';
+import { onMotion, params } from '../core/params';
 import { EASE, LEVEL, WINDOW as W, css, fr } from '../motion/tokens';
 
 export type WindowKind = 'notification' | 'quest' | 'level' | 'reward' | 'info';
@@ -352,7 +352,7 @@ export class LanternWindow {
     this.root.style.visibility = 'visible';
     windowSounds.open?.(kind);
     this.listen();
-    this.offMotion = onSystemMotion(() => this.setStill(params.reduced || this.root.classList.contains('dq-sw--still')));
+    this.offMotion = onMotion(() => this.setStill(params.reduced || this.root.classList.contains('dq-sw--still')));
     let hookAt = 0;
     const ctx: RevealCtx = {
       root: this.root,

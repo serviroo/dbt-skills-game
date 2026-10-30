@@ -4,7 +4,7 @@
  * every cutscene beat (top-left, beside the skip button's layer) and in the companion's top bar and Settings.
  */
 import '../styles/volume.css';
-import { onSystemMotion, params } from '../core/params';
+import { onMotion, params } from '../core/params';
 import type { AudioLevels, VolumeCtrl } from '../audio/prefs';
 
 export type { VolumeCtrl } from '../audio/prefs';
@@ -195,12 +195,12 @@ export type VolumeButton = HTMLElement & { close(focus?: boolean): void; dispose
 export function volumeButton(ctrl: VolumeCtrl, o: { placement: 'cutscene' | 'top'; align: 'left' | 'right' }): VolumeButton {
   const n = ++uid;
   const root = el('div', `vol vol--${o.placement} vol--${o.align}`) as unknown as VolumeButton;
-  // in the companion the page's .is-still follows the Motion setting; the intro has only the device's, kept current here
+  // in the companion the page's .is-still follows motion; in the intro it is kept current here
   const still = () => root.classList.toggle('vol--still', params.reduced);
   let offStill = () => {};
   if (o.placement === 'cutscene') {
     still();
-    offStill = onSystemMotion(still);
+    offStill = onMotion(still);
   }
   const popId = `vol-pop-${n}`;
   const btn = el('button', 'vol-btn', { type: 'button', 'aria-label': 'Sound settings', 'aria-expanded': 'false', 'aria-controls': popId });

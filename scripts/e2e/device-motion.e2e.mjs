@@ -9,7 +9,9 @@
 // on, breathes once it is turned off, and settles again when it comes back on. With Motion saved as Full, the glint on
 // the card's back and the Story Room's scan keep moving whatever the device says. The title's pulses and the end card's
 // drift end with their screen, however it goes, a capture's wait on a dismissed window's typing ends with it, and the
-// Stealth Room's Breathing words still breathe with its glow once motion is back.
+// Stealth Room's Breathing words still breathe with its glow once motion is back. Motion chosen in another open tab
+// reaches the intro the same way, with no reload: Reduced stills the title, a waiting window, the hold's breathing and
+// the end card's drift, and Auto moves them again.
 
 const PHONE = { width: 390, height: 844 };
 
@@ -208,6 +210,60 @@ export const scenarios = {
     h.expect(kept.same && kept.running, `with Motion on Full, a device change restarted the title's breath: ${JSON.stringify(kept)}`);
     h.expect(!full.errors.length, full.errors.join('\n'));
     await full.ctx.close();
+  },
+
+  async 'intro-title-follows-motion-from-another-tab'(h) {
+    // the companion in one tab and the intro's title, replayed, in another: Motion chosen on the companion's Settings
+    // screen reaches the title at once, with no reload
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', PHONE);
+    const title = await ctx.newPage();
+    title.on('pageerror', (e) => errors.push('pageerror, title tab: ' + e.message));
+    await title.goto(h.server.url + '/?cutscene=1&mute');
+    await title.locator('.title-screen').waitFor({ timeout: 30000 });
+    /** True once the title has `n` endless animations; the other tab's change arrives as an event, so this waits on it. */
+    const moving = (n) =>
+      title
+        .waitForFunction((n) => document.querySelector('.title-screen').getAnimations({ subtree: true }).filter((a) => a.effect.getTiming().iterations === Infinity && a.playState !== 'idle').length === n, n, { timeout: 5000, polling: 50 })
+        .then(() => true, () => false);
+    h.expect(await moving(2), `the title's slit and prompt do not move with motion on (${await endless(title, '.title-screen')})`);
+    await h.openSettings(page);
+    await page.getByRole('radio', { name: 'Motion: Reduced', exact: true }).click();
+    h.expect(await moving(0), `with Motion: Reduced chosen in another tab, the title kept moving (${await endless(title, '.title-screen')})`);
+    await page.getByRole('radio', { name: 'Motion: Auto', exact: true }).click();
+    h.expect(await moving(2), `with Motion back on Auto in another tab, the title stayed still (${await endless(title, '.title-screen')})`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  async 'intro-pieces-follow-motion-from-another-tab'(h) {
+    // the same for a Lantern window waiting on a tap, the chest hold's breathing and the end card's drift, each alone in
+    // the window lab beside the companion
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', PHONE);
+    await h.openSettings(page);
+    const pieces = [
+      { kind: 'notification', ready: (p) => p.waitForFunction(() => document.querySelector('.sw .sw-next')?.getAnimations().length > 0, null, { timeout: 30000 }), moving: async (p) => (await windowMotion(p)).endless > 1, still: async (p) => (await windowMotion(p)).endless === 0 },
+      { kind: 'hold', ready: (p) => p.locator('.chest-hold').waitFor({ timeout: 30000 }), moving: async (p) => (await breaths(p, 1500)).length > 3, still: async (p) => { const b = await breaths(p, 1500); return b.length === 1 && Number(b[0]) === 0.5; } },
+      { kind: 'endcard', ready: (p) => p.locator('.ec-stage').waitFor({ timeout: 30000 }), moving: async (p) => (await drifts(p)) === 1, still: async (p) => (await drifts(p)) === 0 },
+    ];
+    for (const k of pieces) {
+      const piece = await ctx.newPage();
+      piece.on('pageerror', (e) => errors.push(`pageerror, ${k.kind} tab: ${e.message}`));
+      await piece.goto(h.server.url + `/?lab=window&kind=${k.kind}&mute`);
+      await k.ready(piece);
+      /** True once the piece shows `want` (moving or still); the other tab's change arrives as an event, so this waits. */
+      const shows = async (want) => {
+        for (const end = Date.now() + 5000; Date.now() < end; await h.sleep(100)) if (await k[want](piece)) return true;
+        return false;
+      };
+      h.expect(await shows('moving'), `${k.kind}: it does not move with motion on`);
+      await page.getByRole('radio', { name: 'Motion: Reduced', exact: true }).click();
+      h.expect(await shows('still'), `${k.kind}: with Motion: Reduced chosen in another tab, it kept moving`);
+      await page.getByRole('radio', { name: 'Motion: Auto', exact: true }).click();
+      h.expect(await shows('moving'), `${k.kind}: with Motion back on Auto in another tab, it stayed still`);
+      await piece.close();
+    }
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
   },
 
   async 'stealth-follows-device-motion'(h) {
