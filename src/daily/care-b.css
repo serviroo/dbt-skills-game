@@ -20,20 +20,22 @@
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
+/* a grid, the art and then its words, so at its narrowest it is the art and its longest word (a flex row would count all
+   its words on one line), which is when Give me a moment takes the next line */
 .dq-chest {
   position: relative;
-  display: inline-flex;
+  display: inline-grid;
+  grid-auto-flow: column;
+  justify-content: start;
   align-items: center;
   gap: 10px;
   min-height: 48px;
-  min-width: 0;
   padding: 2px 12px 2px 4px;
   text-align: left;
   border-radius: 2px;
 }
 .dq-chest-art {
   position: relative;
-  flex: none;
   width: 46px;
   height: 40px;
 }
@@ -105,11 +107,13 @@
 .dq-chest.is-open .dq-chest-lock {
   opacity: 0;
 }
+/* its name over its line, as blocks, so it is no narrower than its longest word */
 .dq-chest-txt {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
   line-height: 1.25;
+}
+.dq-chest-t,
+.dq-chest-s {
+  display: block;
 }
 .dq-chest-t {
   font-size: 13px;
@@ -145,7 +149,6 @@
   font-size: 16px;
   font-weight: 400;
   letter-spacing: 0.01em;
-  white-space: nowrap;
   transition:
     border-color 0.2s,
     background 0.2s;
@@ -178,8 +181,9 @@
     opacity: 0.6;
   }
 }
+/* the chest's own end padding and Give me a moment's start padding part them on a line */
 .dq-lobby {
-  gap: 8px;
+  gap: 8px 0;
 }
 .dq-chest {
   gap: 8px;
@@ -209,22 +213,18 @@
     padding: 0 12px 0 10px;
   }
 }
-/* a phone at 200% zoom, held either way (300 CSS pixels wide or less): where the whole chest and Give me a moment don't
-   fit side by side, Give me a moment takes the next line, at its end, and its own words wrap if they still don't fit */
-@media (max-width: 300px) {
-  .dq-lobby {
-    flex-wrap: wrap;
-  }
-  .dq-chest {
-    flex: 1 1 0;
-    min-width: auto;
-    max-width: max-content;
-  }
-  .dq-momentbtn {
-    max-width: 100%;
-    margin-left: auto;
-    white-space: normal;
-  }
+/* where the whole chest and Give me a moment don't fit side by side (a phone at 200% zoom, or its own text at 200%), Give
+   me a moment takes the next line, at its end, and its own words wrap if they still don't fit */
+.dq-lobby {
+  flex-wrap: wrap;
+}
+.dq-chest {
+  flex: 1 1 0;
+  max-width: max-content;
+}
+.dq-momentbtn {
+  max-width: 100%;
+  margin-left: auto;
 }
 @media (min-width: 760px) {
   .dq-col--t {

@@ -250,7 +250,19 @@ const crowded = (page) =>
       if (!t.data.trim() || el.closest('.dq-sr, .dq-card:not(.is-open) .dq-cardface--front, .dq-card.is-open .dq-cardface--back') || !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) continue;
       const range = document.createRange();
       range.selectNodeContents(t);
-      for (const r of range.getClientRects()) if (r.width > 1 && r.height > 1) runs.push([t, r]);
+      // only the part that shows inside every box around it that cuts it off (an ellipsis, a hidden overflow), wherever the
+      // page is scrolled to: a box that scrolls cuts nothing off
+      const cuts = (v) => v === 'hidden' || v === 'clip';
+      for (const r of range.getClientRects()) {
+        let [left, top, right, bottom] = [r.left, r.top, r.right, r.bottom];
+        for (let p = el; p && p !== document.body; p = p.parentElement) {
+          const cs = getComputedStyle(p);
+          const q = p.getBoundingClientRect();
+          if (cuts(cs.overflowX)) [left, right] = [Math.max(left, q.left), Math.min(right, q.right)];
+          if (cuts(cs.overflowY)) [top, bottom] = [Math.max(top, q.top), Math.min(bottom, q.bottom)];
+        }
+        if (right - left > 1 && bottom - top > 1) runs.push([t, { left, top, right, bottom, height: r.height }]);
+      }
     }
     const out = new Set();
     for (let i = 0; i < runs.length; i++)
@@ -261,28 +273,60 @@ const crowded = (page) =>
     return [...out];
   });
 
+/** The top bar's mark and icons that a box around them cuts into. */
+const cutMarks = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll('.dq-top :is(.dq-brand-mark, svg)')].flatMap((e) => {
+      const r = e.getBoundingClientRect();
+      if (!r.width || !r.height || !e.checkVisibility({ checkVisibilityCSS: true })) return [];
+      for (let p = e.parentElement; p && p !== document.body; p = p.parentElement) {
+        const cs = getComputedStyle(p);
+        if (!/hidden|clip/.test(`${cs.overflowX} ${cs.overflowY}`)) continue;
+        const q = p.getBoundingClientRect();
+        if (r.left < q.left - 0.5 || r.right > q.right + 0.5 || r.top < q.top - 0.5 || r.bottom > q.bottom + 0.5)
+          return [`${e.matches('svg') ? 'an icon' : "Home's mark"} is cut by its box (${[r.left, r.right, r.top, r.bottom].map(Math.round).join(', ')} in ${[q.left, q.right, q.top, q.bottom].map(Math.round).join(', ')})`];
+      }
+      return [];
+    }),
+  );
+
+/** Words a box cuts short (an ellipsis, or a hidden overflow at the side) on the page and its top bar. */
+const cutShort = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll('.dq-top *, #dq-main *')].flatMap((e) => {
+      if (e.closest('.dq-sr') || !e.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return [];
+      const text = [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+      const cs = getComputedStyle(e);
+      const cuts = /hidden|clip/.test(cs.overflowX) || cs.textOverflow === 'ellipsis';
+      return text && cuts && e.scrollWidth > e.clientWidth + 1 ? [`"${e.textContent.trim().slice(0, 32)}" is cut short (${e.clientWidth} of ${e.scrollWidth} px)`] : [];
+    }),
+  );
+
 // every screen layout-fit checks, each route once
 const ROUTES = [...new Map(Object.values(SCREENS).map(({ route }) => [JSON.stringify(route), route])).values()];
 const BAR = '.dq-top :is(button, a[href]), .dq-mo-done';
 
 /**
- * The Safe Zone stays one tap from every screen at 200%: on every screen with a top bar, the Safe Zone button and the
- * rest of the bar show whole inside the screen, at least 44 px each way, and take their own taps; on Give me a moment
- * its Done does too once scrolled to. The bar takes no more rows than its buttons need with the back control down to
- * its arrow (44 px) and Home's name down to its mark. With Sound open, the panel sits below the whole bar and each of the
- * bar's buttons still takes its own tap. Home and Settings have nothing cut off, scrolling sideways, too small to tap or
- * under a pinned bar, and no two runs of text on top of each other.
+ * The Safe Zone stays one tap from every screen at 200%, browser zoom or the phone's own text: on every screen with a top
+ * bar, the Safe Zone button and the rest of the bar show whole inside the screen, at least 44 px each way, and take their
+ * own taps, its mark and icons whole; on Give me a moment its Done does too once scrolled to. The bar takes no more rows
+ * than its buttons need with the back control down to its arrow (44 px) and Home's name down to its mark. With Sound open,
+ * the panel sits below the whole bar and each of the bar's buttons still takes its own tap. Home, with its stats open,
+ * and Settings have nothing cut off, cut short or scrolling sideways, too small to tap or under a pinned bar, and no two
+ * runs of text on top of each other.
  */
-function bars(phone) {
+function bars(phone, { font = false } = {}) {
   return async (h) => {
     const p = PHONES[phone];
     const problems = [];
-    const { ctx, page, errors } = await boot(h, { width: p.width / 2, height: p.height / 2 });
+    const size = font ? `${phone} with its text at 200%` : `${phone} at 200%`;
+    const { ctx, page, errors } = font ? await boot(h, { width: p.width, height: p.height }, { device: { isMobile: true, hasTouch: true } }) : await boot(h, { width: p.width / 2, height: p.height / 2 });
+    if (font) await scaleText(page);
     for (const route of ROUTES) {
       await page.evaluate((r) => window.__daily.go(r), route);
       await page.waitForFunction((n) => window.__daily.route.name === n && !!document.querySelector('.dq-top .dq-safe'), route.name, { timeout: 10000 });
       await settle(page);
-      const at = `${phone} at 200%, ${route.name}`;
+      const at = `${size}, ${route.name}`;
       const small = await page.evaluate((sel) => [...document.querySelectorAll(sel)].filter((e) => e.checkVisibility({ checkVisibilityCSS: true })).map((e) => [(e.getAttribute('aria-label') || e.textContent).trim().slice(0, 32), e.getBoundingClientRect()]).filter(([, r]) => r.width < 43.5 || r.height < 43.5).map(([n, r]) => `"${n}" ${Math.round(r.width)}x${Math.round(r.height)}`), BAR);
       for (const s of small) problems.push(`${at}: ${s}, under 44 px`);
       if (route.name === 'moment' && !(await page.locator('.dq-mo-done').isVisible())) problems.push(`${at}: Done doesn't show`);
@@ -291,7 +335,7 @@ function bars(phone) {
         const parts = [top.firstElementChild, ...top.querySelectorAll(':scope > .dq-top-end > *, :scope > .dq-safe')].filter((e) => e.checkVisibility());
         const cs = getComputedStyle(top);
         const room = top.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
-        const narrow = (e) => (e.matches('.dq-back') ? 44 : e.matches('.dq-brand') ? parseFloat(getComputedStyle(e).paddingLeft) + e.querySelector('.dq-brand-mark').getBoundingClientRect().width : e.getBoundingClientRect().width);
+        const narrow = (e) => (e.matches('.dq-back') ? 44 : e.matches('.dq-brand') ? parseFloat(getComputedStyle(e).paddingLeft) + e.querySelector('.dq-brand-mark').offsetWidth + parseFloat(getComputedStyle(e).paddingRight) : e.getBoundingClientRect().width);
         const gap = parseFloat(cs.columnGap);
         // as many rows as wrapping them in order takes, each part at its narrowest
         let need = 1;
@@ -307,11 +351,19 @@ function bars(phone) {
       });
       if (bar.rows > bar.need) problems.push(`${at}: the top bar takes ${bar.rows} rows where its buttons need ${bar.need} in ${bar.room} px with the back control down to its arrow and Home's name to its mark`);
       for (const f of await unreachable(page, { controls: BAR })) problems.push(`${at}: ${f}`);
+      for (const f of await cutMarks(page)) problems.push(`${at}: ${f}`);
       if (route.name === 'hub' || route.name === 'settings') {
+        // Home's stats, folded away on a phone, open
+        const fold = page.locator('.dq-status:not(.is-open) .dq-stats-toggle');
+        if (await fold.isVisible()) {
+          await fold.click();
+          await settle(page);
+        }
         for (const f of await audit(page, PAGE, SKIP)) if (!f.detail.endsWith('as the screen opens')) problems.push(`${at}: ${f.kind} ${f.what} (${f.detail})`);
         for (const pair of await crowded(page)) problems.push(`${at}: ${pair} sit on top of each other`);
+        for (const words of await cutShort(page)) problems.push(`${at}: ${words}`);
       }
-      await h.shot(page, `safe-zone-button-${phone}-200-${route.name}`);
+      await h.shot(page, `safe-zone-button-${phone}-${font ? 'text-' : ''}200-${route.name}`);
       await page.locator('.dq-top .vol-btn').click();
       await page.locator('.vol.is-open .vol-pop').waitFor();
       for (const f of await unreachable(page, { sound: true })) problems.push(`${at}, Sound open: ${f}`);
@@ -319,11 +371,18 @@ function bars(phone) {
       // gone once its fade out ends, so it takes no taps meant for the next screen
       await gone(page.locator('.dq-top .vol-pop'), 10000, { state: 'hidden' });
     }
-    if (errors.length) problems.push(`${phone} at 200%: ${errors.join(' | ')}`);
+    if (errors.length) problems.push(`${size}: ${errors.join(' | ')}`);
     await ctx.close();
     h.expect(!problems.length, `${problems.length} problems:\n${problems.join('\n')}`);
   };
 }
+
+/**
+ * The phone's own text size at 200%, as Android's text zoom applies it (an in-app browser's WebView): every word drawn at
+ * twice its size in a page as wide as before, where browser zoom would narrow the page instead. Chrome's text autosizer,
+ * which that text zoom drives, takes it as text-size-adjust on a phone's page.
+ */
+const scaleText = (page) => page.addStyleTag({ content: 'html { -webkit-text-size-adjust: 200%; text-size-adjust: 200%; }' });
 
 /**
  * On a phone at 200%, where the Sound panel's sliders scroll inside it: a finger that swipes up across a slider's track,
@@ -414,4 +473,5 @@ export const scenarios = {
   ...Object.fromEntries(Object.keys(PHONES).flatMap((phone) => [1, 2].map((zoom) => [`safe-zone-reach-${phone}${zoom > 1 ? '-200' : ''}`, walk(phone, zoom)]))),
   ...Object.fromEntries(['568x320', '320x568'].map((phone) => [`sound-panel-swipe-${phone}-200`, swipe(phone)])),
   ...Object.fromEntries(Object.keys(PHONES).map((phone) => [`safe-zone-button-${phone}-200`, bars(phone)])),
+  ...Object.fromEntries(Object.keys(PHONES).map((phone) => [`safe-zone-button-${phone}-text-200`, bars(phone, { font: true })])),
 };

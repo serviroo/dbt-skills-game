@@ -212,11 +212,12 @@
   text-overflow: ellipsis;
   max-width: 46vw;
 }
+/* the gap after the mark takes in the mark's 2 px end margin (room for its turned corner) */
 .dq-brand {
   display: flex;
   white-space: nowrap;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-height: 44px;
   padding-left: 4px;
   font-size: 13px;
@@ -233,7 +234,7 @@
 }
 @media (max-width: 359px) {
   .dq-brand {
-    gap: 8px;
+    gap: 6px;
     letter-spacing: 0.12em;
   }
 }
@@ -308,6 +309,32 @@
 }
 .dq:not([data-screen='safe']) .dq-top-end {
   display: contents;
+}
+/* the back control and Home's name are their arrow and mark, with their word beside them wherever the bar has room for all
+   of it, else the word wraps away under them, out of sight (their names stay for a screen reader), so the bar takes as
+   few rows as its buttons allow (the phone's own text at 200%) */
+.dq:not([data-screen='safe']) .dq-top > .dq-back,
+.dq-top > .dq-brand {
+  flex-wrap: wrap;
+  align-content: flex-start;
+  height: 44px;
+  min-width: 0;
+  max-width: max-content;
+  overflow: clip;
+}
+.dq:not([data-screen='safe']) .dq-top > .dq-back {
+  flex: 1 0 44px;
+  min-width: 44px;
+}
+.dq:not([data-screen='safe']) .dq-back span:first-child {
+  height: 44px;
+}
+/* its start padding and its mark, with room at the mark's end for its turned corner */
+.dq-top > .dq-brand {
+  flex: 1 0 15px;
+}
+.dq-brand-mark {
+  margin: 17.5px 2px 17.5px 0;
 }
 /* a phone at 200% zoom, held either way (300 CSS pixels wide or less): the back control keeps only its arrow and Home's
    name only its mark, so the bar takes as few rows as its buttons allow */
@@ -813,6 +840,14 @@
 .dq-seg--pace {
   width: 100%;
 }
+/* Motion's three choices share the row, and where a word doesn't fit its share (the phone's own text at 200%) the choices
+   take the lines they need */
+.dq-seg--3 {
+  flex-wrap: wrap;
+}
+.dq-seg--3 .dq-seg-b {
+  min-width: max-content;
+}
 .dq-seg--3 .dq-seg-b,
 .dq-seg--range .dq-seg-b {
   font-size: 14.5px;
@@ -1075,9 +1110,12 @@ textarea.dq-input {
     0 0 16px rgba(20, 87, 172, 0.4);
   opacity: 0.7;
 }
+/* the crystal beside the name, title and class, or above them where even their narrowest doesn't fit beside it (the
+   phone's own text at 200%) */
 .dq-player {
   position: relative;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 16px;
   padding: 2px 0 16px;
@@ -1166,13 +1204,19 @@ textarea.dq-input {
   display: grid;
   gap: 2px;
 }
+.dq-player > .dq-kvs {
+  flex: 1 1 0;
+  max-width: max-content;
+}
 .dq-kv {
   display: flex;
   align-items: baseline;
   gap: 10px;
 }
+/* each label in a column 50 px wide, wider where its word needs it (the phone's own text at 200%) */
 .dq-kv dt {
   width: 50px;
+  min-width: min-content;
   font-size: 12.5px;
   font-weight: 500;
   letter-spacing: 0.16em;
@@ -1218,8 +1262,11 @@ textarea.dq-input {
   flex-direction: column;
   margin: 4px 0 0;
 }
+/* a skill's value beside its name, or under it, at its end, where even the name's longest word leaves it no room (the
+   phone's own text at 200%) */
 .dq-stat {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -1231,10 +1278,11 @@ textarea.dq-input {
   border-bottom: 0;
 }
 .dq-stat dt {
+  flex: 1 1 0;
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 10px;
-  min-width: 0;
+  gap: 0 10px;
 }
 .dq-stat-ic {
   align-self: center;
@@ -1243,36 +1291,32 @@ textarea.dq-input {
   height: 18px;
   color: var(--accent);
 }
+/* a column 8.6em wide, narrower down to its longest word where the row is short of room */
 .dq-stat-k {
-  flex: none;
-  width: 8.6em;
+  flex: 0 1 8.6em;
+  min-width: min-content;
   font-size: 13px;
   font-weight: 500;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--t-title);
 }
+/* its line beside the name where all of it fits there, else under the name, word by word (narrower than 390 px always
+   under it), so all of it shows */
 .dq-stat-m {
+  flex: 1 1 auto;
   font-size: 14px;
   color: var(--t-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 @media (max-width: 389px) {
-  .dq-stat dt {
-    flex-wrap: wrap;
-    row-gap: 0;
-  }
   .dq-stat-m {
     flex-basis: 100%;
     padding-left: 28px;
-    white-space: normal;
   }
 }
 .dq-stat-n {
   flex: none;
-  margin: 0;
+  margin: 0 0 0 auto;
   min-width: 2ch;
   text-align: right;
   font-size: 24px;
@@ -1724,16 +1768,18 @@ textarea.dq-input {
   height: auto;
 }
 
+/* two places a row, each half of it (the Art room and the Story Room the whole of it); a place whose longest word doesn't
+   fit half (a phone at 200% zoom, or its own text at 200%) takes the whole row, so its name and line show whole */
 .dq-menu {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
 }
-/* a phone zoomed to 200% (260 CSS pixels wide or less): one place a row, its name and line whole */
-@media (max-width: 260px) {
-  .dq-menu {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.dq-menu > .dq-tile {
+  flex: 1 1 calc(50% - 5px);
+}
+.dq-menu > :is(.dq-tile--art, .dq-tile--story) {
+  flex-basis: 100%;
 }
 .dq-tile {
   position: relative;
@@ -1817,9 +1863,6 @@ textarea.dq-input {
   }
   .dq-cf-name {
     font-size: 36px;
-  }
-  .dq-menu {
-    grid-template-columns: 1fr 1fr;
   }
 }
 
@@ -3545,8 +3588,18 @@ textarea.dq-input {
   min-height: 0;
   max-height: 35cqw;
 }
+/* on the quest card the module wraps word by word beside its minutes, and where even its longest word doesn't fit beside
+   them (the phone's own text at 200%) the minutes take the next line, at its end */
 .dq-card .dq-cf-top {
   align-items: flex-start;
+  flex-wrap: wrap;
+}
+.dq-card .dq-cf-mod {
+  flex: 1 1 0;
+  min-width: auto;
+}
+.dq-card .dq-cf-min {
+  margin-left: auto;
 }
 .dq-card .dq-cf-mod span {
   white-space: normal;
@@ -3924,7 +3977,6 @@ textarea.dq-input {
 
 /* ---------- art room tile ---------- */
 .dq-tile--art {
-  grid-column: 1 / -1;
   align-content: center;
   grid-template-columns: 24px minmax(0, 1fr) auto;
   min-height: 82px;

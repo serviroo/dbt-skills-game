@@ -2,7 +2,6 @@
 
 /* ---------- hub tile ---------- */
 .dq-tile--story {
-  grid-column: 1 / -1;
   align-content: center;
   grid-template-columns: 24px minmax(0, 1fr);
   min-height: 82px;
@@ -11,10 +10,9 @@
 .dq-tile--story .dq-tile-ic {
   color: #a8dcff;
 }
+/* the story's title wraps where it doesn't fit, so all of it shows */
 .dq-tile-story {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  overflow-wrap: break-word;
   font-family: var(--font-display);
   font-style: italic;
   font-size: 16px;
