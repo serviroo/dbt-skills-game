@@ -27,6 +27,7 @@
 //                       and Save again after Back keeps one saved map
 //   clear-elsewhere     another tab clears the game's data while this one sits on Home: this tab shows Settings, and
 //                       Back, Forward and the Safe Zone still move inside the game, with or without a page before it
+import { gone } from './harness.mjs';
 import { boot, settle } from './layout-fit.e2e.mjs';
 
 const PHONE = { width: 390, height: 844 };
@@ -304,14 +305,14 @@ export const scenarios = {
     await page.locator('.st-cwbtn').click();
     await page.locator('.st-cw-x').waitFor({ state: 'visible' });
     await back(page);
-    await page.locator('.st-cw-x').waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
+    await gone(page.locator('.st-cw-x'), 3000, { state: 'hidden' }).catch(() => {});
     expect(!(await page.locator('.st-cw-x').isVisible()), 'Back did not close the co-writer');
     expect((await screenOf(page)) === 'write', 'Back with the co-writer open left the editor');
     await page.locator('.st-cwbtn').click();
     await page.locator('.st-cw-x').waitFor({ state: 'visible' });
     await page.keyboard.press('Escape');
     await settle(page);
-    await page.locator('.st-cw-x').waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
+    await gone(page.locator('.st-cw-x'), 3000, { state: 'hidden' }).catch(() => {});
     expect(!(await page.locator('.st-cw-x').isVisible()), 'Escape did not close the co-writer');
     // Co-writer pressed again while it is open opens nothing more: one Back closes it, the next leaves the editor
     await page.locator('.st-cwbtn').click();
@@ -320,7 +321,7 @@ export const scenarios = {
     await page.keyboard.press('Enter');
     await settle(page);
     await back(page);
-    await page.locator('.st-cw-x').waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
+    await gone(page.locator('.st-cw-x'), 3000, { state: 'hidden' }).catch(() => {});
     expect(!(await page.locator('.st-cw-x').isVisible()), 'Back after a second Co-writer press did not close the co-writer');
     await back(page);
     expect((await screenOf(page)) === 'stories', `Back from the editor went to ${await screenOf(page)}, not the Story Room`);

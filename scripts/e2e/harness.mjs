@@ -51,9 +51,14 @@ export async function until(page, check, arg, { timeout = 10000, polling = 100 }
   }
 }
 
+/** An init script: keeps the page's own timer and clock, before a scenario installs the page clock over them. */
+export function realTimers() {
+  window.__e2eReal = { setTimeout: window.setTimeout.bind(window), now: performance.now.bind(performance) };
+}
+
 let counts = 0;
 /**
- * Counts, inside the page, the time it could run, by its own 50 ms timer (kept from before a page clock, see pageTrail):
+ * Counts, inside the page, the time it could run, by its own 50 ms timer (kept by realTimers(), from before a page clock):
  * a gap longer than 250 ms between two ticks is time the page could not run, such as a busy machine stopping the whole
  * browser for seconds now and then, and counts as 250 ms. `late` resolves true once the page has run `ms`; stop() ends
  * the count (`late` then resolves false) and gives how long the page ran, in ms.
@@ -92,21 +97,23 @@ function runs(page, ms) {
 }
 
 /**
- * Waits for `locator` to match nothing, as its waitFor({ state: 'detached' }) does, with `timeout` counted in time the
- * page could run (see runs()): a browser stopped for a while on a busy machine can't fail it, and a locator that never
- * empties still fails at its deadline. Resolves with how long the page ran meanwhile, in ms.
+ * Waits for `locator` to match nothing, as its waitFor({ state: 'detached' }) does (or, with state 'hidden', for it to be
+ * out of view too), with `timeout` counted in time the page could run (see runs()): a browser stopped for a while on a
+ * busy machine can't fail it, and a locator that never goes still fails at its deadline. Resolves with how long the
+ * page ran meanwhile, in ms.
  */
-export async function gone(locator, timeout) {
+export async function gone(locator, timeout, { state = 'detached' } = {}) {
   const count = runs(locator.page(), timeout);
   let over = false;
-  count.late.then((v) => (over = v === true), () => {});
+  let broke = null;
+  count.late.then((v) => (over = v === true), (e) => (broke = e));
   // a page that answers nothing at all for this long is stuck, not stopped for a moment
   const stuck = Math.max(60000, 4 * timeout);
   const end = Date.now() + stuck;
   let left = false;
   try {
     for (;;) {
-      left = await locator.waitFor({ state: 'detached', timeout: 250 }).then(
+      left = await locator.waitFor({ state, timeout: 250 }).then(
         () => true,
         (e) => {
           if (e.name !== 'TimeoutError') throw e;
@@ -114,8 +121,11 @@ export async function gone(locator, timeout) {
         },
       );
       if (left) return await count.stop();
-      if (over) throw new Error(`${locator} was still in the page after ${timeout / 1000} s of the page running`);
-      if (Date.now() > end) throw new Error(`${locator} was still in the page ${stuck / 1000} s later, the page stopped for most of it`);
+      // without its count (the page went to another document, or was never given realTimers()) the deadline would be gone
+      if (broke) throw new Error(`${locator}: the page's running time could not be counted: ${broke.message}`);
+      const still = state === 'hidden' ? 'shown' : 'in the page';
+      if (over) throw new Error(`${locator} was still ${still} after ${timeout / 1000} s of the page running`);
+      if (Date.now() > end) throw new Error(`${locator} was still ${still} ${stuck / 1000} s later, the page stopped for most of it`);
     }
   } finally {
     if (!left) count.stop();
@@ -267,8 +277,6 @@ async function serve(host, pinned) {
 // the page's own clock. evidence() reads it back, so a page that froze for a while still tells what happened in it.
 function pageTrail() {
   window.__e2eRaf = window.requestAnimationFrame.bind(window);
-  // the page's own timer and clock, kept before a scenario installs the page clock over them
-  window.__e2eReal = { setTimeout: window.setTimeout.bind(window), now: performance.now.bind(performance) };
   if (window.__e2eTrail) return;
   const trail = (window.__e2eTrail = { ev: [], seen: {}, frames: 0, lastFrame: null });
   const add = (ev, extra, t = performance.now()) => {
@@ -422,6 +430,7 @@ export async function startHarness(flags = {}) {
       browser.newContext = async (o = {}) => {
         const t0 = Date.now();
         const ctx = await newContext({ timezoneId: ZONE, ...o });
+        await ctx.addInitScript(realTimers);
         await ctx.addInitScript(pageTrail);
         const throttle = flags['cpu-throttle'] ? Number(flags['cpu-throttle']) : 1;
         const prepared = new WeakMap();

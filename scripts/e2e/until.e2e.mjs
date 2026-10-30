@@ -74,8 +74,10 @@ export const scenarios = {
       const page = await ctx.newPage();
       await page.setContent('<div role="dialog" aria-label="Pick">x</div>');
       await freezeThenLet(page, '[role=dialog]');
-      const after = await h.gone(page.getByRole('dialog', { name: 'Pick' }), 2000).then(() => 'left', (e) => e.message);
-      h.expect(after === 'left', `a page frozen mid-wait past the deadline, which let it go soon after, failed: ${after}`);
+      const after = await h.gone(page.getByRole('dialog', { name: 'Pick' }), 2000).then((ms) => ms, (e) => e.message);
+      // about 1.15 s: 0.3 s before the freeze, the freeze as one 0.25 s tick and 0.6 s after it, where a count begun
+      // only once the freeze was over would give about 0.6 s
+      h.expect(typeof after === 'number' && after >= 900, `a page frozen mid-wait past the deadline, which let it go soon after, gave ${after}`);
     } finally { await ctx.close(); }
   },
 
