@@ -10,7 +10,7 @@ import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { getBounds } from '@gltf-transform/functions';
 import sharp from 'sharp';
-import { screenshot } from './harness.mjs';
+import { gone, screenshot } from './harness.mjs';
 
 const PHONE = { width: 390, height: 844 };
 const SIDE = { width: 844, height: 390 };
@@ -273,7 +273,7 @@ export const scenarios = {
     // the name field is the card's own: what is typed is stored as Anvil's name and shows on his card in the row
     await card.locator('input[data-shadow="anvil"]').fill('Ironside');
     await page.keyboard.press('Escape');
-    await card.waitFor({ state: 'detached', timeout: 5000 });
+    await gone(card, 5000);
     h.expect((await page.locator('.w2-roster-row .w2-sh--anvil .w2-sh-nick').textContent()) === '“Ironside”', 'the name typed in the card did not reach the row');
     const saved = await page
       .waitForFunction((k) => JSON.parse(localStorage.getItem(k) ?? '{}').profile?.names?.anvil === 'Ironside', h.SAVE, { timeout: 5000 })
@@ -284,7 +284,7 @@ export const scenarios = {
     await page.mouse.click(anvil.cx, anvil.cy);
     await card.waitFor({ timeout: 5000 });
     await page.goBack({ waitUntil: 'commit' });
-    const closed = await card.waitFor({ state: 'detached', timeout: 5000 }).then(() => true, () => false);
+    const closed = await gone(card, 5000).then(() => true, () => false);
     h.expect(closed && (await page.evaluate(() => window.__daily.route.name)) === 'shadows', `Back with a card open ${closed ? 'left the camp for ' + (await page.evaluate(() => window.__daily.route.name)) : 'did not close the card'}`);
     // the keyboard: Tab-reachable buttons, Enter opens; the close button and the backdrop close
     await page.locator('.w2-camp-hit[data-shadow="sable"]').focus();
@@ -292,13 +292,13 @@ export const scenarios = {
     await card.waitFor({ timeout: 5000 });
     h.expect((await card.locator('.w2-sh--sable').count()) === 1, 'Enter on Sable did not open her card');
     await page.locator('.w2-camp-x').click();
-    await card.waitFor({ state: 'detached', timeout: 5000 });
+    await gone(card, 5000);
     const block = btns.find((b) => b.id === 'block');
     await page.mouse.click(block.cx, block.cy);
     await card.waitFor({ timeout: 5000 });
     h.expect((await card.locator('.w2-sh--block').count()) === 1, 'tapping the Unlisted did not open its card');
     await page.mouse.click(8, PHONE.height - 8);
-    await card.waitFor({ state: 'detached', timeout: 5000 });
+    await gone(card, 5000);
     h.expect((await page.locator('.w2-roster-row .w2-sh--block').count()) === 1, 'the backdrop did not close the card');
     // with a card open the Safe Zone is still on top and one tap away, and nothing of the camp comes along
     await page.mouse.click(anvil.cx, anvil.cy);

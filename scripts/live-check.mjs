@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { glArgs, checkRenderer } from './gl.mjs';
+import { gone, realTimers } from './e2e/harness.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -63,6 +64,8 @@ const browser = await chromium.launch({
 
 async function profile({ seed = null, sw = true } = {}) {
   const ctx = await browser.newContext({ ...VIEW, serviceWorkers: sw ? 'allow' : 'block' });
+  // gone() counts its deadline in time the page could run, by the page's own timer
+  await ctx.addInitScript(realTimers);
   await ctx.exposeBinding('__liveCsp', (_src, v) => cspViolations.push(v));
   await ctx.addInitScript(() => document.addEventListener('securitypolicyviolation', (e) => window.__liveCsp(`${e.violatedDirective} ${e.blockedURI || 'inline'} @ ${location.pathname}${location.search}`)));
   if (seed) {
@@ -158,7 +161,7 @@ try {
     await ready(page);
     await page.locator('.title-screen').click();
     await page.locator('#np-name').waitFor({ timeout: 20000 });
-    await page.locator('.title-screen').waitFor({ state: 'detached', timeout: 30000 });
+    await gone(page.locator('.title-screen'), 30000);
     await shot(page);
     await ctx.close();
   });
@@ -220,7 +223,7 @@ try {
     await ready(page);
     await page.locator('.title-screen').click();
     await page.locator('#np-name').waitFor({ timeout: 20000 });
-    await page.locator('.title-screen').waitFor({ state: 'detached', timeout: 30000 });
+    await gone(page.locator('.title-screen'), 30000);
     await shot(page, 'offline-reload');
     await page.close();
     const cold = await ctx.newPage();
@@ -299,7 +302,7 @@ try {
           ? page.waitForResponse((r) => new URL(r.url()).pathname.endsWith('/models/hero.glb'), { timeout: 30000 })
           : null;
         const [response] = await Promise.all([model, page.locator('.title-screen').click()]);
-        await page.locator('.title-screen').waitFor({ state: 'detached', timeout: 30000 });
+        await gone(page.locator('.title-screen'), 30000);
         if (response) {
           expect(response.ok() && new URL(response.url()).pathname === site.pathname + 'models/hero.glb', 'the intro model did not load inside the site folder');
         }

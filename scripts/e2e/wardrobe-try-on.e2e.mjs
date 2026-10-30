@@ -2,6 +2,7 @@
 // back, the Safe Zone, Back, a reload and another tab's choices all leave the kept look exactly as it was, and the
 // other tab only ever sees kept looks.
 import path from 'node:path';
+import { gone } from './harness.mjs';
 
 const dayOf = (ms) => {
   const d = new Date(ms - 6 * 3600e3);
@@ -49,7 +50,7 @@ const look = (page) =>
   });
 const tryOn = (page, slot, id) => page.locator(`.w2-wopt--${slot}[data-id="${id}"]`).click();
 const choose = (page, name) => page.getByRole('button', { name, exact: true }).click();
-const barGone = (page) => page.locator('.w2-try').waitFor({ state: 'hidden', timeout: 5000 });
+const barGone = (page) => gone(page.locator('.w2-try'), 5000, { state: 'hidden' });
 const routeIs = (page, name) => page.waitForFunction((n) => window.__daily?.route.name === n, name, { timeout: 10000 });
 
 export const scenarios = {

@@ -3,6 +3,8 @@
 // every second, on more time, while the page is out of sight, inside the Safe Zone or in the intro, and the choice
 // survives a reload.
 
+import { gone } from './harness.mjs';
+
 const START = JSON.stringify([40]);
 const END = JSON.stringify([40, 120, 40]);
 /** a skip's double pulse, a 200 ms rest, then the next timer's start pulse: one pattern, so neither cuts the other off */
@@ -364,7 +366,7 @@ export const scenarios = {
     await name.fill('Sky');
     await page.keyboard.press('Enter');
     await page.keyboard.press('Enter');
-    await name.waitFor({ state: 'detached', timeout: 10000 });
+    await gone(name, 10000);
     for (let i = 0; i < 12; i++) {
       await h.sleep(1500);
       await page.mouse.click(195, 700);

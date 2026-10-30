@@ -51,6 +51,97 @@ export async function until(page, check, arg, { timeout = 10000, polling = 100 }
   }
 }
 
+/** An init script: keeps the page's own timer and clock, before a scenario installs the page clock over them. */
+export function realTimers() {
+  window.__e2eReal = { setTimeout: window.setTimeout.bind(window), now: performance.now.bind(performance) };
+}
+
+let counts = 0;
+/**
+ * Counts, inside the page, the time it could run, by its own 50 ms timer (kept by realTimers(), from before a page clock):
+ * a gap longer than 250 ms between two ticks is time the page could not run, such as a busy machine stopping the whole
+ * browser for seconds now and then, and counts as 250 ms. `late` resolves true once the page has run `ms`; stop() ends
+ * the count (`late` then resolves false) and gives how long the page ran, in ms.
+ */
+function runs(page, ms) {
+  const id = ++counts;
+  const late = page.evaluate(
+    ({ id, ms }) =>
+      new Promise((done) => {
+        const { setTimeout: later, now } = window.__e2eReal;
+        const c = ((window.__e2eRuns ??= {})[id] = { run: 0, stop: false });
+        let last = now();
+        const tick = () => {
+          if (c.stop) return done(false);
+          const t = now();
+          c.run += Math.min(t - last, 250);
+          last = t;
+          if (c.run >= ms) done(true);
+          else later(tick, 50);
+        };
+        later(tick, 50);
+      }),
+    { id, ms },
+  );
+  late.catch(() => {});
+  const stop = () =>
+    page
+      .evaluate((id) => {
+        const c = window.__e2eRuns?.[id];
+        if (!c) return null;
+        c.stop = true;
+        return Math.round(c.run);
+      }, id)
+      .catch(() => null);
+  return { late, stop };
+}
+
+/**
+ * Waits for `locator` to match nothing, as its waitFor({ state: 'detached' }) does (or, with state 'hidden', for it to be
+ * out of view too), with `timeout` counted in time the page could run (see runs()): a browser stopped for a while on a
+ * busy machine can't fail it, and a locator that never goes, or goes only after it, still fails at its deadline. A page
+ * that answers nothing at all for `stuck` ms is stuck, not stopped for a moment, and fails it too. Resolves with how
+ * long the page ran meanwhile, in ms.
+ */
+export async function gone(locator, timeout, { state = 'detached', stuck = Math.max(60000, 4 * timeout) } = {}) {
+  const count = runs(locator.page(), timeout);
+  let over = false;
+  let broke = null;
+  count.late.then((v) => (over = v === true), (e) => (broke = e));
+  const end = Date.now() + stuck;
+  let left = false;
+  try {
+    for (;;) {
+      left = await locator.waitFor({ state, timeout: 250 }).then(
+        () => true,
+        (e) => {
+          if (e.name !== 'TimeoutError') throw e;
+          return false;
+        },
+      );
+      if (left) {
+        // the page's own count answers before this read does, so a deadline it reached first is known here; the read is
+        // bounded too, as a page can stop answering right after
+        let timer;
+        const ran = await Promise.race([
+          count.stop(),
+          new Promise((_, fail) => (timer = setTimeout(() => fail(new Error(`${locator} left, then the page answered nothing until ${stuck / 1000} s after the wait began`)), Math.max(0, end - Date.now())))),
+        ]).finally(() => clearTimeout(timer));
+        if (broke) throw new Error(`${locator}: the page's running time could not be counted: ${broke.message}`);
+        if (over) throw new Error(`${locator} left only after ${timeout / 1000} s of the page running`);
+        return ran;
+      }
+      // without its count (the page went to another document, or was never given realTimers()) the deadline would be gone
+      if (broke) throw new Error(`${locator}: the page's running time could not be counted: ${broke.message}`);
+      const still = state === 'hidden' ? 'shown' : 'in the page';
+      if (over) throw new Error(`${locator} was still ${still} after ${timeout / 1000} s of the page running`);
+      if (Date.now() > end) throw new Error(`${locator} was still ${still} ${stuck / 1000} s later, the page stopped for most of it`);
+    }
+  } finally {
+    if (!left) count.stop();
+  }
+}
+
 /**
  * Stops the page clock where it is, so time moves only when the scenario says. clock.pauseAt alone takes a wall time,
  * which a running clock may pass before the call lands on a slow page. Holding Date still first makes the pause land
@@ -349,6 +440,7 @@ export async function startHarness(flags = {}) {
       browser.newContext = async (o = {}) => {
         const t0 = Date.now();
         const ctx = await newContext({ timezoneId: ZONE, ...o });
+        await ctx.addInitScript(realTimers);
         await ctx.addInitScript(pageTrail);
         const throttle = flags['cpu-throttle'] ? Number(flags['cpu-throttle']) : 1;
         const prepared = new WeakMap();
@@ -406,7 +498,8 @@ export async function startHarness(flags = {}) {
    * it and call the result with a timeout after the tap: `const left = leaves(page, '#np-name'); await tap; await left(10000)`.
    * The page reports the moment itself, so a page that freezes right after can't hide that it happened: the intro's first
    * 3D frames compile their shaders, which on a software GPU (CI's SwiftShader) blocks the page for seconds, and a wait
-   * that asks the page from outside gets no answer until that ends.
+   * that asks the page from outside gets no answer until that ends. The timeout counts only time the page could run (see
+   * runs()), so a browser stopped for a while on a busy machine can't fail it either.
    */
   function leaves(page, selector) {
     const at = page.evaluate(
@@ -429,12 +522,25 @@ export async function startHarness(flags = {}) {
     at.catch(() => {});
     return async (timeout) => {
       note(page, `wait for ${selector} to leave`);
+      const count = runs(page, timeout);
+      // a page that answers nothing at all for this long is stuck, not stopped for a moment
+      const stuck = Math.max(60000, 4 * timeout);
+      const late = count.late.then((over) => {
+        if (over) throw new Error(`${selector} was still in the page after ${timeout / 1000} s of the page running`);
+        return at;
+      });
+      late.catch(() => {});
       let timer;
       try {
-        const left = await Promise.race([at, new Promise((_, fail) => (timer = setTimeout(() => fail(new Error(`${selector} was still in the page ${timeout / 1000} s later`)), timeout)))]);
+        const left = await Promise.race([
+          at,
+          late,
+          new Promise((_, fail) => (timer = setTimeout(() => fail(new Error(`${selector}: the page answered nothing for ${stuck / 1000} s`)), stuck))),
+        ]);
         note(page, `${selector} left`, { inPage: Math.round(left - (trail.get(page)?.t0 ?? 0)) });
       } finally {
         clearTimeout(timer);
+        count.stop();
       }
     };
   }
@@ -558,7 +664,7 @@ export async function startHarness(flags = {}) {
   })());
 
   const shared = {};
-  const lane = (browser) => ({ browser, server, out, flags, shared, renderer, throttleErrors, zone: ZONE, open: opener(browser), evidence, evidenceAll: allEvidence(browser), note, leaves, shot, ls, youOf, deepFind, deepDrop, expect, sleep, frames, settled, until, pauseClock, reachHub, openSettings, SAVE, YOU, SEEN, stop, more });
+  const lane = (browser) => ({ browser, server, out, flags, shared, renderer, throttleErrors, zone: ZONE, open: opener(browser), evidence, evidenceAll: allEvidence(browser), note, leaves, gone, shot, ls, youOf, deepFind, deepDrop, expect, sleep, frames, settled, until, pauseClock, reachHub, openSettings, SAVE, YOU, SEEN, stop, more });
   /** Another browser on the same dev server, so scenarios can run side by side: its own profiles, the same `shared`. */
   async function more() {
     if (stopping) throw new Error('the harness is stopping');

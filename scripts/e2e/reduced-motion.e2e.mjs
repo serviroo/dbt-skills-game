@@ -16,6 +16,7 @@
 // left out. Screens in ENFORCED fail the run; every other screen passes and lists its problems on stdout and under
 // `result` in report.json, as the todo list.
 import fs from 'node:fs';
+import { gone } from './harness.mjs';
 import { boot, forward, SCREENS, settle, SKIP } from './layout-fit.e2e.mjs';
 
 const ENFORCED = Object.keys(SCREENS);
@@ -55,9 +56,9 @@ const ACT = {
         await win.waitFor({ timeout: 5000 });
         for (let i = 0; i < 3 && (await win.count()); i++) {
           await win.click({ force: true });
-          await win.waitFor({ state: 'detached', timeout: 2000 }).catch(() => {});
+          await gone(win, 2000).catch(() => {});
         }
-        await win.waitFor({ state: 'detached', timeout: 5000 });
+        await gone(win, 5000);
         await page.locator('.dq-gift:not(.is-hidden)').waitFor();
       }
       await page.locator('.dq-stats-toggle[aria-expanded=true]').click();
