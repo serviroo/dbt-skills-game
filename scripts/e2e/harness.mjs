@@ -196,6 +196,8 @@ async function serve(host, pinned) {
 // the page's own clock. evidence() reads it back, so a page that froze for a while still tells what happened in it.
 function pageTrail() {
   window.__e2eRaf = window.requestAnimationFrame.bind(window);
+  // the page's own timer and clock, kept before a scenario installs the page clock over them
+  window.__e2eReal = { setTimeout: window.setTimeout.bind(window), now: performance.now.bind(performance) };
   if (window.__e2eTrail) return;
   const trail = (window.__e2eTrail = { ev: [], seen: {}, frames: 0, lastFrame: null });
   const add = (ev, extra, t = performance.now()) => {
@@ -406,16 +408,21 @@ export async function startHarness(flags = {}) {
    * it and call the result with a timeout after the tap: `const left = leaves(page, '#np-name'); await tap; await left(10000)`.
    * The page reports the moment itself, so a page that freezes right after can't hide that it happened: the intro's first
    * 3D frames compile their shaders, which on a software GPU (CI's SwiftShader) blocks the page for seconds, and a wait
-   * that asks the page from outside gets no answer until that ends.
+   * that asks the page from outside gets no answer until that ends. The timeout counts only time the page could run, by
+   * its own timer: a page frozen meanwhile (a busy CI runner stops the whole browser for seconds now and then) gets that
+   * time back, so a freeze can't pass for a selector that never left.
    */
+  let leaving = 0;
   function leaves(page, selector) {
+    const id = ++leaving;
     const at = page.evaluate(
-      (sel) =>
+      ({ sel, id }) =>
         new Promise((done) => {
           let seen = false;
           const check = () => {
             if (document.querySelector(sel)) seen = true;
             else if (seen) {
+              (window.__e2eLeft ??= new Set()).add(id);
               done(performance.timeOrigin + performance.now());
               return true;
             }
@@ -424,14 +431,39 @@ export async function startHarness(flags = {}) {
           const o = new MutationObserver(() => check() && o.disconnect());
           o.observe(document, { childList: true, subtree: true });
         }),
-      selector,
+      { sel: selector, id },
     );
     at.catch(() => {});
     return async (timeout) => {
       note(page, `wait for ${selector} to leave`);
+      // ends once the page has run for the timeout, or once the selector has left
+      const ran = page.evaluate(
+        ({ id, ms }) =>
+          new Promise((done) => {
+            const { setTimeout: later, now } = window.__e2eReal;
+            let run = 0;
+            let last = now();
+            const tick = () => {
+              if (window.__e2eLeft?.has(id)) return done('left');
+              const t = now();
+              // longer than this between two ticks of a 50 ms timer, the page could not run: a freeze counts as one tick
+              run += Math.min(t - last, 250);
+              last = t;
+              if (run >= ms) done('late');
+              else later(tick, 50);
+            };
+            later(tick, 50);
+          }),
+        { id, ms: timeout },
+      );
+      ran.catch(() => {});
+      // a page that answers nothing at all for this long is stuck, not frozen for a moment
+      const stuck = Math.max(60000, 4 * timeout);
       let timer;
       try {
-        const left = await Promise.race([at, new Promise((_, fail) => (timer = setTimeout(() => fail(new Error(`${selector} was still in the page ${timeout / 1000} s later`)), timeout)))]);
+        const first = await Promise.race([at, ran, new Promise((_, fail) => (timer = setTimeout(() => fail(new Error(`${selector}: the page answered nothing for ${stuck / 1000} s`)), stuck)))]);
+        if (first === 'late') throw new Error(`${selector} was still in the page after ${timeout / 1000} s of the page running`);
+        const left = await at;
         note(page, `${selector} left`, { inPage: Math.round(left - (trail.get(page)?.t0 ?? 0)) });
       } finally {
         clearTimeout(timer);

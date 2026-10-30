@@ -290,9 +290,11 @@ export const scenarios = {
         parts,
       );
       h.expect(endless === n, `${how}: ${endless} endless animations to begin with, not ${n}`);
+      // the page says when the screen went, so a browser frozen for a while on a busy machine doesn't count against it
+      const gone = h.leaves(page, screen);
       await close(page);
-      await page.locator(screen).waitFor({ state: 'detached', timeout: 15000 }).catch(() => {
-        throw new Error(`${how}: the screen never went`);
+      await gone(15000).catch((e) => {
+        throw new Error(`${how}: the screen never went (${e.message})`);
       });
       if (query.includes('capture')) await page.evaluate(() => window.__stage.step(1 / 15));
       const left = await page.evaluate(() => window.__endless.map((a) => a.playState).filter((p) => p !== 'idle'));

@@ -288,6 +288,8 @@
   "layout-fit-wardrobe": 12,
   "layout-fit-write": 9,
   "leave-early-and-credit": 3,
+  "leaves-fails-at-its-deadline": 1,
+  "leaves-waits-out-a-freeze": 5,
   "leaving-and-reopening-stops-hum": 7,
   "legacy-sound-off-silences-hum": 4,
   "library-focus": 8,
