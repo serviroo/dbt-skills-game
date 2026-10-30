@@ -268,6 +268,8 @@ function walk(phone, zoom, { font = false } = {}) {
       await tap(page, 'Give me a moment');
       await at(page, 'Give me a moment');
       await look(page, 'Give me a moment');
+      // its heading comes first, above its ring, as it is read
+      if (await page.evaluate(() => document.querySelector('.dq-sz .dq-mo-stage').getBoundingClientRect().top < document.querySelector('.dq-sz-body .dq-sz-t').getBoundingClientRect().bottom - 1)) problems.push(`${size}, Give me a moment: its ring sits above its heading`);
       await page.locator('.dq-sz-body .dq-mo-done').evaluate((b) => b.click());
       await at(page, 'here.');
       await tap(page, 'Calm my body first');
@@ -352,23 +354,68 @@ const cutMarks = (page) =>
   );
 
 /**
- * Words a box cuts short (an ellipsis, or a hidden overflow at the side) on the page and its top bar, leaving out names
- * kept only for a screen reader (clipped to nothing, as .dq-sr is).
+ * Words a box cuts short (an ellipsis, or a hidden overflow at the side) among the elements `scope` names, and with
+ * `breaks`, words that run onto the next line anywhere but just after a hyphen (their own, or a soft one, which shows
+ * as one there), leaving out names kept only for a screen reader (clipped to nothing, as .dq-sr is).
  */
-const cutShort = (page) =>
-  page.evaluate(() =>
-    [...document.querySelectorAll('.dq-top *, #dq-main *')].flatMap((e) => {
-      const cs = getComputedStyle(e);
-      if (e.closest('.dq-sr') || cs.clipPath === 'inset(50%)' || !e.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return [];
-      const text = [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
-      const cuts = /hidden|clip/.test(cs.overflowX) || cs.textOverflow === 'ellipsis';
-      return text && cuts && e.scrollWidth > e.clientWidth + 1 ? [`"${e.textContent.trim().slice(0, 32)}" is cut short (${e.clientWidth} of ${e.scrollWidth} px)`] : [];
-    }),
+export const cutShort = (page, { scope = '.dq-top *, #dq-main *', breaks = true } = {}) =>
+  page.evaluate(
+    async ({ scope, breaks }) => {
+      const out = [];
+      const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const at = (t, i) => {
+        const r = document.createRange();
+        r.setStart(t, i);
+        r.setEnd(t, i + 1);
+        return r.getClientRects()[0];
+      };
+      const els = [...document.querySelectorAll(scope)].filter((e) => !e.closest('.dq-sr') && getComputedStyle(e).clipPath !== 'inset(50%)' && e.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }));
+      const near = [];
+      for (const e of els) {
+        const texts = [...e.childNodes].filter((n) => n.nodeType === 3 && n.textContent.trim());
+        const cs = getComputedStyle(e);
+        if (texts.length && (/hidden|clip/.test(cs.overflowX) || cs.textOverflow === 'ellipsis') && e.scrollWidth > e.clientWidth + 1) out.push(`"${e.textContent.trim().slice(0, 32)}" is cut short (${e.clientWidth} of ${e.scrollWidth} px)`);
+        // a letter that starts lower than the one before it in its word: the word may go on to a new line there
+        for (const t of breaks ? texts : []) {
+          let top = null;
+          for (let i = 0; i < t.length; i++) {
+            if (/\s/.test(t.data[i])) top = null;
+            const q = /[\s\u00AD]/.test(t.data[i]) ? null : at(t, i);
+            if (!q?.height) continue;
+            if (top !== null && q.top > top + q.height / 2) near.push([e, t, i]);
+            top = q.top;
+          }
+        }
+      }
+      // where the line really starts, as a tap there finds it (the letters by a soft hyphen can report the wrong line):
+      // after a space it's no break, after a hyphen or a soft one a clean one, after a letter a bare one
+      const scrollers = [document.scrollingElement, document.querySelector('.dq')];
+      const was = scrollers.map((s) => s?.scrollTop);
+      for (const [e, t, i] of near) {
+        e.scrollIntoView({ block: 'center', behavior: 'instant' });
+        await frame();
+        const q = at(t, i);
+        const whole = document.createRange();
+        whole.selectNodeContents(t);
+        const line = [...whole.getClientRects()].find((f) => f.width && Math.abs(f.top - q.top) < q.height / 2);
+        const hit = line && document.caretRangeFromPoint(line.left + 1, line.top + line.height / 2);
+        const k = hit?.startContainer === t ? hit.startOffset : i;
+        if (k > 0 && !/[\s\u00AD-]/.test(t.data[k - 1])) {
+          const [from, to] = [t.data.slice(0, k).search(/\S*$/), k + t.data.slice(k).search(/\s|$/)];
+          out.push(`"${t.data.slice(from, k)}|${t.data.slice(k, to)}" breaks with no hyphen`.replace(/\u00AD/g, ''));
+        }
+      }
+      scrollers.forEach((s, j) => s && (s.scrollTop = was[j]));
+      return [...new Set(out)];
+    },
+    { scope, breaks },
   );
 
 // every screen layout-fit checks, each route once
 const ROUTES = [...new Map(Object.values(SCREENS).map(({ route }) => [JSON.stringify(route), route])).values()];
 const BAR = '.dq-top :is(button, a[href]), .dq-mo-done';
+// the screens laid out by their own words: Home, Settings and the Story Room
+const WRAPS = new Set(['hub', 'settings', 'stories', 'write']);
 
 /**
  * The Safe Zone stays one tap from every screen at 200%, browser zoom or the phone's own text: on every screen with a top
@@ -376,8 +423,9 @@ const BAR = '.dq-top :is(button, a[href]), .dq-mo-done';
  * own taps, its mark and icons whole; on Give me a moment its Done does too once scrolled to. The bar takes no more rows
  * than its buttons need with the back control down to its arrow (44 px) and Home's name down to its mark. With Sound open,
  * the panel sits below the whole bar and each of the bar's buttons still takes its own tap. No screen cuts its words
- * short. Home, with its stats open, and Settings have nothing cut off or scrolling sideways, too small to tap or under a
- * pinned bar, and no two runs of text on top of each other.
+ * short, and on Home, Settings and the Story Room no word breaks onto the next line without a hyphen. Home, with its
+ * stats open, and Settings have nothing cut off or scrolling sideways, too small to tap or under a pinned bar, and no two
+ * runs of text on top of each other.
  */
 function bars(phone, { font = false } = {}) {
   return async (h) => {
@@ -426,7 +474,7 @@ function bars(phone, { font = false } = {}) {
         for (const f of await audit(page, PAGE, SKIP)) if (!f.detail.endsWith('as the screen opens')) problems.push(`${at}: ${f.kind} ${f.what} (${f.detail})`);
         for (const pair of await crowded(page)) problems.push(`${at}: ${pair} sit on top of each other`);
       }
-      for (const words of await cutShort(page)) problems.push(`${at}: ${words}`);
+      for (const words of await cutShort(page, { breaks: WRAPS.has(route.name) })) problems.push(`${at}: ${words}`);
       await h.shot(page, `safe-zone-button-${phone}-${font ? 'text-' : ''}200-${route.name}`);
       await page.locator('.dq-top .vol-btn').click();
       await page.locator('.vol.is-open .vol-pop').waitFor();

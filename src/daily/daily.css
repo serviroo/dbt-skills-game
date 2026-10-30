@@ -2540,8 +2540,9 @@ textarea.dq-input {
 .dq-sz .dq-mo-len-o {
   font-size: calc(20px * var(--text-scale, 1));
 }
-/* the helpline address is one long word in a tap-sized box: it breaks where it must (a phone at 200% zoom, or its own
-   text at 200%) */
+/* the helpline address is one long word in a tap-sized box: where it doesn't fit a line (a phone at 200% zoom, or its
+   own text at 200%) it breaks before its .com, with no hyphen, which would read as part of the address, and inside its
+   name only where even that is wider than the line */
 .dq-sz .dq-small .dq-a {
   display: inline-flex;
   align-items: center;
@@ -3802,7 +3803,9 @@ textarea.dq-input {
     display: grid;
     grid-template-rows: auto minmax(min(120px, 100%), 1fr);
   }
+  /* under its heading, though the moment held sideways puts its ring first */
   .dq-sz .dq-sz-lead > .dq-mo-stage {
+    grid-row: 2;
     width: auto;
     height: min(196px, 100% - 8px, 100cqw);
   }

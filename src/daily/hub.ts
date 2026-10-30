@@ -5,7 +5,7 @@ import { CHECKIN, QUEST, RANKS } from '../content/daily-lines';
 import type { App, ScreenOut } from './app';
 import { cardArtSVG, catSVG, crystalSVG, glyph, icon, mothSVG } from './art';
 import { wait } from './clock';
-import { btn, chip, h, md, panel, segmented, typo } from './ui';
+import { breakable, btn, chip, h, md, panel, segmented, typo } from './ui';
 import { artStore } from './artstore';
 import { storyStore } from './storystore';
 import { cardOf, refill, todayPrompt, thumbImg } from './artroom';
@@ -422,7 +422,7 @@ function menu(app: App) {
     .list()
     .then((list) => {
       if (!list[0]) return;
-      storySub.textContent = list[0].title.trim() || 'Untitled story';
+      storySub.textContent = breakable(list[0].title.trim()) || 'Untitled story';
       storySub.classList.add('is-title');
     })
     .catch(() => undefined);
