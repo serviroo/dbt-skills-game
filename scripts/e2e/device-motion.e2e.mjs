@@ -11,8 +11,8 @@
 // drift end with their screen, however it goes, a capture's wait on a dismissed window's typing ends with it, and the
 // Stealth Room's Breathing words still breathe with its glow once motion is back. Motion chosen in another open tab
 // reaches the intro the same way, with no reload: Reduced stills the title, a waiting window, the hold's breathing and
-// the end card's drift, and Auto moves them again; one made while this tab was in the page cache or out of sight
-// reaches its title once it is back.
+// the end card's drift, and Auto moves them again; a window still opening and the end card still coming in land where
+// they end at once; one made while this tab was in the page cache or out of sight reaches its title once it is back.
 
 const PHONE = { width: 390, height: 844 };
 
@@ -232,6 +232,52 @@ export const scenarios = {
     h.expect(await moving(0), `with Motion: Reduced chosen in another tab, the title kept moving (${await endless(title, '.title-screen')})`);
     await page.getByRole('radio', { name: 'Motion: Auto', exact: true }).click();
     h.expect(await moving(2), `with Motion back on Auto in another tab, the title stayed still (${await endless(title, '.title-screen')})`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  async 'intro-openings-land-on-motion-from-another-tab'(h) {
+    // Reduced chosen in another tab while a Lantern window is still opening and typing, and while the end card is still
+    // coming in: every finite animation of either lands where it ends at once, the window's text and the card's buttons
+    // with them. The page's animation clock stands still meanwhile, so nothing could have ended on its own
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', PHONE);
+    await h.openSettings(page);
+    const pieces = [
+      { kind: 'notification', root: '.sw', ready: (p) => p.waitForFunction(() => window.__win?.typing === true, null, { timeout: 30000 }) },
+      { kind: 'endcard', root: '.endcard', ready: (p) => p.locator('.endcard').waitFor({ timeout: 30000 }) },
+    ];
+    for (const k of pieces) {
+      const piece = await ctx.newPage();
+      piece.on('pageerror', (e) => errors.push(`pageerror, ${k.kind} tab: ${e.message}`));
+      const cdp = await ctx.newCDPSession(piece);
+      await cdp.send('Animation.enable');
+      await cdp.send('Animation.setPlaybackRate', { playbackRate: 0 });
+      await piece.goto(h.server.url + `/?lab=window&kind=${k.kind}&mute`);
+      await k.ready(piece);
+      /** the piece's finite animations not yet at their end, and what is still to show */
+      const coming = () =>
+        piece.evaluate((sel) => {
+          const root = document.querySelector(sel);
+          return {
+            running: root.getAnimations({ subtree: true }).filter((a) => a.effect.getTiming().iterations !== Infinity && !['finished', 'idle'].includes(a.playState)).length,
+            typing: window.__win?.typing ?? null,
+            hidden: [...root.querySelectorAll('.sw-u')].filter((u) => Number(getComputedStyle(u).opacity) < 1).length,
+            inert: [...root.querySelectorAll('.sw-actions, .ec-actions')].filter((a) => a.inert).length,
+          };
+        }, k.root);
+      const before = await coming();
+      h.expect(before.running > 0, `${k.kind}: nothing was still coming in to begin with: ${JSON.stringify(before)}`);
+      await page.getByRole('radio', { name: 'Motion: Reduced', exact: true }).click();
+      let now = before;
+      for (const end = Date.now() + 5000; Date.now() < end; await h.sleep(50)) {
+        now = await coming();
+        if (!now.running && !now.typing && !now.hidden && !now.inert) break;
+      }
+      h.expect(!now.running && !now.typing && !now.hidden && !now.inert, `${k.kind}: with Motion: Reduced chosen in another tab, it kept coming in: ${JSON.stringify(now)}`);
+      // Auto again, so the next piece opens with motion on
+      await page.getByRole('radio', { name: 'Motion: Auto', exact: true }).click();
+      await piece.close();
+    }
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },

@@ -273,6 +273,7 @@
   "intro-chest-follows-device-motion": 35,
   "intro-end-card-follows-device-motion": 3,
   "intro-hold-follows-device-motion": 10,
+  "intro-openings-land-on-motion-from-another-tab": 12,
   "intro-pause-awaken": 8,
   "intro-pause-chest": 3,
   "intro-pause-hide-during-resume": 4,

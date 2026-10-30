@@ -235,16 +235,24 @@ function still(frames: Keyframe[]): Keyframe[] {
 }
 
 function entrance() {
-  const reduced = params.reduced;
+  let reduced = params.reduced;
   const anims: Animation[] = [];
   const due = new Set<() => void>();
   const flush = () => [...due].forEach((run) => run());
-  const off = onTaps(() => {
+  const finish = () => {
     flush();
     anims.forEach(complete);
+  };
+  const off = onTaps(finish);
+  // motion turning off while the screen comes in completes it, as a tap does; what comes in after follows it too
+  const offMotion = onMotion(() => {
+    reduced = params.reduced;
+    if (reduced) finish();
   });
   return {
-    reduced,
+    get reduced() {
+      return reduced;
+    },
     animate(e: Element, frames: Keyframe[], opts: KeyframeAnimationOptions) {
       const a = reduced ? animate(e, still(frames), { ...opts, duration: W.reducedFadeMs, delay: 0, easing: css(EASE.outCubic) }) : animate(e, frames, opts);
       anims.push(a);
@@ -269,6 +277,7 @@ function entrance() {
     async leave(root: HTMLElement, ms: number) {
       flush();
       off();
+      offMotion();
       snd('ui_tap');
       const out = reduced ? W.reducedCloseMs : ms;
       animate(root, [{ opacity: 1 }, { opacity: 0 }], reduced ? { duration: out, easing: css(EASE.outCubic) } : { duration: out, easing: 'ease-in' });
