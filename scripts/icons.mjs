@@ -2,14 +2,14 @@
 // node scripts/icons.mjs [--software] [--out=public] [--only=icons|splash] [--sheet=qa/out/pwa/icon-src] [--lose-context-at=<n>] [--lose-context-times=<k>]
 // A lost WebGL context redraws that image once on a fresh page, keeping the requested renderer.
 // --lose-context-at=<n> (tests) loses the context on the nth image's first <k> draws (default 1).
-// Drawing every image into public/ records what drew them in scripts/icons.stamp, so a build redraws them only after
-// this script or the list of images changes.
+// Drawing every image into public/ records what drew them and a hash of each in scripts/icons.stamp, so a build
+// redraws them only after this script, the list of images or an image in public/ changes.
 import { chromium } from 'playwright';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { DRAWN_FROM, ICONS, drawnFrom, splashImages } from './pwa-spec.mjs';
+import { DRAWN_FROM, ICONS, drawnFrom, drawnStamp, sha256, splashImages } from './pwa-spec.mjs';
 import { glArgs, checkRenderer } from './gl.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -218,6 +218,7 @@ async function draw(j, n) {
 // Each image is finished in a folder beside the output, then renamed into place, so a build copying public/ while
 // another build redraws the images (the E2E scenarios build side by side) never takes a half-written one.
 let parts;
+const hashes = {};
 const write = (rel, dataUrl) => {
   const file = path.join(outDir, rel);
   if (!parts) {
@@ -231,6 +232,7 @@ const write = (rel, dataUrl) => {
   try {
     execFileSync('magick', [part, '-strip', '-define', 'png:compression-level=9', '-define', 'png:compression-filter=5', 'PNG24:' + part]);
   } catch {}
+  hashes[rel] = sha256(fs.readFileSync(part));
   fs.renameSync(part, file);
   return fs.statSync(file).size;
 };
@@ -249,7 +251,7 @@ try {
     if (!flags.quiet) console.log(`${j.file}  ${j.w}x${j.h}  ${(size / 1024).toFixed(1)} KB`);
   }
   console.log(`wrote ${jobs.length} images (${(total / 1024).toFixed(0)} KB) to ${path.relative(root, outDir) || '.'}`);
-  if (!flags.only && outDir === path.join(root, 'public')) fs.writeFileSync(DRAWN_FROM, source + '\n');
+  if (!flags.only && outDir === path.join(root, 'public')) fs.writeFileSync(DRAWN_FROM, drawnStamp(source, hashes));
 } finally {
   await browser.close();
 }

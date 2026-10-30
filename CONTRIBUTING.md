@@ -59,8 +59,9 @@ The PWA checks test the build in `dist/`. `pwa-verify` runs in both Chromium and
 can't run, add `--browser=chromium`.
 
 The build draws the icons and splash screens again only when `scripts/icons.mjs` or the list of images in
-`scripts/pwa-spec.mjs` has changed since `scripts/icons.stamp` was written. Commit the new images in `public/` with
-that file: CI fails a build that changes a committed file.
+`scripts/pwa-spec.mjs` has changed since `scripts/icons.stamp` was written, or when an image in `public/` is not the
+one that file records. Commit the new images in `public/` with that file: CI fails a build that changes a committed
+file.
 
 `scripts/e2e.mjs` starts its own dev server and Playwright Chromium, runs every scenario in `scripts/e2e/*.e2e.mjs`
 and saves screenshots and `report.json` to `artifacts/e2e/<time>/`. It exits non-zero if any scenario fails. Scenarios
