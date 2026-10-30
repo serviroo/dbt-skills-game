@@ -23,23 +23,27 @@ export async function deviceMotion(ctx, page) {
   return (value) => cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value }] });
 }
 
-/** Every --breath value the hold shows over `ms`: many while it breathes, one steady 0.5 while it is still. */
-const breaths = (page, ms) =>
-  page.evaluate(
-    (ms) =>
-      new Promise((done) => {
-        const root = document.querySelector('.chest-hold');
-        const seen = new Set();
-        const end = performance.now() + ms;
-        const tick = () => {
-          seen.add(root.style.getPropertyValue('--breath'));
-          if (performance.now() < end) requestAnimationFrame(tick);
-          else done([...seen]);
-        };
-        tick();
-      }),
-    ms,
-  );
+/**
+ * Every --breath value the hold shows over the next `frames` frames it draws: many while it breathes, one steady 0.5
+ * while it is still. Counted in frames, not time: a page a busy host lets draw only now and then shows as many, only
+ * later.
+ */
+const breaths = (page, frames) =>
+  page.evaluate(async (frames) => {
+    const root = document.querySelector('.chest-hold');
+    const seen = new Set();
+    for (let i = 0; i < frames; i++) {
+      await new Promise((r) => requestAnimationFrame(r));
+      seen.add(root.style.getPropertyValue('--breath'));
+    }
+    return [...seen];
+  }, frames);
+
+/** Resolves once the page has drawn `n` more frames, however long it is stopped meanwhile. */
+const drawn = (page, n) =>
+  page.evaluate(async (n) => {
+    for (let i = 0; i < n; i++) await new Promise((r) => requestAnimationFrame(r));
+  }, n);
 
 /** The window's endless animations (the plasma along its bars, the waiting arrow's pulse), and the arrow's opacity. */
 const windowMotion = (page) =>
@@ -80,6 +84,19 @@ const reducedHere = (page, on) =>
 
 /** Animations under `selector` that never end. */
 const endless = (page, selector) => page.evaluate((sel) => document.querySelector(sel).getAnimations({ subtree: true }).filter((a) => a.effect.getTiming().iterations === Infinity && a.playState !== 'idle').length, selector);
+
+/** True once `n` animations under `selector` never end, looked at frame by frame for 300 frames the page draws. */
+const endlessReach = (page, selector, n) =>
+  page.evaluate(
+    async ([sel, n]) => {
+      for (let i = 0; i < 300; i++) {
+        if (document.querySelector(sel).getAnimations({ subtree: true }).filter((a) => a.effect.getTiming().iterations === Infinity && a.playState !== 'idle').length === n) return true;
+        await new Promise((r) => requestAnimationFrame(r));
+      }
+      return false;
+    },
+    [selector, n],
+  );
 
 /** The end card's drift: an animation on its stage that never ends. */
 const drifts = (page) => page.evaluate(() => document.querySelector('.ec-stage').getAnimations().filter((a) => a.effect.getTiming().iterations === Infinity && a.playState !== 'idle').length);
@@ -133,11 +150,11 @@ export const scenarios = {
     h.expect(placed.every((s) => s === 'finished'), `with the device's reduce-motion turned on, the hold kept coming in: ${JSON.stringify(placed)}`);
     // the breath runs on the same animation clock, which moves again from here
     await cdp.send('Animation.setPlaybackRate', { playbackRate: 1 });
-    const still = await breaths(page, 1500);
+    const still = await breaths(page, 8);
     h.expect(still.length === 1 && Number(still[0]) === 0.5, `with the device's reduce-motion turned on, the hold kept breathing: ${JSON.stringify(still)}`);
     await device('no-preference');
     h.expect(await reducedHere(page, false), 'the game never heard the device turn reduce-motion off');
-    const again = await breaths(page, 1500);
+    const again = await breaths(page, 8);
     h.expect(again.length > 3, `with it turned off again, the hold did not breathe: ${JSON.stringify(again)}`);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
@@ -250,10 +267,7 @@ export const scenarios = {
     await title.goto(h.server.url + '/?cutscene=1&mute');
     await title.locator('.title-screen').waitFor({ timeout: 30000 });
     /** True once the title has `n` endless animations; the other tab's change arrives as an event, so this waits on it. */
-    const moving = (n) =>
-      title
-        .waitForFunction((n) => document.querySelector('.title-screen').getAnimations({ subtree: true }).filter((a) => a.effect.getTiming().iterations === Infinity && a.playState !== 'idle').length === n, n, { timeout: 5000, polling: 50 })
-        .then(() => true, () => false);
+    const moving = (n) => endlessReach(title, '.title-screen', n);
     h.expect(await moving(2), `the title's slit and prompt do not move with motion on (${await endless(title, '.title-screen')})`);
     await h.openSettings(page);
     await page.getByRole('radio', { name: 'Motion: Reduced', exact: true }).click();
@@ -325,10 +339,7 @@ export const scenarios = {
     // view, the title follows what is stored
     const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?cutscene=1&mute', PHONE);
     await page.locator('.title-screen').waitFor({ timeout: 30000 });
-    const moving = (n) =>
-      page
-        .waitForFunction((n) => document.querySelector('.title-screen').getAnimations({ subtree: true }).filter((a) => a.effect.getTiming().iterations === Infinity && a.playState !== 'idle').length === n, n, { timeout: 5000, polling: 50 })
-        .then(() => true, () => false);
+    const moving = (n) => endlessReach(page, '.title-screen', n);
     const stored = (motion, back) =>
       page.evaluate(
         ([key, motion, back]) => {
@@ -354,7 +365,7 @@ export const scenarios = {
     await h.openSettings(page);
     const pieces = [
       { kind: 'notification', ready: (p) => p.waitForFunction(() => document.querySelector('.sw .sw-next')?.getAnimations().length > 0, null, { timeout: 30000 }), moving: async (p) => (await windowMotion(p)).endless > 1, still: async (p) => (await windowMotion(p)).endless === 0 },
-      { kind: 'hold', ready: (p) => p.locator('.chest-hold').waitFor({ timeout: 30000 }), moving: async (p) => (await breaths(p, 1500)).length > 3, still: async (p) => { const b = await breaths(p, 1500); return b.length === 1 && Number(b[0]) === 0.5; } },
+      { kind: 'hold', ready: (p) => p.locator('.chest-hold').waitFor({ timeout: 30000 }), moving: async (p) => (await breaths(p, 8)).length > 3, still: async (p) => { const b = await breaths(p, 8); return b.length === 1 && Number(b[0]) === 0.5; } },
       { kind: 'endcard', ready: (p) => p.locator('.ec-stage').waitFor({ timeout: 30000 }), moving: async (p) => (await drifts(p)) === 1, still: async (p) => (await drifts(p)) === 0 },
     ];
     for (const k of pieces) {
@@ -362,9 +373,12 @@ export const scenarios = {
       piece.on('pageerror', (e) => errors.push(`pageerror, ${k.kind} tab: ${e.message}`));
       await piece.goto(h.server.url + `/?lab=window&kind=${k.kind}&mute`);
       await k.ready(piece);
-      /** True once the piece shows `want` (moving or still). */
+      /** True once the piece shows `want` (moving or still), asked again every 5 frames it draws, 60 times at most. */
       const shows = async (want) => {
-        for (const end = Date.now() + 5000; Date.now() < end; await h.sleep(100)) if (await k[want](piece)) return true;
+        for (let i = 0; i < 60; i++) {
+          if (await k[want](piece)) return true;
+          await drawn(piece, 5);
+        }
         return false;
       };
       h.expect(await shows('moving'), `${k.kind}: it does not move with motion on`);
