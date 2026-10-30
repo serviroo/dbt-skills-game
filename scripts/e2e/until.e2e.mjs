@@ -1,7 +1,22 @@
 // The harness's until() waits for a check in the page that awaits something, and gives up at its deadline even when the
 // check never answers, or turns true only after it while a long wait between checks runs. Its leaves() and gone() wait
-// for something to leave the page on the page's running time: a page frozen past the deadline that lets it go once it
-// runs again passes, and one that never lets it go fails at its deadline.
+// for something to leave the page on the page's running time: a page frozen mid-wait past the deadline that lets it go
+// soon after passes, and one that never lets it go fails at its deadline.
+
+/**
+ * A moment into a wait the page can't run for 3 s, as a browser a busy machine stops for a while, and lets `sel` go a
+ * little after: counted in full, the freeze alone would be past a 2 s deadline.
+ */
+const freezeThenLet = (page, sel) =>
+  page.evaluate(
+    (sel) =>
+      void setTimeout(() => {
+        const end = performance.now() + 3000;
+        while (performance.now() < end);
+        setTimeout(() => document.querySelector(sel).remove(), 600);
+      }, 300),
+    sel,
+  );
 
 export const scenarios = {
   async 'until-hung-check-fails'(h) {
@@ -34,14 +49,9 @@ export const scenarios = {
       const page = await ctx.newPage();
       await page.setContent('<div id="x">x</div>');
       const gone = h.leaves(page, '#x');
-      // the page can't run for 3 s, then lets it go at once: as a browser a busy machine stops for a while
-      await page.evaluate(() => void setTimeout(() => {
-        const end = performance.now() + 3000;
-        while (performance.now() < end);
-        document.getElementById('x').remove();
-      }));
-      const after = await gone(1500).then(() => 'left', (e) => e.message);
-      h.expect(after === 'left', `a page frozen past the deadline, which let it go as soon as it ran again, failed: ${after}`);
+      await freezeThenLet(page, '#x');
+      const after = await gone(2000).then(() => 'left', (e) => e.message);
+      h.expect(after === 'left', `a page frozen mid-wait past the deadline, which let it go soon after, failed: ${after}`);
     } finally { await ctx.close(); }
   },
 
@@ -63,13 +73,9 @@ export const scenarios = {
     try {
       const page = await ctx.newPage();
       await page.setContent('<div role="dialog" aria-label="Pick">x</div>');
-      await page.evaluate(() => void setTimeout(() => {
-        const end = performance.now() + 3000;
-        while (performance.now() < end);
-        document.querySelector('[role=dialog]').remove();
-      }, 100));
-      const after = await h.gone(page.getByRole('dialog', { name: 'Pick' }), 1500).then(() => 'left', (e) => e.message);
-      h.expect(after === 'left', `a page frozen past the deadline, which let it go as soon as it ran again, failed: ${after}`);
+      await freezeThenLet(page, '[role=dialog]');
+      const after = await h.gone(page.getByRole('dialog', { name: 'Pick' }), 2000).then(() => 'left', (e) => e.message);
+      h.expect(after === 'left', `a page frozen mid-wait past the deadline, which let it go soon after, failed: ${after}`);
     } finally { await ctx.close(); }
   },
 
