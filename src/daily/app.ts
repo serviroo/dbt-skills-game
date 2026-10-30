@@ -241,6 +241,8 @@ export class App {
 
   /** This game's data is being cleared (here or in another tab): windows close and every screen but the Safe Zone shows it. */
   private afterClear() {
+    // the store is back to the defaults, Motion on Auto among them: what moves follows that from here
+    this.applyMotion();
     this.clearForSafe();
     if (this.route.name !== 'safe') this.go({ name: 'settings' }, { replace: true });
     // what visits kept for Back and Forward (answers, typed text) goes too: every way back now lands on Settings
