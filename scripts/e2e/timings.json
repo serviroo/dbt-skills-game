@@ -286,6 +286,7 @@
   "intro-pieces-follow-motion-from-another-tab": 20,
   "intro-title-follows-device-motion": 2,
   "intro-title-follows-motion-from-another-tab": 8,
+  "intro-title-follows-motion-missed-while-away": 4,
   "intro-window-follows-device-motion": 5,
   "intro-window-words-320x568-200": 20,
   "intro-window-words-390x844-200": 20,

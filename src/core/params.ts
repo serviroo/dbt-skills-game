@@ -33,11 +33,16 @@ reduceQuery.addEventListener('change', () => {
 });
 // Motion saved in another open copy (or that copy clearing the game): the companion's store merges it and says so
 // through setMotion; until it is open, as in the intro, the stored setting is the one every copy wrote
-window.addEventListener('storage', (e) => {
-  if (held || (e.key !== SAVE_KEY && e.key !== null)) return;
+const reread = () => {
+  if (held) return;
   motion = savedMotion();
   follow();
-});
+};
+window.addEventListener('storage', (e) => (e.key === SAVE_KEY || e.key === null) && reread());
+// back from the page cache or back in view: a storage event missed meanwhile never comes, so read what is stored, as
+// the store does
+window.addEventListener('pageshow', (e) => e.persisted && reread());
+document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && reread());
 
 /**
  * Calls fn when motion turns on or off while the page is open: the device's setting changed, or the saved Motion

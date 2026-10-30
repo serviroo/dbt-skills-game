@@ -11,7 +11,8 @@
 // drift end with their screen, however it goes, a capture's wait on a dismissed window's typing ends with it, and the
 // Stealth Room's Breathing words still breathe with its glow once motion is back. Motion chosen in another open tab
 // reaches the intro the same way, with no reload: Reduced stills the title, a waiting window, the hold's breathing and
-// the end card's drift, and Auto moves them again.
+// the end card's drift, and Auto moves them again; one made while this tab was in the page cache or out of sight
+// reaches its title once it is back.
 
 const PHONE = { width: 390, height: 844 };
 
@@ -231,6 +232,34 @@ export const scenarios = {
     h.expect(await moving(0), `with Motion: Reduced chosen in another tab, the title kept moving (${await endless(title, '.title-screen')})`);
     await page.getByRole('radio', { name: 'Motion: Auto', exact: true }).click();
     h.expect(await moving(2), `with Motion back on Auto in another tab, the title stayed still (${await endless(title, '.title-screen')})`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  async 'intro-title-follows-motion-missed-while-away'(h) {
+    // a change another tab made while this one was in the page cache or out of sight sent no event this tab heard: a
+    // write from this same tab sends it none either, so it stands in for one. Back from the page cache, or back in
+    // view, the title follows what is stored
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?cutscene=1&mute', PHONE);
+    await page.locator('.title-screen').waitFor({ timeout: 30000 });
+    const moving = (n) =>
+      page
+        .waitForFunction((n) => document.querySelector('.title-screen').getAnimations({ subtree: true }).filter((a) => a.effect.getTiming().iterations === Infinity && a.playState !== 'idle').length === n, n, { timeout: 5000, polling: 50 })
+        .then(() => true, () => false);
+    const stored = (motion, back) =>
+      page.evaluate(
+        ([key, motion, back]) => {
+          localStorage.setItem(key, JSON.stringify({ v: 1, settings: { motion } }));
+          if (back === 'pageshow') window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+          else document.dispatchEvent(new Event('visibilitychange'));
+        },
+        [h.SAVE, motion, back],
+      );
+    h.expect(await moving(2), `the title's slit and prompt do not move with motion on (${await endless(page, '.title-screen')})`);
+    await stored('reduce', 'pageshow');
+    h.expect(await moving(0), `with Motion: Reduced stored while away, the title kept moving once back from the page cache (${await endless(page, '.title-screen')})`);
+    await stored('system', 'visibilitychange');
+    h.expect(await moving(2), `with Motion back on Auto stored while away, the title stayed still once back in view (${await endless(page, '.title-screen')})`);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },
