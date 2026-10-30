@@ -694,12 +694,11 @@ async function safeZone(h, page, problems, tag, act = true) {
     }
     if (next) await main.getByRole('button', { name: next, exact: true }).last().click();
   }
-  // leaving is immediate: the whole way out ends within 3 s of the page running, its steps taking no timeout of their own
-  const leave = async () => {
+  // leaving is immediate: the whole way out takes the page under 3 s
+  await h.quick(page, 3000, `${tag}: leaving the Safe Zone`, async () => {
     await page.locator('header .dq-back', { hasText: 'Leave' }).click({ timeout: 0 });
     await atScreen(page, 'hub', 0);
-  };
-  await h.poll(page, leave, () => true, `${tag}: leaving the Safe Zone was not immediate`, { timeout: 3000 });
+  });
   h.expect(!problems.length, `${tag}: leaving the Safe Zone was not immediate:\n${problems.join('\n')}`);
   await h.reachHub(page);
 }

@@ -103,7 +103,7 @@ export const scenarios = {
       await page.evaluate(() => {
         window.requestAnimationFrame = (cb) => setTimeout(() => cb(performance.now()), 1000);
       });
-      const ran = h.stopwatch(page);
+      const ran = await h.stopwatch(page);
       await page.locator('.ui-skip').click();
       const note = page.getByRole('button', { name: 'Read the note' });
       await note.waitFor({ timeout: 30000 });

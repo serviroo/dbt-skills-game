@@ -50,28 +50,43 @@ let counts = 0;
 /**
  * Counts, inside the page, the time it could run, by its own 50 ms timer (kept by realTimers(), from before a page clock):
  * a gap longer than 250 ms between two ticks is time the page could not run, such as a busy machine stopping the whole
- * browser for seconds now and then, and counts as 250 ms. `late` resolves true once the page has run `ms`; stop() ends
- * the count (`late` then resolves false) and gives how long the page ran, in ms.
+ * browser for seconds now and then, and counts as 250 ms. With `work`, a gap counts in full as far as the page's own work
+ * filled it: its long tasks, as the browser timed them, and the spans of its work a test timed (c.busy), each moment once,
+ * as the browser times some of what a test runs in the page and not the rest. `late` resolves true once the page has run
+ * `ms`; stop() ends the count (`late` then resolves false) and gives how long the page ran, in ms.
  */
-function runs(page, ms) {
+function runs(page, ms, { work = false } = {}) {
   const id = ++counts;
   const late = page.evaluate(
-    ({ id, ms }) =>
+    ({ id, ms, work }) =>
       new Promise((done) => {
         const { setTimeout: later, now } = window.__e2eReal;
-        const c = ((window.__e2eRuns ??= {})[id] = { run: 0, stop: false });
+        const c = ((window.__e2eRuns ??= {})[id] = { run: 0, busy: [], stop: false });
+        const add = (list) => list.forEach((e) => c.busy.push([e.startTime, e.startTime + e.duration]));
+        if (work) (c.tasks = new PerformanceObserver((list) => add(list.getEntries()))).observe({ type: 'longtask' });
         let last = now();
+        c.count = () => {
+          add(c.tasks?.takeRecords() ?? []);
+          const t = now();
+          let busy = 0;
+          let end = -Infinity;
+          for (const [from, to] of c.busy.sort((a, b) => a[0] - b[0])) {
+            busy += Math.max(0, to - Math.max(from, end));
+            end = Math.max(end, to);
+          }
+          c.run += Math.max(Math.min(t - last, 250), busy);
+          c.busy = [];
+          last = t;
+        };
         const tick = () => {
           if (c.stop) return done(false);
-          const t = now();
-          c.run += Math.min(t - last, 250);
-          last = t;
+          c.count();
           if (c.run >= ms) done(true);
           else later(tick, 50);
         };
         later(tick, 50);
       }),
-    { id, ms },
+    { id, ms, work },
   );
   late.catch(() => {});
   const stop = () =>
@@ -79,11 +94,13 @@ function runs(page, ms) {
       .evaluate((id) => {
         const c = window.__e2eRuns?.[id];
         if (!c) return null;
+        c.count();
         c.stop = true;
+        c.tasks?.disconnect();
         return Math.round(c.run);
       }, id)
       .catch(() => null);
-  return { late, stop };
+  return { id, late, stop };
 }
 
 /**
@@ -177,16 +194,68 @@ export async function poll(page, read, ok, message, { timeout = 10000, polling =
 }
 
 /**
- * Starts counting the time the page could run (see runs()), for a check on how long the page took over something; the
- * function it gives ends the count and resolves with how long the page ran, in ms.
+ * Starts counting how long the page takes over something, for a check that the app is quick: the time it could run (see
+ * runs()) with the app's own work counted in full, so a browser stopped on a busy machine can't fail the check, and the
+ * app holding the page for seconds can't pass it. Resolves, once counting, with a function that ends the count and
+ * resolves with the milliseconds. Its evaluate(fn, arg) is page.evaluate's, counting the time fn holds the page as the
+ * app's work: the browser times the page's own tasks, but only some of what a test runs in it.
  */
-export function stopwatch(page) {
-  const count = runs(page, Infinity);
-  return async () => {
+export async function stopwatch(page) {
+  const count = runs(page, Infinity, { work: true });
+  const lost = () => new Error("the page's running time could not be counted: it went to another document, or was never given realTimers()");
+  if (!(await page.evaluate((id) => !!window.__e2eRuns?.[id], count.id))) throw lost();
+  const ran = async () => {
     const ms = await count.stop();
-    if (ms === null) throw new Error("the page's running time could not be counted: it went to another document, or was never given realTimers()");
+    if (ms === null) throw lost();
     return ms;
   };
+  ran.evaluate = async (fn, arg) => {
+    const f = await page.evaluateHandle(`(${fn})`);
+    try {
+      return await page.evaluate(
+        ({ id, f, arg }) => {
+          const { now } = window.__e2eReal;
+          const t = now();
+          try {
+            return f(arg);
+          } finally {
+            window.__e2eRuns[id].busy.push([t, now()]);
+          }
+        },
+        { id: count.id, f, arg },
+      );
+    } finally {
+      await f.dispose();
+    }
+  };
+  return ran;
+}
+
+/**
+ * Checks that the app is quick over step(ran): the step's waits end within `ms` of the page running, its own steps taking
+ * no timeout of their own, and stopwatch() puts the whole step under `ms`. step makes any app call in the page through
+ * ran.evaluate(). One deadline (see pageTime()) bounds all of it, the stopwatch's start and end too, so a page that stops
+ * answering anywhere in it fails it.
+ */
+export async function quick(page, ms, what, step, { stuck } = {}) {
+  const time = pageTime(page, ms, () => `${what} took over ${ms} ms of the page running`, { stuck });
+  // a part the deadline overtook ends with the page; it must not fail the run on its own then
+  const bound = (p) => {
+    p.catch(() => {});
+    return Promise.race([p, time.late]);
+  };
+  let ran;
+  try {
+    ran = await bound(stopwatch(page));
+    await bound(step(ran));
+    const took = await bound(ran());
+    ran = null;
+    if (took >= ms) throw new Error(`${what} took ${took} ms, not under ${ms} ms, with the app's own work counted in full`);
+  } finally {
+    time.stop();
+    // a page stuck past the deadline may never answer: its count is stopped without waiting on it
+    ran?.().catch(() => {});
+  }
 }
 
 /**
@@ -750,7 +819,7 @@ export async function startHarness(flags = {}) {
   })());
 
   const shared = {};
-  const lane = (browser) => ({ browser, server, out, flags, shared, renderer, throttleErrors, zone: ZONE, open: opener(browser), evidence, evidenceAll: allEvidence(browser), note, leaves, gone, poll, stopwatch, shot, ls, youOf, deepFind, deepDrop, expect, sleep, frames, settled, until, pauseClock, reachHub, openSettings, SAVE, YOU, SEEN, stop, more });
+  const lane = (browser) => ({ browser, server, out, flags, shared, renderer, throttleErrors, zone: ZONE, open: opener(browser), evidence, evidenceAll: allEvidence(browser), note, leaves, gone, poll, stopwatch, quick, shot, ls, youOf, deepFind, deepDrop, expect, sleep, frames, settled, until, pauseClock, reachHub, openSettings, SAVE, YOU, SEEN, stop, more });
   /** Another browser on the same dev server, so scenarios can run side by side: its own profiles, the same `shared`. */
   async function more() {
     if (stopping) throw new Error('the harness is stopping');

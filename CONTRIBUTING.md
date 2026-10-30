@@ -117,12 +117,19 @@ scenario gets an `h` object from `scripts/e2e/harness.mjs`, the same but for `br
 - `poll(page, read, ok, message, { timeout = 10000, polling = 100 } = {})`: call `read()` here, so it can read the
   page in any way, step its clock or read another tab, until `ok(value)`; it resolves with that value, or fails
   with `message` (or `message(last value)`).
-- `stopwatch(page)`: start counting the time the page could run; the function it returns stops the count and gives
-  the milliseconds, for a check on how long the page took over something.
 - These waits, `gone` and `leaves` count their deadlines in the time the page could run, not on the wall clock: CI's
   software renderer stops a tab for seconds while it compiles shaders, and a wall-clock deadline fails whenever a
   stop lands in it. Use them for any wait on the page; keep `Date.now()` deadlines for waits on something outside
-  it, such as a server or a file.
+  it, such as a server or a file. They count a task that holds the page for seconds as a stop, so a check that the
+  app is quick uses `quick` or `stopwatch` instead.
+- `quick(page, ms, what, step)`: check that the app is quick over `step(ran)`: its waits end within `ms` of the page
+  running (give its own steps `timeout: 0`), and `stopwatch` puts it under `ms`. A page that stops answering anywhere
+  in it fails it, at the stuck limit the waits use.
+- `stopwatch(page)`: resolves, once counting, with a function that ends the count and gives how long the page took
+  in ms: the time it could run, with the app's own work counted in full. A stop of the whole browser is left out, but
+  every long task of the page counts, a stop that lands inside one too. The browser times the page's own tasks, but
+  only some of what a test runs in it, so make an app call through the function's `evaluate(fn, arg)`, which is
+  `page.evaluate` with the time `fn` holds the page counted.
 - `shot(page, name)`: a screenshot in the run's folder (`out`), with its tab brought to the front first, as full
   Chromium captures no tab behind another. Start the name with your file's name, and give whatever a scenario writes
   there a name no other scenario uses, as they run at once.

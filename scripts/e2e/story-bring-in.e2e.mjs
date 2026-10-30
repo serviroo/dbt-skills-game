@@ -231,23 +231,8 @@ export const scenarios = {
       fs.writeFileSync(path.join(h.out, 'spaces-timing.json'), JSON.stringify(timed, null, 1));
       for (const t of timed) h.expect(t.read < 200 && t.write < 200, `${t.name}: read in ${Math.round(t.read)} ms, written in ${Math.round(t.write)} ms`);
 
-      // each step must end within `ms` of the page running, its own waits taking no timeout of their own. Page time counts a
-      // task that holds the page as a stop, so the app's own work is timed inside the page, as the reading and writing are
-      // above: no one task of the step may hold the page for `ms` either
-      const quick = async (what, ms, step) => {
-        await page.evaluate(() => {
-          const tasks = (window.__quickTasks = []);
-          (window.__quickWatch = new PerformanceObserver((list) => tasks.push(...list.getEntries().map((e) => e.duration)))).observe({ type: 'longtask' });
-        });
-        await h.poll(page, step, () => true, `${what} took over ${ms} ms of the page running`, { timeout: ms });
-        const longest = await page.evaluate(() => {
-          const tasks = window.__quickTasks;
-          tasks.push(...window.__quickWatch.takeRecords().map((e) => e.duration));
-          window.__quickWatch.disconnect();
-          return Math.round(Math.max(0, ...tasks));
-        });
-        h.expect(longest < ms, `${what}: one task held the page for ${longest} ms`);
-      };
+      // each step takes the page under `ms`, the app's own work counted in full
+      const quick = (what, ms, step) => h.quick(page, ms, what, step);
       for (const [name, body, first] of files) {
         // through the real chooser: the preview comes up at once and the Safe Zone opens on the first tap
         const file = write(h, name, body);
@@ -264,8 +249,8 @@ export const scenarios = {
         await page.locator('.st-bring-said:not(:empty)').waitFor();
         const story = (await everything(page)).find((s) => !was.some((w) => w.id === s.id));
         h.expect(story?.chapters[0]?.text === first, `${name}: the first chapter came in as ${JSON.stringify(story?.chapters[0]?.text.slice(0, 40))}…`);
-        await quick(`${name}: the reading view`, 2000, async () => {
-          await page.evaluate((r) => window.__daily.go(r), { name: 'read', id: story.id });
+        await quick(`${name}: the reading view`, 2000, async (ran) => {
+          await ran.evaluate((r) => window.__daily.go(r), { name: 'read', id: story.id });
           await page.locator('.st-read-text').first().waitFor({ timeout: 0 });
         });
         await quick(`${name}: the Safe Zone from the reading view`, 1000, async () => {
@@ -329,14 +314,14 @@ export const scenarios = {
       }
       await page.locator('.st-cw .st-mode--polish').click();
       await quick('Polish after 4,000 blank lines', 2000, async () => {
-        await page.locator('.st-cw .st-ask').click();
-        await page.locator('.st-cards > .st-batch:first-child .st-card').first().waitFor({ timeout: 2000 });
+        await page.locator('.st-cw .st-ask').click({ timeout: 0 });
+        await page.locator('.st-cards > .st-batch:first-child .st-card').first().waitFor({ timeout: 0 });
       });
       const card = await page.locator('.st-cards > .st-batch:first-child .st-card-t').first().textContent();
       h.expect(card === 'smiled', `Polish came back as ${JSON.stringify(card)}`);
       await quick('the Safe Zone after Polish', 1000, async () => {
-        await page.locator('.dq-top .dq-safe').click({ timeout: 1000 });
-        await page.waitForFunction(() => window.__daily?.route.name === 'safe', null, { timeout: 1000 });
+        await page.locator('.dq-top .dq-safe').click({ timeout: 0 });
+        await page.waitForFunction(() => window.__daily?.route.name === 'safe', null, { timeout: 0 });
       });
       h.expect(!errors.length, errors.join('\n'));
     } finally {
