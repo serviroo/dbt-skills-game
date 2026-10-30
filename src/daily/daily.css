@@ -2587,6 +2587,11 @@ textarea.dq-input {
   .dq-sz .dq-res-note {
     font-size: 20px;
   }
+  /* a call or text button stays a tap wide when its word is short, as "Call" is; its row wraps, so no word breaks */
+  .dq-sz .dq-res-a,
+  .dq-sz .dq-person-acts .dq-btn {
+    min-width: 44px;
+  }
   .dq-sz .dq-btn-ic,
   .dq-sz-talk > span:first-child {
     display: none;
