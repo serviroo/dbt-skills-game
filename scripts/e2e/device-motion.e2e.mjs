@@ -12,7 +12,8 @@
 // Stealth Room's Breathing words still breathe with its glow once motion is back. Motion chosen in another open tab
 // reaches the intro the same way, with no reload: Reduced stills the title, a waiting window, the hold's breathing and
 // the end card's drift, and Auto moves them again; a window still opening and the end card still coming in land where
-// they end at once; one made while this tab was in the page cache or out of sight reaches its title once it is back.
+// they end at once, also in a tab stopped for a while just as the change is made; one made while this tab was in the
+// page cache or out of sight reaches its title once it is back.
 
 const PHONE = { width: 390, height: 844 };
 
@@ -66,7 +67,10 @@ const rattle = (page) =>
     return tilts;
   });
 
-/** True once the game has the device's setting: it hears of it as the next frame is drawn, so this waits frame by frame. */
+/**
+ * True once the game has motion `on`. It hears of the device's setting as the next frame is drawn, and of another tab's
+ * Motion once the page runs again, so this waits frame by frame: a page stopped for a while uses none of the wait.
+ */
 const reducedHere = (page, on) =>
   page.evaluate(async (on) => {
     const { params } = await import('/src/core/params.ts');
@@ -79,6 +83,20 @@ const endless = (page, selector) => page.evaluate((sel) => document.querySelecto
 
 /** The end card's drift: an animation on its stage that never ends. */
 const drifts = (page) => page.evaluate(() => document.querySelector('.ec-stage').getAnimations().filter((a) => a.effect.getTiming().iterations === Infinity && a.playState !== 'idle').length);
+
+/**
+ * Stops the page for `ms` from its next task, as a software renderer (CI's SwiftShader) does while it compiles a new
+ * frame's shaders: whatever comes meanwhile, a change from another tab among it, waits for the page to run again.
+ */
+const freeze = (page, ms) =>
+  page.evaluate(
+    (ms) =>
+      void setTimeout(() => {
+        const end = performance.now() + ms;
+        while (performance.now() < end);
+      }),
+    ms,
+  );
 
 export const scenarios = {
   async 'intro-hold-follows-device-motion'(h) {
@@ -239,7 +257,9 @@ export const scenarios = {
   async 'intro-openings-land-on-motion-from-another-tab'(h) {
     // Reduced chosen in another tab while a Lantern window is still opening and typing, and while the end card is still
     // coming in: every finite animation of either lands where it ends at once, the window's text and the card's buttons
-    // with them. The page's animation clock stands still meanwhile, so nothing could have ended on its own
+    // with them. The page's animation clock stands still meanwhile, so nothing could have ended on its own. The piece's
+    // tab is stopped just as the change is made, for longer than CI's software renderer has stopped one (5.4 s): it lands
+    // all the same once it runs again
     const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', PHONE);
     await h.openSettings(page);
     const pieces = [
@@ -267,12 +287,10 @@ export const scenarios = {
         }, k.root);
       const before = await coming();
       h.expect(before.running > 0, `${k.kind}: nothing was still coming in to begin with: ${JSON.stringify(before)}`);
+      await freeze(piece, 5500);
       await page.getByRole('radio', { name: 'Motion: Reduced', exact: true }).click();
-      let now = before;
-      for (const end = Date.now() + 5000; Date.now() < end; await h.sleep(50)) {
-        now = await coming();
-        if (!now.running && !now.typing && !now.hidden && !now.inert) break;
-      }
+      h.expect(await reducedHere(piece, true), `${k.kind}: the piece never heard Motion: Reduced chosen in another tab`);
+      const now = await coming();
       h.expect(!now.running && !now.typing && !now.hidden && !now.inert, `${k.kind}: with Motion: Reduced chosen in another tab, it kept coming in: ${JSON.stringify(now)}`);
       // Auto again, so the next piece opens with motion on
       await page.getByRole('radio', { name: 'Motion: Auto', exact: true }).click();
@@ -325,15 +343,17 @@ export const scenarios = {
       piece.on('pageerror', (e) => errors.push(`pageerror, ${k.kind} tab: ${e.message}`));
       await piece.goto(h.server.url + `/?lab=window&kind=${k.kind}&mute`);
       await k.ready(piece);
-      /** True once the piece shows `want` (moving or still); the other tab's change arrives as an event, so this waits. */
+      /** True once the piece shows `want` (moving or still). */
       const shows = async (want) => {
         for (const end = Date.now() + 5000; Date.now() < end; await h.sleep(100)) if (await k[want](piece)) return true;
         return false;
       };
       h.expect(await shows('moving'), `${k.kind}: it does not move with motion on`);
       await page.getByRole('radio', { name: 'Motion: Reduced', exact: true }).click();
+      h.expect(await reducedHere(piece, true), `${k.kind}: the piece never heard Motion: Reduced chosen in another tab`);
       h.expect(await shows('still'), `${k.kind}: with Motion: Reduced chosen in another tab, it kept moving`);
       await page.getByRole('radio', { name: 'Motion: Auto', exact: true }).click();
+      h.expect(await reducedHere(piece, false), `${k.kind}: the piece never heard Motion back on Auto in another tab`);
       h.expect(await shows('moving'), `${k.kind}: with Motion back on Auto in another tab, it stayed still`);
       await piece.close();
     }
