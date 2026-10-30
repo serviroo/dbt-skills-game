@@ -342,7 +342,8 @@ export function safeScreen(app: App, route: Route): ScreenOut {
           [h3(SAFE.talk.title), shown[0]],
           shown[1],
           shown[2],
-          h('p', { class: 'dq-small' }, h('a', { href: 'https://findahelpline.com', target: '_blank', rel: 'noopener noreferrer', class: 'dq-a' }, h('span', {}, 'findahelpline', h('wbr'), '.com')), ` ${SAFE.talk.elsewhere}`),
+          // named exactly as it reads: the browser hears the break before .com as a space
+          h('p', { class: 'dq-small' }, h('a', { href: 'https://findahelpline.com', target: '_blank', rel: 'noopener noreferrer', class: 'dq-a', 'aria-label': 'findahelpline.com' }, h('span', {}, 'findahelpline', h('wbr'), '.com')), ` ${SAFE.talk.elsewhere}`),
           picker,
           h('div', { class: 'dq-actions dq-actions--stack' }, nextBtn(at, 'Next', 'quiet'), btn('Back to breathing', () => show('breathe'), { kind: 'quiet' })),
         );

@@ -58,6 +58,17 @@ const actions = (page, region) =>
 
 const dangerLine = (page) => page.evaluate(() => [...document.querySelectorAll('.dq-sz-danger')].map((e) => e.textContent.trim()));
 
+/** What the browser's accessibility tree names the element `selector` finds: the name a screen reader gets. */
+async function axName(ctx, page, selector) {
+  const cdp = await ctx.newCDPSession(page);
+  await cdp.send('Accessibility.enable');
+  const { root } = await cdp.send('DOM.getDocument', { depth: 0 });
+  const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector });
+  const { nodes } = await cdp.send('Accessibility.getPartialAXTree', { nodeId, fetchRelatives: false });
+  await cdp.detach();
+  return nodes[0]?.name?.value ?? null;
+}
+
 export const scenarios = {
   /** "Higher" brings "Talk to someone now" above the screen, on arrival and after scrolling, at every size */
   async 'urgent-higher-talk-first'(h) {
@@ -126,7 +137,10 @@ export const scenarios = {
     await page.waitForFunction(() => document.querySelector('.dq-region select')?.value === 'elsewhere');
     h.expect(!(await actions(page, 'elsewhere')).length, 'Somewhere else: shows a call button from some country');
     h.expect(JSON.stringify(await dangerLine(page)) === JSON.stringify(['If you are in danger right now, call your local emergency number.']), `Somewhere else: danger line ${await dangerLine(page)}`);
-    h.expect(await page.getByRole('link', { name: 'findahelpline.com' }).isVisible(), 'Somewhere else: no directory link');
+    const directory = 'a[href="https://findahelpline.com"]';
+    h.expect(await page.locator(directory).isVisible(), 'Somewhere else: no directory link');
+    const named = await axName(ctx, page, directory);
+    h.expect(named === 'findahelpline.com', `Somewhere else: the directory link is named ${JSON.stringify(named)}, not "findahelpline.com"`);
 
     await picker.selectOption('ie');
     await page.getByRole('button', { name: 'Back to breathing' }).click();
