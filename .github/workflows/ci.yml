@@ -41,6 +41,8 @@ jobs:
       - run: npm run build
         env:
           LANTERN_GL: software
+      - name: The build changes no committed file
+        run: test -z "$(git status --porcelain)" || { git status --short; echo "npm run build changed the files above; if it redrew the PWA images, commit them with scripts/icons.stamp"; exit 1; }
       - name: PWA offline launch
         run: node scripts/pwa-verify.mjs --software --check
       - name: PWA update

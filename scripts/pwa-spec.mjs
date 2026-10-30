@@ -1,4 +1,10 @@
 // Single source of truth for the PWA images: scripts/icons.mjs draws them, the Vite plugin links the splash screens.
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
 
 export const ICONS = [
   { file: 'icons/apple-touch-icon-180.png', size: 180, kind: 'any' },
@@ -40,6 +46,34 @@ export function splashImages() {
     }
   }
   return out;
+}
+
+// A checkout gives each file the time it was written, so file times can't tell whether the images are older than the
+// code that draws them. A full draw into public/ records here what it drew them from and a hash of each image it wrote,
+// and the build redraws them unless the code and every image in public/ still match that record.
+export const DRAWN_FROM = path.join(here, 'icons.stamp');
+
+export const sha256 = (data) => crypto.createHash('sha256').update(data).digest('hex');
+const imageFiles = () => [...ICONS.map((i) => i.file), ...splashImages().map((s) => s.file)];
+
+/** What the images in public/ are drawn from: scripts/icons.mjs and the list of images it draws. */
+export function drawnFrom() {
+  const script = fs.readFileSync(path.join(here, 'icons.mjs'), 'utf8').replace(/\r\n/g, '\n');
+  const images = [...ICONS.map((i) => [i.file, i.size, i.kind]), ...splashImages().map((s) => [s.file, s.width, s.height])];
+  return crypto.createHash('sha256').update(script).update(JSON.stringify(images)).digest('hex');
+}
+
+/** The stamp for images drawn from `from`; `hashes` maps each image's path in public/ to the SHA-256 of its bytes. */
+export function drawnStamp(from, hashes) {
+  return [from, ...imageFiles().map((f) => `${hashes[f]}  ${f}`)].join('\n') + '\n';
+}
+
+/** Whether the stamp is the current code's and every image in public/ is, byte for byte, the one it records. */
+export function imagesMatchStamp() {
+  const inPublic = (f) => path.join(here, '../public', f);
+  if (!fs.existsSync(DRAWN_FROM) || !imageFiles().every((f) => fs.existsSync(inPublic(f)))) return false;
+  const hashes = Object.fromEntries(imageFiles().map((f) => [f, sha256(fs.readFileSync(inPublic(f)))]));
+  return fs.readFileSync(DRAWN_FROM, 'utf8').replace(/\r\n/g, '\n') === drawnStamp(drawnFrom(), hashes);
 }
 
 export function splashLinkTags(base = './') {
