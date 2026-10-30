@@ -310,6 +310,15 @@
 .dq:not([data-screen='safe']) .dq-top-end {
   display: contents;
 }
+/* in the Safe Zone the bar wraps where its words don't fit on one line (the phone's own text at 200%): Lights up and Sound
+   take the next line together, at its end, each whole with its words */
+.dq[data-screen='safe'] .dq-top {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.dq[data-screen='safe'] .dq-top-end {
+  margin-left: auto;
+}
 /* the back control and Home's name are their arrow and mark, with their word beside them wherever the bar has room for all
    of it, else the word wraps away under them, out of sight (their names stay for a screen reader), so the bar takes as
    few rows as its buttons allow (the phone's own text at 200%) */
@@ -2530,10 +2539,13 @@ textarea.dq-input {
 .dq-sz .dq-mo-len-o {
   font-size: calc(20px * var(--text-scale, 1));
 }
+/* the helpline address is one long word in a tap-sized box: it breaks where it must (a phone at 200% zoom, or its own
+   text at 200%) */
 .dq-sz .dq-small .dq-a {
   display: inline-flex;
   align-items: center;
   min-height: 44px;
+  overflow-wrap: anywhere;
 }
 .dq-sz-foot.is-talk {
   display: none;
@@ -2597,8 +2609,10 @@ textarea.dq-input {
     padding-right: max(8px, var(--safe-right));
     padding-left: max(8px, var(--safe-left));
   }
+  /* its start keeps the word off the edge; its end gives the bar the room, so all three fit on one line, not into its
+     padding */
   .dq[data-screen='safe'] .dq-back {
-    padding: 0 6px 0 4px;
+    padding: 0 2px 0 4px;
   }
   .dq[data-screen='safe'] .dq-back span:first-child,
   .dq .ca-sz-light-t {
@@ -2608,10 +2622,6 @@ textarea.dq-input {
     justify-content: center;
     width: 44px;
     padding: 0;
-  }
-  /* the helpline address is one long word in a tap-sized box: it breaks where it must */
-  .dq-sz .dq-small .dq-a {
-    overflow-wrap: anywhere;
   }
   .dq-sz {
     --pad: 12px;
@@ -3795,9 +3805,12 @@ textarea.dq-input {
 .dq-sz .dq-mo-row {
   justify-content: center;
 }
+/* held sideways "Talk to someone now" pins under the heading and the ring, and enlarged text can take it up over the
+   ring, so a scroll to the ring stops clear of it */
 @media (orientation: landscape) and (max-height: 500px) and (min-width: 540px) {
   .dq-sz .dq-mo-stage {
     width: clamp(120px, calc(100dvh - 250px), 196px);
+    scroll-margin-bottom: var(--dq-foot, 0px);
   }
 }
 .dq-cardbtn .dq-cf-stat {

@@ -1,7 +1,8 @@
 // Safe Zone reach: every control on every Safe Zone screen, in every state the player can put it in, can be reached
-// and tapped. Each phone (390x844 and 320x568, upright and held sideways) is checked at normal text and at 200% zoom,
+// and tapped. Each phone (390x844 and 320x568, upright and held sideways) is checked at normal text, at 200% zoom,
 // which DESIGN.md asks the Safe Zone to fit on a 320 px phone (the page laid out at half the size, as browser zoom
-// does). Each phone walks the Safe Zone twice, "Talk to someone now" under the frame and then, after "I might not be
+// does), and with the phone's own text at 200% (each word twice its size in a page as wide as before, see scaleText).
+// Each phone walks the Safe Zone twice, "Talk to someone now" under the frame and then, after "I might not be
 // safe", above it, through Give me a moment (its ring whole too), cool air counting down, every STOP line, each list with
 // "Add one" and "Copy your lists" open, Talk for three countries (many lines, notes under the buttons, none), the empty
 // lists, and the Sound panel opened from the top bar (there only its own controls, the bar's buttons and where it sits
@@ -15,9 +16,11 @@
 //   talk        "Talk to someone now" shows whole and takes a tap, with the page and the frame scrolled to either end
 //   keyboard    while a list item or a person is typed, the on-screen keyboard takes the bottom of the screen (the page
 //               gets the height above it, as a phone that resizes for the keyboard gives it): the field and its Save
-//               show whole and take a tap, and the rest still passes reach. Held sideways at 200% the keyboard leaves
-//               under 100 px, less than "Talk to someone now" and the field need together, so typing at 200% is
-//               checked upright (a phone that keeps the page's full height under its keyboard is the check without it)
+//               show whole and take a tap, and the rest still passes reach. Held sideways at 200% zoom the keyboard
+//               leaves under 100 px, and on the smaller phone held sideways with its text at 200% 126 px, less than
+//               "Talk to someone now" and the field need together, so typing is checked upright at 200% zoom and on
+//               all but that phone with the text at 200% (a phone that keeps the page's full height under its keyboard
+//               is the check without it)
 // And on every other screen with a top bar, at 200%, the Safe Zone button stays one tap away: it and the rest of the bar
 // show whole and take their taps, with the Sound panel open too, and Give me a moment's Done shows whole once scrolled
 // to; Home and Settings also fit whole, with no text on top of other text.
@@ -115,19 +118,21 @@ const unreachable = (page, { typing = false, sound = false, controls = null } = 
     return out;
   }, { typing, sound, controls });
 
-function walk(phone, zoom) {
+function walk(phone, zoom, { font = false } = {}) {
   return async (h) => {
     const p = PHONES[phone];
     const viewport = { width: p.width / zoom, height: p.height / zoom };
-    const size = `${phone}${zoom > 1 ? ` at ${zoom * 100}%` : ''}`;
+    const size = font ? `${phone} with its text at 200%` : `${phone}${zoom > 1 ? ` at ${zoom * 100}%` : ''}`;
     const problems = [];
     let shots = 0;
     const look = async (page, label, o = {}) => {
       await settle(page);
       for (const f of await audit(page, o.sound ? ['.dq-top .vol-pop'] : PAGE, SKIP)) if (!f.detail.endsWith('as the screen opens')) problems.push(`${size}, ${label}: ${f.kind} ${f.what} (${f.detail})`);
       for (const f of await unreachable(page, o)) problems.push(`${size}, ${label}: ${f}`);
-      await h.shot(page, `safe-zone-reach-${phone}-${zoom * 100}-${String(++shots).padStart(2, '0')}-${label.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`);
+      await h.shot(page, `safe-zone-reach-${phone}-${font ? 'text-200' : zoom * 100}-${String(++shots).padStart(2, '0')}-${label.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`);
     };
+    // where the room above the keyboard holds "Talk to someone now" and the field (see the top)
+    const typing = font ? phone !== '568x320' : zoom === 1 || p.width < p.height;
     const keyboard = async (page, label) => {
       await page.setViewportSize({ width: viewport.width, height: Math.round((p.height - p.kb) / zoom) });
       await look(page, `${label} with the keyboard up`, { typing: true });
@@ -140,7 +145,7 @@ function walk(phone, zoom) {
       await look(page, label);
       await tap(page, add);
       await look(page, `${label}, ${add} open`);
-      if (zoom === 1 || p.width < p.height) await keyboard(page, `${label}, ${add} open`);
+      if (typing) await keyboard(page, `${label}, ${add} open`);
       await tap(page, 'Copy your lists');
       await page.locator('.dq-lists-copy:not(.is-hidden)').waitFor();
       await look(page, `${label}, ${add} and Copy your lists open`);
@@ -189,7 +194,8 @@ function walk(phone, zoom) {
       save.settings = { ...save.settings, region: 'us' };
     };
     const open = async (edit) => {
-      const o = await boot(h, viewport, { edit });
+      const o = await boot(h, viewport, font ? { edit, device: { isMobile: true, hasTouch: true } } : { edit });
+      if (font) await scaleText(o.page);
       await o.page.locator('header .dq-safe').click();
       await o.page.locator('.dq-sz-t').first().waitFor({ timeout: 10000 });
       return o;
@@ -471,6 +477,7 @@ function swipe(phone) {
 
 export const scenarios = {
   ...Object.fromEntries(Object.keys(PHONES).flatMap((phone) => [1, 2].map((zoom) => [`safe-zone-reach-${phone}${zoom > 1 ? '-200' : ''}`, walk(phone, zoom)]))),
+  ...Object.fromEntries(Object.keys(PHONES).map((phone) => [`safe-zone-reach-${phone}-text-200`, walk(phone, 1, { font: true })])),
   ...Object.fromEntries(['568x320', '320x568'].map((phone) => [`sound-panel-swipe-${phone}-200`, swipe(phone)])),
   ...Object.fromEntries(Object.keys(PHONES).map((phone) => [`safe-zone-button-${phone}-200`, bars(phone)])),
   ...Object.fromEntries(Object.keys(PHONES).map((phone) => [`safe-zone-button-${phone}-text-200`, bars(phone, { font: true })])),
