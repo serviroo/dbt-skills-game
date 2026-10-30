@@ -102,7 +102,8 @@ export function animate(el: Element, frames: Keyframe[] | PropertyIndexedKeyfram
 /** Jumps an animation to its end state now and stops the capture clock from scrubbing it back. */
 export function complete(a: Animation) {
   for (const tr of tracked) if (tr.a === a) tracked.delete(tr);
-  if (a.effect?.getComputedTiming().endTime === Infinity) return;
+  // one already cancelled stays so: finishing it would put back its end state, which every animation here holds
+  if (a.playState === 'idle' || a.effect?.getComputedTiming().endTime === Infinity) return;
   a.finish();
 }
 

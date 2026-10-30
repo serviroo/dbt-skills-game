@@ -76,11 +76,28 @@ export function volumeSliders(ctrl: VolumeCtrl, o: { compact?: boolean; hum?: bo
     row.append(head, input);
     root.append(row);
     inputs.set(k, { input, out });
-    input.addEventListener('input', () => ctrl.set({ [k]: Number(input.value) / 100 }, { persist: false }));
-    input.addEventListener('change', () => ctrl.set({ [k]: Number(input.value) / 100 }, { persist: true }));
-    // iOS moves a native range only by its thumb: a tap on the track jumps there, and a drag that started on the
-    // track follows the finger (a drag on the thumb stays native)
+    // A finger on a slider waits for its first clear move to tell what it is, and the level holds until then, whatever
+    // the browser's own range does under the finger (Chrome's jumps to it): up or down is the panel scrolling past (the
+    // browser takes that touch, and it changes nothing), sideways is a drag, and a lift without one is a tap. iOS moves
+    // a native range only by its thumb, so a tap on the track jumps there and a drag that started on the track follows
+    // the finger; a drag on the thumb stays native
     let drag = -1;
+    let press: { id: number; x: number; y: number; thumb: boolean } | null = null;
+    // the level a finger's touch holds the slider at until it shows what it is, and for the rest of a touch that scrolls
+    let hold: string | null = null;
+    input.addEventListener('input', () => {
+      if (hold !== null) input.value = hold;
+      else ctrl.set({ [k]: Number(input.value) / 100 }, { persist: false });
+    });
+    input.addEventListener('change', () => {
+      if (hold === null) ctrl.set({ [k]: Number(input.value) / 100 }, { persist: true });
+    });
+    input.addEventListener('keydown', () => (hold = null));
+    // and ends with that touch, once the browser's own change at its end has gone by: a screen reader sets the level
+    // next with no press at all
+    const release = () => setTimeout(() => !press && (hold = null));
+    input.addEventListener('touchend', release, { passive: true });
+    input.addEventListener('touchcancel', release, { passive: true });
     const valueAt = (x: number) => {
       const r = input.getBoundingClientRect();
       const half = 7;
@@ -94,23 +111,52 @@ export function volumeSliders(ctrl: VolumeCtrl, o: { compact?: boolean; hum?: bo
     };
     input.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
+      hold = null;
       const r = input.getBoundingClientRect();
       const thumbX = r.left + 7 + (Number(input.value) / 100) * (r.width - 14);
-      if (Math.abs(e.clientX - thumbX) <= 12) return;
-      put(valueAt(e.clientX));
-      if (e.pointerType !== 'mouse') {
-        drag = e.pointerId;
-        try {
-          input.setPointerCapture(e.pointerId);
-        } catch {
-          /* capture unavailable: the tap still lands */
-        }
+      const thumb = Math.abs(e.clientX - thumbX) <= 12;
+      if (e.pointerType === 'mouse') {
+        if (!thumb) put(valueAt(e.clientX));
+        return;
       }
+      press = { id: e.pointerId, x: e.clientX, y: e.clientY, thumb };
+      hold = input.value;
     });
+    // a sideways move from the track: the finger drags the slider, which follows it from here
+    const follow = (e: PointerEvent) => {
+      drag = e.pointerId;
+      try {
+        input.setPointerCapture(e.pointerId);
+      } catch {
+        /* capture unavailable: the slider still follows while the finger is on it */
+      }
+      put(valueAt(e.clientX));
+    };
     input.addEventListener('pointermove', (e) => {
-      if (e.pointerId === drag) put(valueAt(e.clientX));
+      if (e.pointerId === drag) return put(valueAt(e.clientX));
+      if (e.pointerId !== press?.id) return;
+      const dx = Math.abs(e.clientX - press.x);
+      const dy = Math.abs(e.clientY - press.y);
+      if (Math.max(dx, dy) < 8) return;
+      const { thumb } = press;
+      press = null;
+      if (dy >= dx) return;
+      hold = null;
+      if (!thumb) follow(e);
     });
     const end = (e: PointerEvent) => {
+      if (e.pointerId === press?.id) {
+        const { thumb } = press;
+        press = null;
+        // a tap, which on the track jumps there; or the browser took the touch to scroll, which keeps holding
+        if (e.type === 'pointerup') {
+          hold = null;
+          if (!thumb) {
+            put(valueAt(e.clientX));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        }
+      }
       if (e.pointerId === drag) {
         drag = -1;
         input.dispatchEvent(new Event('change', { bubbles: true }));

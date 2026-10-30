@@ -324,7 +324,93 @@ function bars(phone) {
   };
 }
 
+/**
+ * On a phone at 200%, where the Sound panel's sliders scroll inside it: a finger that swipes up across a slider's track,
+ * away from its thumb, scrolls the panel and leaves that level as it was, kept or not; a tap on the track still jumps
+ * the level there, and a sideways drag from the track still takes the level along with it.
+ */
+function swipe(phone) {
+  return async (h) => {
+    const { width, height } = PHONES[phone];
+    const { ctx, page, errors } = await boot(h, { width: width / 2, height: height / 2 }, { device: { hasTouch: true, isMobile: true } });
+    const problems = [];
+    try {
+      await page.locator('.dq-top .vol-btn').tap();
+      await page.locator('.vol.is-open .vol-pop').waitFor();
+      await settle(page);
+      // the first slider, scrolled just into view, a quarter of its track from the end farther from its thumb
+      const at = await page.evaluate(() => {
+        const body = document.querySelector('.dq-top .vol-body');
+        const input = body.querySelector('.vol-range');
+        body.scrollTop = 0;
+        input.scrollIntoView({ block: 'nearest' });
+        const r = input.getBoundingClientRect();
+        const v = Number(input.value);
+        return { id: input.id, v, x: Math.round(v >= 50 ? r.left + r.width / 4 : r.right - r.width / 4), y: Math.round(r.top + r.height / 2), room: body.scrollHeight - body.clientHeight - body.scrollTop, top: body.scrollTop };
+      });
+      if (at.room < 30) problems.push(`${phone} at 200%: the Sound panel has only ${at.room} px left to scroll, too little to swipe`);
+      const stored = () => page.evaluate(() => localStorage.getItem('dbt.audio.v1'));
+      const level = () => page.evaluate((id) => Number(document.getElementById(id).value), at.id);
+      const kept = await stored();
+      const cdp = await ctx.newCDPSession(page);
+      const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
+      // straight up, a frame at a time
+      const up = Math.min(60, at.y - 4);
+      await touch('touchStart', at.x, at.y);
+      for (let i = 1; i <= 10; i++) {
+        await touch('touchMove', at.x, Math.round(at.y - (up * i) / 10));
+        await h.sleep(16);
+      }
+      await touch('touchEnd');
+      await h.sleep(400);
+      const swiped = { level: await level(), stored: await stored(), top: await page.evaluate(() => document.querySelector('.dq-top .vol-body').scrollTop) };
+      if (swiped.top <= at.top) problems.push(`${phone} at 200%: the swipe across the slider didn't scroll the Sound panel (${at.top} to ${swiped.top})`);
+      if (swiped.level !== at.v || swiped.stored !== kept) problems.push(`${phone} at 200%: a swipe up across the ${at.id} slider moved its level from ${at.v} to ${swiped.level}${swiped.stored !== kept ? ' and kept it' : ''}`);
+      // then a screen reader sets it, with no press: the value, then input and change
+      const read = await page.evaluate((id) => {
+        const input = document.getElementById(id);
+        input.value = '40';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        return { level: Number(input.value), stored: JSON.parse(localStorage.getItem('dbt.audio.v1') ?? '{}')[id.split('-')[1]] };
+      }, at.id);
+      if (read.level !== 40 || read.stored !== 0.4) problems.push(`${phone} at 200%: after the swipe, a screen reader setting ${at.id} to 40 left it at ${read.level}, kept as ${read.stored}`);
+      // a tap on the track, then a drag along it from there
+      const track = await page.evaluate((id) => {
+        const input = document.getElementById(id);
+        input.scrollIntoView({ block: 'nearest' });
+        const r = input.getBoundingClientRect();
+        return { left: r.left + 7, width: r.width - 14, y: Math.round(r.top + r.height / 2) };
+      }, at.id);
+      const want = (x) => Math.round(Math.max(0, Math.min(1, (x - track.left) / track.width)) * 100);
+      // on the side of the track away from the thumb where it is now
+      const now = await level();
+      const tapX = Math.round(now >= 50 ? track.left + track.width / 4 : track.left + (track.width * 3) / 4);
+      await page.touchscreen.tap(tapX, track.y);
+      await h.sleep(100);
+      const tapped = await level();
+      if (Math.abs(tapped - want(tapX)) > 1) problems.push(`${phone} at 200%: a tap on the ${at.id} track at ${want(tapX)} left the level at ${tapped}`);
+      // from a sixth of the track away from the thumb, a quarter of the track farther the same way
+      const dir = now >= 50 ? 1 : -1;
+      const fromX = tapX + (dir * track.width) / 6;
+      const toX = fromX + (dir * track.width) / 4;
+      await touch('touchStart', Math.round(fromX), track.y);
+      for (let i = 1; i <= 6; i++) await touch('touchMove', Math.round(fromX + ((toX - fromX) * i) / 6), track.y);
+      await touch('touchEnd');
+      await h.sleep(400);
+      const dragged = await level();
+      if (Math.abs(dragged - want(Math.round(toX))) > 1) problems.push(`${phone} at 200%: a drag along the ${at.id} track to ${want(Math.round(toX))} left the level at ${dragged}`);
+      if (!(await stored())?.includes(String(dragged / 100))) problems.push(`${phone} at 200%: the dragged ${at.id} level ${dragged} wasn't kept (${await stored()})`);
+      if (errors.length) problems.push(`${phone} at 200%: ${errors.join(' | ')}`);
+    } finally {
+      await ctx.close();
+    }
+    h.expect(!problems.length, problems.join('\n'));
+  };
+}
+
 export const scenarios = {
   ...Object.fromEntries(Object.keys(PHONES).flatMap((phone) => [1, 2].map((zoom) => [`safe-zone-reach-${phone}${zoom > 1 ? '-200' : ''}`, walk(phone, zoom)]))),
+  ...Object.fromEntries(['568x320', '320x568'].map((phone) => [`sound-panel-swipe-${phone}-200`, swipe(phone)])),
   ...Object.fromEntries(Object.keys(PHONES).map((phone) => [`safe-zone-button-${phone}-200`, bars(phone)])),
 };

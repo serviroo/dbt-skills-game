@@ -716,6 +716,31 @@ async function everyScreen(h, viewport, { insets } = {}) {
 }
 
 export const scenarios = {
+  /** a tap while the Lantern still types the rank-up line, after the marker has come to rest in its new letter, only
+   * finishes the typing: the marker stays edge to edge under that letter */
+  'rank-marker-stays-on-tap': async (h) => {
+    const { ctx, page, errors } = await boot(h, { save: WINDOWS.rank.save(), viewport: { width: 390, height: 844 } });
+    try {
+      await WINDOWS.rank.open(page);
+      await page.waitForFunction(() => document.querySelector('.dq-sw .sw-marker')?.parentElement?.matches('.sw-pip'), null, { polling: 'raf', timeout: 15000 });
+      const typing = await page.evaluate(() => {
+        const next = document.querySelector('.dq-sw .sw-next');
+        return !!next && !next.getAnimations().length;
+      });
+      h.expect(typing, 'rank: the Lantern finished typing before the marker came to rest, so no tap could come between');
+      const p = await page.evaluate(() => {
+        const r = document.querySelector('.dq-sw .sw-plate').getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      });
+      await page.mouse.click(p.x, p.y);
+      await page.waitForFunction(isSettled, '.dq-sw', { polling: 'raf', timeout: 15000 });
+      const off = await markerUnder(page);
+      h.expect(!off.length, `rank, tapped while the line types: ${off.join('; ')}`);
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
   'safe-zone-stays-quiet': async (h) => {
     const { ctx, page, errors } = await boot(h, { save: returning() });
     const c = step();
