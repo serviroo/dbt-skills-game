@@ -221,19 +221,21 @@ export const scenarios = {
           });
         // the scroll stops clear of the top bar (scroll-padding), so up to 16 px of what fits may stay out of view
         const inView = (v) => v.seen >= v.fits - 16;
+        const shows = (v) => `${label}: the opened preview shows ${v?.seen} of the ${v?.fits} px that fit`;
         let v;
         if (reduced) {
           await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
           v = await seen();
         } else {
-          // a smooth scroll: check every frame until it has brought the preview in, for up to 5 s
-          v = await seen();
-          for (const end = Date.now() + 5000; !inView(v) && Date.now() < end; ) {
-            await page.evaluate(() => new Promise((r) => requestAnimationFrame(r)));
-            v = await seen();
-          }
+          // a smooth scroll: check every frame until it has brought the preview in, for up to 5 s of the page running
+          const look = async () => {
+            const now = await seen();
+            if (!inView(now)) await page.evaluate(() => new Promise((r) => requestAnimationFrame(r)));
+            return now;
+          };
+          v = await h.poll(page, look, inView, shows, { timeout: 5000, polling: 0 });
         }
-        h.expect(inView(v), `${label}: the opened preview shows ${v.seen} of the ${v.fits} px that fit`);
+        h.expect(inView(v), shows(v));
         if (reduced) await h.shot(page, `copy-lists-in-view-${tag.replace(/ /g, '-').toLowerCase()}-320x568`);
         await page.locator('.dq-lists-copy').getByRole('button', { name: 'Close' }).click();
       }

@@ -438,7 +438,7 @@ export const scenarios = {
       const held = await page.evaluate((n) => window.__taps[n].context.currentTime, n);
       const m = await enter(page);
       const t0 = Date.now();
-      await page.waitForFunction((n) => window.__taps[n].context.state === 'closed', n, { timeout: 3000, polling: 20 }).catch(() => {});
+      await h.until(page, (n) => window.__taps[n].context.state === 'closed', n, { timeout: 3000, polling: 20 }).catch(() => {});
       const ms = Date.now() - t0;
       const { state, end } = await page.evaluate((n) => ({ state: window.__taps[n].context.state, end: window.__taps[n].context.currentTime }), n);
       c.ok(state === 'closed', `suspended: the hum's audio is still ${state} 3 s into the Safe Zone`);

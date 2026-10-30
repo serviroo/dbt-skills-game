@@ -30,15 +30,6 @@ const drafts = (page) => page.evaluate(async () => (await import('/src/daily/art
 const tab = (page) => page.evaluate(() => sessionStorage.getItem('dbt.tab'));
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-async function waitFor(h, read, check, message) {
-  for (let i = 0; i < 50; i++) {
-    const value = await read();
-    if (check(value)) return value;
-    await h.sleep(100);
-  }
-  throw new Error(message);
-}
-
 async function back(page, screen) {
   for (let i = 0; i < 8 && await page.locator('.dq').getAttribute('data-screen') !== screen; i++) {
     if (!await page.locator('.dq-back').count()) throw new Error(`Cannot return to ${screen} from ${await page.locator('.dq').getAttribute('data-screen')}: ${(await page.locator('body').innerText()).slice(0,1000)}`);
@@ -185,7 +176,7 @@ async function savedPair(h, edit, before) {
         await a.getByRole('button', { name: 'Undo', exact: true }).click();
       }
       edited = await strokes(a);
-      await waitFor(h, () => drafts(a), (ds) => ds.some((d) => d.editId === id && same(d.strokes, edited)), 'the unsaved edit was not drafted');
+      await h.poll(a, () => drafts(a), (ds) => ds.some((d) => d.editId === id && same(d.strokes, edited)), 'the unsaved edit was not drafted', { timeout: 5000 });
     }
   }
   await h.shot(a, edit ? 'delete-before-edit' : 'delete-before-gallery');
@@ -193,8 +184,8 @@ async function savedPair(h, edit, before) {
   await b.getByRole('button', { name: 'Remove', exact: true }).click();
   await b.locator('.dq-artroom').waitFor();
   // the removal lands when its Undo runs out
-  await b.locator('.dq-toast').waitFor({ state: 'hidden', timeout: 15000 });
-  await waitFor(h, () => stored(b), (s) => !s.records.some((r) => r.id === id), 'the removal did not land when its Undo ran out');
+  await h.gone(b.locator('.dq-toast'), 15000, { state: 'hidden' });
+  await h.poll(b, () => stored(b), (s) => !s.records.some((r) => r.id === id), 'the removal did not land when its Undo ran out', { timeout: 5000 });
   await h.sleep(700);
   return { ctx, a, b, errors, id, edited };
 }
@@ -239,7 +230,7 @@ export const scenarios = {
     await draw(a);
     await stroke(a);
     const original = await strokes(a);
-    const [source] = await waitFor(h, () => drafts(a), (ds) => ds.length === 1, 'the original draft was not stored');
+    const [source] = await h.poll(a, () => drafts(a), (ds) => ds.length === 1, 'the original draft was not stored', { timeout: 5000 });
     const b = await ctx.newPage();
     await b.goto(h.server.url + '/?mute&reduced&nopost&msaa=0&dpr=1');
     await art(h, b);
@@ -381,7 +372,7 @@ export const scenarios = {
     await draw(page);
     await stroke(page);
     const before = await strokes(page), id = await tab(page);
-    await waitFor(h, () => drafts(page), (ds) => ds.some((d) => same(d.strokes, before)), 'the single tab draft was not stored');
+    await h.poll(page, () => drafts(page), (ds) => ds.some((d) => same(d.strokes, before)), 'the single tab draft was not stored', { timeout: 5000 });
     await page.reload();
     await art(h, page);
     await draw(page);

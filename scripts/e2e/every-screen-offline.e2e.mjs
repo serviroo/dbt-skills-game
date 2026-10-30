@@ -463,8 +463,7 @@ async function quietPlaces(h, page, problems) {
   await atScreen(page, 'diary');
   const sad = page.getByRole('radio', { name: 'Sadness: 3' });
   await sad.click();
-  for (let i = 0; i < 20 && (await sad.getAttribute('aria-checked')) !== 'true'; i++) await h.sleep(100);
-  h.expect((await sad.getAttribute('aria-checked')) === 'true', 'the diary row did not take Sadness 3');
+  await h.poll(page, () => sad.getAttribute('aria-checked'), (v) => v === 'true', 'the diary row did not take Sadness 3', { timeout: 2000 });
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.waitForFunction(() => [...document.querySelectorAll('.dq-hint')].some((e) => /on this device/.test(e.textContent)), null, { timeout: 5000 });
   const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 15000 }), page.getByRole('button', { name: 'Share or save' }).click()]);
@@ -695,10 +694,13 @@ async function safeZone(h, page, problems, tag, act = true) {
     }
     if (next) await main.getByRole('button', { name: next, exact: true }).last().click();
   }
-  const t0 = Date.now();
-  await page.locator('header .dq-back', { hasText: 'Leave' }).click();
-  await atScreen(page, 'hub', 3000);
-  h.expect(Date.now() - t0 < 3000 && !problems.length, `${tag}: leaving the Safe Zone was not immediate:\n${problems.join('\n')}`);
+  // leaving is immediate: the whole way out ends within 3 s of the page running, its steps taking no timeout of their own
+  const leave = async () => {
+    await page.locator('header .dq-back', { hasText: 'Leave' }).click({ timeout: 0 });
+    await atScreen(page, 'hub', 0);
+  };
+  await h.poll(page, leave, () => true, `${tag}: leaving the Safe Zone was not immediate`, { timeout: 3000 });
+  h.expect(!problems.length, `${tag}: leaving the Safe Zone was not immediate:\n${problems.join('\n')}`);
   await h.reachHub(page);
 }
 

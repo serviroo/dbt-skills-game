@@ -681,7 +681,9 @@ export const scenarios = {
             await page.keyboard.down('Enter');
             const cdp = await ctx.newCDPSession(page);
             const focused = new Set();
-            for (const end = Date.now() + 2250; Date.now() < end; ) {
+            // about 2.25 s of holding, counted in the 68 repeats the page takes, not in seconds: a page a busy machine stops
+            // for a while meanwhile still gets the whole hold
+            for (let i = 0; i < 68; i++) {
               await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r', unmodifiedText: '\r', autoRepeat: true });
               focused.add(await page.evaluate(() => document.activeElement?.id || document.activeElement?.className || ''));
               await sleep(33);

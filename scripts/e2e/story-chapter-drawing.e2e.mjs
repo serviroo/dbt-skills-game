@@ -80,8 +80,7 @@ const placed = (page, id) =>
   }, id);
 const deep = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 async function placedIs(h, page, id, want, label) {
-  for (const end = Date.now() + 5000; Date.now() < end; await h.sleep(150)) if (deep(await placed(page, id), want)) return;
-  throw new Error(`${label}: the story holds ${JSON.stringify(await placed(page, id))}, not ${JSON.stringify(want)}`);
+  await h.poll(page, () => placed(page, id), (v) => deep(v, want), (v) => `${label}: the story holds ${JSON.stringify(v)}, not ${JSON.stringify(want)}`, { timeout: 5000, polling: 150 });
 }
 /** The drawing the open page has, as its button beside the starting point names it once its picture is in, or null. */
 const button = (page) =>
@@ -92,11 +91,8 @@ const button = (page) =>
   });
 async function editorShows(h, page, want, label) {
   const name = want === null ? 'Add a drawing' : `Change drawing, ${want}`;
-  for (const end = Date.now() + 8000; Date.now() < end; await h.sleep(150)) {
-    const b = await button(page);
-    if (b.shown && b.name === name && b.img === (want !== null) && b.loaded === (want !== null)) return;
-  }
-  throw new Error(`${label}: the drawing's button is ${JSON.stringify(await button(page))}, not "${name}"`);
+  const shows = (b) => b.shown && b.name === name && b.img === (want !== null) && b.loaded === (want !== null);
+  await h.poll(page, () => button(page), shows, (b) => `${label}: the drawing's button is ${JSON.stringify(b)}, not "${name}"`, { timeout: 8000, polling: 150 });
 }
 /** What the reading view shows above each chapter: the drawing's alt text, once its picture is in, or null. */
 const readPics = (page) => page.evaluate(() => [...document.querySelectorAll('.st-read-ch')].map((s) => s.querySelector('.st-read-pic img')?.alt ?? null));
@@ -312,10 +308,7 @@ export const scenarios = {
       const dlg = page.getByRole('dialog', { name: 'Pick a drawing' });
       await dlg.waitFor({ timeout: 5000 });
       const picks = () => dlg.locator('.st-pick, .st-sheet-acts .dq-btn').evaluateAll((els) => els.map((e) => `${e.textContent.trim()}${e.getAttribute('aria-current') ? ' (placed)' : ''}`));
-      const picksAre = async (want, label) => {
-        for (const end = Date.now() + 5000; Date.now() < end; await h.sleep(150)) if (deep(await picks(), want)) return;
-        throw new Error(`${label}: the picker shows ${JSON.stringify(await picks())}, not ${JSON.stringify(want)}`);
-      };
+      const picksAre = (want, label) => h.poll(page, picks, (p) => deep(p, want), (p) => `${label}: the picker shows ${JSON.stringify(p)}, not ${JSON.stringify(want)}`, { timeout: 5000, polling: 150 });
       await picksAre(['Brave', 'Lantern on the step (placed)', 'Remove drawing'], 'the picker');
       await art('hide');
       await picksAre(['Brave'], 'the picker while another tab removes the drawing');

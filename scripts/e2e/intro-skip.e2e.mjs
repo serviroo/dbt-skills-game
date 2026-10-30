@@ -103,20 +103,21 @@ export const scenarios = {
       await page.evaluate(() => {
         window.requestAnimationFrame = (cb) => setTimeout(() => cb(performance.now()), 1000);
       });
-      const t0 = Date.now();
+      const ran = h.stopwatch(page);
       await page.locator('.ui-skip').click();
       const note = page.getByRole('button', { name: 'Read the note' });
       await note.waitFor({ timeout: 30000 });
       // a player taps Read the note where it shows, and again if nothing happens (a tap, not a Playwright click, which
       // waits for two still frames: two seconds each here)
-      while ((await page.locator('.rw').count()) && Date.now() - t0 < 40000) {
+      const through = async () => {
+        if (!(await page.locator('.rw').count())) return true;
         const box = await note.boundingBox({ timeout: 1000 }).catch(() => null);
         if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-        await h.sleep(300);
-      }
-      const sec = (Date.now() - t0) / 1000;
-      h.expect(!(await page.locator('.rw').count()), 'the rewards never let Read the note through');
-      h.expect(sec < 8, `with slow 3D frames the rewards took ${sec.toFixed(1)} s to let Read the note through (their own pace is under 3 s)`);
+        return false;
+      };
+      await h.poll(page, through, Boolean, 'the rewards never let Read the note through', { timeout: 40000, polling: 300 });
+      const sec = (await ran()) / 1000;
+      h.expect(sec < 8, `with slow 3D frames the rewards took ${sec.toFixed(1)} s of the page running to let Read the note through (their own pace is under 3 s)`);
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();

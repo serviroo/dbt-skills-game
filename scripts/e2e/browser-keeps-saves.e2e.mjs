@@ -190,11 +190,8 @@ async function waitKeep(h, page, state, ms = 10000) {
 }
 async function bootDone(h, page, expectAsk) {
   await h.reachHub(page);
-  for (const end = Date.now() + 15000; Date.now() < end; await h.sleep(150)) {
-    const c = await calls(page);
-    if (c.includes('persisted') && (!expectAsk || c.includes('persist'))) return h.sleep(300);
-  }
-  throw new Error('the boot request never read the decision: ' + JSON.stringify(await calls(page)));
+  await h.poll(page, () => calls(page), (c) => c.includes('persisted') && (!expectAsk || c.includes('persist')), (c) => 'the boot request never read the decision: ' + JSON.stringify(c), { timeout: 15000, polling: 150 });
+  await h.sleep(300);
 }
 const comeBack = (page) =>
   page.evaluate(() => {

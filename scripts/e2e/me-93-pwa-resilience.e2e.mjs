@@ -487,10 +487,11 @@ export const scenarios = {
       const a = await context(h, { sw: false, seed: returning });
       try {
         await a.ctx.route('**/fonts/*.woff2', (r) => held.push(r));
-        const t0 = Date.now();
         await a.page.goto(srv.url + '?mute', { waitUntil: 'commit' });
-        await ready(a.page, 10000).catch(async (e) => { await fontShot(a.page, 'fail-fonts-held'); throw e; });
-        expect(Date.now() - t0 < 10000, 'the boot waited too long for fonts');
+        await h.until(a.page, () => document.documentElement.dataset.ready === '1', null, { timeout: 10000 }).catch(async (e) => {
+          await fontShot(a.page, 'fail-fonts-held');
+          throw new Error(`the boot waited too long for fonts: ${e.message}`);
+        });
         expect(held.length > 0, 'no font request was held');
         const display = await a.page.evaluate(() => [...document.fonts].map((f) => f.display));
         expect(display.length && display.every((d) => d === 'swap'), 'font faces should swap in late: ' + display.join(' '));

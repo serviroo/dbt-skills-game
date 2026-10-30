@@ -1,8 +1,9 @@
 // The harness's until() waits for a check in the page that awaits something, and gives up at its deadline even when the
-// check never answers, or turns true only after it while a long wait between checks runs. Its leaves() and gone() wait
-// for something to leave the page on the page's running time: a page frozen mid-wait past the deadline that lets it go
-// soon after passes, and one that never lets it go fails at its deadline. gone() takes something that goes only once
-// the page has run past its deadline as late, and gives up on a page that stops answering just after it has gone.
+// check never answers, or turns true only after it while a long wait between checks runs. Its waits count the page's
+// running time: until(), poll(), leaves() and gone() pass on a page frozen mid-wait past the deadline that lets the
+// wait end soon after, and fail at the deadline on one that never does, and stopwatch() leaves a freeze out of how long
+// the page took. gone() takes something that goes only once the page has run past its deadline as late, and gives up on
+// a page that stops answering just after it has gone.
 
 /**
  * A moment into a wait the page can't run for 3 s, as a browser a busy machine stops for a while, and lets `sel` go a
@@ -41,6 +42,57 @@ export const scenarios = {
       const after = await h.until(page, (t) => Date.now() > t, at, { timeout: 300, polling: 2000 }).then(() => 'answered', (e) => e.message);
       const took = Date.now() - t0;
       h.expect(/^waited 300 ms for /.test(after) && took < 1000, `a check true only after its deadline gave "${after}" after ${took} ms`);
+    } finally { await ctx.close(); }
+  },
+
+  async 'until-waits-out-a-freeze'(h) {
+    const ctx = await h.browser.newContext();
+    try {
+      const page = await ctx.newPage();
+      await page.setContent('<div id="x">x</div>');
+      await freezeThenLet(page, '#x');
+      const after = await h.until(page, () => !document.querySelector('#x'), null, { timeout: 2000 }).then(() => 'answered', (e) => e.message);
+      h.expect(after === 'answered', `a page frozen mid-wait past the deadline, which let the check come true soon after, failed: ${after}`);
+    } finally { await ctx.close(); }
+  },
+
+  async 'poll-waits-out-a-freeze'(h) {
+    const ctx = await h.browser.newContext();
+    try {
+      const page = await ctx.newPage();
+      await page.setContent('<div id="x">x</div>');
+      await freezeThenLet(page, '#x');
+      const after = await h.poll(page, () => page.locator('#x').count(), (n) => n === 0, '#x stayed', { timeout: 2000 }).then(() => 'answered', (e) => e.message);
+      h.expect(after === 'answered', `a page frozen mid-wait past the deadline, which let #x go soon after, failed: ${after}`);
+    } finally { await ctx.close(); }
+  },
+
+  async 'poll-fails-at-its-deadline'(h) {
+    const ctx = await h.browser.newContext();
+    try {
+      const page = await ctx.newPage();
+      await page.setContent('<div id="x">x</div>');
+      const t0 = Date.now();
+      const after = await h.poll(page, () => page.locator('#x').count(), (n) => n === 0, (n) => `#x is still there (${n})`, { timeout: 500 }).then(() => 'answered', (e) => `${e.name}: ${e.message}`);
+      const took = Date.now() - t0;
+      h.expect(after === 'TimeoutError: #x is still there (1)' && took < 2000, `something that never went gave "${after}" after ${took} ms`);
+    } finally { await ctx.close(); }
+  },
+
+  async 'stopwatch-leaves-out-a-freeze'(h) {
+    const ctx = await h.browser.newContext();
+    try {
+      const page = await ctx.newPage();
+      await page.setContent('<p>x</p>');
+      const ran = h.stopwatch(page);
+      await h.sleep(500);
+      await page.evaluate(() => {
+        const end = performance.now() + 3000;
+        while (performance.now() < end);
+      });
+      const ms = await ran();
+      // about 0.75 s: the 0.5 s the page ran, then the freeze as one 0.25 s tick
+      h.expect(ms >= 450 && ms < 1500, `0.5 s of the page running, then a 3 s freeze, came to ${ms} ms`);
     } finally { await ctx.close(); }
   },
 

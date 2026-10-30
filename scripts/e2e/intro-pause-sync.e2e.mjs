@@ -1,3 +1,5 @@
+import { poll } from './harness.mjs';
+
 async function intro(h, beat, reduced = false, hiddenStart = false) {
   const opened = await h.open({ 'dbt.app.v1': h.SEEN }, `?shot=${beat}&mute&dpr=1&nopost${reduced ? '&reduced' : ''}`, { width: 390, height: 844 }, async (ctx) => {
     await ctx.clock.install();
@@ -88,39 +90,25 @@ const read = (page) => page.evaluate(() => ({
 const hidden = (page, on) => page.evaluate((on) => window.__introHide(on), on);
 /** The window's opening once its pending play or pause has taken effect, so its time no longer moves by itself. */
 async function opening(page) {
-  let timeout;
-  try {
-    await Promise.race([
-      page.evaluate(() => window.__introOpening.ready),
-      new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('the window opening never settled')), 5000); }),
-    ]);
-  } finally {
-    clearTimeout(timeout);
-  }
+  await poll(page, () => page.evaluate(() => window.__introOpening.ready.then(() => true)), Boolean, 'the window opening never settled', { timeout: 5000 });
   return page.evaluate(() => {
     const a = window.__introOpening;
     return { state: a.playState, time: a.currentTime, end: a.effect.getComputedTiming().endTime };
   });
 }
 async function audioState(page, state) {
-  let timeout;
-  try {
-    await Promise.race([
-      page.evaluate((state) => new Promise((resolve) => {
-        const ctx = window.__introAudio;
-        const check = () => {
-          if (ctx.state !== state) return;
-          ctx.removeEventListener('statechange', check);
-          resolve();
-        };
-        ctx.addEventListener('statechange', check);
-        check();
-      }), state),
-      new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error(`sound never became ${state}`)), 5000); }),
-    ]);
-  } finally {
-    clearTimeout(timeout);
-  }
+  const became = () =>
+    page.evaluate((state) => new Promise((resolve) => {
+      const ctx = window.__introAudio;
+      const check = () => {
+        if (ctx.state !== state) return;
+        ctx.removeEventListener('statechange', check);
+        resolve(true);
+      };
+      ctx.addEventListener('statechange', check);
+      check();
+    }), state);
+  await poll(page, became, Boolean, `sound never became ${state}`, { timeout: 5000 });
 }
 const suspended = (page) => audioState(page, 'suspended');
 const running = (page) => audioState(page, 'running');

@@ -1,4 +1,5 @@
-// The harness waits for layout to rest, including delayed entrances and animated parents, without waiting on paint.
+// The harness waits for layout to rest, including delayed entrances and animated parents, without waiting on paint, and
+// counts its deadline in the time the page could run.
 
 /** A timeout naming `target` and its bob, either moving (its box before and after) or, on a slow compositor, still
  *  waiting to start. */
@@ -82,6 +83,20 @@ export const scenarios = {
       let message = '';
       try { await h.settled(page, '#moving', { timeout: 1000 }); } catch (e) { message = e.message; }
       h.expect(namesBob(message, '#moving'), `the timeout did not name the moving target and animation: ${message}`);
+    } finally { await ctx.close(); }
+  },
+  // a page frozen mid-entrance for longer than the deadline settles all the same once it runs again
+  async 'settled-waits-out-a-freeze'(h) {
+    const ctx = await h.browser.newContext();
+    try {
+      const page = await ctx.newPage();
+      await page.setContent('<style>@keyframes enter { from { transform:translateY(50px) } to { transform:translateY(0) } } button { height:44px; animation:enter 800ms both }</style><button>One</button>');
+      await page.evaluate(() => void setTimeout(() => {
+        const end = performance.now() + 3000;
+        while (performance.now() < end);
+      }, 200));
+      const after = await h.settled(page, 'button', { timeout: 2000 }).then(() => 'settled', (e) => e.message);
+      h.expect(after === 'settled', `a page frozen mid-entrance past the deadline, which came to rest soon after, failed: ${after}`);
     } finally { await ctx.close(); }
   },
   // an endless bob holds still until it starts, in its delay here, and on CI for the frames a new animation waits to

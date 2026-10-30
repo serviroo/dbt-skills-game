@@ -100,21 +100,32 @@ scenario gets an `h` object from `scripts/e2e/harness.mjs`, the same but for `br
 - `open(seed?, query = '?mute', viewport = 390x844)`: a fresh browser profile with `seed` written to localStorage
   first. Returns `{ ctx, page, errors }`; close `ctx` when done.
 - `reachHub(page)`, `openSettings(page)`: tap through to Home or the Settings screen.
-- `settled(page, selector, { timeout = 15000 } = {})`: wait for finite layout animations affecting the matched boxes
-  to end and endless ones to start, then for identical rectangles across two frames. Select elements that come to rest
-  after entry. On timeout, it names the animations or rectangles still moving. Wait for the app's own state first when
-  script delays an entry.
-- `frames(page, n)`: wait for real browser frames, even with the page clock paused, with a 15 s deadline. Use this
-  for an observation window, and a drawn-frame count for a scene's progress. Intentional endless motion keeps playing;
-  measure its layout box or a still parent when testing layout. Keep separate performance deadlines such as 900 ms.
+- `settled(page, selector, { timeout = 15000 } = {})`: wait, for up to `timeout` of the page running, for finite layout
+  animations affecting the matched boxes to end and endless ones to start, then for identical rectangles across two
+  frames. Select elements that come to rest after entry. On timeout, it names the animations or rectangles still
+  moving. Wait for the app's own state first when script delays an entry.
+- `frames(page, n)`: wait for real browser frames, even with the page clock paused, within 15 s of the page running.
+  Use this for an observation window, and a drawn-frame count for a scene's progress. Intentional endless motion keeps
+  playing; measure its layout box or a still parent when testing layout. Keep separate performance deadlines such as
+  900 ms.
 - `pauseClock(page)`: stop the page clock where it is, after `page.clock.install()`, so time moves only with
   `runFor` or `fastForward`. Use it instead of `page.clock.pauseAt` with a time read from the page: a running clock
   on a slow page can pass that time before the call lands, and the pause then fails.
 - `until(page, check, arg?, { timeout = 10000, polling = 100 } = {})`: wait for a check in the page that awaits
   something, such as a database read. `page.waitForFunction` counts the promise an async check returns as true, so
   it returns at once.
-- `shot(page, name)`: a screenshot in the run's folder (`out`). Start the name with your file's name, and give
-  whatever a scenario writes there a name no other scenario uses, as they run at once.
+- `poll(page, read, ok, message, { timeout = 10000, polling = 100 } = {})`: call `read()` here, so it can read the
+  page in any way, step its clock or read another tab, until `ok(value)`; it resolves with that value, or fails
+  with `message` (or `message(last value)`).
+- `stopwatch(page)`: start counting the time the page could run; the function it returns stops the count and gives
+  the milliseconds, for a check on how long the page took over something.
+- These waits, `gone` and `leaves` count their deadlines in the time the page could run, not on the wall clock: CI's
+  software renderer stops a tab for seconds while it compiles shaders, and a wall-clock deadline fails whenever a
+  stop lands in it. Use them for any wait on the page; keep `Date.now()` deadlines for waits on something outside
+  it, such as a server or a file.
+- `shot(page, name)`: a screenshot in the run's folder (`out`), with its tab brought to the front first, as full
+  Chromium captures no tab behind another. Start the name with your file's name, and give whatever a scenario writes
+  there a name no other scenario uses, as they run at once.
 - `ls(page, key)`, `youOf(page)`, `deepFind(obj, key)`, `deepDrop(obj, keys)`, `expect(cond, msg)`, `sleep(ms)`.
 - `SAVE`, `YOU`, `SEEN`: the save key, the names key and an app state that skips the intro.
 - `browser`, `server.url`, `flags`, and `shared`, one object for the whole run, for a result worth making once (a

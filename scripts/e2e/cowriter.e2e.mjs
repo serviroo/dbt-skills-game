@@ -409,8 +409,7 @@ export const scenarios = {
       const { page, ctx } = s;
       await page.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 30000 });
       await page.evaluate(() => navigator.serviceWorker.ready);
-      for (let i = 0; i < 50 && !(await page.evaluate(() => !!navigator.serviceWorker.controller)); i++) await h.sleep(200);
-      h.expect(await page.evaluate(() => !!navigator.serviceWorker.controller), 'The service worker never took over the page.');
+      await h.poll(page, () => page.evaluate(() => !!navigator.serviceWorker.controller), Boolean, 'The service worker never took over the page.', { timeout: 10000, polling: 200 });
       await ctx.setOffline(true);
       await page.reload();
       await page.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 30000 });

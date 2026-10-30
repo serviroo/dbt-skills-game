@@ -14,41 +14,31 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const portFree = (p, host) => new Promise((res) => { const s = net.createServer().once('error', () => res(false)).once('listening', () => s.close(() => res(true))).listen(p, host); });
 
-/** Counts real browser frames, including when a scenario has installed the page clock. */
+/** Waits for the page to draw `n` real frames, also when a scenario has installed the page clock. */
+const drawn = (page, n) =>
+  page.evaluate((n) => new Promise((done) => {
+    const raf = window.__e2eRaf;
+    const tick = () => --n <= 0 ? done() : raf(tick);
+    raf(tick);
+  }), n);
+
+/** Counts real browser frames, including when a scenario has installed the page clock, within 15 s of the page running. */
 export async function frames(page, n) {
-  let timer;
+  const time = pageTime(page, 15000, () => `the browser did not draw ${n} frames within 15 s of the page running`);
   try {
-    await Promise.race([
-      page.evaluate((n) => new Promise((done) => {
-        const raf = window.__e2eRaf;
-        const tick = () => --n <= 0 ? done() : raf(tick);
-        raf(tick);
-      }), n),
-      new Promise((_, fail) => { timer = setTimeout(() => fail(new Error(`the browser did not draw ${n} frames within 15000 ms`)), 15000); }),
-    ]);
+    await Promise.race([drawn(page, n), time.late]);
   } finally {
-    clearTimeout(timer);
+    time.stop();
   }
 }
 
 /**
  * Waits for check(arg), run in the page, to come true: for a check that awaits something, such as a database read, which
- * page.waitForFunction would take as true at once (it counts the promise as the answer). A check still unanswered at
- * the deadline fails it too, and no check starts after it.
+ * page.waitForFunction would take as true at once (it counts the promise as the answer). Its deadline is poll()'s, in
+ * time the page could run: a check still unanswered then fails it too, and no check starts after it.
  */
-export async function until(page, check, arg, { timeout = 10000, polling = 100 } = {}) {
-  const end = Date.now() + timeout;
-  const late = () => new Error(`waited ${timeout} ms for ${String(check).replace(/\s+/g, ' ').slice(0, 160)}`);
-  for (;;) {
-    if (Date.now() >= end) throw late();
-    let timer;
-    try {
-      if (await Promise.race([page.evaluate(check, arg), new Promise((_, fail) => { timer = setTimeout(() => fail(late()), Math.max(0, end - Date.now())); })])) return;
-    } finally {
-      clearTimeout(timer);
-    }
-    await sleep(Math.min(polling, end - Date.now()));
-  }
+export function until(page, check, arg, { timeout = 10000, polling = 100 } = {}) {
+  return poll(page, () => page.evaluate(check, arg), Boolean, `waited ${timeout} ms for ${String(check).replace(/\s+/g, ' ').slice(0, 160)}`, { timeout, polling });
 }
 
 /** An init script: keeps the page's own timer and clock, before a scenario installs the page clock over them. */
@@ -143,6 +133,63 @@ export async function gone(locator, timeout, { state = 'detached', stuck = Math.
 }
 
 /**
+ * A deadline in the time the page could run (see runs()), for a wait on something the page does: a browser stopped for
+ * a while on a busy machine uses none of it. `late` fails with a TimeoutError saying say() once the page has run `ms`,
+ * or once `stuck` ms have gone by with the page stopped for most of them; and with an Error if the page's time can't be
+ * counted (it went to another document, or was never given realTimers()). stop() ends the count and resolves with how
+ * long the page ran, in ms.
+ */
+function pageTime(page, ms, say, { stuck = Math.max(60000, 4 * ms) } = {}) {
+  const count = runs(page, ms);
+  const missed = (why, name = 'TimeoutError') => Object.assign(new Error(say() + (why ? ` (${why})` : '')), { name });
+  let timer;
+  const late = new Promise((_, fail) => {
+    count.late.then((over) => over && fail(missed()), (e) => fail(missed(`the page's running time could not be counted: ${e.message}`, 'Error')));
+    timer = setTimeout(() => fail(missed(`${stuck / 1000} s went by, the page stopped for most of them`)), stuck);
+  });
+  late.catch(() => {});
+  return {
+    late,
+    stop: () => {
+      clearTimeout(timer);
+      return count.stop();
+    },
+  };
+}
+
+/**
+ * Reads read() every `polling` ms until ok() takes what it gave, and resolves with that. read runs here, so it can ask the
+ * page anything, step its clock or read another tab; the wait counts `timeout` in time `page` could run (see pageTime()),
+ * and a read still unanswered then fails it too, with `message`, or message(the last value read).
+ */
+export async function poll(page, read, ok, message, { timeout = 10000, polling = 100 } = {}) {
+  let last;
+  const time = pageTime(page, timeout, () => (typeof message === 'function' ? message(last) : message));
+  try {
+    for (;;) {
+      last = await Promise.race([read(), time.late]);
+      if (ok(last)) return last;
+      await Promise.race([sleep(polling), time.late]);
+    }
+  } finally {
+    time.stop();
+  }
+}
+
+/**
+ * Starts counting the time the page could run (see runs()), for a check on how long the page took over something; the
+ * function it gives ends the count and resolves with how long the page ran, in ms.
+ */
+export function stopwatch(page) {
+  const count = runs(page, Infinity);
+  return async () => {
+    const ms = await count.stop();
+    if (ms === null) throw new Error("the page's running time could not be counted: it went to another document, or was never given realTimers()");
+    return ms;
+  };
+}
+
+/**
  * Stops the page clock where it is, so time moves only when the scenario says. clock.pauseAt alone takes a wall time,
  * which a running clock may pass before the call lands on a slow page. Holding Date still first makes the pause land
  * exactly there; then Date catches up with the time the clock ran on before it stopped.
@@ -154,17 +201,19 @@ export async function pauseClock(page) {
   await page.clock.setSystemTime(wall + (await page.evaluate((t) => performance.now() - t, ticks)));
 }
 
-/** Waits for entry motion to finish on boxes that come to rest, then compares consecutive frame rects. */
+/**
+ * Waits for entry motion to finish on boxes that come to rest, then compares consecutive frame rects, for up to `timeout`
+ * ms of the page running (see pageTime()).
+ */
 export async function settled(page, selector, { timeout = 15000 } = {}) {
-  const end = Date.now() + timeout;
   let before = [];
   let moving = 'no frame received';
-  for (;;) {
-    let timer;
-    try {
+  const time = pageTime(page, timeout, () => `${selector} did not settle within ${timeout} ms of the page running: ${moving}`);
+  try {
+    for (;;) {
       const now = await Promise.race([
         (async () => {
-          await frames(page, 1);
+          await drawn(page, 1);
           return page.evaluate(({ selector, before }) => {
             const label = (e) => e.tagName.toLowerCase() + (e.id ? '#' + e.id : '') + [...e.classList].map((c) => '.' + c).join('');
             const paint = /^(opacity|color|fill|fillOpacity|stroke|strokeOpacity|strokeWidth|strokeDasharray|strokeDashoffset|background.*|filter|boxShadow|textShadow|.*Color)$/;
@@ -189,24 +238,28 @@ export async function settled(page, selector, { timeout = 15000 } = {}) {
             return { rects, blocking, changed, stable: els.length > 0 && before.length === rects.length && !changed.length && !blocking.some((a) => !a.endless || !a.started) };
           }, { selector, before });
         })(),
-        new Promise((_, fail) => { timer = setTimeout(() => fail(new Error(`${selector} did not settle within ${timeout} ms: ${moving}`)), Math.max(0, end - Date.now())); }),
+        time.late,
       ]);
       if (now.stable) return;
       before = now.rects;
       moving = JSON.stringify({ animations: now.blocking, rects: now.changed, ...(!now.rects.length && { missing: selector }) });
-    } finally {
-      clearTimeout(timer);
     }
+  } finally {
+    time.stop();
   }
 }
 
 /**
  * page.screenshot or locator.screenshot, once the GPU has drawn what the page queued. A capture waits at the end of the
  * GPU's queue, which all of a page's canvases share, and a pixel read back from a fresh canvas returns only when that
- * queue is done. The wait allows 60 s: CI has kept a capture of Home waiting past 30 s.
+ * queue is done. The wait allows 60 s: CI has kept a capture of Home waiting past 30 s. It counts wall time, as the page
+ * itself is held in that read until the GPU is done, so the page's own time can't. The page comes to the front first:
+ * full Chromium captures only the tab in front, and gives none of a tab behind it, which still runs and draws meanwhile.
+ * Neither headless mode tells a page it moved (no focus, blur or visibility change).
  */
 export async function screenshot(target, options) {
   const page = target.page?.() ?? target;
+  await page.bringToFront();
   let timer;
   try {
     await Promise.race([
@@ -385,50 +438,64 @@ function launch(flags) {
   return chromium.launch({ ...launchOptions(flags), handleSIGINT: false, handleSIGTERM: false });
 }
 
-/** Home is usable only after any due greeting has opened and closed, including its scrim. */
+/**
+ * Home is usable only after any due greeting has opened and closed, including its scrim. Allows 60 s of the page running
+ * (see pageTime()), which every step below shares, so they take no timeout of their own.
+ */
 export async function reachHub(page) {
-  const end = Date.now() + 60000;
+  const time = pageTime(page, 60000, () => 'Home did not become idle within 60 s of the page running');
+  const step = (p) => {
+    // a step the deadline overtook ends with the page; it must not fail the run on its own then
+    p.catch(() => {});
+    return Promise.race([p, time.late]);
+  };
   const closed = [];
   let label = null;
   try {
-    while (Date.now() < end) {
-      const ready = await page.waitForFunction(() => {
+    for (;;) {
+      const ready = await step(page.waitForFunction(() => {
         const app = window.__daily;
         const tile = document.querySelector('.dq-tile');
         if (!app || app.route.name !== 'hub' || !tile?.getClientRects().length || getComputedStyle(tile).visibility === 'hidden') return false;
         const win = [...document.querySelectorAll('.dq-sw')].find((w) => !w.closest('.pwa-hint-layer'));
         if (win && document.querySelector('.dq-scrim.is-on')) return win;
         return !app.greeting && !app.busy && !win && !document.querySelector('.dq-scrim.is-on, .dq-scrim.is-closing') && !document.querySelector('#dq-main')?.inert;
-      }, null, { timeout: Math.max(1, end - Date.now()) });
+      }, null, { timeout: 0 }));
       const win = ready.asElement();
       if (!win) {
         await ready.dispose();
         return closed;
       }
-      label = await win.getAttribute('aria-label');
-      await page.waitForFunction((w) => {
+      label = await step(win.getAttribute('aria-label'));
+      await step(page.waitForFunction((w) => {
         const next = w.querySelector('.sw-next');
         return next && Number(getComputedStyle(next).opacity) > 0;
-      }, win, { timeout: Math.max(1, end - Date.now()) });
-      await win.press('Enter', { timeout: Math.max(1, end - Date.now()) });
-      await page.waitForFunction((w) => !w.isConnected, win, { timeout: Math.max(1, end - Date.now()) });
+      }, win, { timeout: 0 }));
+      await step(win.press('Enter', { timeout: 0 }));
+      await step(page.waitForFunction((w) => !w.isConnected, win, { timeout: 0 }));
       closed.push(label);
       await win.dispose();
     }
   } catch (e) {
     if (e.name !== 'TimeoutError') throw e;
-    const state = await page.evaluate((label) => JSON.stringify({
-      label,
-      route: window.__daily?.route.name,
-      greeting: window.__daily?.greeting,
-      busy: window.__daily?.busy,
-      window: !!document.querySelector('.dq-sw'),
-      scrim: !!document.querySelector('.dq-scrim.is-on, .dq-scrim.is-closing'),
-      inert: document.querySelector('#dq-main')?.inert,
-    }), label).catch(() => 'unreadable');
+    // what was left, from a page that may be the stuck one: asked for 3 s at most, as evidence() asks
+    let timer;
+    const state = await Promise.race([
+      page.evaluate((label) => JSON.stringify({
+        label,
+        route: window.__daily?.route.name,
+        greeting: window.__daily?.greeting,
+        busy: window.__daily?.busy,
+        window: !!document.querySelector('.dq-sw'),
+        scrim: !!document.querySelector('.dq-scrim.is-on, .dq-scrim.is-closing'),
+        inert: document.querySelector('#dq-main')?.inert,
+      }), label).catch(() => 'unreadable'),
+      new Promise((done) => (timer = setTimeout(() => done('no answer in 3 s'), 3000))),
+    ]).finally(() => clearTimeout(timer));
     throw new Error(`Home never became idle: ${state}`, { cause: e });
+  } finally {
+    time.stop();
   }
-  throw new Error('Home never became idle');
 }
 
 export async function startHarness(flags = {}) {
@@ -683,7 +750,7 @@ export async function startHarness(flags = {}) {
   })());
 
   const shared = {};
-  const lane = (browser) => ({ browser, server, out, flags, shared, renderer, throttleErrors, zone: ZONE, open: opener(browser), evidence, evidenceAll: allEvidence(browser), note, leaves, gone, shot, ls, youOf, deepFind, deepDrop, expect, sleep, frames, settled, until, pauseClock, reachHub, openSettings, SAVE, YOU, SEEN, stop, more });
+  const lane = (browser) => ({ browser, server, out, flags, shared, renderer, throttleErrors, zone: ZONE, open: opener(browser), evidence, evidenceAll: allEvidence(browser), note, leaves, gone, poll, stopwatch, shot, ls, youOf, deepFind, deepDrop, expect, sleep, frames, settled, until, pauseClock, reachHub, openSettings, SAVE, YOU, SEEN, stop, more });
   /** Another browser on the same dev server, so scenarios can run side by side: its own profiles, the same `shared`. */
   async function more() {
     if (stopping) throw new Error('the harness is stopping');

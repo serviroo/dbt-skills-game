@@ -39,12 +39,6 @@ const breaths = (page, frames) =>
     return [...seen];
   }, frames);
 
-/** Resolves once the page has drawn `n` more frames, however long it is stopped meanwhile. */
-const drawn = (page, n) =>
-  page.evaluate(async (n) => {
-    for (let i = 0; i < n; i++) await new Promise((r) => requestAnimationFrame(r));
-  }, n);
-
 /** The window's endless animations (the plasma along its bars, the waiting arrow's pulse), and the arrow's opacity. */
 const windowMotion = (page) =>
   page.evaluate(() => {
@@ -377,7 +371,7 @@ export const scenarios = {
       const shows = async (want) => {
         for (let i = 0; i < 60; i++) {
           if (await k[want](piece)) return true;
-          await drawn(piece, 5);
+          await h.frames(piece, 5);
         }
         return false;
       };

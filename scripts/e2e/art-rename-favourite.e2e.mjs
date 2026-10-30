@@ -126,15 +126,6 @@ const toGallery = (page) =>
 /** Nothing on screen is mid-animation (a fade, a window), so a shot shows the screen as it rests. */
 const steady = (page) => page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.getComputedTiming().iterations === Infinity));
 
-async function until(h, read, check, message, tries = 120) {
-  for (let i = 0; i < tries; i++) {
-    const v = await read();
-    if (check(v)) return v;
-    await h.sleep(100);
-  }
-  throw new Error(message);
-}
-
 /** Nothing sticks out sideways, and the piece page's controls sit inside the screen with readable text. */
 async function fits(h, page, where) {
   const r = await page.evaluate(() => {
@@ -189,7 +180,7 @@ export const scenarios = {
       const cdp = await ctx.newCDPSession(page);
       await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
       const state = () => page.evaluate(() => ({ home: !!document.querySelector('.dq-tile'), greeting: window.__daily?.greeting, window: !!document.querySelector('.dq-sw'), inert: document.querySelector('#dq-main')?.inert }));
-      for (const end = Date.now() + 30000; !(await state()).home && Date.now() < end; ) await page.clock.runFor(20);
+      await h.poll(page, async () => (await state()).home || (await page.clock.runFor(20), false), Boolean, 'Home did not become ready as the page clock ran', { timeout: 30000, polling: 0 });
       const before = await state();
       h.expect(paused, 'the navigation did not pass through the clock gate');
       h.expect(before.home && before.greeting && !before.window, 'the welcome was not pending when Home became ready: ' + JSON.stringify(before));
@@ -197,7 +188,7 @@ export const scenarios = {
       let closed;
       let failed;
       const reaching = h.reachHub(page).then(async (names) => { closed = names; reached = await state(); }, (e) => { failed = e; });
-      for (const end = Date.now() + 30000; !reached && !failed && Date.now() < end; ) await page.clock.runFor(50);
+      await h.poll(page, async () => reached || failed || (await page.clock.runFor(50), false), Boolean, 'reaching Home did not end as the page clock ran', { timeout: 30000, polling: 0 });
       await reaching;
       if (failed) throw failed;
       h.expect(JSON.stringify(closed) === '["Notification"]', 'the helper did not close the due welcome: ' + JSON.stringify(closed));
@@ -311,7 +302,7 @@ export const scenarios = {
       h.expect((await fav.getAttribute('aria-pressed')) === 'true', `${at}: Favourite did not press`);
       const mint = await fav.locator('.dq-btn-ic').evaluate((e) => getComputedStyle(e).color);
       h.expect(mint === 'rgb(137, 207, 157)', `${at}: the favourite star is not mint: ${mint}`);
-      await until(h, () => records(page), (rs) => rs.find((r) => r.id === 'pg-a')?.fav === true, `${at}: the favourite was not stored`);
+      await h.poll(page, () => records(page), (rs) => rs.find((r) => r.id === 'pg-a')?.fav === true, `${at}: the favourite was not stored`, { timeout: 12000 });
 
       // rename: Escape leaves it, Enter saves it, the cap holds, empty goes back to the day
       const head = page.locator('.dq-piece-h');
@@ -332,7 +323,7 @@ export const scenarios = {
       await rename.click();
       await input.fill('Not this either');
       await page.evaluate(() => history.back());
-      await until(h, () => page.locator('.dq-piece-rename').isHidden(), (v) => v, `${at}: Back did not close the name field`);
+      await h.poll(page, () => page.locator('.dq-piece-rename').isHidden(), (v) => v, `${at}: Back did not close the name field`, { timeout: 12000 });
       await h.sleep(300);
       h.expect((await page.locator('.dq').getAttribute('data-screen')) === 'piece' && (await head.textContent()).trim() === dayTitle, `${at}: Back in the name field left the page or renamed it`);
       h.expect(await rename.evaluate((e) => e === document.activeElement), `${at}: focus did not return to Rename after Back`);
@@ -341,9 +332,9 @@ export const scenarios = {
       h.expect((await input.inputValue()).length === 24, `${at}: the name field takes more than 24 characters`);
       await input.fill('Rain window');
       await page.keyboard.press('Enter');
-      await until(h, async () => (await head.textContent()).trim(), (t) => t === 'Rain window', `${at}: the new name does not show`);
+      await h.poll(page, async () => (await head.textContent()).trim(), (t) => t === 'Rain window', `${at}: the new name does not show`, { timeout: 12000 });
       h.expect((await page.locator('.dq-piece-day').textContent()).trim() === dayTitle && await page.locator('.dq-piece-day').isVisible(), `${at}: a named page does not show its day under the name`);
-      const named = await until(h, () => records(page), (rs) => rs.find((r) => r.id === 'pg-a')?.name === 'Rain window', `${at}: the name was not stored`);
+      const named = await h.poll(page, () => records(page), (rs) => rs.find((r) => r.id === 'pg-a')?.name === 'Rain window', `${at}: the name was not stored`, { timeout: 12000 });
       const v1 = named.find((r) => r.id === 'pg-a');
       h.expect(v1.rev === v0.rev && v1.updated === v0.updated && v1.nameAt > 0 && v1.favAt > 0, `${at}: a label made a new version: ${JSON.stringify({ v0: [v0.rev, v0.updated], v1: [v1.rev, v1.updated, v1.nameAt, v1.favAt] })}`);
       h.expect(named.length === 3, `${at}: a label made another page`);
@@ -353,7 +344,7 @@ export const scenarios = {
       // the gallery: favourites first, a mint star and the name in the caption
       await page.locator('.dq-back').click();
       await page.locator('.dq-artroom .dq-galitem').first().waitFor();
-      await until(h, () => order(page, '.dq-galitem'), (o) => JSON.stringify(o) === '["pg-a","al-c","pg-b"]', `${at}: the favourite is not first in the gallery`);
+      await h.poll(page, () => order(page, '.dq-galitem'), (o) => JSON.stringify(o) === '["pg-a","al-c","pg-b"]', `${at}: the favourite is not first in the gallery`, { timeout: 12000 });
       const first = page.locator('.dq-galitem').first();
       h.expect((await first.locator('.dq-galitem-d').textContent()).includes('Rain window') && await first.locator('.dq-galitem-fav').isVisible(), `${at}: the favourite's caption has no name or star`);
       h.expect(/^Rain window, a page from .+, a favourite$/.test(await first.getAttribute('aria-label')), `${at}: the favourite's label does not say so: ${await first.getAttribute('aria-label')}`);
@@ -367,13 +358,13 @@ export const scenarios = {
       await page.getByRole('button', { name: 'Rename', exact: true }).click();
       await page.getByLabel('Name this page').fill('Soon gone');
       await page.getByRole('button', { name: 'Save name', exact: true }).click();
-      await until(h, async () => (await head.textContent()).trim(), (t) => t === 'Soon gone', `${at}: Save name did not rename`);
+      await h.poll(page, async () => (await head.textContent()).trim(), (t) => t === 'Soon gone', `${at}: Save name did not rename`, { timeout: 12000 });
       await page.getByRole('button', { name: 'Rename', exact: true }).click();
       await page.getByLabel('Name this page').fill('   ');
       await page.keyboard.press('Enter');
-      await until(h, async () => (await head.textContent()).trim(), (t) => t === dayTitle, `${at}: an empty name did not go back to the day`);
+      await h.poll(page, async () => (await head.textContent()).trim(), (t) => t === dayTitle, `${at}: an empty name did not go back to the day`, { timeout: 12000 });
       h.expect(await page.locator('.dq-piece-day').isHidden(), `${at}: an unnamed page shows its day twice`);
-      await until(h, () => records(page), (rs) => !rs.find((r) => r.id === 'pg-b')?.name, `${at}: the empty name was stored`);
+      await h.poll(page, () => records(page), (rs) => !rs.find((r) => r.id === 'pg-b')?.name, `${at}: the empty name was stored`, { timeout: 12000 });
 
       // Remove: no question, the page goes at once, Undo brings it back to its place with focus on it
       await page.getByRole('button', { name: 'Remove', exact: true }).click();
@@ -381,7 +372,7 @@ export const scenarios = {
       h.expect(!(await page.locator('.dq-piece-confirm, [role=alertdialog]').count()) && !(await page.getByRole('button', { name: 'Keep it' }).count()), `${at}: Remove still asks`);
       const toast = page.locator('.dq-toast');
       await toast.getByText('Page removed.', { exact: true }).waitFor();
-      await until(h, () => order(page, '.dq-galitem'), (o) => !o.includes('pg-b'), `${at}: the removed page still shows`);
+      await h.poll(page, () => order(page, '.dq-galitem'), (o) => !o.includes('pg-b'), `${at}: the removed page still shows`, { timeout: 12000 });
       h.expect((await records(page)).some((r) => r.id === 'pg-b'), `${at}: the page was gone before its Undo ran out`);
       await fits(h, page, `${at} toast`);
       // the gallery behind the toast, both at rest
@@ -390,8 +381,8 @@ export const scenarios = {
       await steady(page);
       await h.shot(page, `${at}-removed-toast`);
       await toast.getByRole('button', { name: 'Undo', exact: true }).click();
-      await until(h, () => order(page, '.dq-galitem'), (o) => JSON.stringify(o) === '["pg-a","al-c","pg-b"]', `${at}: Undo did not bring the page back to its place`);
-      await until(h, () => page.evaluate(() => document.activeElement?.dataset?.piece), (f) => f === 'pg-b', `${at}: focus did not go to the page Undo brought back`);
+      await h.poll(page, () => order(page, '.dq-galitem'), (o) => JSON.stringify(o) === '["pg-a","al-c","pg-b"]', `${at}: Undo did not bring the page back to its place`, { timeout: 12000 });
+      await h.poll(page, () => page.evaluate(() => document.activeElement?.dataset?.piece), (f) => f === 'pg-b', `${at}: focus did not go to the page Undo brought back`, { timeout: 12000 });
       await h.sleep(7000);
       h.expect((await records(page)).some((r) => r.id === 'pg-b'), `${at}: the page Undo brought back was removed later`);
 
@@ -399,8 +390,8 @@ export const scenarios = {
       await openPiece(page, 'pg-b');
       await page.getByRole('button', { name: 'Remove', exact: true }).click();
       await toast.getByText('Page removed.', { exact: true }).waitFor();
-      await toast.waitFor({ state: 'hidden', timeout: 12000 });
-      await until(h, () => records(page), (rs) => !rs.some((r) => r.id === 'pg-b'), `${at}: the removal did not land when the toast went`);
+      await h.gone(toast, 12000, { state: 'hidden' });
+      await h.poll(page, () => records(page), (rs) => !rs.some((r) => r.id === 'pg-b'), `${at}: the removal did not land when the toast went`, { timeout: 12000 });
       h.expect(!(await order(page, '.dq-galitem')).includes('pg-b'), `${at}: the removed page came back`);
 
       // Release an ally: Shadows, Undo, focus on the card; Shadows shows favourites first with a star
@@ -409,13 +400,13 @@ export const scenarios = {
       await page.getByRole('button', { name: 'Rename', exact: true }).click();
       await page.getByLabel('Name your ally').fill('Ember Light');
       await page.keyboard.press('Enter');
-      await until(h, () => page.locator('.dq-piece .dq-allycard-name').textContent(), (t) => t.trim() === 'Ember Light', `${at}: the ally card does not show the new name`);
+      await h.poll(page, () => page.locator('.dq-piece .dq-allycard-name').textContent(), (t) => t.trim() === 'Ember Light', `${at}: the ally card does not show the new name`, { timeout: 12000 });
       await page.getByRole('button', { name: 'Release', exact: true }).click();
       await page.locator('.dq-shadows').waitFor();
       await toast.getByText('Ally released.', { exact: true }).waitFor();
       h.expect(!(await order(page, '.dq-allybtn')).includes('al-c'), `${at}: the released ally still shows`);
       await toast.getByRole('button', { name: 'Undo', exact: true }).click();
-      await until(h, () => page.evaluate(() => document.activeElement?.dataset?.piece), (f) => f === 'al-c', `${at}: focus did not go to the ally Undo brought back`);
+      await h.poll(page, () => page.evaluate(() => document.activeElement?.dataset?.piece), (f) => f === 'al-c', `${at}: focus did not go to the ally Undo brought back`, { timeout: 12000 });
       const card = page.locator('.dq-allybtn[data-piece="al-c"]');
       h.expect(await card.locator('.dq-allycard-fav').isVisible() && (await card.getAttribute('aria-label')).startsWith('Ember Light, a shadow ally you designed, a favourite'), `${at}: the favourite ally has no star or name on Shadows`);
       await card.scrollIntoViewIfNeeded();
@@ -428,7 +419,7 @@ export const scenarios = {
       await page.locator('.dq-safe').click();
       await page.locator('.dq[data-screen="safe"]').waitFor();
       h.expect(await toast.isHidden(), `${at}: the toast followed into the Safe Zone`);
-      await until(h, () => records(page), (rs) => !rs.some((r) => r.id === 'al-c'), `${at}: the release did not land when the Safe Zone opened`);
+      await h.poll(page, () => records(page), (rs) => !rs.some((r) => r.id === 'al-c'), `${at}: the release did not land when the Safe Zone opened`, { timeout: 12000 });
       await h.shot(page, `${at}-safe-zone-no-toast`);
 
       h.expect((await xp(page, h.SAVE)) === xp0, `${at}: labels or Undo changed XP`);
@@ -460,7 +451,7 @@ export const scenarios = {
     await openPiece(b, 'pg-a');
     h.expect((await b.locator('.dq-piece-h').textContent()).trim() === 'Harbour', 'the other tab does not show the new name');
     await b.getByRole('button', { name: 'Favourite', exact: true }).click();
-    await until(h, () => records(b), (rs) => rs.find((r) => r.id === 'pg-a')?.fav === true, 'the favourite was not stored');
+    await h.poll(b, () => records(b), (rs) => rs.find((r) => r.id === 'pg-a')?.fav === true, 'the favourite was not stored', { timeout: 12000 });
 
     // A saves an edit it began before the favourite
     const box = await a.locator('.dq-ink-live').boundingBox();
@@ -469,26 +460,26 @@ export const scenarios = {
     await a.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.7, { steps: 10 });
     await a.mouse.up();
     await a.getByRole('button', { name: 'Save', exact: true }).click();
-    const saved = await until(h, () => records(a), (rs) => rs.find((r) => r.id === 'pg-a')?.strokes.length === 2, 'the edit was not saved');
+    const saved = await h.poll(a, () => records(a), (rs) => rs.find((r) => r.id === 'pg-a')?.strokes.length === 2, 'the edit was not saved', { timeout: 12000 });
     const rec = saved.find((r) => r.id === 'pg-a');
     h.expect(rec.name === 'Harbour' && rec.fav === true && saved.length === 3, `the edit lost a label or split the page: ${JSON.stringify({ name: rec.name, fav: rec.fav, ids: saved.map((r) => r.id) })}`);
     // B's open page shows what A saved, and B renames while A keeps drawing
-    await until(h, () => b.locator('.dq-piece-fav').getAttribute('aria-pressed'), (v) => v === 'true', 'the other tab lost the favourite');
+    await h.poll(b, () => b.locator('.dq-piece-fav').getAttribute('aria-pressed'), (v) => v === 'true', 'the other tab lost the favourite', { timeout: 12000 });
     await b.getByRole('button', { name: 'Rename', exact: true }).click();
     await b.getByLabel('Name this page').fill('Harbour light');
     await b.keyboard.press('Enter');
-    await until(h, () => records(b), (rs) => rs.find((r) => r.id === 'pg-a')?.name === 'Harbour light', 'the second name was not stored');
+    await h.poll(b, () => records(b), (rs) => rs.find((r) => r.id === 'pg-a')?.name === 'Harbour light', 'the second name was not stored', { timeout: 12000 });
     await a.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.2);
     await a.mouse.down();
     await a.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.3, { steps: 10 });
     await a.mouse.up();
     await a.getByRole('button', { name: 'Save', exact: true }).click();
-    const again = await until(h, () => records(a), (rs) => rs.find((r) => r.id === 'pg-a')?.strokes.length === 3, 'the second edit was not saved');
+    const again = await h.poll(a, () => records(a), (rs) => rs.find((r) => r.id === 'pg-a')?.strokes.length === 3, 'the second edit was not saved', { timeout: 12000 });
     const last = again.find((r) => r.id === 'pg-a');
     h.expect(last.name === 'Harbour light' && last.fav === true && again.length === 3, `the second edit lost the other tab's name: ${JSON.stringify({ name: last.name, fav: last.fav, ids: again.map((r) => r.id) })}`);
     // B's gallery shows it first, named, with its star, without a reload
     await b.locator('.dq-back').click();
-    await until(h, () => b.locator('.dq-galitem').first().getAttribute('aria-label'), (l) => /^Harbour light, a page from .+, a favourite$/.test(l ?? ''), 'the other tab\'s gallery does not show the labels');
+    await h.poll(b, () => b.locator('.dq-galitem').first().getAttribute('aria-label'), (l) => /^Harbour light, a page from .+, a favourite$/.test(l ?? ''), 'the other tab\'s gallery does not show the labels', { timeout: 12000 });
     await h.shot(b, 'two-tabs-gallery-320');
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
@@ -527,7 +518,7 @@ export const scenarios = {
     await q.page.getByRole('button', { name: 'Rename', exact: true }).click();
     await q.page.getByLabel('Name this page').fill('Old one');
     await q.page.keyboard.press('Enter');
-    const renamed = await until(h, () => records(q.page), (rs) => rs.find((r) => r.id === 'pg-b')?.name === 'Old one', 'an old drawing could not be renamed');
+    const renamed = await h.poll(q.page, () => records(q.page), (rs) => rs.find((r) => r.id === 'pg-b')?.name === 'Old one', 'an old drawing could not be renamed', { timeout: 12000 });
     h.expect(JSON.stringify(renamed.find((r) => r.id === 'pg-b').glaze) === '{"k":1}', 'renaming dropped a field a newer build stored');
     await h.shot(q.page, 'old-save-renamed-320');
 
@@ -537,7 +528,7 @@ export const scenarios = {
     await q.page.getByRole('button', { name: 'Rename', exact: true }).click();
     await q.page.getByLabel('Name this page').fill('Stars');
     await q.page.keyboard.press('Enter');
-    await until(h, () => records(q.page), (rs) => rs.find((r) => r.id === 'pg-a')?.name === 'Stars', 'the rename was not stored');
+    await h.poll(q.page, () => records(q.page), (rs) => rs.find((r) => r.id === 'pg-a')?.name === 'Stars', 'the rename was not stored', { timeout: 12000 });
     await restore(q.page, raw);
     let rs = await records(q.page);
     h.expect(rs.length === 3 && rs.find((r) => r.id === 'pg-a').name === 'Stars' && rs.find((r) => r.id === 'pg-a').fav === true, 'an older name in a file replaced a newer one, or the page doubled: ' + JSON.stringify(rs.map((r) => [r.id, r.name, r.fav])));
@@ -546,7 +537,7 @@ export const scenarios = {
     rs = await records(q.page);
     h.expect(rs.length === 3 && rs.find((r) => r.id === 'pg-a').name === 'From the file' && rs.find((r) => r.id === 'pg-a').fav === false, 'a newer name in a file did not come in, or the page doubled: ' + JSON.stringify(rs.map((r) => [r.id, r.name, r.fav])));
     await toArt(h, q.page);
-    await until(h, () => order(q.page, '.dq-galitem'), (o) => JSON.stringify(o) === '["al-c","pg-b","pg-a"]', 'the gallery does not show the restored labels');
+    await h.poll(q.page, () => order(q.page, '.dq-galitem'), (o) => JSON.stringify(o) === '["al-c","pg-b","pg-a"]', 'the gallery does not show the restored labels', { timeout: 12000 });
     h.expect(!q.errors.length, q.errors.join('\n'));
     await q.ctx.close();
   },
@@ -570,7 +561,7 @@ export const scenarios = {
       h.expect(!(await records(page)).find((r) => r.id === 'pg-a').name, `a composing Enter saved the name: ${JSON.stringify(init)}`);
     }
     await page.keyboard.press('Enter');
-    await until(h, () => records(page), (rs) => rs.find((r) => r.id === 'pg-a')?.name === 'きょう', 'Enter after the composition did not save the name');
+    await h.poll(page, () => records(page), (rs) => rs.find((r) => r.id === 'pg-a')?.name === 'きょう', 'Enter after the composition did not save the name', { timeout: 12000 });
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },
@@ -590,7 +581,7 @@ export const scenarios = {
       await page.getByRole('button', { name: 'Rename', exact: true }).click();
       await page.getByLabel('Name this page').fill(name);
       await page.keyboard.press('Enter');
-      await until(h, () => page.locator('.dq-piece-h').textContent(), (t) => t.trim() === name, `${id}: the new name did not show while storage could not write`, 30);
+      await h.poll(page, () => page.locator('.dq-piece-h').textContent(), (t) => t.trim() === name, `${id}: the new name did not show while storage could not write`, { timeout: 3000 });
       h.expect((await page.locator('.dq-piece-fav').getAttribute('aria-pressed')) === 'true', `${id}: the favourite did not hold while storage could not write`);
       await page.locator('.dq-back').click();
       await page.locator('.dq-artroom .dq-galitem').first().waitFor();
@@ -609,13 +600,13 @@ export const scenarios = {
     await toArt(h, page);
     await full(page);
     await relabel('pg-a', 'Night');
-    await until(h, () => order(page, '.dq-galitem'), (o) => JSON.stringify(o) === '["pg-a","al-c","pg-b"]', 'the gallery does not put the favourite first');
+    await h.poll(page, () => order(page, '.dq-galitem'), (o) => JSON.stringify(o) === '["pg-a","al-c","pg-b"]', 'the gallery does not put the favourite first', { timeout: 12000 });
     h.expect(/^Night, .+, a favourite$/.test((await page.locator('[data-piece="pg-a"]').getAttribute('aria-label')) ?? ''), 'the gallery does not show the name and the star');
     await crystalHas('pg-a', 'Night');
     await writable(page);
     await openPiece(page, 'pg-a');
     await page.getByRole('button', { name: 'Favourite', exact: true }).click();
-    await until(h, () => stored(page, 'pg-a'), (m) => m?.fav === false, 'the favourite was not stored once storage wrote again');
+    await h.poll(page, () => stored(page, 'pg-a'), (m) => m?.fav === false, 'the favourite was not stored once storage wrote again', { timeout: 12000 });
     await page.goto(h.server.url + '/?mute');
     await h.reachHub(page);
     const after = (await records(page)).find((r) => r.id === 'pg-a');
@@ -638,7 +629,7 @@ export const scenarios = {
     const b = await other(h, ctx, errors);
     await nameIt(b, 'pg-a', 'Harbour', true);
     await nameIt(b, 'pg-b', 'Low tide');
-    await until(h, () => records(b), (rs) => rs.find((r) => r.id === 'pg-a')?.fav === true && rs.find((r) => r.id === 'pg-b')?.name === 'Low tide', 'the other tab did not store its labels');
+    await h.poll(b, () => records(b), (rs) => rs.find((r) => r.id === 'pg-a')?.fav === true && rs.find((r) => r.id === 'pg-b')?.name === 'Low tide', 'the other tab did not store its labels', { timeout: 12000 });
 
     await full(a);
     await stroke(a, [0.3, 0.6], [0.7, 0.7]);
@@ -647,7 +638,7 @@ export const scenarios = {
     const edit = (await records(a)).find((r) => r.id === 'pg-a');
     h.expect(edit?.strokes.length === 2 && edit.name === 'Harbour' && edit.fav === true, `the edit storage couldn't keep lost the other tab's labels: ${JSON.stringify(edit && { n: edit.strokes.length, name: edit.name, fav: edit.fav })}`);
     await a.evaluate(() => window.__daily.go({ name: 'art' }));
-    await until(h, () => a.locator('[data-piece="pg-a"]').getAttribute('aria-label'), (l) => /^Harbour, a page from .+, a favourite$/.test(l ?? ''), 'the gallery does not show the other tab\'s labels on the edit');
+    await h.poll(a, () => a.locator('[data-piece="pg-a"]').getAttribute('aria-label'), (l) => /^Harbour, a page from .+, a favourite$/.test(l ?? ''), 'the gallery does not show the other tab\'s labels on the edit', { timeout: 12000 });
 
     const res = await restoreNewer(a, 'pg-b');
     const newer = (await records(a)).find((r) => r.id === 'pg-b');
@@ -700,9 +691,9 @@ export const scenarios = {
     const b = await other(h, ctx, errors);
 
     await saveNewer(b, 'al-c');
-    const ally = await until(h, () => records(a), (rs) => rs.find((r) => r.id === 'al-c')?.strokes.length === 2, 'this tab did not see the other tab\'s save');
+    const ally = await h.poll(a, () => records(a), (rs) => rs.find((r) => r.id === 'al-c')?.strokes.length === 2, 'this tab did not see the other tab\'s save', { timeout: 12000 });
     h.expect(ally.find((r) => r.id === 'al-c').name === 'Spark', `the other tab's newer version dropped the name held here: ${ally.find((r) => r.id === 'al-c').name}`);
-    await until(h, () => a.locator('[data-piece="al-c"]').getAttribute('aria-label'), (l) => /^Spark, a shadow ally/.test(l ?? ''), 'the gallery lost the name held here');
+    await h.poll(a, () => a.locator('[data-piece="al-c"]').getAttribute('aria-label'), (l) => /^Spark, a shadow ally/.test(l ?? ''), 'the gallery lost the name held here', { timeout: 12000 });
 
     await keepDrawing(a, 'pg-a');
     await saveNewer(b, 'pg-a');
@@ -760,7 +751,7 @@ export const scenarios = {
     await keepDrawing(a, 'al-c');
     const b = await other(h, ctx, errors);
     await nameIt(b, 'al-c', 'Blaze');
-    await until(h, () => records(b), (rs) => rs.find((r) => r.id === 'al-c')?.name === 'Blaze', 'the other tab did not store the name');
+    await h.poll(b, () => records(b), (rs) => rs.find((r) => r.id === 'al-c')?.name === 'Blaze', 'the other tab did not store the name', { timeout: 12000 });
 
     await stroke(a, [0.3, 0.6], [0.7, 0.7]);
     await a.getByRole('button', { name: 'Save', exact: true }).click();

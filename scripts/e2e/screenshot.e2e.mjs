@@ -1,6 +1,6 @@
 // A screenshot taken while the GPU is still working through what a page drew waits for that drawing, not on the
 // capture's own time, and shows the last thing the page drew. WebGL drawing leaves the page's script free, so only a
-// wait on the GPU's queue itself covers it.
+// wait on the GPU's queue itself covers it. A screenshot of a tab behind another shows that tab.
 import sharp from 'sharp';
 
 // GPU work queued before the shot, and the time the capture itself gets (this page alone captures in under 40 ms), in ms
@@ -74,6 +74,26 @@ export const scenarios = {
       h.expect(near(at(20, 290), [255, 0, 255]), `the shot is missing the WebGL canvas's last drawing: ${at(20, 290)}`);
       h.expect(near(at(350, 50), [0, 255, 0]), `the shot is missing the 2D canvas's last drawing: ${at(350, 50)}`);
       return { took, ...queued };
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  // full Chromium, as the remote GPU browser runs, captures only the tab in front
+  async 'screenshot-of-a-tab-behind'(h) {
+    const ctx = await h.browser.newContext({ viewport: { width: 400, height: 300 } });
+    try {
+      const behind = await ctx.newPage();
+      await behind.goto('data:text/html,<body style="margin:0;background:%230f0"></body>');
+      const front = await ctx.newPage();
+      await front.goto('data:text/html,<body style="margin:0;background:%23f0f"></body>');
+      // the browser stops giving the tab behind captures within a second of another tab loading a page in front, though
+      // the page behind still runs, draws and counts as visible, so nothing in it can be waited on
+      await h.sleep(2000);
+      behind.setDefaultTimeout(5000);
+      const { data } = await sharp(await h.shot(behind, 'screenshot-of-a-tab-behind')).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+      const px = [...data.subarray(0, 3)];
+      h.expect(px[0] < 8 && px[1] > 247 && px[2] < 8, `the shot of the tab behind does not show its page: ${px}`);
     } finally {
       await ctx.close();
     }
