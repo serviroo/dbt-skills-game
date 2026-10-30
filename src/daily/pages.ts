@@ -999,6 +999,9 @@ export function settingsScreen(app: App): ScreenOut {
     app.applyMotion();
     app.applySound();
     app.root.querySelectorAll('.dq-settings [aria-label="Motion"] [role="radio"]').forEach((b, i) => b.setAttribute('aria-checked', String(['system', 'reduce', 'full'][i] === s.settings.motion)));
+    // the Text size the crystal brought back (the group moves its Tab stop to it)
+    const size = textSize(app);
+    app.root.querySelectorAll('.dq-settings [aria-label="Text size"] [role="radio"]').forEach((b, i) => b.setAttribute('aria-checked', String(READ_SIZES[i] === size)));
     if (!app.opts.volume) {
       const sound = app.root.querySelector<HTMLInputElement>('.dq-settings input[role="switch"]');
       if (sound) sound.checked = s.settings.sound;

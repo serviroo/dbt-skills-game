@@ -55,9 +55,14 @@ export function supportListsCopy(app: App) {
     hint.textContent = said ? `${LISTS_COPY.therapist} ${LISTS_COPY.local}` : LISTS_COPY.local;
     const text = render();
     // bringing it into view can hide the button under the top bar, so focus on that button moves into the preview
-    if (document.activeElement === open) (text ? pre : close).focus({ preventScroll: true });
+    const to = document.activeElement === open ? (text ? pre : close) : null;
+    // opened with the keys, what takes focus is brought in after the preview, from its top where the words above it
+    // fill the screen, clear of the pinned bars
+    const keyed = to && open.matches(':focus-visible') ? to : null;
+    to?.focus({ preventScroll: true });
     // on a small screen it opens below the fold
-    box.scrollIntoView({ block: 'nearest', behavior: app.reduced() ? 'auto' : 'smooth' });
+    box.scrollIntoView({ block: 'nearest', behavior: app.reduced() || keyed ? 'auto' : 'smooth' });
+    keyed?.scrollIntoView({ block: 'nearest' });
   }
   // a list changed in another open copy: the open preview follows it, and nothing else on the screen moves
   const off = st.onChange(() => {

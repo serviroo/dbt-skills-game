@@ -3633,6 +3633,24 @@ textarea.dq-input {
     margin-top: 8px;
   }
 }
+/* held sideways there, the word sits beside the ring instead, and the ring is never taller than the room the pinned bars
+   leave, so the ring with its count and its word show together above "Talk to someone now" */
+@media (max-width: 300px) and (orientation: landscape) {
+  .dq-sz .dq-ring-stage {
+    grid-template-columns: auto auto;
+    justify-content: center;
+    align-items: center;
+    column-gap: 12px;
+  }
+  .dq-sz .dq-ring-svg {
+    width: min(196px, 52vw, calc(100dvh - var(--sz-bar, 0px) - var(--dq-foot, 0px) - 8px));
+  }
+  .dq-sz .dq-ring-word {
+    grid-area: 1 / 2;
+    margin-top: 0;
+    text-align: start;
+  }
+}
 .dq-sz-lead,
 .dq-sz-main {
   display: contents;

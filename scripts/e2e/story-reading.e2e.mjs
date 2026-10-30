@@ -632,6 +632,9 @@ export const scenarios = {
         await fresh.page.getByRole('button', { name: 'Restore this Save Crystal' }).click();
         await fresh.page.waitForFunction(() => /Restored/.test(document.querySelector('.dq-settings .dq-hint[aria-live]')?.textContent ?? ''), null, { timeout: 15000 });
         h.expect((await h.ls(fresh.page, SIZE_KEY(h))) === 'largest', 'Restore did not bring the reading size');
+        // Settings, still open, shows the restored size, and Tab into it lands on that choice
+        const shown = await fresh.page.evaluate(() => [...document.querySelectorAll('.dq-settings [aria-label="Text size"] [role=radio]')].map((b) => `${b.textContent}:${b.getAttribute('aria-checked')}:${b.tabIndex}`).join(' '));
+        h.expect(shown === 'Regular:false:-1 Larger:false:-1 Largest:true:0', `after Restore the Text size control shows ${shown}`);
         h.expect(!fresh.errors.length, fresh.errors.join('\n'));
       } finally {
         await fresh.ctx.close();

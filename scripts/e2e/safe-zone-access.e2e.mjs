@@ -18,9 +18,13 @@
 //                        Regular size and the Story Room reads at the same size. Nothing scrolls sideways, is cut off,
 //                        runs outside its button or box or sits out of reach at 320x568, 390x844, 844x390 and 568x320,
 //                        nor at 200% browser zoom on 320x568 upright and sideways
+//   text-size-without-storage where storage refuses the size, Largest picked in Settings still holds in the Safe Zone
+//                        for the rest of the visit, until the game's data is cleared
 //   safe-zone-zoom-keys  at Largest and 200% zoom on 320x568, upright and sideways, every Safe Zone screen used with
 //                        the keyboard alone: each control, and each choice of a group (How long's "Until I'm ready"
-//                        among them), shows whole and clear of the top bar and "Talk to someone now" as it gets focus
+//                        among them), shows whole and clear of the top bar and "Talk to someone now" as it gets focus.
+//                        Opening "Copy your lists" by key puts focus on the preview, shown from its top clear of both
+//                        bars, and closing it puts focus back on "Copy your lists", in view
 import { boot, settle } from './layout-fit.e2e.mjs';
 import { fits } from './move-like-an-app.e2e.mjs';
 
@@ -50,6 +54,23 @@ const listen = (page, scope) =>
     }).observe(document.body, { subtree: true, childList: true, characterData: true });
   }, scope);
 const heard = (page) => page.evaluate(() => window.__said.splice(0));
+/** Waits for a scroll to end: the page and the Safe Zone's own scroller still for 5 frames in a row (3 s at most). */
+const still = (page) =>
+  page.evaluate(
+    () =>
+      new Promise((done) => {
+        const at = () => [...document.querySelectorAll('.dq, .dq-sz-body')].map((e) => e.scrollTop).join();
+        let [last, same, n] = [at(), 0, 0];
+        const tick = () => {
+          const now = at();
+          same = now === last ? same + 1 : 0;
+          last = now;
+          if (same >= 5 || ++n > 180) done();
+          else requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+  );
 const xp = (page) => page.evaluate(() => JSON.stringify(window.__daily.store.state.events.map((e) => [e.k, e.xp ?? 0])));
 /** What a control is called: its aria-label, else its label's words, else its own. Runs in the page. */
 const nameOf = (e) => (e?.getAttribute('aria-label') || (e?.labels?.length ? e.labels[0].textContent : e?.textContent) || '').replace(/\s+/g, ' ').trim();
@@ -99,7 +120,8 @@ const focusNow = (page) =>
 /**
  * Words out of place: a line of words that runs outside a box it sits in (each box around it, up to the page), a word
  * broken across two lines in a button, a choice or a note, and a breathing ring's word that reaches past the ring
- * instead of sitting inside it or just under it.
+ * instead of sitting inside it, or outside it: beside it held sideways, with the ring and the word fitting together
+ * between the pinned bars, and just under it upright.
  */
 const spills = (page) =>
   page.evaluate(() => {
@@ -132,15 +154,28 @@ const spills = (page) =>
       }
     }
     for (const w of document.querySelectorAll('.dq-safezone .dq-ring-word')) {
-      const ring = w.closest('.dq-ring-stage')?.querySelector('svg')?.getBoundingClientRect();
-      if (!ring || !w.textContent.trim()) continue;
+      const stage = w.closest('.dq-ring-stage');
+      const svg = stage?.querySelector('svg');
+      if (!svg || !w.textContent.trim()) continue;
+      const said = `the ring's "${w.textContent.trim()}"`;
+      const sideways = innerWidth > innerHeight;
+      // where the page scrolls, the ring is brought up under the top bar first, as far as it goes
+      stage.scrollIntoView({ block: 'start', behavior: 'instant' });
+      const ring = svg.getBoundingClientRect();
       const [x, y, r] = [ring.left + ring.width / 2, ring.top + ring.height / 2, ring.width / 2 + 1];
       const words = document.createRange();
       words.selectNodeContents(w);
-      for (const q of words.getClientRects()) {
-        const inside = [[q.left, q.top], [q.right, q.top], [q.left, q.bottom], [q.right, q.bottom]].every(([a, b]) => Math.hypot(a - x, b - y) <= r);
-        if (!inside && q.top < ring.bottom - 1) out.add(`the ring's "${w.textContent.trim()}" reaches past the ring, neither inside it nor under it`);
+      const lines = [...words.getClientRects()].filter((q) => q.width);
+      const corners = (q) => [[q.left, q.top], [q.right, q.top], [q.left, q.bottom], [q.right, q.bottom]];
+      if (lines.every((q) => corners(q).every(([a, b]) => Math.hypot(a - x, b - y) <= r))) continue;
+      if (!sideways) {
+        if (lines.some((q) => q.top < ring.bottom - 1)) out.add(`${said} reaches past the ring, neither inside it nor under it`);
+        continue;
       }
+      if (lines.some((q) => q.top < ring.top - 1 || q.bottom > ring.bottom + 1 || (q.left < ring.right - 1 && q.right > ring.left + 1))) out.add(`${said} is outside the ring held sideways but not beside it`);
+      // the ring and its word show together: no corner of either sits under a pinned bar or off the screen
+      const hidden = [ring, ...lines].flatMap((q) => corners(q).map(([a, b]) => [a + (a === q.left ? 2 : -2), b + (b === q.top ? 2 : -2)])).some(([a, b]) => !stage.contains(document.elementFromPoint(a, b)));
+      if (hidden) out.add(`${said} and its ring don't fit together between the pinned bars`);
     }
     return [...out];
   });
@@ -539,6 +574,32 @@ export const scenarios = {
     h.expect(!problems.length, problems.join('\n'));
   },
 
+  async 'text-size-without-storage'(h) {
+    const { ctx, page, errors } = await boot(h, PHONE, { edit: (s) => (s.profile.region = 'us') });
+    await page.evaluate(() => {
+      const set = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (k, v) {
+        if (String(k).endsWith('.read-size')) throw new DOMException('Storage is full', 'QuotaExceededError');
+        return set.call(this, k, v);
+      };
+    });
+    await page.evaluate(() => window.__daily.go({ name: 'settings' }));
+    await onScreen(page, 'settings');
+    const choice = page.getByRole('radio', { name: 'Text size: Largest' });
+    await choice.scrollIntoViewIfNeeded();
+    await choice.click();
+    await page.evaluate((r) => window.__daily.go(r), { name: 'safe', at: 'start' });
+    await page.locator('.dq-sz-t').first().waitFor();
+    const size = await page.evaluate(() => document.querySelector('.dq-safezone')?.dataset.size);
+    // another copy clears the game's data and this one hears it: the held size goes, as a stored one would
+    const cleared = await page.evaluate(async () => {
+      (await import('/src/core/cleared.ts')).goneElsewhere();
+      return (await import('/src/daily/text-size.ts')).textSize(window.__daily);
+    });
+    h.expect(size === 'largest' && cleared === 'regular' && !errors.length, [`with storage refusing it, Largest picked in Settings reached the Safe Zone as ${size}, and read ${cleared} after a clear`, ...errors].join('\n'));
+    await ctx.close();
+  },
+
   async 'safe-zone-zoom-keys'(h) {
     const problems = [];
     for (const [w, ht] of [[320, 568], [568, 320]]) {
@@ -562,6 +623,18 @@ export const scenarios = {
           return out;
         })()`);
         for (const n of hidden) problems.push(`${tag} ${at}: "${n}" is not whole, or sits under something, as it gets focus`);
+        if (at === 'reasons') {
+          await press(page, 'Copy your lists');
+          await page.locator('.dq-lists-copy pre').waitFor();
+          await still(page);
+          const opened = await focusNow(page);
+          if (opened.name !== 'Your lists as plain text' || !opened.ring || !opened.inView) problems.push(`${tag} reasons: opening the lists by key left focus on ${opened.name} (${JSON.stringify(opened)})`);
+          await h.shot(page, `zoom-keys-${w}x${ht}-lists-open`);
+          await press(page, 'Close');
+          await still(page);
+          const closed = await focusNow(page);
+          if (closed.name !== 'Copy your lists' || !closed.ring || !closed.inView) problems.push(`${tag} reasons: closing the lists by key left focus on ${closed.name} (${JSON.stringify(closed)})`);
+        }
         if (['moment', 'breathe', 'check', 'people', 'talk', 'close'].includes(at)) await h.shot(page, `zoom-keys-${w}x${ht}-${at}`);
       }
       problems.push(...errors.map((e) => `${tag}: ${e}`));
