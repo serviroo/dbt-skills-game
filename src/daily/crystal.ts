@@ -5,6 +5,7 @@ import { artStore, cleanRec, skippedDrafts } from './artstore';
 import { cleanChapter, cleanStory, skippedCards, storyStore, STORY_CAP, type Story } from './storystore';
 import { isSkillId, normalize, type State, type Store } from './store';
 import { exportSkillDrafts } from './skilldraft';
+import { heldTextSize, keepTextSizeFor } from './text-size';
 
 interface Preferences {
   audio?: AudioLevels & { v: 1 };
@@ -24,30 +25,42 @@ const BESIDE_CHOICES = [['safeLight', BESIDE.safeLight], ['readSize', BESIDE.rea
  */
 const choice = (v: unknown): v is string => typeof v === 'string' && /^[a-z0-9-]{1,20}$/.test(v);
 const object = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
+/** Runs one choice's step on its own, so a throw never stops the others: false when it threw or returned false. */
+const went = (step: () => boolean | void) => {
+  try {
+    return step() !== false;
+  } catch {
+    return false;
+  }
+};
 
 export function exportPreferences(store: Store, volume?: VolumeCtrl) {
   const key = store.key;
   const preferences: Preferences = volume ? { audio: { v: 1, ...volume.snapshot() } } : {};
-  let incomplete = false;
-  try {
-    const audio = localStorage.getItem(AUDIO_KEY);
-    if (!volume) {
-      const levels = parsePrefs(audio);
-      preferences.audio = { v: 1, ...levels, muted: Object.hasOwn(store.state.setAt, 'sound') ? !store.state.settings.sound : levels.muted || !store.state.settings.sound };
-    }
-    const room = localStorage.getItem(`${key}${BESIDE.stealth}`);
-    if (room !== null) {
+  // a text size storage refused is held for the visit, and the crystal carries it
+  const heldSize = heldTextSize(key);
+  if (choice(heldSize)) preferences.readSize = heldSize;
+  // each is read on its own: one that can't be read leaves the rest in the crystal, which then says it isn't whole
+  const read = [
+    went(() => {
+      const levels = parsePrefs(localStorage.getItem(AUDIO_KEY));
+      if (!volume) preferences.audio = { v: 1, ...levels, muted: Object.hasOwn(store.state.setAt, 'sound') ? !store.state.settings.sound : levels.muted || !store.state.settings.sound };
+    }),
+    went(() => {
+      const room = localStorage.getItem(`${key}${BESIDE.stealth}`);
+      if (room === null) return;
       const value: unknown = JSON.parse(room);
       if (object(value)) preferences.room = { aquarium: value.aquarium === true, words: value.words === true };
-    }
-    for (const [name, end] of BESIDE_CHOICES) {
-      const v = localStorage.getItem(`${key}${end}`);
-      if (choice(v)) preferences[name] = v;
-    }
-  } catch {
-    incomplete = true;
-  }
-  return { preferences, incomplete };
+    }),
+    ...BESIDE_CHOICES.map(([name, end]) =>
+      went(() => {
+        if (name === 'readSize' && preferences.readSize) return;
+        const v = localStorage.getItem(`${key}${end}`);
+        if (choice(v)) preferences[name] = v;
+      }),
+    ),
+  ];
+  return { preferences, incomplete: !read.every(Boolean) };
 }
 
 /** A copy of a save no version could read, kept beside the save (see Store.keepCopy): its key's ending, and its bytes. */
@@ -143,49 +156,53 @@ export function crystalContent(json: string) {
 
 export function restorePreferences(raw: unknown, store: Store, volume?: VolumeCtrl) {
   const prefs = object(raw) ? raw : {};
-  try {
-    volume?.flush();
-    const audioRaw = localStorage.getItem(AUDIO_KEY);
-    let destination: Record<string, unknown> = {};
-    try {
-      const parsed: unknown = JSON.parse(audioRaw ?? 'null');
-      if (object(parsed) && parsed.v === 1) destination = parsed;
-    } catch {}
-    const audio = object(prefs.audio) && prefs.audio.v === 1 ? parsePrefs(JSON.stringify(prefs.audio)) : null;
-    let saved = true;
-    const levels = parsePrefs(audioRaw);
-    let changed = false;
-    if (audio) {
-      for (const k of ['master', 'music', 'sfx', 'hum'] as const) {
-        if (typeof destination[k] !== 'number' || !Number.isFinite(destination[k])) { levels[k] = audio[k]; changed = true; }
+  // each on its own: one storage refuses, or one stored here that can't be read, isn't saved; the rest still restore
+  const saved = [
+    went(() => {
+      volume?.flush();
+      const audioRaw = localStorage.getItem(AUDIO_KEY);
+      let destination: Record<string, unknown> = {};
+      try {
+        const parsed: unknown = JSON.parse(audioRaw ?? 'null');
+        if (object(parsed) && parsed.v === 1) destination = parsed;
+      } catch {}
+      const audio = object(prefs.audio) && prefs.audio.v === 1 ? parsePrefs(JSON.stringify(prefs.audio)) : null;
+      const levels = parsePrefs(audioRaw);
+      let changed = false;
+      if (audio) {
+        for (const k of ['master', 'music', 'sfx', 'hum'] as const) {
+          if (typeof destination[k] !== 'number' || !Number.isFinite(destination[k])) { levels[k] = audio[k]; changed = true; }
+        }
+        if (typeof destination.muted !== 'boolean') { levels.muted ||= audio.muted; changed = true; }
       }
-      if (typeof destination.muted !== 'boolean') { levels.muted ||= audio.muted; changed = true; }
-    }
-    if (!audio && typeof destination.muted !== 'boolean' && !store.state.settings.sound) { levels.muted = true; changed = true; }
-    if (changed || volume) {
+      if (!audio && typeof destination.muted !== 'boolean' && !store.state.settings.sound) { levels.muted = true; changed = true; }
+      if (!changed && !volume) return;
       const expected = volume ? volume.restore(levels) : levels;
       if (!volume) savePrefs(levels);
       const stored = parsePrefs(localStorage.getItem(AUDIO_KEY));
-      saved = localStorage.getItem(AUDIO_KEY) !== null && (Object.keys(expected) as (keyof AudioLevels)[]).every((k) => stored[k] === expected[k]);
-    }
-    if (object(prefs.room)) {
+      return localStorage.getItem(AUDIO_KEY) !== null && (Object.keys(expected) as (keyof AudioLevels)[]).every((k) => stored[k] === expected[k]);
+    }),
+    went(() => {
+      if (!object(prefs.room)) return;
       const roomRaw = localStorage.getItem(`${store.key}${BESIDE.stealth}`);
       const room: unknown = roomRaw === null ? {} : JSON.parse(roomRaw);
-      if (object(room)) {
-        const next = { ...room };
-        for (const k of ['aquarium', 'words'] as const) if (!Object.hasOwn(room, k) && typeof prefs.room[k] === 'boolean') next[k] = prefs.room[k];
-        if (JSON.stringify(next) !== JSON.stringify(room)) write(() => localStorage.setItem(`${store.key}${BESIDE.stealth}`, JSON.stringify(next)));
-      }
-    }
-    // added only where this device has none: the length, light or size it chose here stays
-    for (const [name, end] of BESIDE_CHOICES) {
-      const v = prefs[name];
-      if (choice(v) && localStorage.getItem(`${store.key}${end}`) === null) write(() => localStorage.setItem(`${store.key}${end}`, v));
-    }
-    return saved;
-  } catch {
-    return false;
-  }
+      if (!object(room)) return;
+      const next = { ...room };
+      for (const k of ['aquarium', 'words'] as const) if (!Object.hasOwn(room, k) && typeof prefs.room[k] === 'boolean') next[k] = prefs.room[k];
+      if (JSON.stringify(next) !== JSON.stringify(room)) write(() => localStorage.setItem(`${store.key}${BESIDE.stealth}`, JSON.stringify(next)));
+    }),
+    // added only where this device has none, a size held for the visit counting as one: the length, light or size it
+    // chose here stays. A size storage refuses is held for the visit, as one picked here would be, and isn't saved
+    ...BESIDE_CHOICES.map(([name, end]) =>
+      went(() => {
+        const v = prefs[name];
+        if (!choice(v) || (name === 'readSize' && heldTextSize(store.key) !== undefined) || localStorage.getItem(`${store.key}${end}`) !== null) return;
+        if (name !== 'readSize') write(() => localStorage.setItem(`${store.key}${end}`, v));
+        else return keepTextSizeFor(store.key, v);
+      }),
+    ),
+  ];
+  return saved.every(Boolean);
 }
 
 export interface Peek {

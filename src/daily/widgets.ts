@@ -189,10 +189,19 @@ function frost() {
   return g;
 }
 
+/** A length of time as it is said: "30 seconds", "1 minute", "1 minute 30 seconds". */
+function spoken(s: number) {
+  const m = Math.floor(s / 60);
+  const r = Math.round(s - m * 60);
+  const part = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;
+  return [m ? part(m, 'minute') : '', r || !m ? part(r, 'second') : ''].filter(Boolean).join(' ');
+}
+
 /**
  * Countdown with an optional visual. Waits for a tap when `start` is given, or for the caller's own start() when `held`;
  * that start brings `reveal` (the countdown unless the caller names something further down) into view if it isn't,
- * stopping clear of anything pinned.
+ * stopping clear of anything pinned, and moves focus that was on Start to what takes its place. A screen reader hears
+ * it start, get more time and end, never each second.
  */
 export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; input?: unknown; start?: string; held?: boolean; extend?: number; big?: string; extra?: HTMLElement[]; peers?: HTMLElement[]; reveal?: HTMLElement; onStart?: () => void; onDone: () => void }) {
   let dur = opts.seconds;
@@ -248,7 +257,15 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; in
   const peers = opts.peers ?? [];
   const extra = [...(opts.extra ?? []), ...peers];
   const actions = h('div', { class: `dq-actions dq-actions--center ${peers.length ? 'dq-actions--pair' : ''}` });
-  const el = h('div', { class: `dq-timer ${peers.length ? 'dq-timer--peers' : ''}` }, big, peers.length ? actions : null, stageEl, peers.length ? null : actions);
+  // each line is cleared, then said a moment later, so the same words twice ("15 seconds more.") are heard twice
+  const said = h('span', { class: 'dq-sr', 'aria-live': 'polite' });
+  let saying: ReturnType<typeof setTimeout> | undefined;
+  const say = (t: string) => {
+    said.textContent = '';
+    clearTimeout(saying);
+    saying = setTimeout(() => (said.textContent = t), 100);
+  };
+  const el = h('div', { class: `dq-timer ${peers.length ? 'dq-timer--peers' : ''}` }, big, peers.length ? actions : null, stageEl, peers.length ? null : actions, said);
   let t0 = -1;
   let stop: (() => void) | null = null;
   let finished = false;
@@ -328,6 +345,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; in
       stop?.();
       stop = null;
       ctx.sound('check');
+      say('Done.');
       // a countdown that ran out while the page was out of sight ends there: no late buzz when the page comes back
       if (t0 + dur >= backInSight()) ctx.buzz?.('end');
       opts.onDone();
@@ -342,6 +360,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; in
       actions.prepend(
         btn(`+${opts.extend} s`, () => {
           dur = Math.max(dur, now() - t0) + opts.extend!;
+          say(`${spoken(opts.extend!)} more.`);
           if (finished) {
             // a finished timer runs again the way it first started (a dimmed timer dims again)
             finished = false;
@@ -353,13 +372,20 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; in
     }
     opts.onStart?.();
     ctx.buzz?.('start');
+    say(`${spoken(dur)}, starting now.`);
     stop = onFrame(render);
   };
   const tapped = () => {
+    const had = document.activeElement === startB;
+    // a choice the keys started it from (a held timer's caller) stays in view: the countdown shows as far as it can below
+    const keyed = !had && document.activeElement instanceof HTMLElement && document.activeElement.matches(':focus-visible') ? document.activeElement : null;
     begin();
-    (opts.reveal ?? stageEl).scrollIntoView({ block: 'nearest', behavior: ctx.reduced() ? 'auto' : 'smooth' });
+    if (had) actions.querySelector('button')?.focus({ preventScroll: true });
+    (opts.reveal ?? stageEl).scrollIntoView({ block: 'nearest', behavior: ctx.reduced() || keyed ? 'auto' : 'smooth' });
+    keyed?.scrollIntoView({ block: 'nearest' });
   };
-  if (opts.start) actions.append(btn(opts.start, tapped, { kind: 'primary' }), ...extra);
+  const startB = opts.start ? btn(opts.start, tapped, { kind: 'primary' }) : null;
+  if (startB) actions.append(startB, ...extra);
   else if (!opts.held) begin();
   render(now());
   // running by the clock: a hidden page draws no frames, so a timer can be over before it shows Done
@@ -368,6 +394,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; in
     stop: () => {
       stop?.();
       stop = null;
+      clearTimeout(saying);
       unmount?.();
     },
     begin,

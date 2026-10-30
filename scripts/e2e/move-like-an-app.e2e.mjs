@@ -140,7 +140,7 @@ async function spoken(page, cdp) {
  * What doesn't fit on the Safe Zone screen as it stands: sideways scrolling, anything past the sides, text cut off, a
  * control that sits under the pinned bars when scrolled to, or "Talk to someone now" off screen at either end.
  */
-function fits(page, at) {
+export function fits(page, at) {
   return page.evaluate(async (at) => {
     const out = [];
     const W = innerWidth;

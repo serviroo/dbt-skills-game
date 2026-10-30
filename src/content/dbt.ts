@@ -2104,6 +2104,7 @@ export const SAFE = {
 /** "Copy your lists", on Comfort and in the Safe Zone. */
 export const LISTS_COPY = {
   open: 'Copy your lists',
+  preview: 'Your lists as plain text',
   therapist: 'For your therapist, if you want.',
   local: 'Your lists as plain text. Nothing is uploaded, and sharing them is up to you.',
   empty: 'Nothing in your lists yet.',

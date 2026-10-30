@@ -274,6 +274,44 @@ export const scenarios = {
     await ctx.close();
   },
 
+  /** Opened with the keys on one entry, then another open copy removes it: the preview and Copy go, and focus on either
+   * moves to Close, in view, rather than being lost */
+  async 'copy-lists-emptied-elsewhere'(h) {
+    const one = save({ lists: { reasons: [], comfort: [{ id: 'c1', text: 'Tea by the window', at: T }], activities: [], people: [] } });
+    const { ctx, page, errors } = await home(h, { saved: one });
+    await go(page, { name: 'comfort' });
+    await page.getByRole('button', { name: 'Copy your lists' }).focus();
+    await page.keyboard.press('Enter');
+    await page.locator('.dq-lists-copy pre').waitFor();
+    const other = await ctx.newPage();
+    await other.goto(h.server.url + '/?mute');
+    await other.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
+    await other.evaluate(() => window.__daily.go({ name: 'comfort' }));
+    const focused = () =>
+      page.evaluate(() => {
+        const a = document.activeElement;
+        const r = a?.getBoundingClientRect();
+        return { name: a?.matches('pre') ? 'the preview' : (a?.textContent?.trim() ?? 'nothing'), inBox: !!a?.closest('.dq-lists-copy'), shown: !!r && r.height > 0 && r.top >= 0 && r.bottom <= innerHeight };
+      });
+    const problems = [];
+    for (const from of ['the preview', 'Copy']) {
+      if (from === 'Copy') {
+        // the entry comes back in the other copy, then the keys move to Copy before it goes again
+        await other.getByRole('textbox', { name: 'Add to Comfort kit' }).fill('Tea by the window');
+        await other.locator('.dq-listp--comfort').getByRole('button', { name: 'Add' }).click();
+        await page.locator('.dq-lists-copy pre').waitFor();
+        await page.keyboard.press('Shift+Tab');
+      }
+      const before = await focused();
+      await other.getByRole('button', { name: 'Remove Tea by the window' }).click();
+      await page.locator('.dq-lists-copy pre').waitFor({ state: 'hidden' });
+      const after = await focused();
+      if (before.name !== from || after.name !== 'Close' || !after.inBox || !after.shown) problems.push(`the last entry went elsewhere with focus on ${before.name}: focus is now on ${after.name} (${JSON.stringify(after)})`);
+    }
+    h.expect(!problems.length && !errors.length, [...problems, ...errors].join('\n'));
+    await ctx.close();
+  },
+
   /** The therapist line once a session: whichever of the copy preview, the diary card and Settings comes first says it */
   async 'copy-lists-therapist-once'(h) {
     const { ctx, page, errors } = await home(h);

@@ -26,22 +26,26 @@ export function supportListsCopy(app: App) {
   const st = app.store;
   let said: boolean | undefined;
   const hint = p('', 'dq-small');
-  const pre = h('pre', { class: 'dq-pre dq-lists-pre', tabindex: '0', 'aria-label': LISTS_COPY.open });
+  const pre = h('pre', { class: 'dq-pre dq-lists-pre', tabindex: '0', 'aria-label': LISTS_COPY.preview });
   const empty = p(LISTS_COPY.empty, 'dq-text');
   const status = h('span', { class: 'dq-hint', 'aria-live': 'polite' });
   const render = () => {
     const text = supportListsText(st.state);
+    // the preview and Copy go with the last entry, removed here or in another open copy: focus on either moves to Close
+    const lost = !text && (document.activeElement === pre || document.activeElement === copy);
     if (pre.textContent !== text) pre.textContent = text;
     pre.classList.toggle('is-hidden', !text);
     copy.classList.toggle('is-hidden', !text);
     empty.classList.toggle('is-hidden', !!text);
+    if (lost) close.focus();
     return text;
   };
   const copy = btn(LISTS_COPY.copy, async () => {
     const text = render();
     status.textContent = text && (await copyText(text)) ? LISTS_COPY.copied : LISTS_COPY.failed;
   }, { kind: 'quiet', ic: 'copy' });
-  const box = h('div', { class: 'dq-lists-copy is-hidden', id: `dq-lists-${uid()}` }, hint, pre, empty, h('div', { class: 'dq-actions' }, copy, btn(LISTS_COPY.close, () => show(false), { kind: 'quiet' }), status));
+  const close = btn(LISTS_COPY.close, () => show(false), { kind: 'quiet' });
+  const box = h('div', { class: 'dq-lists-copy is-hidden', id: `dq-lists-${uid()}` }, hint, pre, empty, h('div', { class: 'dq-actions' }, copy, close, status));
   const open = btn(LISTS_COPY.open, () => show(box.classList.contains('is-hidden')), { kind: 'quiet', ic: 'copy' });
   open.setAttribute('aria-expanded', 'false');
   open.setAttribute('aria-controls', box.id);
@@ -52,9 +56,16 @@ export function supportListsCopy(app: App) {
     if (!on) return open.focus();
     said ??= mayMentionTherapist();
     hint.textContent = said ? `${LISTS_COPY.therapist} ${LISTS_COPY.local}` : LISTS_COPY.local;
-    render();
+    const text = render();
+    // bringing it into view can hide the button under the top bar, so focus on that button moves into the preview
+    const to = document.activeElement === open ? (text ? pre : close) : null;
+    // opened with the keys, what takes focus is brought in after the preview, from its top where the words above it
+    // fill the screen, clear of the pinned bars
+    const keyed = to && open.matches(':focus-visible') ? to : null;
+    to?.focus({ preventScroll: true });
     // on a small screen it opens below the fold
-    box.scrollIntoView({ block: 'nearest', behavior: app.reduced() ? 'auto' : 'smooth' });
+    box.scrollIntoView({ block: 'nearest', behavior: app.reduced() || keyed ? 'auto' : 'smooth' });
+    keyed?.scrollIntoView({ block: 'nearest' });
   }
   // a list changed in another open copy: the open preview follows it, and nothing else on the screen moves
   const off = st.onChange(() => {

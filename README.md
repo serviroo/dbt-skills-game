@@ -19,7 +19,8 @@ back after a long break is always fine.
   and pin your favourites to the top. Browsing and pinning never count as practice.
 - Safe Zone: a calm path for hard moments, one tap from every screen. No XP, sounds, vibration or glows in there,
   and a link to crisis lines on every screen: the US, Canada, the UK, Ireland, Australia, New Zealand and India,
-  picked from your device language and changeable in one tap.
+  picked from your device language and changeable in one tap. It works with the keyboard alone (Escape leaves) and
+  with a screen reader, and its words grow with Text size in Settings.
 - Give me a moment: a one-tap check-in when you just need to breathe, for about a minute, three, or until you're ready.
   It has an optional low hum with its own volume.
 - Diary card: a plain-text card of what you practised, made for sharing with a therapist if you want to.
@@ -29,8 +30,8 @@ back after a long break is always fine.
 - Art room and Story Room: draw or write whatever you like. Paint with glowing ink or a soft glow, and erase what
   you'd rather not keep. It all stays on your device. The Story Room's co-writer can ask you questions, toss in
   a what-if, suggest a next line or tidy up a messy bit. It's scripted and runs on your device too. Stuck on a
-  blank page? Ask for a starting point. Read mode shows the whole story at the text size you pick, and remembers it.
-  Search finds any word in your stories and notes, even offline.
+  blank page? Ask for a starting point. Read mode shows the whole story at the text size you pick, here or in
+  Settings, and remembers it. Search finds any word in your stories and notes, even offline.
   A story you downloaded can come back in as a new story. Put one of your own drawings above a chapter and it shows
   there when you read.
 - Save Crystal: a backup of your progress, stories, drawings (unfinished ones too), unfinished skill answers and

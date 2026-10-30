@@ -19,7 +19,7 @@ import { Slime } from './bubbles';
 import { inventorySection, rosterSection, brambleNap } from './roster';
 import { wardrobePanel } from './wardrobe';
 import { DEFAULT_COMPANION, DEFAULT_NAME } from '../core/you';
-import { BESIDE } from '../core/stored-names';
+import { BESIDE, READ_SIZES, type ReadSize } from '../core/stored-names';
 import { mayMentionTherapist } from '../core/session';
 import { canWrite, cleared, clearStatus, holdAll, onClearStatus, write } from '../core/cleared';
 import { siteUrl } from '../core/base';
@@ -27,6 +27,7 @@ import { clearGame } from './clear';
 import { crystalContent, makeCrystal, readCrystal, restorePreferences, restoreUnread, type Peek } from './crystal';
 import { restoreSkillDrafts } from './skilldraft';
 import { supportListsCopy } from './support-lists';
+import { keepTextSize, textSize } from './text-size';
 
 const pageHead = (title: string, sub?: string) => h('header', { class: 'dq-pagehead' }, h('h1', { class: 'dq-h1', 'data-focus': '', text: title }), sub ? p(sub, 'dq-text dq-pagesub') : null);
 
@@ -998,6 +999,9 @@ export function settingsScreen(app: App): ScreenOut {
     app.applyMotion();
     app.applySound();
     app.root.querySelectorAll('.dq-settings [aria-label="Motion"] [role="radio"]').forEach((b, i) => b.setAttribute('aria-checked', String(['system', 'reduce', 'full'][i] === s.settings.motion)));
+    // the Text size the crystal brought back (the group moves its Tab stop to it)
+    const size = textSize(app);
+    app.root.querySelectorAll('.dq-settings [aria-label="Text size"] [role="radio"]').forEach((b, i) => b.setAttribute('aria-checked', String(READ_SIZES[i] === size)));
     if (!app.opts.volume) {
       const sound = app.root.querySelector<HTMLInputElement>('.dq-settings input[role="switch"]');
       if (sound) sound.checked = s.settings.sound;
@@ -1352,6 +1356,12 @@ export function settingsScreen(app: App): ScreenOut {
             st.save();
             app.applyMotion();
           }, { labels: motionLabels, cls: 'dq-seg--3' }),
+        ),
+        h(
+          'div',
+          { class: 'dq-setting dq-setting--col' },
+          h('span', { class: 'dq-setting-l' }, h('span', { class: 'dq-setting-t', text: 'Text size' }), h('span', { class: 'dq-setting-h', text: 'Bigger words in the Safe Zone and when you read a story.' })),
+          segmented('Text size', [...READ_SIZES], textSize(app), (v) => keepTextSize(app, v as ReadSize), { labels: ['Regular', 'Larger', 'Largest'], cls: 'dq-seg--3' }),
         ),
         vibrate,
       ),

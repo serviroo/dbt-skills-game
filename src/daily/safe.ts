@@ -14,6 +14,7 @@ import { momentView } from './moment';
 import { uid } from './store';
 import { btn, chip, field, h, p, panel, typo } from './ui';
 import { supportListsCopy } from './support-lists';
+import { textSize } from './text-size';
 import { breathRing, coolChoice, pmrView, type Ctx } from './widgets';
 
 const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.userAgent));
@@ -98,7 +99,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   const top = h('h1', { class: 'dq-sr', 'data-focus': '', text: 'Safe Zone' });
   // each step's heading is said politely as it shows
   const live = h('p', { class: 'dq-sr', role: 'status', 'aria-live': 'polite' });
-  const el = h('div', { class: 'dq-safezone' }, top, foot, box, live);
+  const el = h('div', { class: 'dq-safezone', 'data-size': textSize(app) }, top, foot, box, live);
   const say = (t: string) => {
     live.textContent = '';
     const id = setTimeout(() => (live.textContent = t), 100);
@@ -279,7 +280,6 @@ export function safeScreen(app: App, route: Route): ScreenOut {
         );
       }
       case 'talk': {
-        const region = regionOf(app);
         // each button says which line it calls, so a screen reader names it in full: "Call 116 123, Samaritans"
         const action = (line: CrisisLine, l: CrisisLine['links'][number], noteId?: string) => {
           const web = l.href.startsWith('https:');
@@ -302,22 +302,48 @@ export function safeScreen(app: App, route: Route): ScreenOut {
             line.links.some((l) => l.note) ? h('div', { class: 'dq-res-acts dq-res-acts--notes' }, noted(line)) : h('div', { class: 'dq-res-acts' }, line.links.map((l) => action(line, l))),
             lead ? null : h('p', { class: 'dq-res-how', text: typo(line.how) }),
           );
-        const rows = region.lines.map((line) => row(line));
-        const nums = region.emergency;
         // the danger line says who to call, so it sits right above the buttons that call: on the emergency card, first in
         // line, when there is a number, and first among the choices when there isn't
         const dangerLine = (t: string) => p(t, `dq-text dq-sz-advice ${danger ? 'dq-sz-danger' : ''}`);
-        if (nums.length) {
-          const sos = { name: 'Emergency', how: SAFE.talk.emergency, links: nums.map((n) => ({ label: `Call ${n}`, href: `tel:${n}`, note: region.emergencyNotes?.[n] })) };
-          rows.splice(danger ? 0 : Math.min(2, rows.length), 0, row(sos, danger ? dangerLine(SAFE.talk.danger.replace('{num}', nums.join(' or '))) : undefined));
-        }
+        /** What follows the country: the words under the heading, the danger line when there's no number, the lines. */
+        const lines = (): ChildNode[] => {
+          const region = regionOf(app);
+          const rows = region.lines.map((line) => row(line));
+          const nums = region.emergency;
+          if (nums.length) {
+            const sos = { name: 'Emergency', how: SAFE.talk.emergency, links: nums.map((n) => ({ label: `Call ${n}`, href: `tel:${n}`, note: region.emergencyNotes?.[n] })) };
+            rows.splice(danger ? 0 : Math.min(2, rows.length), 0, row(sos, danger ? dangerLine(SAFE.talk.danger.replace('{num}', nums.join(' or '))) : undefined));
+          }
+          return [
+            p(region.lines.length ? SAFE.talk.text : SAFE.talk.none, 'dq-text'),
+            nums.length ? document.createComment('') : dangerLine(SAFE.talk.dangerElsewhere),
+            rows.length ? h('ul', { class: 'dq-res-list' }, rows) : document.createComment(''),
+          ];
+        };
+        let shown = lines();
+        // another country swaps only these in place (an empty comment holds the place of one it has none of), so the picker
+        // keeps focus as the arrow keys move through countries. A country picked in another open copy can take away the
+        // call or text link that has focus: focus goes to the same link among the new lines (by its name, else its
+        // number), or to the picker when the new country has none
+        const picked = () => {
+          const next = lines();
+          const was = document.activeElement;
+          const had = was instanceof HTMLAnchorElement && shown.some((n) => n.contains(was)) ? was : null;
+          shown.forEach((n, i) => n.replaceWith(next[i]));
+          shown = next;
+          if (!had) return;
+          const links = next.flatMap((n) => (n instanceof Element ? [...n.querySelectorAll<HTMLAnchorElement>('a[href]')] : []));
+          const same = links.find((a) => a.getAttribute('aria-label') === had.getAttribute('aria-label')) ?? links.find((a) => a.getAttribute('href') === had.getAttribute('href'));
+          (same ?? picker.querySelector('select'))?.focus();
+        };
+        const picker = regionPicker(app, picked);
         return swap(
           at,
-          [h3(SAFE.talk.title), p(region.lines.length ? SAFE.talk.text : SAFE.talk.none, 'dq-text')],
-          nums.length ? null : dangerLine(SAFE.talk.dangerElsewhere),
-          rows.length ? h('ul', { class: 'dq-res-list' }, rows) : null,
+          [h3(SAFE.talk.title), shown[0]],
+          shown[1],
+          shown[2],
           h('p', { class: 'dq-small' }, h('a', { href: 'https://findahelpline.com', target: '_blank', rel: 'noopener noreferrer', class: 'dq-a', text: 'findahelpline.com' }), ` ${SAFE.talk.elsewhere}`),
-          regionPicker(app, () => show('talk')),
+          picker,
           h('div', { class: 'dq-actions dq-actions--stack' }, nextBtn(at, 'Next', 'quiet'), btn('Back to breathing', () => show('breathe'), { kind: 'quiet' })),
         );
       }

@@ -221,11 +221,18 @@ export class App {
     const pop = (e: PopStateEvent) => this.popped(e.state);
     window.addEventListener('popstate', pop);
     this.offs.push(() => window.removeEventListener('popstate', pop));
-    // Escape closes what is open on top, like Back; a sheet that handles its own Escape stops it first
+    // Escape closes what is open on top, like Back; a sheet that handles its own Escape stops it first. With nothing
+    // open, it leaves the Safe Zone the way Leave does. An Escape that ends composing a word (typing Japanese, say) only
+    // ends that
     const esc = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || e.defaultPrevented || !this.sheets.length) return;
-      e.preventDefault();
-      this.closeTop();
+      if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing) return;
+      if (this.sheets.length) {
+        e.preventDefault();
+        this.closeTop();
+      } else if (this.route.name === 'safe') {
+        e.preventDefault();
+        this.go({ name: 'hub' });
+      }
     };
     window.addEventListener('keydown', esc);
     this.offs.push(() => window.removeEventListener('keydown', esc));
