@@ -1,9 +1,11 @@
-// The build draws icons on the requested renderer: one lost context recovers, repeated loss fails.
+// The build draws icons on the requested renderer: one lost context recovers, repeated loss fails, and a full draw
+// stamps the code it drew with.
 import { execFile } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -62,6 +64,50 @@ export const scenarios = {
     expect(Object.keys(want).every((f) => got[f] === want[f]) && Object.keys(got).length === Object.keys(want).length, 'icons drawn after a lost context differ: ' + Object.keys(want).filter((f) => got[f] !== want[f]).join(', '));
     expect(/WebGL context lost, drawing it again \(fresh page\)/.test(run.stderr), 'the context was never lost, so the retry went untested: ' + run.stderr);
     expect(/wrote \d+ images/.test(run.stdout), 'the icon run did not finish: ' + run.stdout);
+  },
+
+  async 'icons-stamp-the-code-they-were-drawn-with'({ expect }) {
+    // a copy of the drawing code with one small icon to draw, so the full draws that write the stamp stay short
+    const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'lantern-icons-stamp-'));
+    try {
+      fs.mkdirSync(path.join(copy, 'scripts'));
+      fs.symlinkSync(path.join(root, 'node_modules'), path.join(copy, 'node_modules'));
+      for (const f of ['icons.mjs', 'gl.mjs']) fs.copyFileSync(path.join(root, 'scripts', f), path.join(copy, 'scripts', f));
+      let source = fs.readFileSync(path.join(root, 'scripts/pwa-spec.mjs'), 'utf8');
+      for (const [list, keep] of [['ICONS', "[{ file: 'icons/favicon-32.png', size: 32, kind: 'tiny' }]"], ['SPLASH_DEVICES', '[]']]) {
+        const whole = new RegExp(`export const ${list} = \\[[\\s\\S]*?\\n\\];`);
+        expect(whole.test(source), `scripts/pwa-spec.mjs no longer writes ${list} as one array, so this copy can't shorten it`);
+        source = source.replace(whole, `export const ${list} = ${keep};`);
+      }
+      fs.writeFileSync(path.join(copy, 'scripts/pwa-spec.mjs'), source);
+      const spec = await import(pathToFileURL(path.join(copy, 'scripts/pwa-spec.mjs')).href);
+      const script = path.join(copy, 'scripts/icons.mjs');
+      const stamp = () => fs.readFileSync(spec.DRAWN_FROM, 'utf8').trim();
+
+      await runIconChild([script, '--quiet']);
+      const drawn = spec.drawnFrom();
+      expect(stamp() === drawn, 'a full draw did not stamp the code it drew with');
+
+      // edited once the drawing has begun, the images are still the old code's, so the stamp has to stay the old code's
+      let edited = false;
+      await new Promise((resolve, reject) => {
+        const child = execFile(process.execPath, [script, '--quiet'], { cwd: root, encoding: 'utf8', timeout: ICON_DRAW_TIMEOUT_MS, killSignal: 'SIGKILL' }, (e, stdout, stderr) =>
+          e ? reject(new Error(`icon child failed\nstdout:\n${stdout}\nstderr:\n${stderr}`, { cause: e })) : resolve());
+        let said = '';
+        child.stdout.on('data', (d) => {
+          said += d;
+          if (!edited && /renderer:/.test(said)) {
+            fs.appendFileSync(script, '// edited while it draws\n');
+            edited = true;
+          }
+        });
+      });
+      expect(edited, 'the second draw never said which renderer it drew with, so it was never edited mid-draw');
+      expect(spec.drawnFrom() !== drawn, 'the edit did not change what the images are drawn from');
+      expect(stamp() === drawn, 'an edit made while the icons were drawn was stamped as drawn, so no build would redraw them');
+    } finally {
+      fs.rmSync(copy, { recursive: true, force: true });
+    }
   },
 
 };

@@ -2,17 +2,21 @@
 // node scripts/icons.mjs [--software] [--out=public] [--only=icons|splash] [--sheet=qa/out/pwa/icon-src] [--lose-context-at=<n>] [--lose-context-times=<k>]
 // A lost WebGL context redraws that image once on a fresh page, keeping the requested renderer.
 // --lose-context-at=<n> (tests) loses the context on the nth image's first <k> draws (default 1).
+// Drawing every image into public/ records what drew them in scripts/icons.stamp, so a build redraws them only after
+// this script or the list of images changes.
 import { chromium } from 'playwright';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { ICONS, splashImages } from './pwa-spec.mjs';
+import { DRAWN_FROM, ICONS, drawnFrom, splashImages } from './pwa-spec.mjs';
 import { glArgs, checkRenderer } from './gl.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const flags = Object.fromEntries(process.argv.slice(2).filter((a) => a.startsWith('--')).map((a) => { const [k, v = 'true'] = a.slice(2).split('='); return [k, v]; }));
 const outDir = path.resolve(root, flags.out ?? 'public');
+// read before drawing, so an edit made while it draws is never stamped as drawn
+const source = drawnFrom();
 
 const FRAG = /* glsl */ `
 precision highp float;
@@ -245,6 +249,7 @@ try {
     if (!flags.quiet) console.log(`${j.file}  ${j.w}x${j.h}  ${(size / 1024).toFixed(1)} KB`);
   }
   console.log(`wrote ${jobs.length} images (${(total / 1024).toFixed(0)} KB) to ${path.relative(root, outDir) || '.'}`);
+  if (!flags.only && outDir === path.join(root, 'public')) fs.writeFileSync(DRAWN_FROM, source + '\n');
 } finally {
   await browser.close();
 }

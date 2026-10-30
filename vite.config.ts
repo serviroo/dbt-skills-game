@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { writeServiceWorker } from './scripts/sw-build.mjs';
-import { CSP, ICONS, headersFile, splashImages, splashLinkTags } from './scripts/pwa-spec.mjs';
+import { CSP, DRAWN_FROM, ICONS, drawnFrom, headersFile, splashImages, splashLinkTags } from './scripts/pwa-spec.mjs';
 
 function basePath(): string {
   const raw = process.env.BASE_PATH?.trim();
@@ -44,9 +44,8 @@ function pwa(): Plugin {
       if (!build) return;
       const script = path.join(root, 'scripts/icons.mjs');
       const outputs = [...ICONS.map((i) => i.file), ...splashImages().map((s) => s.file)].map((f) => path.join(root, 'public', f));
-      const stamp = fs.statSync(script).mtimeMs;
-      const stale = outputs.some((f) => !fs.existsSync(f) || fs.statSync(f).mtimeMs < stamp);
-      if (stale) {
+      const drawn = fs.existsSync(DRAWN_FROM) ? fs.readFileSync(DRAWN_FROM, 'utf8').trim() : null;
+      if (drawn !== drawnFrom() || outputs.some((f) => !fs.existsSync(f))) {
         const r = spawnSync(process.execPath, [script, '--quiet'], { cwd: root, stdio: 'inherit' });
         if (r.status !== 0) this.error('scripts/icons.mjs failed; the PWA icons could not be drawn');
       }

@@ -1,4 +1,10 @@
 // Single source of truth for the PWA images: scripts/icons.mjs draws them, the Vite plugin links the splash screens.
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
 
 export const ICONS = [
   { file: 'icons/apple-touch-icon-180.png', size: 180, kind: 'any' },
@@ -40,6 +46,18 @@ export function splashImages() {
     }
   }
   return out;
+}
+
+// A checkout gives each file the time it was written, so file times can't tell whether the images are older than the
+// code that draws them. A full draw into public/ records what it drew them from here instead, and the build redraws
+// them only when that has changed.
+export const DRAWN_FROM = path.join(here, 'icons.stamp');
+
+/** What the images in public/ are drawn from: scripts/icons.mjs and the list of images it draws. */
+export function drawnFrom() {
+  const script = fs.readFileSync(path.join(here, 'icons.mjs'), 'utf8').replace(/\r\n/g, '\n');
+  const images = [...ICONS.map((i) => [i.file, i.size, i.kind]), ...splashImages().map((s) => [s.file, s.width, s.height])];
+  return crypto.createHash('sha256').update(script).update(JSON.stringify(images)).digest('hex');
 }
 
 export function splashLinkTags(base = './') {
