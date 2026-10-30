@@ -245,6 +245,14 @@
   text-align: left;
   -webkit-tap-highlight-color: transparent;
 }
+/* a phone zoomed to 200% (260 CSS pixels wide or less), where each label sits above its value: the title takes its full
+   tap height in the line instead of reaching into the label under it */
+@media (max-width: 260px) {
+  .w2-title-btn {
+    margin-top: 0;
+    margin-bottom: 0;
+  }
+}
 .w2-title-t {
   text-shadow: 0 0 10px rgba(201, 164, 92, 0.35);
 }
@@ -949,6 +957,14 @@
   }
   .w2-wopt {
     padding: 6px;
+  }
+}
+/* a phone zoomed to 200% (260 CSS pixels wide or less): one look a row, each wide enough for its name and preview */
+@media (max-width: 260px) {
+  .w2-wopts,
+  .w2-wgroup--cardBack .w2-wopts,
+  .w2-wgroup--plate .w2-wopts {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

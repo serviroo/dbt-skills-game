@@ -1,4 +1,5 @@
 import { installAudioRecorder, audioReady } from './audio-recorder.mjs';
+import { settle } from './layout-fit.e2e.mjs';
 const SAFARI = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
 const TALL = { width: 390, height: 844 };
 const SMALL = { width: 320, height: 568 };
@@ -13,8 +14,9 @@ const dayKey = (ms) => {
   const d = new Date(ms - 6 * 3600e3);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
-function returning(xp = 0) {
-  const t = Date.now() - 86400e3;
+/** A save last visited `ago` days back (two or more makes Home's gift a welcome back). */
+function returning(xp = 0, ago = 1) {
+  const t = Date.now() - ago * 86400e3;
   const day = dayKey(t);
   const events = [{ id: 'me92-visit', t, day, k: 'visit', xp: 10 }];
   if (xp) events.push({ id: 'me92-rest', t: t + 1, day, k: 'rest', xp });
@@ -165,6 +167,15 @@ function step() {
 
 async function enterSafe(h, page, label, before) {
   const c = step();
+  // one tap away whatever is open: the Safe Zone button shows whole, and a tap on its middle reaches it
+  const button = await page.evaluate(() => {
+    const b = document.querySelector('header .dq-safe');
+    const r = b.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return { whole: r.left >= -0.5 && r.top >= -0.5 && r.right <= innerWidth + 0.5 && r.bottom <= innerHeight + 0.5, hit: hit && !b.contains(hit) ? `${hit.tagName.toLowerCase()}.${[...hit.classList].join('.')}` : null, at: [r.left, r.top, r.right, r.bottom].map(Math.round).join(', ') };
+  });
+  c.ok(button.whole && !button.hit, `${label}: the Safe Zone button at ${button.at} in ${page.viewportSize().width}x${page.viewportSize().height} is ${button.whole ? '' : 'not whole on screen'}${!button.whole && button.hit ? ' and ' : ''}${button.hit ? `under ${button.hit}` : ''}`);
+  if (!button.whole || button.hit) c.end();
   await page.locator('header .dq-safe').click({ timeout: 4000 });
   const s = await probe(page);
   c.ok(s.route === 'safe', `${label}: route is ${s.route}, not the Safe Zone`);
@@ -220,6 +231,27 @@ async function leaveSafe(h, page, label, before) {
   return s;
 }
 
+/** A rank window's marker rests under the new letter (the title's, under the last), in whichever row the ladder wraps
+ * it to, and stays there when the phone turns. */
+async function markerUnder(page) {
+  const look = () =>
+    page.evaluate(() => {
+      const m = document.querySelector('.dq-sw .sw-marker').getBoundingClientRect();
+      const pip = (document.querySelector('.dq-sw .sw-pip-new')?.parentElement ?? [...document.querySelectorAll('.dq-sw .sw-pip')].at(-1)).getBoundingClientRect();
+      // edge to edge with its letter, just below it
+      const under = Math.abs(m.left - pip.left) <= 0.5 && Math.abs(m.right - pip.right) <= 0.5 && m.top >= pip.bottom - 0.5 && m.top <= pip.bottom + pip.height / 2;
+      return under ? [] : [`the rank marker at ${[m.left, m.right, m.top].map((v) => v.toFixed(1)).join(', ')} is not under the new letter at ${[pip.left, pip.right, pip.bottom].map((v) => v.toFixed(1)).join(', ')}`];
+    });
+  const out = await look();
+  const v = page.viewportSize();
+  for (const size of [{ width: v.height, height: v.width }, v]) {
+    await page.setViewportSize(size);
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    out.push(...(await look()).map((p) => `turned to ${size.width}x${size.height}: ${p}`));
+  }
+  return out;
+}
+
 const WINDOWS = {
   gift: {
     save: () => returning(),
@@ -231,9 +263,11 @@ const WINDOWS = {
       await page.locator('.dq-sw').waitFor({ state: 'visible', timeout: 5000 });
       const tap = async () => {
         const p = await page.evaluate(() => {
+          // the middle of the part that shows: a window taller than the room scrolls in its layer
           const r = document.querySelector('.dq-sw .sw-plate').getBoundingClientRect();
+          const l = document.querySelector('.dq-sw').parentElement.getBoundingClientRect();
           const x = r.x + r.width / 2;
-          const y = r.y + r.height / 2;
+          const y = (Math.max(r.top, l.top) + Math.min(r.bottom, l.bottom, innerHeight)) / 2;
           return { x, y, hit: !!document.elementFromPoint(x, y)?.closest('.dq-sw') };
         });
         h.expect(p.hit, 'gift: the window is not what a tap on it reaches');
@@ -251,8 +285,17 @@ const WINDOWS = {
     },
   },
   welcome: { save: () => null, open: async () => {} },
+  'welcome-back': {
+    save: () => returning(0, 3),
+    open: (page) => page.locator('.dq-chest').click(),
+    check: async (page) => {
+      const title = (await page.locator('.dq-sw .sw-title').textContent()).trim();
+      return /^welcome back$/i.test(title) ? [] : [`the gift after three days away opened as "${title}", not Welcome back`];
+    },
+  },
   rank: {
     save: () => returning(150),
+    check: markerUnder,
     open: async (page) => {
       await page.evaluate(() => window.__daily.go({ name: 'library' }));
       await page.locator('header .dq-back').click();
@@ -261,6 +304,21 @@ const WINDOWS = {
       const r = await page.evaluate(() => ({ rank: window.__daily.store.derived().rank, seen: window.__daily.store.state.flags.rankSeen }));
       h.expect(r.rank >= 1 && r.seen === r.rank, `rank: the new rank is not kept (${JSON.stringify(r)})`);
     },
+  },
+  warden: {
+    save: () => {
+      const s = JSON.parse(returning());
+      const at = s.events[0];
+      // the title's 6,000 XP in the most a saved event may carry (500), with every rank already seen
+      for (let i = 0; i < 12; i++) s.events.push({ ...at, id: `me92-warden-${i}`, t: at.t + i + 1, k: 'rest', xp: 500 });
+      s.flags.rankSeen = 5;
+      return JSON.stringify(s);
+    },
+    open: async (page) => {
+      await page.evaluate(() => window.__daily.go({ name: 'library' }));
+      await page.locator('header .dq-back').click();
+    },
+    check: markerUnder,
   },
   'story-delete': {
     save: () => returning(),
@@ -285,6 +343,36 @@ const WINDOWS = {
       h.expect(kept, 'story-delete: the story was deleted after the confirm window was closed by the Safe Zone');
     },
   },
+  // sheets: next to the page and under the top bar
+  'story-chapters': {
+    save: () => returning(),
+    sel: '.st-sheet',
+    sheet: true,
+    open: async (page) => {
+      await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const { story } = await storyStore(window.__daily.store.key).create('Kept story');
+        window.__daily.go({ name: 'write', id: story.id });
+      });
+      await page.locator('.st-chbtn').click({ timeout: 10000 });
+    },
+  },
+  'art-name': {
+    save: () => returning(),
+    sel: '.dq-sheet:not(.is-hidden)',
+    sheet: true,
+    open: async (page) => {
+      await page.evaluate(() => window.__daily.go({ name: 'draw', kind: 'ally' }));
+      await page.locator('.dq-draw-frame').waitFor({ timeout: 10000 });
+      await settle(page);
+      const pad = await page.locator('.dq-draw-frame').boundingBox();
+      await page.mouse.move(pad.x + pad.width * 0.3, pad.y + pad.height * 0.3);
+      await page.mouse.down();
+      await page.mouse.move(pad.x + pad.width * 0.6, pad.y + pad.height * 0.5, { steps: 8 });
+      await page.mouse.up();
+      await page.locator('.dq-save').click();
+    },
+  },
   'install-hint': {
     save: () => returning(),
     ua: SAFARI,
@@ -296,6 +384,76 @@ const WINDOWS = {
   },
 };
 
+/** A window has settled: its typing and reveals are done; only endless effects, such as the bars' glow, still run. */
+export const isSettled = (sel) =>
+  document
+    .querySelector(sel)
+    .getAnimations({ subtree: true })
+    .every((a) => a instanceof CSSTransition || a instanceof CSSAnimation || a.playState === 'finished' || a.effect.getComputedTiming().endTime === Infinity);
+
+/**
+ * What of a Lantern window doesn't show, scrolled only the way its layer lets the player, up and down: the window
+ * running past the sides, one of its neon bars (the glowing bar itself: the faint circuit lines beside it reach past a
+ * phone's edge, as designed) or buttons not whole on screen and inside every box that clips it, or any word a player can
+ * see, its title and headings included, cut off at the sides.
+ */
+export const windowCut = (page, sel) =>
+  page.evaluate(async (sel) => {
+    const win = document.querySelector(sel);
+    const layer = win.parentElement;
+    const paint = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    // how much of e shows: inside the screen and inside every box around it that clips
+    const shows = (e) => {
+      const r = e.getBoundingClientRect();
+      let [l, t, rt, b] = [Math.max(r.left, 0), Math.max(r.top, 0), Math.min(r.right, innerWidth), Math.min(r.bottom, innerHeight)];
+      for (let p = e.parentElement; p; p = p.parentElement) {
+        const cs = getComputedStyle(p);
+        if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
+        const q = p.getBoundingClientRect();
+        const [x, y] = [q.left + p.clientLeft, q.top + p.clientTop];
+        [l, t, rt, b] = [Math.max(l, x), Math.max(t, y), Math.min(rt, x + p.clientWidth), Math.min(b, y + p.clientHeight)];
+      }
+      return { r, w: rt - l, h: b - t };
+    };
+    const name = (e) => (e.matches('.core') ? `its ${e.closest('.sw-bar--top') ? 'top' : 'bottom'} bar` : `"${e.textContent.trim()}"`);
+    for (const s of [layer, ...win.querySelectorAll('*')]) s.scrollLeft = 0;
+    layer.scrollTop = 0;
+    await paint();
+    const out = [];
+    const all = shows(win);
+    if (all.w < all.r.width - 1) out.push(`it runs past the sides (${Math.round(all.r.left)} to ${Math.round(all.r.right)} of ${innerWidth})`);
+    for (const e of [...win.querySelectorAll('.sw-bar > .core'), ...win.querySelectorAll('button')]) {
+      if (!e.checkVisibility({ checkVisibilityCSS: true })) continue;
+      const r = e.getBoundingClientRect();
+      const room = layer.getBoundingClientRect().top + layer.clientTop;
+      if (r.top < room) layer.scrollTop -= room - r.top;
+      else if (r.bottom > room + layer.clientHeight) layer.scrollTop += r.bottom - room - layer.clientHeight;
+      await paint();
+      const s = shows(e);
+      if (s.w < s.r.width - 1 || s.h < s.r.height - 1) out.push(`${name(e)} doesn't show whole (${[s.r.left, s.r.top, s.r.right, s.r.bottom].map(Math.round).join(', ')})`);
+    }
+    // and no word a player can see, its title, headings and rows included, is cut off at the sides
+    const walk = document.createTreeWalker(win, NodeFilter.SHOW_TEXT);
+    for (let t = walk.nextNode(); t; t = walk.nextNode()) {
+      const el = t.parentElement;
+      if (!t.data.trim() || !el.checkVisibility({ checkVisibilityCSS: true, opacityProperty: true })) continue;
+      const range = document.createRange();
+      range.selectNodeContents(t);
+      const clipped = [...range.getClientRects()].some((r) => {
+        let [l, rt] = [Math.max(r.left, 0), Math.min(r.right, innerWidth)];
+        for (let p = el; p; p = p.parentElement) {
+          if (getComputedStyle(p).overflowX === 'visible') continue;
+          const q = p.getBoundingClientRect();
+          [l, rt] = [Math.max(l, q.left + p.clientLeft), Math.min(rt, q.left + p.clientLeft + p.clientWidth)];
+        }
+        return rt - l < r.width - 1;
+      });
+      if (clipped) out.push(`"${(el.closest('.sw-title') ?? el).textContent.trim().slice(0, 32)}" is cut off at the side`);
+    }
+    layer.scrollTop = 0;
+    return [...new Set(out)];
+  }, sel);
+
 async function windowCase(h, kind, { viewport, reduced = false, score = true }) {
   const w = WINDOWS[kind];
   const tag = `${kind}-${viewport.width}x${viewport.height}${reduced ? '-reduced' : ''}`;
@@ -304,7 +462,10 @@ async function windowCase(h, kind, { viewport, reduced = false, score = true }) 
     h.expect(await page.evaluate(() => !!window.__daily.opts.sound), `${tag}: no sound callback to watch`);
     await w.open(page);
     await page.locator(w.sel ?? '.dq-sw').first().waitFor({ state: 'visible', timeout: 12000 });
-    await h.sleep(400);
+    // every word typed in and every reveal done, so all of it is measured
+    await page.waitForFunction(isSettled, w.sel ?? '.dq-sw', { polling: 'raf', timeout: 15000 });
+    const cut = w.sheet ? [] : [...(await windowCut(page, w.sel ?? '.dq-sw')), ...((await w.check?.(page)) ?? [])];
+    h.expect(!cut.length, `${tag}: the window doesn't show whole: ${cut.join('; ')}`);
     const before = await probe(page);
     await h.shot(page, `me92-${tag}-1-window`);
     await enterSafe(h, page, tag, before);
@@ -328,9 +489,9 @@ async function windowCase(h, kind, { viewport, reduced = false, score = true }) 
   }
 }
 
-async function allWindows(h, opts) {
+async function allWindows(h, opts, kinds = Object.keys(WINDOWS)) {
   const failed = [];
-  for (const kind of Object.keys(WINDOWS)) {
+  for (const kind of kinds) {
     try {
       await windowCase(h, kind, opts);
     } catch (e) {
@@ -411,7 +572,7 @@ const SHOWN = {
   talk: ['.dq-res-list > li:first-child .dq-res-a:first-child', 1],
   close: [ACTS, 2],
 };
-const listed = (n, k) => Array.from({ length: n }, (_, i) => ({ id: `me92-${k}${i}`, text: `${k} ${i + 1}, a few words long`, at: Date.now() - 86400e3 }));
+export const listed = (n, k) => Array.from({ length: n }, (_, i) => ({ id: `me92-${k}${i}`, text: `${k} ${i + 1}, a few words long`, at: Date.now() - 86400e3 }));
 const filled = () => JSON.stringify({ ...JSON.parse(returning()), lists: { reasons: listed(3, 'reason'), comfort: listed(3, 'comfort'), activities: [], people: [{ id: 'me92-p1', name: 'Sam', phone: '+1 555 0100', at: Date.now() - 86400e3 }, { id: 'me92-p2', name: 'Robin', phone: '', at: Date.now() - 86400e3 }] } });
 // an iPhone with a notch held sideways (the smallest is 812x375): 47 px each side, 21 px for the home bar
 const NOTCH = { top: 0, left: 47, right: 47, bottom: 21 };
@@ -555,6 +716,31 @@ async function everyScreen(h, viewport, { insets } = {}) {
 }
 
 export const scenarios = {
+  /** a tap while the Lantern still types the rank-up line, after the marker has come to rest in its new letter, only
+   * finishes the typing: the marker stays edge to edge under that letter */
+  'rank-marker-stays-on-tap': async (h) => {
+    const { ctx, page, errors } = await boot(h, { save: WINDOWS.rank.save(), viewport: { width: 390, height: 844 } });
+    try {
+      await WINDOWS.rank.open(page);
+      await page.waitForFunction(() => document.querySelector('.dq-sw .sw-marker')?.parentElement?.matches('.sw-pip'), null, { polling: 'raf', timeout: 15000 });
+      const typing = await page.evaluate(() => {
+        const next = document.querySelector('.dq-sw .sw-next');
+        return !!next && !next.getAnimations().length;
+      });
+      h.expect(typing, 'rank: the Lantern finished typing before the marker came to rest, so no tap could come between');
+      const p = await page.evaluate(() => {
+        const r = document.querySelector('.dq-sw .sw-plate').getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      });
+      await page.mouse.click(p.x, p.y);
+      await page.waitForFunction(isSettled, '.dq-sw', { polling: 'raf', timeout: 15000 });
+      const off = await markerUnder(page);
+      h.expect(!off.length, `rank, tapped while the line types: ${off.join('; ')}`);
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
   'safe-zone-stays-quiet': async (h) => {
     const { ctx, page, errors } = await boot(h, { save: returning() });
     const c = step();
@@ -580,6 +766,10 @@ export const scenarios = {
   'safe-zone-over-windows-320-reduced': (h) => allWindows(h, { viewport: SMALL, reduced: true, score: false }),
   'safe-zone-over-windows-landscape': (h) => allWindows(h, { viewport: WIDE, score: false }),
   'safe-zone-over-windows-landscape-reduced': (h) => allWindows(h, { viewport: WIDE, reduced: true, score: false }),
+  // at 200% zoom (the page laid out at half the size), on each phone either way up, the windows: the sheets sit under the
+  // top bar by their layer at every size, and the drawing page and story editor that open them are wider than a phone at
+  // 200% (their own fit, not the Safe Zone's)
+  ...Object.fromEntries([TALL, SMALL, WIDE, SHORT].map((v) => [`safe-zone-over-windows-${v.width}x${v.height}-200`, (h) => allWindows(h, { viewport: { width: v.width / 2, height: v.height / 2 }, score: false }, Object.keys(WINDOWS).filter((k) => !WINDOWS[k].sheet))])),
   'safe-zone-from-every-route': async (h) => {
     await allRoutes(h, { viewport: TALL });
     await allRoutes(h, { viewport: SMALL, reduced: true });

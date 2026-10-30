@@ -1,13 +1,23 @@
 /* Lantern window. */
 
+/* a window sits centred in the room at its own width, narrower only where the room is, and starts at its top and
+   scrolls where it's taller; the padding above and below holds its neon bars, which reach 24 px past it */
 .sw-layer {
   position: fixed;
   inset: 0;
   display: grid;
-  place-items: center;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  justify-items: center;
   pointer-events: none;
   z-index: 20;
-  padding: calc(var(--safe-top) + 16px) 14px calc(var(--safe-bottom) + 16px);
+  padding: calc(var(--safe-top) + 32px) 14px calc(var(--safe-bottom) + 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.sw-layer > .sw {
+  max-width: 100%;
+  margin-block: auto;
 }
 
 .sw {
@@ -191,6 +201,7 @@
   font-size: clamp(15px, 1.12em, 24px);
   letter-spacing: 0.14em;
   text-transform: uppercase;
+  text-align: center;
   color: var(--title);
   white-space: nowrap;
   text-shadow:
@@ -374,6 +385,7 @@
 /* ---- actions + next indicator ---- */
 .sw-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
   gap: 12px;
   margin-top: clamp(18px, 4.5vw, 26px);
@@ -675,7 +687,61 @@
   background: #89cf9d;
   box-shadow: 0 0 6px rgba(137, 207, 157, 0.8);
 }
+/* resting inside its letter (src/ui/rank-reveal.ts), it is placed from that letter's border, as its move ended */
+.sw-pip > .sw-marker {
+  left: -1px;
+  bottom: calc(-0.65em - 1px);
+}
 
+/* a screen narrower than a window's own width (a phone under 350 px wide, or one zoomed to 200%): its title and big
+   line wrap rather than run past it */
+@media (max-width: 349.98px) {
+  .sw-title,
+  .sw-big {
+    white-space: normal;
+  }
+}
+
+/* a phone zoomed to 200% (260 CSS pixels wide or less): the plate gives its words the room; the title sits under its
+   icon in smaller, closer capitals; the big level line scales to the plate, each row's value takes the next line where
+   it must, the rank ladder wraps, with room between its rows for the marker under a letter, and a button's word takes
+   smaller, closer capitals, so every word fits the narrowest window */
+@media (max-width: 260px) {
+  .sw-plate {
+    padding: 14px 10px 18px;
+  }
+  .sw-chip {
+    flex-direction: column;
+    align-items: center;
+  }
+  .sw-title {
+    padding: 4px 8px;
+    font-size: 13px;
+    letter-spacing: 0.06em;
+  }
+  .sw-big {
+    font-size: min(34px, 15vw);
+  }
+  .sw-row {
+    flex-wrap: wrap;
+    gap: 0 1em;
+  }
+  .sw-row .v {
+    margin-left: auto;
+    white-space: normal;
+  }
+  .sw-ladder {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.9em 0.35em;
+  }
+  .sw-btn {
+    max-width: 100%;
+    padding: 0.85em 0.9em;
+    font-size: 13px;
+    letter-spacing: 0.06em;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .sw-bar .plasma {
     animation: none !important;

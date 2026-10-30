@@ -296,6 +296,34 @@
   width: 22px;
   height: 22px;
 }
+/* outside the Safe Zone the bar wraps where it must (a phone at 200% zoom), its right-hand buttons one by one, so the Safe
+   Zone button always shows whole and full size, at the right; on one line it looks as it always has */
+.dq:not([data-screen='safe']) .dq-top {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 2px;
+}
+.dq:not([data-screen='safe']) .dq-top > :first-child {
+  margin-right: auto;
+}
+.dq:not([data-screen='safe']) .dq-top-end {
+  display: contents;
+}
+/* a phone at 200% zoom, held either way (300 CSS pixels wide or less): the back control keeps only its arrow and Home's
+   name only its mark, so the bar takes as few rows as its buttons allow */
+@media (max-width: 300px) {
+  .dq-brand > span:last-child {
+    display: none;
+  }
+  .dq:not([data-screen='safe']) .dq-back {
+    justify-content: center;
+    min-width: 44px;
+    padding: 0;
+  }
+  .dq:not([data-screen='safe']) .dq-back span:last-child {
+    display: none;
+  }
+}
 .dq-icbtn {
   width: 44px;
   height: 44px;
@@ -341,7 +369,8 @@
   font-family: var(--font-display);
   font-weight: 600;
   font-optical-sizing: auto;
-  font-size: 38px;
+  /* the longest one-word title, Settings, still fits a phone at 200% zoom */
+  font-size: min(38px, 20vw);
   line-height: 1.08;
   letter-spacing: 0.01em;
   color: #e4f2ff;
@@ -643,6 +672,24 @@
   opacity: 0.45;
   cursor: default;
 }
+/* a phone zoomed to 200% (260 CSS pixels wide or less): the page, its panels and buttons give their words the room, as
+   the Safe Zone does; a button's label already says what it does, so its icon steps aside */
+@media (max-width: 260px) {
+  .dq-view {
+    padding-right: max(10px, var(--safe-right));
+    padding-left: max(10px, var(--safe-left));
+  }
+  .dq {
+    --pad: 12px;
+  }
+  .dq-btn {
+    padding: 0 10px;
+    letter-spacing: 0.06em;
+  }
+  .dq-btn-ic {
+    display: none;
+  }
+}
 
 .dq-opts {
   display: flex;
@@ -669,6 +716,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  /* never wider than its row: a long choice's words wrap on a phone at 200% zoom */
+  max-width: 100%;
   min-height: 46px;
   padding: 9px 16px;
   font: 400 16.5px/1.3 var(--font-ui);
@@ -768,6 +817,20 @@
 .dq-seg--range .dq-seg-b {
   font-size: 14.5px;
   letter-spacing: 0.02em;
+}
+/* a phone zoomed to 200% (260 CSS pixels wide or less): Motion's three choices stack, each as wide as the row, so no
+   word runs into the next or past the screen */
+@media (max-width: 260px) {
+  .dq-seg--3 {
+    flex-direction: column;
+  }
+  .dq-seg--3 .dq-seg-b {
+    border-left: 0;
+    border-top: 1px solid rgba(125, 150, 197, 0.22);
+  }
+  .dq-seg--3 .dq-seg-b:first-child {
+    border-top: 0;
+  }
 }
 
 .dq-field {
@@ -1123,6 +1186,17 @@ textarea.dq-input {
 }
 .dq-kv.is-up dd {
   color: #bfe9ff;
+}
+/* a phone zoomed to 200% (260 CSS pixels wide or less): the crystal above the name, title and class, each label above
+   its value, so none runs past the screen */
+@media (max-width: 260px) {
+  .dq-player {
+    flex-direction: column;
+  }
+  .dq-kv {
+    flex-direction: column;
+    gap: 0;
+  }
 }
 .dq-num {
   font-variant-numeric: tabular-nums;
@@ -1545,6 +1619,9 @@ textarea.dq-input {
   .dq-quest {
     --quest-room: calc(100dvh - var(--safe-top) - var(--safe-bottom) - var(--quest-top) - 20px);
   }
+}
+/* the card beside its words and buttons wherever they have the room: not on a phone at 200% zoom, which stacks them */
+@media (orientation: landscape) and (max-height: 540px) and (min-width: 301px) {
   .dq-quest:not(.is-aside) {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
@@ -1651,6 +1728,12 @@ textarea.dq-input {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+/* a phone zoomed to 200% (260 CSS pixels wide or less): one place a row, its name and line whole */
+@media (max-width: 260px) {
+  .dq-menu {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .dq-tile {
   position: relative;
@@ -2258,8 +2341,9 @@ textarea.dq-input {
     flex: none;
   }
   /* the scroller runs to the frame's edges so the words scroll right up to its border, and the frame's bottom padding
-     comes after the last choice */
+     comes after the last choice. It holds everything it scrolls, visually hidden labels too, so the page never scrolls */
   .dq-sz-body {
+    position: relative;
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
@@ -2398,6 +2482,32 @@ textarea.dq-input {
   top: var(--dq-top, 0px);
   bottom: auto;
   padding: 0 0 12px;
+}
+/* where the page scrolls, a scroll or focus stops clear of the pinned bars: below the top bar, and above "Talk to someone
+   now" (--dq-foot, its height) or below it once it sits above the frame */
+.dq[data-screen='safe'] {
+  --sz-bar: calc(var(--dq-top, 0px) + var(--top-shade));
+  --sz-over: var(--dq-foot, 0px);
+  scroll-padding: var(--sz-bar) 0 var(--sz-over);
+}
+.dq[data-screen='safe']:has(.dq-sz-foot.is-top) {
+  scroll-padding: calc(var(--sz-bar) + var(--sz-over)) 0 0;
+}
+/* under 230px tall (a phone held sideways at 200% zoom, or with the keyboard up) the top bar and "Talk to someone now"
+   pinned together leave no room for a choice and a line of words: Talk stays pinned and the top bar scrolls away */
+@media (max-height: 230px) {
+  .dq[data-screen='safe'] {
+    --sz-bar: 0px;
+  }
+  .dq[data-screen='safe'] .dq-top {
+    position: relative;
+  }
+  .dq[data-screen='safe'] .dq-sky-top {
+    display: none;
+  }
+  .dq[data-screen='safe'] .dq-sz-foot.is-top {
+    top: 0;
+  }
 }
 /* Copy your lists: the preview reads like the lists, wraps on a phone and stays selectable */
 .dq-lists-row {
@@ -3135,6 +3245,12 @@ textarea.dq-input {
 .dq[data-screen='safe'] .dq-scrim {
   transition: none;
 }
+/* Lantern windows over the companion (src/daily/app.ts winLayer), laid out as every window layer is
+   (lantern-window.css), below the top bar, so the Safe Zone button is never under one */
+.sw-layer.dq-sw-layer {
+  inset: var(--dq-top, 0px) 0 0;
+  padding-top: 32px;
+}
 .dq.is-windowed .dq-top {
   z-index: 16;
   pointer-events: none;
@@ -3515,6 +3631,10 @@ textarea.dq-input {
     width: calc(1px + 2 * var(--pad) + (100% - 2px - 3 * var(--pad)) * 2 / 5);
     padding: 4px 0 calc(var(--safe-bottom) + 12px);
   }
+  /* so a scroll or focus needn't stop clear of it */
+  .dq[data-screen='safe'] {
+    --sz-over: 0px;
+  }
   .dq-sz-foot.is-top {
     padding: 0 0 8px;
     background: linear-gradient(180deg, rgba(7, 8, 15, 0.97) 60%, rgba(7, 8, 15, 0));
@@ -3529,8 +3649,10 @@ textarea.dq-input {
   }
 }
 /* Give me a moment inside the Safe Zone: the ring under the heading, the line, How long and Done under it; held
-   sideways the ring stays with the heading and the rest sits beside it, as on the moment's own screen */
+   sideways the ring stays with the heading and the rest sits beside it, as on the moment's own screen. The ring is never
+   taller than the room the pinned bars leave, so it shows whole once scrolled to */
 .dq-sz .dq-mo-stage {
+  max-width: calc(100dvh - var(--sz-bar, 0px) - var(--dq-foot, 0px) - 8px);
   margin: 8px auto 0;
 }
 .dq-sz .dq-moment {

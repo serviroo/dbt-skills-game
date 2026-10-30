@@ -81,6 +81,9 @@ export function showTitle(onGesture?: () => void): Promise<void> {
     };
     root.addEventListener('pointerup', onUp);
     root.addEventListener('keydown', onKey);
+    // the tap is the title's alone too: the name prompt is up before the finger's touch ends, so the mouse press and
+    // click a touch makes after it would land on whatever is under the finger (a name field, popping up the keyboard)
+    root.addEventListener('touchend', (e) => e.preventDefault());
     if (params.capture) wait(0.6).then(go);
   });
 }

@@ -74,7 +74,58 @@ function check(v, where) {
   return out;
 }
 
+/**
+ * The Daily gift and Give me a moment, on a phone at 200% zoom held either way (the page laid out at half the size): each
+ * shows whole once scrolled to, clear of the top bar, apart from the other, takes its own taps and is at least 44 px.
+ */
+function strip(page) {
+  return page.evaluate(() => {
+    const bar = document.querySelector('.dq-top').getBoundingClientRect().bottom;
+    const parts = [['the Daily gift', document.querySelector('.dq-chest')], ['Give me a moment', document.querySelector('.dq-momentbtn')]];
+    const out = [];
+    for (const [name, el] of parts) {
+      if (!el?.checkVisibility({ checkVisibilityCSS: true })) {
+        out.push(`no ${name}`);
+        continue;
+      }
+      el.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+      // the page never scrolls sideways for the player, though a script can move it there
+      for (const s of [document.scrollingElement, document.querySelector('.dq')]) s.scrollLeft = 0;
+      const r = el.getBoundingClientRect();
+      const box = [r.left, r.top, r.right, r.bottom].map(Math.round).join(', ');
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      const pts = [[cx, cy], [r.left + 4, cy], [r.right - 4, cy], [cx, r.top + 4], [cx, r.bottom - 4]];
+      if (r.top < bar - 0.5 || r.bottom > innerHeight + 0.5 || r.left < -0.5 || r.right > innerWidth + 0.5) out.push(`${name} doesn't show whole (${box} in ${innerWidth}x${innerHeight})`);
+      const missed = pts.filter(([x, y]) => !el.contains(document.elementFromPoint(x, y))).length;
+      if (missed) out.push(`something covers ${name} (${missed} of 5 points miss it, at ${box})`);
+      if (r.width < 44 || r.height < 44) out.push(`${name} is ${Math.round(r.width)}x${Math.round(r.height)}, under 44 px`);
+    }
+    const [a, b] = parts.map(([, e]) => e?.getBoundingClientRect());
+    if (a && b && a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5) out.push('the Daily gift and Give me a moment overlap');
+    return out;
+  });
+}
+
 export const scenarios = {
+  async 'home-strip-200'(h) {
+    const c = await content(h);
+    const vi = c.rotation.findIndex((q, i) => i >= 2 && !q.special);
+    const problems = [];
+    for (const vp of [{ width: 390, height: 844 }, { width: 320, height: 568 }, { width: 844, height: 390 }, { width: 568, height: 320 }]) {
+      const size = `${vp.width}x${vp.height} at 200%`;
+      const { ctx, page, errors } = await h.open(returning(h, vi), '?mute', { width: vp.width / 2, height: vp.height / 2 });
+      try {
+        await h.reachHub(page);
+        await settle(page);
+        problems.push(...(await strip(page)).map((p) => `${size}: ${p}`));
+        await h.shot(page, `home-strip-${vp.width}x${vp.height}-200`);
+        if (errors.length) problems.push(`${size}: ${errors.join('\n')}`);
+      } finally {
+        await ctx.close();
+      }
+    }
+    h.expect(!problems.length, problems.join('\n'));
+  },
   async 'home-roomy-tablets-and-sideways'(h) {
     const c = await content(h);
     const vi = c.rotation.findIndex((q, i) => i >= 2 && !q.special);

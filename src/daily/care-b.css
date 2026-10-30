@@ -209,6 +209,23 @@
     padding: 0 12px 0 10px;
   }
 }
+/* a phone at 200% zoom, held either way (300 CSS pixels wide or less): where the whole chest and Give me a moment don't
+   fit side by side, Give me a moment takes the next line, at its end, and its own words wrap if they still don't fit */
+@media (max-width: 300px) {
+  .dq-lobby {
+    flex-wrap: wrap;
+  }
+  .dq-chest {
+    flex: 1 1 0;
+    min-width: auto;
+    max-width: max-content;
+  }
+  .dq-momentbtn {
+    max-width: 100%;
+    margin-left: auto;
+    white-space: normal;
+  }
+}
 @media (min-width: 760px) {
   .dq-col--t {
     grid-column: 1 / -1;
@@ -390,10 +407,12 @@
   margin-top: auto;
   padding-top: 18px;
 }
+/* the hum fills the line beside Done; where they don't fit side by side, Done takes the next line, at its end */
 .dq-mo-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
   width: 100%;
 }
@@ -477,6 +496,21 @@
   margin: 0;
   opacity: 0;
   cursor: pointer;
+}
+/* a phone zoomed to 200% (260 CSS pixels wide or less): the lengths stack, each as wide as the row, so none is too
+   narrow to tap */
+@media (max-width: 260px) {
+  .dq-mo-len-opts {
+    flex-direction: column;
+  }
+  .dq-mo-len-o {
+    flex: none;
+    border-left: 0;
+    border-top: 1px solid rgba(125, 150, 197, 0.22);
+  }
+  .dq-mo-len-o:first-child {
+    border-top: 0;
+  }
 }
 /* gone but still holding their place, so Done stays where the thumb left it */
 .dq-mo-foot .is-gone {

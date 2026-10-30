@@ -487,6 +487,7 @@
 /* ---------- first-run names ---------- */
 .sw .np {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.9em;
   margin-top: 1.1em;
 }
@@ -501,6 +502,7 @@
   color: rgba(191, 233, 255, 0.72);
 }
 .sw .np-in {
+  min-width: 0;
   font: inherit;
   color: #eaf7ff;
   background: rgba(6, 16, 32, 0.72);
@@ -521,14 +523,17 @@
   font-size: 0.78em;
   color: rgba(191, 233, 255, 0.55);
 }
-/* short screens (a phone on its side): the two fields side by side, no hint, so the buttons stay on screen */
+/* short screens (a phone on its side): no hint, and the two fields side by side where there's room for both, so the
+   buttons stay on screen */
 @media (max-height: 480px) {
-  .sw .np {
-    grid-template-columns: 1fr 1fr;
-    gap: 0.5em 0.9em;
-    margin-top: 0.5em;
-  }
   .sw .np-hint {
     display: none;
+  }
+}
+@media (max-height: 480px) and (min-width: 400px) {
+  .sw .np {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5em 0.9em;
+    margin-top: 0.5em;
   }
 }

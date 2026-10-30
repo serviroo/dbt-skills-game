@@ -1,16 +1,24 @@
-/* Install hint: a small Lantern window resting low on the screen, near Safari's own toolbar. */
+/* Install hint: a small Lantern window resting low on the screen, near Safari's own toolbar. Over the companion it stays
+   below the top bar (--dq-top), so the Safe Zone button is never under it; taller than the room left, it starts at the
+   top of that room and scrolls. The padding above and below holds its neon bars, which reach 24 px past it. */
 .pwa-hint-layer {
   position: fixed;
-  inset: 0;
+  inset: var(--dq-top, 0px) 0 0;
   z-index: 40;
   display: grid;
-  align-items: end;
+  /* one column as wide as the room, so a window is never wider than it */
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
   justify-items: center;
-  padding: calc(var(--safe-top) + 16px) 16px calc(var(--safe-bottom) + 60px);
+  padding: calc(var(--safe-top) + 32px) 16px calc(var(--safe-bottom) + 60px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   pointer-events: none;
 }
 .pwa-hint-layer .sw {
   --w: min(calc(100vw - 44px), 420px);
+  max-width: 100%;
+  margin-top: auto;
   font-size: 16px;
 }
 .pwa-hint .sw-plate {
@@ -46,8 +54,11 @@
 .pwa-steps li:last-child {
   border-bottom: 0;
 }
+/* an icon and its name keep together on one line where they fit, and wrap inside their own box where they don't */
 .pwa-steps .nw {
-  white-space: nowrap;
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: top;
 }
 .pwa-steps .n {
   display: grid;
@@ -92,4 +103,21 @@
 .pwa-hint .sw-btn {
   font-size: 14px;
   padding: 0.85em 1.6em 0.85em 1.76em;
+}
+/* a phone zoomed to 200%: the same narrow plate and title every Lantern window takes (lantern-window.css), the whole
+   width of the room, and closer steps, so each icon and its name fit beside the step's number */
+@media (max-width: 260px) {
+  .pwa-hint-layer .sw {
+    --w: 100%;
+  }
+  .pwa-hint .sw-plate {
+    padding: 14px 10px 18px;
+  }
+  .pwa-hint .sw-title {
+    font-size: 13px;
+  }
+  .pwa-steps li {
+    gap: 0.5em;
+    padding-inline: 0;
+  }
 }

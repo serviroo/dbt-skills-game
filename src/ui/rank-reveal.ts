@@ -51,12 +51,15 @@ export function rankSpec(letter: RankLetter, line: string): WindowSpec {
     const marker = q<HTMLElement>('.sw-marker');
     const fresh = root.querySelector<HTMLElement>('.sw-pip-new');
     const ladder = q<HTMLElement>('.sw-ladder');
-    const pip = ladder.querySelector<HTMLElement>('.sw-pip')!;
-    const step = pip.offsetWidth + parseFloat(getComputedStyle(ladder).columnGap || '0');
-    const at = (i: number) => `translateX(${i * step}px)`;
+    const slots = [...ladder.querySelectorAll<HTMLElement>('.sw-pip')];
+    // from under one letter to under another, in whichever row a narrow window wraps each (the marker starts under the
+    // ladder's last row)
+    const at = (i: number) => `translate(${slots[i].offsetLeft}px, ${slots[i].offsetTop + slots[i].offsetHeight - ladder.offsetHeight}px)`;
     const to = isTitle ? prev : tier;
+    // then it rests inside its letter, so it stays under it when the window reflows (a phone turned at 200% rewraps it)
+    const rest = () => slots[to].append(marker);
     if (reduced) {
-      marker.style.transform = at(to);
+      rest();
       if (fresh) fresh.style.opacity = '1';
       return 0;
     }
@@ -80,11 +83,19 @@ export function rankSpec(letter: RankLetter, line: string): WindowSpec {
     });
     // R3 (beat 1): the marker moves one step, from where the player was to where the player is; the new pip lights
     const mAt = fr(RANK.markerFrames);
-    animate(marker, [{ opacity: 0, transform: at(prev) }, { opacity: 1, transform: at(prev), offset: 0.001 }, { opacity: 1, transform: at(to) }], {
+    const move = animate(marker, [{ opacity: 0, transform: at(prev) }, { opacity: 1, transform: at(prev), offset: 0.001 }, { opacity: 1, transform: at(to) }], {
       duration: to === prev ? RANK.pipLightMs : RANK.markerMs,
       delay: mAt,
       easing: css(RANK.markerEase),
     });
+    // a tap that completes the typing finishes the move too; a window that goes first cancels it
+    move.finished.then(
+      () => {
+        rest();
+        move.cancel();
+      },
+      () => {},
+    );
     if (fresh) animate(fresh, [{ opacity: 0 }, { opacity: 1 }], { duration: RANK.pipLightMs, delay: mAt + (to === prev ? 0 : RANK.markerMs), easing: css(EASE.outCubic) });
     // R4 (beat 2): the line types
     return fr(RANK.lineFrames);

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { gone } from './harness.mjs';
+import { isSettled, windowCut } from './me-92-safe-zone-clean.e2e.mjs';
 
 const VIEWPORTS = [{ width: 390, height: 844 }, { width: 320, height: 568 }, { width: 844, height: 390 }];
 const PHONE = VIEWPORTS[0];
@@ -167,12 +168,105 @@ const spot = (page, sel) =>
     return { x: r.x + r.width / 2, y: r.y + r.height / 2, opacity };
   }, sel);
 
-const isSettled = (sel) =>
-  document
-    .querySelector(sel)
-    .getAnimations({ subtree: true })
-    .every((a) => a instanceof CSSTransition || a instanceof CSSAnimation || a.playState === 'finished' || a.effect.getComputedTiming().endTime === Infinity);
 const settled = (page, sel) => page.evaluate(isSettled, sel);
+
+/**
+ * Every intro window at this size, each once it has settled, with what `look(page, sel)` finds wrong with it: the name
+ * prompt and the chosen, level and quest windows the intro shows itself, and the army and unlocked windows, from later
+ * beats, opened here with the intro's own words.
+ */
+async function introWindows({ open, expect }, viewport, look) {
+  const problems = [];
+  const first = await firstRun(open, viewport);
+  try {
+    await first.page.locator('.title-screen').click();
+    const prompt = '.sw:has(#np-name)';
+    await first.page.locator(prompt).waitFor({ timeout: 30000 });
+    await first.page.waitForFunction(isSettled, prompt, { polling: 'raf', timeout: 15000 });
+    problems.push(...(await look(first.page, prompt)).map((f) => `name prompt: ${f}`));
+    expect(!first.errors.length, first.errors.join('\n'));
+  } finally {
+    await first.ctx.close();
+  }
+  const { ctx, page, errors } = await open({}, `?shot=windows&mute${LIGHT}`, viewport);
+  try {
+    await pastStartup(page);
+    await page.locator('.title-screen').click();
+    for (const kind of ['notification', 'level', 'quest']) {
+      const win = `.sw[data-kind="${kind}"]`;
+      await page.locator(win).waitFor({ timeout: 30000 });
+      const p = await spot(page, `${win} .sw-plate`);
+      // the quest's last lines show after its typing: a tap completes it, and every word with it
+      if (kind === 'quest') {
+        await page.waitForFunction((q) => Number(getComputedStyle(document.querySelector(`${q} .sw-title`)).opacity) === 1, win, { polling: 'raf' });
+        await page.mouse.click(p.x, p.y);
+      }
+      await page.waitForFunction(isSettled, win, { polling: 'raf', timeout: 15000 });
+      problems.push(...(await look(page, win)).map((f) => `${kind}: ${f}`));
+      // a tap before the Lantern has finished typing only finishes it: the window closes on one once its arrow shows
+      await page.waitForFunction((q) => document.querySelector(`${q} .sw-next`)?.getAnimations().length > 0, win, { polling: 'raf', timeout: 15000 });
+      await page.mouse.click(p.x, p.y);
+      await gone(page.locator(win), 10000);
+    }
+    for (const kind of ['army', 'unlocked']) {
+      await page.evaluate(async (kind) => {
+        const { LanternWindow, lanternLayer } = await import('/src/ui/lantern-window.ts');
+        const { WINDOWS } = await import('/src/content/intro.ts');
+        const W = WINDOWS[kind];
+        const win = new LanternWindow(lanternLayer(), { kind: kind === 'army' ? 'notification' : 'reward', title: W.title, html: W.html });
+        win.root.dataset.words = kind;
+        window.__words = win;
+        void win.open();
+      }, kind);
+      const win = `[data-words="${kind}"]`;
+      await page.locator(win).waitFor({ state: 'visible', timeout: 10000 });
+      await page.waitForFunction(isSettled, win, { polling: 'raf', timeout: 15000 });
+      problems.push(...(await look(page, win)).map((f) => `${kind}: ${f}`));
+      await page.evaluate(() => window.__words.destroy());
+    }
+    expect(!errors.length, errors.join('\n'));
+  } finally {
+    await ctx.close();
+  }
+  return problems;
+}
+
+/**
+ * How a Lantern window differs from its design where the room is wide enough for it: narrower than its own width (its
+ * --w, src/styles/lantern-window.css), or a title or big line taking more than one line.
+ */
+const asDesigned = (page, sel) =>
+  page.evaluate((sel) => {
+    const win = document.querySelector(sel);
+    const out = [];
+    const { width } = win.getBoundingClientRect();
+    win.style.maxWidth = 'none';
+    const want = win.getBoundingClientRect().width;
+    win.style.maxWidth = '';
+    if (Math.abs(width - want) > 2) out.push(`it is ${width.toFixed(1)} px wide, not the ${want.toFixed(1)} px it was designed`);
+    // the lines its words sit on: a word whose top is below the half of the line before starts a new one
+    const lines = (e) => {
+      const rects = [];
+      const walk = document.createTreeWalker(e, NodeFilter.SHOW_TEXT);
+      for (let t = walk.nextNode(); t; t = walk.nextNode()) {
+        if (!t.data.trim()) continue;
+        const range = document.createRange();
+        range.selectNodeContents(t);
+        rects.push(...[...range.getClientRects()].filter((r) => r.width > 0.5));
+      }
+      rects.sort((a, b) => a.top - b.top);
+      let n = 0;
+      let top = -Infinity;
+      let height = 0;
+      for (const r of rects) if (r.top - top > height / 2) [n, top, height] = [n + 1, r.top, r.height];
+      return n;
+    };
+    for (const e of win.querySelectorAll('.sw-title, .sw-big')) {
+      const n = lines(e);
+      if (n > 1) out.push(`"${e.textContent.trim()}" takes ${n} lines`);
+    }
+    return out;
+  }, sel);
 
 const typing = (page) => page.evaluate(() => window.__typing);
 const shown = (page) => page.waitForFunction(() => Number(getComputedStyle(document.querySelector('.sw-actions')).opacity) === 1, null, { polling: 'raf' });
@@ -1133,4 +1227,27 @@ export const scenarios = {
       await ctx.close();
     }
   },
+  // every intro window at 200% zoom (the page laid out at half the size), on each phone either way up, as windows over the
+  // companion are checked: never past the sides, its neon bars and buttons whole once scrolled to, and no word a player
+  // can see cut off
+  ...Object.fromEntries(
+    [[390, 844], [320, 568], [844, 390], [568, 320]].map(([w, ht]) => [
+      `intro-window-words-${w}x${ht}-200`,
+      async (h) => {
+        const problems = await introWindows(h, { width: w / 2, height: ht / 2 }, windowCut);
+        h.expect(!problems.length, `${w}x${ht} at 200%: ${problems.join('; ')}`);
+      },
+    ]),
+  ),
+  // at a phone's own text size, upright and on its side, every intro window is as wide as it was designed, not narrowed
+  // for the small screens and zoomed text that need it, and its title and the level window's big line each take one line
+  ...Object.fromEntries(
+    [[390, 844], [844, 390]].map(([w, ht]) => [
+      `intro-windows-as-designed-${w}x${ht}`,
+      async (h) => {
+        const problems = await introWindows(h, { width: w, height: ht }, asDesigned);
+        h.expect(!problems.length, `${w}x${ht}: ${problems.join('; ')}`);
+      },
+    ]),
+  ),
 };
