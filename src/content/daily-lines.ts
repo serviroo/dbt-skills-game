@@ -332,8 +332,11 @@ export const ART = {
   nameHint: 'Optional. You can leave it as Shadow ally.',
   risen: 'A new ally steps out of the dark. It joins the Night Watch.',
   noStore: "This browser isn't keeping drawings right now. Save to Photos keeps a copy.",
-  removeAsk: 'Remove this page from your Art room? This only removes it from this device.',
-  releaseAsk: 'Release this ally? It leaves the Night Watch on this device.',
+  favourite: 'Favourite',
+  rename: 'Rename',
+  pageNameAsk: 'Name this page',
+  removed: 'Page removed.',
+  released: 'Ally released.',
 };
 
 /** Optional prompts for "Draw today". Offered one at a time; "Another" moves on; "No prompt" hides it. */

@@ -23,7 +23,7 @@ function returning(xp = 0, ago = 1) {
   return JSON.stringify({ v: 1, created: t, events, flags: { greetDay: day } });
 }
 
-async function boot(h, { save, viewport = TALL, reduced = false, ua, extra = {}, init, live = false } = {}) {
+async function boot(h, { save, viewport = TALL, reduced = false, ua, extra = {}, init, live = false, keepWelcome = false } = {}) {
   const ctx = await h.browser.newContext({ viewport, deviceScaleFactor: 2, serviceWorkers: 'block', reducedMotion: reduced ? 'reduce' : 'no-preference', locale: 'en-US', ...(ua ? { userAgent: ua } : {}) });
   if (init) {
     await installAudioRecorder(ctx);
@@ -40,7 +40,12 @@ async function boot(h, { save, viewport = TALL, reduced = false, ua, extra = {},
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   page.on('console', (m) => m.type() === 'error' && !/WebGL|GPU stall|AudioContext/i.test(m.text()) && errors.push('console: ' + m.text().slice(0, 300)));
   await page.goto(h.server.url + '/');
-  await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
+  if (keepWelcome) {
+    await page.waitForFunction(() => {
+      const tile = document.querySelector('.dq-tile');
+      return window.__daily?.route.name === 'hub' && window.__daily.greeting && tile?.getClientRects().length && getComputedStyle(tile).visibility !== 'hidden';
+    }, null, { timeout: 60000 });
+  } else await h.reachHub(page);
   if (init) await audioReady(page);
   await page.evaluate((live) => {
     const a = window.__daily;
@@ -284,7 +289,14 @@ const WINDOWS = {
       h.expect((await probe(page)).windows === 0, 'gift: accepting it did not close the window');
     },
   },
-  welcome: { save: () => null, open: async () => {} },
+  welcome: {
+    save: () => null,
+    keepWelcome: true,
+    open: (page) => page.waitForFunction(() => {
+      const win = [...document.querySelectorAll('.dq-sw')].find((w) => !w.closest('.pwa-hint-layer') && w.getAttribute('aria-label') === 'Notification');
+      return window.__daily?.greeting && win?.getClientRects().length && getComputedStyle(win).visibility !== 'hidden';
+    }, null, { timeout: 60000 }),
+  },
   'welcome-back': {
     save: () => returning(0, 3),
     open: (page) => page.locator('.dq-chest').click(),
@@ -457,7 +469,7 @@ export const windowCut = (page, sel) =>
 async function windowCase(h, kind, { viewport, reduced = false, score = true }) {
   const w = WINDOWS[kind];
   const tag = `${kind}-${viewport.width}x${viewport.height}${reduced ? '-reduced' : ''}`;
-  const { ctx, page, errors } = await boot(h, { save: w.save(), viewport, reduced, ua: w.ua });
+  const { ctx, page, errors } = await boot(h, { save: w.save(), viewport, reduced, ua: w.ua, keepWelcome: w.keepWelcome });
   try {
     h.expect(await page.evaluate(() => !!window.__daily.opts.sound), `${tag}: no sound callback to watch`);
     await w.open(page);
@@ -596,7 +608,7 @@ async function everyScreen(h, viewport, { insets } = {}) {
     if (insets) {
       await (await ctx.newCDPSession(page)).send('Emulation.setSafeAreaInsetsOverride', { insets });
       await page.reload();
-      await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
+      await h.reachHub(page);
     }
     await page.locator('header .dq-safe').click();
     let heading = '';
@@ -847,7 +859,7 @@ export const scenarios = {
         if (insets) {
           await (await ctx.newCDPSession(page)).send('Emulation.setSafeAreaInsetsOverride', { insets });
           await page.reload();
-          await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
+          await h.reachHub(page);
         }
         await page.locator('header .dq-safe').click();
         const at = async (title) => {

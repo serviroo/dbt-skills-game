@@ -6,7 +6,7 @@ import type { App, ScreenOut } from './app';
 import { glyph, icon, mothSVG } from './art';
 import { skillCard } from './hub';
 import { regionPicker, telHref, smsHref } from './safe';
-import { allyCard } from './artroom';
+import { allyCard, cardOf, favFirst, focusBack, refill } from './artroom';
 import { artStore } from './artstore';
 import { storyStore } from './storystore';
 import { addDays, cleanName, fieldKey, fieldTimes, isSkillId, ROW_CAP, uid, type DiaryEntry, type State, type Store } from './store';
@@ -261,17 +261,23 @@ export function shadowsScreen(app: App): ScreenOut {
   );
   const allies = h('div', { class: 'dq-collection dq-allies' }, designSlot);
   const roster = rosterSection(app);
-  void artStore(app.store.key)
-    .list()
-    .then((list) => {
-      const mine = list.filter((m) => m.kind === 'ally');
-      allies.replaceChildren(
-        ...mine.map((m) =>
-          h('button', { type: 'button', class: 'dq-cardbtn dq-allybtn', onclick: () => app.go({ name: 'piece', id: m.id }), 'aria-label': `${m.name || 'Shadow ally'}, a shadow ally you designed` }, allyCard(app, m)),
-        ),
-        designSlot,
-      );
-    });
+  const as = artStore(app.store.key);
+  let turn = 0;
+  const showAllies = async () => {
+    const n = ++turn;
+    const list = await as.shown();
+    if (n !== turn) return;
+    const mine = favFirst(list.filter((m) => m.kind === 'ally'));
+    refill(allies, mine.map(cardOf).join('\n'), () => [
+      ...mine.map((m) =>
+        h('button', { type: 'button', class: 'dq-cardbtn dq-allybtn', 'data-piece': m.id, onclick: () => app.go({ name: 'piece', id: m.id }), 'aria-label': `${m.name || 'Shadow ally'}, a shadow ally you designed${m.fav ? ', a favourite' : ''}` }, allyCard(app, m, undefined, true)),
+      ),
+      designSlot,
+    ]);
+    focusBack(allies);
+  };
+  const off = as.onChange(() => void showAllies());
+  void showAllies();
   const el = h(
     'div',
     { class: 'dq-page dq-shadows' },
@@ -285,7 +291,7 @@ export function shadowsScreen(app: App): ScreenOut {
     inventorySection(app),
     h('div', { class: 'dq-actions' }, btn('All skills', () => app.go({ name: 'library' }), { kind: 'quiet', ic: 'book' })),
   );
-  return { el, title: 'Shadows', mode: 'sub', leave: roster.leave };
+  return { el, title: 'Shadows', mode: 'sub', leave: () => { turn++; off(); roster.leave(); } };
 }
 
 // ---------------- Library ----------------

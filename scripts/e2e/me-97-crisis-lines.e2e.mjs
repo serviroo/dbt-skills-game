@@ -42,7 +42,7 @@ async function boot(h, { locale = 'en-US', viewport = TALL, save = returning() }
   const errors = [];
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   await page.goto(h.server.url + '/?mute');
-  await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 60000 });
+  await h.reachHub(page);
   return { ctx, page, errors };
 }
 
@@ -145,7 +145,7 @@ export const scenarios = {
       const saved = await page.evaluate(() => window.__daily.store.state.settings.region);
       h.expect(saved === 'nz', `the choice was not saved (${saved})`);
       await page.reload();
-      await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 60000 });
+      await h.reachHub(page);
       await talk(page);
       expectRegion(h, await shown(page), 'nz', 'after a reload');
       await page.evaluate(() => window.__daily.go({ name: 'settings' }));
@@ -291,7 +291,7 @@ export const scenarios = {
       const kept = await unknown.page.evaluate(() => window.__daily.store.state.settings.region);
       h.expect(kept === 'de', `the newer build's country was not kept (${kept})`);
       await unknown.page.reload();
-      await unknown.page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 60000 });
+      await h.reachHub(unknown.page);
       await talk(unknown.page);
       expectRegion(h, await shown(unknown.page), 'elsewhere', 'unknown country after a reload');
     } finally {

@@ -241,7 +241,6 @@ export class App {
   /** This game's data is being cleared (here or in another tab): windows close and every screen but the Safe Zone shows it. */
   private afterClear() {
     this.clearForSafe();
-    this.toastEl.classList.remove('is-on');
     if (this.route.name !== 'safe') this.go({ name: 'settings' }, { replace: true });
     // what visits kept for Back and Forward (answers, typed text) goes too: every way back now lands on Settings
     this.kept.clear();
@@ -521,9 +520,17 @@ export class App {
   }
 
   private toastN = 0;
-  toast(text: string, action?: { label: string; run(): void }) {
-    if (this.route.name === 'safe') return;
+  /** what happens when the toast showing now goes without its action being taken */
+  private toastEnd: (() => void) | null = null;
+  /**
+   * A short message at the bottom, with an optional action (Undo). Its end runs once if the toast goes without the
+   * action: it ran out, another toast took its place, they left for a screen it wasn't for, or the Safe Zone opened.
+   */
+  toast(text: string, action?: { label: string; run(): void; end?(): void }) {
+    this.endToast();
+    if (this.route.name === 'safe') return action?.end?.();
     const n = ++this.toastN;
+    this.toastEnd = action?.end ?? null;
     this.toastEl.replaceChildren(h('span', { text: typo(text) }));
     if (action)
       this.toastEl.append(
@@ -532,7 +539,10 @@ export class App {
             class: 'dq-toast-btn',
             text: action.label,
             onclick: () => {
+              // once the toast has gone, what it offered to undo has landed
+              if (n !== this.toastN) return;
               this.toastN++;
+              this.toastEnd = null;
               this.toastEl.classList.remove('is-on');
               action.run();
             },
@@ -541,10 +551,27 @@ export class App {
     this.toastEl.classList.add('is-on');
     const a = animate(this.toastEl, [{ opacity: 0, transform: 'translate(-50%, 8px)' }, { opacity: 1, transform: 'translate(-50%, 0)' }], { duration: this.reduced() ? 1 : 420, easing: 'cubic-bezier(.16,1,.3,1)' });
     void a;
-    void wait(action ? 6 : 5).then(() => {
+    void wait(action ? 6 : 5).then(async () => {
       if (n !== this.toastN) return;
-      animate(this.toastEl, [{ opacity: 1 }, { opacity: 0 }], { duration: 240, easing: 'ease-in' }).finished.then(() => this.toastEl.classList.remove('is-on'));
+      // the action still works while the toast fades; its end lands once the toast is gone
+      animate(this.toastEl, [{ opacity: 1 }, { opacity: 0 }], { duration: 240, easing: 'ease-in' });
+      await wait(0.24);
+      if (n !== this.toastN) return;
+      this.toastN++;
+      this.toastEl.classList.remove('is-on');
+      this.endToast();
     });
+  }
+  /** Takes the toast away at once: a screen it wasn't for, the Safe Zone opening, or the game being cleared. */
+  private dropToast() {
+    this.toastN++;
+    this.toastEl.classList.remove('is-on');
+    this.endToast();
+  }
+  private endToast() {
+    const end = this.toastEnd;
+    this.toastEnd = null;
+    end?.();
   }
 
   /** Whether this build has the route's screen. A history entry can come from another version of the app. */
@@ -588,8 +615,14 @@ export class App {
       for (let j = route.name === 'safe' ? 0 : first - 1; j > 0; j--) {
         const e = this.trail[j];
         if (!e || e.sheet || e.route.name !== route.name) continue;
+        const to = same(route, e.route) ? e : { ...e, key: fresh(), route, place: undefined };
+        // the visit it replaces leaves history too, so Forward can't open it again (a removed drawing, a finished skill)
+        if (o.replace) {
+          this.travel(j - 1);
+          return this.write('push', to).key;
+        }
         this.travel(j);
-        return same(route, e.route) ? e.key : this.write('replace', { ...e, key: fresh(), route, place: undefined }).key;
+        return to === e ? e.key : this.write('replace', to).key;
       }
     }
     // a new visit in place of this one (Practise again, a skill that leads to another) drops this visit's places too
@@ -731,7 +764,8 @@ export class App {
     this.current?.leave?.();
     this.sheetLayer.replaceChildren();
     if (this.current?.foot) this.pins.unobserve(this.current.foot);
-    if (route.name !== 'hub') this.toastEl.classList.remove('is-on');
+    // a toast goes with the screen it was for (Home keeps one from the screen before); leaving ends its Undo
+    if (route.name !== 'hub') this.dropToast();
     this.route = route;
     const key = v.key;
     this.visitKey = key;
@@ -777,6 +811,7 @@ export class App {
   private clearForSafe() {
     this.winGen++;
     dismissWindows();
+    this.dropToast();
     this.dropScrim?.();
     document.querySelectorAll('[data-fx]').forEach((n) => n.remove());
     this.stopBuzz();

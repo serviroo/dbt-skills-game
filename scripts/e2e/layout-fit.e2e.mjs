@@ -1,3 +1,4 @@
+import { reachHub as home } from './harness.mjs';
 // Layout fit (ME-131): every companion screen fits a small phone and a phone on its side. Each screen opens on a
 // returning save with everything unlocked, at 390x844, 320x568 and 844x390, and is checked for:
 //   overflow    the page scrolls sideways
@@ -73,8 +74,6 @@ export async function boot(h, viewport, o = {}) {
   await home(page);
   return { ctx, page, errors };
 }
-
-const home = (page) => page.waitForFunction(() => window.__daily?.route.name === 'hub' && !!document.querySelector('.dq-tile') && !document.querySelector('.dq-sw'), null, { timeout: 30000 });
 
 /** Waits until the screen stops changing: no DOM changes for 400 ms (at most 4 s), then no animation running that ends within 3 s. */
 export const settle = (page) =>

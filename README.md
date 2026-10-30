@@ -28,7 +28,8 @@ back after a long break is always fine.
   you can change both any time in Settings. Try a look on in the Wardrobe and keep it if you like it.
 - The Night Watch, ranks and titles: small rewards that grow as you use things. Nothing is ever taken away.
 - Art room and Story Room: draw or write whatever you like. Paint with glowing ink or a soft glow, and erase what
-  you'd rather not keep. It all stays on your device. The Story Room's co-writer can ask you questions, toss in
+  you'd rather not keep. Name your drawings, star favourites so they come first, and Undo a removal you didn't
+  mean. It all stays on your device. The Story Room's co-writer can ask you questions, toss in
   a what-if, suggest a next line or tidy up a messy bit. It's scripted and runs on your device too. Stuck on a
   blank page? Ask for a starting point. Read mode shows the whole story at the text size you pick, here or in
   Settings, and remembers it. Search finds any word in your stories and notes, even offline.

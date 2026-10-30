@@ -18,6 +18,7 @@
 //   answers-kept-ranks            ranks survive reload; clearing all ranks leaves no draft
 //   answers-kept-branch           passing a branch after typing leaves no extra copy behind when the skill ends
 import { boot, settle } from './layout-fit.e2e.mjs';
+import { reachHub as home } from './harness.mjs';
 import { crystal, restore } from './newer-save-safety.e2e.mjs';
 
 const PHONE = { width: 390, height: 844 };
@@ -29,7 +30,6 @@ const value = (page) => field(page).inputValue().catch(() => 'no field');
 const stepText = (page) => page.evaluate(() => document.querySelector('.dq-step-body')?.textContent?.replace(/\s+/g, ' ').trim().slice(0, 120) ?? '');
 const screenOf = (page) => page.evaluate(() => document.querySelector('.dq')?.dataset.screen ?? null);
 const onScreen = (page, name) => page.waitForFunction((n) => document.querySelector('.dq')?.dataset.screen === n && !!document.querySelector('#dq-main > *'), name, { timeout: 10000 });
-const home = (page) => page.waitForFunction(() => window.__daily?.route.name === 'hub' && !!document.querySelector('.dq-tile') && !document.querySelector('.dq-sw'), null, { timeout: 30000 });
 const events = (page, key) => page.evaluate((k) => JSON.parse(localStorage.getItem(k) ?? '{"events":[]}').events.map((e) => e.k), key);
 const kept = (page, key) => page.evaluate((k) => Object.keys(localStorage).filter((x) => x.startsWith(`${k}.skill-draft.`)), key);
 const tap = async (page, name) => {

@@ -8,6 +8,8 @@ export const INSTALL_HINT_KEY = 'dbt.install-hint.v1';
 
 export const BESIDE = {
   art: '.art',
+  /** a drawing's removal waiting for its Undo, one per drawing: `<save>.art.gone.<drawing id>` */
+  artGone: '.art.gone',
   story: '.story',
   storyLive: '.story.live',
   unreadable: '.unreadable',

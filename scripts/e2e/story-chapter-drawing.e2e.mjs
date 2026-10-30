@@ -2,7 +2,8 @@
 // change it and take it off again; it shows above that chapter while writing and while reading, at a calm size on a
 // phone either way up and on a desktop, named by the drawing's name, and the words never wait for it. The link is kept
 // with the story by the drawing's id: it survives a reload and a Save Crystal, two open tabs both keep what they placed,
-// an old Save Crystal without it still loads, and a drawing deleted or not on this device simply shows no picture.
+// an old Save Crystal without it still loads, a drawing removed (or waiting for its Undo) or not on this device simply
+// shows no picture, and an open story follows a removal and its Undo in another tab.
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { crystal, restore } from './newer-save-safety.e2e.mjs';
@@ -200,7 +201,7 @@ export const scenarios = {
     }
   },
 
-  /** A drawing deleted in the Art room, one that is on another device only, and an Art room that never answers */
+  /** A drawing removed in the Art room (while its Undo lasts and after), one on another device only, and an Art room that never answers */
   async 'story-drawing-gone'(h) {
     const { ctx, page, errors } = await h.open(seed(h));
     try {
@@ -216,8 +217,32 @@ export const scenarios = {
       await reading(page, t.id);
       await readerShows(h, page, ['Lantern on the step', null], 'a drawing that is on another device only');
 
-      // the Art room's own delete
-      await page.evaluate(async () => (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).remove('lantern-page'));
+      // the Art room's own removal, as its Remove button does it: off the story while the Undo lasts, back with the Undo
+      const art = (step) =>
+        page.evaluate(async (step) => {
+          const { artStore, revOf } = await import('/src/daily/artstore.ts');
+          const as = artStore(window.__daily.store.key);
+          if (step === 'hide') as.hide('lantern-page', revOf(await as.get('lantern-page')));
+          else if (step === 'undo') as.unhide('lantern-page');
+          else await as.remove('lantern-page');
+        }, step);
+      await art('hide');
+      await reading(page, t.id);
+      await readerShows(h, page, [null, null], 'a drawing waiting for its Undo');
+      await writing(page, t.id, t.ch1);
+      await editorShows(h, page, null, 'writing above a drawing waiting for its Undo');
+      await page.getByRole('button', { name: 'Add a drawing', exact: true }).click();
+      const dlg = page.getByRole('dialog', { name: 'Pick a drawing' });
+      await dlg.getByRole('button', { name: 'Brave', exact: true }).waitFor({ timeout: 5000 });
+      h.expect(!(await dlg.getByRole('button', { name: 'Lantern on the step', exact: true }).count()), 'the picker offered a drawing waiting for its Undo');
+      await dlg.getByRole('button', { name: 'Close the drawings', exact: true }).click();
+      await dlg.waitFor({ state: 'detached', timeout: 5000 });
+      await art('undo');
+      await reading(page, t.id);
+      await readerShows(h, page, ['Lantern on the step', null], 'a drawing its Undo brought back');
+      // and once the Undo has run out, it is gone
+      await art('hide');
+      await art('remove');
       await page.reload();
       await ready(page);
       await h.reachHub(page);
@@ -239,6 +264,64 @@ export const scenarios = {
       });
       await go(page, { name: 'read', id: t.id });
       await page.waitForFunction((w) => [...document.querySelectorAll('.st-read-text')].map((e) => e.textContent).join('\n\n') === w, `${CH1}\n\n${CH2}`, { timeout: 5000 });
+      h.expect(!errors.length, 'errors: ' + errors.join(' | '));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  /** A drawing removed in another tab leaves the open story (reading, the page and the picker), and its Undo brings it back, with no screen opened again */
+  async 'story-drawing-follows-art'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await ready(page);
+      await h.reachHub(page);
+      const t = await make(page);
+      await page.evaluate(async ({ id, ch1 }) => (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key).setDrawing(id, ch1, 'lantern-page'), t);
+      const b = await ctx.newPage();
+      b.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+      await b.goto(h.server.url + '/?mute');
+      await ready(b);
+      await h.reachHub(b);
+      // the story's tab is the one watched, so it goes in front, where it draws: the other only runs the Art room's steps
+      await page.bringToFront();
+      // the other tab's Art room, as its Remove button and the toast's Undo do it
+      const art = (step) =>
+        b.evaluate(async (step) => {
+          const { artStore, revOf } = await import('/src/daily/artstore.ts');
+          const as = artStore(window.__daily.store.key);
+          if (step === 'hide') as.hide('lantern-page', revOf(await as.get('lantern-page')));
+          else as.unhide('lantern-page');
+        }, step);
+
+      await reading(page, t.id);
+      await readerShows(h, page, ['Lantern on the step', null], 'reading');
+      await art('hide');
+      await readerShows(h, page, [null, null], 'reading while another tab removes the drawing');
+      await art('undo');
+      await readerShows(h, page, ['Lantern on the step', null], 'reading after the other tab\'s Undo');
+
+      await writing(page, t.id, t.ch1);
+      await editorShows(h, page, 'Lantern on the step', 'writing');
+      await art('hide');
+      await editorShows(h, page, null, 'writing while another tab removes the drawing');
+      await art('undo');
+      await editorShows(h, page, 'Lantern on the step', 'writing after the other tab\'s Undo');
+
+      await page.getByRole('button', { name: 'Change drawing, Lantern on the step', exact: true }).click();
+      const dlg = page.getByRole('dialog', { name: 'Pick a drawing' });
+      await dlg.waitFor({ timeout: 5000 });
+      const picks = () => dlg.locator('.st-pick, .st-sheet-acts .dq-btn').evaluateAll((els) => els.map((e) => `${e.textContent.trim()}${e.getAttribute('aria-current') ? ' (placed)' : ''}`));
+      const picksAre = async (want, label) => {
+        for (const end = Date.now() + 5000; Date.now() < end; await h.sleep(150)) if (deep(await picks(), want)) return;
+        throw new Error(`${label}: the picker shows ${JSON.stringify(await picks())}, not ${JSON.stringify(want)}`);
+      };
+      await picksAre(['Brave', 'Lantern on the step (placed)', 'Remove drawing'], 'the picker');
+      await art('hide');
+      await picksAre(['Brave'], 'the picker while another tab removes the drawing');
+      await art('undo');
+      await picksAre(['Brave', 'Lantern on the step (placed)', 'Remove drawing'], 'the picker after the other tab\'s Undo');
+      h.expect(await dlg.isVisible(), 'the picker closed');
       h.expect(!errors.length, 'errors: ' + errors.join(' | '));
     } finally {
       await ctx.close();

@@ -92,7 +92,7 @@ export const scenarios = {
     const said = await page.evaluate(
       async ({ rec, withC, newer }) => {
         const { artStore, ArtStore } = await import('/src/daily/artstore.ts');
-        const a = artStore(window.__daily.store.key), b = new ArtStore(a.name);
+        const a = artStore(window.__daily.store.key), b = new ArtStore(a.name, `${a.name}.gone`);
         // the other tab's Restore lands right after this one's first drawing: a newer version of that page, which moves
         // the version this one just restored aside to a copy
         const one = a.importOne;

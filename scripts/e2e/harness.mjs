@@ -385,6 +385,52 @@ function launch(flags) {
   return chromium.launch({ ...launchOptions(flags), handleSIGINT: false, handleSIGTERM: false });
 }
 
+/** Home is usable only after any due greeting has opened and closed, including its scrim. */
+export async function reachHub(page) {
+  const end = Date.now() + 60000;
+  const closed = [];
+  let label = null;
+  try {
+    while (Date.now() < end) {
+      const ready = await page.waitForFunction(() => {
+        const app = window.__daily;
+        const tile = document.querySelector('.dq-tile');
+        if (!app || app.route.name !== 'hub' || !tile?.getClientRects().length || getComputedStyle(tile).visibility === 'hidden') return false;
+        const win = [...document.querySelectorAll('.dq-sw')].find((w) => !w.closest('.pwa-hint-layer'));
+        if (win && document.querySelector('.dq-scrim.is-on')) return win;
+        return !app.greeting && !app.busy && !win && !document.querySelector('.dq-scrim.is-on, .dq-scrim.is-closing') && !document.querySelector('#dq-main')?.inert;
+      }, null, { timeout: Math.max(1, end - Date.now()) });
+      const win = ready.asElement();
+      if (!win) {
+        await ready.dispose();
+        return closed;
+      }
+      label = await win.getAttribute('aria-label');
+      await page.waitForFunction((w) => {
+        const next = w.querySelector('.sw-next');
+        return next && Number(getComputedStyle(next).opacity) > 0;
+      }, win, { timeout: Math.max(1, end - Date.now()) });
+      await win.press('Enter', { timeout: Math.max(1, end - Date.now()) });
+      await page.waitForFunction((w) => !w.isConnected, win, { timeout: Math.max(1, end - Date.now()) });
+      closed.push(label);
+      await win.dispose();
+    }
+  } catch (e) {
+    if (e.name !== 'TimeoutError') throw e;
+    const state = await page.evaluate((label) => JSON.stringify({
+      label,
+      route: window.__daily?.route.name,
+      greeting: window.__daily?.greeting,
+      busy: window.__daily?.busy,
+      window: !!document.querySelector('.dq-sw'),
+      scrim: !!document.querySelector('.dq-scrim.is-on, .dq-scrim.is-closing'),
+      inert: document.querySelector('#dq-main')?.inert,
+    }), label).catch(() => 'unreadable');
+    throw new Error(`Home never became idle: ${state}`, { cause: e });
+  }
+  throw new Error('Home never became idle');
+}
+
 export async function startHarness(flags = {}) {
   const host = flags.host ?? '127.0.0.1';
   const out = path.join(root, 'artifacts/e2e', new Date().toISOString().replace(/[:.]/g, '-'));
@@ -617,36 +663,9 @@ export async function startHarness(flags = {}) {
   function expect(cond, msg) {
     if (!cond) throw new Error(msg);
   }
-  /** Taps through any Lantern window the companion opens on arrival (the first-visit welcome), then waits for Home. */
-  async function reachHub(page) {
-    for (const end = Date.now() + 60000; Date.now() < end; ) {
-      const win = await page.evaluate(() => [...document.querySelectorAll('.dq-sw')].filter((w) => !w.closest('.pwa-hint-layer')).length);
-      const home = await page.locator('.dq-tile').first().isVisible().catch(() => false);
-      if (!win && home) return;
-      if (await page.locator('.dq-scrim.is-on').count()) await page.mouse.click(195, 700);
-      // the next look comes 400 ms on, or as soon as Home shows with no window over it
-      await page
-        .waitForFunction(() => {
-          const tile = document.querySelector('.dq-tile');
-          const home = !!tile && tile.getClientRects().length > 0 && getComputedStyle(tile).visibility !== 'hidden';
-          return home && ![...document.querySelectorAll('.dq-sw')].some((w) => !w.closest('.pwa-hint-layer'));
-        }, null, { timeout: 400 })
-        .catch(() => {});
-    }
-    await shot(page, 'fail-no-home');
-    throw new Error('Home never appeared');
-  }
-  /** The first-visit welcome opens a moment after Home appears, so a tap that lands on its scrim taps through and retries. */
   async function openSettings(page) {
-    for (let i = 0; ; i++) {
-      await reachHub(page);
-      try {
-        await page.getByRole('button', { name: /Settings/ }).first().click({ timeout: 8000 });
-        break;
-      } catch (e) {
-        if (i === 2) throw e;
-      }
-    }
+    await reachHub(page);
+    await page.getByRole('button', { name: /Settings/ }).first().click({ timeout: 8000 });
     await page.locator('#set-playerName').waitFor({ timeout: 10000 });
   }
 

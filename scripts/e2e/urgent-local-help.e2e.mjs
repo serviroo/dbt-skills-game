@@ -18,7 +18,7 @@ async function home(h, viewport) {
     dialogs.push(d.message());
     void d.dismiss().catch(() => {});
   });
-  await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
+  await h.reachHub(page);
   return { ctx, page, errors, dialogs };
 }
 

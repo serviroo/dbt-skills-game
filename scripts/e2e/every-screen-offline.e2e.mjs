@@ -195,17 +195,6 @@ async function install(h, page, origin, dir) {
 const screenOf = (page) => page.evaluate(() => document.querySelector('.dq')?.dataset.screen ?? null);
 const atScreen = (page, name, timeout = 15000) => page.waitForFunction((n) => document.querySelector('.dq')?.dataset.screen === n, name, { timeout });
 
-/** Taps away any window the companion opens (a rank, a welcome) until Home is clear. */
-async function settle(h, page) {
-  for (const end = Date.now() + 30000; Date.now() < end; await h.sleep(300)) {
-    const open = await page.evaluate(() => [...document.querySelectorAll('.dq-sw')].filter((w) => !w.closest('.pwa-hint-layer')).length);
-    if (!open && (await page.locator('nav.dq-menu .dq-tile').first().isVisible())) return;
-    const scrim = page.locator('.dq-scrim.is-on');
-    if (await scrim.count()) await scrim.click({ position: { x: 20, y: 20 }, force: true }).catch(() => {});
-  }
-  throw new Error('Home never cleared');
-}
-
 /** Back to Home through each screen's own Lantern, Leave or close control. */
 async function home(h, page) {
   for (let i = 0; i < 4 && (await screenOf(page)) !== 'hub'; i++) {
@@ -214,7 +203,7 @@ async function home(h, page) {
     await page.waitForFunction((was) => document.querySelector('.dq')?.dataset.screen !== was, at, { timeout: 10000 }).catch(() => {});
   }
   await atScreen(page, 'hub');
-  await settle(h, page);
+  await h.reachHub(page);
 }
 
 /** taps the middle of `loc` where it is now, as a player does: a Playwright click first waits for two still frames, which a
@@ -372,7 +361,7 @@ async function launch(h, ctx, origin, query, { viewport, reducedMotion } = {}) {
   await page.goto(`${origin}${BASE}${query}`);
   await page.waitForFunction(() => document.documentElement.dataset.ready === '1' && !!window.__daily, null, { timeout: 60000 });
   h.expect(await page.evaluate(() => !!navigator.serviceWorker.controller), 'the cold launch is not controlled by the offline worker');
-  await settle(h, page);
+  await h.reachHub(page);
   await listen(page);
   return page;
 }
@@ -399,7 +388,7 @@ async function homeAndToday(h, page, problems) {
   await arrived(h, page, problems, 'offline-today-skill', /\S: \S/);
   await page.getByRole('button', { name: 'Leave this skill' }).click();
   await atScreen(page, 'hub', 5000);
-  await settle(h, page);
+  await h.reachHub(page);
   h.expect((await skillCredits(page)) === before + 1, 'leaving today\'s skill on its first screen did not credit it');
   await page.locator('.dq-quest.is-done').waitFor();
 
@@ -458,7 +447,7 @@ async function quietPlaces(h, page, problems) {
   await arrived(h, page, problems, 'offline-moment', 'Give me a moment');
   await page.getByRole('button', { name: 'Done', exact: true }).click();
   await atScreen(page, 'hub');
-  await settle(h, page);
+  await h.reachHub(page);
 
   await tile(page, 'Shadows').click();
   await atScreen(page, 'shadows');
@@ -637,7 +626,7 @@ async function replayIntro(h, page, problems) {
   await enter.waitFor({ timeout: 20000 });
   await tapWhereItIs(page, enter);
   await page.waitForFunction(() => !!window.__daily && document.querySelector('.dq')?.dataset.screen === 'hub', null, { timeout: 30000 });
-  await settle(h, page);
+  await h.reachHub(page);
   await listen(page);
   h.expect(!problems.length, `the intro replayed offline:\n${problems.join('\n')}`);
   await h.shot(page, 'offline-after-replay');
@@ -710,7 +699,7 @@ async function safeZone(h, page, problems, tag, act = true) {
   await page.locator('header .dq-back', { hasText: 'Leave' }).click();
   await atScreen(page, 'hub', 3000);
   h.expect(Date.now() - t0 < 3000 && !problems.length, `${tag}: leaving the Safe Zone was not immediate:\n${problems.join('\n')}`);
-  await settle(h, page);
+  await h.reachHub(page);
 }
 
 /** The Safe Zone's other ways on from its first screen: a person now, not safe, and a moment, which stays inside. */
@@ -723,7 +712,7 @@ async function safeExits(h, page, problems) {
     h.expect(!(await safeState(page)).cues.length && !problems.length, `safe ${button}: not quiet:\n${problems.join('\n')}`);
     await page.locator('header .dq-back', { hasText: 'Leave' }).click();
     await atScreen(page, 'hub', 3000);
-    await settle(h, page);
+    await h.reachHub(page);
   }
   await page.getByRole('button', { name: 'Safe Zone, help right now' }).click();
   await atScreen(page, 'safe');

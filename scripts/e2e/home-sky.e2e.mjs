@@ -111,19 +111,8 @@ async function home(h, time, query = '?mute', viewport, seed = { 'dbt.app.v1': h
     await ctx.addInitScript(trackTimers);
     await ctx.addInitScript(skyReader);
   });
-  await calm(h, r.page);
+  await h.reachHub(r.page);
   return r;
-}
-
-/** Home with nothing over it: the first-visit welcome opens a moment after Home appears, so tap until it stays clear. */
-async function calm(h, page) {
-  for (let quiet = 0, end = Date.now() + 60000; quiet < 4; ) {
-    h.expect(Date.now() < end, 'Home never stayed clear of windows');
-    await h.reachHub(page);
-    const busy = await page.evaluate(() => !!document.querySelector('.dq-scrim.is-on') || [...document.querySelectorAll('.dq-sw')].some((w) => !w.closest('.pwa-hint-layer')));
-    quiet = busy ? 0 : quiet + 1;
-    await h.sleep(500);
-  }
 }
 
 const rgba = (s) => {
@@ -565,7 +554,7 @@ export const scenarios = {
     expect((await live()) === 0 && s.mood === null && !s.fading, 'the sky woke up on Settings: ' + JSON.stringify(s));
     // back on Home (now dusk) the watch starts again; the Safe Zone then takes the night sky without a fade
     await page.goBack();
-    await calm(h, page);
+    await h.reachHub(page);
     await settle(h, page);
     expect((await skyOf(page)).mood === 'dusk' && (await live()) >= 1, 'Home after 18:00 is not dusk with its watch running: ' + JSON.stringify(await skyOf(page)));
     await page.locator(SAFE).first().click();
@@ -616,7 +605,7 @@ export const scenarios = {
     await page.locator(SAFE).first().click();
     await page.locator('.dq[data-screen="safe"]').waitFor({ timeout: 10000 });
     for (let i = 0; i < 2; i++) await moveAndRead(page, 'history', -1);
-    await calm(h, page);
+    await h.reachHub(page);
     await settle(h, page);
     expect((await skyOf(page)).mood === 'dusk', 'Back did not bring Home at dusk: ' + JSON.stringify(await skyOf(page)));
     // Forward to Settings starts the fade back to night; Forward again lands in the Safe Zone in the middle of it

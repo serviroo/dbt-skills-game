@@ -76,7 +76,7 @@ async function boot(h, locale, viewport = SIZES['390x844']) {
   const errors = [];
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   await page.goto(h.server.url + '/?mute');
-  await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 60000 });
+  await h.reachHub(page);
   return { ctx, page, errors, outside };
 }
 

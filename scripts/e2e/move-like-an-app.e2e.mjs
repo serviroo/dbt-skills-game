@@ -1,3 +1,4 @@
+import { reachHub as home } from './harness.mjs';
 // Moving through the companion like any app, with real taps and real keys on a returning save at 390x844:
 //   back-forward        the browser's Back and Forward (Android's back gesture is the same history step) follow the
 //                       companion: Skills, a skill's steps with what was typed kept, back to Skills, forward again,
@@ -37,7 +38,6 @@ const left = (u) => String(u).endsWith('/robots.txt');
 
 const screenOf = (page) => page.evaluate(() => document.querySelector('.dq')?.dataset.screen ?? null);
 const onScreen = (page, name) => page.waitForFunction((n) => document.querySelector('.dq')?.dataset.screen === n && !!document.querySelector('#dq-main > *'), name, { timeout: 10000 });
-const home = (page) => page.waitForFunction(() => window.__daily?.route.name === 'hub' && !!document.querySelector('.dq-tile') && !document.querySelector('.dq-sw'), null, { timeout: 30000 });
 const events = (page, SAVE, k) => page.evaluate(({ key, k }) => JSON.parse(localStorage.getItem(key) ?? '{"events":[]}').events.filter((e) => !k || e.k === k).length, { key: SAVE, k });
 const xpOf = (page, SAVE) => page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? '{"events":[]}').events.reduce((n, e) => n + (e.xp ?? 0), 0), SAVE);
 /** What has focus, as a short description, or "body" when nothing does. */

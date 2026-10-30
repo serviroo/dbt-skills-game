@@ -20,6 +20,13 @@ export interface DrawingMeta {
   rev?: string;
   /** Identities (revOf) of the versions this one was drawn from, newest last: a backup holding one of them is not news. */
   from?: string[];
+  /**
+   * Labels, which are not part of a version: when the name was last set, whether it is a favourite (shown first) and
+   * when that was last set. Wherever two copies of a drawing meet, each label comes from the copy that set it last.
+   */
+  nameAt?: number;
+  fav?: boolean;
+  favAt?: number;
 }
 export interface DrawingRec extends DrawingMeta {
   strokes: Stroke[];
@@ -42,7 +49,10 @@ export interface PutResult {
   updated: number;
   /** The identity (revOf) of the version this save produced. */
   rev: string;
+  /** The name and favourite it was stored with: a label set later elsewhere wins over the one saved. */
+  labels: Labels;
 }
+type Labels = Pick<DrawingMeta, 'name' | 'nameAt' | 'fav' | 'favAt'>;
 
 const THUMB_W = 480;
 const isObj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
@@ -120,7 +130,7 @@ export function cleanStrokes(raw: unknown, kind: Paper): Stroke[] | null {
 }
 
 /** The fields of a drawing and of a draft this build reads. Any other is kept as it was stored (see restOf). */
-const REC_KEYS = ['id', 'kind', 'day', 't', 'updated', 'prompt', 'name', 'n', 'rev', 'from', 'strokes', 'bases', 'after'];
+const REC_KEYS = ['id', 'kind', 'day', 't', 'updated', 'prompt', 'name', 'n', 'rev', 'from', 'nameAt', 'fav', 'favAt', 'strokes', 'bases', 'after'];
 const DRAFT_KEYS = ['key', 'kind', 'editId', 'bases', 'base', 'prompt', 'strokes', 't'];
 /** The fields of o this build doesn't read, as they were stored, so a newer build's fields stay on what this one writes. */
 const restOf = (o: object, known: readonly string[]): Record<string, unknown> => Object.fromEntries(Object.entries(o).filter(([k]) => !known.includes(k)));
@@ -129,9 +139,13 @@ export const extrasOf = (r: DrawingMeta) => restOf(r, REC_KEYS);
 /** A drawing or a draft as it is stored and goes into a Save Crystal. */
 export const storedRec = (r: DrawingRec) => ({ ...r, strokes: r.strokes.map(storedStroke) });
 const storedDraft = (d: Draft) => ({ ...d, strokes: d.strokes.map(storedStroke) });
-/** Whether drawing a holds everything b does: each of b's fields, and b's strokes in their order among a's. */
-function holds(a: DrawingRec, b: DrawingRec) {
-  const fa: Record<string, unknown> = { ...metaOf(a), id: '', n: 0 }, fb = { ...metaOf(b), id: '', n: 0 };
+/**
+ * Whether drawing a holds everything b does: each of b's fields but its labels, and b's strokes in their order among a's.
+ * A re-stamp of b (see importOne) holds it with a time and lineage of its own.
+ */
+function holds(a: DrawingRec, b: DrawingRec, restamp = false) {
+  const bare = (r: DrawingRec): Record<string, unknown> => ({ ...metaOf(r), id: '', n: 0, name: undefined, nameAt: undefined, fav: undefined, favAt: undefined, ...(restamp ? { updated: 0, from: undefined } : {}) });
+  const fa = bare(a), fb = bare(b);
   if (Object.entries(fb).some(([k, v]) => JSON.stringify(fa[k]) !== JSON.stringify(v))) return false;
   return within(a.strokes, b.strokes);
 }
@@ -166,6 +180,9 @@ export function cleanRec(raw: unknown): DrawingRec | null {
     name: typeof raw.name === 'string' ? raw.name.slice(0, 24) : undefined,
     rev: revId(raw.rev),
     from: fromOf(raw.from),
+    nameAt: fin(raw.nameAt) ? raw.nameAt : undefined,
+    fav: typeof raw.fav === 'boolean' ? raw.fav : undefined,
+    favAt: fin(raw.favAt) ? raw.favAt : undefined,
     n: strokes.length,
     strokes,
   };
@@ -200,11 +217,49 @@ export function skippedDrafts(raw: unknown) {
 /** A page and the copies kept apart from it share this. */
 const family = (id: string) => id.split('~')[0].slice(0, 26);
 const landKey = (id: string, rev: string) => `${id}\n${rev}`;
-const metaOf = (r: DrawingRec): DrawingMeta => ({ ...restOf(r, REC_KEYS), id: r.id, kind: r.kind, day: r.day, t: r.t, updated: r.updated, prompt: r.prompt, name: r.name, n: r.strokes.length, rev: r.rev, from: fromOf(r.from) });
+const metaOf = (r: DrawingRec): DrawingMeta => ({ ...restOf(r, REC_KEYS), id: r.id, kind: r.kind, day: r.day, t: r.t, updated: r.updated, prompt: r.prompt, name: r.name, n: r.strokes.length, rev: r.rev, from: fromOf(r.from), nameAt: r.nameAt, fav: r.fav, favAt: r.favAt });
+const setAt = (t: unknown) => (fin(t) ? t : -1);
+/**
+ * Each label from whichever side set it last; a tie keeps the first side's, except that a name beats none: a build from
+ * before names saves a page without its name but keeps when it was set, while taking a name away always sets a later time.
+ */
+const newestLabels = (first: Labels, other: Labels): Labels => ({
+  ...(setAt(other.nameAt) > setAt(first.nameAt) || (setAt(other.nameAt) === setAt(first.nameAt) && !first.name && !!other.name) ? { name: other.name, nameAt: other.nameAt } : { name: first.name, nameAt: first.nameAt }),
+  ...(setAt(other.favAt) > setAt(first.favAt) ? { fav: other.fav, favAt: other.favAt } : { fav: first.fav, favAt: first.favAt }),
+});
+const sameLabels = (a: Labels, b: Labels) => a.name === b.name && a.nameAt === b.nameAt && a.fav === b.fav && a.favAt === b.favAt;
+/**
+ * The copy in use, with each label from whichever copy of the drawing (stored or in memory) set it last. Labels are not part
+ * of a version, so one held in memory (storage couldn't write it) stays on a newer version saved elsewhere.
+ */
+const withLabels = <T extends DrawingMeta>(use: T, other: DrawingMeta | undefined): T => (other ? { ...use, ...newestLabels(use, other) } : use);
 const detached = (d: Draft): Draft => {
   const { editId, bases, base, ...draft } = d;
   return draft;
 };
+
+/**
+ * A removal waiting for its Undo to run out, kept beside the save so every tab hides it and a reload finishes it: the
+ * version it hides (revOf), when, and the tab whose toast holds the Undo. Each drawing's has a key of its own
+ * (BESIDE.artGone), so tabs removing different drawings at once never write over each other's.
+ */
+interface Gone {
+  rev: string;
+  at: number;
+  tab: string;
+}
+/** Another tab's removal is finished here only after this long: that tab's own toast ends it in seconds, unless it closed. */
+const GONE_WAIT = 60e3;
+const sameGone = (a: Gone | null, b: Gone) => !!a && a.rev === b.rev && a.at === b.at && a.tab === b.tab;
+/** A stored removal as it was written, or null when there is none or it can't be read. */
+function readGone(raw: string | null): Gone | null {
+  try {
+    const g: unknown = JSON.parse(raw ?? 'null');
+    return isObj(g) && typeof g.rev === 'string' && fin(g.at) && typeof g.tab === 'string' ? { rev: g.rev, at: g.at, tab: g.tab } : null;
+  } catch {
+    return null;
+  }
+}
 
 function req<T>(r: IDBRequest<T>) {
   return new Promise<T>((ok, bad) => {
@@ -234,6 +289,10 @@ export class ArtStore {
   private tab: { id: string; ready: Promise<void> } | null = null;
   private claimMessage: ((data: Record<string, unknown>) => void) | null = null;
   private removals = new Set<(id: string) => void>();
+  private changes = new Set<() => void>();
+  /** This tab's removals waiting for their toast's Undo (stored beside the save too, when it can be). */
+  private mine = new Map<string, Gone>();
+  private sweepTimer = 0;
   private deleted = new Set<string>();
   /** Versions this copy saw land on disk (id + identity). A version in memory that is not here never reached disk. */
   private landed = new Set<string>();
@@ -242,8 +301,18 @@ export class ArtStore {
   private draftTurn = 0;
   /** Writes under way, so a clear's check waits for them. */
   private writes = new Set<Promise<unknown>>();
+  private onStorage = (e: StorageEvent) => {
+    if (!e.key?.startsWith(`${this.goneKey}.`)) return;
+    this.drop();
+    this.changed();
+    void this.sweep();
+    if (e.oldValue !== null && e.newValue === null) void this.ended(e.key.slice(this.goneKey.length + 1));
+  };
 
-  constructor(readonly name: string) {
+  constructor(
+    readonly name: string,
+    private goneKey: string,
+  ) {
     onClear({ hold: () => Promise.allSettled([...this.writes]), clear: () => this.dispose() });
     if (typeof BroadcastChannel !== 'undefined') {
       try {
@@ -251,13 +320,20 @@ export class ArtStore {
         this.channel.onmessage = ({ data }: MessageEvent<unknown>) => {
           if (isObj(data) && (data.type === 'tab-claim' || data.type === 'tab-owned')) this.claimMessage?.(data);
           else if (isObj(data) && data.type === 'removed' && typeof data.id === 'string') this.forget(data.id);
-          else this.drop();
+          else {
+            this.drop();
+            this.changed();
+            // another tab hid a drawing: if that tab closes before its Undo runs out, this one finishes it
+            if (isObj(data) && data.type === 'gone') void this.sweep();
+          }
         };
       } catch {
         this.channel = null;
       }
     }
+    if (typeof window !== 'undefined') window.addEventListener('storage', this.onStorage);
     this.db = this.connect(true);
+    void this.sweep();
   }
 
   claimTab() {
@@ -303,6 +379,7 @@ export class ArtStore {
 
   /** This game's data is being cleared: the database closes so it can go, and nothing stays in memory. */
   private dispose() {
+    if (typeof window !== 'undefined') window.removeEventListener('storage', this.onStorage);
     const db = this.db;
     this.db = Promise.resolve(null);
     void db.then((d) => d?.close());
@@ -317,6 +394,8 @@ export class ArtStore {
     for (const m of Object.values(this.mem)) m.clear();
     this.landed.clear();
     this.draftTurns.clear();
+    this.mine.clear();
+    clearTimeout(this.sweepTimer);
     this.drop();
   }
 
@@ -324,9 +403,23 @@ export class ArtStore {
     this.removals.add(fn);
     return () => this.removals.delete(fn);
   }
+  /** Calls fn when what the screens show may have changed: a save, a label, a removal, here or in another copy. */
+  onChange(fn: () => void) {
+    this.changes.add(fn);
+    return () => this.changes.delete(fn);
+  }
+  private changed() {
+    this.changes.forEach((fn) => fn());
+  }
+  private async ended(id: string) {
+    if (this.deleted.has(id)) return;
+    const disk = await this.tx(['meta'], 'readonly', (t) => req(t.objectStore('meta').get(id) as IDBRequest<DrawingMeta | undefined>), () => null);
+    if (disk === undefined && !this.deleted.has(id)) this.forget(id);
+  }
 
   private forget(id: string) {
     this.deleted.add(id);
+    this.mine.delete(id);
     this.mem.meta.delete(id);
     this.mem.strokes.delete(id);
     this.mem.thumbs.delete(id);
@@ -334,6 +427,7 @@ export class ArtStore {
     this.dropUrl(id);
     this.drop();
     this.removals.forEach((fn) => fn(id));
+    this.changed();
   }
 
   /** Opens the database; a lost connection on open gets one more try (`again`). Null when there is none to use. */
@@ -441,12 +535,162 @@ export class ArtStore {
     const byId = new Map(rows.map((m) => [m.id, m]));
     for (const m of this.mem.meta.values()) {
       const db = byId.get(m.id);
-      if (!db || m.updated > db.updated) byId.set(m.id, m);
+      byId.set(m.id, !db || m.updated > db.updated ? withLabels(m, db) : withLabels(db, m));
     }
     const out = [...byId.values()].sort((a, b) => b.t - a.t);
     // a list read while the drawings couldn't be read is not kept, so the next look reads again
     if (gen === this.gen && this.readFails === fails) this.cache = out;
     return out;
+  }
+
+  /** The drawings the screens show: every saved one but the versions waiting for a removal's Undo to run out. */
+  async shown(): Promise<DrawingMeta[]> {
+    const list = await this.list();
+    const gone = this.gone();
+    return list.filter((m) => gone[m.id]?.rev !== revOf(m) && this.mine.get(m.id)?.rev !== revOf(m));
+  }
+  async isShown(id: string) {
+    return (await this.shown()).some((m) => m.id === id);
+  }
+  /**
+   * Takes a drawing off every screen, in every tab, while its Undo lasts. Only the version they saw (rev) hides, so a
+   * newer save of it, here or in another tab, shows again and stays. remove(id) finishes it; unhide(id) is the Undo.
+   */
+  hide(id: string, rev: string) {
+    const g: Gone = { rev, at: Date.now(), tab: this.claimTab().id };
+    this.mine.set(id, g);
+    this.markGone(id, g);
+    this.changed();
+    this.announce({ type: 'gone' });
+  }
+  unhide(id: string) {
+    const g = this.mine.get(id);
+    if (!g) return;
+    this.mine.delete(id);
+    this.markGone(id, null, g);
+    this.changed();
+    this.announce();
+  }
+  /** The removals waiting for their Undo: as stored beside the save, and this tab's own. */
+  private gone() {
+    const out: Record<string, Gone> = Object.create(null);
+    const at = `${this.goneKey}.`;
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k?.startsWith(at)) continue;
+        const g = readGone(localStorage.getItem(k));
+        if (g) out[k.slice(at.length)] = g;
+      }
+    } catch {
+      /* unreadable: this tab's own still count */
+    }
+    for (const [id, g] of this.mine) out[id] ??= g;
+    return out;
+  }
+  /** Stores the removal of id waiting for its Undo, or drops it (null); with `was`, only while it is still that one. */
+  private markGone(id: string, g: Gone | null, was?: Gone) {
+    const k = `${this.goneKey}.${id}`;
+    writeOut(() => {
+      try {
+        if (g) localStorage.setItem(k, JSON.stringify(g));
+        else if (!was || sameGone(readGone(localStorage.getItem(k)), was)) localStorage.removeItem(k);
+      } catch {
+        /* storage is full or off: this tab still hides its own */
+      }
+    });
+  }
+  /**
+   * Finishes the removals whose Undo can no longer be taken: this tab's from before a reload (the toast went with the
+   * page) and another tab's once GONE_WAIT has passed (that tab closed). The rest wait for their own tab's toast. Only the
+   * tab channel makes a copy of this tab take an id of its own (claimTab), so with none, this tab's id may also be a live
+   * copy's whose Undo is still up: its removals wait like another tab's.
+   */
+  private async sweep() {
+    clearTimeout(this.sweepTimer);
+    this.sweepTimer = 0;
+    if (typeof window === 'undefined') return;
+    const tab = this.claimTab();
+    await tab.ready;
+    const now = Date.now();
+    let next = Infinity;
+    for (const [id, g] of Object.entries(this.gone())) {
+      if (this.mine.has(id)) continue;
+      // a time far ahead means the clock stepped back since: it is not waiting on anyone
+      const due = (g.tab === tab.id && !!this.channel) || g.at > now + GONE_WAIT ? now : g.at + GONE_WAIT;
+      if (due <= now) await this.remove(id);
+      else next = Math.min(next, due);
+    }
+    if (next < Infinity && !cleared()) this.sweepTimer = window.setTimeout(() => void this.sweep(), next - now + 50);
+  }
+
+  /**
+   * Renames a drawing (an empty name goes back to none) or marks it a favourite. A label is not a new version of the
+   * drawing, so it never sets one copy apart from another: each keeps when it was set, and the latest wins.
+   */
+  async setLabels(id: string, change: { name?: string; fav?: boolean }) {
+    const now = Date.now();
+    const wrote = await this.relabel(id, (m) => ({
+      ...m,
+      ...('name' in change ? { name: change.name?.trim().slice(0, 24) || undefined, nameAt: Math.max(now, setAt(m.nameAt) + 1) } : {}),
+      ...(change.fav !== undefined ? { fav: change.fav, favAt: Math.max(now, setAt(m.favAt) + 1) } : {}),
+    }));
+    if (wrote) this.announce();
+  }
+  /**
+   * Rewrites a stored drawing's labels with next(meta), in one transaction (null leaves them), on top of the labels this
+   * copy holds in memory (one storage refused earlier), so the write stores those too; a copy in memory too.
+   */
+  private async relabel(id: string, next: (m: DrawingMeta) => DrawingMeta | null) {
+    const wrote = await this.tx(
+      ['meta'],
+      'readwrite',
+      (t) =>
+        new Promise<boolean>((ok, bad) => {
+          const s = t.objectStore('meta');
+          const g = s.get(id) as IDBRequest<DrawingMeta | undefined>;
+          g.onerror = () => bad(g.error);
+          g.onsuccess = () => {
+            try {
+              const disk = g.result;
+              if (!disk) return ok(false);
+              const base = withLabels(disk, this.mem.meta.get(id));
+              const m = next(base) ?? base;
+              if (sameLabels(m, disk)) return ok(false);
+              s.put(m, id);
+              ok(true);
+            } catch (e) {
+              bad(e);
+            }
+          };
+        }),
+      () => null,
+    );
+    // a write that failed keeps the labels for this visit, as a failed save keeps a drawing: in the copy held in memory,
+    // or in one taken from the disk now
+    if (wrote === null && !this.mem.meta.has(id)) {
+      const d = await this.onDisk(id);
+      if (d && !this.mem.meta.has(id) && !this.deleted.has(id)) {
+        this.mem.meta.set(id, metaOf(d));
+        this.mem.strokes.set(id, d.strokes);
+        this.landed.add(landKey(id, revOf(d)));
+      }
+    }
+    const mm = this.mem.meta.get(id);
+    const held = mm ? next(mm) : null;
+    if (held) this.mem.meta.set(id, held);
+    if (wrote || held) {
+      this.drop();
+      this.changed();
+    }
+    return wrote === true;
+  }
+  /** Brings the labels a copy from elsewhere set later into the stored drawing it matches. */
+  private takeLabels(id: string, from: Labels) {
+    return this.relabel(id, (m) => {
+      const l = newestLabels(m, from);
+      return sameLabels(l, m) ? null : { ...m, ...l };
+    });
   }
 
   private drop() {
@@ -479,8 +723,8 @@ export class ArtStore {
     );
     if (gen !== this.gen) return this.get(id);
     const mm = this.mem.meta.get(id), ms = this.mem.strokes.get(id);
-    if (mm && ms && (!m || !s || mm.updated > m.updated)) return { ...mm, strokes: ms };
-    return m && s ? { ...m, strokes: cleanStrokes(s, m.kind) ?? [] } : null;
+    if (mm && ms && (!m || !s || mm.updated > m.updated)) return { ...withLabels(mm, m), strokes: ms };
+    return m && s ? { ...withLabels(m, mm), strokes: cleanStrokes(s, m.kind) ?? [] } : null;
   }
 
   /** The drawing stored under id, as it is on the disk (not this copy's memory). */
@@ -504,7 +748,7 @@ export class ArtStore {
    * edit started from or saved itself (`bases`), their edit is kept as its own drawing (and their own older version in memory
    * gives way to the stored one). Times only order versions.
    */
-  private async write(rec: DrawingRec, force = false): Promise<{ stored: 'wrote' | 'held' | 'copied' | 'failed'; prev: number | undefined; id: string; updated: number; rev: string }> {
+  private async write(rec: DrawingRec, force = false): Promise<{ stored: 'wrote' | 'held' | 'copied' | 'failed'; prev: number | undefined; id: string; updated: number; rev: string; labels: Labels }> {
     let stamp = rec.updated;
     if (force) this.lastStamp = stamp = Math.max(stamp, this.lastStamp + 1, fin(rec.after) ? rec.after + 1 : -Infinity);
     const rev = force ? uid() : revId(rec.rev);
@@ -519,6 +763,9 @@ export class ArtStore {
     let prev: number | undefined;
     let decided = false;
     let same = false;
+    // labels set later elsewhere (a rename in another tab while this one drew, or one held here when storage couldn't
+    // write) stay
+    let labels = newestLabels(rec, this.mem.meta.get(rec.id) ?? rec);
     const decide = (disk: DrawingMeta | undefined, read = true): 'copy' | 'write' => {
       decided = true;
       const seen = [disk, this.mem.meta.get(rec.id)].filter((m): m is DrawingMeta => !!m);
@@ -546,7 +793,7 @@ export class ArtStore {
           };
           const keep = (as: 'wrote' | 'copied') => {
             try {
-              t.objectStore('meta').put(metaOf({ ...rec, id, updated: stamp, rev, from }), id);
+              t.objectStore('meta').put(metaOf({ ...rec, ...labels, id, updated: stamp, rev, from }), id);
               t.objectStore('strokes').put(kept, id);
               if (buf) t.objectStore('thumbs').put({ type: 'image/jpeg', buf }, id);
               ok(as);
@@ -567,6 +814,7 @@ export class ArtStore {
                 return ok('held');
               }
               if (force) from = fromOf([...lineage(had), ...(from ?? [])]);
+              if (had) labels = newestLabels(labels, had);
               if (force && decide(had) === 'copy') {
                 const c = t.objectStore('meta').get(id) as IDBRequest<DrawingMeta | undefined>;
                 c.onerror = () => bad(c.error);
@@ -585,13 +833,20 @@ export class ArtStore {
       () => 'failed' as const,
     );
     if (force && stored === 'failed' && !decided) decide(undefined, false);
-    const meta = metaOf({ ...rec, id, updated: stamp, rev, from });
+    // a write that failed, even before its transaction read the stored copy, keeps the labels that copy set later
+    if (stored === 'failed') {
+      const disk = await this.tx(['meta'], 'readonly', (t) => req(t.objectStore('meta').get(rec.id) as IDBRequest<DrawingMeta | undefined>), () => undefined);
+      if (disk) labels = newestLabels(labels, disk);
+    }
+    const meta = metaOf({ ...rec, ...labels, id, updated: stamp, rev, from });
     const own = force && id !== rec.id ? this.mem.meta.get(rec.id) : undefined;
     if (own && rec.bases?.includes(revOf(own))) {
       this.mem.meta.delete(rec.id);
       this.mem.strokes.delete(rec.id);
       this.mem.thumbs.delete(rec.id);
       this.dropUrl(rec.id);
+      // a name or favourite it held that storage couldn't write goes onto the stored version in its place
+      await this.takeLabels(rec.id, own);
     }
     const mm = this.mem.meta.get(id);
     if (!this.deleted.has(id) && (force || ((stored === 'wrote' || stored === 'failed' || same) && (!mm || stamp >= mm.updated)))) {
@@ -603,7 +858,7 @@ export class ArtStore {
     if (stored === 'wrote' || stored === 'copied' || same) this.landed.add(landKey(id, revOf(meta)));
     this.dropUrl(id);
     this.drop();
-    return { stored, prev, id, updated: stamp, rev: revOf(meta) };
+    return { stored, prev, id, updated: stamp, rev: revOf(meta), labels };
   }
 
   /**
@@ -612,33 +867,60 @@ export class ArtStore {
    * editing (`copied`).
    */
   async put(rec: DrawingRec): Promise<PutResult> {
-    const { stored, id, updated, rev } = await this.write(rec, true);
+    const { stored, id, updated, rev, labels } = await this.write(rec, true);
     if (stored === 'wrote' || stored === 'copied') this.announce();
-    return { stored: stored === 'held' ? 'wrote' : stored, id, updated, rev };
+    return { stored: stored === 'held' ? 'wrote' : stored, id, updated, rev, labels };
   }
 
+  /**
+   * Ends the Undo of a hidden drawing: it goes, and drafts of it become drafts of a new page, unless the version stored
+   * now is not the one hidden (a newer save in any tab, or a restore, wins and stays). Nothing hidden, nothing happens.
+   * The check and the delete share one transaction, so a save landing between them can't be lost.
+   */
   async remove(id: string) {
-    const done = await this.tx(
+    const g = this.mine.get(id) ?? this.gone()[id];
+    if (!g) return;
+    this.mine.delete(id);
+    const mm = this.mem.meta.get(id);
+    const out = await this.tx(
       ['meta', 'strokes', 'thumbs', 'drafts'],
       'readwrite',
-      async (t) => {
-        for (const s of ['meta', 'strokes', 'thumbs']) t.objectStore(s).delete(id);
-        const cursor = t.objectStore('drafts').openCursor();
-        await new Promise<void>((ok, bad) => {
-          cursor.onerror = () => bad(cursor.error);
-          cursor.onsuccess = () => {
-            const c = cursor.result;
-            if (!c) return ok();
-            if ((c.value as Draft).editId === id) c.update(detached(c.value as Draft));
-            c.continue();
+      (t) =>
+        new Promise<'removed' | 'kept'>((ok, bad) => {
+          const r = t.objectStore('meta').get(id) as IDBRequest<DrawingMeta | undefined>;
+          r.onerror = () => bad(r.error);
+          r.onsuccess = () => {
+            try {
+              const disk = r.result;
+              const top = mm && (!disk || mm.updated > disk.updated) ? mm : disk;
+              if (!top || revOf(top) !== g.rev) return ok('kept');
+              for (const s of ['meta', 'strokes', 'thumbs']) t.objectStore(s).delete(id);
+              const cursor = t.objectStore('drafts').openCursor();
+              cursor.onerror = () => bad(cursor.error);
+              cursor.onsuccess = () => {
+                const c = cursor.result;
+                if (!c) return ok('removed');
+                if ((c.value as Draft).editId === id) c.update(detached(c.value as Draft));
+                c.continue();
+              };
+            } catch (e) {
+              bad(e);
+            }
           };
-        });
-        return true;
-      },
-      () => false,
+        }),
+      () => 'failed' as const,
     );
-    this.forget(id);
-    if (done) this.announce({ type: 'removed', id });
+    // a write that failed with the database there leaves it hidden, for the next load to finish
+    const db = out === 'failed' && !!(await this.db);
+    if (db) this.mine.set(id, g);
+    else this.markGone(id, null, g);
+    if (out === 'removed' || (out === 'failed' && !db && (!mm || revOf(mm) === g.rev))) {
+      this.forget(id);
+      if (out === 'removed') this.announce({ type: 'removed', id });
+    } else {
+      this.changed();
+      this.announce();
+    }
   }
 
   private dropUrl(id: string) {
@@ -740,7 +1022,7 @@ export class ArtStore {
       const mem = mm && ms ? { ...mm, strokes: ms } : null;
       // the version in use keeps the id (as get() picks it); a different one only memory holds goes in under its own id
       const main = mem && (!disk || mem.updated > disk.updated) ? mem : disk;
-      if (main) out.push(storedRec(main));
+      if (main) out.push(storedRec(withLabels(main, main === disk ? mm : m)));
       if (!mem || !disk || revOf(mem) === revOf(disk) || (main === disk && this.landed.has(landKey(id, revOf(mem))))) continue;
       const other = main === mem ? disk : mem;
       const base = `${family(id)}~${Math.max(0, Math.floor(other.updated)).toString(36)}`;
@@ -794,7 +1076,7 @@ export class ArtStore {
     return out;
   }
 
-  /** How many of these drawings exist on this device only in memory (no saved copy as new as the one in use). */
+  /** How many of these drawings exist on this device only in memory (no saved copy as new as the one in use, or with its labels). */
   private async memoryOnly(ids: string[]) {
     const saved = await this.tx(
       ['meta'],
@@ -804,7 +1086,7 @@ export class ArtStore {
     );
     return ids.filter((id, i) => {
       const mm = this.mem.meta.get(id), db = saved[i];
-      return !!mm && (!db || mm.updated > db.updated);
+      return !!mm && (!db || mm.updated > db.updated || !sameLabels(newestLabels(db, mm), db));
     }).length;
   }
 
@@ -814,9 +1096,10 @@ export class ArtStore {
    * dropped the tools' strokes: then the file's copy comes in as its own page. A different version of a page that is here keeps both: the newer one under the page's id, the other as
    * its own page, in one transaction. The same version stored here with other content was saved by a build that
    * couldn't read all of it: the file's copy updates it when it holds everything the one here does, and comes in with
-   * the other kept as its own page when neither does. Each drawing counts once as added, updated, kept (both versions
-   * kept), unchanged or skipped (unreadable). unsaved counts the drawings from the file whose copy in use lives only in
-   * memory for this session.
+   * the other kept as its own page when neither does; either way the page takes the file's copy as a version of its own
+   * (see importOne), so no version ever holds two contents. Each drawing counts once as added, updated, kept (both
+   * versions kept), unchanged or skipped (unreadable). unsaved counts the drawings from the file whose copy in use lives
+   * only in memory for this session.
    */
   async importAll(raw: unknown): Promise<{ added: number; updated: number; kept: number; unchanged: number; skipped: number; unsaved: number }> {
     const out = { added: 0, updated: 0, kept: 0, unchanged: 0, skipped: 0, unsaved: 0 };
@@ -856,13 +1139,18 @@ export class ArtStore {
         const here = await this.familyNow(family(rec.id));
         const same = here.filter((d) => revOf(d) === me);
         // a page edited from this version holds it, unless a build from before the tools made the edit: that keeps the
-        // strokes it can read and drops the tools' strokes, so the file's copy comes in as its own page
+        // strokes it can read and drops the tools' strokes, so the file's copy comes in as its own page. A page a Restore
+        // re-stamped from this version (see importOne) holds only what it has.
         const later = here.filter((d) => fromOf(d.from)?.includes(me));
-        const lost = !later.some((d) => within(d.strokes, rec.strokes)) && later.some((d) => within(d.strokes, rec.strokes.filter((s) => !storedStroke(s).m)));
-        const by = same.find((d) => holds(d, rec)) ?? (!same.length && !lost ? later[0] : undefined);
+        const restamped = later.filter((d) => revId(d.rev) === revId(rec.rev));
+        const edits = later.filter((d) => !restamped.includes(d));
+        const lost = !edits.some((d) => within(d.strokes, rec.strokes)) && edits.some((d) => within(d.strokes, rec.strokes.filter((s) => !storedStroke(s).m)));
+        const by = same.find((d) => holds(d, rec)) ?? restamped.find((d) => holds(d, rec, true)) ?? (!same.length && !lost ? edits[0] : undefined);
         if (by) {
           out.unchanged++;
           inUse.push(by.id);
+          // a name or favourite the file's copy set later comes in all the same
+          if (await this.takeLabels(by.id, rec)) wrote = true;
           continue;
         }
         // the same version here with other content: the file's copy meets the page that holds it (see importOne)
@@ -901,6 +1189,9 @@ export class ArtStore {
   /**
    * One drawing from a backup that no page here holds; see importAll. `at` is where it landed. The same version stored
    * under its id with other content is updated when the file's copy holds all of it, and otherwise kept beside it.
+   * Either way the page then holds other content than that version, so it is re-stamped: the same revision at a later
+   * time, drawn from that version. Every screen showing the version stored here draws the page again, and a removal
+   * waiting on that version leaves the page.
    */
   private async importOne(rec: DrawingRec, scanned: DrawingMeta | undefined): Promise<{ result: 'added' | 'updated' | 'kept' | 'unchanged'; at: string; wrote: boolean; moved?: { id: string; rev: string } }> {
     const me = revOf(rec);
@@ -908,11 +1199,16 @@ export class ArtStore {
     const buf = thumb ? await thumb.arrayBuffer() : null;
     const kept = rec.strokes.map(storedStroke);
     const M = this.mem.meta.get(rec.id);
+    // the labels the version taking the page's id gets: the newest of the file's, the stored copy's and this copy's in
+    // memory (one storage couldn't write), so none set later is lost when memory gives way to it
+    const labelsAt = (stored?: Labels) => [stored, M].reduce<Labels>((l, m) => (m ? newestLabels(l, m) : l), rec);
     let cid = this.copyId(rec.id);
     let at = rec.id;
     let D: DrawingMeta | undefined;
     let same = false;
     let moved: { id: string; rev: string } | undefined;
+    let relabeled = false;
+    let restamp: Pick<DrawingMeta, 'updated' | 'from'> | undefined;
     const stored = await this.tx(
       ['meta', 'strokes', 'thumbs'],
       'readwrite',
@@ -927,8 +1223,8 @@ export class ArtStore {
               return;
             }
           };
-          const put = (id: string) => {
-            metaS.put(metaOf({ ...rec, id }), id);
+          const put = (id: string, labels: Labels = rec, version?: Pick<DrawingMeta, 'updated' | 'from'>) => {
+            metaS.put(metaOf({ ...rec, ...labels, ...version, id }), id);
             strokeS.put(kept, id);
             if (buf) thumbS.put({ type: 'image/jpeg', buf }, id);
           };
@@ -952,7 +1248,7 @@ export class ArtStore {
                 return ok('kept');
               }
               if (!D) {
-                put(rec.id);
+                put(rec.id, labelsAt());
                 return ok('kept');
               }
               const was = D;
@@ -967,9 +1263,17 @@ export class ArtStore {
                     // can't overwrite what that one wrote
                     const strokes = cleanStrokes(st.result, was.kind);
                     const page = strokes && { ...was, strokes };
-                    if (page && holds(page, rec)) return ok('unchanged');
+                    if (page && holds(page, rec)) {
+                      const l = newestLabels(was, labelsAt());
+                      if (!sameLabels(l, was)) {
+                        metaS.put({ ...was, ...l }, rec.id);
+                        relabeled = true;
+                      }
+                      return ok('unchanged');
+                    }
+                    restamp = { updated: Math.max(rec.updated, ...tops) + 1, from: fromOf([...(was.from ?? []), ...(rec.from ?? []), me]) };
                     if (page && holds(rec, page)) {
-                      put(rec.id);
+                      put(rec.id, labelsAt(was), restamp);
                       return ok('updated');
                     }
                   }
@@ -979,7 +1283,7 @@ export class ArtStore {
                     if (th.result) thumbS.put(th.result, cid);
                     moved = { id: cid, rev: revOf(was) };
                   }
-                  put(rec.id);
+                  put(rec.id, labelsAt(was), restamp);
                   ok('kept');
                 } catch (e) {
                   fail(e);
@@ -1014,17 +1318,20 @@ export class ArtStore {
           if (mt) this.mem.thumbs.set(to, mt);
         }
       }
-      this.mem.meta.set(at, metaOf({ ...rec, id: at }));
+      this.mem.meta.set(at, metaOf({ ...rec, ...(at === rec.id ? labelsAt(disk) : {}), id: at }));
       this.mem.strokes.set(at, rec.strokes);
       if (thumb) this.mem.thumbs.set(at, thumb);
       this.dropUrl(at);
       this.drop();
       return { result: there.length ? 'kept' : 'added', at, wrote: false };
     }
-    if (stored === 'unchanged') return { result: 'unchanged', at: rec.id, wrote: false };
+    if (stored === 'unchanged') {
+      if (relabeled) this.drop();
+      return { result: 'unchanged', at: rec.id, wrote: relabeled };
+    }
     // what this copy held of that version in memory is the stored one it replaced or moved aside
     if (same && at === rec.id && M && revOf(M) === me) memDrop(rec.id);
-    this.landed.add(landKey(at, me));
+    this.landed.add(landKey(at, restamp ? revOf({ rev: rec.rev, updated: restamp.updated }) : me));
     if (moved) this.landed.add(landKey(moved.id, moved.rev));
     if (at === rec.id && M && revOf(M) !== me) {
       const ms = this.mem.strokes.get(rec.id), mt = this.mem.thumbs.get(rec.id);
@@ -1047,6 +1354,6 @@ const stores = new Map<string, ArtStore>();
 /** One store per storage key, so the lab never touches the real drawings. */
 export function artStore(key: string) {
   let s = stores.get(key);
-  if (!s) stores.set(key, (s = new ArtStore(`${key}${BESIDE.art}`)));
+  if (!s) stores.set(key, (s = new ArtStore(`${key}${BESIDE.art}`, `${key}${BESIDE.artGone}`)));
   return s;
 }

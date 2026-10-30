@@ -62,7 +62,7 @@ async function home(h, { viewport = { width: 390, height: 844 }, saved = save(),
   });
   const outside = [];
   page.on('request', (r) => !r.url().startsWith(h.server.url) && !r.url().startsWith('data:') && outside.push(r.url()));
-  await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
+  await h.reachHub(page);
   return { ctx, page, errors, outside };
 }
 
@@ -205,7 +205,7 @@ export const scenarios = {
       // the app reads the motion preference as it starts
       await page.emulateMedia({ reducedMotion: reduced ? 'reduce' : 'no-preference' });
       await page.reload();
-      await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
+      await h.reachHub(page);
       for (const [tag, route] of [['Safe Zone', { name: 'safe', at: 'reasons' }], ['Comfort', { name: 'comfort' }]]) {
         const label = `${tag}${reduced ? ', reduced motion' : ''}`;
         await go(page, route);
@@ -252,7 +252,7 @@ export const scenarios = {
     await draft.focus();
     const other = await ctx.newPage();
     await other.goto(h.server.url + '/?mute');
-    await other.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
+    await h.reachHub(other);
     await other.evaluate(() => window.__daily.go({ name: 'comfort' }));
     await other.getByRole('textbox', { name: 'Add to Comfort kit' }).fill('From the other tab');
     await other.locator('.dq-listp--comfort').getByRole('button', { name: 'Add' }).click();

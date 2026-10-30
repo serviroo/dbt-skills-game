@@ -109,7 +109,7 @@ async function page(h, ctx, url, errors) {
   const p = await ctx.newPage();
   p.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   await p.goto(url);
-  await p.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 60000 });
+  await h.reachHub(p);
   return p;
 }
 
@@ -380,7 +380,7 @@ export const scenarios = {
       expectKept(h, await read(a.page), 'uk', 'en-SG with the UK picked');
       await pick(a.page, 'za');
       await a.page.reload();
-      await a.page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 60000 });
+      await h.reachHub(a.page);
       await talk(a.page);
       expectCountry(h, await read(a.page), 'za', 'en-SG with South Africa picked, after a reload');
       // a second copy opened from this one shares its session, so it isn't seeded again
