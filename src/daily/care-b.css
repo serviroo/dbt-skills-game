@@ -266,11 +266,12 @@
   justify-content: center;
   padding: 8px 0 24px;
 }
+/* never wider than the screen, even as its breath scales it up to 1.08 (easeScreen in moment.ts) */
 .dq-ease-glow {
   position: absolute;
   left: 50%;
   top: 46%;
-  width: min(560px, 130vw);
+  width: min(560px, calc(100vw / 1.08));
   aspect-ratio: 1;
   border-radius: 50%;
   transform: translate(-50%, -50%);

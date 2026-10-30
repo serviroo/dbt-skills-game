@@ -9,6 +9,13 @@
   height: clamp(260px, min(108vw, 80vh), 520px);
   margin: 0 -14px;
 }
+/* a phone zoomed to 200% (260 CSS pixels wide or less): it reaches only as far as the page's own 10 px padding, like
+   the roster under it */
+@media (max-width: 260px) {
+  .w2-camp {
+    margin: 0 -10px;
+  }
+}
 /* shown while the scene loads, and for as long as it is mounted (a lost context comes back here); gone if it never starts */
 .w2-camp.is-scene-wait,
 .w2-camp.is-scene-mounted {

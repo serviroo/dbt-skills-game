@@ -1276,6 +1276,17 @@
   font-weight: 500;
   line-height: 1;
 }
+/* a phone zoomed to 200% (260 CSS pixels wide or less): the three sizes stack, each as wide as the row, as Motion's
+   choices do */
+@media (max-width: 260px) {
+  .st-size {
+    flex-direction: column;
+  }
+  .st-size .dq-seg-b {
+    border-left: 0;
+    border-top: 1px solid rgba(125, 150, 197, 0.22);
+  }
+}
 .st-size-b--regular {
   font-size: 16px;
 }

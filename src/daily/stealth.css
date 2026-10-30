@@ -26,6 +26,8 @@
 /* title: first time a Lantern unlock plate, after that a quiet gold chip */
 .dq-st-title {
   display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
   align-items: baseline;
   gap: 10px;
   margin: 12px 0 0;
