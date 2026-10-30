@@ -31,10 +31,13 @@ export function supportListsCopy(app: App) {
   const status = h('span', { class: 'dq-hint', 'aria-live': 'polite' });
   const render = () => {
     const text = supportListsText(st.state);
+    // the preview and Copy go with the last entry, removed here or in another open copy: focus on either moves to Close
+    const lost = !text && (document.activeElement === pre || document.activeElement === copy);
     if (pre.textContent !== text) pre.textContent = text;
     pre.classList.toggle('is-hidden', !text);
     copy.classList.toggle('is-hidden', !text);
     empty.classList.toggle('is-hidden', !!text);
+    if (lost) close.focus();
     return text;
   };
   const copy = btn(LISTS_COPY.copy, async () => {

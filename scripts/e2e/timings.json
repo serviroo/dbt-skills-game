@@ -111,6 +111,7 @@
   "cope-walk": 11,
   "copy-everywhere": 1,
   "copy-lists-denied": 3,
+  "copy-lists-emptied-elsewhere": 4,
   "copy-lists-empty-and-private": 9,
   "copy-lists-exact": 2,
   "copy-lists-opens-in-view": 6,
