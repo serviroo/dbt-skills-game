@@ -2,6 +2,7 @@
 // has no names yet.
 import fs from 'node:fs';
 import path from 'node:path';
+import { gone } from './harness.mjs';
 
 /** taps the title once it is on screen: on a busy machine it comes up later than any fixed wait */
 async function tapTitle(page, note) {
@@ -78,7 +79,7 @@ export const scenarios = {
     const typed = await fields();
     expect(typed.name === 'Sam' && typed.comp === 'Pip the moth' && typed.focus === 'np-comp', `keys landed in the wrong field: ${JSON.stringify(typed)}`);
     await page.keyboard.press('Enter');
-    await name.waitFor({ state: 'detached', timeout: 10000 });
+    await gone(name, 10000);
     const you = await youOf(page);
     expect(you?.name === 'Sam' && you?.companion === 'Pip the moth', 'names not saved exactly: ' + JSON.stringify(you));
     expect(opened.focus === 'np-name', `the name field did not take focus as the prompt opened: ${JSON.stringify(opened)}`);

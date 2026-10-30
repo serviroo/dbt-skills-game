@@ -7,6 +7,7 @@
 //                                stage (renderer and postprocessing); Replay cutscene in Settings makes the stage and
 //                                draws the intro's first frame behind the title.
 // Frames are counted by wrapping requestAnimationFrame, which still hands every callback to the browser's own.
+import { gone } from './harness.mjs';
 import { settle } from './layout-fit.e2e.mjs';
 
 const IDLE_MS = 1200;
@@ -96,7 +97,7 @@ export const scenarios = {
     const win = page.locator('.sw-layer .sw');
     await hold(page, HOLD_SEC);
     await win.waitFor({ timeout: 5000 });
-    await win.waitFor({ state: 'detached', timeout: 5000 });
+    await gone(win, 5000);
     const ms = await page.evaluate(() => window.__held);
     // a clock that failed to wake would never close it; the ceiling only leaves room for a busy machine
     h.expect(ms >= HOLD_SEC * 1000 && ms < HOLD_SEC * 1000 + 5000, `the window held ${Math.round(ms)} ms, not its ${HOLD_SEC} s`);
@@ -123,7 +124,7 @@ export const scenarios = {
     await cdp.send('Debugger.resume');
     await cdp.send('Debugger.disable');
     await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-    await win.waitFor({ state: 'detached', timeout: 5000 });
+    await gone(win, 5000);
     const frozenMs = await page.evaluate(() => window.__held);
     h.expect(frozenMs >= across * 1000, `the window held across the freeze ended its ${across} s hold after ${Math.round(frozenMs)} ms`);
     await still('settings after a freeze and resume');

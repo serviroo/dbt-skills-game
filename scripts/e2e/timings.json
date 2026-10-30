@@ -186,6 +186,8 @@
   "gaps-newer-tab-removes": 6,
   "gaps-old-day-tabs": 3,
   "gaps-tab-rows": 3,
+  "gone-fails-at-its-deadline": 1,
+  "gone-waits-out-a-freeze": 5,
   "hidden-button-press": 27,
   "history-from-another-version": 3,
   "holds-let-go": 54,

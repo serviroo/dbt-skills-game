@@ -11,7 +11,7 @@
 // wave's moon is a light that shows whole at every size.
 import sharp from 'sharp';
 import { deviceMotion } from './device-motion.e2e.mjs';
-import { screenshot } from './harness.mjs';
+import { gone, screenshot } from './harness.mjs';
 
 const PHONE = { width: 390, height: 844 };
 const SIDE = { width: 844, height: 390 };
@@ -407,7 +407,7 @@ async function keepsTime(h, page, kind) {
   h.expect(c.s.frames > b.s.frames + 10 && c.s.last.e > b.s.last.e + 1, `${kind} resumed: the scene did not move on (${b.s.frames} -> ${c.s.frames} frames, ${b.s.last.e.toFixed(2)} -> ${c.s.last.e.toFixed(2)} s)`);
   inStep(h, c, `${kind} resumed`);
   await page.getByRole('button', { name: 'Leave this skill' }).click();
-  await page.locator('.dq-timer-stage').waitFor({ state: 'detached', timeout: 5000 });
+  await gone(page.locator('.dq-timer-stage'), 5000);
   const out = await scenes(page);
   h.expect(out.live === 0 && !(await page.locator('.dq-scene').count()), `${kind} left: ${JSON.stringify(out)}`);
   h.expect(out.left && !out.left.geometries && !out.left.textures && !out.left.programs, `${kind} left things on the GPU: ${JSON.stringify(out.left)}`);
@@ -793,7 +793,7 @@ export const scenarios = {
       const same = await page.evaluate(() => (window.__firstCanvas ??= document.querySelector('.dq-scene canvas')) === document.querySelector('.dq-scene canvas'));
       h.expect(s.live === 1 && s.contexts === 1 && same, `cycle ${i}: ${s.live} live, ${s.contexts} contexts, same canvas ${same}`);
       await page.getByRole('button', { name: 'Leave this skill' }).click();
-      await page.locator('.dq-timer-stage').waitFor({ state: 'detached', timeout: 5000 });
+      await gone(page.locator('.dq-timer-stage'), 5000);
       const out = await scenes(page);
       h.expect(out.live === 0 && out.contexts === 1 && !(await page.locator('.dq-scene').count()), `cycle ${i}: after leaving ${JSON.stringify(out)}`);
       h.expect(out.left && !out.left.geometries && !out.left.textures && !out.left.programs, `cycle ${i}: leaving left things on the GPU: ${JSON.stringify(out.left)}`);
@@ -1049,7 +1049,7 @@ export const scenarios = {
     const ticks = await page.$$eval('.dq-mo-svg path', (ps) => ps.filter((p) => getComputedStyle(p).visibility !== 'hidden' && Number(getComputedStyle(p).opacity) > 0.5).length);
     h.expect(ticks >= 1, 'moment: the ticks round the light are gone');
     await page.locator('.dq-mo-done').click();
-    await page.locator('.dq-mo-stage').waitFor({ state: 'detached', timeout: 5000 });
+    await gone(page.locator('.dq-mo-stage'), 5000);
     const out = await scenes(page);
     h.expect(out.live === 0 && out.left && !out.left.geometries && !out.left.textures, `moment: leaving did not free the scene: ${JSON.stringify(out)}`);
     h.expect(!errors.length, errors.join('\n'));

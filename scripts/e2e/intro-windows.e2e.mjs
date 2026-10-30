@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { gone } from './harness.mjs';
 
 const VIEWPORTS = [{ width: 390, height: 844 }, { width: 320, height: 568 }, { width: 844, height: 390 }];
 const PHONE = VIEWPORTS[0];
@@ -152,9 +153,9 @@ const state = (page) =>
     };
   });
 
+/** How long the page ran until no window was left, or null if one was still there after CLOSE_MS of it running. */
 async function closes(page) {
-  const t0 = Date.now();
-  return page.locator('.sw').waitFor({ state: 'detached', timeout: CLOSE_MS }).then(() => Date.now() - t0, () => null);
+  return gone(page.locator('.sw'), CLOSE_MS).catch(() => null);
 }
 
 const spot = (page, sel) =>
@@ -935,13 +936,13 @@ export const scenarios = {
         for (const part of ['.vol-range', '.vol-mute', '.vol-head']) {
           const p = await spot(page, part);
           await page.mouse.click(p.x, p.y);
-          const left = await win.waitFor({ state: 'detached', timeout: 800 }).then(() => true, () => false);
+          const left = await gone(win, 800).then(() => true, () => false);
           expect(!left, `a tap on the sound panel (${part}) answered the Lantern window`);
         }
         const plate = await spot(page, '.sw[data-kind="notification"] .sw-plate');
         await page.mouse.click(plate.x, plate.y);
         expect(!(await page.locator('.vol.is-open').count()), 'the tap outside the sound panel did not close it');
-        const stayed = await win.waitFor({ state: 'detached', timeout: 800 }).then(() => false, () => true);
+        const stayed = await gone(win, 800).then(() => false, () => true);
         expect(stayed, 'the tap that closed the sound panel also answered the Lantern window');
         // the next window opens a moment after this one leaves, so this times the one tapped, not any window
         await leaves(page, out, 'sound-panel-taps-close', '.sw[data-kind="notification"]', CLOSE_MS, () => page.mouse.click(plate.x, plate.y));

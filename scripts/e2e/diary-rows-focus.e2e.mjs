@@ -1,4 +1,5 @@
 import { returning, route } from './first-actions.e2e.mjs';
+import { gone } from './harness.mjs';
 
 const ROWS = ['Sadness', 'Fear or anxiety', 'Anger', 'Shame', 'Joy'];
 
@@ -14,7 +15,7 @@ async function diary(h, page) {
 const radio = (page, row, v) => page.locator('.dq-today').getByRole('radio', { name: `${row}: ${v}`, exact: true });
 const remove = (page, row) => page.locator('.dq-rowsed').getByRole('button', { name: `Remove ${row}`, exact: true });
 const adder = (page) => page.locator('.dq-rowsed .dq-addrow').first().getByRole('textbox');
-const gone = (page, row) => page.locator('.dq-today').getByRole('radiogroup', { name: row, exact: true }).waitFor({ state: 'detached', timeout: 5000 });
+const rowGone = (page, row) => gone(page.locator('.dq-today').getByRole('radiogroup', { name: row, exact: true }), 5000);
 const tag = (page, name) => page.evaluate((n) => (document.activeElement.dataset.keep = n), name);
 const focus = (page) =>
   page.evaluate(() => {
@@ -51,7 +52,7 @@ export const scenarios = {
       const removeJoy = await remove(b, 'Joy').evaluate((e) => (e.dataset.same = 'joy'));
 
       await removeIn(a, 'Anger');
-      await gone(b, 'Anger');
+      await rowGone(b, 'Anger');
       let f = await focus(b);
       h.expect(f.keep === 'joy' && f.checked === 'true', `B's focus after A removed Anger: ${JSON.stringify(f)}`);
       h.expect((await adder(b).inputValue()) === 'Calm', `B's typed row name is now "${await adder(b).inputValue()}"`);
@@ -62,19 +63,19 @@ export const scenarios = {
       await remove(b, 'Fear or anxiety').focus();
       await tag(b, 'fear');
       await removeIn(a, 'Shame');
-      await gone(b, 'Shame');
+      await rowGone(b, 'Shame');
       f = await focus(b);
       h.expect(f.keep === 'fear', `B's focus after A removed Shame: ${JSON.stringify(f)}`);
 
       await removeIn(a, 'Fear or anxiety');
-      await gone(b, 'Fear or anxiety');
+      await rowGone(b, 'Fear or anxiety');
       f = await focus(b);
       h.expect(f.label === 'Remove Joy', `B's focus after A removed the row it was on: ${JSON.stringify(f)}`);
 
       await b.bringToFront();
       await radio(b, 'Sadness', 4).focus();
       await removeIn(a, 'Sadness');
-      await gone(b, 'Sadness');
+      await rowGone(b, 'Sadness');
       f = await focus(b);
       h.expect(f.label === 'Joy: 2' && f.checked === 'true', `B's focus after A removed the rated row it was on: ${JSON.stringify(f)}`);
 

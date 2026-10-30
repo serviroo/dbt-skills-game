@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { crystal, restore } from './newer-save-safety.e2e.mjs';
 import { holdStorage } from './story-reading.e2e.mjs';
+import { gone } from './harness.mjs';
 
 const OLD = JSON.parse(fs.readFileSync(fileURLToPath(new URL('./fixtures/older-saves/crystal-v1-8761293.json', import.meta.url)), 'utf8'));
 const day = () => {
@@ -122,7 +123,7 @@ async function pick(page, opener, name) {
   const dlg = page.getByRole('dialog', { name: 'Pick a drawing' });
   await dlg.waitFor({ timeout: 5000 });
   await dlg.getByRole('button', { name, exact: true }).click();
-  await dlg.waitFor({ state: 'detached', timeout: 5000 });
+  await gone(dlg, 5000);
 }
 const focused = (page) => page.evaluate(() => document.activeElement?.textContent?.trim() ?? '');
 async function safeShows(h, page, label) {
@@ -149,7 +150,7 @@ export const scenarios = {
       h.expect((await focused(page)) === 'Brave', 'focus did not move into the drawings');
       h.expect(!(await dlg.getByRole('button', { name: 'Remove drawing' }).count()), 'Remove drawing is offered with no drawing above the chapter');
       await page.keyboard.press('Escape');
-      await dlg.waitFor({ state: 'detached', timeout: 5000 });
+      await gone(dlg, 5000);
       h.expect((await focused(page)) === 'Add a drawing', 'closing the drawings did not bring focus back');
       await placedIs(h, page, t.id, null, 'closing without a pick');
 
@@ -185,7 +186,7 @@ export const scenarios = {
       await page.getByRole('button', { name: 'Change drawing' }).click();
       const sheet = page.getByRole('dialog', { name: 'Pick a drawing' });
       await sheet.getByRole('button', { name: 'Remove drawing', exact: true }).click();
-      await sheet.waitFor({ state: 'detached', timeout: 5000 });
+      await gone(sheet, 5000);
       await editorShows(h, page, null, 'after Remove drawing');
       h.expect((await focused(page)) === 'Add a drawing', 'focus did not land on Add a drawing after Remove');
       await placedIs(h, page, t.id, null, 'after Remove drawing');
@@ -326,7 +327,7 @@ export const scenarios = {
       await held.drain();
       await page.getByRole('textbox', { name: 'Page, Spring' }).waitFor({ timeout: 5000 });
       await dlg.getByRole('button', { name: 'Brave', exact: true }).click();
-      await dlg.waitFor({ state: 'detached', timeout: 5000 });
+      await gone(dlg, 5000);
       await placedIs(h, page, t.id, { [t.ch1]: 'fox-ally' }, 'a pick from the picker chapter 1 opened');
       await editorShows(h, page, null, 'chapter 2, on screen now');
       await writing(page, t.id, t.ch1);

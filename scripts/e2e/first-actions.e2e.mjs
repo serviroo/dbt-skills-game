@@ -1,3 +1,4 @@
+import { gone } from './harness.mjs';
 import { audit, boot, PAGE, settle, SKIP } from './layout-fit.e2e.mjs';
 
 export const dayOf = (ms) => {
@@ -181,7 +182,7 @@ async function addRow(page, row) {
   await box.getByRole('button', { name: 'Add' }).click();
 }
 async function offCard(h, page, row, where) {
-  await rowOnCard(page, row).waitFor({ state: 'detached', timeout: 5000 }).catch(() => {});
+  await gone(rowOnCard(page, row), 5000).catch(() => {});
   h.expect(!(await rowOnCard(page, row).count()), `${where}: "${row}" is still on today's card after it was removed`);
   if (row === URGE) h.expect(!(await page.locator('.dq-today h3', { hasText: 'Urges, 0 to 5' }).isVisible()), `${where}: today's card still shows the Urges heading with no urge rows`);
 }

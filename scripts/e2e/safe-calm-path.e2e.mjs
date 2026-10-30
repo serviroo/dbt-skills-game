@@ -3,6 +3,8 @@
 // comes back to its first screen; Leave still goes Home, whether the Safe Zone was opened from Home or from a skill.
 // Every way into its moment stays flat, without creating a WebGL context; the moment outside still has its scene.
 
+import { gone } from './harness.mjs';
+
 const PHONE = { width: 390, height: 844 };
 const DESK = { width: 1440, height: 900 };
 
@@ -161,7 +163,7 @@ export const scenarios = {
         }
         await page.getByRole('button', { name: 'Cool air', exact: true }).click();
         await page.clock.fastForward(31000);
-        await page.locator('.dq-timer').waitFor({ state: 'detached' });
+        await gone(page.locator('.dq-timer'), 30000);
         await flat('cold timer end');
 
         await page.locator('.dq-top .dq-back', { hasText: 'Leave' }).click();

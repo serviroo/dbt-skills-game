@@ -1,7 +1,7 @@
 // The harness's until() waits for a check in the page that awaits something, and gives up at its deadline even when the
-// check never answers, or turns true only after it while a long wait between checks runs. Its leaves() waits for
-// something to leave the page on the page's running time: a page frozen past the deadline that lets it go once it runs
-// again passes, and one that never lets it go fails at its deadline.
+// check never answers, or turns true only after it while a long wait between checks runs. Its leaves() and gone() wait
+// for something to leave the page on the page's running time: a page frozen past the deadline that lets it go once it
+// runs again passes, and one that never lets it go fails at its deadline.
 
 export const scenarios = {
   async 'until-hung-check-fails'(h) {
@@ -55,6 +55,33 @@ export const scenarios = {
       const after = await gone(500).then(() => 'left', (e) => e.message);
       const took = Date.now() - t0;
       h.expect(after === '#x was still in the page after 0.5 s of the page running' && took < 2000, `something that never left gave "${after}" after ${took} ms`);
+    } finally { await ctx.close(); }
+  },
+
+  async 'gone-waits-out-a-freeze'(h) {
+    const ctx = await h.browser.newContext();
+    try {
+      const page = await ctx.newPage();
+      await page.setContent('<div role="dialog" aria-label="Pick">x</div>');
+      await page.evaluate(() => void setTimeout(() => {
+        const end = performance.now() + 3000;
+        while (performance.now() < end);
+        document.querySelector('[role=dialog]').remove();
+      }, 100));
+      const after = await h.gone(page.getByRole('dialog', { name: 'Pick' }), 1500).then(() => 'left', (e) => e.message);
+      h.expect(after === 'left', `a page frozen past the deadline, which let it go as soon as it ran again, failed: ${after}`);
+    } finally { await ctx.close(); }
+  },
+
+  async 'gone-fails-at-its-deadline'(h) {
+    const ctx = await h.browser.newContext();
+    try {
+      const page = await ctx.newPage();
+      await page.setContent('<div role="dialog" aria-label="Pick">x</div>');
+      const t0 = Date.now();
+      const after = await h.gone(page.getByRole('dialog', { name: 'Pick' }), 500).then(() => 'left', (e) => e.message);
+      const took = Date.now() - t0;
+      h.expect(/^getByRole\(.* was still in the page after 0\.5 s of the page running$/.test(after) && took < 2000, `something that never left gave "${after}" after ${took} ms`);
     } finally { await ctx.close(); }
   },
 };

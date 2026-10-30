@@ -51,6 +51,77 @@ export async function until(page, check, arg, { timeout = 10000, polling = 100 }
   }
 }
 
+let counts = 0;
+/**
+ * Counts, inside the page, the time it could run, by its own 50 ms timer (kept from before a page clock, see pageTrail):
+ * a gap longer than 250 ms between two ticks is time the page could not run, such as a busy machine stopping the whole
+ * browser for seconds now and then, and counts as 250 ms. `late` resolves true once the page has run `ms`; stop() ends
+ * the count (`late` then resolves false) and gives how long the page ran, in ms.
+ */
+function runs(page, ms) {
+  const id = ++counts;
+  const late = page.evaluate(
+    ({ id, ms }) =>
+      new Promise((done) => {
+        const { setTimeout: later, now } = window.__e2eReal;
+        const c = ((window.__e2eRuns ??= {})[id] = { run: 0, stop: false });
+        let last = now();
+        const tick = () => {
+          if (c.stop) return done(false);
+          const t = now();
+          c.run += Math.min(t - last, 250);
+          last = t;
+          if (c.run >= ms) done(true);
+          else later(tick, 50);
+        };
+        later(tick, 50);
+      }),
+    { id, ms },
+  );
+  late.catch(() => {});
+  const stop = () =>
+    page
+      .evaluate((id) => {
+        const c = window.__e2eRuns?.[id];
+        if (!c) return null;
+        c.stop = true;
+        return Math.round(c.run);
+      }, id)
+      .catch(() => null);
+  return { late, stop };
+}
+
+/**
+ * Waits for `locator` to match nothing, as its waitFor({ state: 'detached' }) does, with `timeout` counted in time the
+ * page could run (see runs()): a browser stopped for a while on a busy machine can't fail it, and a locator that never
+ * empties still fails at its deadline. Resolves with how long the page ran meanwhile, in ms.
+ */
+export async function gone(locator, timeout) {
+  const count = runs(locator.page(), timeout);
+  let over = false;
+  count.late.then((v) => (over = v === true), () => {});
+  // a page that answers nothing at all for this long is stuck, not stopped for a moment
+  const stuck = Math.max(60000, 4 * timeout);
+  const end = Date.now() + stuck;
+  let left = false;
+  try {
+    for (;;) {
+      left = await locator.waitFor({ state: 'detached', timeout: 250 }).then(
+        () => true,
+        (e) => {
+          if (e.name !== 'TimeoutError') throw e;
+          return false;
+        },
+      );
+      if (left) return await count.stop();
+      if (over) throw new Error(`${locator} was still in the page after ${timeout / 1000} s of the page running`);
+      if (Date.now() > end) throw new Error(`${locator} was still in the page ${stuck / 1000} s later, the page stopped for most of it`);
+    }
+  } finally {
+    if (!left) count.stop();
+  }
+}
+
 /**
  * Stops the page clock where it is, so time moves only when the scenario says. clock.pauseAt alone takes a wall time,
  * which a running clock may pass before the call lands on a slow page. Holding Date still first makes the pause land
@@ -408,21 +479,17 @@ export async function startHarness(flags = {}) {
    * it and call the result with a timeout after the tap: `const left = leaves(page, '#np-name'); await tap; await left(10000)`.
    * The page reports the moment itself, so a page that freezes right after can't hide that it happened: the intro's first
    * 3D frames compile their shaders, which on a software GPU (CI's SwiftShader) blocks the page for seconds, and a wait
-   * that asks the page from outside gets no answer until that ends. The timeout counts only time the page could run, by
-   * its own timer: a page frozen meanwhile (a busy CI runner stops the whole browser for seconds now and then) gets that
-   * time back, so a freeze can't pass for a selector that never left.
+   * that asks the page from outside gets no answer until that ends. The timeout counts only time the page could run (see
+   * runs()), so a browser stopped for a while on a busy machine can't fail it either.
    */
-  let leaving = 0;
   function leaves(page, selector) {
-    const id = ++leaving;
     const at = page.evaluate(
-      ({ sel, id }) =>
+      (sel) =>
         new Promise((done) => {
           let seen = false;
           const check = () => {
             if (document.querySelector(sel)) seen = true;
             else if (seen) {
-              (window.__e2eLeft ??= new Set()).add(id);
               done(performance.timeOrigin + performance.now());
               return true;
             }
@@ -431,42 +498,30 @@ export async function startHarness(flags = {}) {
           const o = new MutationObserver(() => check() && o.disconnect());
           o.observe(document, { childList: true, subtree: true });
         }),
-      { sel: selector, id },
+      selector,
     );
     at.catch(() => {});
     return async (timeout) => {
       note(page, `wait for ${selector} to leave`);
-      // ends once the page has run for the timeout, or once the selector has left
-      const ran = page.evaluate(
-        ({ id, ms }) =>
-          new Promise((done) => {
-            const { setTimeout: later, now } = window.__e2eReal;
-            let run = 0;
-            let last = now();
-            const tick = () => {
-              if (window.__e2eLeft?.has(id)) return done('left');
-              const t = now();
-              // longer than this between two ticks of a 50 ms timer, the page could not run: a freeze counts as one tick
-              run += Math.min(t - last, 250);
-              last = t;
-              if (run >= ms) done('late');
-              else later(tick, 50);
-            };
-            later(tick, 50);
-          }),
-        { id, ms: timeout },
-      );
-      ran.catch(() => {});
-      // a page that answers nothing at all for this long is stuck, not frozen for a moment
+      const count = runs(page, timeout);
+      // a page that answers nothing at all for this long is stuck, not stopped for a moment
       const stuck = Math.max(60000, 4 * timeout);
+      const late = count.late.then((over) => {
+        if (over) throw new Error(`${selector} was still in the page after ${timeout / 1000} s of the page running`);
+        return at;
+      });
+      late.catch(() => {});
       let timer;
       try {
-        const first = await Promise.race([at, ran, new Promise((_, fail) => (timer = setTimeout(() => fail(new Error(`${selector}: the page answered nothing for ${stuck / 1000} s`)), stuck)))]);
-        if (first === 'late') throw new Error(`${selector} was still in the page after ${timeout / 1000} s of the page running`);
-        const left = await at;
+        const left = await Promise.race([
+          at,
+          late,
+          new Promise((_, fail) => (timer = setTimeout(() => fail(new Error(`${selector}: the page answered nothing for ${stuck / 1000} s`)), stuck))),
+        ]);
         note(page, `${selector} left`, { inPage: Math.round(left - (trail.get(page)?.t0 ?? 0)) });
       } finally {
         clearTimeout(timer);
+        count.stop();
       }
     };
   }
@@ -590,7 +645,7 @@ export async function startHarness(flags = {}) {
   })());
 
   const shared = {};
-  const lane = (browser) => ({ browser, server, out, flags, shared, renderer, throttleErrors, zone: ZONE, open: opener(browser), evidence, evidenceAll: allEvidence(browser), note, leaves, shot, ls, youOf, deepFind, deepDrop, expect, sleep, frames, settled, until, pauseClock, reachHub, openSettings, SAVE, YOU, SEEN, stop, more });
+  const lane = (browser) => ({ browser, server, out, flags, shared, renderer, throttleErrors, zone: ZONE, open: opener(browser), evidence, evidenceAll: allEvidence(browser), note, leaves, gone, shot, ls, youOf, deepFind, deepDrop, expect, sleep, frames, settled, until, pauseClock, reachHub, openSettings, SAVE, YOU, SEEN, stop, more });
   /** Another browser on the same dev server, so scenarios can run side by side: its own profiles, the same `shared`. */
   async function more() {
     if (stopping) throw new Error('the harness is stopping');
