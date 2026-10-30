@@ -85,18 +85,28 @@ const endless = (page, selector) => page.evaluate((sel) => document.querySelecto
 const drifts = (page) => page.evaluate(() => document.querySelector('.ec-stage').getAnimations().filter((a) => a.effect.getTiming().iterations === Infinity && a.playState !== 'idle').length);
 
 /**
- * Stops the page for `ms` from its next task, as a software renderer (CI's SwiftShader) does while it compiles a new
- * frame's shaders: whatever comes meanwhile, a change from another tab among it, waits for the page to run again.
+ * Stops the page, as a software renderer (CI's SwiftShader) does while it compiles a new frame's shaders: it runs nothing
+ * until resume(), so whatever comes meanwhile, a change from another tab among it, waits for it. read(fn, arg) looks into
+ * it meanwhile, where page.evaluate would wait for it to run again. Resolves once the page has stopped.
  */
-const freeze = (page, ms) =>
-  page.evaluate(
-    (ms) =>
-      void setTimeout(() => {
-        const end = performance.now() + ms;
-        while (performance.now() < end);
-      }),
-    ms,
-  );
+const pause = async (ctx, page) => {
+  const cdp = await ctx.newCDPSession(page);
+  await cdp.send('Debugger.enable');
+  const stopped = new Promise((r) => cdp.once('Debugger.paused', r));
+  await cdp.send('Debugger.pause');
+  await stopped;
+  return {
+    async read(fn, arg) {
+      const r = await cdp.send('Runtime.evaluate', { expression: `(${fn})(${JSON.stringify(arg)})`, returnByValue: true });
+      if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
+      return r.result.value;
+    },
+    async resume() {
+      await cdp.send('Debugger.resume');
+      await cdp.detach();
+    },
+  };
+};
 
 export const scenarios = {
   async 'intro-hold-follows-device-motion'(h) {
@@ -258,8 +268,8 @@ export const scenarios = {
     // Reduced chosen in another tab while a Lantern window is still opening and typing, and while the end card is still
     // coming in: every finite animation of either lands where it ends at once, the window's text and the card's buttons
     // with them. The page's animation clock stands still meanwhile, so nothing could have ended on its own. The piece's
-    // tab is stopped just as the change is made, for longer than CI's software renderer has stopped one (5.4 s): it lands
-    // all the same once it runs again
+    // tab is stopped from before the change is made until it is stored, as CI's software renderer once stopped one for
+    // 5.4 s: it lands all the same once it runs again
     const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', PHONE);
     await h.openSettings(page);
     const pieces = [
@@ -275,20 +285,29 @@ export const scenarios = {
       await piece.goto(h.server.url + `/?lab=window&kind=${k.kind}&mute`);
       await k.ready(piece);
       /** the piece's finite animations not yet at their end, and what is still to show */
-      const coming = () =>
-        piece.evaluate((sel) => {
-          const root = document.querySelector(sel);
-          return {
-            running: root.getAnimations({ subtree: true }).filter((a) => a.effect.getTiming().iterations !== Infinity && !['finished', 'idle'].includes(a.playState)).length,
-            typing: window.__win?.typing ?? null,
-            hidden: [...root.querySelectorAll('.sw-u')].filter((u) => Number(getComputedStyle(u).opacity) < 1).length,
-            inert: [...root.querySelectorAll('.sw-actions, .ec-actions')].filter((a) => a.inert).length,
-          };
-        }, k.root);
+      const state = (sel) => {
+        const root = document.querySelector(sel);
+        return {
+          running: root.getAnimations({ subtree: true }).filter((a) => a.effect.getTiming().iterations !== Infinity && !['finished', 'idle'].includes(a.playState)).length,
+          typing: window.__win?.typing ?? null,
+          hidden: [...root.querySelectorAll('.sw-u')].filter((u) => Number(getComputedStyle(u).opacity) < 1).length,
+          inert: [...root.querySelectorAll('.sw-actions, .ec-actions')].filter((a) => a.inert).length,
+        };
+      };
+      const coming = () => piece.evaluate(state, k.root);
       const before = await coming();
       h.expect(before.running > 0, `${k.kind}: nothing was still coming in to begin with: ${JSON.stringify(before)}`);
-      await freeze(piece, 5500);
-      await page.getByRole('radio', { name: 'Motion: Reduced', exact: true }).click();
+      const stopped = await pause(ctx, piece);
+      let stored, held;
+      try {
+        await page.getByRole('radio', { name: 'Motion: Reduced', exact: true }).click();
+        // stored while the tab is stopped, which still shows just what it showed before
+        stored = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).settings.motion, h.SAVE);
+        held = await stopped.read(state, k.root);
+      } finally {
+        await stopped.resume();
+      }
+      h.expect(stored === 'reduce' && JSON.stringify(held) === JSON.stringify(before), `${k.kind}: the stop was not exercised: with Motion ${stored} stored in another tab, the stopped tab showed ${JSON.stringify(held)}`);
       h.expect(await reducedHere(piece, true), `${k.kind}: the piece never heard Motion: Reduced chosen in another tab`);
       const now = await coming();
       h.expect(!now.running && !now.typing && !now.hidden && !now.inert, `${k.kind}: with Motion: Reduced chosen in another tab, it kept coming in: ${JSON.stringify(now)}`);
