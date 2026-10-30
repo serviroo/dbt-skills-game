@@ -23,6 +23,9 @@
 //   text-size-crystal-refused where storage refuses the size, a Save Crystal carries Largest picked in Settings, and
 //                        restoring it on a device that refuses it too shows Largest in Settings and the Safe Zone for
 //                        the visit and says some choices couldn't be saved
+//   text-size-crystal-no-storage where storage refuses every write, restoring a Save Crystal that carries the Safe
+//                        Zone's light with Largest still shows Largest in Settings and the Safe Zone for the visit,
+//                        and says some choices couldn't be saved
 //   text-size-crystal-unreadable where the size can't be read back, a Save Crystal says it isn't whole, and restoring
 //                        one keeps this device's own size and says some choices couldn't be saved
 //   talk-keeps-focus     at 390x844, a call link on Talk holds the keys' focus while another open copy picks another
@@ -77,6 +80,12 @@ const refuseSize = (how) => {
   Storage.prototype[name] = function (k, ...rest) {
     if (String(k).endsWith('.read-size')) throw new DOMException('Storage refused it', how === 'set' ? 'QuotaExceededError' : 'SecurityError');
     return real.call(this, k, ...rest);
+  };
+};
+/** Storage refuses every write. Runs in the page. */
+const refuseAll = () => {
+  Storage.prototype.setItem = function () {
+    throw new DOMException('Storage refused it', 'QuotaExceededError');
   };
 };
 /** Makes a Save Crystal from Settings and reads it back from the file it saves to. */
@@ -671,6 +680,32 @@ export const scenarios = {
     const size = await b.page.evaluate(() => document.querySelector('.dq-safezone')?.dataset.size);
     if (shown !== 'Largest' || size !== 'largest') problems.push(`restored where storage refuses it, Settings shows ${shown} and the Safe Zone is ${size}`);
     if (!said.includes(UNSAVED)) problems.push(`restored where storage refuses the size, the restore said "${said}"`);
+    problems.push(...b.errors);
+    await b.ctx.close();
+    h.expect(!problems.length, problems.join('\n'));
+  },
+
+  async 'text-size-crystal-no-storage'(h) {
+    const problems = [];
+    const a = await h.open({ ...plainSeed(h), [`${h.SAVE}.safe-light`]: 'up', [`${h.SAVE}.read-size`]: 'largest' }, '?mute', PHONE);
+    await a.page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
+    await a.page.evaluate(() => window.__daily.go({ name: 'settings' }));
+    await onScreen(a.page, 'settings');
+    const raw = await crystalOf(h, a.page, 'no-storage.json');
+    if (raw.preferences?.safeLight !== 'up' || raw.preferences?.readSize !== 'largest') problems.push(`the Save Crystal carries the light as ${raw.preferences?.safeLight} and the text size as ${raw.preferences?.readSize}`);
+    problems.push(...a.errors);
+    await a.ctx.close();
+    // the light, stored first, can't be saved here: the size is held for the visit all the same
+    const b = await h.open(plainSeed(h), '?mute', PHONE);
+    await b.page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
+    await b.page.evaluate(refuseAll);
+    const said = await restoreCrystal(b.page, raw);
+    const shown = await b.page.evaluate(() => document.querySelector('.dq-settings [aria-label="Text size"] [role=radio][aria-checked=true]')?.textContent);
+    await b.page.evaluate((r) => window.__daily.go(r), { name: 'safe', at: 'start' });
+    await b.page.locator('.dq-sz-t').first().waitFor();
+    const size = await b.page.evaluate(() => document.querySelector('.dq-safezone')?.dataset.size);
+    if (shown !== 'Largest' || size !== 'largest') problems.push(`restored where storage refuses every write, Settings shows ${shown} and the Safe Zone is ${size}`);
+    if (!said.includes(UNSAVED)) problems.push(`restored where storage refuses every write, the restore said "${said}"`);
     problems.push(...b.errors);
     await b.ctx.close();
     h.expect(!problems.length, problems.join('\n'));
