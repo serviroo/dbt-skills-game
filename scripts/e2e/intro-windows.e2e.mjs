@@ -206,7 +206,7 @@ async function introWindows({ open, expect }, viewport, look) {
       // a tap before the Lantern has finished typing only finishes it: the window closes on one once its arrow shows
       await page.waitForFunction((q) => document.querySelector(`${q} .sw-next`)?.getAnimations().length > 0, win, { polling: 'raf', timeout: 15000 });
       await page.mouse.click(p.x, p.y);
-      await page.locator(win).waitFor({ state: 'detached', timeout: 10000 });
+      await gone(page.locator(win), 10000);
     }
     for (const kind of ['army', 'unlocked']) {
       await page.evaluate(async (kind) => {

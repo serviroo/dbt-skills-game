@@ -21,6 +21,7 @@
 // And on every other screen with a top bar, at 200%, the Safe Zone button stays one tap away: it and the rest of the bar
 // show whole and take their taps, with the Sound panel open too, and Give me a moment's Done shows whole once scrolled
 // to; Home and Settings also fit whole, with no text on top of other text.
+import { gone } from './harness.mjs';
 import { audit, boot, PAGE, SCREENS, settle, SKIP } from './layout-fit.e2e.mjs';
 import { listed } from './me-92-safe-zone-clean.e2e.mjs';
 
@@ -200,7 +201,7 @@ function walk(phone, zoom) {
       await page.locator('.vol.is-open .vol-pop').waitFor();
       await look(page, 'start, Sound open', { sound: true });
       await page.keyboard.press('Escape');
-      await page.locator('.vol.is-open').waitFor({ state: 'detached' });
+      await gone(page.locator('.vol.is-open'), 10000);
       await tap(page, 'Give me a moment');
       await at(page, 'Give me a moment');
       await look(page, 'Give me a moment');
@@ -316,7 +317,7 @@ function bars(phone) {
       for (const f of await unreachable(page, { sound: true })) problems.push(`${at}, Sound open: ${f}`);
       await page.keyboard.press('Escape');
       // gone once its fade out ends, so it takes no taps meant for the next screen
-      await page.locator('.dq-top .vol-pop').waitFor({ state: 'hidden' });
+      await gone(page.locator('.dq-top .vol-pop'), 10000, { state: 'hidden' });
     }
     if (errors.length) problems.push(`${phone} at 200%: ${errors.join(' | ')}`);
     await ctx.close();
