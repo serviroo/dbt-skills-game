@@ -1,13 +1,21 @@
-// Art room: a removal waiting for its Undo is stored beside the save with the version it hides. Every tab hides it, a
-// newer save in any tab wins, a reload finishes it, a Save Crystal restore neither brings it back nor loses it, Undo
-// works until the toast is gone, Forward can't reopen it, and a change in another tab keeps the focused card.
+// Art room: a removal waiting for its Undo is stored beside the save, one key per drawing, with the version it hides.
+// Every tab hides it, tabs removing at once keep both, a copy of a tab waits for its Undo, a newer save in any tab wins,
+// a reload finishes it, a Save Crystal restore neither brings it back nor loses it, Undo works until the toast is gone
+// or they leave for another screen (Home keeps it), Forward can't reopen it, and a change in another tab keeps the
+// focused card.
 import fs from 'node:fs';
 import path from 'node:path';
 
 const line = (x, y, i = 1) => ({ i, w: 25, p: [x, y, x + 300, y + 80, x + 520, y + 20] });
 const records = (page) => page.evaluate(async () => (await (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).exportAll()).records);
 const order = (page, sel = '.dq-galitem') => page.locator(sel).evaluateAll((els) => els.map((e) => e.dataset.piece));
-const goneMarks = (page) => page.evaluate(() => JSON.parse(localStorage.getItem(`${window.__daily.store.key}.art.gone`) ?? 'null'));
+/** The removals waiting for their Undo as stored, by drawing id (one key each), or null when none is. */
+const goneMarks = (page) =>
+  page.evaluate(() => {
+    const at = `${window.__daily.store.key}.art.gone.`;
+    const keys = Object.keys(localStorage).filter((k) => k.startsWith(at));
+    return keys.length ? Object.fromEntries(keys.map((k) => [k.slice(at.length), JSON.parse(localStorage.getItem(k))])) : null;
+  });
 const focused = (page) => page.evaluate(() => document.activeElement?.dataset?.piece ?? document.activeElement?.className ?? null);
 
 async function seed(page) {
@@ -108,6 +116,34 @@ export const scenarios = {
     }
   },
 
+  /** With no BroadcastChannel, a copy of a tab (it keeps the tab's id) leaves a removal to the Undo still up in the other. */
+  async 'art-remove-copied-tab'(h) {
+    const { ctx, page: a, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', undefined, (c) => c.addInitScript(() => { window.BroadcastChannel = undefined; }));
+    try {
+      a.setDefaultTimeout(15000);
+      await h.reachHub(a);
+      await seed(a);
+      await toArt(h, a);
+      const copy = await ctx.newPage();
+      copy.on('pageerror', (e) => errors.push(e.message));
+      await copy.addInitScript((id) => sessionStorage.setItem('dbt.tab', id), await a.evaluate(() => sessionStorage.getItem('dbt.tab')));
+      await copy.goto(h.server.url + '/?mute');
+      await toArt(h, copy);
+      h.expect((await copy.evaluate(() => sessionStorage.getItem('dbt.tab'))) === (await a.evaluate(() => sessionStorage.getItem('dbt.tab'))), 'the copy did not keep the tab\'s id');
+
+      await removePiece(a, 'pg-b');
+      await copy.locator('[data-piece="pg-b"]').waitFor({ state: 'detached', timeout: 3000 });
+      await h.sleep(1500);
+      h.expect((await records(a)).some((r) => r.id === 'pg-b'), 'the copy of the tab finished the removal while its Undo was still up');
+      await a.locator('.dq-toast').getByRole('button', { name: 'Undo', exact: true }).click();
+      await copy.locator('[data-piece="pg-b"]').waitFor();
+      h.expect((await records(a)).some((r) => r.id === 'pg-b') && !(await goneMarks(a)), 'Undo did not keep the page');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** Every valid drawing id is marked as an own key, heard in other tabs and finished after a reload. */
   async 'art-remove-special-ids'(h) {
     const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute');
@@ -121,7 +157,7 @@ export const scenarios = {
       const other = await second(h, ctx, errors);
       for (const id of ['__proto__', 'constructor', 'toString']) {
         await removePiece(page, id);
-        h.expect(await page.evaluate((id) => Object.hasOwn(JSON.parse(localStorage.getItem(`${window.__daily.store.key}.art.gone`) ?? '{}'), id), id), `${id}: the pending removal was not stored as an own key`);
+        h.expect(await page.evaluate((id) => localStorage.getItem(`${window.__daily.store.key}.art.gone.${id}`) !== null, id), `${id}: the pending removal was not stored under its own key`);
         await other.locator(`[data-piece="${id}"]`).waitFor({ state: 'detached', timeout: 3000 });
         await page.reload();
         await toArt(h, page);
@@ -252,7 +288,8 @@ export const scenarios = {
     });
     await a.evaluate(([rev, revC]) => {
       const now = Date.now();
-      localStorage.setItem(`${window.__daily.store.key}.art.gone`, JSON.stringify({ 'pg-a': { rev, at: now - 61e3, tab: 'closed-tab' }, 'al-c': { rev: revC, at: now, tab: 'closed-tab' } }));
+      localStorage.setItem(`${window.__daily.store.key}.art.gone.pg-a`, JSON.stringify({ rev, at: now - 61e3, tab: 'closed-tab' }));
+      localStorage.setItem(`${window.__daily.store.key}.art.gone.al-c`, JSON.stringify({ rev: revC, at: now, tab: 'closed-tab' }));
     }, [rev, revC]);
     await a.reload();
     await toArt(h, a);
@@ -341,6 +378,67 @@ export const scenarios = {
     await page.evaluate(() => document.querySelector('.dq-toast-btn')?.click());
     await h.sleep(500);
     h.expect(!(await order(page)).includes('pg-b') && !(await page.locator('.dq-toast').isVisible()), 'a tap on the gone toast brought something back');
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /**
+   * Two tabs remove different drawings at the same moment, the second reading the waiting removals from before the first
+   * landed: both stay waiting, and a reload during its Undo finishes the first tab's.
+   */
+  async 'art-remove-two-tabs-at-once'(h) {
+    const { ctx, page: a, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute');
+    a.setDefaultTimeout(15000);
+    await h.reachHub(a);
+    await seed(a);
+    await toArt(h, a);
+    const b = await second(h, ctx, errors);
+    await b.evaluate(() => {
+      const at = `${window.__daily.store.key}.art.gone`;
+      const then = Object.fromEntries(Object.keys(localStorage).filter((k) => k.startsWith(at)).map((k) => [k, localStorage.getItem(k)]));
+      const get = Storage.prototype.getItem;
+      Storage.prototype.getItem = function (k) {
+        return String(k).startsWith(at) ? (then[k] ?? null) : get.call(this, k);
+      };
+      window.__readsNow = () => (Storage.prototype.getItem = get);
+    });
+
+    await removePiece(a, 'pg-a');
+    await removePiece(b, 'pg-b');
+    await b.evaluate(() => window.__readsNow());
+    await a.reload();
+    await toArt(h, a);
+    await until(h, () => records(a), (rs) => !rs.some((r) => r.id === 'pg-a'), 'a reload during the Undo did not finish this tab\'s removal');
+    h.expect(!(await order(a)).includes('pg-a') && !(await order(a)).includes('pg-b'), `a removal came back after the reload: ${JSON.stringify(await order(a))}`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /** Leaving for another screen before the toast runs out ends its Undo there and then; Home keeps the toast and its Undo. */
+  async 'art-remove-leave-ends-undo'(h) {
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute');
+    page.setDefaultTimeout(15000);
+    await h.reachHub(page);
+    await seed(page);
+    await toArt(h, page);
+
+    await removePiece(page, 'pg-b');
+    await openPiece(page, 'pg-a');
+    h.expect(!(await page.locator('.dq-toast').isVisible()), 'the toast followed to another screen');
+    await until(h, () => records(page), (rs) => !rs.some((r) => r.id === 'pg-b'), 'leaving the toast behind did not finish the removal', 20);
+    h.expect(!(await goneMarks(page))?.['pg-b'], 'leaving the toast behind left the removal waiting in every tab');
+    await page.evaluate(() => document.querySelector('.dq-toast-btn')?.click());
+    await h.sleep(500);
+    h.expect(!(await records(page)).some((r) => r.id === 'pg-b'), 'the Undo of a toast left behind brought the page back');
+
+    await page.locator('.dq-back').click();
+    await page.locator('.dq-artroom').waitFor();
+    await removePiece(page, 'pg-a');
+    await page.locator('.dq-back').click();
+    await page.locator('.dq-hub').waitFor();
+    await page.locator('.dq-toast').getByRole('button', { name: 'Undo', exact: true }).click();
+    await until(h, () => goneMarks(page), (g) => !g?.['pg-a'], 'Undo on Home did not take the removal back');
+    h.expect((await records(page)).some((r) => r.id === 'pg-a'), 'Undo on Home did not keep the page');
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },

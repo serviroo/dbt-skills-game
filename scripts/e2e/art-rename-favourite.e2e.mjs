@@ -1,9 +1,11 @@
 // Art room: rename a drawing, mark favourites (shown first with a mint star) and bring a removed one back with Undo.
-// Labels are not a new version of a drawing, so two tabs, a Save Crystal and an old save all keep them.
+// Labels are not a new version of a drawing, so two tabs, a Save Crystal and an old save all keep them, and storage that
+// can't write keeps the newest ones for the visit (a restore says so).
 // art-home-waits-for-welcome holds the browser clock at Home, before the welcome's delay, then checks reaching Home
 // closes the due welcome before Art can be tapped, with the page CPU running four times slower.
 import fs from 'node:fs';
 import path from 'node:path';
+import { line as stroke } from './art-eraser-glow.e2e.mjs';
 
 const PHONES = [{ width: 390, height: 844 }, { width: 320, height: 568 }];
 const line = (x, y, i = 1) => ({ i, w: 25, p: [x, y, x + 300, y + 80, x + 520, y + 20] });
@@ -35,6 +37,67 @@ async function openPiece(page, id) {
   await page.locator(`[data-piece="${id}"]`).click();
   await page.locator('.dq-piece-labels').waitFor();
 }
+
+/** Keep drawing on a saved drawing, from its page, once the drawing page has slid in. */
+async function keepDrawing(page, id) {
+  await openPiece(page, id);
+  await page.getByRole('button', { name: 'Keep drawing', exact: true }).click();
+  await page.waitForFunction(() => window.__daily?.ink?.strokes.length === 1 && !document.querySelector('.dq-ink-stage')?.inert);
+  await page.waitForFunction(() => !document.querySelector('.dq-draw')?.getAnimations().some((a) => a.playState === 'running'));
+}
+
+/** A second tab, on the Art room. */
+async function other(h, ctx, errors) {
+  const b = await ctx.newPage();
+  b.setDefaultTimeout(15000);
+  b.on('pageerror', (e) => errors.push(e.message));
+  await b.goto(h.server.url + '/?mute');
+  await toArt(h, b);
+  return b;
+}
+
+/** Names a drawing on its page (and with `fav` makes it a favourite), then goes back to the gallery. */
+async function nameIt(page, id, name, fav = false) {
+  await openPiece(page, id);
+  if (fav) await page.getByRole('button', { name: 'Favourite', exact: true }).click();
+  await page.getByRole('button', { name: 'Rename', exact: true }).click();
+  await page.locator('.dq-piece-rename input').fill(name);
+  await page.keyboard.press('Enter');
+  await page.locator('.dq-piece-h', { hasText: name }).waitFor();
+  await page.locator('.dq-back').click();
+  await page.locator('.dq-artroom .dq-galitem').first().waitFor();
+}
+
+/** Storage that reads but can't write drawings (full), until `writable` or the page loads again. */
+const full = (page) =>
+  page.evaluate(() => {
+    const transaction = (window.__transaction ??= IDBDatabase.prototype.transaction);
+    IDBDatabase.prototype.transaction = function (stores, mode, ...rest) {
+      if (mode === 'readwrite' && this.name.endsWith('.art')) throw new DOMException('The disk is full.', 'QuotaExceededError');
+      return transaction.call(this, stores, mode, ...rest);
+    };
+  });
+const writable = (page) => page.evaluate(() => (IDBDatabase.prototype.transaction = window.__transaction));
+/** Restores a version of `id` drawn after the one stored here, from a file with no labels on it. */
+const restoreNewer = (page, id) =>
+  page.evaluate(
+    async ({ id, more }) => {
+      const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+      const { name, nameAt, fav, favAt, ...was } = (await as.exportAll()).records.find((r) => r.id === id);
+      return as.importAll([{ ...was, rev: `later-${was.strokes.length}`, updated: was.updated + 1000, n: was.strokes.length + 1, strokes: [...was.strokes, more] }]);
+    },
+    { id, more: line(400, 300, 2) },
+  );
+/** Another tab saves a new version of `id` (one more stroke), as its Save does. */
+const saveNewer = (page, id) =>
+  page.evaluate(
+    async ({ id, more }) => {
+      const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+      const rec = await as.get(id);
+      await as.put({ ...rec, strokes: [...rec.strokes, more], n: rec.strokes.length + 1 });
+    },
+    { id, more: line(100, 1200, 3) },
+  );
 
 /** Scrolls the gallery's heading to just under the top bar, so a shot shows the gallery with its heading. */
 const toGallery = (page) =>
@@ -500,14 +563,6 @@ export const scenarios = {
     page.setDefaultTimeout(15000);
     await h.reachHub(page);
     await seed(page);
-    const full = () =>
-      page.evaluate(() => {
-        const transaction = IDBDatabase.prototype.transaction;
-        IDBDatabase.prototype.transaction = function (stores, mode, ...rest) {
-          if (mode === 'readwrite' && this.name.endsWith('.art')) throw new DOMException('The disk is full.', 'QuotaExceededError');
-          return transaction.call(this, stores, mode, ...rest);
-        };
-      });
     const relabel = async (id, name) => {
       await openPiece(page, id);
       await page.getByRole('button', { name: 'Favourite', exact: true }).click();
@@ -526,16 +581,170 @@ export const scenarios = {
     };
     // one this visit saved (so a copy is held in memory too), then, on a later visit, one only the disk holds
     await toArt(h, page);
-    await full();
+    await full(page);
     await relabel('pg-b', 'Kept here');
     await crystalHas('pg-b', 'Kept here');
     await page.goto(h.server.url + '/?mute');
     await toArt(h, page);
-    await full();
+    await full(page);
     await relabel('pg-a', 'Night');
     await until(h, () => order(page, '.dq-galitem'), (o) => JSON.stringify(o) === '["pg-a","al-c","pg-b"]', 'the gallery does not put the favourite first');
     h.expect(/^Night, .+, a favourite$/.test((await page.locator('[data-piece="pg-a"]').getAttribute('aria-label')) ?? ''), 'the gallery does not show the name and the star');
     await crystalHas('pg-a', 'Night');
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /**
+   * Storage that can't write, once another tab has named two pages: an edit saved here, and a newer version of the other
+   * page from a Save Crystal, each keep that tab's name and favourite for the visit.
+   */
+  async 'art-labels-save-fails'(h) {
+    const { ctx, page: a, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute');
+    a.setDefaultTimeout(15000);
+    await h.reachHub(a);
+    await seed(a);
+    await toArt(h, a);
+    await keepDrawing(a, 'pg-a');
+    const b = await other(h, ctx, errors);
+    await nameIt(b, 'pg-a', 'Harbour', true);
+    await nameIt(b, 'pg-b', 'Low tide');
+    await until(h, () => records(b), (rs) => rs.find((r) => r.id === 'pg-a')?.fav === true && rs.find((r) => r.id === 'pg-b')?.name === 'Low tide', 'the other tab did not store its labels');
+
+    await full(a);
+    await stroke(a, [0.3, 0.6], [0.7, 0.7]);
+    await a.getByRole('button', { name: 'Save', exact: true }).click();
+    await a.locator('.dq-tools').getByText(/keeping drawings right now/).first().waitFor();
+    const edit = (await records(a)).find((r) => r.id === 'pg-a');
+    h.expect(edit?.strokes.length === 2 && edit.name === 'Harbour' && edit.fav === true, `the edit storage couldn't keep lost the other tab's labels: ${JSON.stringify(edit && { n: edit.strokes.length, name: edit.name, fav: edit.fav })}`);
+    await a.evaluate(() => window.__daily.go({ name: 'art' }));
+    await until(h, () => a.locator('[data-piece="pg-a"]').getAttribute('aria-label'), (l) => /^Harbour, a page from .+, a favourite$/.test(l ?? ''), 'the gallery does not show the other tab\'s labels on the edit');
+
+    const res = await restoreNewer(a, 'pg-b');
+    const newer = (await records(a)).find((r) => r.id === 'pg-b');
+    h.expect(res.unsaved === 1 && newer?.strokes.length === 2 && newer.name === 'Low tide', `the restored version storage couldn't keep lost the name: ${JSON.stringify({ unsaved: res.unsaved, n: newer?.strokes.length, name: newer?.name })}`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /**
+   * Labels set here while storage couldn't write: a newer version a Save Crystal brings keeps them, in memory while
+   * storage is still full and on disk once it writes again.
+   */
+  async 'art-labels-held-restore'(h) {
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute');
+    page.setDefaultTimeout(15000);
+    await h.reachHub(page);
+    await seed(page);
+    await toArt(h, page);
+    await full(page);
+    await nameIt(page, 'pg-a', 'Held', true);
+    await nameIt(page, 'pg-b', 'Also held', true);
+
+    const res = await restoreNewer(page, 'pg-a');
+    const held = (await records(page)).find((r) => r.id === 'pg-a');
+    h.expect(res.unsaved === 1 && held?.strokes.length === 2 && held.name === 'Held' && held.fav === true, `a newer version restored while storage was full lost the labels held here: ${JSON.stringify({ unsaved: res.unsaved, n: held?.strokes.length, name: held?.name, fav: held?.fav })}`);
+
+    await writable(page);
+    await restoreNewer(page, 'pg-b');
+    await page.goto(h.server.url + '/?mute');
+    await h.reachHub(page);
+    const stored = (await records(page)).find((r) => r.id === 'pg-b');
+    h.expect(stored?.strokes.length === 2 && stored.name === 'Also held' && stored.fav === true, `a newer version restored once storage wrote again did not store the labels held here: ${JSON.stringify({ n: stored?.strokes.length, name: stored?.name, fav: stored?.fav })}`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /**
+   * Labels set here while storage couldn't write stay on a newer version another tab saves, and when this tab's own edit
+   * is kept apart from that version, the page keeps them too, stored once storage writes again.
+   */
+  async 'art-labels-held-other-tab'(h) {
+    const { ctx, page: a, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute');
+    a.setDefaultTimeout(15000);
+    await h.reachHub(a);
+    await seed(a);
+    await toArt(h, a);
+    await full(a);
+    await nameIt(a, 'al-c', 'Spark');
+    await nameIt(a, 'pg-a', 'Held', true);
+    const b = await other(h, ctx, errors);
+
+    await saveNewer(b, 'al-c');
+    const ally = await until(h, () => records(a), (rs) => rs.find((r) => r.id === 'al-c')?.strokes.length === 2, 'this tab did not see the other tab\'s save');
+    h.expect(ally.find((r) => r.id === 'al-c').name === 'Spark', `the other tab's newer version dropped the name held here: ${ally.find((r) => r.id === 'al-c').name}`);
+    await until(h, () => a.locator('[data-piece="al-c"]').getAttribute('aria-label'), (l) => /^Spark, a shadow ally/.test(l ?? ''), 'the gallery lost the name held here');
+
+    await keepDrawing(a, 'pg-a');
+    await saveNewer(b, 'pg-a');
+    await writable(a);
+    await stroke(a, [0.3, 0.6], [0.7, 0.7]);
+    await a.getByRole('button', { name: 'Save', exact: true }).click();
+    await a.locator('.dq-tools').getByText(/kept as its own page/).first().waitFor();
+    await a.goto(h.server.url + '/?mute');
+    await h.reachHub(a);
+    const rs = await records(a);
+    const page = rs.find((r) => r.id === 'pg-a'), apart = rs.find((r) => r.id !== 'pg-a' && r.id.startsWith('pg-a'));
+    h.expect(page?.strokes.length === 2 && page.name === 'Held' && page.fav === true && apart?.name === 'Held', `an edit kept apart left the page without the labels held here: ${JSON.stringify(rs.map((r) => [r.id, r.strokes.length, r.name, r.fav]))}`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /** A restore that brings newer labels says when only this visit keeps them, and what it says holds after a reload. */
+  async 'art-labels-restore-unsaved'(h) {
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute');
+    page.setDefaultTimeout(15000);
+    await h.reachHub(page);
+    await seed(page);
+    const raw = await crystalOf(h, page, 'crystal-unlabelled');
+    const named = { ...raw, art: raw.art.map((r) => (r.id === 'pg-a' ? { ...r, name: 'From the file', nameAt: Date.now(), fav: true, favAt: Date.now() } : r)) };
+    const said = () => page.locator('.dq-settings .dq-hint[aria-live]').textContent();
+    const pgA = async () => (await records(page)).find((r) => r.id === 'pg-a');
+    const reload = async () => {
+      await page.goto(h.server.url + '/?mute');
+      await h.reachHub(page);
+    };
+
+    await full(page);
+    await restore(page, named);
+    h.expect(/for this visit only/.test(await said()), `a restore of labels storage couldn't keep did not say so: ${await said()}`);
+    h.expect((await pgA()).name === 'From the file', 'the restored name does not show for this visit');
+    await reload();
+    h.expect(!(await pgA()).name, 'the labels the restore kept for this visit only were stored after all');
+
+    await restore(page, named);
+    h.expect(!/for this visit only/.test(await said()), `a stored restore said it kept drawings for this visit only: ${await said()}`);
+    await reload();
+    const kept = await pgA();
+    h.expect(kept.name === 'From the file' && kept.fav === true, `the restored labels did not last a reload: ${JSON.stringify({ name: kept.name, fav: kept.fav })}`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /** An ally renamed in another tab while this one draws it rises, and saves as an image, under the newer name. */
+  async 'art-ally-saved-after-rename'(h) {
+    const { ctx, page: a, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute');
+    a.setDefaultTimeout(15000);
+    await h.reachHub(a);
+    await seed(a);
+    await toArt(h, a);
+    await keepDrawing(a, 'al-c');
+    const b = await other(h, ctx, errors);
+    await nameIt(b, 'al-c', 'Blaze');
+    await until(h, () => records(b), (rs) => rs.find((r) => r.id === 'al-c')?.name === 'Blaze', 'the other tab did not store the name');
+
+    await stroke(a, [0.3, 0.6], [0.7, 0.7]);
+    await a.getByRole('button', { name: 'Save', exact: true }).click();
+    // the name sheet still holds the name this tab opened with: rising with it untouched keeps the newer one
+    h.expect((await a.getByRole('textbox', { name: 'Name your ally' }).inputValue()) === 'Ember', 'the name sheet does not start from the name this tab had');
+    await a.getByRole('button', { name: 'Rise', exact: true }).click();
+    const risen = a.locator('.dq-rise .dq-allycard-name');
+    await risen.waitFor();
+    h.expect((await risen.textContent()).trim() === 'Blaze', `the ally rose under the old name: ${await risen.textContent()}`);
+    const [file] = await Promise.all([a.waitForEvent('download'), a.locator('.dq-rise').getByRole('button', { name: 'Save card image', exact: true }).click()]);
+    h.expect(file.suggestedFilename() === 'shadow-ally-blaze.png', `the card image is named for the old name: ${file.suggestedFilename()}`);
+    const rec = (await records(a)).find((r) => r.id === 'al-c');
+    h.expect(rec?.strokes.length === 2 && rec.name === 'Blaze', `the saved ally lost the newer name: ${JSON.stringify(rec && { n: rec.strokes.length, name: rec.name })}`);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },

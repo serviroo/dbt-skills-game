@@ -464,7 +464,8 @@ export function drawScreen(app: App, route: Route): ScreenOut {
       flushDraft();
       return null;
     }
-    const saved: DrawingRec = { ...next, id: res.id, updated: res.updated };
+    // as stored: a name or favourite set later in another tab is the one it keeps
+    const saved: DrawingRec = { ...next, ...res.labels, id: res.id, updated: res.updated };
     rec = saved;
     recId = res.id;
     const failed = res.stored === 'failed';

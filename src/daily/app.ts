@@ -524,7 +524,7 @@ export class App {
   private toastEnd: (() => void) | null = null;
   /**
    * A short message at the bottom, with an optional action (Undo). Its end runs once if the toast goes without the
-   * action: it ran out, another toast took its place, or the Safe Zone opened (no toasts in there).
+   * action: it ran out, another toast took its place, they left for a screen it wasn't for, or the Safe Zone opened.
    */
   toast(text: string, action?: { label: string; run(): void; end?(): void }) {
     this.endToast();
@@ -562,7 +562,7 @@ export class App {
       this.endToast();
     });
   }
-  /** Takes the toast away at once: the Safe Zone opening, or the game being cleared. */
+  /** Takes the toast away at once: a screen it wasn't for, the Safe Zone opening, or the game being cleared. */
   private dropToast() {
     this.toastN++;
     this.toastEl.classList.remove('is-on');
@@ -764,7 +764,8 @@ export class App {
     this.current?.leave?.();
     this.sheetLayer.replaceChildren();
     if (this.current?.foot) this.pins.unobserve(this.current.foot);
-    if (route.name !== 'hub') this.toastEl.classList.remove('is-on');
+    // a toast goes with the screen it was for (Home keeps one from the screen before); leaving ends its Undo
+    if (route.name !== 'hub') this.dropToast();
     this.route = route;
     const key = v.key;
     this.visitKey = key;
