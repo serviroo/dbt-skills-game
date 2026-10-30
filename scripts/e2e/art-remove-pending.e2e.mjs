@@ -5,6 +5,7 @@
 // screen (Home keeps it), Forward can't reopen it, and a change in another tab keeps the focused card.
 import fs from 'node:fs';
 import path from 'node:path';
+import { pause } from './device-motion.e2e.mjs';
 
 const line = (x, y, i = 1) => ({ i, w: 25, p: [x, y, x + 300, y + 80, x + 520, y + 20] });
 const records = (page) => page.evaluate(async () => (await (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).exportAll()).records);
@@ -48,23 +49,6 @@ async function toArt(h, page) {
 async function openPiece(page, id) {
   await page.locator(`[data-piece="${id}"]`).click();
   await page.locator('.dq-piece-labels').waitFor();
-}
-
-/**
- * Holds the tab's UI clock where it is, so its toast's Undo can't run out, however long the tab is stopped meanwhile; the
- * function it gives lets the clock go on from there.
- */
-async function holdUndo(page) {
-  await page.evaluate(async () => {
-    const anim = await import('/src/ui/anim.ts');
-    const at = anim.uiNow();
-    anim.bindClock(() => at);
-    window.__releaseUndo = () => {
-      const base = performance.now() / 1000 - at;
-      anim.bindClock(() => performance.now() / 1000 - base);
-    };
-  });
-  return () => page.evaluate(() => window.__releaseUndo());
 }
 
 async function removePiece(page, id) {
@@ -199,12 +183,16 @@ export const scenarios = {
     await b.getByRole('button', { name: 'Keep drawing', exact: true }).click();
     await b.waitForFunction(() => window.__daily?.ink?.strokes.length === 1 && !document.querySelector('.dq-ink-stage')?.inert);
     await removePiece(a, 'pg-a');
-    const release = await holdUndo(a);
-    await stroke(b);
-    h.expect((await goneMarks(a))?.['pg-a'], 'the removal was no longer waiting for its Undo when the other tab saved');
-    await b.getByRole('button', { name: 'Save', exact: true }).click();
-    await h.poll(b, () => records(b), (rs) => rs.find((r) => r.id === 'pg-a')?.strokes.length === 2, 'the other tab\'s edit was not saved', { timeout: 12000 });
-    await release();
+    // A stops at once, so its Undo, a timer on its own page, can't run out before B has saved, however long B takes
+    const stopped = await pause(ctx, a);
+    try {
+      await stroke(b);
+      h.expect((await goneMarks(b))?.['pg-a'], 'the removal was no longer waiting for its Undo when the other tab saved');
+      await b.getByRole('button', { name: 'Save', exact: true }).click();
+      await h.poll(b, () => records(b), (rs) => rs.find((r) => r.id === 'pg-a')?.strokes.length === 2, 'the other tab\'s edit was not saved', { timeout: 12000 });
+    } finally {
+      await stopped.resume();
+    }
     await h.gone(a.locator('.dq-toast'), 12000, { state: 'hidden' });
     await h.sleep(800);
     const after = await records(a);
@@ -336,9 +324,11 @@ export const scenarios = {
     const b = await second(h, ctx, errors);
 
     await removePiece(a, 'pg-b');
-    await holdUndo(a);
+    // A stops at once, so its Undo can't run out before it reloads: a stopped tab reloads, its pagehide runs and its timers
+    // never do, and the reload ends the stop
+    await pause(ctx, a);
     await h.poll(b, () => order(b), (o) => o.includes('pg-a') && !o.includes('pg-b'), 'the other tab still shows the removed page', { timeout: 2000 });
-    h.expect((await goneMarks(a))?.['pg-b'], 'the removal was no longer waiting for its Undo when the tab reloaded');
+    h.expect((await goneMarks(b))?.['pg-b'], 'the removal was no longer waiting for its Undo when the tab reloaded');
     await a.reload();
     await toArt(h, a);
     await h.poll(a, () => records(a), (rs) => !rs.some((r) => r.id === 'pg-b'), 'a reload during the Undo did not finish the removal', { timeout: 12000 });

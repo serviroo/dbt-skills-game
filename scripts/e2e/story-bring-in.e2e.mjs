@@ -231,9 +231,23 @@ export const scenarios = {
       fs.writeFileSync(path.join(h.out, 'spaces-timing.json'), JSON.stringify(timed, null, 1));
       for (const t of timed) h.expect(t.read < 200 && t.write < 200, `${t.name}: read in ${Math.round(t.read)} ms, written in ${Math.round(t.write)} ms`);
 
-      // each step must end within `ms` of the page running, its own waits taking no timeout of their own; the reading and
-      // writing themselves are timed inside the page above
-      const quick = (what, ms, step) => h.poll(page, step, () => true, `${what} took over ${ms} ms of the page running`, { timeout: ms });
+      // each step must end within `ms` of the page running, its own waits taking no timeout of their own. Page time counts a
+      // task that holds the page as a stop, so the app's own work is timed inside the page, as the reading and writing are
+      // above: no one task of the step may hold the page for `ms` either
+      const quick = async (what, ms, step) => {
+        await page.evaluate(() => {
+          const tasks = (window.__quickTasks = []);
+          (window.__quickWatch = new PerformanceObserver((list) => tasks.push(...list.getEntries().map((e) => e.duration)))).observe({ type: 'longtask' });
+        });
+        await h.poll(page, step, () => true, `${what} took over ${ms} ms of the page running`, { timeout: ms });
+        const longest = await page.evaluate(() => {
+          const tasks = window.__quickTasks;
+          tasks.push(...window.__quickWatch.takeRecords().map((e) => e.duration));
+          window.__quickWatch.disconnect();
+          return Math.round(Math.max(0, ...tasks));
+        });
+        h.expect(longest < ms, `${what}: one task held the page for ${longest} ms`);
+      };
       for (const [name, body, first] of files) {
         // through the real chooser: the preview comes up at once and the Safe Zone opens on the first tap
         const file = write(h, name, body);

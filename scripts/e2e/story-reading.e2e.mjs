@@ -338,13 +338,8 @@ export const scenarios = {
       const notesTab = page.getByRole('radio', { name: 'Show: Notes' });
       const card = (text) => page.locator('.st-card', { hasText: text });
       // lets every held read and save through until `ok`, including ones the app asks for only after an earlier one answers,
-      // for up to 5 s of the page running; the check after it says what never came
-      const settle = (ok) =>
-        h
-          .poll(page, async () => (await drain(), ok()), Boolean, 'the held reads never let it through', { timeout: 5000, polling: 50 })
-          .catch((e) => {
-            if (e.name !== 'TimeoutError') throw e;
-          });
+      // for up to 5 s of the page running
+      const settle = (ok) => h.poll(page, async () => (await drain(), ok()), Boolean, 'the held reads and saves never let it through', { timeout: 5000, polling: 50 });
       const boxIs = (re) => async () => re.test((await shownIn(page)).box ?? '');
       const notesOnDisk = () =>
         page.evaluate(async (n) => {

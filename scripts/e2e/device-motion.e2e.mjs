@@ -100,7 +100,7 @@ const drifts = (page) => page.evaluate(() => document.querySelector('.ec-stage')
  * until resume(), so whatever comes meanwhile, a change from another tab among it, waits for it. read(fn, arg) looks into
  * it meanwhile, where page.evaluate would wait for it to run again. Resolves once the page has stopped.
  */
-const pause = async (ctx, page) => {
+export const pause = async (ctx, page) => {
   const cdp = await ctx.newCDPSession(page);
   await cdp.send('Debugger.enable');
   const stopped = new Promise((r) => cdp.once('Debugger.paused', r));
