@@ -5,6 +5,7 @@ import { artStore, cleanRec, skippedDrafts } from './artstore';
 import { cleanChapter, cleanStory, skippedCards, storyStore, STORY_CAP, type Story } from './storystore';
 import { isSkillId, normalize, type State, type Store } from './store';
 import { exportSkillDrafts } from './skilldraft';
+import { heldTextSize, keepTextSizeFor } from './text-size';
 
 interface Preferences {
   audio?: AudioLevels & { v: 1 };
@@ -28,6 +29,9 @@ const object = (x: unknown): x is Record<string, unknown> => !!x && typeof x ===
 export function exportPreferences(store: Store, volume?: VolumeCtrl) {
   const key = store.key;
   const preferences: Preferences = volume ? { audio: { v: 1, ...volume.snapshot() } } : {};
+  // a text size storage refused is held for the visit, and the crystal carries it
+  const heldSize = heldTextSize(key);
+  if (choice(heldSize)) preferences.readSize = heldSize;
   let incomplete = false;
   try {
     const audio = localStorage.getItem(AUDIO_KEY);
@@ -41,6 +45,7 @@ export function exportPreferences(store: Store, volume?: VolumeCtrl) {
       if (object(value)) preferences.room = { aquarium: value.aquarium === true, words: value.words === true };
     }
     for (const [name, end] of BESIDE_CHOICES) {
+      if (name === 'readSize' && preferences.readSize) continue;
       const v = localStorage.getItem(`${key}${end}`);
       if (choice(v)) preferences[name] = v;
     }
@@ -177,10 +182,13 @@ export function restorePreferences(raw: unknown, store: Store, volume?: VolumeCt
         if (JSON.stringify(next) !== JSON.stringify(room)) write(() => localStorage.setItem(`${store.key}${BESIDE.stealth}`, JSON.stringify(next)));
       }
     }
-    // added only where this device has none: the length, light or size it chose here stays
+    // added only where this device has none, a size held for the visit counting as one: the length, light or size it
+    // chose here stays. A size storage refuses is held for the visit, as one picked here would be, and isn't saved
     for (const [name, end] of BESIDE_CHOICES) {
       const v = prefs[name];
-      if (choice(v) && localStorage.getItem(`${store.key}${end}`) === null) write(() => localStorage.setItem(`${store.key}${end}`, v));
+      if (!choice(v) || (name === 'readSize' && heldTextSize(store.key) !== undefined) || localStorage.getItem(`${store.key}${end}`) !== null) continue;
+      if (name !== 'readSize') write(() => localStorage.setItem(`${store.key}${end}`, v));
+      else if (!keepTextSizeFor(store.key, v)) saved = false;
     }
     return saved;
   } catch {

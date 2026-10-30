@@ -20,11 +20,21 @@
 //                        nor at 200% browser zoom on 320x568 upright and sideways
 //   text-size-without-storage where storage refuses the size, Largest picked in Settings still holds in the Safe Zone
 //                        for the rest of the visit, until the game's data is cleared
+//   text-size-crystal-refused where storage refuses the size, a Save Crystal carries Largest picked in Settings, and
+//                        restoring it on a device that refuses it too shows Largest in Settings and the Safe Zone for
+//                        the visit and says some choices couldn't be saved
+//   text-size-crystal-unreadable where the size can't be read back, a Save Crystal says it isn't whole, and restoring
+//                        one keeps this device's own size and says some choices couldn't be saved
+//   talk-keeps-focus     at 390x844, a call link on Talk holds the keys' focus while another open copy picks another
+//                        country: focus moves to the same link in the new lines, or to the country picker when there is
+//                        none, in view with its ring
 //   safe-zone-zoom-keys  at Largest and 200% zoom on 320x568, upright and sideways, every Safe Zone screen used with
 //                        the keyboard alone: each control, and each choice of a group (How long's "Until I'm ready"
 //                        among them), shows whole and clear of the top bar and "Talk to someone now" as it gets focus.
 //                        Opening "Copy your lists" by key puts focus on the preview, shown from its top clear of both
 //                        bars, and closing it puts focus back on "Copy your lists", in view
+import fs from 'node:fs';
+import path from 'node:path';
 import { boot, settle } from './layout-fit.e2e.mjs';
 import { fits } from './move-like-an-app.e2e.mjs';
 
@@ -54,6 +64,37 @@ const listen = (page, scope) =>
     }).observe(document.body, { subtree: true, childList: true, characterData: true });
   }, scope);
 const heard = (page) => page.evaluate(() => window.__said.splice(0));
+/** A returning save with nothing but its start, on a device that has seen the intro. */
+const plainSeed = (h) => ({ [h.YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: Date.now() - 1000, companionAt: Date.now() - 1000 }), 'dbt.app.v1': h.SEEN, [h.SAVE]: JSON.stringify({ v: 1, created: Date.now() - 86400e3, events: [] }) });
+const UNSAVED = "Some choices couldn't be saved on this device.";
+/** Storage refuses the text size kept beside a save: storing it (`'set'`) or reading it (`'get'`). Runs in the page. */
+const refuseSize = (how) => {
+  const name = how === 'set' ? 'setItem' : 'getItem';
+  const real = Storage.prototype[name];
+  // what is stored, read past the refusal
+  const get = Storage.prototype.getItem;
+  window.__readAnyway = (k) => get.call(localStorage, k);
+  Storage.prototype[name] = function (k, ...rest) {
+    if (String(k).endsWith('.read-size')) throw new DOMException('Storage refused it', how === 'set' ? 'QuotaExceededError' : 'SecurityError');
+    return real.call(this, k, ...rest);
+  };
+};
+/** Makes a Save Crystal from Settings and reads it back from the file it saves to. */
+async function crystalOf(h, page, name) {
+  const pending = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Save Crystal', exact: true }).click();
+  const file = path.join(h.out, name);
+  await (await pending).saveAs(file);
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+/** Restores `raw` from Settings and returns what the restore said. */
+async function restoreCrystal(page, raw) {
+  await page.evaluate(() => window.__daily.go({ name: 'settings' }, { quiet: true }));
+  await page.locator('input[type=file]').setInputFiles({ name: 'crystal.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(raw)) });
+  await page.getByRole('button', { name: 'Restore this Save Crystal' }).click();
+  await page.waitForFunction(() => /Restored/.test(document.querySelector('.dq-settings .dq-hint[aria-live]')?.textContent ?? ''), null, { timeout: 15000 });
+  return page.evaluate(() => document.querySelector('.dq-settings .dq-hint[aria-live]').textContent);
+}
 /** Waits for a scroll to end: the page and the Safe Zone's own scroller still for 5 frames in a row (3 s at most). */
 const still = (page) =>
   page.evaluate(
@@ -244,14 +285,20 @@ async function tabWalk(page, tag) {
   return out;
 }
 
-/** Tabs on, from wherever focus is, to the control called `name` (or matching it), wrapping through the top bar, and presses `key`. */
-async function press(page, name, key = 'Enter') {
+/** Tabs on, from wherever focus is, to the control called `name` (or matching it), wrapping through the top bar. */
+async function tabTo(page, name) {
   for (let i = 0; i < 80; i++) {
     await page.keyboard.press('Tab');
     const now = (await focusNow(page)).name;
-    if (name instanceof RegExp ? name.test(now) : now === name) return page.keyboard.press(key);
+    if (name instanceof RegExp ? name.test(now) : now === name) return;
   }
   throw new Error(`Tab never reached "${name}"`);
+}
+
+/** Tabs on to the control called `name`, as tabTo does, and presses `key`. */
+async function press(page, name, key = 'Enter') {
+  await tabTo(page, name);
+  await page.keyboard.press(key);
 }
 
 export const scenarios = {
@@ -597,6 +644,86 @@ export const scenarios = {
       return (await import('/src/daily/text-size.ts')).textSize(window.__daily);
     });
     h.expect(size === 'largest' && cleared === 'regular' && !errors.length, [`with storage refusing it, Largest picked in Settings reached the Safe Zone as ${size}, and read ${cleared} after a clear`, ...errors].join('\n'));
+    await ctx.close();
+  },
+
+  async 'text-size-crystal-refused'(h) {
+    const problems = [];
+    const a = await boot(h, PHONE, { edit: (s) => (s.profile.region = 'us') });
+    await a.page.evaluate(refuseSize, 'set');
+    await a.page.evaluate(() => window.__daily.go({ name: 'settings' }));
+    await onScreen(a.page, 'settings');
+    const choice = a.page.getByRole('radio', { name: 'Text size: Largest' });
+    await choice.scrollIntoViewIfNeeded();
+    await choice.click();
+    const raw = await crystalOf(h, a.page, 'size-refused.json');
+    if (raw.preferences?.readSize !== 'largest') problems.push(`the Save Crystal carries the text size as ${raw.preferences?.readSize}`);
+    problems.push(...a.errors);
+    await a.ctx.close();
+    // another device, where storage refuses the size too, restores it: it holds for the visit, and the restore says so
+    const b = await h.open(plainSeed(h), '?mute', PHONE);
+    await b.page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
+    await b.page.evaluate(refuseSize, 'set');
+    const said = await restoreCrystal(b.page, raw);
+    const shown = await b.page.evaluate(() => document.querySelector('.dq-settings [aria-label="Text size"] [role=radio][aria-checked=true]')?.textContent);
+    await b.page.evaluate((r) => window.__daily.go(r), { name: 'safe', at: 'start' });
+    await b.page.locator('.dq-sz-t').first().waitFor();
+    const size = await b.page.evaluate(() => document.querySelector('.dq-safezone')?.dataset.size);
+    if (shown !== 'Largest' || size !== 'largest') problems.push(`restored where storage refuses it, Settings shows ${shown} and the Safe Zone is ${size}`);
+    if (!said.includes(UNSAVED)) problems.push(`restored where storage refuses the size, the restore said "${said}"`);
+    problems.push(...b.errors);
+    await b.ctx.close();
+    h.expect(!problems.length, problems.join('\n'));
+  },
+
+  async 'text-size-crystal-unreadable'(h) {
+    const problems = [];
+    // a newer build's size this device can't read back: the Save Crystal says it isn't whole
+    const a = await boot(h, PHONE, { edit: (s) => (s.profile.region = 'us') });
+    await a.page.evaluate((key) => localStorage.setItem(`${key}.read-size`, 'huge'), h.SAVE);
+    await a.page.evaluate(refuseSize, 'get');
+    await a.page.evaluate(() => window.__daily.go({ name: 'settings' }));
+    await onScreen(a.page, 'settings');
+    const raw = await crystalOf(h, a.page, 'size-unreadable.json');
+    if (raw.incomplete !== true) problems.push(`with the size unreadable, the Save Crystal says it is whole and carries the size as ${raw.preferences?.readSize}`);
+    problems.push(...a.errors);
+    await a.ctx.close();
+    // restored where the size this device chose can't be read: that choice stays, and the restore says it couldn't save
+    const b = await h.open({ ...plainSeed(h), [`${h.SAVE}.read-size`]: 'larger' }, '?mute', PHONE);
+    await b.page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
+    await b.page.evaluate(refuseSize, 'get');
+    const said = await restoreCrystal(b.page, { ...raw, preferences: { ...raw.preferences, readSize: 'largest' } });
+    const kept = await b.page.evaluate((key) => window.__readAnyway(`${key}.read-size`), h.SAVE);
+    if (kept !== 'larger') problems.push(`restoring over an unreadable size stored ${kept} in place of this device's own`);
+    if (!said.includes(UNSAVED)) problems.push(`restoring over an unreadable size, the restore said "${said}"`);
+    problems.push(...b.errors);
+    await b.ctx.close();
+    h.expect(!problems.length, problems.join('\n'));
+  },
+
+  async 'talk-keeps-focus'(h) {
+    const { ctx, page, errors } = await boot(h, PHONE, { edit: (s) => (s.profile.region = 'us') });
+    await page.evaluate((r) => window.__daily.go(r, { replace: true }), { name: 'safe', at: 'talk' });
+    await heading(page, 'Talk to someone now');
+    const other = await ctx.newPage();
+    await other.goto(h.server.url + '/?mute');
+    await other.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
+    await other.evaluate((r) => window.__daily.go(r), { name: 'safe', at: 'talk' });
+    const picker = other.locator('.dq-safezone select.dq-select');
+    await picker.waitFor();
+    await page.evaluate(() => document.querySelector('.dq-safezone h1').focus());
+    await tabTo(page, 'Call 988, 988 Suicide & Crisis Lifeline');
+    const problems = [];
+    for (const [region, want] of [['ca', 'Call 988, 9-8-8: Suicide Crisis Helpline'], ['uk', 'the country picker']]) {
+      await picker.selectOption(region);
+      await page.waitForFunction((id) => document.querySelector('.dq-safezone select.dq-select')?.value === id, region, { timeout: 10000 });
+      await settle(page);
+      const f = await focusNow(page);
+      const name = (await page.evaluate(() => document.activeElement?.matches('.dq-safezone select.dq-select'))) ? 'the country picker' : f.name;
+      if (name !== want || !f.ring || !f.inView) problems.push(`another copy picked ${region}: focus is on ${name}, not ${want} (${JSON.stringify(f)})`);
+      await h.shot(page, `talk-keeps-focus-${region}-390x844`);
+    }
+    h.expect(!problems.length && !errors.length, [...problems, ...errors].join('\n'));
     await ctx.close();
   },
 

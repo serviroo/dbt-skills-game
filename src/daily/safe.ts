@@ -322,19 +322,28 @@ export function safeScreen(app: App, route: Route): ScreenOut {
         };
         let shown = lines();
         // another country swaps only these in place (an empty comment holds the place of one it has none of), so the picker
-        // keeps focus as the arrow keys move through countries
+        // keeps focus as the arrow keys move through countries. A country picked in another open copy can take away the
+        // call or text link that has focus: focus goes to the same link among the new lines (by its name, else its
+        // number), or to the picker when the new country has none
         const picked = () => {
           const next = lines();
+          const was = document.activeElement;
+          const had = was instanceof HTMLAnchorElement && shown.some((n) => n.contains(was)) ? was : null;
           shown.forEach((n, i) => n.replaceWith(next[i]));
           shown = next;
+          if (!had) return;
+          const links = next.flatMap((n) => (n instanceof Element ? [...n.querySelectorAll<HTMLAnchorElement>('a[href]')] : []));
+          const same = links.find((a) => a.getAttribute('aria-label') === had.getAttribute('aria-label')) ?? links.find((a) => a.getAttribute('href') === had.getAttribute('href'));
+          (same ?? picker.querySelector('select'))?.focus();
         };
+        const picker = regionPicker(app, picked);
         return swap(
           at,
           [h3(SAFE.talk.title), shown[0]],
           shown[1],
           shown[2],
           h('p', { class: 'dq-small' }, h('a', { href: 'https://findahelpline.com', target: '_blank', rel: 'noopener noreferrer', class: 'dq-a', text: 'findahelpline.com' }), ` ${SAFE.talk.elsewhere}`),
-          regionPicker(app, picked),
+          picker,
           h('div', { class: 'dq-actions dq-actions--stack' }, nextBtn(at, 'Next', 'quiet'), btn('Back to breathing', () => show('breathe'), { kind: 'quiet' })),
         );
       }
