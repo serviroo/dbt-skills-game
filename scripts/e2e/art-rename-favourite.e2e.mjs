@@ -78,6 +78,22 @@ const full = (page) =>
     };
   });
 const writable = (page) => page.evaluate(() => (IDBDatabase.prototype.transaction = window.__transaction));
+/** A drawing's meta as it is stored on disk, not as this copy holds it in memory. */
+const stored = (page, id) =>
+  page.evaluate(
+    (id) =>
+      new Promise((ok, bad) => {
+        const open = indexedDB.open(`${window.__daily.store.key}.art`);
+        open.onerror = () => bad(open.error);
+        open.onsuccess = () => {
+          const db = open.result;
+          const g = db.transaction('meta').objectStore('meta').get(id);
+          g.onsuccess = () => (db.close(), ok(g.result ?? null));
+          g.onerror = () => (db.close(), bad(g.error));
+        };
+      }),
+    id,
+  );
 /** Restores a version of `id` drawn after the one stored here, from a file with no labels on it. */
 const restoreNewer = (page, id) =>
   page.evaluate(
@@ -557,7 +573,10 @@ export const scenarios = {
     await ctx.close();
   },
 
-  /** Storage that reads but can't write (full): a rename and a favourite still hold for the visit and go into a Save Crystal. */
+  /**
+   * Storage that reads but can't write (full): a rename and a favourite still hold for the visit and go into a Save
+   * Crystal, and once storage writes again, the next change stored takes them with it.
+   */
   async 'art-labels-write-fails'(h) {
     const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute');
     page.setDefaultTimeout(15000);
@@ -591,6 +610,14 @@ export const scenarios = {
     await until(h, () => order(page, '.dq-galitem'), (o) => JSON.stringify(o) === '["pg-a","al-c","pg-b"]', 'the gallery does not put the favourite first');
     h.expect(/^Night, .+, a favourite$/.test((await page.locator('[data-piece="pg-a"]').getAttribute('aria-label')) ?? ''), 'the gallery does not show the name and the star');
     await crystalHas('pg-a', 'Night');
+    await writable(page);
+    await openPiece(page, 'pg-a');
+    await page.getByRole('button', { name: 'Favourite', exact: true }).click();
+    await until(h, () => stored(page, 'pg-a'), (m) => m?.fav === false, 'the favourite was not stored once storage wrote again');
+    await page.goto(h.server.url + '/?mute');
+    await h.reachHub(page);
+    const after = (await records(page)).find((r) => r.id === 'pg-a');
+    h.expect(after?.name === 'Night' && after.fav === false, `the change stored once storage wrote again left the name held for the visit behind: ${JSON.stringify(after && { name: after.name, fav: after.fav })}`);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },

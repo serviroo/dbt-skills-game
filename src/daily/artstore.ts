@@ -216,9 +216,12 @@ const family = (id: string) => id.split('~')[0].slice(0, 26);
 const landKey = (id: string, rev: string) => `${id}\n${rev}`;
 const metaOf = (r: DrawingRec): DrawingMeta => ({ ...restOf(r, REC_KEYS), id: r.id, kind: r.kind, day: r.day, t: r.t, updated: r.updated, prompt: r.prompt, name: r.name, n: r.strokes.length, rev: r.rev, from: fromOf(r.from), nameAt: r.nameAt, fav: r.fav, favAt: r.favAt });
 const setAt = (t: unknown) => (fin(t) ? t : -1);
-/** Each label from whichever side set it last; a tie keeps the first side's. */
+/**
+ * Each label from whichever side set it last; a tie keeps the first side's, except that a name beats none: a build from
+ * before names saves a page without its name but keeps when it was set, while taking a name away always sets a later time.
+ */
 const newestLabels = (first: Labels, other: Labels): Labels => ({
-  ...(setAt(other.nameAt) > setAt(first.nameAt) ? { name: other.name, nameAt: other.nameAt } : { name: first.name, nameAt: first.nameAt }),
+  ...(setAt(other.nameAt) > setAt(first.nameAt) || (setAt(other.nameAt) === setAt(first.nameAt) && !first.name && !!other.name) ? { name: other.name, nameAt: other.nameAt } : { name: first.name, nameAt: first.nameAt }),
   ...(setAt(other.favAt) > setAt(first.favAt) ? { fav: other.fav, favAt: other.favAt } : { fav: first.fav, favAt: first.favAt }),
 });
 const sameLabels = (a: Labels, b: Labels) => a.name === b.name && a.nameAt === b.nameAt && a.fav === b.fav && a.favAt === b.favAt;
@@ -631,7 +634,10 @@ export class ArtStore {
     }));
     if (wrote) this.announce();
   }
-  /** Rewrites a stored drawing's meta with next(meta), in one transaction (null leaves it); a copy in memory too. */
+  /**
+   * Rewrites a stored drawing's labels with next(meta), in one transaction (null leaves them), on top of the labels this
+   * copy holds in memory (one storage refused earlier), so the write stores those too; a copy in memory too.
+   */
   private async relabel(id: string, next: (m: DrawingMeta) => DrawingMeta | null) {
     const wrote = await this.tx(
       ['meta'],
@@ -643,9 +649,13 @@ export class ArtStore {
           g.onerror = () => bad(g.error);
           g.onsuccess = () => {
             try {
-              const m = g.result ? next(g.result) : null;
-              if (m) s.put(m, id);
-              ok(!!m);
+              const disk = g.result;
+              if (!disk) return ok(false);
+              const base = withLabels(disk, this.mem.meta.get(id));
+              const m = next(base) ?? base;
+              if (sameLabels(m, disk)) return ok(false);
+              s.put(m, id);
+              ok(true);
             } catch (e) {
               bad(e);
             }
