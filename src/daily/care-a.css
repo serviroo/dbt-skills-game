@@ -187,8 +187,8 @@
 .dq-safezone.is-lit .dq-sz-t {
   color: #ffffff;
 }
-/* held sideways the page scrolls under the pinned foot (upright nothing does, and it has no backdrop) */
-@media (orientation: landscape) and (max-height: 500px) and (min-width: 540px) {
+/* held sideways under 300px tall the page scrolls under the pinned foot (elsewhere nothing does, and it has no backdrop) */
+@media (orientation: landscape) and (max-height: 299px) and (min-width: 540px) {
   .dq-safezone.is-lit .dq-sz-foot {
     background: linear-gradient(0deg, rgba(48, 72, 102, 0.97) 60%, rgba(48, 72, 102, 0));
   }

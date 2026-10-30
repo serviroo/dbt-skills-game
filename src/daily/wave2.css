@@ -781,14 +781,28 @@
 .w2-wgroup-t {
   margin-bottom: 10px;
 }
+/* two looks a row (card backs and name plates three), each its share of the row; a look whose name or preview doesn't
+   fit its share (a phone at 200% zoom, or its own text at 200%) takes a row to itself */
 .w2-wopts {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  --w2-cols: 2;
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
 }
 .w2-wgroup--cardBack .w2-wopts,
 .w2-wgroup--plate .w2-wopts {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  --w2-cols: 3;
+}
+.w2-wopts > .w2-wopt {
+  flex: 0 1 calc((100% - (var(--w2-cols) - 1) * 10px) / var(--w2-cols));
+}
+/* a look's preview is a miniature (hidden from screen readers) drawn to the width its option has, so only the look's name
+   decides how narrow it can be, and its words keep the miniature's size when the phone's own text grows, as a picture's
+   would */
+.w2-wopt > :first-child {
+  contain: inline-size;
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
 }
 .w2-wopt {
   position: relative;
@@ -952,19 +966,22 @@
 @media (max-width: 419px) {
   .w2-wgroup--cardBack .w2-wopts,
   .w2-wgroup--plate .w2-wopts {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
+  }
+  .w2-wgroup--cardBack .w2-wopts > .w2-wopt,
+  .w2-wgroup--plate .w2-wopts > .w2-wopt {
+    flex-basis: calc((100% - 16px) / 3);
   }
   .w2-wopt {
     padding: 6px;
   }
 }
-/* a phone zoomed to 200% (260 CSS pixels wide or less): one look a row, each wide enough for its name and preview */
+/* a phone zoomed to 200% (260 CSS pixels wide or less): one look a row, the whole row wide */
 @media (max-width: 260px) {
-  .w2-wopts,
-  .w2-wgroup--cardBack .w2-wopts,
-  .w2-wgroup--plate .w2-wopts {
-    grid-template-columns: minmax(0, 1fr);
+  .w2-wopts > .w2-wopt,
+  .w2-wgroup--cardBack .w2-wopts > .w2-wopt,
+  .w2-wgroup--plate .w2-wopts > .w2-wopt {
+    flex-basis: 100%;
   }
 }
 

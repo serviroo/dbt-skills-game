@@ -156,4 +156,5 @@ Every step is skippable. The lists are set up only when the player chooses to, a
   countdown, a preview opening below), it moves to what takes its place.
 - The Safe Zone starts each screen at the top with "Talk to someone now" one Tab away, and Tab reaches every control
   in reading order. It says each step politely to a screen reader, and a countdown as it starts and ends, never each
-  second. Its words follow Text size in Settings, and it fits at 200% zoom on a 320 px phone at any text size.
+  second. Its words follow Text size in Settings, and it fits at 200% zoom on a 320 px phone at any text size, and
+  with the phone's own text at 200%.

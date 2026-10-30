@@ -2,7 +2,6 @@
 
 /* ---------- hub tile ---------- */
 .dq-tile--story {
-  grid-column: 1 / -1;
   align-content: center;
   grid-template-columns: 24px minmax(0, 1fr);
   min-height: 82px;
@@ -11,10 +10,9 @@
 .dq-tile--story .dq-tile-ic {
   color: #a8dcff;
 }
+/* the story's title wraps where it doesn't fit, so all of it shows */
 .dq-tile-story {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  overflow-wrap: break-word;
   font-family: var(--font-display);
   font-style: italic;
   font-size: 16px;
@@ -144,11 +142,10 @@
 .st-row:active {
   background: rgba(79, 184, 255, 0.12);
 }
+/* the story's title wraps where it doesn't fit, so all of it shows */
 .st-row-t {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: break-word;
   font-family: var(--font-display);
   font-weight: 500;
   font-size: 22px;
@@ -241,9 +238,7 @@
 .st-removed-t {
   flex: 1 1 140px;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: break-word;
   font-family: var(--font-display);
   font-size: 18px;
   color: #b9cce2;
@@ -311,8 +306,12 @@
   border-bottom-color: #a8dcff;
   box-shadow: 0 1px 0 0 rgba(168, 220, 255, 0.35), 0 6px 10px -8px rgba(79, 184, 255, 0.45);
 }
+/* the chapter's button, Page and Notes, and More share the row; where the chapter's name doesn't fit beside them word by
+   word (a phone at 200% zoom, or its own text at 200%), Page, Notes and More take the next line, at its end, and a word
+   longer than the whole row breaks inside it */
 .st-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   padding: 6px 0;
@@ -321,7 +320,7 @@
 }
 .st-chbtn {
   display: inline-flex;
-  flex: 1 1 auto;
+  flex: 1 1 min-content;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -341,11 +340,10 @@
   letter-spacing: 0.06em;
   color: var(--t-faint);
 }
+/* the chapter's name wraps where it doesn't fit, so all of it shows */
 .st-chbtn-t {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: break-word;
 }
 .st-chbtn-ic {
   display: grid;
@@ -359,6 +357,7 @@
 }
 .st-seg {
   flex: none;
+  margin-left: auto;
 }
 .st-seg .dq-seg-b {
   min-width: 64px;
@@ -999,12 +998,14 @@
   padding: 4px 0;
   border-bottom: 1px solid rgba(62, 100, 133, 0.26);
 }
+/* a chapter's name takes room for its longest word beside its number, and for 10 letters at least where its words can
+   all break, else its tools take the next line, so its words never split for want of room */
 .st-chrow-b {
   display: flex;
-  flex: 1 1 120px;
+  flex: 1 1 min-content;
   align-items: center;
   gap: 12px;
-  min-width: 0;
+  min-width: min(100%, 10ch);
   min-height: 48px;
   padding: 0 8px 0 6px;
   font: inherit;
@@ -1031,9 +1032,7 @@
 }
 .st-chrow-t {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: break-word;
   font-family: var(--font-display);
   font-size: 18px;
 }

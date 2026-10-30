@@ -29,6 +29,37 @@ export function typo(s: string) {
     .replace(/(^|[\s(\[])'/g, '$1‘')
     .replace(/'/g, '’');
 }
+
+/**
+ * Where a name the player gave may break a word: the offsets a soft hyphen goes before, so that a word wider than its
+ * line breaks with a hyphen, never bare. Browsers don't hyphenate capitalised English words themselves, and a name's
+ * words mostly are. A word gets them when it is at least as wide as 7.5 ordinary letters, the most the narrowest line a
+ * name takes holds (wide letters count 1.5, narrow ones 0.5), with 2 letters kept before a break and 3 after; words
+ * narrower than that fit their line whole, so nothing else breaks.
+ */
+function softBreaks(s: string) {
+  const width = (c: string) => (/[MWmwÆŒæœ]/.test(c) ? 1.5 : /[fijlrtIJ]/.test(c) ? 0.5 : 1);
+  const at = new Set<number>();
+  for (const m of s.matchAll(/\p{L}+/gu)) {
+    const cs = [...m[0]];
+    if (cs.reduce((n, c) => n + width(c), 0) < 7.5) continue;
+    let k = m.index;
+    cs.forEach((c, j) => {
+      k += c.length;
+      if (j >= 1 && j <= cs.length - 4) at.add(k);
+    });
+  }
+  return at;
+}
+
+/** `s` from `from` to `to`, with the soft hyphens its whole breaks there (so a highlighted part keeps them). */
+export function breakable(s: string, from = 0, to = s.length) {
+  const at = softBreaks(s);
+  let out = '';
+  for (let k = from; k < to; k++) out += `${at.has(k) ? '\u00AD' : ''}${s[k]}`;
+  return out;
+}
+
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 /** Display copy to HTML: escapes, typographic quotes, **bold** as Lantern emphasis. */
 export function md(s: string) {

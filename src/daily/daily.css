@@ -212,11 +212,12 @@
   text-overflow: ellipsis;
   max-width: 46vw;
 }
+/* the gap after the mark takes in the mark's 2 px end margin (room for its turned corner) */
 .dq-brand {
   display: flex;
   white-space: nowrap;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-height: 44px;
   padding-left: 4px;
   font-size: 13px;
@@ -233,7 +234,7 @@
 }
 @media (max-width: 359px) {
   .dq-brand {
-    gap: 8px;
+    gap: 6px;
     letter-spacing: 0.12em;
   }
 }
@@ -308,6 +309,41 @@
 }
 .dq:not([data-screen='safe']) .dq-top-end {
   display: contents;
+}
+/* in the Safe Zone the bar wraps where its words don't fit on one line (the phone's own text at 200%): Lights up and Sound
+   take the next line together, at its end, each whole with its words */
+.dq[data-screen='safe'] .dq-top {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.dq[data-screen='safe'] .dq-top-end {
+  margin-left: auto;
+}
+/* the back control and Home's name are their arrow and mark, with their word beside them wherever the bar has room for all
+   of it, else the word wraps away under them, out of sight (their names stay for a screen reader), so the bar takes as
+   few rows as its buttons allow (the phone's own text at 200%) */
+.dq:not([data-screen='safe']) .dq-top > .dq-back,
+.dq-top > .dq-brand {
+  flex-wrap: wrap;
+  align-content: flex-start;
+  height: 44px;
+  min-width: 0;
+  max-width: max-content;
+  overflow: clip;
+}
+.dq:not([data-screen='safe']) .dq-top > .dq-back {
+  flex: 1 0 44px;
+  min-width: 44px;
+}
+.dq:not([data-screen='safe']) .dq-back span:first-child {
+  height: 44px;
+}
+/* its start padding and its mark, with room at the mark's end for its turned corner */
+.dq-top > .dq-brand {
+  flex: 1 0 15px;
+}
+.dq-brand-mark {
+  margin: 17.5px 2px 17.5px 0;
 }
 /* a phone at 200% zoom, held either way (300 CSS pixels wide or less): the back control keeps only its arrow and Home's
    name only its mark, so the bar takes as few rows as its buttons allow */
@@ -813,6 +849,14 @@
 .dq-seg--pace {
   width: 100%;
 }
+/* Motion's three choices share the row, and where a word doesn't fit its share (the phone's own text at 200%) the choices
+   take the lines they need */
+.dq-seg--3 {
+  flex-wrap: wrap;
+}
+.dq-seg--3 .dq-seg-b {
+  min-width: max-content;
+}
 .dq-seg--3 .dq-seg-b,
 .dq-seg--range .dq-seg-b {
   font-size: 14.5px;
@@ -1075,9 +1119,12 @@ textarea.dq-input {
     0 0 16px rgba(20, 87, 172, 0.4);
   opacity: 0.7;
 }
+/* the crystal beside the name, title and class, or above them where even their narrowest doesn't fit beside it (the
+   phone's own text at 200%) */
 .dq-player {
   position: relative;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 16px;
   padding: 2px 0 16px;
@@ -1166,13 +1213,19 @@ textarea.dq-input {
   display: grid;
   gap: 2px;
 }
+.dq-player > .dq-kvs {
+  flex: 1 1 0;
+  max-width: max-content;
+}
 .dq-kv {
   display: flex;
   align-items: baseline;
   gap: 10px;
 }
+/* each label in a column 50 px wide, wider where its word needs it (the phone's own text at 200%) */
 .dq-kv dt {
   width: 50px;
+  min-width: min-content;
   font-size: 12.5px;
   font-weight: 500;
   letter-spacing: 0.16em;
@@ -1218,8 +1271,11 @@ textarea.dq-input {
   flex-direction: column;
   margin: 4px 0 0;
 }
+/* a skill's value beside its name, or under it, at its end, where even the name's longest word leaves it no room (the
+   phone's own text at 200%) */
 .dq-stat {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -1231,10 +1287,11 @@ textarea.dq-input {
   border-bottom: 0;
 }
 .dq-stat dt {
+  flex: 1 1 0;
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 10px;
-  min-width: 0;
+  gap: 0 10px;
 }
 .dq-stat-ic {
   align-self: center;
@@ -1243,36 +1300,32 @@ textarea.dq-input {
   height: 18px;
   color: var(--accent);
 }
+/* a column 8.6em wide, narrower down to its longest word where the row is short of room */
 .dq-stat-k {
-  flex: none;
-  width: 8.6em;
+  flex: 0 1 8.6em;
+  min-width: min-content;
   font-size: 13px;
   font-weight: 500;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--t-title);
 }
+/* its line beside the name where all of it fits there, else under the name, word by word (narrower than 390 px always
+   under it), so all of it shows */
 .dq-stat-m {
+  flex: 1 1 auto;
   font-size: 14px;
   color: var(--t-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 @media (max-width: 389px) {
-  .dq-stat dt {
-    flex-wrap: wrap;
-    row-gap: 0;
-  }
   .dq-stat-m {
     flex-basis: 100%;
     padding-left: 28px;
-    white-space: normal;
   }
 }
 .dq-stat-n {
   flex: none;
-  margin: 0;
+  margin: 0 0 0 auto;
   min-width: 2ch;
   text-align: right;
   font-size: 24px;
@@ -1724,16 +1777,18 @@ textarea.dq-input {
   height: auto;
 }
 
+/* two places a row, each half of it (the Art room and the Story Room the whole of it); a place whose longest word doesn't
+   fit half (a phone at 200% zoom, or its own text at 200%) takes the whole row, so its name and line show whole */
 .dq-menu {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
 }
-/* a phone zoomed to 200% (260 CSS pixels wide or less): one place a row, its name and line whole */
-@media (max-width: 260px) {
-  .dq-menu {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.dq-menu > .dq-tile {
+  flex: 1 1 calc(50% - 5px);
+}
+.dq-menu > :is(.dq-tile--art, .dq-tile--story) {
+  flex-basis: 100%;
 }
 .dq-tile {
   position: relative;
@@ -1817,9 +1872,6 @@ textarea.dq-input {
   }
   .dq-cf-name {
     font-size: 36px;
-  }
-  .dq-menu {
-    grid-template-columns: 1fr 1fr;
   }
 }
 
@@ -2322,11 +2374,12 @@ textarea.dq-input {
   padding: 14px 0 calc(var(--safe-bottom) + 14px);
   background: linear-gradient(0deg, rgba(7, 8, 15, 0.97) 60%, rgba(7, 8, 15, 0));
 }
-/* upright and on a desktop the Safe Zone is one screen tall, like the drawing page: only its words and choices scroll,
-   inside the frame, and the foot sits under the frame, so nothing ever rests or scrolls under "Talk to someone now".
-   Held sideways the page scrolls and the foot sits beside the choices (below). A screen under 361px tall (a phone at
-   200% zoom) has no room for a frame that scrolls inside, so there the page scrolls and the foot pins to the bottom. */
-@media (orientation: portrait) and (min-height: 361px), (min-height: 501px), (max-width: 539px) and (min-height: 361px) {
+/* upright, held sideways and on a desktop the Safe Zone is one screen tall, like the drawing page: only its words and
+   choices scroll, inside the frame, and the foot sits under the frame, so nothing ever rests or scrolls under "Talk to
+   someone now", whatever the text size. A screen under 361px tall upright (a phone at 200% zoom) or under 300px held
+   sideways (the keyboard up) has no room for a frame that scrolls inside, so there the page scrolls and the foot pins to
+   the bottom. */
+@media (orientation: portrait) and (min-height: 361px), (orientation: landscape) and (min-height: 300px) and (min-width: 540px), (min-height: 501px), (max-width: 539px) and (min-height: 361px) {
   .dq[data-screen='safe'] {
     overflow: hidden;
     display: flex;
@@ -2487,10 +2540,14 @@ textarea.dq-input {
 .dq-sz .dq-mo-len-o {
   font-size: calc(20px * var(--text-scale, 1));
 }
+/* the helpline address is one long word in a tap-sized box: where it doesn't fit a line (a phone at 200% zoom, or its
+   own text at 200%) it breaks before its .com, with no hyphen, which would read as part of the address, and inside its
+   name only where even that is wider than the line */
 .dq-sz .dq-small .dq-a {
   display: inline-flex;
   align-items: center;
   min-height: 44px;
+  overflow-wrap: anywhere;
 }
 .dq-sz-foot.is-talk {
   display: none;
@@ -2554,8 +2611,10 @@ textarea.dq-input {
     padding-right: max(8px, var(--safe-right));
     padding-left: max(8px, var(--safe-left));
   }
+  /* its start keeps the word off the edge; its end gives the bar the room, so all three fit on one line, not into its
+     padding */
   .dq[data-screen='safe'] .dq-back {
-    padding: 0 6px 0 4px;
+    padding: 0 2px 0 4px;
   }
   .dq[data-screen='safe'] .dq-back span:first-child,
   .dq .ca-sz-light-t {
@@ -2565,10 +2624,6 @@ textarea.dq-input {
     justify-content: center;
     width: 44px;
     padding: 0;
-  }
-  /* the helpline address is one long word in a tap-sized box: it breaks where it must */
-  .dq-sz .dq-small .dq-a {
-    overflow-wrap: anywhere;
   }
   .dq-sz {
     --pad: 12px;
@@ -3545,8 +3600,18 @@ textarea.dq-input {
   min-height: 0;
   max-height: 35cqw;
 }
+/* on the quest card the module wraps word by word beside its minutes, and where even its longest word doesn't fit beside
+   them (the phone's own text at 200%) the minutes take the next line, at its end */
 .dq-card .dq-cf-top {
   align-items: flex-start;
+  flex-wrap: wrap;
+}
+.dq-card .dq-cf-mod {
+  flex: 1 1 0;
+  min-width: auto;
+}
+.dq-card .dq-cf-min {
+  margin-left: auto;
 }
 .dq-card .dq-cf-mod span {
   white-space: normal;
@@ -3610,12 +3675,14 @@ textarea.dq-input {
     width: min(196px, 52vw);
   }
 }
-/* a phone at 200% zoom, held either way (300 CSS pixels wide or less): the breathing ring's word doesn't fit inside the
-   ring, so it sits just under it at its full size, on lines as wide as the frame; the count stays in the ring */
-@media (max-width: 300px) {
+/* a phone at 200% zoom, held either way (300 CSS pixels wide or less), or held sideways where the ring shares a column
+   one screen tall (below): the breathing ring's word doesn't fit inside the ring at every text size, so it sits just
+   under it at its full size, on lines as wide as the frame; the count stays in the ring */
+@media (max-width: 300px), (orientation: landscape) and (min-height: 300px) and (max-height: 500px) and (min-width: 540px) {
   .dq-sz .dq-ring-stage {
     display: grid;
     width: 100%;
+    max-width: none;
     aspect-ratio: auto;
   }
   .dq-sz .dq-ring-svg {
@@ -3639,8 +3706,8 @@ textarea.dq-input {
   }
 }
 /* held sideways there, the word sits beside the ring instead, and the ring is never taller than the room the pinned bars
-   leave, so the ring with its count and its word show together above "Talk to someone now" */
-@media (max-width: 300px) and (orientation: landscape) {
+   leave, nor than its column, so the ring with its count and its word show together above "Talk to someone now" */
+@media (max-width: 300px) and (orientation: landscape), (orientation: landscape) and (min-height: 300px) and (max-height: 500px) and (min-width: 540px) {
   .dq-sz .dq-ring-stage {
     grid-template-columns: auto auto;
     justify-content: center;
@@ -3648,7 +3715,7 @@ textarea.dq-input {
     column-gap: 12px;
   }
   .dq-sz .dq-ring-svg {
-    width: min(196px, 52vw, calc(100dvh - var(--sz-bar, 0px) - var(--dq-foot, 0px) - 8px));
+    width: min(196px, 52vw, calc(100dvh - var(--sz-bar, 0px) - var(--dq-foot, 0px) - 8px), 100cqh - 8px);
   }
   .dq-sz .dq-ring-word {
     grid-area: 1 / 2;
@@ -3699,6 +3766,57 @@ textarea.dq-input {
   .dq-sz .dq-addrow .dq-field {
     flex-basis: 100%;
   }
+}
+/* held sideways 300px tall or more, where the Safe Zone is one screen tall (above), the words and the choices each scroll
+   in their own column, right up to the frame's border, and the frame's bottom padding comes after the last of each.
+   Each holds everything it scrolls, visually hidden labels too, and no ring is taller than its column, so each shows
+   whole once scrolled to */
+@media (orientation: landscape) and (min-height: 300px) and (max-height: 500px) and (min-width: 540px) {
+  /* the body is no box here, so it scrolls nothing: its two halves do */
+  .dq-sz-body {
+    overflow: visible;
+  }
+  .dq-sz-lead,
+  .dq-sz-main {
+    position: relative;
+    container-type: size;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(125, 150, 197, 0.35) transparent;
+  }
+  .dq-sz-lead {
+    margin: 0 calc(-0.5 * var(--pad)) 0 calc(-1 * var(--pad));
+    padding: 0 calc(0.5 * var(--pad)) var(--pad) var(--pad);
+  }
+  .dq-sz-main {
+    margin: 0 calc(-1 * var(--pad)) 0 calc(-0.5 * var(--pad));
+    padding: 0 var(--pad) var(--pad) calc(0.5 * var(--pad));
+  }
+  .dq-sz :is(.dq-timer-stage:not(.is-wide), .dq-mo-stage) {
+    width: min(196px, 52vw, 100cqh - 8px);
+  }
+  /* Give me a moment's ring takes the room its heading leaves, at least 120px or the whole column, so the words' column
+     scrolls only where they run longer (enlarged text) and the ring always fits it */
+  .dq-sz-lead:has(> .dq-mo-stage) {
+    display: grid;
+    grid-template-rows: auto minmax(min(120px, 100%), 1fr);
+  }
+  /* under its heading, though the moment held sideways puts its ring first */
+  .dq-sz .dq-sz-lead > .dq-mo-stage {
+    grid-row: 2;
+    width: auto;
+    height: min(196px, 100% - 8px, 100cqw);
+  }
+  /* the copy of the lists is never taller than its column, and scrolls inside, so it shows whole as it gets focus */
+  .dq-sz-main .dq-lists-copy .dq-pre {
+    max-height: 100cqh;
+    overflow-y: auto;
+  }
+}
+/* held sideways under 300px tall the page scrolls instead */
+@media (orientation: landscape) and (max-height: 299px) and (min-width: 540px) {
   /* "Talk to someone now" pins under the words, from the panel's edge to where the choices start (its 1px border, the
      padding, the words' two fifths and the gap), so it never covers a choice; 12px below it keeps it on screen while a
      screen slides in */
@@ -3731,6 +3849,10 @@ textarea.dq-input {
   max-width: calc(100dvh - var(--sz-bar, 0px) - var(--dq-foot, 0px) - 8px);
   margin: 8px auto 0;
 }
+/* so is a breathing or a countdown ring (a phone at 200% zoom held sideways) */
+.dq-sz :where(.dq-ring-stage, .dq-timer-stage:not(.is-wide)) {
+  max-width: calc(100dvh - var(--sz-bar, 0px) - var(--dq-foot, 0px) - 8px);
+}
 .dq-sz .dq-moment {
   display: flex;
   min-height: 0;
@@ -3742,9 +3864,12 @@ textarea.dq-input {
 .dq-sz .dq-mo-row {
   justify-content: center;
 }
-@media (orientation: landscape) and (max-height: 500px) and (min-width: 540px) {
+/* where the page scrolls held sideways, "Talk to someone now" pins under the heading and the ring, and enlarged text can
+   take it up over the ring, so a scroll to the ring stops clear of it */
+@media (orientation: landscape) and (max-height: 299px) and (min-width: 540px) {
   .dq-sz .dq-mo-stage {
     width: clamp(120px, calc(100dvh - 250px), 196px);
+    scroll-margin-bottom: var(--dq-foot, 0px);
   }
 }
 .dq-cardbtn .dq-cf-stat {
@@ -3924,7 +4049,6 @@ textarea.dq-input {
 
 /* ---------- art room tile ---------- */
 .dq-tile--art {
-  grid-column: 1 / -1;
   align-content: center;
   grid-template-columns: 24px minmax(0, 1fr) auto;
   min-height: 82px;
