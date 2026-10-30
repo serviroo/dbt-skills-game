@@ -1,7 +1,7 @@
 import '../styles/lantern-window.css';
 import { after, animate, complete, el, finished, wait } from './anim';
 import { inertUntil, onTaps } from './taps';
-import { onSystemMotion, params } from '../core/params';
+import { onMotion, params } from '../core/params';
 import { EASE, LEVEL, WINDOW as W, css, fr } from '../motion/tokens';
 
 export type WindowKind = 'notification' | 'quest' | 'level' | 'reward' | 'info';
@@ -229,6 +229,8 @@ export class LanternWindow {
   private slices: HTMLElement[];
   private next: HTMLDivElement;
   private plasmaAnims: Animation[] = [];
+  /** the frame's own finite moves as it opens and closes, which motion turning off brings to their end at once */
+  private moves: Animation[] = [];
   /** the waiting arrow's pulse, while it shows and motion is on */
   private pulse: Animation | null = null;
   private waiting = false;
@@ -339,6 +341,12 @@ export class LanternWindow {
     return a;
   }
 
+  private move(e: Element, frames: Keyframe[], opts: KeyframeAnimationOptions) {
+    const a = animate(e, frames, opts);
+    this.moves.push(a);
+    return a;
+  }
+
   private appear(e: Element, delay: number, frames: number = W.unitFadeFrames) {
     return this.typed(e, [{ opacity: 0 }, { opacity: 1 }], { duration: fr(frames), delay, easing: 'linear' });
   }
@@ -352,7 +360,7 @@ export class LanternWindow {
     this.root.style.visibility = 'visible';
     windowSounds.open?.(kind);
     this.listen();
-    this.offMotion = onSystemMotion(() => this.setStill(params.reduced || this.root.classList.contains('dq-sw--still')));
+    this.offMotion = onMotion(() => this.setStill(params.reduced || this.root.classList.contains('dq-sw--still')));
     let hookAt = 0;
     const ctx: RevealCtx = {
       root: this.root,
@@ -382,11 +390,11 @@ export class LanternWindow {
       ...vals.map((v, i) => ({ ...key(v), offset: i && i / (vals.length - 1) - lead, easing: 'steps(1, end)' })),
       { ...key(vals[vals.length - 1]), offset: 1 },
     ];
-    animate(this.plate, stepped(steps, (s) => ({ clipPath: `inset(${((1 - s) / 2) * 100}% -2px ${((1 - s) / 2) * 100}% -2px)` })), { duration: D, easing: 'linear' });
+    this.move(this.plate, stepped(steps, (s) => ({ clipPath: `inset(${((1 - s) / 2) * 100}% -2px ${((1 - s) / 2) * 100}% -2px)` })), { duration: D, easing: 'linear' });
     const ys = steps.map((s) => ((1 - s) * h) / 2);
     const [bt, bb] = this.bars;
-    animate(bt, stepped(ys, (y) => ({ transform: `translateY(${y}px)` })), { duration: D, easing: 'linear' });
-    animate(bb, stepped(ys, (y) => ({ transform: `translateY(${-y}px)` })), { duration: D, easing: 'linear' });
+    this.move(bt, stepped(ys, (y) => ({ transform: `translateY(${y}px)` })), { duration: D, easing: 'linear' });
+    this.move(bb, stepped(ys, (y) => ({ transform: `translateY(${-y}px)` })), { duration: D, easing: 'linear' });
     this.startPlasma();
 
     // 2. glitch-in on the frame only: slices shift each frame, bars twitch sideways, a decaying cyan wash
@@ -395,12 +403,12 @@ export class LanternWindow {
     const per = (vals: readonly number[], f: (v: number) => Keyframe, end: Keyframe) => [...vals.map((v, i) => ({ ...f(v), offset: i / G, easing: 'steps(1, end)' })), { ...end, offset: 1 }];
     this.slices.forEach((s, i) => {
       const xs = W.glitchSliceShiftPx.map((row) => row[i]);
-      animate(s, per(xs, (x) => ({ opacity: 1, transform: `translateX(${x}px)` }), { opacity: 0, transform: `translateX(${xs[G - 1]}px)` }), { duration: gDur, delay: D, fill: 'forwards' });
+      this.move(s, per(xs, (x) => ({ opacity: 1, transform: `translateX(${x}px)` }), { opacity: 0, transform: `translateX(${xs[G - 1]}px)` }), { duration: gDur, delay: D, fill: 'forwards' });
     });
     for (const b of this.bars)
       for (const part of b.querySelectorAll('.core, svg'))
-        animate(part, per(W.glitchBarShiftPx, (x) => ({ transform: `translateX(${x}px)` }), { transform: 'translateX(0px)' }), { duration: gDur, delay: D, fill: 'forwards' });
-    animate(this.wash, per(W.washByFrame, (o) => ({ opacity: o }), { opacity: 0 }), { duration: gDur, delay: D, fill: 'forwards' });
+        this.move(part, per(W.glitchBarShiftPx, (x) => ({ transform: `translateX(${x}px)` }), { transform: 'translateX(0px)' }), { duration: gDur, delay: D, fill: 'forwards' });
+    this.move(this.wash, per(W.washByFrame, (o) => ({ opacity: o }), { opacity: 0 }), { duration: gDur, delay: D, fill: 'forwards' });
 
     // 3. typing schedule (ms from now)
     const chipAt = D + fr(G - 1);
@@ -519,10 +527,17 @@ export class LanternWindow {
     if (!this.reduced) this.pulse = animate(this.next, [{ opacity: W.nextPulseLow }, { opacity: 1 }], { duration: W.nextPulseMs, iterations: Infinity, direction: 'alternate', easing: css(EASE.inOutSine) });
   }
 
-  /** Motion turned off or on while the window is up: the plasma along its bars and the waiting arrow follow at once. */
+  /**
+   * Motion turned off or on while the window is up: the plasma along its bars and the waiting arrow follow at once, and
+   * turned off, an opening or closing still under way lands where it ends, its typing too.
+   */
   setStill(still: boolean) {
     if (this.gone || still === this.reduced) return;
     this.reduced = still;
+    if (still) {
+      this.moves.forEach(complete);
+      this.skipTyping();
+    }
     this.plasmaAnims.forEach((a) => a.cancel());
     this.plasmaAnims = [];
     this.startPlasma();
@@ -565,23 +580,23 @@ export class LanternWindow {
     windowSounds.close?.();
     const h = this.plate.offsetHeight;
     if (this.reduced) {
-      animate(this.root, [{ opacity: 1 }, { opacity: 0 }], { duration: W.reducedCloseMs, easing: css(EASE.outCubic) });
+      this.move(this.root, [{ opacity: 1 }, { opacity: 0 }], { duration: W.reducedCloseMs, easing: css(EASE.outCubic) });
       await after(W.reducedCloseMs);
       this.destroy();
       return;
     }
     const ease = css(EASE.collapse);
     const flash = fr(1) / W.closeMs;
-    animate(this.wash, [{ opacity: W.closeWash }, { opacity: W.closeWash, offset: flash }, { opacity: 0, offset: flash * 2 }, { opacity: 0 }], { duration: W.closeMs, easing: 'linear' });
-    animate(this.plate, [{ clipPath: 'inset(0% -2px 0% -2px)', opacity: 1 }, { clipPath: 'inset(49% -2px 49% -2px)', opacity: 0.6 }], { duration: W.closeMs, easing: ease });
+    this.move(this.wash, [{ opacity: W.closeWash }, { opacity: W.closeWash, offset: flash }, { opacity: 0, offset: flash * 2 }, { opacity: 0 }], { duration: W.closeMs, easing: 'linear' });
+    this.move(this.plate, [{ clipPath: 'inset(0% -2px 0% -2px)', opacity: 1 }, { clipPath: 'inset(49% -2px 49% -2px)', opacity: 0.6 }], { duration: W.closeMs, easing: ease });
     const [bt, bb] = this.bars;
-    animate(bt, [{ transform: 'translateY(0)' }, { transform: `translateY(${h / 2}px)` }], { duration: W.closeMs, easing: ease });
-    animate(bb, [{ transform: 'translateY(0)' }, { transform: `translateY(${-h / 2}px)` }], { duration: W.closeMs, easing: ease });
+    this.move(bt, [{ transform: 'translateY(0)' }, { transform: `translateY(${h / 2}px)` }], { duration: W.closeMs, easing: ease });
+    this.move(bb, [{ transform: 'translateY(0)' }, { transform: `translateY(${-h / 2}px)` }], { duration: W.closeMs, easing: ease });
     const rx = `rotateX(${W.tiltDeg}deg)`;
     const [sx, sy] = W.closeEndScale;
-    animate(this.tilt, [{ transform: `${rx} scale(1)` }, { transform: `${rx} scale(${W.closeFlashScale})`, offset: flash, easing: 'linear' }, { transform: `${rx} scale(${sx},${sy})` }], { duration: W.closeMs, easing: 'linear' });
+    this.move(this.tilt, [{ transform: `${rx} scale(1)` }, { transform: `${rx} scale(${W.closeFlashScale})`, offset: flash, easing: 'linear' }, { transform: `${rx} scale(${sx},${sy})` }], { duration: W.closeMs, easing: 'linear' });
     const fadeAt = W.closeMs + W.closeBarHoldMs;
-    animate(this.root, [{ opacity: 1 }, { opacity: 0 }], { duration: W.closeFadeMs, delay: fadeAt, easing: css(EASE.outCubic) });
+    this.move(this.root, [{ opacity: 1 }, { opacity: 0 }], { duration: W.closeFadeMs, delay: fadeAt, easing: css(EASE.outCubic) });
     await after(fadeAt + W.closeFadeMs);
     this.destroy();
   }

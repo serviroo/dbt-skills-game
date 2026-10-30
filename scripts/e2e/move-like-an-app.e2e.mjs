@@ -26,8 +26,9 @@ import { reachHub as home } from './harness.mjs';
 //                       moved with the arrows, and "Talk to someone now" one Tab from the top of the Safe Zone
 //   back-keeps-steps    Back keeps a tier list's ranks, gives a finished skill's header its name back on earlier steps,
 //                       and Save again after Back keeps one saved map
-//   clear-elsewhere     another tab clears the game's data while this one sits on Home: this tab shows Settings, and
-//                       Back, Forward and the Safe Zone still move inside the game, with or without a page before it
+//   clear-elsewhere     another tab clears the game's data while this one sits on Home: this tab shows Settings, moves
+//                       as its cleared Motion setting (Auto) says, and Back, Forward and the Safe Zone still move
+//                       inside the game, with or without a page before it
 import { gone } from './harness.mjs';
 import { boot, settle } from './layout-fit.e2e.mjs';
 
@@ -908,6 +909,10 @@ export const scenarios = {
         problems.push(`${name}: the clear in another tab left ${left(p.url()) ? 'the game' : `this tab on ${await screenOf(p)}`}`);
         continue;
       }
+      // the save began with Motion: Reduced; cleared, the setting is Auto again and the page follows it (this device
+      // asks for no reduced motion), its scenes and its look alike
+      const m = await p.evaluate(() => ({ set: window.__daily.store.state.settings.motion, reduced: window.__daily.reduced(), still: document.querySelector('.dq').classList.contains('is-still') }));
+      if (m.set !== 'system' || m.reduced || m.still) problems.push(`${name}: after the clear Motion is ${m.set}, but the page moves as if reduced ${m.reduced} and looks still ${m.still}`);
       if (before) {
         await back(p);
         if (left(p.url()) || (await screenOf(p)) !== 'settings') problems.push(`${name}: Back after the clear went to ${left(p.url()) ? 'the page before the game' : await screenOf(p)}`);

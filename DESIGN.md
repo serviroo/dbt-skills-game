@@ -142,8 +142,8 @@ Every step is skippable. The lists are set up only when the player chooses to, a
 ## Accessibility checklist
 
 - At most 3 flashes per second.
-- `prefers-reduced-motion` and the in-game motion setting are both honoured, and a change to the device's setting
-  reaches every scene and animation at once, without a reload.
+- `prefers-reduced-motion` and the in-game motion setting are both honoured, and a change to either (the device's
+  setting, or Motion in any open tab) reaches every scene and animation at once, without a reload.
 - Text contrast at least 4.5:1; body text sizes as above.
 - Nothing depends on sound.
 - Every control has a label a screen reader can read, and every tap target is at least 44 px.

@@ -9,7 +9,11 @@
 // on, breathes once it is turned off, and settles again when it comes back on. With Motion saved as Full, the glint on
 // the card's back and the Story Room's scan keep moving whatever the device says. The title's pulses and the end card's
 // drift end with their screen, however it goes, a capture's wait on a dismissed window's typing ends with it, and the
-// Stealth Room's Breathing words still breathe with its glow once motion is back.
+// Stealth Room's Breathing words still breathe with its glow once motion is back. Motion chosen in another open tab
+// reaches the intro the same way, with no reload: Reduced stills the title, a waiting window, the hold's breathing and
+// the end card's drift, and Auto moves them again; a window still opening and the end card still coming in land where
+// they end at once, also in a tab stopped for a while just as the change is made; one made while this tab was in the
+// page cache or out of sight reaches its title once it is back.
 
 const PHONE = { width: 390, height: 844 };
 
@@ -19,23 +23,27 @@ export async function deviceMotion(ctx, page) {
   return (value) => cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value }] });
 }
 
-/** Every --breath value the hold shows over `ms`: many while it breathes, one steady 0.5 while it is still. */
-const breaths = (page, ms) =>
-  page.evaluate(
-    (ms) =>
-      new Promise((done) => {
-        const root = document.querySelector('.chest-hold');
-        const seen = new Set();
-        const end = performance.now() + ms;
-        const tick = () => {
-          seen.add(root.style.getPropertyValue('--breath'));
-          if (performance.now() < end) requestAnimationFrame(tick);
-          else done([...seen]);
-        };
-        tick();
-      }),
-    ms,
-  );
+/**
+ * Every --breath value the hold shows over the next `frames` frames it draws: many while it breathes, one steady 0.5
+ * while it is still. Counted in frames, not time: a page a busy host lets draw only now and then shows as many, only
+ * later.
+ */
+const breaths = (page, frames) =>
+  page.evaluate(async (frames) => {
+    const root = document.querySelector('.chest-hold');
+    const seen = new Set();
+    for (let i = 0; i < frames; i++) {
+      await new Promise((r) => requestAnimationFrame(r));
+      seen.add(root.style.getPropertyValue('--breath'));
+    }
+    return [...seen];
+  }, frames);
+
+/** Resolves once the page has drawn `n` more frames, however long it is stopped meanwhile. */
+const drawn = (page, n) =>
+  page.evaluate(async (n) => {
+    for (let i = 0; i < n; i++) await new Promise((r) => requestAnimationFrame(r));
+  }, n);
 
 /** The window's endless animations (the plasma along its bars, the waiting arrow's pulse), and the arrow's opacity. */
 const windowMotion = (page) =>
@@ -63,7 +71,10 @@ const rattle = (page) =>
     return tilts;
   });
 
-/** True once the game has the device's setting: it hears of it as the next frame is drawn, so this waits frame by frame. */
+/**
+ * True once the game has motion `on`. It hears of the device's setting as the next frame is drawn, and of another tab's
+ * Motion once the page runs again, so this waits frame by frame: a page stopped for a while uses none of the wait.
+ */
 const reducedHere = (page, on) =>
   page.evaluate(async (on) => {
     const { params } = await import('/src/core/params.ts');
@@ -74,8 +85,45 @@ const reducedHere = (page, on) =>
 /** Animations under `selector` that never end. */
 const endless = (page, selector) => page.evaluate((sel) => document.querySelector(sel).getAnimations({ subtree: true }).filter((a) => a.effect.getTiming().iterations === Infinity && a.playState !== 'idle').length, selector);
 
+/** True once `n` animations under `selector` never end, looked at frame by frame for 300 frames the page draws. */
+const endlessReach = (page, selector, n) =>
+  page.evaluate(
+    async ([sel, n]) => {
+      for (let i = 0; i < 300; i++) {
+        if (document.querySelector(sel).getAnimations({ subtree: true }).filter((a) => a.effect.getTiming().iterations === Infinity && a.playState !== 'idle').length === n) return true;
+        await new Promise((r) => requestAnimationFrame(r));
+      }
+      return false;
+    },
+    [selector, n],
+  );
+
 /** The end card's drift: an animation on its stage that never ends. */
 const drifts = (page) => page.evaluate(() => document.querySelector('.ec-stage').getAnimations().filter((a) => a.effect.getTiming().iterations === Infinity && a.playState !== 'idle').length);
+
+/**
+ * Stops the page, as a software renderer (CI's SwiftShader) does while it compiles a new frame's shaders: it runs nothing
+ * until resume(), so whatever comes meanwhile, a change from another tab among it, waits for it. read(fn, arg) looks into
+ * it meanwhile, where page.evaluate would wait for it to run again. Resolves once the page has stopped.
+ */
+const pause = async (ctx, page) => {
+  const cdp = await ctx.newCDPSession(page);
+  await cdp.send('Debugger.enable');
+  const stopped = new Promise((r) => cdp.once('Debugger.paused', r));
+  await cdp.send('Debugger.pause');
+  await stopped;
+  return {
+    async read(fn, arg) {
+      const r = await cdp.send('Runtime.evaluate', { expression: `(${fn})(${JSON.stringify(arg)})`, returnByValue: true });
+      if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
+      return r.result.value;
+    },
+    async resume() {
+      await cdp.send('Debugger.resume');
+      await cdp.detach();
+    },
+  };
+};
 
 export const scenarios = {
   async 'intro-hold-follows-device-motion'(h) {
@@ -102,11 +150,11 @@ export const scenarios = {
     h.expect(placed.every((s) => s === 'finished'), `with the device's reduce-motion turned on, the hold kept coming in: ${JSON.stringify(placed)}`);
     // the breath runs on the same animation clock, which moves again from here
     await cdp.send('Animation.setPlaybackRate', { playbackRate: 1 });
-    const still = await breaths(page, 1500);
+    const still = await breaths(page, 8);
     h.expect(still.length === 1 && Number(still[0]) === 0.5, `with the device's reduce-motion turned on, the hold kept breathing: ${JSON.stringify(still)}`);
     await device('no-preference');
     h.expect(await reducedHere(page, false), 'the game never heard the device turn reduce-motion off');
-    const again = await breaths(page, 1500);
+    const again = await breaths(page, 8);
     h.expect(again.length > 3, `with it turned off again, the hold did not breathe: ${JSON.stringify(again)}`);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
@@ -208,6 +256,142 @@ export const scenarios = {
     h.expect(kept.same && kept.running, `with Motion on Full, a device change restarted the title's breath: ${JSON.stringify(kept)}`);
     h.expect(!full.errors.length, full.errors.join('\n'));
     await full.ctx.close();
+  },
+
+  async 'intro-title-follows-motion-from-another-tab'(h) {
+    // the companion in one tab and the intro's title, replayed, in another: Motion chosen on the companion's Settings
+    // screen reaches the title at once, with no reload
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', PHONE);
+    const title = await ctx.newPage();
+    title.on('pageerror', (e) => errors.push('pageerror, title tab: ' + e.message));
+    await title.goto(h.server.url + '/?cutscene=1&mute');
+    await title.locator('.title-screen').waitFor({ timeout: 30000 });
+    /** True once the title has `n` endless animations; the other tab's change arrives as an event, so this waits on it. */
+    const moving = (n) => endlessReach(title, '.title-screen', n);
+    h.expect(await moving(2), `the title's slit and prompt do not move with motion on (${await endless(title, '.title-screen')})`);
+    await h.openSettings(page);
+    await page.getByRole('radio', { name: 'Motion: Reduced', exact: true }).click();
+    h.expect(await moving(0), `with Motion: Reduced chosen in another tab, the title kept moving (${await endless(title, '.title-screen')})`);
+    await page.getByRole('radio', { name: 'Motion: Auto', exact: true }).click();
+    h.expect(await moving(2), `with Motion back on Auto in another tab, the title stayed still (${await endless(title, '.title-screen')})`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  async 'intro-openings-land-on-motion-from-another-tab'(h) {
+    // Reduced chosen in another tab while a Lantern window is still opening and typing, and while the end card is still
+    // coming in: every finite animation of either lands where it ends at once, the window's text and the card's buttons
+    // with them. The page's animation clock stands still meanwhile, so nothing could have ended on its own. The piece's
+    // tab is stopped from before the change is made until it is stored, as CI's software renderer once stopped one for
+    // 5.4 s: it lands all the same once it runs again
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', PHONE);
+    await h.openSettings(page);
+    const pieces = [
+      { kind: 'notification', root: '.sw', ready: (p) => p.waitForFunction(() => window.__win?.typing === true, null, { timeout: 30000 }) },
+      { kind: 'endcard', root: '.endcard', ready: (p) => p.locator('.endcard').waitFor({ timeout: 30000 }) },
+    ];
+    for (const k of pieces) {
+      const piece = await ctx.newPage();
+      piece.on('pageerror', (e) => errors.push(`pageerror, ${k.kind} tab: ${e.message}`));
+      const cdp = await ctx.newCDPSession(piece);
+      await cdp.send('Animation.enable');
+      await cdp.send('Animation.setPlaybackRate', { playbackRate: 0 });
+      await piece.goto(h.server.url + `/?lab=window&kind=${k.kind}&mute`);
+      await k.ready(piece);
+      /** the piece's finite animations not yet at their end, and what is still to show */
+      const state = (sel) => {
+        const root = document.querySelector(sel);
+        return {
+          running: root.getAnimations({ subtree: true }).filter((a) => a.effect.getTiming().iterations !== Infinity && !['finished', 'idle'].includes(a.playState)).length,
+          typing: window.__win?.typing ?? null,
+          hidden: [...root.querySelectorAll('.sw-u')].filter((u) => Number(getComputedStyle(u).opacity) < 1).length,
+          inert: [...root.querySelectorAll('.sw-actions, .ec-actions')].filter((a) => a.inert).length,
+        };
+      };
+      const coming = () => piece.evaluate(state, k.root);
+      const before = await coming();
+      h.expect(before.running > 0, `${k.kind}: nothing was still coming in to begin with: ${JSON.stringify(before)}`);
+      const stopped = await pause(ctx, piece);
+      let stored, held;
+      try {
+        await page.getByRole('radio', { name: 'Motion: Reduced', exact: true }).click();
+        // stored while the tab is stopped, which still shows just what it showed before
+        stored = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).settings.motion, h.SAVE);
+        held = await stopped.read(state, k.root);
+      } finally {
+        await stopped.resume();
+      }
+      h.expect(stored === 'reduce' && JSON.stringify(held) === JSON.stringify(before), `${k.kind}: the stop was not exercised: with Motion ${stored} stored in another tab, the stopped tab showed ${JSON.stringify(held)}`);
+      h.expect(await reducedHere(piece, true), `${k.kind}: the piece never heard Motion: Reduced chosen in another tab`);
+      const now = await coming();
+      h.expect(!now.running && !now.typing && !now.hidden && !now.inert, `${k.kind}: with Motion: Reduced chosen in another tab, it kept coming in: ${JSON.stringify(now)}`);
+      // Auto again, so the next piece opens with motion on
+      await page.getByRole('radio', { name: 'Motion: Auto', exact: true }).click();
+      await piece.close();
+    }
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  async 'intro-title-follows-motion-missed-while-away'(h) {
+    // a change another tab made while this one was in the page cache or out of sight sent no event this tab heard: a
+    // write from this same tab sends it none either, so it stands in for one. Back from the page cache, or back in
+    // view, the title follows what is stored
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?cutscene=1&mute', PHONE);
+    await page.locator('.title-screen').waitFor({ timeout: 30000 });
+    const moving = (n) => endlessReach(page, '.title-screen', n);
+    const stored = (motion, back) =>
+      page.evaluate(
+        ([key, motion, back]) => {
+          localStorage.setItem(key, JSON.stringify({ v: 1, settings: { motion } }));
+          if (back === 'pageshow') window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+          else document.dispatchEvent(new Event('visibilitychange'));
+        },
+        [h.SAVE, motion, back],
+      );
+    h.expect(await moving(2), `the title's slit and prompt do not move with motion on (${await endless(page, '.title-screen')})`);
+    await stored('reduce', 'pageshow');
+    h.expect(await moving(0), `with Motion: Reduced stored while away, the title kept moving once back from the page cache (${await endless(page, '.title-screen')})`);
+    await stored('system', 'visibilitychange');
+    h.expect(await moving(2), `with Motion back on Auto stored while away, the title stayed still once back in view (${await endless(page, '.title-screen')})`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  async 'intro-pieces-follow-motion-from-another-tab'(h) {
+    // the same for a Lantern window waiting on a tap, the chest hold's breathing and the end card's drift, each alone in
+    // the window lab beside the companion
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', PHONE);
+    await h.openSettings(page);
+    const pieces = [
+      { kind: 'notification', ready: (p) => p.waitForFunction(() => document.querySelector('.sw .sw-next')?.getAnimations().length > 0, null, { timeout: 30000 }), moving: async (p) => (await windowMotion(p)).endless > 1, still: async (p) => (await windowMotion(p)).endless === 0 },
+      { kind: 'hold', ready: (p) => p.locator('.chest-hold').waitFor({ timeout: 30000 }), moving: async (p) => (await breaths(p, 8)).length > 3, still: async (p) => { const b = await breaths(p, 8); return b.length === 1 && Number(b[0]) === 0.5; } },
+      { kind: 'endcard', ready: (p) => p.locator('.ec-stage').waitFor({ timeout: 30000 }), moving: async (p) => (await drifts(p)) === 1, still: async (p) => (await drifts(p)) === 0 },
+    ];
+    for (const k of pieces) {
+      const piece = await ctx.newPage();
+      piece.on('pageerror', (e) => errors.push(`pageerror, ${k.kind} tab: ${e.message}`));
+      await piece.goto(h.server.url + `/?lab=window&kind=${k.kind}&mute`);
+      await k.ready(piece);
+      /** True once the piece shows `want` (moving or still), asked again every 5 frames it draws, 60 times at most. */
+      const shows = async (want) => {
+        for (let i = 0; i < 60; i++) {
+          if (await k[want](piece)) return true;
+          await drawn(piece, 5);
+        }
+        return false;
+      };
+      h.expect(await shows('moving'), `${k.kind}: it does not move with motion on`);
+      await page.getByRole('radio', { name: 'Motion: Reduced', exact: true }).click();
+      h.expect(await reducedHere(piece, true), `${k.kind}: the piece never heard Motion: Reduced chosen in another tab`);
+      h.expect(await shows('still'), `${k.kind}: with Motion: Reduced chosen in another tab, it kept moving`);
+      await page.getByRole('radio', { name: 'Motion: Auto', exact: true }).click();
+      h.expect(await reducedHere(piece, false), `${k.kind}: the piece never heard Motion back on Auto in another tab`);
+      h.expect(await shows('moving'), `${k.kind}: with Motion back on Auto in another tab, it stayed still`);
+      await piece.close();
+    }
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
   },
 
   async 'stealth-follows-device-motion'(h) {
