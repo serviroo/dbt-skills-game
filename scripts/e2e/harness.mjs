@@ -99,16 +99,15 @@ function runs(page, ms) {
 /**
  * Waits for `locator` to match nothing, as its waitFor({ state: 'detached' }) does (or, with state 'hidden', for it to be
  * out of view too), with `timeout` counted in time the page could run (see runs()): a browser stopped for a while on a
- * busy machine can't fail it, and a locator that never goes still fails at its deadline. Resolves with how long the
- * page ran meanwhile, in ms.
+ * busy machine can't fail it, and a locator that never goes, or goes only after it, still fails at its deadline. A page
+ * that answers nothing at all for `stuck` ms is stuck, not stopped for a moment, and fails it too. Resolves with how
+ * long the page ran meanwhile, in ms.
  */
-export async function gone(locator, timeout, { state = 'detached' } = {}) {
+export async function gone(locator, timeout, { state = 'detached', stuck = Math.max(60000, 4 * timeout) } = {}) {
   const count = runs(locator.page(), timeout);
   let over = false;
   let broke = null;
   count.late.then((v) => (over = v === true), (e) => (broke = e));
-  // a page that answers nothing at all for this long is stuck, not stopped for a moment
-  const stuck = Math.max(60000, 4 * timeout);
   const end = Date.now() + stuck;
   let left = false;
   try {
@@ -120,7 +119,18 @@ export async function gone(locator, timeout, { state = 'detached' } = {}) {
           return false;
         },
       );
-      if (left) return await count.stop();
+      if (left) {
+        // the page's own count answers before this read does, so a deadline it reached first is known here; the read is
+        // bounded too, as a page can stop answering right after
+        let timer;
+        const ran = await Promise.race([
+          count.stop(),
+          new Promise((_, fail) => (timer = setTimeout(() => fail(new Error(`${locator} left, then the page answered nothing until ${stuck / 1000} s after the wait began`)), Math.max(0, end - Date.now())))),
+        ]).finally(() => clearTimeout(timer));
+        if (broke) throw new Error(`${locator}: the page's running time could not be counted: ${broke.message}`);
+        if (over) throw new Error(`${locator} left only after ${timeout / 1000} s of the page running`);
+        return ran;
+      }
       // without its count (the page went to another document, or was never given realTimers()) the deadline would be gone
       if (broke) throw new Error(`${locator}: the page's running time could not be counted: ${broke.message}`);
       const still = state === 'hidden' ? 'shown' : 'in the page';

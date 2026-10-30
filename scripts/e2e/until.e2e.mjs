@@ -1,7 +1,8 @@
 // The harness's until() waits for a check in the page that awaits something, and gives up at its deadline even when the
 // check never answers, or turns true only after it while a long wait between checks runs. Its leaves() and gone() wait
 // for something to leave the page on the page's running time: a page frozen mid-wait past the deadline that lets it go
-// soon after passes, and one that never lets it go fails at its deadline.
+// soon after passes, and one that never lets it go fails at its deadline. gone() takes something that goes only once
+// the page has run past its deadline as late, and gives up on a page that stops answering just after it has gone.
 
 /**
  * A moment into a wait the page can't run for 3 s, as a browser a busy machine stops for a while, and lets `sel` go a
@@ -90,6 +91,57 @@ export const scenarios = {
       const after = await h.gone(page.getByRole('dialog', { name: 'Pick' }), 500).then(() => 'left', (e) => e.message);
       const took = Date.now() - t0;
       h.expect(/^getByRole\(.* was still in the page after 0\.5 s of the page running$/.test(after) && took < 2000, `something that never left gave "${after}" after ${took} ms`);
+    } finally { await ctx.close(); }
+  },
+
+  async 'gone-counts-a-late-leave-as-late'(h) {
+    const ctx = await h.browser.newContext();
+    try {
+      const page = await ctx.newPage();
+      await page.setContent('<div role="dialog" aria-label="Pick">x</div>');
+      // the dialog goes as soon as the page has run 0.8 s, before the wait can have looked again: as a window that was
+      // to stay open for 0.8 s and did
+      await page.evaluate(() => {
+        const watch = () => (Object.values(window.__e2eRuns ?? {}).some((c) => c.run >= 800) ? document.querySelector('[role=dialog]').remove() : setTimeout(watch, 5));
+        watch();
+      });
+      const after = await h.gone(page.getByRole('dialog', { name: 'Pick' }), 800).then((ms) => `left after ${ms} ms`, (e) => e.message);
+      h.expect(/ left only after 0\.8 s of the page running$/.test(after), `a dialog that went once the page had run past the deadline gave "${after}"`);
+    } finally { await ctx.close(); }
+  },
+
+  async 'gone-ends-if-the-page-stops-once-it-left'(h) {
+    const ctx = await h.browser.newContext();
+    try {
+      const page = await ctx.newPage();
+      await page.setContent('<div role="dialog" aria-label="Pick">x</div>');
+      // the dialog goes, then the page stops for 8 s just as the wait asks it how long it ran
+      await page.evaluate(() => {
+        let runs;
+        let stall = false;
+        Object.defineProperty(window, '__e2eRuns', {
+          configurable: true,
+          get() {
+            if (stall) {
+              stall = false;
+              const end = performance.now() + 8000;
+              while (performance.now() < end);
+            }
+            return runs;
+          },
+          set(v) {
+            runs = v;
+          },
+        });
+        setTimeout(() => {
+          document.querySelector('[role=dialog]').remove();
+          stall = true;
+        }, 300);
+      });
+      const t0 = Date.now();
+      const after = await h.gone(page.getByRole('dialog', { name: 'Pick' }), 2000, { stuck: 2000 }).then((ms) => `left after ${ms} ms`, (e) => e.message);
+      const took = Date.now() - t0;
+      h.expect(/ left, then the page answered nothing until 2 s after the wait began$/.test(after) && took < 6000, `a page that stopped once the dialog had gone gave "${after}" after ${took} ms`);
     } finally { await ctx.close(); }
   },
 };
