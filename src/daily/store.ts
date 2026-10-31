@@ -278,6 +278,20 @@ const asStored = <T>(rec: T): T => {
   const t = rec && typeof rec === 'object' ? AS_STORED.get(rec as object) : undefined;
   return (t && t.read === JSON.stringify(rec) ? t.raw : rec) as T;
 };
+/**
+ * Sets fields on a record (undefined takes one away). A record kept as stored takes them in its stored form too, so
+ * everything else a newer build stored on it, past this build's limits included, is still what gets written.
+ */
+function alter(rec: object, fields: Record<string, unknown>) {
+  const was = AS_STORED.get(rec);
+  const raw = was && isObj(was.raw) && was.read === JSON.stringify(rec) ? was.raw : undefined;
+  for (const o of raw ? [rec, raw] : [rec])
+    for (const [k, v] of Object.entries(fields)) {
+      if (v === undefined) delete (o as Record<string, unknown>)[k];
+      else putOwn(o, k, v);
+    }
+  if (raw) was!.read = JSON.stringify(rec);
+}
 const EV_KEYS = ['id', 't', 'day', 'k', 'xp', 'stat', 'skill', 'data'];
 const ENTRY_KEYS = ['day', 'emotions', 'urges', 'note', 'updatedAt', 'ft'];
 const ITEM_KEYS = ['id', 'text', 'at', 'place', 'placeAt'];
@@ -555,8 +569,8 @@ function unionInto<T extends { id: string; at?: number }>(mine: T[], theirs: T[]
     if (atOf(x) > atOf(m) || (atOf(x) === atOf(m) && flat(x) > flat(m))) mine[i] = x;
   }
 }
-/** A list in its order: by place, and on the same place (two copies each adding one) the earlier added first. */
-const byPlace = (a: Item | Person, b: Item | Person) => a.place - b.place || atOf(a) - atOf(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+/** A list in its order: by place, and on the same place (two copies each adding one) by id, which nothing changes. */
+const byPlace = (a: Item | Person, b: Item | Person) => a.place - b.place || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 /** Where an item added to the end of `list` goes. */
 export const nextPlace = (list: (Item | Person)[]) => (list.length ? list[list.length - 1].place + 1 : 0);
 /**
@@ -573,9 +587,7 @@ function unionList<T extends Item | Person>(mine: T[], theirs: T[]) {
   unionInto(mine, theirs);
   for (const x of mine) {
     const s = spot.get(x.id)!;
-    x.place = s.place;
-    if (s.placeAt === undefined) delete x.placeAt;
-    else x.placeAt = s.placeAt;
+    if (x.place !== s.place || x.placeAt !== s.placeAt) alter(x, s);
   }
   mine.sort(byPlace);
 }
@@ -1451,7 +1463,8 @@ export class Store {
   /** Undo: puts the item back in its place, newer than its tombstone, so it comes back in every open copy too. */
   reviveItem<T extends Item | Person>(list: T[], item: T) {
     if (list.some((x) => x.id === item.id)) return;
-    list.push({ ...item, at: Math.max(this.now(), goneAt(this.state.gone, item.id) + 1) });
+    alter(item, { at: Math.max(this.now(), goneAt(this.state.gone, item.id) + 1) });
+    list.push(item);
     list.sort(byPlace);
   }
 
@@ -1463,7 +1476,9 @@ export class Store {
     this.sync();
     const x = list.find((i) => i.id === id);
     if (!x) return false;
-    Object.assign(x, change, { at: Math.max(this.now(), atOf(x) + 1) });
+    // only what changed: a newer build's field past this build's limits stays as stored unless the player changed it
+    const changed = Object.entries(change).filter(([k, v]) => (x as unknown as Record<string, unknown>)[k] !== v);
+    alter(x, { ...Object.fromEntries(changed), at: Math.max(this.now(), atOf(x) + 1) });
     this.save();
     return true;
   }
@@ -1479,11 +1494,7 @@ export class Store {
     if (from < 0 || to < 0 || to >= list.length) return false;
     list.splice(to, 0, ...list.splice(from, 1));
     const now = this.now();
-    list.forEach((x, i) => {
-      if (x.place === i) return;
-      x.place = i;
-      x.placeAt = Math.max(now, (x.placeAt ?? 0) + 1);
-    });
+    list.forEach((x, i) => x.place !== i && alter(x, { place: i, placeAt: Math.max(now, (x.placeAt ?? 0) + 1) }));
     this.save();
     return true;
   }
@@ -1647,13 +1658,15 @@ export class Store {
     adoptRest(this.state.maps, other.maps, (m) => m.id, MAP_KEYS, newer);
     adoptRest(this.state.lines, other.lines, (l) => `${l.day}\n${l.id}\n${l.t}`, LINE_KEYS, newer);
     this.state.v = Math.max(this.state.v, other.v);
-    const bring = <T extends { id: string; at?: number }>(mine: T[], theirs: T[], fit = (x: T) => x) => {
+    const bring = <T extends { id: string; at?: number }>(mine: T[], theirs: T[], fit?: (x: T) => void) => {
       const seen = new Set(mine.map((x) => x.id));
       for (const x of theirs) {
         if (seen.has(x.id)) continue;
         seen.add(x.id);
         const g = goneAt(this.state.gone, x.id);
-        mine.push(fit(g >= atOf(x) ? { ...x, at: Math.max(this.now(), g + 1) } : x));
+        if (g >= atOf(x)) alter(x, { at: Math.max(this.now(), g + 1) });
+        fit?.(x);
+        mine.push(x);
       }
     };
     // what the file adds goes after this device's own entries, in the file's order, at the file's places where they fit
@@ -1662,7 +1675,7 @@ export class Store {
       const have = new Set(mine.map((x) => x.id));
       const low = other.lists[k].reduce((m, x) => (have.has(x.id) ? m : Math.min(m, x.place)), Infinity);
       const shift = Math.max(0, nextPlace(mine) - low);
-      bring(mine, other.lists[k], (x) => (shift ? { ...x, place: x.place + shift } : x));
+      bring(mine, other.lists[k], shift ? (x) => alter(x, { place: x.place + shift }) : undefined);
     }
     bring(this.state.maps, other.maps);
     adoptRaw(this.state, other, { newer, now: this.now() });

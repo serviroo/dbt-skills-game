@@ -10,8 +10,12 @@
 //                           in view with its ring, the top one's Move up dims and does nothing, a screen reader hears
 //                           where it went, and the order holds in the Safe Zone, on Comfort, in "Copy your lists", in
 //                           what is stored and after a reload
-//   edit-your-lists-saves   a save from before places loads in its stored order (an older build's add goes last), and
-//                           a Save Crystal carries the words and the order to a new device, or after a device's own
+//   edit-your-lists-saves   a save from before places loads in its stored order (an older build's add goes last), two
+//                           added at the same place keep their order through an edit and a reload, and a Save Crystal
+//                           carries the words and the order to a new device, or after a device's own
+//   edit-your-lists-newer-save  what a newer build stored past this build's limits, and fields it doesn't know, stay
+//                           as stored through a move, a change to the number alone, a removal undone, a Crystal and a
+//                           restore after a device's own entries
 //   edit-your-lists-tabs    an edit in one tab and a move in another both stay: the open edit keeps its words, caret
 //                           and focus as the move lands, the mover keeps focus, and a copy that never saw either
 //                           change can't undo them
@@ -126,6 +130,21 @@ async function typeIn(page, entry, ...values) {
 const save = (page) => editing(page).getByRole('button', { name: 'Save', exact: true }).click();
 const said = (page) => page.evaluate(() => [...document.querySelectorAll('.dq-sr[role="status"]')].map((e) => e.textContent).filter(Boolean));
 const live = (page, want) => until(page, (want) => [...document.querySelectorAll('.dq-sr[role="status"]')].some((e) => e.textContent === want), want, { timeout: 3000 }).then(() => true, () => false);
+/** Saves a Crystal from Settings into this run's folder: where it went and what it holds. */
+async function crystalOf(h, page, name) {
+  await go(page, { name: 'settings' });
+  const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 20000 }), button(page, 'Save Crystal').click()]);
+  const file = path.join(h.out, `${name}.json`);
+  await dl.saveAs(file);
+  return { file, raw: JSON.parse(fs.readFileSync(file, 'utf8')) };
+}
+/** Restores the Crystal at `file` from Settings. */
+async function restoreFrom(page, file) {
+  await go(page, { name: 'settings' });
+  await page.locator('input[type=file]').setInputFiles(file);
+  await button(page, 'Restore this Save Crystal').click();
+  await page.getByText(/^Restored/).first().waitFor({ timeout: 20000 });
+}
 
 export const scenarios = {
   async 'edit-your-lists'(h) {
@@ -273,6 +292,19 @@ export const scenarios = {
 
   async 'edit-your-lists-saves'(h) {
     const problems = [];
+    // two copies each added one at the same place: an edit never changes which comes first, now or after a reload
+    const tied = await open(h, { width: 390, height: 844 }, { lists: { ...LISTS, comfort: [{ id: 'c2', text: 'Blanket', at: T + 1, place: 0 }, { id: 'c1', text: 'Tea', at: T, place: 0 }] } });
+    await go(tied.page, { name: 'comfort' });
+    await typeIn(tied.page, 'Tea', 'Warm tea');
+    await save(tied.page);
+    const edited = await shown(tied.page, PANEL.comfort);
+    await tied.page.reload();
+    await h.reachHub(tied.page);
+    await go(tied.page, { name: 'comfort' });
+    const reloaded = await shown(tied.page, PANEL.comfort);
+    if (JSON.stringify(edited) !== '["Warm tea","Blanket"]' || JSON.stringify(reloaded) !== JSON.stringify(edited)) problems.push(`same place: after an edit ${JSON.stringify(edited)}, after a reload ${JSON.stringify(reloaded)}`);
+    problems.push(...tied.errors);
+    await tied.ctx.close();
     // places from this build on three of them and none on the fourth, as an older build adds one; reasons have none at all
     const mixed = { ...LISTS, comfort: [{ id: 'c1', text: 'Tea', at: T, place: 0 }, { id: 'c2', text: 'Blanket', at: T, place: 2, placeAt: T }, { id: 'c3', text: 'Rain', at: T, place: 1, placeAt: T }, { id: 'c4', text: 'Soup', at: T }] };
     const { ctx, page, errors } = await open(h, { width: 390, height: 844 }, { lists: mixed });
@@ -285,20 +317,13 @@ export const scenarios = {
     await button(page, 'Move Lanternfish facts up').click();
     const order = { comfort: ['Warm tea', 'Rain', 'Soup', 'Blanket'], reasons: ['Lanternfish facts', 'Quillfeather walks', 'Kestrel feathers'] };
     // the Save Crystal holds the words and the order
-    await go(page, { name: 'settings' });
-    const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 20000 }), button(page, 'Save Crystal').click()]);
-    const file = path.join(h.out, 'edit-your-lists-crystal.json');
-    await dl.saveAs(file);
-    const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const { file, raw } = await crystalOf(h, page, 'edit-your-lists-crystal');
     for (const k of ['comfort', 'reasons']) if (JSON.stringify(words(raw.lists[k])) !== JSON.stringify(order[k])) problems.push(`Crystal: ${k} is ${JSON.stringify(words(raw.lists[k]))}`);
     problems.push(...errors);
     await ctx.close();
     const restore = async (save, want, what) => {
       const d = await open(h, { width: 390, height: 844 }, save);
-      await go(d.page, { name: 'settings' });
-      await d.page.locator('input[type=file]').setInputFiles(file);
-      await button(d.page, 'Restore this Save Crystal').click();
-      await d.page.getByText(/^Restored/).first().waitFor({ timeout: 20000 });
+      await restoreFrom(d.page, file);
       await go(d.page, { name: 'comfort' });
       if (JSON.stringify(await shown(d.page, PANEL.comfort)) !== JSON.stringify(want)) problems.push(`${what}: the comfort kit shows ${JSON.stringify(await shown(d.page, PANEL.comfort))}`);
       if (JSON.stringify(await shown(d.page, PANEL.reasons)) !== JSON.stringify(order.reasons)) problems.push(`${what}: reasons show ${JSON.stringify(await shown(d.page, PANEL.reasons))}`);
@@ -315,6 +340,53 @@ export const scenarios = {
     // a device with its own comfort kit: what the Crystal adds comes after it, in the Crystal's order
     const own = await restore({ lists: { comfort: [{ id: 'own', text: 'Own mug', at: T, place: 0 }] } }, ['Own mug', ...order.comfort], 'own device');
     await own.close();
+    h.expect(!problems.length, problems.join('\n'));
+  },
+
+  async 'edit-your-lists-newer-save'(h) {
+    const problems = [];
+    const long = 'A long note about warm tea '.repeat(12).slice(0, 300);
+    const name = 'Samantha Rose '.repeat(8).slice(0, 100);
+    const newer = { v: 2, lists: { comfort: [{ id: 'c1', text: 'Tea', at: T, place: 0 }, { id: 'c2', text: long, at: T, place: 1, mood: 'kept' }, { id: 'c3', text: 'Rain', at: T, place: 2 }], activities: [], reasons: [], people: [{ id: 'p1', name, phone: '+1 555 0100', at: T, place: 0, ring: 'soft' }] } };
+    /** A problem unless the comfort and the person a newer build stored are still whole, words past this build's limits and fields it doesn't know included. */
+    const intact = (s, what) => {
+      const c2 = s.lists.comfort.find((x) => x.id === 'c2');
+      const p1 = s.lists.people.find((x) => x.id === 'p1');
+      if (c2?.text !== long || c2.mood !== 'kept') problems.push(`${what}: the long comfort became ${JSON.stringify(c2)?.slice(0, 120)}`);
+      if (p1?.name !== name || p1.ring !== 'soft') problems.push(`${what}: the person became ${JSON.stringify(p1)?.slice(0, 160)}`);
+    };
+    const order = (page) => page.evaluate(() => [...document.querySelectorAll('.dq-listp--comfort .dq-items > li')].map((li) => li.dataset.item).join());
+    const { ctx, page, errors } = await open(h, { width: 390, height: 844 }, newer);
+    await go(page, { name: 'comfort' });
+    // a move renumbers the long one too
+    await button(page, 'Move Rain up').click();
+    if ((await order(page)) !== 'c1,c3,c2') problems.push(`the move left ${await order(page)}`);
+    intact(await stored(h, page), 'after a move');
+    // only the number changes
+    await page.locator('.dq-item--person [data-act="edit"]').click();
+    await editing(page).locator('input').nth(1).fill('+1 555 0199');
+    await save(page);
+    const s = await stored(h, page);
+    if (s.lists.people[0]?.phone !== '+1 555 0199') problems.push(`the new number was stored as ${s.lists.people[0]?.phone}`);
+    intact(s, 'after the number changed');
+    // removed, then Undo
+    await page.locator('li[data-item="c2"] [data-act="remove"]').click();
+    await page.getByRole('button', { name: 'Undo' }).click();
+    if (!(await until(page, (k) => JSON.parse(localStorage.getItem(k)).lists.comfort.some((x) => x.id === 'c2'), h.SAVE, { timeout: 5000 }).then(() => true, () => false))) problems.push('Undo did not bring the long comfort back');
+    intact(await stored(h, page), 'after Undo');
+    if ((await order(page)) !== 'c1,c3,c2') problems.push(`Undo put it back at ${await order(page)}`);
+    const { file, raw } = await crystalOf(h, page, 'edit-your-lists-newer-crystal');
+    intact(raw, 'the Crystal');
+    problems.push(...errors);
+    await ctx.close();
+    // restored after a device's own entry, its place moved along
+    const d = await open(h, { width: 390, height: 844 }, { lists: { comfort: [{ id: 'own', text: 'Own mug', at: T, place: 0 }] } });
+    await restoreFrom(d.page, file);
+    await go(d.page, { name: 'comfort' });
+    if ((await order(d.page)) !== 'own,c1,c3,c2') problems.push(`restored next to the device's own: ${await order(d.page)}`);
+    intact(await stored(h, d.page), 'restored next to the device\'s own');
+    problems.push(...d.errors);
+    await d.ctx.close();
     h.expect(!problems.length, problems.join('\n'));
   },
 
