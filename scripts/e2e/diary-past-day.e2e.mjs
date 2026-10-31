@@ -11,7 +11,9 @@
 //   diary-past-day-crystal     an empty earlier day reads as an open page; what is filled in there goes into a Save
 //                              Crystal and comes back whole, field times and all, on a fresh device
 //   diary-past-day-fit         the earlier day's card passes layout-fit's checks at 390x844, 320x568 and 844x390, and
-//                              at 200% zoom nothing scrolls sideways and the day buttons and Safe Zone button are on screen
+//                              at 200% zoom nothing scrolls sideways and the day buttons and Safe Zone button are on
+//                              screen; after Save, at every size, every status line on the diary is at least 16 px and
+//                              the line after Save sits on screen clear of the buttons
 import { addDays, dayOf, returning, route } from './first-actions.e2e.mjs';
 import { audit, boot, PAGE, settle, SKIP } from './layout-fit.e2e.mjs';
 import { crystal, restore } from './newer-save-safety.e2e.mjs';
@@ -265,6 +267,27 @@ export const scenarios = {
         await settle(page);
         await dayBtn(page, 'Earlier day').click();
         await settle(page);
+        await page.locator('.dq-today').scrollIntoViewIfNeeded();
+        await h.shot(page, `diary-past-day-fit-${size}`);
+        // the line after Save is body text, like every status line on the diary, and sits on screen clear of the buttons
+        await save(page).click();
+        await said(page).filter({ hasText: `Saved to ${label(addDays(dayOf(Date.now()), -1))}` }).waitFor({ timeout: 5000 });
+        await settle(page);
+        const lines = await page.evaluate(() => {
+          const out = [];
+          for (const e of document.querySelectorAll('.dq-diary .dq-hint')) {
+            const px = parseFloat(getComputedStyle(e).fontSize);
+            if (px < 16) out.push(`status line "${e.textContent.trim() || '(empty)'}" is ${px} px`);
+          }
+          const m = document.querySelector('.dq-today .dq-hint[aria-live]').getBoundingClientRect();
+          if (m.left < 0 || m.right > innerWidth + 0.5) out.push(`the line after Save is off screen: ${Math.round(m.left)} to ${Math.round(m.right)} of ${innerWidth}`);
+          for (const b of document.querySelectorAll('.dq-today .dq-actions button')) {
+            const r = b.getBoundingClientRect();
+            if (m.left < r.right && r.left < m.right && m.top < r.bottom && r.top < m.bottom) out.push(`the line after Save overlaps ${b.textContent.trim()}`);
+          }
+          return out;
+        });
+        problems.push(...lines.map((f) => `${size} ${f}`));
         if (zoom === 1) problems.push(...(await audit(page, PAGE, SKIP)).map((f) => `${size} ${f.kind} ${f.what} (${f.detail})`));
         else {
           const found = await page.evaluate(() => {
@@ -278,8 +301,8 @@ export const scenarios = {
           });
           problems.push(...found.map((f) => `${size} ${f}`));
         }
-        await page.locator('.dq-today').scrollIntoViewIfNeeded();
-        await h.shot(page, `diary-past-day-fit-${size}`);
+        await said(page).scrollIntoViewIfNeeded();
+        await h.shot(page, `diary-past-day-fit-${size}-saved`);
         h.expect(!errors.length, `${size}: ${errors.join('\n')}`);
       } finally {
         await ctx.close();
