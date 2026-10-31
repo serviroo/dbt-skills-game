@@ -127,7 +127,7 @@
   color: #e3c991;
 }
 .dq-chest-s {
-  font-size: 13px;
+  font-size: 16px;
   color: var(--t-dim);
 }
 .dq-chest:hover .dq-chest-t {
@@ -342,7 +342,7 @@
   margin-top: 10px;
   padding: 0 12px;
   font: inherit;
-  font-size: 14.5px;
+  font-size: 16px;
   letter-spacing: 0.04em;
   color: var(--t-dim);
   background: none;
@@ -437,7 +437,7 @@
   justify-content: flex-start;
 }
 .dq-mo-hum .dq-setting-t {
-  font-size: 14.5px;
+  font-size: 16px;
   color: var(--t-dim);
 }
 .dq-mo-done {

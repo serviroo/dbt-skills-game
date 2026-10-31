@@ -7,7 +7,7 @@
   align-items: baseline;
   gap: 4px 10px;
   margin: 2px 0 6px;
-  font: 400 14px/1.4 var(--font-ui);
+  font: 400 16px/1.4 var(--font-ui);
   color: #b9d3e6;
 }
 .ca-loadtag-k {
@@ -97,7 +97,6 @@
 /* ---------- Flavour Tier List ---------- */
 .ca-tiers .dq-check-t {
   min-width: 0;
-  overflow-wrap: anywhere;
 }
 .ca-tier .dq-seg-b {
   min-width: 48px;

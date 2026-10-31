@@ -46,6 +46,7 @@ portrait screens, wide ones for landscape), the layers in `src/daily/daily.css`,
 - **Bodoni Moda** for display moments of one to three words (a rank, a title card). Never for body copy.
 - **Jost** for all UI and body text.
 - On phones: body text at least 16 px (17 px in the companion, 20 px in the Safe Zone). Contrast at least 4.5:1.
+- A word never breaks bare: it moves to the next line whole, and only a word wider than its line breaks, with a hyphen.
 - Fonts are self-hosted and subset (`scripts/fonts.mjs`). No remote font requests.
 
 ## Light
