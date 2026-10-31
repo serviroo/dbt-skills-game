@@ -14,7 +14,8 @@
 // renderer check expects SwiftShader) and listens on that machine's 127.0.0.1 only. An SSH tunnel from here forwards
 // its port (-L) and the dev server's (-R), so both sides use 127.0.0.1. --ws needs --port, which keeps the dev server
 // on the forwarded port, and the run first checks that the browser reaches this run's dev server (CONTRIBUTING.md).
-// Writes screenshots and report.json to artifacts/e2e/<time>/.
+// Writes screenshots and report.json to artifacts/e2e/<time>/, and copies what a failed scenario wrote there to
+// failed/<scenario>/ in it.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -122,6 +123,26 @@ const onSignal = () => {
 };
 for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, onSignal);
 let failed = 0;
+/**
+ * What the scenario `name` wrote to this run's folder since `since` (its screenshots and notes, and the fail- evidence of
+ * every page it left open), copied to failed/<name>/ there, now that it failed. CI uploads only that and report.json, and
+ * only from a part that failed. With more than one browser at once (--jobs) it holds what the others wrote meanwhile too.
+ */
+function keep(name, since) {
+  const to = path.join(h.out, 'failed', name.replace(/[^\w-]+/g, '-'));
+  try {
+    for (const f of fs.readdirSync(h.out, { recursive: true })) {
+      if (f.split(path.sep)[0] === 'failed') continue;
+      const from = path.join(h.out, f);
+      const st = fs.statSync(from);
+      if (!st.isFile() || st.mtimeMs < since) continue;
+      fs.mkdirSync(path.dirname(path.join(to, f)), { recursive: true });
+      fs.copyFileSync(from, path.join(to, f));
+    }
+  } catch (e) {
+    console.log(`${name}: not everything it wrote could be kept in ${path.relative(root, to)}: ${e?.message ?? e}`);
+  }
+}
 try {
   h = await startHarness(flags);
   const lanes = [h, ...(await Promise.all(Array.from({ length: Math.min(jobs, units.length) - 1 }, () => h.more())))];
@@ -148,6 +169,7 @@ try {
           failed++;
           report.scenarios.push({ name, file, ok: false, ms: Date.now() - t, i, error: String(e?.message ?? e) });
           console.log(`FAIL ${name}: ${e?.message ?? e}`);
+          keep(name, t);
         }
       }
     }

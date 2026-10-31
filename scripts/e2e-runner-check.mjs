@@ -180,6 +180,13 @@ export const scenarios = {
   assert.notEqual(failed.code, 0);
   assert(failed.report.scenarios.some((s) => s.name === `${name}-fail` && !s.ok && /deliberate runner failure/.test(s.error)));
   assert(failed.report.scenarios.some((s) => s.name === `${name}-clean` && s.ok));
+  // what the failed scenario wrote, its own screenshot and its page's evidence, is kept in failed/<scenario>/ of the run's
+  // folder, which CI uploads, and nothing of the scenarios that passed
+  const failedOut = JSON.parse(fs.readFileSync(state, 'utf8')).out;
+  const kept = fs.readdirSync(path.join(failedOut, 'failed'), { recursive: true }).sort();
+  assert(fs.existsSync(path.join(failedOut, `${name}-clean.png`)), 'the passing scenario wrote no screenshot');
+  assert(kept.includes(path.join(`${name}-fail`, `${name}-failure.png`)) && kept.includes(path.join(`${name}-fail`, `fail-${name}-fail-1.json`)), `failed/ lacks the failed scenario's screenshot or evidence: ${JSON.stringify(kept)}`);
+  assert(kept.every((f) => f.split(path.sep)[0] === `${name}-fail`) && !kept.some((f) => f.includes('clean')), `failed/ holds more than the failed scenario's files: ${JSON.stringify(kept)}`);
   const prelude = fs.readFileSync(fixture, 'utf8').split('export const scenarios = {')[0];
   fs.writeFileSync(fixture, prelude + `export const scenarios = {
     async '${name}-report-error'(h) {

@@ -53,14 +53,16 @@ jobs:
         run: node scripts/e2e-runner-check.mjs --software
       - name: PWA failure paths and Firefox storage
         run: node scripts/e2e/me-93-pwa-resilience.e2e.mjs --software
+      # Only from a job that failed: a run that passes stores nothing. Kept 3 days: a failed run's output matters until its
+      # PR's next run, and from 17 to 31 October that came within a day every time
       - uses: actions/upload-artifact@v7
-        if: always()
+        if: failure()
         with:
           name: checks-${{ github.run_attempt }}
           path: |
             artifacts/e2e
             qa/out/pwa
-          retention-days: 7
+          retention-days: 3
           if-no-files-found: ignore
 
   # A push to main after a squash merge of an up-to-date PR has exactly the tree that PR's last run already proved, so
@@ -136,12 +138,16 @@ jobs:
         run: test "$(npx playwright --version)" = "Version 1.64.1" || { echo "package-lock has $(npx playwright --version); set the same version in the container image above"; exit 1; }
       - name: E2E part ${{ matrix.shard }} of 18
         run: node scripts/e2e.mjs --software --shard=${{ matrix.shard }}/18
+      # as in check, only from a part that failed and kept 3 days, and only the report and what its failed scenarios wrote
+      # (scripts/e2e.mjs keeps that in failed/), not every screenshot of the ones that passed
       - uses: actions/upload-artifact@v7
-        if: always()
+        if: failure()
         with:
           name: e2e-${{ matrix.shard }}-${{ github.run_attempt }}
-          path: artifacts/e2e
-          retention-days: 7
+          path: |
+            artifacts/e2e/*/report.json
+            artifacts/e2e/*/failed
+          retention-days: 3
           if-no-files-found: ignore
 
   secrets:
