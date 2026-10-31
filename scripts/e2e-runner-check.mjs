@@ -16,6 +16,7 @@ const out = path.join(root, 'artifacts/e2e', `${name}-${Date.now()}`);
 const fixture = path.join(root, 'scripts/e2e', `${name}.e2e.mjs`);
 const duplicate = path.join(root, 'scripts/e2e', `${name}-duplicate.e2e.mjs`);
 const side = path.join(root, 'scripts/e2e', `${name}-side.e2e.mjs`);
+const unnamed = path.join(root, 'scripts/e2e', `${name}-undefined.e2e.mjs`);
 const state = path.join(out, 'state.json');
 const results = [];
 fs.mkdirSync(out, { recursive: true });
@@ -287,6 +288,74 @@ chromium.launchServer = (options) => launchServer({ ...options, args: [...option
   assert.match(twice.log, new RegExp(`"${name}-twice" on line 3 a second time`));
   assert(!twice.log.includes('renderer:'));
   fs.unlinkSync(duplicate);
+  // a name used but never defined, in the test or in a function that runs in the page, stops the run before the browser.
+  // A function runs there by any name, wrapper or CDP code field that leads back to it, and not for having its text logged
+  // or sent as data.
+  fs.writeFileSync(unnamed, `import * as harness from './harness.mjs';
+const key = 'dbt.app.v1';
+const read = () => localStorage.getItem(key);
+const alias = read;
+const options = { init: () => localStorage.getItem(key) };
+const { reader } = { reader: () => sessionStorage.getItem(key) };
+const [first] = [() => localStorage.getItem(key)];
+const { second = null } = { second: () => sessionStorage.getItem(key) };
+const size = () => document.body.innerHTML.length + key;
+const pid = () => process.pid + key;
+async function boot(h, { init } = {}) {
+  const { ctx, page } = await h.open();
+  await ctx.addInitScript(init);
+  return page;
+}
+const start = (h, settings) => boot(h, settings);
+function run(page, fn) {
+  const cb = fn;
+  return page.evaluate(cb);
+}
+function late(page = helper) {
+  var helper = page;
+  return helper;
+}
+export const scenarios = {
+  async '${name}-undefined'(h) {
+    const page = await boot(h, options);
+    const cdp = await page.context().newCDPSession(page);
+    await start(h, { init: () => document.title + key });
+    console.log(pid.toString(), \`\${pid}\`);
+    await page.evaluate((text) => text.length, pid.toString());
+    await cdp.send('Runtime.callFunctionOn', { functionDeclaration: size.toString(), arguments: [{ value: pid.toString() }] });
+    await page.evaluate((k) => localStorage.getItem(k) ?? document.title, key);
+    await page.evaluate(() => localStorage.getItem(key));
+    await page.evaluate(alias);
+    await page.evaluate(reader);
+    await page.evaluate(first);
+    await page.evaluate(second);
+    await harness.until(page, () => document.title === key);
+    await run(page, () => key);
+    late(page);
+    return home(h, page);
+  },
+};
+`, { flag: 'wx' });
+  const undefinedName = await run('undefined-name', [`--scenario=${name}-undefined`]);
+  assert.notEqual(undefinedName.code, 0);
+  const at = `scripts/e2e/${name}-undefined.e2e.mjs:`;
+  const inPage = 'key is defined in the test, but this function runs in the page: pass it in as an argument';
+  assert.deepEqual(undefinedName.log.split('\n').filter((line) => line.startsWith(at)), [
+    `${at}3: ${inPage}`,
+    `${at}5: ${inPage}`,
+    `${at}6: ${inPage}`,
+    `${at}7: ${inPage}`,
+    `${at}8: ${inPage}`,
+    `${at}9: ${inPage}`,
+    `${at}21: helper is not defined`,
+    `${at}29: ${inPage}`,
+    `${at}34: ${inPage}`,
+    `${at}39: ${inPage}`,
+    `${at}40: ${inPage}`,
+    `${at}42: home is not defined`,
+  ]);
+  assert(!undefinedName.log.includes('renderer:'));
+  fs.unlinkSync(unnamed);
   const missing = await run('missing-file', ['--file=does-not-exist']);
   assert.notEqual(missing.code, 0);
   assert.match(missing.log, /no scenario file/);
@@ -336,7 +405,7 @@ export const scenarios = {
   assert.notEqual(taken.code, 0);
   assert.match(taken.log, new RegExp(`dev server port ${busyPort} is taken`));
 } finally {
-  for (const file of [fixture, duplicate, side]) fs.rmSync(file, { force: true });
+  for (const file of [fixture, duplicate, side, unnamed]) fs.rmSync(file, { force: true });
   fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify(results, null, 2));
 }
 console.log(`${results.length} runner checks passed, artifacts in ${path.relative(root, out)}`);

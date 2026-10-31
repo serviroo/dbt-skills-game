@@ -47,6 +47,7 @@ drawings, skill answers and co-writer cards are included. Thumbnails are not; a 
 ```sh
 npm ci
 npx tsc --noEmit -p .
+node scripts/e2e-scope-check.mjs
 npm run build
 node scripts/pwa-verify.mjs --check
 node scripts/pwa-verify.mjs --update --check
@@ -178,8 +179,12 @@ uses this machine's GPU through Vulkan by default. Add `--software` to use Swift
 or `--headed` to watch it. The requested renderer is checked before any scenario runs; a mismatch fails the run.
 The same choice reaches browser children, including icon draws during a build.
 
-`node scripts/e2e-runner-check.mjs` checks file selection, duplicate names, failure reports and cleanup through the
-real command. It creates temporary scenario files and removes them when it finishes.
+`node scripts/e2e-scope-check.mjs` lists every name a scenario file, or a script it imports, uses without defining it,
+with its file and line. That includes a name from the test used inside a function that runs in the page, where it
+doesn't exist; pass it in as an argument instead. `node scripts/e2e.mjs` makes the same check before it starts a browser.
+
+`node scripts/e2e-runner-check.mjs` checks file selection, duplicate and undefined names, failure reports and cleanup
+through the real command. It creates temporary scenario files and removes them when it finishes.
 
 The intro is 3D, so for a real-GPU run on another machine, start the browser there with `node scripts/e2e-browser.mjs`.
 It starts with the same flags as a local run, because a browser that is already running can't take new ones, and

@@ -21,6 +21,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseAst } from 'vite';
 import { startHarness } from './e2e/harness.mjs';
+import { undefinedNames } from './e2e-scope-check.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.join(root, 'scripts/e2e');
@@ -54,7 +55,11 @@ function twice(node, found = []) {
 const all = [];
 const fileOf = new Map();
 const serial = new Set();
-for (const f of fs.readdirSync(dir).filter((f) => f.endsWith('.e2e.mjs')).sort()) {
+const files = fs.readdirSync(dir).filter((f) => f.endsWith('.e2e.mjs')).sort();
+// a name a scenario uses but never defines would stop it only once a browser got there
+const missing = undefinedNames(files.map((f) => path.join(dir, f)));
+if (missing.length) throw new Error(`names used but never defined, each of which would stop its scenario:\n${missing.join('\n')}`);
+for (const f of files) {
   const file = f.slice(0, -'.e2e.mjs'.length);
   const source = fs.readFileSync(path.join(dir, f), 'utf8');
   const repeats = twice(parseAst(source)).map(({ key, start }) => `"${key}" on line ${source.slice(0, start).split('\n').length}`);
