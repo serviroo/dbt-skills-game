@@ -3191,6 +3191,17 @@ textarea.dq-input {
   color: #a9d6f7;
   font-size: 15.5px;
 }
+/* the diary's Export panel: its ranges, Preview and buttons are body size on a phone, like the words around them, and
+   each range keeps to one line in its third of a small phone's row */
+.dq-export .dq-seg-b,
+.dq-export summary,
+.dq-export .dq-btn {
+  font-size: 16px;
+}
+.dq-export .dq-seg-b {
+  padding: 0 4px;
+  letter-spacing: 0;
+}
 .dq-pre {
   margin: 8px 0 0;
   padding: 12px;
