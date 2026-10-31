@@ -35,6 +35,11 @@ export interface EntryOpts<T extends Entry> {
   hint?: string;
   /** Edit and the moves show only after "Edit the list" (the Safe Zone, kept calm), else always */
   toggle?: boolean;
+  /**
+   * Remove among Edit and the moves, its Undo shown in the removed entry's place until editing ends: for the Safe Zone,
+   * which shows no toasts
+   */
+  removable?: boolean;
 }
 
 export function entryList<T extends Entry>(app: App, o: EntryOpts<T>) {
@@ -43,6 +48,10 @@ export function entryList<T extends Entry>(app: App, o: EntryOpts<T>) {
   let tools = !o.toggle;
   let rows = new Map<string, { el: HTMLElement; sig: string }>();
   let editing: { id: string; el: HTMLElement; done: () => void } | null = null;
+  /** the entry just removed here, in its place with Undo, until it is back, another one goes or editing ends */
+  let gone: { item: T; el: HTMLElement } | null = null;
+  /** the control focus goes to once a change made here lands: its save draws the list again */
+  let then: { id: string; act: string } | undefined;
   const ul = h('ul', { class: o.cls });
   const blank = o.empty?.() ?? document.createComment('');
   let node: HTMLElement | Comment = ul;
@@ -59,12 +68,37 @@ export function entryList<T extends Entry>(app: App, o: EntryOpts<T>) {
     const i = now.findIndex((x) => x.id === id);
     o.say(ENTRY_COPY.moved(nameOf(now[i]), i + 1, now.length));
   };
+  const remove = (id: string) => {
+    const out = st.removeItem(list(), id);
+    if (!out) return;
+    const back = btn(ENTRY_COPY.undo, () => {
+      if (gone?.item.id !== id) return;
+      st.reviveItem(list(), gone.item);
+      gone = null;
+      then = { id, act: 'remove' };
+      st.save();
+    }, { kind: 'quiet', aria: ENTRY_COPY.undoFor(nameOf(out.item)) });
+    back.dataset.act = 'undo';
+    gone = { item: out.item, el: h('li', { class: `${o.row} dq-entry-gone`, 'data-item': id }, h('span', { class: 'dq-entry-t', text: ENTRY_COPY.removed(nameOf(out.item)) }), back) };
+    then = { id, act: 'undo' };
+    st.save();
+  };
   const draw = (x: T) =>
     h(
       'li',
       { class: o.row, 'data-item': x.id },
       ...o.view(x),
-      tools ? h('span', { class: 'dq-entry-tools' }, tool('edit', 'pencil', ENTRY_COPY.edit(nameOf(x)), () => open(x.id)), tool('up', 'up', ENTRY_COPY.up(nameOf(x)), () => move(x.id, -1)), tool('down', 'down', ENTRY_COPY.down(nameOf(x)), () => move(x.id, 1)), o.end?.(x) ?? null) : null,
+      tools
+        ? h(
+            'span',
+            { class: 'dq-entry-tools' },
+            tool('edit', 'pencil', ENTRY_COPY.edit(nameOf(x)), () => open(x.id)),
+            tool('up', 'up', ENTRY_COPY.up(nameOf(x)), () => move(x.id, -1)),
+            tool('down', 'down', ENTRY_COPY.down(nameOf(x)), () => move(x.id, 1)),
+            o.removable ? tool('remove', 'close', ENTRY_COPY.remove(nameOf(x)), () => remove(x.id)) : null,
+            o.end?.(x) ?? null,
+          )
+        : null,
     );
 
   /** Closes the open edit, dropping what was typed in it; with `back`, focus goes to that entry's Edit. */
@@ -115,18 +149,23 @@ export function entryList<T extends Entry>(app: App, o: EntryOpts<T>) {
   const flip = o.toggle
     ? btn(ENTRY_COPY.editList, () => {
         tools = !tools;
+        gone = null;
         shut(false);
         update();
-      }, { kind: 'quiet', ic: 'pencil' })
+      }, { kind: 'quiet', ic: 'pencil', cls: 'dq-entry-flip' })
     : null;
 
   /**
    * Draws the list as it is now. A row whose words and controls are the same stays the same element, and the row with
-   * focus never leaves the page: the rest are put in order around it. With `want`, focus goes to that control of that
-   * entry's row.
+   * focus never leaves the page: the rest are put in order around it. With `want` (else the one a change made here
+   * left), focus goes to that control of that entry's row.
    */
-  function update(want?: { id: string; act: string }) {
+  function update(want = then) {
+    then = undefined;
     const items = list();
+    // back in the list (Undo, or brought back in another open copy), or its removal no longer kept (this game's data
+    // cleared, here or in another copy): its Undo goes, and nothing of it stays
+    if (gone && (items.some((x) => x.id === gone!.item.id) || !Object.hasOwn(st.state.gone, gone.item.id))) gone = null;
     const f = document.activeElement;
     const was = f instanceof HTMLElement && node.contains(f) ? f : null;
     const from = was?.closest('[data-item]')?.getAttribute('data-item');
@@ -135,7 +174,8 @@ export function entryList<T extends Entry>(app: App, o: EntryOpts<T>) {
       editing.done();
       editing = null;
     }
-    if (!items.length) tools = !o.toggle;
+    const any = items.length > 0 || !!gone;
+    if (!any) tools = !o.toggle;
     const next = new Map<string, { el: HTMLElement; sig: string }>();
     const els = items.map((x) => {
       const sig = editing?.id === x.id ? '' : JSON.stringify([tools, 'text' in x ? typo(x.text) : [x.name, x.phone]]);
@@ -144,6 +184,16 @@ export function entryList<T extends Entry>(app: App, o: EntryOpts<T>) {
       next.set(x.id, { el, sig });
       return el;
     });
+    els.forEach((e, i) => {
+      e.querySelector('[data-act="up"]')?.setAttribute('aria-disabled', String(i === 0));
+      e.querySelector('[data-act="down"]')?.setAttribute('aria-disabled', String(i === els.length - 1));
+    });
+    if (gone) {
+      const g = gone.item;
+      const at = items.findIndex((x) => x.place > g.place || (x.place === g.place && x.id > g.id));
+      els.splice(at < 0 ? els.length : at, 0, gone.el);
+      next.set(g.id, { el: gone.el, sig: '' });
+    }
     rows = next;
     const kids = [...ul.children];
     const moved = kids.length !== els.length || els.some((e, i) => kids[i] !== e);
@@ -157,11 +207,7 @@ export function entryList<T extends Entry>(app: App, o: EntryOpts<T>) {
         pivot!.after(...els.slice(i + 1));
       }
     }
-    els.forEach((e, i) => {
-      e.querySelector('[data-act="up"]')?.setAttribute('aria-disabled', String(i === 0));
-      e.querySelector('[data-act="down"]')?.setAttribute('aria-disabled', String(i === els.length - 1));
-    });
-    const shown = items.length ? ul : blank;
+    const shown = any ? ul : blank;
     if (node !== shown) {
       node.replaceWith(shown);
       node = shown;
@@ -169,9 +215,9 @@ export function entryList<T extends Entry>(app: App, o: EntryOpts<T>) {
     if (flip) {
       flip.querySelector('.dq-btn-t')!.textContent = tools ? ENTRY_COPY.doneList : ENTRY_COPY.editList;
       flip.querySelector('.dq-btn-ic')!.innerHTML = icon(tools ? 'check' : 'pencil');
-      const to = !items.length && document.activeElement === flip ? o.lost() : null;
+      const to = !any && document.activeElement === flip ? o.lost() : null;
       if (to) focusWhole(to);
-      flip.classList.toggle('is-hidden', !items.length);
+      flip.classList.toggle('is-hidden', !any);
     }
     const reach = (e: HTMLElement | null | undefined) => e && focusWhole(e);
     if (want) return reach(rows.get(want.id)?.el.querySelector<HTMLElement>(`[data-act="${want.act}"]`) ?? o.lost());

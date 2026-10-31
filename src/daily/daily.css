@@ -3442,10 +3442,10 @@ textarea.dq-input {
   display: block;
   padding: 2px 14px 10px;
 }
-/* an entry of the player's own lists (entries.ts): its Edit, Move up and Move down (and Remove, on Comfort) sit together
-   at the end of its row, beside its words where they fit and under them where they don't, a tap in size each; the one
-   that can't go further is dimmed and keeps focus. Edited, the row is its words in a field (a person's name and number),
-   Save and Cancel under them */
+/* an entry of the player's own lists (entries.ts): its Edit, Move up, Move down and Remove sit together at the end of
+   its row, beside its words where they fit and under them where they don't, a tap in size each; the one that can't go
+   further is dimmed and keeps focus. Edited, the row is its words in a field (a person's name and number), Save and
+   Cancel under them; removed in the Safe Zone, it says so in its place, with Undo */
 .dq-entry-t {
   flex: 1 1 auto;
   min-width: 0;
@@ -3464,17 +3464,34 @@ textarea.dq-input {
 .dq-entry-tools [aria-disabled='true'] .dq-ic {
   opacity: 0.35;
 }
+/* a focused control comes into view with its ring, 2px wide and 3px out (.dq :focus-visible), however it got focus */
+.dq-entry-tools .dq-icbtn,
+.dq-entry-edit :is(.dq-input, .dq-btn),
+.dq-entry-gone .dq-btn,
+.dq-entry-flip {
+  scroll-margin: 5px;
+}
+/* what editing shows is never under 16px: in the Safe Zone at the player's text size */
+.dq .dq-entry-edit :is(.dq-label, .dq-btn),
+.dq .dq-entry-gone .dq-btn,
+.dq .dq-btn.dq-entry-flip {
+  font-size: calc(16px * var(--text-scale, 1));
+}
 .dq-item:has(> .dq-entry-tools) {
   flex-wrap: wrap;
   column-gap: 4px;
 }
-.dq-sz-list .dq-sz-entry:has(> .dq-entry-tools) {
+/* 6px above and below the buttons holds their ring inside the row, so a column that scrolls never cuts it at its top */
+.dq-sz-list :is(.dq-sz-entry:has(> .dq-entry-tools), .dq-entry-gone) {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   column-gap: 8px;
-  padding-block: 2px;
-  padding-inline-end: 2px;
+  padding-block: 6px;
+  padding-inline-end: 6px;
+}
+.dq-entry-gone .dq-entry-t {
+  color: var(--t-dim);
 }
 .dq-item.is-editing,
 .dq-sz-list .dq-sz-entry.is-editing,

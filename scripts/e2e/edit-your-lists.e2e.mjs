@@ -20,13 +20,18 @@
 //   edit-your-lists-tabs    an edit in one tab and a move in another both stay: the open edit keeps its words, caret
 //                           and focus as the move lands, the mover keeps focus, and a copy that never saw either
 //                           change, or saw all but the move, can't undo them, where they are stored or after a reload
+//   edit-your-lists-clear   an entry removed in the Safe Zone, its Undo still showing, then this game's data cleared in
+//                           another tab: nothing of it stays on the page and nothing can bring it back
 //   edit-your-lists-fit     with Edit and the moves showing and an edit open, everything fits at 390 and 320 wide,
 //                           held sideways and at 200% zoom: nothing runs off the side, every button is a tap in size,
-//                           the field shows whole and "Talk to someone now" stays pinned
+//                           nothing editing shows is under 16px, the field shows whole and "Talk to someone now" stays
+//                           pinned. In the Safe Zone every entry has Remove, which leaves Undo in its place, and an
+//                           entry moved to the top by key keeps the whole ring of its dimmed Move up in view
 import fs from 'node:fs';
 import path from 'node:path';
 import { until } from './harness.mjs';
 import { nameOf, whole } from './safe-zone-access.e2e.mjs';
+import { clearGame } from './safe-zone-tabs.e2e.mjs';
 
 const T = Date.now() - 86400e3;
 const LISTS = {
@@ -100,7 +105,17 @@ const focusIs = (page) =>
     const w = cs.outlineStyle === 'none' ? 0 : parseFloat(cs.outlineWidth) + Math.max(0, parseFloat(cs.outlineOffset));
     const r = a.getBoundingClientRect();
     const o = { top: r.top - w, bottom: r.bottom + w, left: r.left - w, right: r.right + w };
-    const onScreen = o.top >= -0.5 && o.left >= -0.5 && o.bottom <= innerHeight + 0.5 && o.right <= innerWidth + 0.5;
+    const within = (b) => o.top >= b.top - 0.5 && o.left >= b.left - 0.5 && o.bottom <= b.bottom + 0.5 && o.right <= b.right + 0.5;
+    let onScreen = within({ top: 0, left: 0, bottom: innerHeight, right: innerWidth });
+    // inside every box around it that cuts what overflows it, a scrolling column most of all (what it shows is its
+    // padding box)
+    for (let p = a.parentElement; p && p !== document.documentElement; p = p.parentElement) {
+      const ps = getComputedStyle(p);
+      if (ps.overflowX === 'visible' && ps.overflowY === 'visible') continue;
+      const b = p.getBoundingClientRect();
+      const top = b.top + p.clientTop, left = b.left + p.clientLeft;
+      onScreen &&= within({ top, left, bottom: top + p.clientHeight, right: left + p.clientWidth });
+    }
     const clear = [...document.querySelectorAll('.dq-top, .dq-sz-foot, .dq.is-typing > .dq-sz-talk')].every((bar) => {
       if (bar.contains(a) || !bar.checkVisibility()) return true;
       const b = bar.getBoundingClientRect();
@@ -488,6 +503,31 @@ export const scenarios = {
     h.expect(!problems.length, problems.join('\n'));
   },
 
+  async 'edit-your-lists-clear'(h) {
+    const problems = [];
+    const { ctx, page, errors } = await open(h, { width: 390, height: 844 });
+    await safeAt(page, 'people');
+    await button(page, 'Edit the list').click();
+    await button(page, 'Remove Sam').click();
+    if (!(await page.locator('.dq-entry-gone').count())) problems.push('removing Sam left no Undo in its place');
+    // this game's data cleared in another tab: nothing of Sam stays, and nothing can bring them back
+    const other = await ctx.newPage();
+    await other.goto(`${h.server.url}/?mute`);
+    await other.waitForFunction(() => !!window.__daily, null, { timeout: 30000 });
+    await clearGame(other);
+    const cleared = await until(page, () => window.__daily.store.state.lists.people.length === 0, undefined, { timeout: 10000 }).then(() => true, () => false);
+    const held = await page.evaluate(() => [...document.querySelectorAll('.dq-entry-gone, .dq-safezone [aria-label*="Sam"]')].map((e) => e.getAttribute('aria-label') ?? e.textContent.trim()));
+    const undo = page.getByRole('button', { name: 'Undo, bring back Sam' });
+    if (await undo.count()) await undo.click();
+    const back = await page.evaluate(() => window.__daily.store.state.lists.people.map((x) => x.name));
+    if (!cleared || held.length || back.length) problems.push(`after a clear in another tab: cleared ${cleared}, still shown ${JSON.stringify(held)}, people after Undo ${JSON.stringify(back)}`);
+    if ((await page.evaluate(() => window.__daily.route.name)) !== 'safe') problems.push('the clear took the Safe Zone away');
+    await h.shot(page, 'clear-safe-zone');
+    problems.push(...errors);
+    await ctx.close();
+    h.expect(!problems.length, problems.join('\n'));
+  },
+
   async 'edit-your-lists-fit'(h) {
     const problems = [];
     for (const [w, ht, zoom] of [[390, 844, 1], [320, 568, 1], [844, 390, 1], [568, 320, 1], [320, 568, 2], [568, 320, 2]]) {
@@ -507,29 +547,59 @@ export const scenarios = {
           }
           return out;
         }, what);
+      /** Text that editing shows under 16px: what it says and its size. */
+      const small = () =>
+        page.evaluate(() =>
+          [...document.querySelectorAll('.dq-entry-edit :is(.dq-label, .dq-btn, .dq-input), .dq-entry-gone :is(.dq-entry-t, .dq-btn), .dq-entry-flip')]
+            .filter((e) => e.checkVisibility() && parseFloat(getComputedStyle(e).fontSize) < 16)
+            .map((e) => `${(e.getAttribute('aria-label') ?? e.textContent ?? '').trim().slice(0, 24) || e.value} at ${getComputedStyle(e).fontSize}`),
+        );
+      const shot = (name) => h.shot(page, `fit-${w}x${ht}${zoom > 1 ? '-200' : ''}-${name}`);
       for (const at of ['reasons', 'people']) {
         await safeAt(page, at);
         await button(page, 'Edit the list').click();
         problems.push(...(await fits(`${tag} Safe Zone ${at}`)));
-        await h.shot(page, `fit-${w}x${ht}${zoom > 1 ? '-200' : ''}-${at}`);
+        const bare = await page.evaluate(() => [...document.querySelectorAll('.dq-safezone li[data-item]')].filter((li) => !li.querySelector('[data-act="remove"]')).map((li) => li.textContent.trim().slice(0, 24)));
+        if (bare.length) problems.push(`${tag} Safe Zone ${at}: no Remove on ${bare.join(', ')}`);
+        problems.push(...(await small()).map((s) => `${tag} Safe Zone ${at}: ${s}`));
+        await shot(at);
+        // the last one up to the top by key: focus stays on its dimmed Move up, its ring whole in the column
+        const last = at === 'people' ? 'Robin' : 'Kestrel feathers';
+        await tabTo(page, `Move ${last} up`);
+        for (let i = at === 'people' ? 1 : 2; i > 0; i--) await page.keyboard.press('Enter');
+        problems.push(...(await focusOn(page, `Move ${last} up`, `${tag} Safe Zone ${at}: moved to the top`)));
+        await shot(`${at}-top`);
+        // Remove says so in its place, focus on its Undo; Undo brings it back, focus on its Remove
+        if (!bare.length) {
+          await tabTo(page, `Remove ${last}`);
+          await page.keyboard.press('Enter');
+          problems.push(...(await focusOn(page, `Undo, bring back ${last}`, `${tag} Safe Zone ${at}: removed`)));
+          problems.push(...(await small()).map((s) => `${tag} Safe Zone ${at} removed: ${s}`));
+          await shot(`${at}-removed`);
+          await page.keyboard.press('Enter');
+          problems.push(...(await focusOn(page, `Remove ${last}`, `${tag} Safe Zone ${at}: undone`)));
+          if ((await shown(page))[0] !== last) problems.push(`${tag} Safe Zone ${at}: Undo put back ${JSON.stringify(await shown(page))}`);
+        }
         await button(page, at === 'people' ? 'Edit Sam' : 'Edit Lanternfish facts').click();
         problems.push(...(await fits(`${tag} Safe Zone ${at} editing`)));
+        problems.push(...(await small()).map((s) => `${tag} Safe Zone ${at} editing: ${s}`));
         const f = await focusIs(page);
         const talk = await page.evaluate(() => [...document.querySelectorAll('.dq-sz-talk')].some((t) => {
           const r = t.getBoundingClientRect();
           return t.checkVisibility() && r.top >= -0.5 && r.bottom <= innerHeight + 0.5;
         }));
         if (!f.field || !f.seen || !talk) problems.push(`${tag} Safe Zone ${at} editing: the field seen whole ${f.seen}, Talk pinned ${talk}`);
-        await h.shot(page, `fit-${w}x${ht}${zoom > 1 ? '-200' : ''}-${at}-editing`);
+        await shot(`${at}-editing`);
         await page.keyboard.press('Escape');
       }
       await go(page, { name: 'comfort' });
       problems.push(...(await fits(`${tag} Comfort`)));
       await button(page, 'Edit Sam').click();
       problems.push(...(await fits(`${tag} Comfort editing`)));
+      problems.push(...(await small()).map((s) => `${tag} Comfort editing: ${s}`));
       const f = await focusIs(page);
       if (!f.field || !f.seen) problems.push(`${tag} Comfort editing: the field is not seen whole`);
-      await h.shot(page, `fit-${w}x${ht}${zoom > 1 ? '-200' : ''}-comfort-editing`);
+      await shot('comfort-editing');
       problems.push(...errors.map((e) => `${tag}: ${e}`));
       await ctx.close();
     }

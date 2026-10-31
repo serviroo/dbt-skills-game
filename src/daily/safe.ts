@@ -272,7 +272,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     const hint = at === 'reasons' ? SAFE.reasons.add : 'Something that helps, even a little';
     // the list follows another open copy's changes, and a clear, as they land; "Edit the list" shows each entry's Edit
     // and moves
-    const list = entryList(app, { key: at, cls: 'dq-sz-list', row: 'dq-sz-entry', view: (x: Item) => [h('span', { class: 'dq-entry-t', text: typo(x.text) })], empty: () => p(empty, 'dq-text dq-sz-empty'), lost: () => addOne, say, hint, toggle: true });
+    const list = entryList(app, { key: at, cls: 'dq-sz-list', row: 'dq-sz-entry', view: (x: Item) => [h('span', { class: 'dq-entry-t', text: typo(x.text) })], empty: () => p(empty, 'dq-text dq-sz-empty'), lost: () => addOne, say, hint, toggle: true, removable: true });
     stops.push(st.onChange(list.update), list.leave);
     const lists = supportListsCopy(app);
     stops.push(lists.dispose);
@@ -400,6 +400,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
           lost: () => addPerson,
           say,
           toggle: true,
+          removable: true,
         });
         stops.push(st.onChange(list.update), list.leave);
         const n = field('Name', { placeholder: 'Name', autocomplete: 'off' });

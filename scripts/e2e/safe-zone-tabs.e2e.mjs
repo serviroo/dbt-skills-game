@@ -167,7 +167,7 @@ async function leaves(page) {
   return page.evaluate(() => window.__daily.route.name !== 'safe' && !document.querySelector('.lw, .dq-sw, [role=alertdialog]'));
 }
 /** Settings > Your data: Back up, then clear, then clear for real, until it says All clear. */
-async function clearGame(page) {
+export async function clearGame(page) {
   await go(page, { name: 'settings' });
   await page.locator('.dq-clear').scrollIntoViewIfNeeded();
   await Promise.all([page.waitForEvent('download', { timeout: 20000 }), page.getByRole('button', { name: 'Back up, then clear' }).click()]);
