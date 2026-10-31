@@ -936,20 +936,22 @@ function weekPaper(st: Store, days: string[]) {
 
 export function printScreen(app: App, _route: Route, visit: Visit): ScreenOut {
   const st = app.store;
-  const today = st.today();
   const s = st.state;
-  // the week ends on this day: today's week first, and Back to this visit comes back to the week it showed
-  let end = visit.again && typeof visit.kept === 'string' && visit.kept <= today && visit.kept >= firstDay(s, today) ? visit.kept : today;
+  // the week ends on this day: today's week first, and Back to this visit comes back to the week it showed. Today is read
+  // again each time, so a day that turns with the page open (counted as the app comes back into view) is in reach of
+  // Later week and This week, and the page stays on the week it shows
+  const opened = st.today();
+  let end = visit.again && typeof visit.kept === 'string' && visit.kept <= opened && visit.kept >= firstDay(s, opened) ? visit.kept : opened;
   const week = () => Array.from({ length: 7 }, (_, i) => addDays(end, i - 6));
   // drawn again only when what it shows changes, so a change in another open copy keeps the player's place in it; one
   // that takes the ratings away hands their focus to Print
   const paper = redrawn(() => panel({ tag: 'section', cls: 'dq-paper', label: 'The page that prints' }, weekPaper(st, week())), () => el.querySelector<HTMLElement>('.dq-paper-scroll') ?? printBtn);
   const earlier = btn('Earlier week', () => openWeek(addDays(end, -7)), { kind: 'link', ic: 'back' });
   const later = btn('Later week', () => {
-    const next = addDays(end, 7);
+    const next = addDays(end, 7), today = st.today();
     openWeek(next < today ? next : today);
   }, { kind: 'link', ic: 'chev', cls: 'dq-btn--icend' });
-  const thisWeek = btn('This week', () => openWeek(today), { kind: 'link' });
+  const thisWeek = btn('This week', () => openWeek(st.today()), { kind: 'link' });
   const printBtn = btn('Print or save as PDF', () => window.print(), { kind: 'primary', ic: 'print' });
   const picker = panel(
     { title: span(addDays(end, -6), end), ic: icon('diary'), cls: 'dq-printweek' },
@@ -960,12 +962,13 @@ export function printScreen(app: App, _route: Route, visit: Visit): ScreenOut {
   const title = picker.querySelector<HTMLElement>('.dq-chip-t')!;
   title.setAttribute('aria-live', 'polite');
   const showWeek = () => {
+    const today = st.today();
     const was = document.activeElement;
     paper.update();
     earlier.classList.toggle('is-hidden', addDays(end, -6) <= firstDay(s, today));
     for (const e of [later, thisWeek]) e.classList.toggle('is-hidden', end === today);
-    // focus on a button the new week hides moves to the one beside it
-    if (was instanceof HTMLElement && was.classList.contains('is-hidden')) (earlier.classList.contains('is-hidden') ? later : earlier).focus({ preventScroll: true });
+    // focus on a button the new week hides moves to the one beside it, or to Print when no week button is left
+    if (was instanceof HTMLElement && was.classList.contains('is-hidden')) ([earlier, later].find((e) => !e.classList.contains('is-hidden')) ?? printBtn).focus({ preventScroll: true });
   };
   const openWeek = (d: string) => {
     end = d;

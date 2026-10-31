@@ -13,6 +13,9 @@
 //                         and every day reads as an open column
 //   diary-print-two-tabs  with the ratings focused, their last row removed in another open copy takes them off the page
 //                         there, and focus moves on to Print
+//   diary-print-day-turns with the page open on a new save, the day turns and the app comes back into view: the page
+//                         keeps its week, Later week and This week come back, and Later week reaches the new day and,
+//                         with no week button left, hands focus to Print
 //   diary-print-export-fit  every range, Preview and button in the diary's Export panel, Print a week among them, is at
 //                         least 16 px, inside the panel and the screen and clear of the others, each range on one line, at 390x844, 320x568 and
 //                         844x390 (where the diary passes layout-fit's checks) and at 200% on both phones
@@ -20,7 +23,8 @@
 //                         320x568 and 844x390, every word on it (the week's heading and the buttons too) is at least
 //                         16 px, every word but the ratings (which scroll in their own box) is on screen, and at 200% zoom
 //                         nothing scrolls sideways and the week buttons, Print and the Safe Zone button are on screen
-// Each scenario runs on one fixed time, so today never turns over partway.
+// Each scenario runs on one fixed time, so today never turns over partway, but for diary-print-day-turns, which moves it
+// on a day.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -88,6 +92,15 @@ async function openDiary(h, page) {
 const weekBtn = (page, name) => page.locator('.dq-printweek .dq-daynav').getByRole('button', { name, exact: true });
 const printBtn = (page) => page.getByRole('button', { name: 'Print or save as PDF', exact: true });
 const titled = (page, text) => page.waitForFunction((t) => document.querySelector('.dq-printweek .dq-chip-t')?.textContent === t, text, { timeout: 5000 });
+/** The app put away and brought back into view, as when a phone is picked up again. */
+const comeBack = (page) =>
+  page.evaluate(() => {
+    const set = (v) => Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => v });
+    set('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+    set('visible');
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
 const focused = (page) => page.evaluate(() => document.activeElement?.getAttribute('aria-label') || document.activeElement?.textContent.trim() || document.activeElement?.tagName);
 /** The page as it reads now: its head lines, the days across the top, each rated row by day, and each day's lines. */
 const sheet = (page) =>
@@ -326,6 +339,33 @@ export const scenarios = {
       h.expect(!Object.keys(s.rows).length && !s.groups.length && s.perDay.length === 7, `the page once the last row went: ${JSON.stringify(s)}`);
       h.expect((await focused(a)) === 'Print or save as PDF', `focus once the ratings went is on ${await focused(a)}`);
       await h.shot(a, 'diary-print-two-tabs');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'diary-print-day-turns'(h) {
+    const now = Date.now();
+    const today = dayOf(now), next = dayOf(now + 86400e3);
+    const { ctx, page, errors } = await h.open(returning(h, 0), '?mute', undefined, prepared(now));
+    try {
+      await openDiary(h, page);
+      await page.locator('.dq-export').getByRole('button', { name: 'Print a week', exact: true }).click();
+      await route(page, 'print');
+      const before = await sheet(page);
+      h.expect(before.week === span(addDays(today, -6), today) && JSON.stringify(before.buttons) === JSON.stringify(['Print or save as PDF']), `before the day turns: ${before.week}, ${JSON.stringify(before.buttons)}`);
+      // the phone is put down overnight and picked up the next day
+      await ctx.clock.setFixedTime(new Date(now + 86400e3));
+      await comeBack(page);
+      const turned = await h.poll(page, () => sheet(page), (s) => JSON.stringify(s.buttons) === JSON.stringify(['Later week', 'This week', 'Print or save as PDF']), (s) => `once the day turned with the page open, its buttons: ${JSON.stringify(s?.buttons)}`, { timeout: 5000 });
+      h.expect(turned.week === before.week && JSON.stringify(turned.meta) === JSON.stringify(before.meta), `the page left its week as the day turned: ${turned.week}, ${JSON.stringify(turned.meta)}`);
+      await weekBtn(page, 'Later week').click();
+      await titled(page, span(addDays(next, -6), next));
+      const after = await sheet(page);
+      h.expect(JSON.stringify(after.meta) === JSON.stringify([span(addDays(next, -6), next)]) && JSON.stringify(after.perDay) === JSON.stringify(week(next).map((d) => [label(d)])), `Later week to the new day: ${JSON.stringify(after.meta)}, ${JSON.stringify(after.perDay)}`);
+      h.expect(JSON.stringify(after.buttons) === JSON.stringify(['Print or save as PDF']), `on the new day's week, the buttons: ${JSON.stringify(after.buttons)}`);
+      h.expect((await focused(page)) === 'Print or save as PDF', `with no week button left, focus is on ${await focused(page)}`);
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();
