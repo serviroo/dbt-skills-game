@@ -17,8 +17,8 @@ const AUDIO = 'dbt.audio.v1';
 const Q = 128;
 // silent: a peak below one step of 16-bit audio, as in safe-zone-quiet
 const SILENT_PEAK = 2 ** -15;
-// the Safe Zone silences the speakers this soon after the tap
-const WITHIN = 0.05;
+// the Safe Zone silences the speakers this soon after the tap, as in safe-zone-quiet
+const WITHIN = 0.085;
 // a click: a step between two samples more than this many times the steepest the steady hum ever moves
 const CLICK = 3;
 // the slider curve the engine gives Master, Music and Effects

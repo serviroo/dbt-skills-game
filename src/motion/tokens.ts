@@ -116,6 +116,8 @@ export const RANK = {
 
 export const SCORE = {
   inSec: 3,
+  /** sound asked for now lands this long after, on the audio clock: visuals lead their sound by up to 2 frames */
+  leadSec: 2 / FPS,
   /** Safe Zone in: a click-free ramp to exact silence, shorter than one 60 Hz frame */
   safeOutSec: 0.015,
   /** Safe Zone out: the score fades back in */
@@ -147,7 +149,6 @@ export const GATE = {
   plateFadeSec: 0.2,
   airSec: 1.8,
   crackSec: 1.9,
-  crackSfxSec: 1.93,
   swellSec: 1.95,
   humSec: 2.3,
   humLevel: 0.5,

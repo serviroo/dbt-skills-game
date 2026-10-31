@@ -629,6 +629,12 @@ export const scenarios = {
         await audioReady(page);
         await open(page);
         await cue(page, sound);
+        // a cue sounds two frames after it is asked for (SCORE.leadSec): the press waits until it is heard
+        await until(page, (min) => {
+          const tap = window.__taps[0];
+          const last = [...tap.q.values()].slice(-Math.round((0.2 * tap.context.sampleRate) / 128));
+          return Math.sqrt(last.reduce((s, [, ss]) => s + ss, 0) / (last.length * 128)) > min;
+        }, 10 * SILENT_RMS, { timeout: 10000, polling: 20 });
         await page.evaluate((hidden) => {
           addEventListener(
             'click',

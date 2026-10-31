@@ -1,5 +1,5 @@
 import { bezierCurve, midi } from './dsp';
-import type { Voice } from './voice';
+import type { Timed, Voice } from './voice';
 
 export interface CueDef {
   /** Nominal length in seconds including tails (used by offline cue renders). */
@@ -12,18 +12,18 @@ export interface CueDef {
 }
 
 /** Piecewise-linear automation from (dt, value) points relative to t. */
-function pts(p: AudioParam, t: number, points: [number, number][]) {
+function pts(p: Timed, t: number, points: [number, number][]) {
   p.setValueAtTime(points[0][1], t + points[0][0]);
   for (let i = 1; i < points.length; i++) p.linearRampToValueAtTime(points[i][1], t + points[i][0]);
 }
 
-function expTo(p: AudioParam, t: number, from: number, to: number, dur: number) {
+function expTo(p: Timed, t: number, from: number, to: number, dur: number) {
   p.setValueAtTime(from, t);
   p.exponentialRampToValueAtTime(to, t + dur);
 }
 
 /** A value curve as linear ramps: WebKit shifts setValueCurveAtTime to "now", so later events would overlap and throw. */
-function curveAt(p: AudioParam, values: Float32Array, t: number, dur: number) {
+function curveAt(p: Timed, values: Float32Array, t: number, dur: number) {
   p.cancelScheduledValues(t);
   p.setValueAtTime(values[0], t);
   for (let i = 1; i < values.length; i++) p.linearRampToValueAtTime(values[i], t + (dur * i) / (values.length - 1));
@@ -33,7 +33,7 @@ const IGNITION = bezierCurve(0.7, 0, 0.95, 0.55, 64);
 
 /** Soft-attack envelope: a sine-shaped swell to peak over `a` (no corner at the start, so no click), optional hold,
  *  exponential decay. Built from short linear ramps (never setValueCurveAtTime: WebKit shifts it and throws). */
-function swell(p: AudioParam, t: number, peak: number, a: number, tau: number, hold = 0) {
+function swell(p: Timed, t: number, peak: number, a: number, tau: number, hold = 0) {
   p.setValueAtTime(0, t);
   const N = 6;
   for (let i = 1; i <= N; i++) p.linearRampToValueAtTime(peak * 0.5 * (1 - Math.cos((Math.PI * i) / N)), t + (a * i) / N);
@@ -49,33 +49,33 @@ function boom(v: Voice, t: number, s: { level: number; f0: number; f1: number; b
   const L = s.level;
   // 1) sine sweep 120 -> 45 Hz over 400 ms: the felt drop (weight only; phones lose it)
   const sw = v.gain(0, v.dry);
-  swell(sw.gain, t, 0.26 * L, 0.056, 0.28, 0.03);
+  swell(v.at(sw.gain), t, 0.26 * L, 0.056, 0.28, 0.03);
   const so = v.osc('sine', s.f0, t, t + 2.4, sw);
-  expTo(so.frequency, t, s.f0, s.f1, 0.4);
+  expTo(v.at(so.frequency), t, s.f0, s.f1, 0.4);
   // 2) low-mid body 150 Hz-1 kHz (the band that jumps +21.6 dB): a saturated falling triangle whose harmonics fill
   //    200-1200 Hz, plus pink noise band-passed 300-900 Hz with a 600 ms exponential decay
   const bodyOut = v.filt('lowpass', 1600, 0.6, v.wet);
   const shp = v.shaper(3.6, v.gain(0.6 * L * s.body, bodyOut));
   const tg = v.gain(0, shp);
-  swell(tg.gain, t, 0.9, 0.05, 0.15, 0.02);
+  swell(v.at(tg.gain), t, 0.9, 0.05, 0.15, 0.02);
   const tri = v.osc('triangle', s.f0 * 2, t, t + 1.6, tg);
-  expTo(tri.frequency, t, s.f0 * 2, s.f1 * 2, 0.35);
+  expTo(v.at(tri.frequency), t, s.f0 * 2, s.f1 * 2, 0.35);
   const nb = v.gain(0, v.filt('bandpass', 520, 0.7, v.filt('highpass', 280, 0.7, v.wet)));
-  swell(nb.gain, t, 3.2 * L * s.body, 0.056, 0.15, 0.02);
+  swell(v.at(nb.gain), t, 3.2 * L * s.body, 0.056, 0.15, 0.02);
   v.noise('pink', t, t + 1.6, nb);
   const nw = v.gain(0, v.filt('bandpass', 760, 0.9, v.wet));
-  swell(nw.gain, t, 1.1 * L * s.body, 0.046, 0.08);
+  swell(v.at(nw.gain), t, 1.1 * L * s.body, 0.046, 0.08);
   v.noise('white', t, t + 0.9, nw);
   // 3) presence in 1-4 kHz (+15 dB band), now swelled rather than snapped: the 2.3 kHz edge and the 1.3 kHz thud
   //    arrive with the body, and the sizzle above 4 kHz is a breath, not a crack
   const ck = v.gain(0, v.filt('bandpass', 2300, 0.8, v.wet));
-  swell(ck.gain, t, 0.5 * L * s.crack, 0.036, 0.03);
+  swell(v.at(ck.gain), t, 0.5 * L * s.crack, 0.036, 0.03);
   v.noise('white', t, t + 0.4, ck);
   const th = v.gain(0, v.filt('bandpass', 1300, 1.1, v.wet));
-  swell(th.gain, t, 0.75 * L * s.crack, 0.04, 0.05);
+  swell(v.at(th.gain), t, 0.75 * L * s.crack, 0.04, 0.05);
   v.noise('white', t, t + 0.5, th);
   const hz = v.gain(0, v.filt('highpass', 4300, 0.7, v.wet));
-  swell(hz.gain, t, 0.1 * L * s.crack, 0.042, 0.07);
+  swell(v.at(hz.gain), t, 0.1 * L * s.crack, 0.042, 0.07);
   v.noise('white', t, t + 0.7, hz);
   // 4) sub tail
   const st = v.gain(0, v.dry);
@@ -101,16 +101,16 @@ export const CUES: Record<string, CueDef> = {
       const t = v.t;
       const g1 = v.gain(0, v.wet);
       const bp1 = v.filt('bandpass', 3500, 0.7, g1);
-      expTo(bp1.frequency, t, 3200, 7600, 1.5);
+      expTo(v.at(bp1.frequency), t, 3200, 7600, 1.5);
       v.noise('white', t, t + 2.6, bp1);
-      pts(g1.gain, t, [[0, 0], [0.1, 0.035], [0.7, 0.05]]);
-      g1.gain.setTargetAtTime(0, t + 0.7, 0.35);
+      pts(v.at(g1.gain), t, [[0, 0], [0.1, 0.035], [0.7, 0.05]]);
+      v.at(g1.gain).setTargetAtTime(0, t + 0.7, 0.35);
       const g2 = v.gain(0, v.wet);
       const bp2 = v.filt('bandpass', 1100, 7, g2);
-      expTo(bp2.frequency, t, 1050, 2500, 1.7);
+      expTo(v.at(bp2.frequency), t, 1050, 2500, 1.7);
       v.noise('pink', t, t + 2.6, bp2);
-      pts(g2.gain, t, [[0, 0], [0.22, 0.11], [0.9, 0.13]]);
-      g2.gain.setTargetAtTime(0, t + 0.9, 0.4);
+      pts(v.at(g2.gain), t, [[0, 0], [0.22, 0.11], [0.9, 0.13]]);
+      v.at(g2.gain).setTargetAtTime(0, t + 0.9, 0.4);
     },
   },
 
@@ -132,7 +132,7 @@ export const CUES: Record<string, CueDef> = {
       const th = v.gain(0, v.shaper(2.5, v.gain(0.32, v.dry)));
       const e = v.perc(th.gain, t, 0.6, 0.002, 0.085);
       const o = v.osc('sine', 96, t, e, th);
-      expTo(o.frequency, t, 96, 46, 0.22);
+      expTo(v.at(o.frequency), t, 96, 46, 0.22);
       // the thump's knock, the part of it a phone speaker can play
       const kn = v.gain(0, v.filt('bandpass', 1100, 1.2, v.wet));
       v.perc(kn.gain, t, 0.9, 0.002, 0.06);
@@ -150,15 +150,15 @@ export const CUES: Record<string, CueDef> = {
       const stage: [number, number][] = [[0, 0], [0.167, 0.54], [0.267, 0.58], [0.433, 1], [0.6, 0.92]];
       const env = (peak: number) => {
         const g = v.gain(0, v.wet);
-        pts(g.gain, t, stage.map(([d, x]) => [d, x * peak] as [number, number]));
-        g.gain.setTargetAtTime(0, t + 0.6, 0.7);
+        pts(v.at(g.gain), t, stage.map(([d, x]) => [d, x * peak] as [number, number]));
+        v.at(g.gain).setTargetAtTime(0, t + 0.6, 0.7);
         return g;
       };
       const nlp = v.filt('lowpass', 400, 0.9, env(0.42));
-      pts(nlp.frequency, t, [[0, 380], [0.167, 1500], [0.267, 1550], [0.433, 3600], [1.6, 1500]]);
+      pts(v.at(nlp.frequency), t, [[0, 380], [0.167, 1500], [0.267, 1550], [0.433, 3600], [1.6, 1500]]);
       v.noise("pink", t, t + 5.6, nlp);
       const tl = v.filt('lowpass', 300, 1.2, env(0.05));
-      pts(tl.frequency, t, [[0, 260], [0.167, 900], [0.267, 950], [0.433, 2600], [2.0, 1100]]);
+      pts(v.at(tl.frequency), t, [[0, 260], [0.167, 900], [0.267, 950], [0.433, 2600], [2.0, 1100]]);
       for (const [m, d] of [[50, -6], [57, 5], [62, -3], [69, 7]] as const) v.osc("sawtooth", midi(m), t, t + 5.6, v.gain(1, tl)).detune.value = v.cents + d;
       // what a phone speaker keeps of the swell: a faint singing D6 and A6 riding the same open
       const sing = env(0.04);
@@ -167,8 +167,8 @@ export const CUES: Record<string, CueDef> = {
       const sh = v.filt('bandpass', 5200, 2.5, env(0.06));
       v.noise("white", t, t + 5.6, sh);
       const sub = v.gain(0, v.dry);
-      pts(sub.gain, t, [[0, 0], [0.167, 0.12], [0.267, 0.13], [0.433, 0.24]]);
-      sub.gain.setTargetAtTime(0, t + 0.6, 0.7);
+      pts(v.at(sub.gain), t, [[0, 0], [0.167, 0.12], [0.267, 0.13], [0.433, 0.24]]);
+      v.at(sub.gain).setTargetAtTime(0, t + 0.6, 0.7);
       v.osc("sine", midi(38), t, t + 5.6, sub);
     },
   },
@@ -195,7 +195,7 @@ export const CUES: Record<string, CueDef> = {
       const sub = v.gain(0, v.dry);
       const e = v.perc(sub.gain, t, 0.06, 0.004, 0.06);
       const so = v.osc('sine', 165, t, e, sub);
-      expTo(so.frequency, t, 165, 110, 0.12);
+      expTo(v.at(so.frequency), t, 165, 110, 0.12);
     },
   },
 
@@ -210,7 +210,7 @@ export const CUES: Record<string, CueDef> = {
       const g = v.gain(0, v.wet);
       v.perc(g.gain, t, 0.04, 0.004, 0.045, 0.06);
       const o = v.osc('sine', 3200, t, t + 0.6, g);
-      expTo(o.frequency, t, 3200, 1500, 0.15);
+      expTo(v.at(o.frequency), t, 3200, 1500, 0.15);
       const c = v.gain(0, v.filt('bandpass', 3800, 0.8, v.wet));
       v.perc(c.gain, t, 0.12, 0.0005, 0.0016);
       v.noise('white', t, t + 0.02, c);
@@ -254,14 +254,14 @@ export const CUES: Record<string, CueDef> = {
     fn(v) {
       const t = v.t;
       const amp = v.gain(0, v.filt('lowpass', 3600, 0.5, v.wet));
-      pts(amp.gain, t, [[0, 0], [0.12, 0.026], [1.0, 0.04]]);
-      amp.gain.setTargetAtTime(0, t + 1.01, 0.05);
+      pts(v.at(amp.gain), t, [[0, 0], [0.12, 0.026], [1.0, 0.04]]);
+      v.at(amp.gain).setTargetAtTime(0, t + 1.01, 0.05);
       const am = v.gain(0.55, amp);
       v.lfo(24, 0.45, am.gain, t, t + 1.3);
       const a = v.osc('triangle', midi(74), t, t + 1.4, am);
-      expTo(a.frequency, t, midi(74), midi(86), 1.0);
+      expTo(v.at(a.frequency), t, midi(74), midi(86), 1.0);
       const b = v.osc('sine', midi(86), t, t + 1.4, v.gain(0.35, am));
-      expTo(b.frequency, t, midi(86), midi(98), 1.0);
+      expTo(v.at(b.frequency), t, midi(86), midi(98), 1.0);
       v.fm({ t: t + 1.0, f: midi(98), ratio: 2, index: 0.7, idxTau: 0.02, a: 0.003, tau: 0.12, peak: 0.045, dest: v.wet, partials: [[2.76, 0.08, 0.03]] });
     },
   },
@@ -280,8 +280,8 @@ export const CUES: Record<string, CueDef> = {
       }
       v.fm({ t: t + 0.16, f: midi(74), ratio: 1, index: 0.6, idxEnd: 0.1, idxTau: 0.3, a: 0.01, tau: 0.6, peak: 0.03, dest: bus });
       const pad = v.gain(0, v.filt('lowpass', 1100, 0.7, bus));
-      pts(pad.gain, t, [[0, 0], [0.4, 0.016], [1.0, 0.014]]);
-      pad.gain.setTargetAtTime(0, t + 1.0, 0.5);
+      pts(v.at(pad.gain), t, [[0, 0], [0.4, 0.016], [1.0, 0.014]]);
+      v.at(pad.gain).setTargetAtTime(0, t + 1.0, 0.5);
       for (const [m, d] of [[62, -5], [69, 6], [74, 3]] as const) v.osc('triangle', midi(m), t, t + 3.2, pad).detune.value = v.cents + d;
     },
   },
@@ -295,8 +295,8 @@ export const CUES: Record<string, CueDef> = {
       const t = v.t;
       const env = v.gain(0, v.wet);
       v.ramp(env.gain, t, 0.0355 * 0.4, 0.355 * 0.4, 0.14);
-      env.gain.setValueAtTime(0.355 * 0.4, t + 0.34);
-      env.gain.setTargetAtTime(0, t + 0.34, 0.55);
+      v.at(env.gain).setValueAtTime(0.355 * 0.4, t + 0.34);
+      v.at(env.gain).setTargetAtTime(0, t + 0.34, 0.55);
       const sat = v.shaper(3.4, v.gain(0.5, env));
       env.connect(v.filt("bandpass", 420, 0.8, v.gain(1.4, v.wet)));
       v.osc("sine", midi(33), t, t + 4.2, sat);
@@ -304,24 +304,24 @@ export const CUES: Record<string, CueDef> = {
       v.osc("triangle", midi(45), t, t + 4.2, v.gain(0.35, sat));
       v.noise("brown", t, t + 4.2, v.gain(0.9, v.filt('lowpass', 380, 0.9, env)));
       const br = v.gain(0, v.filt('bandpass', 1500, 1.4, v.wet));
-      pts(br.gain, t, [[0, 0], [0.16, 0.37], [0.45, 0.29]]);
-      br.gain.setTargetAtTime(0, t + 0.45, 0.4);
+      pts(v.at(br.gain), t, [[0, 0], [0.16, 0.37], [0.45, 0.29]]);
+      v.at(br.gain).setTargetAtTime(0, t + 0.45, 0.4);
       v.noise("pink", t, t + 4.2, br);
       // what a phone speaker keeps of it: the same swell growled through D3 / A3 (harmonics 300 Hz-1.5 kHz) and a
       // breath of energy sweeping up through the mids
       const mid = v.gain(0, v.wet);
       v.ramp(mid.gain, t, 0.016, 0.16, 0.14);
-      mid.gain.setValueAtTime(0.16, t + 0.34);
-      mid.gain.setTargetAtTime(0, t + 0.34, 0.5);
+      v.at(mid.gain).setValueAtTime(0.16, t + 0.34);
+      v.at(mid.gain).setTargetAtTime(0, t + 0.34, 0.5);
       const growl = v.filt('bandpass', 650, 0.6, mid);
       const gs = v.shaper(4, v.gain(0.6, growl), 'none');
       v.osc('triangle', midi(50), t, t + 2.4, v.gain(0.6, gs));
       v.osc('triangle', midi(57), t, t + 2.4, v.gain(0.4, gs)).detune.value = v.cents + 4;
       const fw = v.gain(0, v.wet);
-      pts(fw.gain, t, [[0, 0], [0.12, 0.6], [0.3, 0.36]]);
-      fw.gain.setTargetAtTime(0, t + 0.3, 0.3);
+      pts(v.at(fw.gain), t, [[0, 0], [0.12, 0.6], [0.3, 0.36]]);
+      v.at(fw.gain).setTargetAtTime(0, t + 0.3, 0.3);
       const fb = v.filt('bandpass', 500, 1.2, fw);
-      expTo(fb.frequency, t, 500, 2200, 0.32);
+      expTo(v.at(fb.frequency), t, 500, 2200, 0.32);
       v.noise('pink', t, t + 2.4, fb);
     },
   },
@@ -335,18 +335,18 @@ export const CUES: Record<string, CueDef> = {
       const t = v.t;
       const pn = v.ctx.createStereoPanner ? v.ctx.createStereoPanner() : null;
       const dest = pn ? (pn.connect(v.wet), pn) : v.wet;
-      if (pn) pts(pn.pan, t, [[0, -0.45], [0.35, 0.45]]);
+      if (pn) pts(v.at(pn.pan), t, [[0, -0.45], [0.35, 0.45]]);
       const g = v.gain(0, dest);
-      pts(g.gain, t, [[0, 0], [0.09, 0.09], [0.2, 0.12]]);
-      g.gain.setTargetAtTime(0, t + 0.2, 0.11);
+      pts(v.at(g.gain), t, [[0, 0], [0.09, 0.09], [0.2, 0.12]]);
+      v.at(g.gain).setTargetAtTime(0, t + 0.2, 0.11);
       const bp = v.filt('bandpass', 1000, 1.3, g);
-      expTo(bp.frequency, t, 900, 6200, 0.32);
+      expTo(v.at(bp.frequency), t, 900, 6200, 0.32);
       v.noise('white', t, t + 1.2, bp);
       const lo = v.gain(0, dest);
-      pts(lo.gain, t, [[0, 0], [0.08, 0.16], [0.18, 0.12]]);
-      lo.gain.setTargetAtTime(0, t + 0.18, 0.1);
+      pts(v.at(lo.gain), t, [[0, 0], [0.08, 0.16], [0.18, 0.12]]);
+      v.at(lo.gain).setTargetAtTime(0, t + 0.18, 0.1);
       const lb = v.filt('bandpass', 600, 1.0, lo);
-      expTo(lb.frequency, t, 500, 1700, 0.3);
+      expTo(v.at(lb.frequency), t, 500, 1700, 0.3);
       v.noise('pink', t, t + 1.2, lb);
     },
   },
@@ -368,9 +368,9 @@ export const CUES: Record<string, CueDef> = {
       boom(v, t, { level: 1, f0: 120, f1: 45, body: 1, crack: 1, sub: 1 });
       // the body's noise swelling in with it, falling 1.3 -> 0.8 kHz as the sweep falls
       const ph = v.gain(0, v.wet);
-      swell(ph.gain, t, 5.5, 0.046, 0.15);
+      swell(v.at(ph.gain), t, 5.5, 0.046, 0.15);
       const pf = v.filt('bandpass', 1300, 0.9, ph);
-      expTo(pf.frequency, t, 1300, 800, 0.4);
+      expTo(v.at(pf.frequency), t, 1300, 800, 0.4);
       v.noise('white', t, t + 1.2, pf);
     },
   },
@@ -384,17 +384,17 @@ export const CUES: Record<string, CueDef> = {
       const t = v.t;
       const g = v.gain(0, v.wet);
       v.ramp(g.gain, t, 0.004, 0.075, 0.95);
-      g.gain.setTargetAtTime(0, t + 0.97, 0.09);
+      v.at(g.gain).setTargetAtTime(0, t + 0.97, 0.09);
       const am = v.gain(0.75, g);
       const lf = v.lfo(6, 0.22, am.gain, t, t + 1.8);
-      expTo(lf.frequency, t, 6, 15, 1.0);
+      expTo(v.at(lf.frequency), t, 6, 15, 1.0);
       for (const [r, a, d] of [[1, 1, -4], [1.5, 0.5, 5], [2, 0.35, -2], [3, 0.12, 3]] as const) {
         const o = v.osc(r === 1 ? 'triangle' : 'sine', 700 * r, t, t + 1.8, v.gain(a, am));
-        expTo(o.frequency, t, 700 * r, 1800 * r, 1.0);
+        expTo(v.at(o.frequency), t, 700 * r, 1800 * r, 1.0);
         o.detune.value = v.cents + d;
       }
       const nb = v.filt('bandpass', 700, 5, v.gain(1.6, g));
-      expTo(nb.frequency, t, 700, 1800, 1.0);
+      expTo(v.at(nb.frequency), t, 700, 1800, 1.0);
       v.noise('white', t, t + 1.8, nb);
     },
   },
@@ -411,15 +411,15 @@ export const CUES: Record<string, CueDef> = {
       const T = 0.467;
       const curve = (k: number) => IGNITION.map((x) => x * k) as Float32Array<ArrayBuffer>;
       const ng = v.gain(0, v.wet);
-      curveAt(ng.gain, curve(0.2), t, T);
-      ng.gain.setTargetAtTime(0.012, t + T + 0.001, 0.03);
-      ng.gain.setTargetAtTime(0, t + T + 0.2, 0.4);
+      curveAt(v.at(ng.gain), curve(0.2), t, T);
+      v.at(ng.gain).setTargetAtTime(0.012, t + T + 0.001, 0.03);
+      v.at(ng.gain).setTargetAtTime(0, t + T + 0.2, 0.4);
       const nb = v.filt('bandpass', 1200, 1.1, ng);
-      expTo(nb.frequency, t, 1100, 5200, T);
+      expTo(v.at(nb.frequency), t, 1100, 5200, T);
       v.noise('white', t, t + 3, nb);
       const cg = v.gain(0, v.filt('lowpass', 7000, 0.5, v.wet));
-      curveAt(cg.gain, curve(0.03), t, T);
-      cg.gain.setTargetAtTime(0, t + T + 0.001, 0.02);
+      curveAt(v.at(cg.gain), curve(0.03), t, T);
+      v.at(cg.gain).setTargetAtTime(0, t + T + 0.001, 0.02);
       const am = v.gain(0.6, cg);
       v.lfo(12, 0.4, am.gain, t, t + T + 0.2, 'square');
       for (const m of [86, 93, 98, 100]) v.osc('sine', midi(m), t, t + T + 0.2, am);
@@ -427,13 +427,13 @@ export const CUES: Record<string, CueDef> = {
       v.fm({ t: t + T + 0.012, f: midi(100), ratio: 2, index: 0.7, idxEnd: 0.05, idxTau: 0.03, a: 0.002, tau: 0.26, peak: 0.045, dest: v.pan(0.2, v.wet) });
       const sw = v.gain(0, v.wet);
       v.ramp(sw.gain, t, 0.006, 0.1, 0.45);
-      sw.gain.setTargetAtTime(0, t + 0.45, 0.4);
+      v.at(sw.gain).setTargetAtTime(0, t + 0.45, 0.4);
       const sat = v.shaper(2.4, v.gain(0.6, sw));
       v.osc('sine', midi(38), t, t + 3, sat);
       v.osc('triangle', midi(50), t, t + 3, v.gain(0.3, sat));
       const air = v.gain(0, v.filt('highpass', 3200, 0.7, v.wet));
-      pts(air.gain, t + T, [[0, 0], [0.01, 0.03]]);
-      air.gain.setTargetAtTime(0, t + T + 0.02, 0.5);
+      pts(v.at(air.gain), t + T, [[0, 0], [0.01, 0.03]]);
+      v.at(air.gain).setTargetAtTime(0, t + T + 0.02, 0.5);
       v.noise('white', t + T, t + 3, air);
     },
   },
@@ -448,16 +448,16 @@ export const CUES: Record<string, CueDef> = {
       const env = (peak: number, tauDecay = 0.7, rise = 1.0) => {
         const g = v.gain(0, v.wet);
         v.ramp(g.gain, t, peak * 0.05, peak, rise);
-        g.gain.setValueAtTime(peak, t + 1.9);
-        g.gain.setTargetAtTime(0, t + 1.9, tauDecay);
+        v.at(g.gain).setValueAtTime(peak, t + 1.9);
+        v.at(g.gain).setTargetAtTime(0, t + 1.9, tauDecay);
         return g;
       };
       const roar = v.filt("lowpass", 250, 0.8, env(0.62));
-      expTo(roar.frequency, t, 200, 1000, 1.0);
+      expTo(v.at(roar.frequency), t, 200, 1000, 1.0);
       v.noise("brown", t, t + 7, roar);
       // the part a phone keeps: the mid roar arrives a little sooner, so the rise reads before the stand lands
       const mid = v.filt("bandpass", 700, 0.8, env(1.05, 0.7, 0.85));
-      expTo(mid.frequency, t, 600, 1800, 1.0);
+      expTo(v.at(mid.frequency), t, 600, 1800, 1.0);
       v.noise("pink", t, t + 7, mid);
       v.noise("white", t, t + 7, v.filt("highpass", 5200, 0.7, env(0.025, 0.5)));
       const sat = v.shaper(2.0, v.gain(0.36, env(1, 0.75)));
@@ -475,15 +475,15 @@ export const CUES: Record<string, CueDef> = {
       const t = v.t;
       const low = v.gain(0, v.wet);
       v.ramp(low.gain, t, 0.01, 0.14, 1.1);
-      low.gain.setTargetAtTime(0, t + 1.3, 0.6);
+      v.at(low.gain).setTargetAtTime(0, t + 1.3, 0.6);
       const sat = v.shaper(2.2, v.gain(0.5, low));
       v.osc("sine", midi(38), t, t + 5, sat);
       v.osc("triangle", midi(50), t, t + 5, v.gain(0.4, sat));
       const pg = v.gain(0, v.wet);
-      pts(pg.gain, t, [[0, 0], [0.5, 0.02], [1.2, 0.05], [2.0, 0.045]]);
-      pg.gain.setTargetAtTime(0, t + 2.0, 0.5);
+      pts(v.at(pg.gain), t, [[0, 0], [0.5, 0.02], [1.2, 0.05], [2.0, 0.045]]);
+      v.at(pg.gain).setTargetAtTime(0, t + 2.0, 0.5);
       const lp = v.filt('lowpass', 300, 0.9, pg);
-      pts(lp.frequency, t, [[0, 300], [0.4, 420], [1.2, 1700], [2.4, 1200]]);
+      pts(v.at(lp.frequency), t, [[0, 300], [0.4, 420], [1.2, 1700], [2.4, 1200]]);
       for (const [m, d] of [[62, -6], [66, 5], [69, -3], [74, 7]] as const) v.osc("sawtooth", midi(m), t, t + 5, lp).detune.value = v.cents + d;
       glints(v, t + 0.7, t + 2.0, 6, [98, 102, 105, 110], 0.028, v.wet);
     },
@@ -501,7 +501,7 @@ export const CUES: Record<string, CueDef> = {
       const t = v.t;
       boom(v, t, { level: 0.42, f0: 165, f1: 62, body: 1, crack: 0.8, sub: 0.8 });
       const sh = v.gain(0, v.filt('bandpass', 3800, 0.65, v.wet));
-      swell(sh.gain, t, 0.12, 0.035, 0.17);
+      swell(v.at(sh.gain), t, 0.12, 0.035, 0.17);
       v.noise('white', t, t + 1.8, sh);
       const bus = v.filt('lowpass', 7500, 0.5, v.wet);
       for (const [m, dt, p] of [[86, 0.02, -0.2], [90, 0.095, 0], [93, 0.17, 0.2]] as const) {
@@ -513,21 +513,21 @@ export const CUES: Record<string, CueDef> = {
         const ts = t + 0.5 + i * 0.075 + v.rng() * 0.05;
         const f = midi(notes[i]);
         const g = v.gain(0, v.pan(i % 2 ? 0.45 : -0.45, bus));
-        swell(g.gain, ts, 0.016 * (0.75 + 0.25 * v.rng()), 0.02, 0.2);
+        swell(v.at(g.gain), ts, 0.016 * (0.75 + 0.25 * v.rng()), 0.02, 0.2);
         const o = v.osc('sine', f, ts, ts + 1.8, g);
-        o.frequency.setValueAtTime(f, ts);
-        o.frequency.exponentialRampToValueAtTime(f * 0.84, ts + 0.7);
+        v.at(o.frequency).setValueAtTime(f, ts);
+        v.at(o.frequency).exponentialRampToValueAtTime(f * 0.84, ts + 0.7);
         const g2 = v.gain(0, v.pan(i % 2 ? 0.45 : -0.45, bus));
-        swell(g2.gain, ts, 0.0035, 0.02, 0.08);
+        swell(v.at(g2.gain), ts, 0.0035, 0.02, 0.08);
         v.osc('sine', f * 2.76, ts, ts + 0.8, g2);
       }
       // the feather: a warm breath of air on the right that rises and settles, under everything
       const fa = v.gain(0, v.pan(0.4, v.wet));
-      swell(fa.gain, t + 0.35, 0.02, 0.9, 0.7, 0.5);
+      swell(v.at(fa.gain), t + 0.35, 0.02, 0.9, 0.7, 0.5);
       const fb = v.filt('bandpass', 900, 0.8, fa);
-      fb.frequency.setValueAtTime(700, t + 0.35);
-      fb.frequency.linearRampToValueAtTime(1300, t + 1.3);
-      fb.frequency.linearRampToValueAtTime(800, t + 3.4);
+      v.at(fb.frequency).setValueAtTime(700, t + 0.35);
+      v.at(fb.frequency).linearRampToValueAtTime(1300, t + 1.3);
+      v.at(fb.frequency).linearRampToValueAtTime(800, t + 3.4);
       v.noise('pink', t + 0.35, t + 4.4, fb);
     },
   },
@@ -550,7 +550,7 @@ export const CUES: Record<string, CueDef> = {
       const sub = v.gain(0, v.dry);
       const e = v.perc(sub.gain, t, 0.06, 0.005, 0.09);
       const so = v.osc('sine', 196, t, e, sub);
-      expTo(so.frequency, t, 196, 147, 0.15);
+      expTo(v.at(so.frequency), t, 196, 147, 0.15);
     },
   },
 
@@ -563,10 +563,10 @@ export const CUES: Record<string, CueDef> = {
     fn(v) {
       const t = v.t;
       const g = v.gain(0, v.wet);
-      pts(g.gain, t, [[0, 0], [0.35, 0.05], [0.55, 0.045]]);
-      g.gain.setTargetAtTime(0, t + 0.55, 0.22);
+      pts(v.at(g.gain), t, [[0, 0], [0.35, 0.05], [0.55, 0.045]]);
+      v.at(g.gain).setTargetAtTime(0, t + 0.55, 0.22);
       const bp = v.filt('bandpass', 500, 1.2, g);
-      expTo(bp.frequency, t, 480, 2300, 0.6);
+      expTo(v.at(bp.frequency), t, 480, 2300, 0.6);
       v.noise('pink', t, t + 2, bp);
       for (const [m, dt, p] of [[81, 0.32, -0.15], [88, 0.38, 0.15]] as const) {
         v.fm({ t: t + dt, f: midi(m), ratio: 1, index: 0.6, idxEnd: 0.08, idxTau: 0.2, a: 0.012, tau: 0.45, peak: 0.04, dest: v.pan(p, v.wet), partials: [[2.0, 0.18, 0.25]] });
@@ -584,18 +584,18 @@ export const CUES: Record<string, CueDef> = {
       const th = v.gain(0, v.dry);
       v.perc(th.gain, t, 0.24, 0.006, 0.26);
       const o = v.osc('sine', 72, t, t + 2, th);
-      expTo(o.frequency, t, 72, 46, 0.3);
+      expTo(v.at(o.frequency), t, 72, 46, 0.3);
       const bd = v.gain(0, v.shaper(2, v.gain(0.2, v.filt('lowpass', 700, 0.7, v.wet))));
       v.perc(bd.gain, t, 0.8, 0.005, 0.16);
       const tb = v.osc('triangle', 150, t, t + 1.2, bd);
-      expTo(tb.frequency, t, 150, 92, 0.25);
+      expTo(v.at(tb.frequency), t, 150, 92, 0.25);
       const bus = v.filt('lowpass', 7600, 0.5, v.wet);
       for (const [m, dt, p, pk] of [[86, 0.1, -0.25, 0.05], [93, 0.145, 0.25, 0.042], [100, 0.19, -0.1, 0.03], [102, 0.235, 0.15, 0.024]] as const) {
         v.fm({ t: t + dt, f: midi(m), ratio: 2, index: 0.8, idxEnd: 0.04, idxTau: 0.06, a: 0.006, tau: 0.85, peak: pk, dest: v.pan(p, bus), partials: [[2.76, 0.07, 0.15]] });
       }
       const sh = v.gain(0, v.filt('bandpass', 5600, 0.9, v.wet));
-      pts(sh.gain, t + 0.1, [[0, 0], [0.04, 0.03]]);
-      sh.gain.setTargetAtTime(0, t + 0.14, 0.45);
+      pts(v.at(sh.gain), t + 0.1, [[0, 0], [0.04, 0.03]]);
+      v.at(sh.gain).setTargetAtTime(0, t + 0.14, 0.45);
       v.noise('white', t + 0.1, t + 3.5, sh);
     },
   },
@@ -609,12 +609,12 @@ export const CUES: Record<string, CueDef> = {
     fn(v) {
       const t = v.t;
       const g = v.gain(0, v.wet);
-      pts(g.gain, t, [[0, 0], [0.025, 0.05], [0.11, 0.04]]);
-      g.gain.setTargetAtTime(0, t + 0.11, 0.03);
+      pts(v.at(g.gain), t, [[0, 0], [0.025, 0.05], [0.11, 0.04]]);
+      v.at(g.gain).setTargetAtTime(0, t + 0.11, 0.03);
       const am = v.gain(0.55, g);
       v.lfo(28, 0.45, am.gain, t, t + 0.3);
       const bp = v.filt('bandpass', 1500, 1.3, am);
-      expTo(bp.frequency, t, 1400, 3800, 0.13);
+      expTo(v.at(bp.frequency), t, 1400, 3800, 0.13);
       v.noise('white', t, t + 0.4, bp);
       v.fm({ t: t + 0.13, f: midi(93), ratio: 1, index: 0.3, idxTau: 0.01, a: 0.0015, tau: 0.012, peak: 0.018, dest: v.wet });
       v.fm({ t: t + 0.16, f: midi(86), ratio: 1, index: 0.7, idxEnd: 0.08, idxTau: 0.12, a: 0.008, tau: 0.34, peak: 0.04, dest: v.wet, partials: [[2.0, 0.2, 0.2], [2.76, 0.05, 0.07]] });
@@ -644,7 +644,7 @@ export const CUES: Record<string, CueDef> = {
         const g = v.gain(0, v.filt('lowpass', 4200, 0.5, v.wet));
         const e = v.perc(g.gain, t, pk, 0.003, 0.03);
         const o = v.osc('sine', f0, t, e, g);
-        expTo(o.frequency, t, f0, f0 * 2.3, 0.055);
+        expTo(v.at(o.frequency), t, f0, f0 * 2.3, 0.055);
       };
       const f0 = 520 + v.rng() * 360;
       one(v.t, f0, 0.07);
@@ -662,14 +662,14 @@ export const CUES: Record<string, CueDef> = {
       const T = o.dur ?? 4;
       const shape = new Float32Array(32).map((_, i) => Math.pow(Math.sin(((i / 31) * Math.PI) / 2), 2)) as Float32Array<ArrayBuffer>;
       const g = v.gain(0, v.wet);
-      curveAt(g.gain, shape.map((x) => x * 0.075) as Float32Array<ArrayBuffer>, t, T);
-      g.gain.setTargetAtTime(0, t + T + 0.001, 0.22);
+      curveAt(v.at(g.gain), shape.map((x) => x * 0.075) as Float32Array<ArrayBuffer>, t, T);
+      v.at(g.gain).setTargetAtTime(0, t + T + 0.001, 0.22);
       const bp = v.filt('bandpass', 450, 1.1, g);
-      expTo(bp.frequency, t, 450, 1500, T);
+      expTo(v.at(bp.frequency), t, 450, 1500, T);
       v.noise('pink', t, t + T + 1.5, bp);
       const tg = v.gain(0, v.filt('lowpass', 1200, 0.6, v.wet));
-      curveAt(tg.gain, shape.map((x) => x * 0.02) as Float32Array<ArrayBuffer>, t, T);
-      tg.gain.setTargetAtTime(0, t + T + 0.001, 0.3);
+      curveAt(v.at(tg.gain), shape.map((x) => x * 0.02) as Float32Array<ArrayBuffer>, t, T);
+      v.at(tg.gain).setTargetAtTime(0, t + T + 0.001, 0.3);
       v.osc('triangle', midi(62), t, t + T + 1.5, tg);
       v.osc('triangle', midi(69), t, t + T + 1.5, v.gain(0.7, tg));
     },
@@ -689,12 +689,12 @@ export const CUES: Record<string, CueDef> = {
         return a * Math.pow(Math.cos((x * Math.PI) / 2), 1.6);
       }) as Float32Array<ArrayBuffer>;
       const g = v.gain(0, v.wet);
-      curveAt(g.gain, shape.map((x) => x * 0.075) as Float32Array<ArrayBuffer>, t, T);
+      curveAt(v.at(g.gain), shape.map((x) => x * 0.075) as Float32Array<ArrayBuffer>, t, T);
       const bp = v.filt('bandpass', 1400, 1.1, g);
-      expTo(bp.frequency, t, 1400, 420, T);
+      expTo(v.at(bp.frequency), t, 1400, 420, T);
       v.noise('pink', t, t + T + 0.2, bp);
       const tg = v.gain(0, v.filt('lowpass', 1100, 0.6, v.wet));
-      curveAt(tg.gain, shape.map((x) => x * 0.02) as Float32Array<ArrayBuffer>, t, T);
+      curveAt(v.at(tg.gain), shape.map((x) => x * 0.02) as Float32Array<ArrayBuffer>, t, T);
       v.osc('triangle', midi(62), t, t + T + 0.2, tg);
       v.osc('triangle', midi(69), t, t + T + 0.2, v.gain(0.7, tg));
     },

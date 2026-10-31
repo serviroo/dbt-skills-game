@@ -5,9 +5,9 @@
  */
 import { CUES } from './cues';
 import { BED_NAMES, startBed, startCharge, type BedHandle, type BedName, type ChargeHandle } from './beds';
-import { Music, SECTIONS, type Section, type SectionOpts } from './music';
+import { AHEAD, Music, SECTIONS, type Section, type SectionOpts } from './music';
 import { clipCurve, makeCrackle, makeIR, makeNoise, dB, type Ctx } from './dsp';
-import { holdAt, taper } from './param';
+import { holdAt, soon, taper } from './param';
 import { Voice, stoppedBy, type Lib } from './voice';
 
 export type { BedHandle, BedName, ChargeHandle, Section, SectionOpts };
@@ -266,7 +266,7 @@ export class AudioEngine {
     );
 
     if (this.live) {
-      this.timer = setInterval(() => this.music.scheduleUntil(this.ctx.currentTime + 0.7), 120);
+      this.timer = setInterval(() => this.music.scheduleUntil(this.ctx.currentTime + AHEAD), 120);
       const vis = () => { void this.applyVisibility(); };
       document.addEventListener('visibilitychange', vis);
       const sc = () => {
@@ -286,6 +286,12 @@ export class AudioEngine {
 
   get now() {
     return this.ctx.currentTime;
+  }
+
+  /** `at`, or soon() if it is unset or sooner: nothing asked for is placed where it could already be past. */
+  private when(at?: number) {
+    const t = soon(this.ctx);
+    return at === undefined ? t : Math.max(at, t);
   }
 
   get state() {
@@ -323,7 +329,7 @@ export class AudioEngine {
       /* ignore */
     }
     this.unlocked = true;
-    this.music.scheduleUntil(ac.currentTime + 0.7);
+    this.music.scheduleUntil(ac.currentTime + AHEAD);
     return this.applyVisibility();
   }
 
@@ -357,17 +363,17 @@ export class AudioEngine {
 
   setVolume(v: number, ramp = 0.2) {
     this.vol = Math.max(0, Math.min(1, v));
-    this.volume.gain.setTargetAtTime(this.masterTarget(), this.ctx.currentTime, Math.max(0.003, ramp / 4));
+    this.volume.gain.setTargetAtTime(this.masterTarget(), soon(this.ctx), Math.max(0.003, ramp / 4));
   }
 
   setMuted(m: boolean, ramp = 0.2) {
     this.isMuted = m;
-    this.volume.gain.setTargetAtTime(this.masterTarget(), this.ctx.currentTime, Math.max(0.003, ramp / 4));
+    this.volume.gain.setTargetAtTime(this.masterTarget(), soon(this.ctx), Math.max(0.003, ramp / 4));
   }
 
   /** Their levels from the speaker control, 0..1 each; master multiplies the scene level set by setVolume. */
   setUser(l: UserLevels, ramp = 0.08): void {
-    const t = this.ctx.currentTime;
+    const t = soon(this.ctx);
     const tau = Math.max(0.003, ramp / 4);
     this.userMaster = taper(l.master);
     this.isMuted = !!l.muted;
@@ -395,20 +401,22 @@ export class AudioEngine {
 
   play(cue: CueName | string, opts: PlayOpts = {}): CueHandle {
     const def = CUES[cue];
-    const at = Math.max(opts.at ?? this.ctx.currentTime, this.live ? this.ctx.currentTime : 0);
     if (!def) {
       console.warn('[audio] unknown cue', cue);
-      return { stop() {}, end: at };
+      return { stop() {}, end: this.when(opts.at) };
     }
     // nothing starts inside the Safe Zone, so nothing can be left sounding when the player steps out
-    if (this.isQuiet) return { stop() {}, end: at };
+    if (this.isQuiet) return { stop() {}, end: this.when(opts.at) };
     const detune = opts.detune ?? (opts.index !== undefined ? opts.index * 50 : 0);
-    const v = new Voice(this.lib, at, this.sfx, { gain: (opts.gain ?? 1) * dB(def.gainDb ?? 0), pan: opts.pan, detune, room: def.room, hall: def.hall }, this.nextSeed());
+    // built first and held, then timed: however long building it takes, no part of it can land in the past
+    const v = new Voice(this.lib, 0, this.sfx, { gain: (opts.gain ?? 1) * dB(def.gainDb ?? 0), pan: opts.pan, detune, room: def.room, hall: def.hall, held: true }, this.nextSeed());
     try {
       def.fn(v, { dur: opts.dur });
     } catch (err) {
       console.warn('[audio] cue failed', cue, err);
     }
+    const at = this.when(opts.at);
+    v.open(at);
     if (UI_DUCK.has(cue)) {
       const g = this.uiDuck.gain;
       g.setTargetAtTime(dB(-3), at, 0.012);
@@ -441,7 +449,7 @@ export class AudioEngine {
       }, Math.max(1000, ms));
     }
     return {
-      stop: (t = this.ctx.currentTime, ramp = 0.03) => v.stop(t, ramp),
+      stop: (t = soon(this.ctx), ramp = 0.03) => v.stop(t, ramp),
       get end() {
         return v.end;
       },
@@ -450,7 +458,7 @@ export class AudioEngine {
 
   /** Start (or re-level) a continuous bed. Calling it again for a running bed ramps its level. */
   bed(name: BedName, o: { at?: number; level?: number; fadeIn?: number } = {}): BedHandle {
-    const at = o.at ?? this.ctx.currentTime;
+    const at = this.when(o.at);
     const cur = this.beds.get(name);
     if (cur && !cur.stopped) {
       if (o.level !== undefined) cur.level(o.level, o.fadeIn ?? 0.5, at);
@@ -480,24 +488,26 @@ export class AudioEngine {
    *  score steps back (-2 dB idle, -9 dB at full charge); after stop() it swells back in behind the burst. */
   chargeLoop(o: { at?: number } = {}): ChargeHandle {
     if (this.charge) return this.charge;
-    const t0 = Math.max(o.at ?? this.ctx.currentTime, this.live ? this.ctx.currentTime : 0);
+    const t0 = this.when(o.at);
     const h = startCharge(this.lib, this.sfx, t0, this.nextSeed());
     const self = this;
-    const now = (at?: number) => Math.max(at ?? self.ctx.currentTime, self.live ? self.ctx.currentTime : 0);
     this.toFocus(dB(-2), t0, 0.4);
     this.charge = {
       set(c: number, at?: number) {
-        h.set(c, at);
-        self.toFocus(dB(-2 - 7 * Math.max(0, Math.min(1, c))), now(at), 0.08);
+        const t = self.when(at);
+        h.set(c, t);
+        self.toFocus(dB(-2 - 7 * Math.max(0, Math.min(1, c))), t, 0.08);
       },
       release(at?: number) {
-        h.release(at);
-        self.toFocus(dB(-2), now(at), 0.15);
+        const t = self.when(at);
+        h.release(t);
+        self.toFocus(dB(-2), t, 0.15);
       },
       stop(at?: number, ramp?: number) {
-        h.stop(at, ramp);
+        const t = self.when(at);
+        h.stop(t, ramp);
         self.charge = null;
-        self.toFocus(1, now(at) + 0.3, 0.5);
+        self.toFocus(1, t + 0.3, 0.5);
       },
     };
     return this.charge;
@@ -508,7 +518,7 @@ export class AudioEngine {
    * -35 dBFS RMS) so the hit lands +22 dB over it. With `to`, everything returns at `to` in ~5 ms. Without it the hush
    * holds until unhush() or the next awaken_hit. An open-ended awaken section cuts its build here.
    */
-  hush(from = this.ctx.currentTime, to?: number) {
+  hush(from = soon(this.ctx), to?: number) {
     for (const g of [this.hushBeds.gain, this.hushMusic.gain, this.hushHall.gain, this.hushRoom.gain]) {
       g.cancelScheduledValues(from);
       g.setTargetAtTime(0.008, from, 0.007);
@@ -531,7 +541,7 @@ export class AudioEngine {
   }
 
   /** End an open-ended hush (awaken_hit does this itself). */
-  unhush(at = this.ctx.currentTime) {
+  unhush(at = soon(this.ctx)) {
     for (const g of [this.hushBeds.gain, this.hushMusic.gain, this.hushHall.gain, this.hushRoom.gain]) {
       g.cancelScheduledValues(at);
       g.setTargetAtTime(1, at, 0.0015);
@@ -546,7 +556,7 @@ export class AudioEngine {
    * whatever still rang in it, is swapped for an empty one, so nothing from before the visit can return, and the score
    * fades back in (time constant sec / 4). Music, Effects and Master levels are left alone.
    */
-  quiet(on: boolean, sec: number, at = this.ctx.currentTime) {
+  quiet(on: boolean, sec: number, at = soon(this.ctx)) {
     this.isQuiet = on;
     if (!on) {
       const old = this.echo;
@@ -573,7 +583,7 @@ export class AudioEngine {
     const level = (to: number, was?: GainNode) => {
       const g = this.ctx.createGain();
       g.gain.value = was?.gain.value ?? to;
-      if (was) g.gain.setTargetAtTime(to, this.ctx.currentTime, tau);
+      if (was) g.gain.setTargetAtTime(to, soon(this.ctx), tau);
       return g;
     };
     return { sfxRoom: level(sfx, from?.sfxRoom), sfxHall: level(sfx, from?.sfxHall), musRoom: level(mus, from?.musRoom), musHall: level(mus, from?.musHall) };
@@ -605,7 +615,7 @@ export class AudioEngine {
   }
 
   /** Duck beds + score together (e.g. -3 dB as the gate dims for the first window). */
-  duck(db: number, ramp = 0.4, at = this.ctx.currentTime) {
+  duck(db: number, ramp = 0.4, at = soon(this.ctx)) {
     this.duckG.gain.cancelScheduledValues(at);
     this.duckG.gain.setTargetAtTime(dB(db), at, Math.max(0.003, ramp / 4));
   }
@@ -613,7 +623,7 @@ export class AudioEngine {
   /** Stop every cue still sounding, the beds, charge and score, and the echo's tail with them (e.g. on replay or leaving
    *  the cutscene): what plays next starts in an empty echo. Under the Safe Zone's quiet the echo is closed already, and
    *  leaving the quiet brings the empty one (see quiet). */
-  stopAll(fade = 0.4, at = this.ctx.currentTime) {
+  stopAll(fade = 0.4, at = soon(this.ctx)) {
     for (const v of this.active) v.stop(at, fade);
     this.active.clear();
     for (const b of this.beds.values()) b.stop(fade, at);
@@ -645,7 +655,7 @@ export class AudioEngine {
   }
 
   /** Stop everything and restore the score controls (level, low-pass, lift, duck, hush) for a clean replay. */
-  reset(fade = 0.3, at = this.ctx.currentTime) {
+  reset(fade = 0.3, at = soon(this.ctx)) {
     this.stopAll(fade, at);
     const set = (p: AudioParam, v: number) => {
       p.cancelScheduledValues(at);
@@ -665,7 +675,7 @@ export class AudioEngine {
   }
 
   /** Full charge reached: cut the charge loop, 200 ms hush, then the gold burst (visual leads by 1-2 frames). */
-  chestBurst(at = this.ctx.currentTime) {
+  chestBurst(at = soon(this.ctx)) {
     this.charge?.stop(at, 0.03);
     this.hush(at, at + 0.2);
     return this.play("chest_burst", { at: at + 0.2 });
@@ -683,7 +693,7 @@ export class AudioEngine {
    * - { t, cue: 'music_stop' | 'music_level' | 'music_lowpass' | 'music_lift', opts: { fade? | v, ramp? | hz, ramp? | db, ramp? } }
    * - { t, cue: 'hush', opts: { until } } / { t, cue: 'duck', opts: { db, ramp? } }
    */
-  schedule(events: SoundEvent[], t0 = this.ctx.currentTime) {
+  schedule(events: SoundEvent[], t0 = soon(this.ctx)) {
     const named = this.named;
     const sorted = [...events].sort((a, b) => a.t - b.t);
     for (const e of sorted) {
@@ -765,7 +775,7 @@ export class AudioEngine {
         }
       }
     }
-    this.music.scheduleUntil(Math.min(this.ctx.currentTime + 0.7, t0 + 1e6));
+    this.music.scheduleUntil(Math.min(this.ctx.currentTime + AHEAD, t0 + 1e6));
   }
 
   /** Peak number of simultaneously scheduled source nodes (oscillators + buffer sources), from recorded spans. */
