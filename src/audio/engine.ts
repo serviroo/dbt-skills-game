@@ -87,6 +87,9 @@ export class AudioEngine {
   private sfxUser: GainNode;
   private bedUser: GainNode;
   private musUser: GainNode;
+  /** Effects' and Music's levels as setUser last set them, and the time constant it moves them by: sends made later go
+   *  there too. */
+  private sendLevels: { sfx: number; mus: number; tau: number };
   /** The Safe Zone's gate: the last stage before the speaker level, so the score, effects, beds and echo all pass it. */
   private safe: GainNode;
   private isQuiet = false;
@@ -170,6 +173,7 @@ export class AudioEngine {
     this.duckG.connect(this.yieldG).connect(pre);
     const sfxLevel = taper(opts.user?.sfx ?? 1);
     const musLevel = taper(opts.user?.music ?? 1);
+    this.sendLevels = { sfx: sfxLevel, mus: musLevel, tau: 0.003 };
     const level = (v: number) => {
       const g = C.createGain();
       g.gain.value = v;
@@ -186,7 +190,7 @@ export class AudioEngine {
     this.hushRoom.connect(pre);
     this.hushHall.connect(pre);
     this.echo = this.makeEcho(
-      this.makeSends(sfxLevel, musLevel),
+      this.makeSends(),
       makeIR(C, this.seedN + 1, { rt60: 0.9, length: 1.1, preDelay: 0.008, damp0: 11000, damp1: 3500, early: 0.03, onset: 0.004 }),
       makeIR(C, this.seedN + 2, { rt60: 3.2, length: 3.6, preDelay: 0.024, damp0: 12000, damp1: 2000, early: 0.07, onset: 0.03 }),
     );
@@ -371,6 +375,7 @@ export class AudioEngine {
     const m = taper(l.music);
     for (const g of [this.musUser, this.echo.sends.musRoom, this.echo.sends.musHall]) g.gain.setTargetAtTime(m, t, tau);
     const s = taper(l.sfx);
+    this.sendLevels = { sfx: s, mus: m, tau };
     for (const g of [this.sfxUser, this.bedUser, this.echo.sends.sfxRoom, this.echo.sends.sfxHall]) g.gain.setTargetAtTime(s, t, tau);
   }
 
@@ -561,14 +566,17 @@ export class AudioEngine {
     this.charge?.stop(at, sec);
   }
 
-  /** Effects' and Music's sends into an echo, at these levels. */
-  private makeSends(sfx: number, mus: number): Sends {
-    const level = (v: number) => {
+  /** Effects' and Music's sends into an echo, at their levels; made in place of `from`, they start where those are and go
+   *  on to where setUser last sent them, so a level still on its way gets there in the new sends too. */
+  private makeSends(from?: Sends): Sends {
+    const { sfx, mus, tau } = this.sendLevels;
+    const level = (to: number, was?: GainNode) => {
       const g = this.ctx.createGain();
-      g.gain.value = v;
+      g.gain.value = was?.gain.value ?? to;
+      if (was) g.gain.setTargetAtTime(to, this.ctx.currentTime, tau);
       return g;
     };
-    return { sfxRoom: level(sfx), sfxHall: level(sfx), musRoom: level(mus), musHall: level(mus) };
+    return { sfxRoom: level(sfx, from?.sfxRoom), sfxHall: level(sfx, from?.sfxHall), musRoom: level(mus, from?.musRoom), musHall: level(mus, from?.musHall) };
   }
 
   /** An empty room and hall echo with these responses, fed by `sends`. */
@@ -619,7 +627,7 @@ export class AudioEngine {
       holdAt(g.gain, at);
       g.gain.linearRampToValueAtTime(0, at + fade);
     }
-    const sends = this.makeSends(this.sfxUser.gain.value, this.musUser.gain.value);
+    const sends = this.makeSends(old.sends);
     this.echo = this.makeEcho(sends, old.room.buffer!, old.hall.buffer!);
     Object.assign(this.lib, { room: sends.sfxRoom, hall: sends.sfxHall });
     Object.assign(this.libMusic, { room: sends.musRoom, hall: sends.musHall });

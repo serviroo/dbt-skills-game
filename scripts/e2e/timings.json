@@ -630,6 +630,7 @@
   "skip-in-the-chest-charge": 4,
   "skip-in-the-hush": 7,
   "skip-keeps-default": 72,
+  "skip-keeps-the-sound-levels": 15,
   "skip-late-in-awaken": 14,
   "skip-mid-silhouette": 5,
   "skip-stops-the-intro-sound": 110,

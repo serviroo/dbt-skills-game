@@ -700,6 +700,42 @@ export const scenarios = {
     }
   },
 
+  /** Effects turned off as Skip is pressed stay off: a tap on Home afterwards is silent, its echo too, so the echo that
+   *  leaving brings in takes the level the old one was going to */
+  async 'skip-keeps-the-sound-levels'(h) {
+    const levels = JSON.stringify({ v: 1, master: 1, music: 0, sfx: 1, hum: 0, muted: false });
+    // a first visit, at the names: the Sound panel is there (a ?shot has none)
+    const { ctx, page, errors } = await visit(h, `?fresh${LIGHT}`, PHONE, { seed: { 'dbt.audio.v1': levels }, prepare: installAudioRecorder });
+    try {
+      await STAGES.names.reach(page);
+      await audioReady(page);
+      const pressed = await page.evaluate(async () => {
+        const { uiSounds } = await import('/src/ui/cutscene-ui.ts');
+        window.__tap = () => {
+          const at = window.__taps[0].context.currentTime;
+          uiSounds.play('ui_tap');
+          return at;
+        };
+        // Effects to 0 in the Sound panel, and Skip, in one go: the level is still on its way when the intro is left
+        const effects = document.getElementById([...document.querySelectorAll('.vol-l')].find((l) => l.textContent === 'Effects').htmlFor);
+        effects.value = '0';
+        effects.dispatchEvent(new Event('input', { bubbles: true }));
+        document.querySelector('.ui-skip').click();
+        return window.__taps[0].context.currentTime;
+      });
+      await until(page, (t) => window.__taps[0].context.currentTime > t + 2, pressed, { timeout: 15000 });
+      const at = await page.evaluate(() => window.__tap());
+      await audioRecorded(page, 0, at + 0.7);
+      const tapped = await heard(page, at, at + 0.6);
+      h.expect(tapped.read >= 0.9, `the recorder read only ${Math.round(tapped.read * 100)}% of the time after the tap`);
+      h.expect(tapped.peak < SILENT_PEAK && tapped.rms < SILENT_RMS, `with Effects off, a tap on Home after Skip still sounded (peak ${tapped.peak}, RMS ${tapped.rms})`);
+      await until(page, () => window.__daily?.route.name === 'hub', null, { timeout: 30000 });
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** Help is one tap with the Sound panel open: the tap that closes it still lands on the intro's Skip and Safe Zone, and
    *  in the companion on the Safe Zone, Talk to someone now and a number to call */
   async 'one-tap-with-sound-open'(h) {
