@@ -80,6 +80,13 @@ function statusPanel(app: App) {
     () => null,
   );
   const parts = [letter, name, rank, xp, flower, stats];
+  const moth = h('div', { class: 'dq-firstshadow', html: mothSVG({ size: 84 }) });
+  // the companion's name, renamed in another open copy too (the art mints new ids, so it is named in place)
+  const nameMoth = () => {
+    moth.title = typo('{companion}, asleep');
+    moth.querySelector('svg')?.setAttribute('aria-label', typo('{companion}, a small night moth, asleep'));
+  };
+  nameMoth();
   const el = panel(
     { title: 'Status', ic: icon('status'), cls: 'dq-status', label: 'Status' },
     h('div', { class: 'dq-hairbar', 'aria-hidden': 'true' }),
@@ -88,7 +95,7 @@ function statusPanel(app: App) {
       { class: 'dq-player' },
       h('div', { class: 'dq-crystal', 'aria-hidden': 'true', html: crystalSVG(58) }, letter.node),
       h('dl', { class: 'dq-kvs' }, name.node, title.el, classRow(), rank.node, xp.node),
-      h('div', { class: 'dq-firstshadow', title: typo('{companion}, asleep'), html: mothSVG({ size: 84, label: typo('{companion}, a small night moth, asleep') }) }),
+      moth,
       flower.node,
     ),
     titleUnlock(app),
@@ -141,6 +148,7 @@ function statusPanel(app: App) {
     d = st.derived();
     parts.forEach((x) => x.update());
     title.sync();
+    nameMoth();
     // shown now, so it never counts up on a later visit to Home
     app.shown = { xp: d.xp, stats: { ...d.stats } };
   };
@@ -149,21 +157,24 @@ function statusPanel(app: App) {
 
 function questSection(app: App) {
   const st = app.store;
-  const q = st.quest();
+  let q = st.quest();
   const today = st.today();
   const practised = () => st.state.events.some((e) => e.k === 'skill' && e.day === today);
   let open = st.state.flags.cardDay === today;
   let done = practised();
-  const front = skillCard(q.skill, { label: q.label, special: q.special });
-  front.append(h('span', { class: 'dq-sheen', 'aria-hidden': 'true' }));
-  const foil = foilLayer(app, front, today);
-  const cardName = q.special === 'comfort' ? 'Comfort' : q.special === 'free' ? 'Free choice' : SKILL[isSkillId(q.skill) ? q.skill : 'wise-mind'].sl;
-  const openLabel = `Today's skill card: ${cardName}. Open it.`;
+  const face = () => {
+    const f = skillCard(q.skill, { label: q.label, special: q.special });
+    f.append(h('span', { class: 'dq-sheen', 'aria-hidden': 'true' }));
+    return f;
+  };
+  let front = face();
+  let foil = foilLayer(app, front, today);
+  const openLabel = () => `Today's skill card: ${q.special === 'comfort' ? 'Comfort' : q.special === 'free' ? 'Free choice' : SKILL[isSkillId(q.skill) ? q.skill : 'wise-mind'].sl}. Open it.`;
   const back = h('div', { class: 'dq-cardface dq-cardface--back', html: cardBackArt(app) }, h('span', { class: 'dq-cb-orn', 'aria-hidden': 'true' }), h('span', { class: 'dq-cb-t', text: 'Tap to reveal' }));
   let backWorn = worn(st, 'cardBack');
   const inner = h('div', { class: 'dq-card-inner' }, back, front);
   const note = h('p', { class: 'dq-quest-note', 'aria-live': 'polite', text: done ? typo(QUEST.done) : '' });
-  const card = h('button', { type: 'button', class: `dq-card ${open ? 'is-open' : ''}`, 'aria-label': open ? openLabel : "Reveal today's skill card" }, inner);
+  const card = h('button', { type: 'button', class: `dq-card ${open ? 'is-open' : ''}`, 'aria-label': open ? openLabel() : "Reveal today's skill card" }, inner);
   const begin = () => {
     if (q.special === 'comfort') app.go({ name: 'comfort' });
     else if (q.special === 'free') app.go({ name: 'shadows' });
@@ -185,7 +196,7 @@ function questSection(app: App) {
     open = true;
     const isNew = !st.derived().collection.has(q.skill) && !q.special;
     card.classList.add('is-open');
-    card.setAttribute('aria-label', openLabel);
+    card.setAttribute('aria-label', openLabel());
     st.state.flags.cardDay = today;
     st.add('card', 0, q.special ? { data: { slot: q.slot, special: q.special } } : { skill: q.skill, data: { slot: q.slot } });
     app.sound('card_flip');
@@ -223,10 +234,22 @@ function questSection(app: App) {
       backWorn = worn(st, 'cardBack');
       back.firstElementChild?.replaceWith(h('span', { html: cardBackArt(app) }).firstElementChild!);
     }
+    // today's card as every open copy deals it: until it is revealed, visit days restored in another copy can deal
+    // another, and one revealed there is the one shown here; Begin opens it
+    const now = st.quest();
+    if (now.slot !== q.slot) {
+      q = now;
+      const next = face();
+      front.replaceWith(next);
+      front = next;
+      foil = foilLayer(app, front, today);
+      go.querySelector('.dq-btn-t')!.textContent = q.special ? 'Open' : 'Begin';
+      if (open) card.setAttribute('aria-label', openLabel());
+    }
     if (!open && st.state.flags.cardDay === today) {
       open = true;
       card.classList.add('is-open');
-      card.setAttribute('aria-label', openLabel);
+      card.setAttribute('aria-label', openLabel());
       go.classList.remove('is-hidden');
       fade(card, ...shown(2));
     }
@@ -254,10 +277,16 @@ function questSection(app: App) {
 
 function checkinPanel(app: App) {
   const st = app.store;
-  /** what it shows follows the save, until the player answers or asks again here */
-  let following = true;
+  /** the check-in made here (and one being made): its answer shows until another open copy checks in after it */
+  let mine: string | null = null;
+  let answering = false;
+  /** the player put something else in the panel since it was drawn: their answer, or the question again */
+  let theirs = false;
+  /** today's latest check-in as the panel last showed it, and whether it was heavy */
+  const latest = () => `${app.lastCheckin()?.id ?? ''} ${app.hushed()}`;
+  let showing = latest();
   const again = () => {
-    following = false;
+    theirs = true;
     body().replaceChildren(...ask());
     fade();
   };
@@ -274,17 +303,19 @@ function checkinPanel(app: App) {
     h('p', { class: 'dq-lead dq-after' }, CHECKIN.after.map((l) => h('span', { text: typo(l) }))),
     h('div', { class: 'dq-actions dq-actions--end' }, btn('Check in again', again, { kind: 'link' })),
   ];
-  // as Home opens it shows the latest check-in today, another open copy's too: after a heavy one there only the open door
-  // shows here as well, and a lighter one after it asks again
+  // as Home opens, and whenever another open copy checks in later, it shows the latest check-in today: after a heavy one
+  // only the open door, after a lighter one the question again
   const view = redrawn(() => h('div', { class: 'dq-checkin-body' }, app.hushed() ? after() : ask()), (): HTMLElement | null => body().querySelector('button'));
   const body = () => view.node as HTMLElement;
   const el = panel({ title: 'Check-in', ic: icon('checkin'), cls: 'dq-checkin', label: 'Check-in' }, view.node);
   const fade = () => animate(body(), [{ opacity: 0 }, { opacity: 1 }], { duration: app.reduced() ? 150 : 380 });
   const answer = (feel: Feeling) => {
-    following = false;
     st.sync();
     const first = st.state.flags.checkinDay !== st.today();
+    answering = theirs = true;
     const ev = st.add('checkin', first ? 10 : 0, { data: { feel, level: null } });
+    answering = false;
+    mine = ev.id;
     st.state.flags.checkinDay = st.today();
     st.save();
     const s0 = suggestFor(feel, null, st.quest().skill);
@@ -343,7 +374,13 @@ function checkinPanel(app: App) {
     fade();
   };
   const sync = () => {
-    if (following && view.update()) fade();
+    if (answering || (mine && app.lastCheckin()?.id === mine)) return;
+    const now = latest();
+    if (now === showing) return;
+    showing = now;
+    // what the player put in the panel gives way too
+    if (view.update(theirs)) fade();
+    theirs = false;
   };
   return { el, sync };
 }
@@ -432,6 +469,8 @@ function menu(app: App) {
     ['settings', 'Settings', 'Your name, sound, backup', () => app.go({ name: 'settings' })],
   ];
   const artThumb = h('span', { class: 'dq-tile-thumb', 'aria-hidden': 'true' });
+  // today's prompt as every open copy deals it: visit days restored there, or the companion renamed, change it here too
+  const prompt = redrawn(() => h('span', { class: 'dq-tile-s', text: typo(todayPrompt(app)) }), () => null);
   const as = artStore(app.store.key);
   let turn = 0;
   // the newest drawing and the allies, as every tab has them now (a drawing saved, removed or brought back)
@@ -451,7 +490,7 @@ function menu(app: App) {
     { type: 'button', class: 'dq-tile dq-tile--art', onclick: () => app.go({ name: 'art' }) },
     h('span', { class: 'dq-tile-ic', html: icon('brush') }),
     h('span', { class: 'dq-tile-t', text: 'Art room' }),
-    h('span', { class: 'dq-tile-s', text: typo(todayPrompt(app)) }),
+    prompt.node,
     artThumb,
   );
   const storySub = h('span', { class: 'dq-tile-s dq-tile-story', text: 'Start your first story' });
@@ -484,8 +523,9 @@ function menu(app: App) {
   void showArt();
   return {
     el: h('nav', { class: 'dq-menu', 'aria-label': 'Places' }, art, story, tiles),
-    // a skill met in another open copy
+    // a skill met, or today's prompt dealt anew, in another open copy
     sync: () => {
+      prompt.update();
       const line = typo(allyLine(allies));
       if (shadowsSub.textContent !== line) shadowsSub.textContent = line;
     },
@@ -499,7 +539,9 @@ function menu(app: App) {
 }
 
 export function hubScreen(app: App): ScreenOut {
-  const gift = h('p', { class: 'dq-gift' }, h('span', { class: 'dq-gift-k', text: 'Daily gift' }), h('span', { class: 'dq-gift-t', html: md(app.store.giftLine()) }));
+  // today's gift as every open copy deals it: visit days restored there, or the companion renamed, change it here too
+  const giftText = redrawn(() => h('span', { class: 'dq-gift-t', html: md(app.store.giftLine()) }), () => null);
+  const gift = h('p', { class: 'dq-gift' }, h('span', { class: 'dq-gift-k', text: 'Daily gift' }), giftText.node);
   const quest = questSection(app);
   const chest = lobby(app, gift);
   const line = linePanel(app);
@@ -516,6 +558,9 @@ export function hubScreen(app: App): ScreenOut {
     h('div', { class: 'dq-hcol dq-hcol--r' }, h('div', { class: 'dq-col dq-col--c' }, checkin.el), h('div', { class: 'dq-col dq-col--m' }, places.el)),
   );
   // what another open copy changes shows here as it lands: nothing it did plays, counts up or celebrates here
-  const off = app.store.onChange(() => [chest, quest, line, status, checkin, places].forEach((x) => x.sync()));
+  const off = app.store.onChange(() => {
+    giftText.update();
+    [chest, quest, line, status, checkin, places].forEach((x) => x.sync());
+  });
   return { el, title: 'The Lantern', mode: 'hub', bubbles: [2.4, 0.75], leave: () => { off(); places.off(); } };
 }

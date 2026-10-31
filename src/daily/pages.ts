@@ -13,7 +13,7 @@ import { allyCard, allyName, cardOf, favFirst, focusBack, refill } from './artro
 import { artStore } from './artstore';
 import { storyStore } from './storystore';
 import { addDays, cleanName, dayKey, fieldKey, fieldTimes, isSkillId, ROW_CAP, uid, type DiaryEntry, type State, type Store } from './store';
-import { btn, copyText, field, h, md, p, panel, place, quotes, redrawn, segmented, shareOrSave, toggle, typo, youCopy } from './ui';
+import { btn, copyText, field, h, md, p, panel, place, quotes, redrawn, segmented, shareOrSave, toggle, typo } from './ui';
 import type { KeepStatus } from '../pwa/register';
 import { volumeSliders } from '../ui/volume';
 import { STEALTH, STEALTH_LINES } from '../content/stealth-lines';
@@ -73,7 +73,6 @@ export function restScreen(app: App): ScreenOut {
     st.add('rest', 10, firstEver || quiet ? { data: { ...(firstEver ? { title: LURKER_TITLE } : {}), ...(quiet ? { quiet: true } : {}) } } : {});
   }
   const prefs = stealthPrefs(st.key);
-  const line = STEALTH_LINES[st.visitIndex() % STEALTH_LINES.length];
 
   const fish = ([0, 1, 2] as const).map((tone) => h('div', { class: `dq-st-fish dq-st-fish${tone}` }, h('div', { class: 'dq-st-fish-in', html: fishSVG(tone) })));
   const weeds = [0, 1, 2].map((i) => h('div', { class: `dq-st-weed dq-st-weed${i}`, html: seaweedSVG([118, 82, 104][i], i * 1.7) }));
@@ -144,12 +143,15 @@ export function restScreen(app: App): ScreenOut {
     );
     return b;
   };
+  // the day's line as every open copy has it: visit days restored there, or the companion renamed, change it here too
+  const said = redrawn(() => p(STEALTH_LINES[st.visitIndex() % STEALTH_LINES.length], 'dq-text dq-st-line'), () => null);
   const fishBtn = mode(STEALTH.aquarium, ST_IC.fish, prefs.aquarium, setAquarium);
   const wordsBtn = mode(STEALTH.words, ST_IC.breath, prefs.words, setWords, `${STEALTH.words}, ${STEALTH.wordsHint}`);
   // the look chosen in another open copy's Stealth room: this one takes it on, the breath going on as it was. Bramble,
   // arriving with visit days counted there (a Save Crystal restored), settles into his corner with a slow fade
   let kept = JSON.stringify(stealthPrefs(st.key));
   const offLook = st.onChange(() => {
+    said.update();
     if (!nap && (nap = brambleNap(app))) {
       stage.append(nap);
       animate(nap, [{ opacity: 0 }, { opacity: getComputedStyle(nap).opacity }], { duration: app.reduced() ? WINDOW.reducedFadeMs : CALM.fadeMs, easing: css(CALM.ease) });
@@ -174,7 +176,7 @@ export function restScreen(app: App): ScreenOut {
       fishBtn,
       wordsBtn,
     ),
-    youCopy(p(line, 'dq-text dq-st-line'), line, true),
+    said.node,
     h('section', { class: 'dq-st-bath', 'aria-label': 'Bubble bath' }, h('p', { class: 'dq-st-kicker', text: STEALTH.slimeKicker }), slime.el, p(STEALTH.slimeLine, 'dq-text dq-st-bath-l')),
   );
   el.classList.toggle('is-aquarium', prefs.aquarium);
@@ -260,11 +262,12 @@ export function restScreen(app: App): ScreenOut {
 const cell = (card: HTMLElement) => h('div', { class: 'dq-cardcell' }, card);
 
 export function shadowsScreen(app: App): ScreenOut {
+  const companion = redrawn(() => h('h2', { class: 'dq-first-n', text: typo('{companion}') }), () => null);
   const first = h(
     'article',
     { class: 'dq-first' },
     h('div', { class: 'dq-first-art', html: mothSVG({ size: 150 }) }),
-    h('div', { class: 'dq-first-txt' }, youCopy(h('h2', { class: 'dq-first-n', text: typo('{companion}') }), '{companion}'), p('A small night moth, asleep. It was here before any skill, and it stays.', 'dq-text'), h('span', { class: 'dq-tag dq-mint', text: 'Yours' })),
+    h('div', { class: 'dq-first-txt' }, companion.node, p('A small night moth, asleep. It was here before any skill, and it stays.', 'dq-text'), h('span', { class: 'dq-tag dq-mint', text: 'Yours' })),
   );
   // every skill met and practised, another open copy's too, as it lands; focus stays on the same skill's card
   const grid = redrawn(() => {
@@ -291,6 +294,7 @@ export function shadowsScreen(app: App): ScreenOut {
   }, () => null);
   const inventory = inventorySection(app);
   const offShown = app.store.onChange(() => {
+    companion.update();
     grid.update();
     inventory.sync();
   });

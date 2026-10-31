@@ -11,7 +11,7 @@ import { artStore, extrasOf, revOf, type Draft, type DrawingMeta, type DrawingRe
 import { canvasBlob, INKS, InkPad, PAGE, renderDrawing, SIZES, TOOLS, type Paper, type Stroke, type Tool } from './ink';
 import { dayLabel } from './lines';
 import { uid } from './store';
-import { btn, chip, field, h, p, panel, radioKeys, shareOrSave, typo, youCopy } from './ui';
+import { btn, chip, field, h, p, panel, radioKeys, redrawn, shareOrSave, typo } from './ui';
 
 const store = (app: App) => artStore(app.store.key);
 const KEPT_APART = 'A newer copy of this drawing arrived, so this one was kept as its own page.';
@@ -193,6 +193,8 @@ export function artScreen(app: App): ScreenOut {
   const draftBox = h('div', { class: 'dq-art-draft is-hidden' });
   const gallery = h('div', { class: 'dq-gallery', 'aria-live': 'polite' });
   const note = h('p', { class: 'dq-small dq-art-note is-hidden', text: ART.noStore });
+  // today's prompt as every open copy deals it: visit days restored there, or the companion renamed, change it here too
+  const prompt = redrawn(() => h('span', { class: 'dq-artentry-prompt', text: typo(todayPrompt(app)) }), () => null);
   const entry = (kind: Paper, title: string, sub: string, extra: HTMLElement | null) =>
     h(
       'button',
@@ -209,7 +211,7 @@ export function artScreen(app: App): ScreenOut {
     h(
       'div',
       { class: 'dq-artentries' },
-      entry('today', ART.todayTitle, ART.todaySub, youCopy(h('span', { class: 'dq-artentry-prompt', text: typo(todayPrompt(app)) }), todayPrompt(app))),
+      entry('today', ART.todayTitle, ART.todaySub, prompt.node as HTMLElement),
       entry('ally', ART.allyTitle, ART.allySub, null),
     ),
     h('section', { class: 'dq-art-pages', 'aria-labelledby': 'dq-pages-h' }, h('h2', { class: 'dq-sec-h', id: 'dq-pages-h' }, h('span', { text: ART.pages })), gallery, note),
@@ -263,8 +265,9 @@ export function artScreen(app: App): ScreenOut {
     focusBack(gallery);
   };
   const off = as.onChange(() => void render());
+  const offPrompt = app.store.onChange(prompt.update);
   void render();
-  return { el, title: ART.title, mode: 'sub', bubbles: [1.6, 0.6], leave: () => { refresh++; off(); } };
+  return { el, title: ART.title, mode: 'sub', bubbles: [1.6, 0.6], leave: () => { refresh++; off(); offPrompt(); } };
 }
 
 function entryArt(kind: Paper) {
@@ -354,7 +357,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
       );
       return;
     }
-    youCopy(promptText, prompt).textContent = typo(prompt);
+    promptText.textContent = typo(prompt);
     promptRow.replaceChildren(
       h('span', { class: 'dq-prompt-k', html: `${icon('brush')}<span>Prompt</span>` }),
       promptText,
@@ -367,6 +370,12 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     );
   };
   renderPrompt();
+  // the companion renamed in another open copy: the prompt being drawn to takes the new name, and stays the same prompt
+  offs.push(
+    app.store.onChange(() => {
+      if (prompt) promptText.textContent = typo(prompt);
+    }),
+  );
 
   // tools. Picking an ink while erasing goes back to the last way of painting.
   let paint: Tool = 'brush';

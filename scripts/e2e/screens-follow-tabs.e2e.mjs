@@ -3,15 +3,19 @@
 //                             tab earned or chose, and its check-in follows a heavy check-in there and a lighter one
 //                             after it; an open line history follows too. Nothing here plays, counts up or opens a
 //                             window, focus and scroll stay where they were (focus on a check-in answer that goes moves
-//                             to Check in again, seen whole), and an older copy of the save arriving after never lowers
-//                             a number
+//                             to Check in again, seen whole), a check-in there after one answered here takes over,
+//                             and an older copy of the save arriving after never lowers a number
 //   night-watch-follows-tabs  the Night Watch's skill shadows take a skill met and one practised again in another tab,
 //                             focus stays on the same skill's card, nothing plays, and an older copy arriving after
 //                             never takes a shadow or a count away
 //   moment-follows-tabs       How long chosen in another tab shows on a running moment, which goes on unbroken (its
 //                             low hum still on, focus on Done) and lasts that long from the change, never ending early
 //   home-looks-follow-tabs    a name plate, card back and title kept in another tab show on Home, and the open title
-//                             list stays open with focus on the same title
+//                             list stays open with focus on the same title; names changed there show here without
+//                             Home being drawn again: Stats stay open, focus and scroll stay put
+//   restored-days-follow-tabs visit days restored in another tab deal the gift, today's card (and where Begin goes), the
+//                             Art room's prompt on Home and in the Art room, and the Stealth room's line as a fresh
+//                             visit would, while the card stays face down
 //   night-watch-arrivals-tabs visit days restored in another tab bring their watchers into the row and the camp and the
 //                             pebble into the Inventory, building the camp once and keeping a half-typed name and its
 //                             focus; nothing unrelated builds it again, the companion renamed there is renamed here, and
@@ -160,6 +164,15 @@ export const scenarios = {
       if ((await home(page)).checkin === 'ask') problems.push(...(await focusOn(page.locator('.dq-checkin').getByRole('button', { name: 'Calm', exact: true }), `${tag} after a lighter check-in elsewhere`)));
       else problems.push(`${tag}: a lighter check-in in another tab left Home's check-in on ${(await home(page)).checkin}`);
       await h.shot(page, `home-checkin-again-${tag}`);
+      // answered here, then a heavier check-in there: it takes over from the answer
+      await page.locator('.dq-checkin').getByRole('button', { name: 'Calm', exact: true }).click();
+      await page.locator('.dq-checkin .dq-suggest').waitFor();
+      await page.evaluate(() => (window.__fx = []));
+      // that tab now asks again too, as this one checked in after it
+      await other.page.locator('.dq-checkin').getByRole('button', { name: 'Hurt', exact: true }).click();
+      await other.page.waitForFunction(() => window.__daily.route.name === 'ease');
+      if (!(await until(page, () => !!document.querySelector('.dq-checkin .dq-after')))) problems.push(`${tag}: a heavy check-in in another tab after one answered here left the answer showing (${(await home(page)).checkin})`);
+      await h.shot(page, `home-checkin-answered-then-heavy-${tag}`);
 
       // an older copy arriving changes nothing shown: the store keeps everything both had
       const now = await home(page);
@@ -319,9 +332,27 @@ export const scenarios = {
       if (!before.open || !after.open) problems.push(`${tag}: the open title list ${before.open ? 'closed' : 'never opened'} when a title was worn in another tab`);
       if (!(await kept(page))) problems.push(`${tag}: focus left Self-Healer in the open list for ${await page.evaluate(() => document.activeElement?.textContent)}`);
       else problems.push(...(await focusOn(healer, `${tag} Self-Healer in the open title list`)));
+      await h.shot(page, `home-looks-after-${tag}`);
+      // renamed there: Home keeps its open Stats, title list, focus and scroll
+      await page.locator('.dq-stats-toggle').click();
+      await healer.focus();
+      const y = await page.evaluate(() => scrollY);
+      await go(other.page, { name: 'settings' });
+      for (const [label, v] of [[/^Your name/, 'Rowan'], [/companion.s name/, 'Moth']]) {
+        const f = other.page.getByLabel(label);
+        await f.scrollIntoViewIfNeeded();
+        await f.fill(v);
+        await f.press('Enter');
+        await f.blur();
+      }
+      const named = await until(page, () => document.querySelector('.dq-status [data-you-name]')?.textContent === 'Rowan' && document.querySelector('.dq-firstshadow')?.title.startsWith('Moth') && !!document.querySelector('.dq-firstshadow svg')?.getAttribute('aria-label')?.startsWith('Moth'));
+      const home_ = await page.evaluate(() => ({ stats: document.querySelector('.dq-status')?.classList.contains('is-open'), list: !document.querySelector('.w2-title-list')?.classList.contains('is-hidden'), y: scrollY }));
+      if (!named) problems.push(`${tag}: Home shows ${await page.evaluate(() => `${document.querySelector('.dq-status [data-you-name]')?.textContent} and ${document.querySelector('.dq-firstshadow')?.title}`)} after Rowan and Moth were chosen in another tab`);
+      if (!home_.stats || !home_.list || Math.abs(home_.y - y) > 1) problems.push(`${tag}: renaming elsewhere left Stats ${home_.stats ? 'open' : 'closed'}, the title list ${home_.list ? 'open' : 'closed'}, and moved Home from ${y} to ${home_.y}`);
+      problems.push(...(await focusOn(healer, `${tag} Self-Healer after renaming elsewhere`)));
       const fx = await page.evaluate(() => window.__fx);
       if (fx.length) problems.push(`${tag}: Home played or showed this for another tab's doings: ${fx.join('; ')}`);
-      await h.shot(page, `home-looks-after-${tag}`);
+      await h.shot(page, `home-renamed-${tag}`);
       problems.push(...[errors, other.errors].flat().map((e) => `${tag}: ${e}`));
       await ctx.close();
     }
@@ -482,6 +513,62 @@ export const scenarios = {
       if (!(await kept(page))) problems.push(`${tag}: focus left the Aquarium button for ${await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 80))}`);
       await h.shot(page, `stealth-look-after-${tag}`);
       problems.push(...[errors, other.errors].flat().map((e) => `${tag}: ${e}`));
+      await ctx.close();
+    }
+    h.expect(!problems.length, problems.join('\n'));
+  },
+
+  async 'restored-days-follow-tabs'(h) {
+    const problems = [];
+    for (const [tag, viewport] of SIZES) {
+      const { ctx, page, errors } = await open(h, viewport);
+      const art = await another(ctx, h);
+      await go(art.page, { name: 'art' });
+      await art.page.locator('.dq-artentry-prompt').waitFor();
+      const room = await another(ctx, h);
+      await go(room.page, { name: 'rest' });
+      await room.page.locator('.dq-st-line').waitFor();
+      const other = await another(ctx, h);
+      await h.reachHub(other.page);
+      await watch(page);
+      const dealt = (p) =>
+        p.evaluate(() => ({
+          gift: document.querySelector('.dq-gift-t')?.textContent,
+          card: document.querySelector('.dq-cardface--front .dq-cf-name')?.textContent,
+          prompt: document.querySelector('.dq-tile--art .dq-tile-s')?.textContent,
+          faceDown: !document.querySelector('.dq-card')?.classList.contains('is-open'),
+        }));
+      const before = await dealt(page);
+      // another tab restores ten more visit days; once every copy holds them, it draws Home afresh as the one to match
+      await other.page.evaluate(([k, v]) => localStorage.setItem(k, v), [h.SAVE, JSON.stringify({ v: 1, created: T, events: visits(10) })]);
+      await until(other.page, () => window.__daily.store.derived().visitDays.length >= 12);
+      await other.page.reload();
+      await h.reachHub(other.page);
+      const fresh = await dealt(other.page);
+      await page.waitForTimeout(500);
+      const now = await dealt(page);
+      if (['gift', 'card', 'prompt'].every((k) => before[k] === fresh[k])) problems.push(`${tag}: the restored days dealt nothing new, so this proves nothing`);
+      for (const k of ['gift', 'card', 'prompt']) if (now[k] !== fresh[k]) problems.push(`${tag}: Home's ${k} is "${now[k]}", a fresh visit's "${fresh[k]}"`);
+      if (!now.faceDown) problems.push(`${tag}: today's card turned over by itself`);
+      const artPrompt = await art.page.locator('.dq-artentry-prompt').textContent();
+      if (artPrompt !== fresh.prompt) problems.push(`${tag}: the Art room's prompt is "${artPrompt}", a fresh visit's "${fresh.prompt}"`);
+      const line = await room.page.locator('.dq-st-line').textContent();
+      await go(other.page, { name: 'rest' });
+      const freshLine = await other.page.locator('.dq-st-line').textContent();
+      if (line !== freshLine) problems.push(`${tag}: the Stealth room's line is "${line}", a fresh visit's "${freshLine}"`);
+      const fx = await page.evaluate(() => window.__fx);
+      if (fx.length) problems.push(`${tag}: Home played or showed this for another tab's doings: ${fx.join('; ')}`);
+      await h.shot(page, `restored-days-home-${tag}`);
+      // Begin opens the card now dealt
+      const want = await page.evaluate(() => window.__daily.store.quest());
+      await page.locator('.dq-quest .dq-card').click({ force: true });
+      await page.locator('.dq-quest-go:not(.is-hidden)').waitFor();
+      await page.locator('.dq-quest-go').click();
+      const went = await page.evaluate(() => window.__daily.route);
+      const wanted = want.special === 'comfort' ? 'comfort' : want.special === 'free' ? 'shadows' : `skill ${want.skill}`;
+      const got = went.name === 'skill' ? `skill ${went.id}` : went.name;
+      if (got !== wanted) problems.push(`${tag}: Begin went to ${got}, not today's ${wanted}`);
+      problems.push(...[errors, art.errors, room.errors, other.errors].flat().map((e) => `${tag}: ${e}`));
       await ctx.close();
     }
     h.expect(!problems.length, problems.join('\n'));

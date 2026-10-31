@@ -75,16 +75,6 @@ export function p(text: string, cls = 'dq-text') {
   return h('p', { class: cls, html: md(text) });
 }
 
-/**
- * Marks `e` as showing `copy`, which may hold {name} or {companion}, drawn as text (or as `md`, with `html`): a name
- * chosen in another open copy draws it again in place (see App).
- */
-export function youCopy<T extends HTMLElement>(e: T, copy: string, html = false) {
-  e.dataset.youCopy = copy;
-  e.toggleAttribute('data-you-md', html);
-  return e;
-}
-
 export function panel(opts: { title?: string; ic?: string; cls?: string; tag?: 'section' | 'div' | 'article'; label?: string } = {}, ...kids: (Child | Child[])[]) {
   const head = opts.title
     ? h('header', { class: 'dq-chip' }, opts.ic ? h('span', { class: 'dq-chip-ic', html: opts.ic }) : null, h('h2', { class: 'dq-chip-t', text: opts.title }))
@@ -240,7 +230,8 @@ export function place(box: HTMLElement, kids: HTMLElement[], fallback?: () => HT
 
 /**
  * Part of a screen drawn from the player's own data (null draws nothing), which `update` draws again in place when what
- * it shows changed: in another open copy, or by a clear. `node` is what shows now, and `update` says whether it drew.
+ * it shows changed: in another open copy, or by a clear. `node` is what shows now, and `update` says whether it drew;
+ * `update(true)` draws it even when the drawing is the same, for a screen that showed something else in its place.
  * Focus on a control that goes moves to that same control drawn again (the same item's, by the data-item id of the row
  * it is in, with the same name and link: its label, else its words), else to `lost`, never to a control of someone or
  * something else. It goes only where the player can see it, brought whole into view, focus ring and all, clear of the
@@ -262,10 +253,10 @@ export function redrawn(draw: () => Element | null, lost: () => HTMLElement | nu
     get node() {
       return node;
     },
-    update() {
+    update(again = false) {
       const next = make();
       const now = html(next);
-      if (now === shown) return false;
+      if (now === shown && !again) return false;
       const had = document.activeElement instanceof HTMLElement && node.contains(document.activeElement) ? document.activeElement : null;
       node.replaceWith(next);
       node = next;
