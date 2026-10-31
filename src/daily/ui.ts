@@ -230,13 +230,82 @@ export function place(box: HTMLElement, kids: HTMLElement[], fallback?: () => HT
 
 /**
  * Part of a screen drawn from the player's own data (null draws nothing), which `update` draws again in place when what
- * it shows changed: in another open copy, or by a clear. Focus on a control that goes moves to that same control drawn
- * again (the same item's, by the data-item id of the row it is in, with the same name, link and words), else to `lost`,
- * never to a control of someone or something else. It goes only where the player can see it, brought whole into view,
- * focus ring and all, clear of the pinned bars (their scroll padding in daily.css).
+ * it shows changed: in another open copy, or by a clear. `node` is what shows now, and `update` says whether it drew;
+ * `update(true)` draws it even when the drawing is the same, for a screen that showed something else in its place.
+ * Focus on a control that goes moves to that same control drawn again (the same item's, by the data-item id of the row
+ * it is in, with the same name and link: its label, else its words), else to `lost`, never to a control of someone or
+ * something else. It goes only where the player can see it, brought whole into view, focus ring and all, clear of the
+ * pinned bars (their scroll padding in daily.css). What the player is looking at stays put (see holdView).
  */
+/** The nearest box that scrolls `e`, else the page. */
+export function scrollerOf(e: Element) {
+  for (let p = e.parentElement; p; p = p.parentElement) if (/auto|scroll/.test(getComputedStyle(p).overflowY) && p.scrollHeight > p.clientHeight) return p;
+  return document.scrollingElement as HTMLElement | null;
+}
+
+/** The top of what `box` shows, under its pinned bars (its scroll padding). */
+const viewTop = (box: Element) => (box === document.scrollingElement ? 0 : box.getBoundingClientRect().top) + (parseFloat(getComputedStyle(box).scrollPaddingTop) || 0);
+
+type Span = { top: number; bottom: number };
+/** Where `e` reaches on screen, top to bottom; one with no box of its own (display: contents) spans its children. */
+function span(e: Element): Span | null {
+  if (e.getClientRects().length) return e.getBoundingClientRect();
+  const kids = [...e.children].map(span).filter((r): r is Span => !!r);
+  return kids.length ? { top: Math.min(...kids.map((r) => r.top)), bottom: Math.max(...kids.map((r) => r.bottom)) } : null;
+}
+
+/** Notes where `e`'s top (or bottom) is on screen; what it returns scrolls so `to` has it there again. */
+function pin(e: Element, edge: 'top' | 'bottom' = 'top') {
+  const box = scrollerOf(e);
+  const at = span(e)?.[edge];
+  return (to: Element) => {
+    const now = to.isConnected ? span(to)?.[edge] : undefined;
+    if (box && at !== undefined && now !== undefined) box.scrollTop += now - at;
+  };
+}
+
+type Held = (now?: { focus?: Element | null; part?: Element | null }) => void;
+/**
+ * Before `part` of a screen changes: notes what the player is looking at, so it stays where it is after. That is the
+ * control with focus, if it is on this screen; else, with `part` partly in view, the first item in view (a row with
+ * its data-item id, found again by that id when it is drawn anew), else the first of its children in view (or, if that
+ * went, `part`'s top); else, with all of `part` above what is in view, what follows it. Call the result once the change
+ * is made, with the control drawn in place of the focused one if that went, and with what stands in `part`'s place now.
+ */
+export function holdView(part: Element | null): Held {
+  const box = part && scrollerOf(part);
+  if (!part || !box) return () => {};
+  const f = document.activeElement;
+  if (f instanceof HTMLElement && f !== document.body && scrollerOf(f) === box) {
+    const back = pin(f);
+    return ({ focus } = {}) => {
+      const to = f.isConnected ? f : focus;
+      if (to) back(to);
+    };
+  }
+  const at = span(part);
+  if (!at) return () => {};
+  const top = viewTop(box);
+  if (at.bottom <= top) {
+    const back = pin(part, 'bottom');
+    return ({ part: now } = {}) => now && back(now);
+  }
+  if (at.top >= top) return () => {};
+  const inView = (e: Element) => (span(e)?.bottom ?? -Infinity) > top;
+  const item = [...part.querySelectorAll('[data-item]')].find(inView);
+  const id = item?.getAttribute('data-item');
+  const kid = item ?? [...part.children].find(inView);
+  const backKid = kid && pin(kid);
+  const back = pin(part);
+  return ({ part: now } = {}) => {
+    const again = kid?.isConnected ? kid : id != null ? now?.querySelector(`[data-item="${CSS.escape(id)}"]`) : null;
+    if (again && backKid) backKid(again);
+    else if (now) back(now);
+  };
+}
+
 /** Whether the player can see `e`: shown, with a size, and not hidden from anyone, a screen reader's eyes only included. */
-const seen = (e: HTMLElement) => {
+export const seen = (e: HTMLElement) => {
   const r = e.getBoundingClientRect();
   return e.checkVisibility({ visibilityProperty: true }) && r.width > 0 && r.height > 0 && !e.closest('[aria-hidden="true"], [inert], .dq-sr');
 };
@@ -248,32 +317,45 @@ export function redrawn(draw: () => Element | null, lost: () => HTMLElement | nu
   // what it showed as drawn: a map the player opened since is not a change
   let shown = html(node);
   return {
-    node,
-    update() {
+    get node() {
+      return node;
+    },
+    update(again = false) {
       const next = make();
       const now = html(next);
-      if (now === shown) return;
+      if (now === shown && !again) return false;
       const had = document.activeElement instanceof HTMLElement && node.contains(document.activeElement) ? document.activeElement : null;
+      const hold = holdView(node instanceof Element ? node : node.parentElement);
       node.replaceWith(next);
       node = next;
       shown = now;
-      if (!had) return;
+      if (!had) {
+        hold({ part: next instanceof Element ? next : null });
+        return true;
+      }
       const item = (e: Element) => e.closest('[data-item]')?.getAttribute('data-item') ?? null;
-      const like = (e: Element) => item(e) === item(had) && ['aria-label', 'href'].every((a) => e.getAttribute(a) === had.getAttribute(a)) && e.textContent === had.textContent;
+      const name = (e: Element) => e.getAttribute('aria-label') ?? e.textContent;
+      const like = (e: Element) => item(e) === item(had) && name(e) === name(had) && e.getAttribute('href') === had.getAttribute('href');
       const same = next instanceof Element ? [...next.querySelectorAll<HTMLElement>('a[href], button, summary')].find(like) : undefined;
       const to = [same, lost()].find((e): e is HTMLElement => !!e && seen(e));
-      if (!to) return;
-      to.focus({ preventScroll: true });
-      // the ring is drawn outside the box, by its width and gap: the scroll takes it in too, past whatever scroll margin
-      // the control has of its own
-      const cs = getComputedStyle(to);
-      const ring = cs.outlineStyle === 'none' ? 0 : parseFloat(cs.outlineWidth) + Math.max(0, parseFloat(cs.outlineOffset));
-      const own = to.style.scrollMargin;
-      to.style.scrollMargin = (['Top', 'Right', 'Bottom', 'Left'] as const).map((s) => `${parseFloat(cs[`scrollMargin${s}`]) + ring}px`).join(' ');
-      to.scrollIntoView({ block: 'nearest' });
-      to.style.scrollMargin = own;
+      hold({ focus: to === same ? to : null });
+      if (to) focusWhole(to);
+      return true;
     },
   };
+}
+
+/** Focuses `to` and brings all of it into view, focus ring and all, clear of the pinned bars. */
+export function focusWhole(to: HTMLElement) {
+  to.focus({ preventScroll: true });
+  // the ring is drawn outside the box, by its width and gap: the scroll takes it in too, past whatever scroll margin the
+  // control has of its own
+  const cs = getComputedStyle(to);
+  const ring = cs.outlineStyle === 'none' ? 0 : parseFloat(cs.outlineWidth) + Math.max(0, parseFloat(cs.outlineOffset));
+  const own = to.style.scrollMargin;
+  to.style.scrollMargin = (['Top', 'Right', 'Bottom', 'Left'] as const).map((s) => `${parseFloat(cs[`scrollMargin${s}`]) + ring}px`).join(' ');
+  to.scrollIntoView({ block: 'nearest' });
+  to.style.scrollMargin = own;
 }
 
 export function sr(text: string) {

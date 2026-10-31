@@ -1,3 +1,5 @@
+import { animate } from '../ui/anim';
+import { CALM, css, WINDOW } from '../motion/tokens';
 import { LOADOUT, LOADOUT_COPY, MODULES, MODULE_ORDER, SAFE, SKILL, SKILLS, type Skill } from '../content/dbt';
 import { LABEL_SECONDS, LIBRARY_COPY, NEEDS, TIMES, TOPICS } from '../content/skill-library';
 import { CRISIS_CHECKED } from '../content/crisis-lines';
@@ -11,7 +13,7 @@ import { allyCard, allyName, cardOf, favFirst, focusBack, refill } from './artro
 import { artStore } from './artstore';
 import { storyStore } from './storystore';
 import { addDays, cleanName, dayKey, fieldKey, fieldTimes, isSkillId, ROW_CAP, uid, type DiaryEntry, type State, type Store } from './store';
-import { btn, copyText, field, h, md, p, panel, place, quotes, redrawn, segmented, shareOrSave, toggle, typo } from './ui';
+import { btn, copyText, field, h, md, p, panel, place, quotes, redrawn, scrollerOf, segmented, shareOrSave, toggle, typo } from './ui';
 import type { KeepStatus } from '../pwa/register';
 import { volumeSliders } from '../ui/volume';
 import { STEALTH, STEALTH_LINES } from '../content/stealth-lines';
@@ -46,11 +48,13 @@ function stealthPrefs(key: string) {
     return { aquarium: false, words: false };
   }
 }
-function saveStealthPrefs(key: string, prefs: { aquarium: boolean; words: boolean }) {
+/** `stored` runs once the look is stored, now or after a hold, and never where storage refuses it. */
+function saveStealthPrefs(key: string, prefs: { aquarium: boolean; words: boolean }, stored: () => void) {
   const out = JSON.stringify(prefs);
   write(() => {
     try {
       localStorage.setItem(`${key}${BESIDE.stealth}`, out);
+      stored();
     } catch {
       /* the room still works; the look resets next visit */
     }
@@ -71,7 +75,6 @@ export function restScreen(app: App): ScreenOut {
     st.add('rest', 10, firstEver || quiet ? { data: { ...(firstEver ? { title: LURKER_TITLE } : {}), ...(quiet ? { quiet: true } : {}) } } : {});
   }
   const prefs = stealthPrefs(st.key);
-  const line = STEALTH_LINES[st.visitIndex() % STEALTH_LINES.length];
 
   const fish = ([0, 1, 2] as const).map((tone) => h('div', { class: `dq-st-fish dq-st-fish${tone}` }, h('div', { class: 'dq-st-fish-in', html: fishSVG(tone) })));
   const weeds = [0, 1, 2].map((i) => h('div', { class: `dq-st-weed dq-st-weed${i}`, html: seaweedSVG([118, 82, 104][i], i * 1.7) }));
@@ -86,7 +89,8 @@ export function restScreen(app: App): ScreenOut {
     h('div', { class: 'dq-st-shark-dir' }, h('span', { class: 'dq-st-wake' }), h('span', { class: 'dq-st-pop dq-st-pop0' }), h('span', { class: 'dq-st-pop dq-st-pop1' }), h('span', { class: 'dq-st-tail', html: sharkTailSVG() }), h('span', { class: 'dq-st-fin', html: sharkFinSVG() })),
   );
   const floor = h('div', { class: 'dq-st-floor', 'aria-hidden': 'true' }, shark);
-  const stage = h('div', { class: 'dq-st-stage' }, tank, glow, sea, word, floor, cat, brambleNap(app));
+  let nap = brambleNap(app);
+  const stage = h('div', { class: 'dq-st-stage' }, tank, glow, sea, word, floor, cat, nap);
 
   const title = firstEver
     ? h(
@@ -133,7 +137,8 @@ export function restScreen(app: App): ScreenOut {
           const v = b.getAttribute('aria-pressed') !== 'true';
           b.setAttribute('aria-pressed', String(v));
           set(v);
-          saveStealthPrefs(st.key, prefs);
+          // this copy hears no storage event for its own write, so it notes the look it stored itself
+          saveStealthPrefs(st.key, prefs, () => (kept = JSON.stringify(stealthPrefs(st.key))));
         },
       },
       h('span', { class: 'dq-st-mode-ic', html: ic }),
@@ -141,6 +146,28 @@ export function restScreen(app: App): ScreenOut {
     );
     return b;
   };
+  // the day's line as every open copy has it: visit days restored there, or the companion renamed, change it here too
+  const said = redrawn(() => p(STEALTH_LINES[st.visitIndex() % STEALTH_LINES.length], 'dq-text dq-st-line'), () => null);
+  const fishBtn = mode(STEALTH.aquarium, ST_IC.fish, prefs.aquarium, setAquarium);
+  const wordsBtn = mode(STEALTH.words, ST_IC.breath, prefs.words, setWords, `${STEALTH.words}, ${STEALTH.wordsHint}`);
+  // the look chosen in another open copy's Stealth room: this one takes it on, the breath going on as it was. Bramble,
+  // arriving with visit days counted there (a Save Crystal restored), settles into his corner with a slow fade
+  let kept = JSON.stringify(stealthPrefs(st.key));
+  const offLook = st.onChange(() => {
+    said.update();
+    if (!nap && (nap = brambleNap(app))) {
+      stage.append(nap);
+      animate(nap, [{ opacity: 0 }, { opacity: getComputedStyle(nap).opacity }], { duration: app.reduced() ? WINDOW.reducedFadeMs : CALM.fadeMs, easing: css(CALM.ease) });
+    }
+    const now = stealthPrefs(st.key);
+    if (JSON.stringify(now) === kept) return;
+    kept = JSON.stringify(now);
+    for (const [b, on, set] of [[fishBtn, now.aquarium, setAquarium], [wordsBtn, now.words, setWords]] as const) {
+      if (b.getAttribute('aria-pressed') === String(on)) continue;
+      b.setAttribute('aria-pressed', String(on));
+      set(on);
+    }
+  });
   const slime = new Slime({ reduced: () => app.reduced(), label: STEALTH.slimeLabel, onPoke: () => app.sound('bubble') });
   el.append(
     h('header', { class: 'dq-pagehead dq-st-head' }, h('p', { class: 'dq-st-kicker', text: STEALTH.kicker }), h('h1', { class: 'dq-h1', 'data-focus': '', text: STEALTH.title }), p(STEALTH.sub, 'dq-text dq-pagesub dq-st-sub')),
@@ -149,10 +176,10 @@ export function restScreen(app: App): ScreenOut {
     h(
       'div',
       { class: 'dq-st-modes' },
-      mode(STEALTH.aquarium, ST_IC.fish, prefs.aquarium, setAquarium),
-      mode(STEALTH.words, ST_IC.breath, prefs.words, setWords, `${STEALTH.words}, ${STEALTH.wordsHint}`),
+      fishBtn,
+      wordsBtn,
     ),
-    p(line, 'dq-text dq-st-line'),
+    said.node,
     h('section', { class: 'dq-st-bath', 'aria-label': 'Bubble bath' }, h('p', { class: 'dq-st-kicker', text: STEALTH.slimeKicker }), slime.el, p(STEALTH.slimeLine, 'dq-text dq-st-bath-l')),
   );
   el.classList.toggle('is-aquarium', prefs.aquarium);
@@ -217,6 +244,7 @@ export function restScreen(app: App): ScreenOut {
     bubbles: prefs.aquarium ? [13, 1.2] : [7, 1],
     leave: () => {
       offMotion();
+      offLook();
       timers.forEach((id) => clearTimeout(id));
       timers.clear();
       slime.destroy();
@@ -237,30 +265,42 @@ export function restScreen(app: App): ScreenOut {
 const cell = (card: HTMLElement) => h('div', { class: 'dq-cardcell' }, card);
 
 export function shadowsScreen(app: App): ScreenOut {
-  const d = app.store.derived();
-  const counts: Record<string, number> = {};
-  for (const e of app.store.state.events) if (e.k === 'skill' && e.skill) counts[e.skill] = (counts[e.skill] ?? 0) + 1;
-  const owned = SKILLS.filter((s) => d.collection.has(s.id));
+  const companion = redrawn(() => h('h2', { class: 'dq-first-n', text: typo('{companion}') }), () => null);
   const first = h(
     'article',
     { class: 'dq-first' },
     h('div', { class: 'dq-first-art', html: mothSVG({ size: 150 }) }),
-    h('div', { class: 'dq-first-txt' }, h('h2', { class: 'dq-first-n', text: typo('{companion}') }), p('A small night moth, asleep. It was here before any skill, and it stays.', 'dq-text'), h('span', { class: 'dq-tag dq-mint', text: 'Yours' })),
+    h('div', { class: 'dq-first-txt' }, companion.node, p('A small night moth, asleep. It was here before any skill, and it stays.', 'dq-text'), h('span', { class: 'dq-tag dq-mint', text: 'Yours' })),
   );
-  const grid = h(
-    'div',
-    { class: 'dq-collection' },
-    owned.map((s) =>
-      cell(
-        h(
-          'button',
-          { type: 'button', class: 'dq-cardbtn', onclick: () => app.go({ name: 'skill', id: s.id }), 'aria-label': `${s.sl}, ${s.real}. Practise it.` },
-          skillCard(s.id, { small: true }),
-          counts[s.id] ? h('span', { class: 'dq-cardbtn-n', text: `Practised ${counts[s.id]}x` }) : h('span', { class: 'dq-cardbtn-n', text: 'Met' }),
-        ),
-      ),
-    ),
-  );
+  // every skill met and practised, another open copy's too, as it lands; focus stays on the same skill's card
+  const grid = redrawn(() => {
+    const d = app.store.derived();
+    const counts: Record<string, number> = {};
+    for (const e of app.store.state.events) if (e.k === 'skill' && e.skill) counts[e.skill] = (counts[e.skill] ?? 0) + 1;
+    const owned = SKILLS.filter((s) => d.collection.has(s.id));
+    return owned.length
+      ? h(
+          'div',
+          { class: 'dq-collection' },
+          owned.map((s) =>
+            cell(
+              h(
+                'button',
+                { type: 'button', class: 'dq-cardbtn', 'data-item': s.id, onclick: () => app.go({ name: 'skill', id: s.id }), 'aria-label': `${s.sl}, ${s.real}. Practise it.` },
+                skillCard(s.id, { small: true }),
+                counts[s.id] ? h('span', { class: 'dq-cardbtn-n', text: `Practised ${counts[s.id]}x` }) : h('span', { class: 'dq-cardbtn-n', text: 'Met' }),
+              ),
+            ),
+          ),
+        )
+      : p('Flip a daily card or open any skill, and it joins here.', 'dq-text dq-empty');
+  }, () => null);
+  const inventory = inventorySection(app);
+  const offShown = app.store.onChange(() => {
+    companion.update();
+    grid.update();
+    inventory.sync();
+  });
   const designSlot = h(
     'button',
     { type: 'button', class: 'dq-cardbtn dq-allyslot', onclick: () => app.go({ name: 'draw', kind: 'ally' }) },
@@ -302,11 +342,11 @@ export function shadowsScreen(app: App): ScreenOut {
     h('h2', { class: 'dq-sec-h' }, h('span', { text: 'Designed by you' }), h('span', { class: 'dq-sec-sub', text: 'From the Art room' })),
     allies,
     h('h2', { class: 'dq-sec-h' }, h('span', { text: 'Skill shadows' }), h('span', { class: 'dq-sec-sub', text: 'Every skill you have met' })),
-    owned.length ? grid : p('Flip a daily card or open any skill, and it joins here.', 'dq-text dq-empty'),
-    inventorySection(app),
+    grid.node,
+    inventory.el,
     h('div', { class: 'dq-actions' }, btn('All skills', () => app.go({ name: 'library' }), { kind: 'quiet', ic: 'book' })),
   );
-  return { el, title: 'Shadows', mode: 'sub', leave: () => { turn++; off(); roster.leave(); } };
+  return { el, title: 'Shadows', mode: 'sub', leave: () => { turn++; off(); offShown(); roster.leave(); } };
 }
 
 // ---------------- Library ----------------
@@ -333,12 +373,6 @@ function fits(s: Skill, f: Finding) {
     .split(' ')
     .every((w) => hay.includes(w));
 }
-
-/** The nearest box that scrolls the page. */
-const scrollerOf = (el: HTMLElement) => {
-  for (let e = el.parentElement; e; e = e.parentElement) if (/auto|scroll/.test(getComputedStyle(e).overflowY) && e.scrollHeight > e.clientHeight) return e;
-  return document.scrollingElement as HTMLElement | null;
-};
 
 export function libraryScreen(app: App): ScreenOut {
   const st = app.store;
@@ -629,7 +663,7 @@ export function diaryScreen(app: App, _route: Route, visit: Visit): ScreenOut {
     skillsHead.textContent = day === today ? 'Skills today' : 'Skills that day';
     skillsHead.classList.toggle('is-hidden', !used.length && day !== today);
     return used.length
-      ? h('ul', { class: 'dq-skillsused' }, used.map((id) => h('li', {}, h('span', { text: typo(`${SKILL[id].sl} (${SKILL[id].real})`) }), h('span', { class: 'dq-code', text: codes[id] === 5 ? 'helped' : codes[id] === 4 ? "didn't help this time" : 'practised' }))))
+      ? h('ul', { class: 'dq-skillsused' }, used.map((id) => h('li', { 'data-item': id }, h('span', { text: typo(`${SKILL[id].sl} (${SKILL[id].real})`) }), h('span', { class: 'dq-code', text: codes[id] === 5 ? 'helped' : codes[id] === 4 ? "didn't help this time" : 'practised' }))))
       : day === today ? p('None yet today. That is fine.', 'dq-small') : null;
   }, () => null);
   const notePrompt = () => (day === today ? 'A note for today (optional)' : 'A note for this day (optional)');
@@ -689,7 +723,10 @@ export function diaryScreen(app: App, _route: Route, visit: Visit): ScreenOut {
   const status = h('span', { class: 'dq-hint', 'aria-live': 'polite' });
   const refresh = () => {
     keep();
-    return (pre.textContent = diaryText(st, range));
+    const text = diaryText(st, range);
+    // the same words stay the same text, so words selected to copy by hand stay selected
+    if (pre.textContent !== text) pre.textContent = text;
+    return text;
   };
   refresh();
   const exportPanel = panel(

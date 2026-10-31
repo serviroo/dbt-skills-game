@@ -5,7 +5,7 @@ import type { App, Place, Route, ScreenOut, Visit } from './app';
 import { glyph, icon } from './art';
 import { isSkillId, uid } from './store';
 import { dropDraft, keepDraft, newestDraft, stepLayout, worthKeeping, type SkillDraft } from './skilldraft';
-import { btn, chip, copyText, field, h, md, p, panel, segmented, typo } from './ui';
+import { btn, chip, copyText, field, h, md, p, panel, redrawn, segmented, typo } from './ui';
 import { breathRing, coolChoice, counter, holdButton, loadoutArt, pmrView, timerView, type Ctx } from './widgets';
 
 const tx = (t: Txt | undefined, a: Answers) => (t === undefined ? '' : typeof t === 'function' ? t(a) : t);
@@ -433,19 +433,31 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
         return swap(...head(s), textEl(tx(s.text, answers), !titled), track, h('div', { class: 'dq-actions' }, btn('Next', next, { kind: 'primary' })));
       }
       case 'list': {
-        const items = app.store.state.lists[s.list];
-        const opts = items.length ? items.map((x) => x.text) : s.fallback;
         const f = field('Add one', { placeholder: 'Add one of your own', hideLabel: true });
         const pick = (v: string) => {
           answers[s.key] = v;
           app.sound('check');
           next();
         };
+        // the list as it is now: one changed in another open copy shows here as it lands, on the same step, with what is
+        // being typed kept; focus on a choice that went moves to the first one
+        const empty = redrawn(() => (app.store.state.lists[s.list].length ? null : p(s.empty, 'dq-small')), () => null);
+        const choices = redrawn(() => {
+          const items = app.store.state.lists[s.list];
+          const opts = items.length ? items.map((x) => x.text) : s.fallback;
+          return h('div', { class: `dq-opts ${stackable(opts) ? 'dq-opts--stack' : ''}` }, opts.map((o) => chip(o, () => pick(o))));
+        }, (): HTMLElement | null => (choices.node as Element).querySelector('button'));
+        stops.push(
+          app.store.onChange(() => {
+            empty.update();
+            choices.update();
+          }),
+        );
         return swap(
           ...head(s),
           textEl(tx(s.text, answers), !titled),
-          items.length ? null : p(s.empty, 'dq-small'),
-          h('div', { class: `dq-opts ${stackable(opts) ? 'dq-opts--stack' : ''}` }, opts.map((o) => chip(o, () => pick(o)))),
+          empty.node,
+          choices.node,
           h('div', { class: 'dq-addrow' }, f.el, btn('Add and pick', () => {
             const v = f.input.value.trim().slice(0, 200);
             if (!v) return f.input.focus();

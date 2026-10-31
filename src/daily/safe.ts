@@ -90,14 +90,15 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   lightBtn.addEventListener('click', () => {
     lit = !lit;
     const light = lit ? 'up' : 'dim';
+    // noted once it is stored, now or after a hold: read before then, a write that waits leaves the old light noted
     write(() => {
       try {
         localStorage.setItem(lightKey(st.key), light);
+        stored = storedLight(st.key);
       } catch {
         /* stays for this visit only */
       }
     });
-    stored = storedLight(st.key);
     applyLight();
   });
   const foot = h('div', { class: 'dq-sz-foot' }, talkLink);
@@ -157,7 +158,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     // the list follows another open copy's changes, and a clear, as they land
     const list = redrawn(() => {
       const items = st.state.lists[at];
-      return items.length ? h('ul', { class: 'dq-sz-list' }, items.map((i) => h('li', { text: typo(i.text) }))) : p(empty, 'dq-text dq-sz-empty');
+      return items.length ? h('ul', { class: 'dq-sz-list' }, items.map((i) => h('li', { 'data-item': i.id, text: typo(i.text) }))) : p(empty, 'dq-text dq-sz-empty');
     }, () => addOne);
     stops.push(st.onChange(list.update));
     const lists = supportListsCopy(app);
