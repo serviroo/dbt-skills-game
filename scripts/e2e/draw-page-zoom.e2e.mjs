@@ -12,12 +12,14 @@
 //   sideways  nothing scrolls sideways, and the page never scrolls to show a tool
 //   hint      the page's hint is at least 16 px (DESIGN.md's body text), stays on the page and overlaps no button
 // Then a pen, an ink and a size are picked from wherever they are, a line is drawn with them, and Save keeps it on
-// Draw today and asks for the ally's name on the shadow ally page. At 200% the note after Save shows whole over the
-// page, at body size and never under the top bar, and a tap on its words puts it away for the next line. Last, a line
+// Draw today and asks for the ally's name on the shadow ally page. The note after Save shows whole over the page's
+// room, at body size, never under the top bar; at 200% a tap on its words puts it away for the next line. Last, a line
 // begun at 390x844 goes on while the phone zooms to 200%: what was drawn stays and the rest lands under the pointer.
 // Back with the tray open closes only the tray, and as the tools unfold again focus on Tools moves to the ink. What is
 // kept is read from the device's storage, as a reload would read it: the line as drawn is there as a draft before
-// anything is tapped, and as a page after Save.
+// anything is tapped, and as a page after Save. On a wide screen (760x700) the note shows whole as it comes in the
+// tools beside the page, and as the screen turns wide under a note shown over the page; once another line clears it,
+// the tools lie as they do without it.
 import { boot, settle } from './layout-fit.e2e.mjs';
 
 const PHONES = [
@@ -51,24 +53,35 @@ const stored = (page) =>
   });
 
 /**
- * What keeps the note after a save from showing whole, over the page's room: reaching past the room or under the top
- * bar, being covered, words cut off with no way to scroll to them, or words under body size.
+ * What keeps the note after a save from showing whole: reaching past its room (the page's, over the page; the drawing
+ * page's, in a wide screen's tools) or under the top bar, being covered, words cut off with no way to scroll to them,
+ * words under body size, or a link of its, or Save, out of a tap.
  */
 const noteShown = (page) =>
   page.evaluate((MIN_TEXT) => {
     const bad = [];
     const m = document.querySelector('.dq-tools-msg');
     const r = m.getBoundingClientRect();
-    const room = document.querySelector('.dq-draw-fit').getBoundingClientRect();
+    const over = getComputedStyle(m).position === 'absolute';
+    const room = document.querySelector(over ? '.dq-draw-fit' : '.dq-draw').getBoundingClientRect();
     const at = `${Math.round(r.left)},${Math.round(r.top)} to ${Math.round(r.right)},${Math.round(r.bottom)}`;
     if (r.top < document.querySelector('.dq-top').getBoundingClientRect().bottom - 0.5) bad.push(`the note after Save reaches under the top bar (${at})`);
-    if (r.top < room.top - 0.5 || r.bottom > room.bottom + 0.5 || r.left < room.left - 0.5 || r.right > room.right + 0.5) bad.push(`the note after Save reaches past the page's room (${at})`);
+    if (r.top < room.top - 0.5 || r.bottom > Math.min(room.bottom, innerHeight) + 0.5 || r.left < room.left - 0.5 || r.right > room.right + 0.5) bad.push(`the note after Save reaches past ${over ? "the page's room" : 'the drawing page'} (${at})`);
     else if (![[r.left + r.width / 2, r.top + 2], [r.left + r.width / 2, r.bottom - 2]].every(([x, y]) => m.contains(document.elementFromPoint(x, y)))) bad.push('something covers the note after Save');
     if (m.scrollHeight > m.clientHeight + 1 && !/auto|scroll/.test(getComputedStyle(m).overflowY)) bad.push(`the note after Save is cut off, ${m.scrollHeight} px in ${m.clientHeight}`);
     for (const e of [m, ...m.querySelectorAll('*')]) {
       if (!e.checkVisibility() || ![...e.childNodes].some((n) => n.nodeType === 3 && n.data.trim())) continue;
       const px = parseFloat(getComputedStyle(e).fontSize);
       if (px < MIN_TEXT - 0.01) bad.push(`"${e.textContent.trim().slice(0, 24)}" in the note after Save is ${px} px`);
+    }
+    // its links, each brought into view inside it, and Save take a tap in their middle
+    for (const b of [...m.querySelectorAll('button, a[href]'), document.querySelector('.dq-save')]) {
+      if (m.contains(b)) {
+        const q = b.getBoundingClientRect();
+        m.scrollTop += q.top < r.top ? q.top - r.top - 2 : q.bottom > r.bottom ? q.bottom - r.bottom + 2 : 0;
+      }
+      const q = b.getBoundingClientRect();
+      if (!b.contains(document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2))) bad.push(`${b.textContent.trim()} is out of a tap with the note after Save showing (${Math.round(q.left)},${Math.round(q.top)})`);
     }
     return bad;
   }, MIN_TEXT);
@@ -230,7 +243,7 @@ function phoneAt(phone) {
             } else {
               await page.locator('.dq-tools-saved').waitFor({ timeout: 10000 });
               // the note shows whole, then the page is on the device as drawn, read back as a reload would
-              if (zoom === 2) bad.push(...(await noteShown(page)));
+              bad.push(...(await noteShown(page)));
               await h.shot(page, `${shot}-saved`);
               const fresh = (s) => s.pages.filter((m) => !before.some((b) => b.id === m.id));
               await h.poll(page, () => stored(page), (s) => fresh(s).length === 1 && fresh(s)[0].strokes === s.drawn, (s) => `Save did not keep the line as drawn on the device: ${s ? `${fresh(s).length} new pages` : 'storage unread'}`).catch((e) => bad.push(e.message));
@@ -304,7 +317,44 @@ async function strokeKept(h) {
   }
 }
 
+/**
+ * On a wide screen the note after a save sits in the tools beside the page and takes room of its own there: it shows
+ * whole as it comes, and as the screen turns wide under a note shown over the page; once another line clears it, the
+ * tools lie as they do without it, with no resize.
+ */
+async function noteRoom(h) {
+  const failed = [];
+  // how the tools lie at 760x700 with no note, taken from the first page before its Save
+  let bare = null;
+  for (const [from, to] of [[{ width: 760, height: 700 }], [{ width: 390, height: 844 }, { width: 760, height: 700 }]]) {
+    const where = `saved at ${from.width}x${from.height}${to ? `, then ${to.width}x${to.height}` : ''}`;
+    const { ctx, page, errors } = await boot(h, from);
+    try {
+      await open(page, 'today');
+      bare ??= await page.evaluate(() => !!document.querySelector('.dq-draw--tray'));
+      await line(page);
+      await page.locator('.dq-save').click();
+      await page.locator('.dq-tools-saved').waitFor({ timeout: 10000 });
+      if (to) {
+        await page.setViewportSize(to);
+        await settle(page);
+      }
+      failed.push(...(await noteShown(page)).map((b) => `${where}: ${b}`));
+      await h.shot(page, `draw-page-zoom-note-${from.width}x${from.height}${to ? `-${to.width}x${to.height}` : ''}`);
+      // another line clears the note, and the tools go back to how they lie with no note, with no resize
+      await line(page);
+      const after = await page.evaluate(() => ({ note: document.querySelector('.dq-tools-msg').hasChildNodes(), lines: window.__daily.ink.strokes.length, folded: !!document.querySelector('.dq-draw--tray') }));
+      if (after.note || after.lines !== 2 || after.folded !== bare) failed.push(`${where}: after another line the note is ${after.note ? 'still there' : 'gone'}, the page has ${after.lines} lines, and the tools are ${after.folded ? 'folded' : 'unfolded'}, not ${bare ? 'folded' : 'unfolded'} as with no note`);
+      if (errors.length) failed.push(`${where}: ${errors.join(' | ')}`);
+    } finally {
+      await ctx.close();
+    }
+  }
+  h.expect(!failed.length, failed.join('\n'));
+}
+
 export const scenarios = {
   ...Object.fromEntries(PHONES.map((phone) => [`draw-page-zoom-${phone.width}x${phone.height}`, phoneAt(phone)])),
   'draw-page-zoom-stroke-kept': strokeKept,
+  'draw-page-zoom-note-room': noteRoom,
 };

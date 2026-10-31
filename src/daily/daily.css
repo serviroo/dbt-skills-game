@@ -4868,15 +4868,19 @@ textarea.dq-input {
   align-items: center;
   gap: 0 14px;
   min-height: 0;
-  font-size: 14.5px;
+  font-size: 16px;
   color: var(--t-dim);
 }
 .dq-tools-msg:empty {
   display: none;
 }
+/* the note's words at body size, and its links a full tap high */
+.dq-tools-msg :is(.dq-small, .dq-xp) {
+  font-size: 16px;
+}
 .dq-tools-msg .dq-btn--link {
-  min-height: 36px;
-  font-size: 14.5px;
+  min-height: 44px;
+  font-size: 16px;
 }
 .dq-tools-saved {
   color: #cfe3f5;
@@ -4900,10 +4904,11 @@ textarea.dq-input {
   min-width: 44px;
   padding: 0 6px;
 }
-/* the tray, and the note after a save, cover the room the page has (--room-*, measured), from its foot and never past
-   it, so never under the top bar: what doesn't fit scrolls inside */
+/* the tray, and the note after a save wherever it lies over the page (.dq-tools--over), cover the room the page has
+   (--room-*, measured) from its foot and never past it, so never under the top bar or over the tools: what doesn't
+   fit scrolls inside */
 .dq-tray,
-.dq-draw--tray .dq-tools .dq-tools-msg {
+.dq-tools--over .dq-tools-msg {
   position: absolute;
   top: auto;
   right: auto;
@@ -4926,22 +4931,15 @@ textarea.dq-input {
   border-color: var(--hl) var(--hs) var(--hs) var(--hl);
   box-shadow: 0 12px 30px -12px rgba(0, 0, 0, 0.9);
 }
-.dq-draw--tray .dq-tools .dq-tools-msg {
+.dq-tools--over .dq-tools-msg {
   z-index: 3;
   justify-content: center;
   padding: 4px 12px;
+  text-align: center;
   border: 1px solid rgba(125, 150, 197, 0.45);
   /* solid, as the tray is, so nothing on the page shows through it */
   background: rgb(6, 14, 26);
   box-shadow: 0 12px 30px -12px rgba(0, 0, 0, 0.9);
-}
-/* its words at body size, and its links a full tap high */
-.dq-draw--tray .dq-tools-msg,
-.dq-draw--tray .dq-tools-msg :is(.dq-small, .dq-xp, .dq-btn--link) {
-  font-size: 16px;
-}
-.dq-draw--tray .dq-tools-msg .dq-btn--link {
-  min-height: 44px;
 }
 /* the size dots wrap in a narrow tray, as the inks and pens do */
 .dq-tray .dq-sizes {
@@ -5435,21 +5433,6 @@ textarea.dq-input {
     width: auto;
     min-width: 0;
   }
-  .dq-tools .dq-tools-msg {
-    position: absolute;
-    top: 0;
-    right: calc(100% + 13px);
-    bottom: auto;
-    left: auto;
-    width: var(--page-w);
-    z-index: 3;
-    justify-content: center;
-    padding: 4px 12px;
-    text-align: center;
-    border: 1px solid rgba(125, 150, 197, 0.45);
-    background: rgba(6, 14, 26, 0.94);
-    box-shadow: 0 12px 30px -12px rgba(0, 0, 0, 0.9);
-  }
   .dq-draw--tray {
     grid-template-columns: minmax(0, 1fr) auto;
   }
@@ -5507,18 +5490,6 @@ textarea.dq-input {
 @media (max-width: 759px) {
   .dq-tools {
     position: relative;
-  }
-  .dq-tools-msg {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: calc(100% + 6px);
-    z-index: 3;
-    justify-content: center;
-    padding: 4px 12px;
-    border: 1px solid rgba(125, 150, 197, 0.45);
-    background: rgba(6, 14, 26, 0.94);
-    box-shadow: 0 12px 30px -12px rgba(0, 0, 0, 0.9);
   }
 }
 .dq-allycard-foot {

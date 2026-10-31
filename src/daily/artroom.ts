@@ -300,7 +300,13 @@ export function drawScreen(app: App, route: Route): ScreenOut {
   const offs: (() => void)[] = [];
 
   const msg = h('div', { class: 'dq-tools-msg', 'aria-live': 'polite' });
-  const say = (...kids: (Node | string | null)[]) => msg.replaceChildren(...kids.filter((k): k is Node | string => k !== null));
+  const say = (...kids: (Node | string | null)[]) => {
+    const had = msg.hasChildNodes();
+    msg.replaceChildren(...kids.filter((k): k is Node | string => k !== null));
+    // in a wide screen's tools (laid out unfolded) the note takes room of its own, so what fits is weighed again as it
+    // comes or goes, folded or not
+    if ((had || msg.hasChildNodes()) && el.isConnected && noteInTools) layout();
+  };
 
   const flushDraft = () => {
     if (draftTimer) clearTimeout(draftTimer);
@@ -657,6 +663,8 @@ export function drawScreen(app: App, route: Route): ScreenOut {
   // into the tray (the page itself is never moved, so a stroke in progress carries on)
   const ROOM = 180;
   let folded = false;
+  // whether the note after a save sits in the tools when they are laid out unfolded (beside a wide screen's page)
+  let noteInTools = false;
   const place = (on: boolean) => {
     if (on === folded) return;
     folded = on;
@@ -691,6 +699,10 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     place(false);
     frame.style.width = frame.style.height = '0px';
     const full = room();
+    // the note after a save placed as it lies unfolded: over the page, or in a wide screen's tools, where it takes room
+    // of its own and so counts in what has to fit
+    noteInTools = full.row && !full.side;
+    tools.classList.toggle('dq-tools--over', !noteInTools);
     const b = el.getBoundingClientRect();
     const inside = (e: Element) => {
       const r = e.getBoundingClientRect();
@@ -714,7 +726,6 @@ export function drawScreen(app: App, route: Route): ScreenOut {
       // screen, so the page keeps the zero size it was measured at
       fit.style.flex = '';
       promptRow.style.width = '';
-      tools.style.setProperty('--page-w', '');
       return;
     }
     const a = pad.W / pad.H;
@@ -723,11 +734,10 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     frame.style.height = `${Math.floor(fw / a)}px`;
     fit.style.flex = row && !side ? `0 0 ${fw + pad2}px` : '';
     promptRow.style.width = row && !side && !folded ? `${fw + pad2 + tools.offsetWidth + gap}px` : '';
-    const cs = getComputedStyle(fit);
-    tools.style.setProperty('--page-w', side ? `${fw + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight)}px` : '');
     pad.moved();
-    if (!folded) return;
-    // the room the page has, which the tray and the note after a save cover from its foot
+    // the room the page has (--room-*), which the note after a save covers from its foot wherever it lies over the
+    // page: everywhere but beside a wide screen's page, where it sits in the tools. Folded, the tray covers it too.
+    tools.classList.toggle('dq-tools--over', !row || side || folded);
     const t = tools.getBoundingClientRect();
     const f = fit.getBoundingClientRect();
     tools.style.setProperty('--room-x', `${f.left - t.left - tools.clientLeft}px`);
