@@ -2,11 +2,12 @@
 //   safe-zone-tabs-clear      the game's data cleared in another tab while Your people, Things that are yours and the
 //                             comfort kit are open: each shows the cleared state at once (no person, number or list
 //                             item anywhere on the page, the closed "Copy your lists" preview and what was being
-//                             typed in included), at Regular text with the light down, "Talk to someone now" still pinned, focus that was on a Call link at
-//                             the top of the Safe Zone, nothing shown or played, and Leave still leaves at once
+//                             typed in included), at Regular text with the light down, "Talk to someone now" still
+//                             pinned, focus that was on a Call link on Add a person, nothing shown or played, and
+//                             Leave still leaves at once
 //   safe-zone-tabs-remove     one person removed in another tab while Your people is open: they go at once with their
 //                             Call and Text, focus on someone else's Call stays on it, focus on the last one's goes to
-//                             the top, what is being typed stays, and nothing is credited, shown or played
+//                             Add a person, what is being typed stays, and nothing is credited, shown or played
 //   safe-zone-tabs-lists      list items added and removed in another tab reach Things that are yours and the comfort
 //                             kit as they land, and a half-typed new item stays
 //   comfort-page-tabs         the Comfort page follows another tab too: a removed person or item goes with its buttons,
@@ -14,11 +15,13 @@
 //   diary-skills-today-tabs   a skill practised in another tab shows in the open Diary card's Skills today
 //   tabs-same-name            two people with the same name: removing the one whose Call or Remove has focus in another
 //                             tab never hands focus to the other one's, in the Safe Zone or on the Comfort page
-//   safe-zone-tabs-text-size  Text size chosen in another tab reaches an open Safe Zone, Settings and a story being read,
-//                             and the Safe Zone's light turned up in another tab turns up here
+//   safe-zone-tabs-text-size  Text size chosen in another tab reaches an open Safe Zone, Settings and a story being
+//                             read, and the Safe Zone's light turned up in another tab turns up here
 //   safe-zone-tabs-held       where storage refuses them, a text size and light held for the visit give way to a size
 //                             stored later in another tab, and a clear there takes both
+// Wherever focus is or goes, the player sees all of it, clear of the top bar and "Talk to someone now"
 import { boot } from './layout-fit.e2e.mjs';
+import { nameOf, whole } from './safe-zone-access.e2e.mjs';
 
 const SIZES = [
   ['390x844', { width: 390, height: 844 }],
@@ -95,7 +98,6 @@ const zone = (page) =>
     const sz = document.querySelector('.dq-safezone');
     const talk = document.querySelector('.dq-sz-foot .dq-sz-talk');
     const r = talk?.getBoundingClientRect();
-    const a = document.activeElement;
     return {
       route: window.__daily.route.name,
       kept: personal.filter((s) => document.documentElement.outerHTML.includes(s)),
@@ -106,11 +108,27 @@ const zone = (page) =>
       size: sz?.dataset.size,
       lit: !!sz?.classList.contains('is-lit'),
       talk: !!talk?.checkVisibility() && !talk.classList.contains('is-hidden') && r.top >= 0 && r.bottom <= innerHeight,
-      focus: !a || a === document.body ? 'nothing' : a.matches('.dq-safezone h1') ? 'the top' : a.getAttribute('aria-label') ?? a.textContent.trim().slice(0, 40),
       fx: document.querySelectorAll('[data-fx], .dq-toast.is-on, .dq-sw, .lw').length,
       xp: window.__daily.store.derived().xp,
     };
   }, PERSONAL);
+/**
+ * What has focus: its name, the Comfort list it is in, and whether the player sees it whole (on the screen, under no
+ * pinned bar, and not hidden from anyone).
+ */
+const focusIs = (page) =>
+  page.evaluate(`(() => {
+    const nameOf = ${nameOf};
+    const whole = ${whole};
+    const a = document.activeElement;
+    if (!a || a === document.body) return { name: 'nothing', seen: false, list: null };
+    return { name: nameOf(a).slice(0, 40), seen: whole(a) && !a.closest('[aria-hidden="true"], [inert], .dq-sr'), list: a.closest('.dq-listp')?.querySelector('.dq-chip-t')?.textContent ?? null };
+  })()`);
+/** A problem unless focus is on `name` (in Comfort's `list`, if given) and the player sees it whole. */
+const focusOn = async (page, name, what, list) => {
+  const f = await focusIs(page);
+  return f.name === name && f.seen && (!list || f.list === list) ? [] : [`${what}: focus is on ${f.name}${f.list ? ` in ${f.list}` : ''}${f.seen ? '' : ', not seen whole'}, not ${name}${list ? ` in ${list}` : ''}`];
+};
 /** Leave goes at once, asking nothing. */
 async function leaves(page) {
   await page.locator('.dq-top .dq-back').click();
@@ -158,7 +176,7 @@ export const scenarios = {
         if (after.size !== 'regular' || after.lit) problems.push(`${tag} ${at}: text ${after.size} and light ${after.lit ? 'up' : 'down'} after a clear, not Regular and down`);
         if (!after.talk) problems.push(`${tag} ${at}: "Talk to someone now" is not pinned in view after the clear`);
         if (after.fx) problems.push(`${tag} ${at}: the clear showed ${after.fx} toast, window or effect in the Safe Zone`);
-        if (at === 'people' && after.focus !== 'the top') problems.push(`${tag}: focus on Call Wren Okafor went to ${after.focus}, not the top of the Safe Zone`);
+        if (at === 'people') problems.push(...(await focusOn(page, 'Add a person', `${tag} after a clear elsewhere`)));
         await h.shot(page, `clear-after-${at}-${tag}`);
         if (!(await leaves(page))) problems.push(`${tag} ${at}: Leave did not leave at once after the clear`);
       }
@@ -186,14 +204,14 @@ export const scenarios = {
       const wren = now.kept.filter((s) => s.startsWith('Wren') || s.includes('0958'));
       if (wren.length) problems.push(`${tag}: removed in another tab, still on the page: ${wren.join(', ')}`);
       if (JSON.stringify(now.people) !== '["Juno Pell"]') problems.push(`${tag}: Your people shows ${JSON.stringify(now.people)} after Wren was removed elsewhere`);
-      if (now.focus !== 'Call Juno Pell') problems.push(`${tag}: focus on Call Juno Pell moved to ${now.focus} when Wren went`);
+      problems.push(...(await focusOn(page, 'Call Juno Pell', `${tag} when Wren went`)));
       await h.shot(page, `remove-one-${tag}`);
       await other.page.getByRole('button', { name: 'Remove Juno Pell' }).click();
       await until(page, (want) => document.querySelector('.dq-sz-empty')?.textContent === want, EMPTY.people);
       now = await zone(page);
       const juno = now.kept.filter((s) => s.startsWith('Juno') || s.includes('0123'));
       if (juno.length || now.people.length || now.empty !== EMPTY.people) problems.push(`${tag}: after the last person went elsewhere: ${JSON.stringify(now)}`);
-      if (now.focus !== 'the top') problems.push(`${tag}: focus on Call Juno Pell went to ${now.focus}, not the top of the Safe Zone, when Juno went`);
+      problems.push(...(await focusOn(page, 'Add a person', `${tag} when Juno went`)));
       if (JSON.stringify(now.typed) !== '["Half a name"]') problems.push(`${tag}: what was being typed became ${JSON.stringify(now.typed)} as people went elsewhere`);
       if (!now.talk || now.fx || now.xp !== was.xp) problems.push(`${tag}: Talk pinned ${now.talk}, ${now.fx} toast, window or effect, XP ${was.xp} to ${now.xp}`);
       await h.shot(page, `remove-last-${tag}`);
@@ -227,6 +245,7 @@ export const scenarios = {
       if (JSON.stringify(r.items) !== '["Lanternfish facts","Kestrel feathers"]') problems.push(`${tag}: Things that are yours shows ${JSON.stringify(r.items)} after an add and a removal elsewhere`);
       if (r.kept.includes('Quillfeather')) problems.push(`${tag}: Quillfeather walks, removed elsewhere, is still on the page`);
       if ((await reasons.locator('.dq-addrow input').inputValue()) !== 'Half a thought') problems.push(`${tag}: the half-typed item went when the list changed`);
+      problems.push(...(await focusOn(reasons, 'Add one', `${tag} typing while the list changed`)));
       await h.shot(reasons, `lists-reasons-${tag}`);
       await other.page.getByRole('button', { name: 'Remove Marmalade toast tins' }).click();
       await until(comfort.page, (want) => document.querySelector('.dq-sz-empty')?.textContent === want, EMPTY.comfort);
@@ -253,8 +272,7 @@ export const scenarios = {
       await remove.focus();
       await other.page.getByRole('button', { name: 'Remove Quillfeather walks' }).click();
       await until(page, () => !document.querySelector('[aria-label="Remove Quillfeather walks"]'));
-      const focus = await page.evaluate(() => (document.activeElement?.closest('.dq-listp--reasons') ? document.activeElement.textContent.trim() : document.activeElement?.tagName));
-      if (focus !== 'Add') problems.push(`${tag}: focus on Remove Quillfeather walks went to ${focus}, not that list's Add`);
+      problems.push(...(await focusOn(page, 'Add', `${tag} when Quillfeather walks went`, 'Things that are yours')));
       await other.page.getByRole('button', { name: 'Remove Wren Okafor' }).click();
       await until(page, () => !document.documentElement.outerHTML.includes('Wren Okafor'));
       const left = await page.evaluate((personal) => personal.filter((s) => document.documentElement.outerHTML.includes(s)), PERSONAL);
@@ -300,9 +318,10 @@ export const scenarios = {
       await until(page, () => document.querySelectorAll('.dq-person-n').length === 1);
       await until(comfort.page, () => document.querySelectorAll('[aria-label="Remove Sam Ash"]').length === 1);
       const safe = await zone(page);
-      const left = await comfort.page.evaluate(() => ({ n: document.querySelectorAll('[aria-label="Remove Sam Ash"]').length, focus: document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.textContent.trim() }));
-      if (safe.people.length !== 1 || safe.focus !== 'the top') problems.push(`${tag}: the Safe Zone after one Sam Ash went elsewhere shows ${safe.people.length} and focus on ${safe.focus}, not the top`);
-      if (left.n !== 1 || left.focus !== 'Add person') problems.push(`${tag}: the Comfort page after one Sam Ash went elsewhere shows ${left.n} and focus on ${left.focus}, not Add person`);
+      const left = await comfort.page.evaluate(() => document.querySelectorAll('[aria-label="Remove Sam Ash"]').length);
+      if (safe.people.length !== 1 || left !== 1) problems.push(`${tag}: after one Sam Ash went elsewhere the Safe Zone shows ${safe.people.length} and the Comfort page ${left}`);
+      problems.push(...(await focusOn(page, 'Add a person', `${tag} Safe Zone when the focused Sam Ash went`)));
+      problems.push(...(await focusOn(comfort.page, 'Add person', `${tag} Comfort page when the focused Sam Ash went`, 'People')));
       await h.shot(page, `same-name-safe-${tag}`);
       problems.push(...[errors, comfort.errors, other.errors].flat().map((e) => `${tag}: ${e}`));
       await ctx.close();

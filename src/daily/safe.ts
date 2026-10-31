@@ -158,7 +158,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     const list = redrawn(() => {
       const items = st.state.lists[at];
       return items.length ? h('ul', { class: 'dq-sz-list' }, items.map((i) => h('li', { text: typo(i.text) }))) : p(empty, 'dq-text dq-sz-empty');
-    }, () => top);
+    }, () => addOne);
     stops.push(st.onChange(list.update));
     const lists = supportListsCopy(app);
     stops.push(lists.dispose);
@@ -170,15 +170,16 @@ export function safeScreen(app: App, route: Route): ScreenOut {
       st.save();
       show(at);
     }, { kind: 'quiet' }));
+    const addOne = btn('Add one', () => {
+      add.classList.remove('is-hidden');
+      f.input.focus();
+    }, { kind: 'quiet', ic: 'plus' });
     return swap(
       at,
       [h3(title), text ? p(text, 'dq-text') : null],
       list.node,
       add,
-      h('div', { class: 'dq-actions dq-actions--stack' }, nextBtn(at), btn('Add one', () => {
-        add.classList.remove('is-hidden');
-        f.input.focus();
-      }, { kind: 'quiet', ic: 'plus' }), lists.open),
+      h('div', { class: 'dq-actions dq-actions--stack' }, nextBtn(at), addOne, lists.open),
       lists.box,
     );
   };
@@ -269,7 +270,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
         return listScreen('comfort', SAFE.comfort.title, SAFE.comfort.text, SAFE.comfort.empty);
       case 'people': {
         // the people follow another open copy's changes, and a clear, as they land: someone removed elsewhere can't be
-        // called from here, and focus on their Call or Text goes to the top, one Tab from "Talk to someone now"
+        // called from here, and focus on their Call or Text goes to Add a person
         const list = redrawn(() => {
           const ppl = st.state.lists.people;
           return ppl.length
@@ -288,7 +289,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
                 ),
               )
             : p(SAFE.people.empty, 'dq-text dq-sz-empty');
-        }, () => top);
+        }, () => addPerson);
         stops.push(st.onChange(list.update));
         const n = field('Name', { placeholder: 'Name', autocomplete: 'off' });
         const ph = field('Number', { placeholder: 'Phone number', type: 'tel', inputmode: 'tel' });
@@ -301,15 +302,16 @@ export function safeScreen(app: App, route: Route): ScreenOut {
           st.save();
           show('people');
         }, { kind: 'quiet' })));
+        const addPerson = btn('Add a person', () => {
+          add.classList.remove('is-hidden');
+          n.input.focus();
+        }, { kind: 'quiet', ic: 'plus' });
         return swap(
           at,
           [h3(SAFE.people.title), p(SAFE.people.text, 'dq-text')],
           list.node,
           add,
-          h('div', { class: 'dq-actions dq-actions--stack' }, nextBtn(at), btn('Add a person', () => {
-            add.classList.remove('is-hidden');
-            n.input.focus();
-          }, { kind: 'quiet', ic: 'plus' }), lists.open),
+          h('div', { class: 'dq-actions dq-actions--stack' }, nextBtn(at), addPerson, lists.open),
           lists.box,
         );
       }

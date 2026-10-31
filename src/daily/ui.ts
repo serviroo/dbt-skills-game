@@ -226,8 +226,15 @@ export function place(box: HTMLElement, kids: HTMLElement[], fallback?: () => HT
  * Part of a screen drawn from the player's own data (null draws nothing), which `update` draws again in place when what
  * it shows changed: in another open copy, or by a clear. Focus on a control that goes moves to that same control drawn
  * again (the same item's, by the data-item id of the row it is in, with the same name, link and words), else to `lost`,
- * never to a control of someone or something else.
+ * never to a control of someone or something else. It goes only where the player can see it, brought whole into view
+ * clear of the pinned bars (their scroll padding in daily.css).
  */
+/** Whether the player can see `e`: shown, with a size, and not hidden from anyone, a screen reader's eyes only included. */
+const seen = (e: HTMLElement) => {
+  const r = e.getBoundingClientRect();
+  return e.checkVisibility({ visibilityProperty: true }) && r.width > 0 && r.height > 0 && !e.closest('[aria-hidden="true"], [inert], .dq-sr');
+};
+
 export function redrawn(draw: () => Element | null, lost: () => HTMLElement | null) {
   const make = () => draw() ?? document.createComment('');
   const html = (n: ChildNode) => (n instanceof Element ? n.outerHTML : '');
@@ -248,7 +255,9 @@ export function redrawn(draw: () => Element | null, lost: () => HTMLElement | nu
       const item = (e: Element) => e.closest('[data-item]')?.getAttribute('data-item') ?? null;
       const like = (e: Element) => item(e) === item(had) && ['aria-label', 'href'].every((a) => e.getAttribute(a) === had.getAttribute(a)) && e.textContent === had.textContent;
       const same = next instanceof Element ? [...next.querySelectorAll<HTMLElement>('a[href], button, summary')].find(like) : undefined;
-      (same ?? lost())?.focus({ preventScroll: true });
+      const to = [same, lost()].find((e): e is HTMLElement => !!e && seen(e));
+      to?.focus({ preventScroll: true });
+      to?.scrollIntoView({ block: 'nearest' });
     },
   };
 }
