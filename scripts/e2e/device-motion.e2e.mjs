@@ -585,6 +585,15 @@ export const scenarios = {
     await h.reachHub(page);
     await page.evaluate(() => window.__daily.go({ name: 'rest' }));
     await page.locator('.dq-st-glow').waitFor({ timeout: 10000 });
+    // a slow device: the frame after the words start, and after the glow breathes again, takes 600 ms to draw
+    await page.evaluate(() => {
+      const stall = () => {
+        const t = performance.now();
+        while (performance.now() - t < 600);
+      };
+      document.addEventListener('click', stall, { once: true });
+      matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', (e) => e.matches || stall());
+    });
     await page.getByRole('button', { name: /^Breathing words/ }).click();
     // how far apart the glow's breath and the words' are, in ms either way round the breath; null while the glow rests
     const apart = () =>
