@@ -864,8 +864,9 @@ export class App {
     let left: HTMLElement;
     if (out.mode === 'hub') left = h('div', { class: 'dq-brand' }, h('span', { class: 'dq-brand-mark', 'aria-hidden': 'true' }), h('span', { text: 'The Lantern' }));
     else if (out.mode === 'skill') left = h('button', { type: 'button', class: 'dq-icbtn', 'aria-label': 'Leave this skill', onclick: () => this.go({ name: 'hub' }), html: icon('close') });
+    // named in its own right too: typing held sideways only its cross shows
     else if (out.mode === 'safe')
-      left = h('button', { type: 'button', class: 'dq-back', onclick: () => this.go({ name: 'hub' }) }, h('span', { html: icon('close') }), h('span', { text: 'Leave' }));
+      left = h('button', { type: 'button', class: 'dq-back', 'aria-label': 'Leave', onclick: () => this.go({ name: 'hub' }) }, h('span', { html: icon('close') }), h('span', { text: 'Leave' }));
     // named for a screen reader in its own right: on a phone at 200% only its arrow shows
     else left = h('button', { type: 'button', class: 'dq-back', 'aria-label': 'Lantern', onclick: () => this.back() }, h('span', { html: icon('back') }), h('span', { text: 'Lantern' }));
     const mid = h('span', { class: 'dq-sr', text: typo(out.title) });
