@@ -209,7 +209,8 @@
   font-family: var(--font-display);
   font-weight: 700;
   font-optical-sizing: auto;
-  font-size: clamp(76px, 21vw, 220px);
+  /* the word is about 5em wide: on a phone, either way up, it fills four fifths of the width and still fits as it grows */
+  font-size: clamp(48px, 16vw, 220px);
   letter-spacing: 0.06em;
   padding-left: 0.06em;
   line-height: 1;
