@@ -11,9 +11,10 @@ const PHONE = { width: 390, height: 844 };
 const SMALL = { width: 320, height: 568 };
 const SIDE = { width: 844, height: 390 };
 const DESK = { width: 1440, height: 900 };
-// the 3D scene is only a backdrop to these checks: drawn light, as the intro's other DOM checks draw it, so a software
-// renderer finishes its frames in the time a capture allows (see screenshot() in harness.mjs)
-const LIGHT = '&nopost&msaa=0&dpr=1';
+// the 3D scene is only a backdrop to these checks: drawn light, as the intro's other DOM checks draw it, and with no more
+// pixels than on a phone at any size, so a software renderer finishes a frame in the time a capture allows (see
+// screenshot() in harness.mjs). Every page here opens so (see visit())
+const light = ({ width, height }) => `&nopost&msaa=0&dpr=${Math.min(1, Math.sqrt((PHONE.width * PHONE.height) / (width * height))).toFixed(2)}`;
 // silent at the speakers: a peak below one step of 16-bit audio and RMS below -100 dBFS, as in safe-zone-quiet
 const SILENT_PEAK = 2 ** -15;
 const SILENT_RMS = 1e-5;
@@ -25,7 +26,7 @@ const INTRO = '.title-screen, .ui-ways, .rw, .letter-wrap, .endcard, .chest-hold
  * added from the press on Safe Zone or Skip, and every cue the audio engine is asked to play, with when.
  */
 async function visit(h, query, viewport = PHONE, { seed = {}, prepare } = {}) {
-  const opened = await h.open(seed, query, viewport, async (ctx) => {
+  const opened = await h.open(seed, query + light(viewport), viewport, async (ctx) => {
     await ctx.addInitScript((intro) => {
       window.__screens = [];
       window.__late = [];
@@ -97,16 +98,16 @@ async function next(page, button, then) {
 
 /** The intro's screens, reached the way a player gets there, each from a fresh page at `query`. */
 const STAGES = {
-  title: { query: `?fresh&mute${LIGHT}`, reach: async () => {} },
-  names: { query: `?fresh&mute${LIGHT}`, reach: (page) => next(page, '.title-screen', '.sw .sw-btn.gold') },
-  gate: { query: `?shot=gate&mute${LIGHT}`, reach: async (page) => { await page.locator('.title-screen').click(); await cue(page, 'gate_air'); } },
-  windows: { query: `?shot=windows&mute${LIGHT}`, reach: async (page) => { await page.locator('.title-screen').click(); await appears(page, '.sw[data-kind="notification"]', 60000); } },
-  silhouette: { query: `?shot=silhouette&mute${LIGHT}`, reach: async (page) => { await page.locator('.title-screen').click(); await cue(page, 'whoosh'); } },
-  awaken: { query: `?shot=awaken&mute${LIGHT}`, reach: async (page) => { await page.locator('.title-screen').click(); await cue(page, 'awaken_voice'); } },
-  chest: { query: `?shot=chest&mute${LIGHT}`, reach: async (page) => { await page.locator('.title-screen').click(); await appears(page, '.chest-hold .ch-target', 60000); } },
-  rewards: { query: `?shot=rewards&mute${LIGHT}`, reach: async (page) => { await page.locator('.title-screen').click(); await shown(page, '.rw .sw-btn'); } },
-  letter: { query: `?shot=rewards&mute${LIGHT}`, reach: async (page) => { await STAGES.rewards.reach(page); await next(page, '.rw .sw-btn', '.letter .sw-btn'); } },
-  endcard: { query: `?shot=rewards&mute${LIGHT}`, reach: async (page) => { await STAGES.letter.reach(page); await next(page, '.letter .sw-btn', '.ec-actions .sw-btn.gold'); } },
+  title: { query: '?fresh&mute', reach: async () => {} },
+  names: { query: '?fresh&mute', reach: (page) => next(page, '.title-screen', '.sw .sw-btn.gold') },
+  gate: { query: '?shot=gate&mute', reach: async (page) => { await page.locator('.title-screen').click(); await cue(page, 'gate_air'); } },
+  windows: { query: '?shot=windows&mute', reach: async (page) => { await page.locator('.title-screen').click(); await appears(page, '.sw[data-kind="notification"]', 60000); } },
+  silhouette: { query: '?shot=silhouette&mute', reach: async (page) => { await page.locator('.title-screen').click(); await cue(page, 'whoosh'); } },
+  awaken: { query: '?shot=awaken&mute', reach: async (page) => { await page.locator('.title-screen').click(); await cue(page, 'awaken_voice'); } },
+  chest: { query: '?shot=chest&mute', reach: async (page) => { await page.locator('.title-screen').click(); await appears(page, '.chest-hold .ch-target', 60000); } },
+  rewards: { query: '?shot=rewards&mute', reach: async (page) => { await page.locator('.title-screen').click(); await shown(page, '.rw .sw-btn'); } },
+  letter: { query: '?shot=rewards&mute', reach: async (page) => { await STAGES.rewards.reach(page); await next(page, '.rw .sw-btn', '.letter .sw-btn'); } },
+  endcard: { query: '?shot=rewards&mute', reach: async (page) => { await STAGES.letter.reach(page); await next(page, '.letter .sw-btn', '.ec-actions .sw-btn.gold'); } },
 };
 
 /** Presses `key` until focus is on `sel`: how many presses it took, or Infinity after 8. */
@@ -510,7 +511,7 @@ export const scenarios = {
   async 'safe-zone-quiet-from-the-press'(h) {
     let release;
     const held = new Promise((r) => (release = r));
-    const { ctx, page, errors } = await visit(h, `?shot=windows${LIGHT}`, PHONE, {
+    const { ctx, page, errors } = await visit(h, '?shot=windows', PHONE, {
       prepare: async (c) => {
         await installAudioRecorder(c);
         await c.route('**/src/daily/index.ts*', (r) => held.then(() => r.continue()));
@@ -603,7 +604,7 @@ export const scenarios = {
       ['end card', 'endcard', 'letter', 'hidden'],
     ];
     for (const [screen, sound, from, hidden] of cases) {
-      const { ctx, page, errors } = await visit(h, `?shot=rewards${LIGHT}`, PHONE, {
+      const { ctx, page, errors } = await visit(h, '?shot=rewards', PHONE, {
         seed: { 'dbt.audio.v1': levels },
         prepare: async (c) => {
           await installAudioRecorder(c);
@@ -668,7 +669,7 @@ export const scenarios = {
    *  the recording: a page this busy can hand a sound to the speakers a moment late */
   async 'sound-after-leaving-keeps-its-echo'(h) {
     const levels = JSON.stringify({ v: 1, master: 1, music: 0, sfx: 1, hum: 0, muted: false });
-    const { ctx, page, errors } = await visit(h, `?shot=rewards${LIGHT}`, PHONE, { seed: { 'dbt.audio.v1': levels }, prepare: installAudioRecorder });
+    const { ctx, page, errors } = await visit(h, '?shot=rewards', PHONE, { seed: { 'dbt.audio.v1': levels }, prepare: installAudioRecorder });
     try {
       await page.locator('.title-screen').click();
       await audioReady(page);
@@ -723,7 +724,7 @@ export const scenarios = {
   async 'skip-keeps-the-sound-levels'(h) {
     const levels = JSON.stringify({ v: 1, master: 1, music: 0, sfx: 1, hum: 0, muted: false });
     // a first visit, at the names: the Sound panel is there (a ?shot has none)
-    const { ctx, page, errors } = await visit(h, `?fresh${LIGHT}`, PHONE, { seed: { 'dbt.audio.v1': levels }, prepare: installAudioRecorder });
+    const { ctx, page, errors } = await visit(h, '?fresh', PHONE, { seed: { 'dbt.audio.v1': levels }, prepare: installAudioRecorder });
     try {
       await STAGES.names.reach(page);
       await audioReady(page);
