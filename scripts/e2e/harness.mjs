@@ -1,7 +1,8 @@
 // Shared setup for the E2E scenario files: a Playwright Chromium, a Vite dev server on a free port, the artifacts
 // folder and the helpers every scenario uses. scripts/e2e.mjs calls startHarness(flags) once, plus h.more() for each
 // extra browser it runs scenarios in side by side, and passes one of these, h, to each scenario. h.stop() closes every
-// browser and stops only the dev server this process started.
+// browser and stops only the dev server this process started. Once it has, every Playwright call that waits on a page
+// counts its timeout in the time the page could run (see onPageTime()).
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -41,9 +42,26 @@ export function until(page, check, arg, { timeout = 10000, polling = 100 } = {})
   return poll(page, () => page.evaluate(check, arg), Boolean, `waited ${timeout} ms for ${String(check).replace(/\s+/g, ' ').slice(0, 160)}`, { timeout, polling });
 }
 
-/** An init script: keeps the page's own timer and clock, before a scenario installs the page clock over them. */
+/**
+ * An init script: keeps the page's own timer and clock, before a scenario installs the page clock over them, and takes up
+ * what the counts of runs() noted as the last document left.
+ */
 export function realTimers() {
   window.__e2eReal = { setTimeout: window.setTimeout.bind(window), now: performance.now.bind(performance) };
+  // how long the counts of runs() ran in the document before this one, noted as it left
+  window.__e2eBefore = {};
+  try {
+    for (const k of Object.keys(sessionStorage).filter((k) => k.startsWith('e2e-ran-'))) {
+      window.__e2eBefore[k.slice('e2e-ran-'.length)] = Number(sessionStorage.getItem(k));
+      sessionStorage.removeItem(k);
+    }
+    // and hands on any not taken up yet, if this one leaves first
+    addEventListener('pagehide', () => {
+      for (const [id, ran] of Object.entries(window.__e2eBefore)) sessionStorage.setItem(`e2e-ran-${id}`, String(ran));
+    });
+  } catch {
+    // a document with no storage of its own, such as about:blank, has none
+  }
 }
 
 let counts = 0;
@@ -53,13 +71,17 @@ let counts = 0;
  * browser for seconds now and then, and counts as 250 ms. With `work`, a gap counts in full as far as the page's own work
  * filled it: its long tasks, as the browser timed them, and the spans of its work a test timed (c.busy), each moment once,
  * as the browser times some of what a test runs in the page and not the rest. `late` resolves true once the page has run
- * `ms`; stop() ends the count (`late` then resolves false) and gives how long the page ran, in ms.
+ * `ms`; stop() ends the count (`late` then resolves false) and gives how long the page ran, in ms. `late` fails if the
+ * page goes to another document, and, marked `unset`, on a page never given realTimers(). With `moved`, a page that goes
+ * to another document notes as it leaves how long the count ran, in its sessionStorage, as nothing it sends then
+ * arrives; the next document's realTimers() moves it to window.__e2eBefore at once, so no scenario finds it stored.
  */
-function runs(page, ms, { work = false } = {}) {
+function runs(page, ms, { work = false, moved = false } = {}) {
   const id = ++counts;
-  const late = page.evaluate(
-    ({ id, ms, work }) =>
+  const counted = page.evaluate(
+    ({ id, ms, work, moved }) =>
       new Promise((done) => {
+        if (!window.__e2eReal) return done(null);
         const { setTimeout: later, now } = window.__e2eReal;
         const c = ((window.__e2eRuns ??= {})[id] = { run: 0, busy: [], stop: false });
         const add = (list) => list.forEach((e) => c.busy.push([e.startTime, e.startTime + e.duration]));
@@ -78,16 +100,33 @@ function runs(page, ms, { work = false } = {}) {
           c.busy = [];
           last = t;
         };
-        const tick = () => {
-          if (c.stop) return done(false);
+        const leave = () => {
           c.count();
-          if (c.run >= ms) done(true);
+          try {
+            sessionStorage.setItem(`e2e-ran-${id}`, String(c.run));
+          } catch {
+            // a document with no storage of its own, such as about:blank, has nowhere to note it
+          }
+        };
+        const end = (over) => {
+          removeEventListener('pagehide', leave);
+          done(over);
+        };
+        if (moved) addEventListener('pagehide', leave);
+        const tick = () => {
+          if (c.stop) return end(false);
+          c.count();
+          if (c.run >= ms) end(true);
           else later(tick, 50);
         };
         later(tick, 50);
       }),
-    { id, ms, work },
+    { id, ms, work, moved },
   );
+  const late = counted.then((over) => {
+    if (over === null) throw Object.assign(new Error('it was never given realTimers()'), { unset: true });
+    return over;
+  });
   late.catch(() => {});
   const stop = () =>
     page
@@ -119,10 +158,11 @@ export async function gone(locator, timeout, { state = 'detached', stuck = Math.
   let left = false;
   try {
     for (;;) {
-      left = await locator.waitFor({ state, timeout: 250 }).then(
+      // a quarter second on the wall clock at a time, so the checks below come round while the page is stopped too
+      left = await locator.waitFor({ state, timeout: 0, signal: AbortSignal.timeout(250) }).then(
         () => true,
         (e) => {
-          if (e.name !== 'TimeoutError') throw e;
+          if (e.name !== 'AbortError') throw e;
           return false;
         },
       );
@@ -153,25 +193,195 @@ export async function gone(locator, timeout, { state = 'detached', stuck = Math.
  * A deadline in the time the page could run (see runs()), for a wait on something the page does: a browser stopped for
  * a while on a busy machine uses none of it. `late` fails with a TimeoutError saying say() once the page has run `ms`,
  * or once `stuck` ms have gone by with the page stopped for most of them; and with an Error if the page's time can't be
- * counted (it went to another document, or was never given realTimers()). stop() ends the count and resolves with how
- * long the page ran, in ms.
+ * counted (it was never given realTimers()). A page that goes to another document meanwhile, by a reload or a link, is
+ * counted on there for what is left of `ms`, as the one it leaves notes how long it ran (see runs()); one that can't,
+ * about:blank or a crashed page, leaves that time out. `stuck` runs from the start of the wait, and `gaveUp` resolves once
+ * it has gone by. stop() ends the count.
  */
 function pageTime(page, ms, say, { stuck = Math.max(60000, 4 * ms) } = {}) {
-  const count = runs(page, ms);
   const missed = (why, name = 'TimeoutError') => Object.assign(new Error(say() + (why ? ` (${why})` : '')), { name });
+  let count;
+  let left = ms;
+  let ended = false;
   let timer;
+  let giveUp;
+  const gaveUp = new Promise((done) => (giveUp = done));
   const late = new Promise((_, fail) => {
-    count.late.then((over) => over && fail(missed()), (e) => fail(missed(`the page's running time could not be counted: ${e.message}`, 'Error')));
-    timer = setTimeout(() => fail(missed(`${stuck / 1000} s went by, the page stopped for most of them`)), stuck);
+    const start = () => {
+      if (ended) return;
+      count = runs(page, left, { moved: true });
+      count.late.then(
+        (over) => over && fail(missed()),
+        (e) => {
+          if (e.unset) fail(missed(`the page's running time could not be counted: ${e.message}`, 'Error'));
+          // its document went away: count what is left in the next one, a moment on, so a crashed page isn't asked over
+          // and over
+          else if (!page.isClosed())
+            setTimeout(async () => {
+              left -= await page
+                .evaluate((id) => {
+                  const ran = window.__e2eBefore?.[id] ?? 0;
+                  delete window.__e2eBefore?.[id];
+                  return ran;
+                }, count.id)
+                .catch(() => 0);
+              if (left > 0) start();
+              else fail(missed());
+            }, 50);
+        },
+      );
+    };
+    start();
+    timer = setTimeout(() => {
+      giveUp();
+      fail(missed(`${stuck / 1000} s went by, the page stopped for most of them`));
+    }, stuck);
   });
   late.catch(() => {});
   return {
     late,
+    gaveUp,
     stop: () => {
+      ended = true;
       clearTimeout(timer);
-      return count.stop();
+      count.stop();
     },
   };
+}
+
+// Every Playwright call that waits on a page with a timeout, by the class it is made on, with where its options go among
+// its arguments; LOADS wait for a document, on Playwright's navigation timeout. A call that only hands on to another one
+// here (a Locator's clear to its fill) is counted there.
+const TIMED = {
+  Frame: { check: 1, click: 1, dblclick: 1, focus: 1, hover: 1, innerHTML: 1, innerText: 1, inputValue: 1, isChecked: 1, isDisabled: 1, isEditable: 1, isEnabled: 1, tap: 1, textContent: 1, uncheck: 1, waitForSelector: 1, dragAndDrop: 2, fill: 2, getAttribute: 2, press: 2, selectOption: 2, setChecked: 2, setInputFiles: 2, type: 2, waitForFunction: 2, dispatchEvent: 3 },
+  Page: { ariaSnapshot: 0, ariaSnapshotJSON: 0, screenshot: 0, check: 1, click: 1, dblclick: 1, focus: 1, hover: 1, innerHTML: 1, innerText: 1, inputValue: 1, isChecked: 1, isDisabled: 1, isEditable: 1, isEnabled: 1, tap: 1, textContent: 1, uncheck: 1, waitForEvent: 1, waitForRequest: 1, waitForResponse: 1, waitForSelector: 1, dragAndDrop: 2, fill: 2, getAttribute: 2, press: 2, selectOption: 2, setChecked: 2, setInputFiles: 2, type: 2, waitForFunction: 2, dispatchEvent: 3 },
+  Locator: { ariaSnapshot: 0, ariaSnapshotJSON: 0, blur: 0, boundingBox: 0, check: 0, click: 0, dblclick: 0, elementHandle: 0, focus: 0, hover: 0, innerHTML: 0, innerText: 0, inputValue: 0, isChecked: 0, isDisabled: 0, isEditable: 0, isEnabled: 0, screenshot: 0, scrollIntoViewIfNeeded: 0, selectText: 0, tap: 0, textContent: 0, uncheck: 0, waitFor: 0, dragTo: 1, drop: 1, fill: 1, getAttribute: 1, press: 1, pressSequentially: 1, selectOption: 1, setChecked: 1, setInputFiles: 1, type: 1, dispatchEvent: 2, evaluate: 2, evaluateHandle: 2, waitForFunction: 2 },
+  ElementHandle: { check: 0, click: 0, dblclick: 0, hover: 0, screenshot: 0, scrollIntoViewIfNeeded: 0, selectText: 0, tap: 0, uncheck: 0, fill: 1, press: 1, selectOption: 1, setChecked: 1, setInputFiles: 1, type: 1, waitForElementState: 1, waitForSelector: 1 },
+  BrowserContext: { waitForEvent: 1 },
+};
+const LOADS = {
+  Frame: { waitForNavigation: 0, goto: 1, setContent: 1, waitForLoadState: 1, waitForURL: 1 },
+  Page: { goBack: 0, goForward: 0, reload: 0, waitForNavigation: 0, goto: 1, setContent: 1, waitForLoadState: 1, waitForURL: 1 },
+};
+/**
+ * The page whose running time a call's timeout counts, known without asking the page, which may be the one stopped. A
+ * wait on a whole profile, such as for a new tab, counts its first page's.
+ */
+const pageOf = {
+  Frame: (frame) => frame.page(),
+  Page: (page) => page,
+  Locator: (locator) => locator.page(),
+  ElementHandle: (handle) => handle._frame.page(),
+  BrowserContext: (ctx) => ctx.pages()[0],
+};
+const counted = new WeakSet();
+
+/**
+ * `call`, `name` made on a `kind` with its options at args[at], with its timeout counted in the time its page could run
+ * (see onPageTime()). With no page to count by, an empty profile's, it runs as Playwright made it.
+ */
+function pace(call, kind, name, at, load) {
+  const api = `${kind[0].toLowerCase()}${kind.slice(1)}.${name}`;
+  async function run(args) {
+    const options = typeof args[at] === 'function' ? { predicate: args[at] } : (args[at] ?? {});
+    const page = options.timeout === 0 ? null : pageOf[kind](this);
+    // Playwright's own reading of the call's timeout, with the defaults its page and profile set
+    const ms = page ? (kind === 'BrowserContext' ? this : page)._timeoutSettings[load ? 'navigationTimeout' : 'timeout'](options).timeout : 0;
+    if (!ms) return await call.apply(this, args);
+    const abort = new AbortController();
+    const time = pageTime(page, ms, () => `Timeout ${ms}ms of the page running exceeded`);
+    args[at] = { ...options, timeout: 0, signal: options.signal ? AbortSignal.any([options.signal, abort.signal]) : abort.signal };
+    const done = call.apply(this, args);
+    try {
+      const late = await Promise.race([done.then(() => null), time.late.catch((e) => e)]);
+      if (!late) return await done;
+      abort.abort(late);
+      // the abort ends the call at once, unless it is in a step the abort can't reach, such as an element handle's
+      // setInputFiles asking the page for its frame first, which a stopped page never answers: that is let go at the
+      // stuck limit, as anything later in it is aborted
+      const ended = await Promise.race([done.then(() => null, (e) => e), time.gaveUp.then(() => late)]);
+      if (!ended) return await done;
+      if (ended === late) {
+        done.catch(() => {});
+        throw Object.assign(new Error(`${api}: ${late.message}`), { name: late.name });
+      }
+      if (ended.name !== 'AbortError') throw ended;
+      // Playwright names the call and the reason, then gives its call log; a wait for an event leaves the reason out
+      throw Object.assign(new Error(ended.message.includes(late.message) ? ended.message : `${late.message}\n${ended.message}`, { cause: ended }), { name: late.name });
+    } finally {
+      time.stop();
+    }
+  }
+  const wrapped = async function (...args) {
+    try {
+      return await run.call(this, args);
+    } catch (e) {
+      // Playwright names an error after the innermost of its calls the harness sits between, a Locator's click after its
+      // Frame's click: it is named after the call made, as it is without the harness
+      if (e instanceof Error) e.message = e.message.replace(/^\w+\.\w+: /, `${api}: `);
+      throw e;
+    }
+  };
+  counted.add(wrapped);
+  return wrapped;
+}
+
+let paced = false;
+/**
+ * Playwright's own timeouts count wall time: a click's, a fill's, a waitFor's, a goto's, a screenshot's, every call's that
+ * waits on a page. CI's software renderer stops a tab for 5 to 13 s now and then, and a stop that lands in such a wait
+ * fails it. So, once, on Playwright's own classes, every call in TIMED and LOADS, from a scenario or the harness, is set
+ * to count its timeout (its own, or the default its page or profile sets) in the time the page could run instead (see
+ * pageTime()): it runs with no deadline on the wall clock, is aborted once the page has run that long, or at the stuck
+ * limit, and fails with Playwright's call log. One that ends anyway, past where an abort can stop it, keeps its result.
+ * A timeout of 0 still means none; a call that needs a deadline on the wall clock gives timeout: 0 and a signal of its
+ * own, such as AbortSignal.timeout(ms).
+ */
+async function onPageTime(probe) {
+  if (paced) return;
+  paced = true;
+  const handle = await probe.$('html');
+  await handle.dispose();
+  const made = { Frame: probe.mainFrame(), Page: probe, Locator: probe.locator('html'), ElementHandle: handle, BrowserContext: probe.context() };
+  for (const [calls, load] of [[TIMED, false], [LOADS, true]]) {
+    for (const [kind, at] of Object.entries(calls)) {
+      const proto = Object.getPrototypeOf(made[kind]);
+      for (const [name, i] of Object.entries(at)) proto[name] = pace(proto[name], kind, name, i, load);
+    }
+  }
+}
+
+/**
+ * The calls on Playwright's Frame, Page, Locator, ElementHandle and BrowserContext that take a timeout and don't count
+ * it in the page's time, for a check that TIMED and LOADS miss none, after a Playwright update too. A call takes one if
+ * its code reads one, or hands on to a Frame call that does, however deep.
+ */
+export async function untimed(page) {
+  const reads = /\b_timeout\(|_timeoutSettings\.(?:timeout|navigationTimeout)\(|_navigationTimeout\(|timeout: options|_setupNavigationWaiter\(|rejectOnTimeout\(|_waitForEvent\(/;
+  const frame = Object.getPrototypeOf(page.mainFrame());
+  const frameTakes = new Map();
+  const takes = (name) => {
+    if (!frameTakes.has(name)) {
+      frameTakes.set(name, false);
+      const code = String(frame[name] ?? '');
+      frameTakes.set(name, reads.test(code) || [...code.matchAll(/\bthis\.(\w+)\(/g)].some(([, n]) => takes(n)));
+    }
+    return frameTakes.get(name);
+  };
+  const handle = await page.$('html');
+  await handle.dispose();
+  const made = { Frame: page.mainFrame(), Page: page, Locator: page.locator('html'), ElementHandle: handle, BrowserContext: page.context() };
+  const missing = [];
+  for (const [kind, object] of Object.entries(made)) {
+    const proto = Object.getPrototypeOf(object);
+    for (const name of Object.getOwnPropertyNames(proto)) {
+      const call = Object.getOwnPropertyDescriptor(proto, name).value;
+      if (name === 'constructor' || name.startsWith('_') || typeof call !== 'function' || counted.has(call)) continue;
+      const code = String(call);
+      if (reads.test(code) || [...code.matchAll(/\b_(?:mainF|f)rame\.(\w+)\(/g)].some(([, n]) => takes(n))) missing.push(`${kind}.${name}`);
+    }
+  }
+  return missing;
 }
 
 /**
@@ -613,6 +823,7 @@ export async function startHarness(flags = {}) {
       const probe = await browser.newPage();
       try {
         renderer = await checkRenderer(probe, { remote: !!flags.ws });
+        await onPageTime(probe);
       } finally {
         await probe.context().close();
       }
@@ -764,7 +975,7 @@ export async function startHarness(flags = {}) {
     };
     const snap = () =>
       page
-        .screenshot({ path: path.join(out, name + '.png'), timeout: 3000 })
+        .screenshot({ path: path.join(out, name + '.png'), timeout: 0, signal: AbortSignal.timeout(3000) })
         .then(() => 'saved', (e) => 'not saved: ' + clean(String(e?.message ?? e).split('\n')[0]));
     const now = await read(3000);
     let shot = await snap();
@@ -819,7 +1030,7 @@ export async function startHarness(flags = {}) {
   })());
 
   const shared = {};
-  const lane = (browser) => ({ browser, server, out, flags, shared, renderer, throttleErrors, zone: ZONE, open: opener(browser), evidence, evidenceAll: allEvidence(browser), note, leaves, gone, poll, stopwatch, quick, shot, ls, youOf, deepFind, deepDrop, expect, sleep, frames, settled, until, pauseClock, reachHub, openSettings, SAVE, YOU, SEEN, stop, more });
+  const lane = (browser) => ({ browser, server, out, flags, shared, renderer, throttleErrors, zone: ZONE, open: opener(browser), evidence, evidenceAll: allEvidence(browser), note, leaves, gone, poll, stopwatch, quick, untimed, shot, ls, youOf, deepFind, deepDrop, expect, sleep, frames, settled, until, pauseClock, reachHub, openSettings, SAVE, YOU, SEEN, stop, more });
   /** Another browser on the same dev server, so scenarios can run side by side: its own profiles, the same `shared`. */
   async function more() {
     if (stopping) throw new Error('the harness is stopping');
