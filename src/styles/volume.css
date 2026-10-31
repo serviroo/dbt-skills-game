@@ -18,7 +18,7 @@
 /* on the intro's Safe Zone and Skip row, slimmer on a phone on its side (cutscene.css) */
 @media (max-height: 400px) {
   .vol--cutscene {
-    top: calc(8px + var(--safe-top));
+    top: calc(7px + var(--safe-top));
   }
 }
 .vol--top {

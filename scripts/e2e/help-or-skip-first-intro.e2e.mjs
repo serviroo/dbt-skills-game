@@ -64,8 +64,10 @@ const shown = (page, sel) =>
     return r && r.width && !b.closest('[inert]') && b.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)) && b.getAnimations({ subtree: true }).every((a) => a.playState !== 'running' || a.effect.getComputedTiming().iterations === Infinity);
   }, sel, { timeout: 30000 });
 
-/** A player's tap on the middle of `sel`, where it is now. */
+/** A player's tap on the middle of `sel`, scrolled to first if it is out of sight (the end card's buttons never hold
+ *  still for a Playwright scroll, so the page scrolls itself). */
 async function tap(page, sel) {
+  await page.locator(sel).evaluate((e) => e.scrollIntoView({ block: 'nearest' }), null, { timeout: 10000 });
   const box = await page.locator(sel).boundingBox({ timeout: 10000 });
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 }
@@ -99,8 +101,49 @@ async function keysTo(page, sel, key) {
   return Infinity;
 }
 
-/** Both buttons are on screen, inside it, on top of everything at their middle, and a few Tabs or Shift+Tabs from
- *  where focus is on this screen. Returns their names. */
+/** Where a tap on `sel` lands on it, found by hit-testing out from its middle: [width, height] in CSS px. */
+const tapArea = (page, sel) =>
+  page.evaluate((s) => {
+    const b = document.querySelector(s);
+    const r = b.getBoundingClientRect();
+    const [cx, cy] = [r.x + r.width / 2, r.y + r.height / 2];
+    const on = (x, y) => x >= 0 && y >= 0 && x < innerWidth && y < innerHeight && b.contains(document.elementFromPoint(x, y));
+    const reach = (dx, dy) => {
+      let n = 0;
+      while (on(cx + dx * (n + 0.25), cy + dy * (n + 0.25))) n += 0.25;
+      return n;
+    };
+    return [reach(-1, 0) + reach(1, 0), reach(0, -1) + reach(0, 1)];
+  }, sel);
+
+/** Scrolls `scroller` to its top and its bottom and returns every line of text it shows behind the Safe Zone or Skip. */
+const textBehind = (page, scroller) =>
+  page.evaluate(async (s) => {
+    const sc = document.querySelector(s);
+    const controls = [...document.querySelectorAll('.ui-safe, .ui-skip')].map((b) => b.getBoundingClientRect());
+    const found = [];
+    for (const end of ['top', 'bottom']) {
+      sc.scrollTop = end === 'top' ? 0 : sc.scrollHeight;
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const view = sc.getBoundingClientRect();
+      const walk = document.createTreeWalker(sc, NodeFilter.SHOW_TEXT);
+      for (let t = walk.nextNode(); t; t = walk.nextNode()) {
+        if (!t.textContent.trim()) continue;
+        const range = document.createRange();
+        range.selectNodeContents(t);
+        for (const r of range.getClientRects()) {
+          // the part of the line the scroll area shows
+          const [top, bottom] = [Math.max(r.top, view.top), Math.min(r.bottom, view.bottom)];
+          if (bottom > top && controls.some((c) => r.left < c.right && r.right > c.left && top < c.bottom && bottom > c.top)) found.push(`${end}: "${t.textContent.trim().slice(0, 32)}"`);
+        }
+      }
+    }
+    sc.scrollTop = 0;
+    return found;
+  }, scroller);
+
+/** Both buttons are on screen, inside it, on top of everything at their middle, at least 44 by 44 px to tap, and a few
+ *  Tabs or Shift+Tabs from where focus is on this screen. Returns their names. */
 async function bothThere(h, page, tag) {
   const found = await page.evaluate(() =>
     ['.ui-safe', '.ui-skip'].map((sel) => {
@@ -119,6 +162,10 @@ async function bothThere(h, page, tag) {
     }),
   );
   for (const b of found) h.expect(!b.missing && b.inside && b.onTop && b.shown, `${tag}: ${b.sel} can't be pressed: ${JSON.stringify(b)}`);
+  for (const sel of ['.ui-safe', '.ui-skip']) {
+    const [w, ht] = await tapArea(page, sel);
+    h.expect(w >= 44 && ht >= 44, `${tag}: ${sel} takes taps over ${w} x ${ht} px, under 44 x 44`);
+  }
   const from = await page.evaluateHandle(() => document.activeElement);
   const back = () => page.evaluate((e) => (e === document.body ? document.activeElement?.blur() : e.focus({ preventScroll: true })), from);
   for (const sel of ['.ui-safe', '.ui-skip']) {
@@ -240,14 +287,21 @@ async function leaveAt(h, at, way, tag = `${way === 'safe' ? 'Safe Zone' : 'Skip
   }
 }
 
-/** Both buttons on every intro screen at this size: one page for the title and names, one for each 3D beat and the
- *  chest's hold, and one for the rewards, the letter and the end card. */
+/** The intro screens that scroll when they don't fit, by what scrolls. */
+const SCROLLS = { names: '.sw-layer', rewards: '.rw', letter: '.letter-wrap' };
+
+/** Both buttons on every intro screen at this size, with no text scrolling behind them: one page for the title and
+ *  names, one for each 3D beat and the chest's hold, and one for the rewards, the letter and the end card. */
 async function everyStage(h, size, viewport) {
   const names = {};
   const check = async (page, at) => {
     // what a player sees first on a screen that scrolls
     await page.evaluate(() => document.querySelectorAll('.rw, .letter-wrap').forEach((n) => n.scrollTo(0, 0)));
     names[at] = await bothThere(h, page, `${size} ${at}`);
+    if (SCROLLS[at]) {
+      const behind = await textBehind(page, SCROLLS[at]);
+      h.expect(!behind.length, `${size} ${at}: text scrolls behind the Safe Zone or Skip: ${behind.join(', ')}`);
+    }
     await h.shot(page, `${size}-${at}`);
   };
   for (const at of ['title', 'gate', 'windows', 'silhouette', 'awaken', 'chest', 'rewards']) {

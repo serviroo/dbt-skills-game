@@ -110,12 +110,15 @@
     color 140ms ease-out,
     border-color 140ms ease-out;
 }
-/* a 46 px tall tap each; the gap keeps the two apart */
+/* a tap 46 px tall on each, whatever the row's height, and 16 px wider; the gap keeps the two apart */
 .ui-safe::after,
 .ui-skip::after {
   content: '';
   position: absolute;
-  inset: -6px -8px;
+  top: calc(50% - 23px);
+  bottom: calc(50% - 23px);
+  left: -8px;
+  right: -8px;
 }
 .ui-safe {
   padding-left: 10px;
@@ -156,29 +159,32 @@
   z-index: 70;
   pointer-events: auto;
 }
-/* while they are up, the intro's windows and closing screens start below them */
+/* while they are up, the intro's windows, rewards and letter scroll only below them, so nothing ever passes behind
+   them (their backdrops still cover the screen), and the end card starts below them */
 .ui-ways ~ .sw-layer,
 .ui-ways ~ .rw,
-.ui-ways ~ .letter-wrap,
+.ui-ways ~ .letter-wrap {
+  top: calc(var(--safe-top) + 46px);
+  padding-top: 12px;
+}
 .ui-ways ~ .endcard {
   padding-top: calc(var(--safe-top) + 58px);
 }
-/* a phone on its side with little height: a slimmer row, so a window still fits under it */
+/* a phone on its side with little height: a slimmer row, so a window, with room for its top bar, still fits under it */
 @media (max-height: 400px) {
   .ui-ways {
     top: calc(8px + var(--safe-top));
   }
   .ui-safe,
   .ui-skip {
-    height: 30px;
-  }
-  .ui-safe::after,
-  .ui-skip::after {
-    inset: -7px -8px;
+    height: 28px;
   }
   .ui-ways ~ .sw-layer,
   .ui-ways ~ .rw,
-  .ui-ways ~ .letter-wrap,
+  .ui-ways ~ .letter-wrap {
+    top: calc(var(--safe-top) + 36px);
+    padding-top: 11px;
+  }
   .ui-ways ~ .endcard {
     padding-top: calc(var(--safe-top) + 46px);
   }
@@ -239,6 +245,13 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   z-index: 30;
+}
+/* the backdrop covers the whole screen, wherever the cards scroll */
+.rw::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
   background: radial-gradient(70% 55% at 50% 50%, rgba(201, 164, 92, 0.1), rgba(7, 8, 15, 0.72) 70%);
 }
 .rw-head {
@@ -383,8 +396,15 @@
   place-items: center;
   z-index: 32;
   padding: calc(var(--safe-top) + 18px) 14px calc(var(--safe-bottom) + 18px);
-  background: rgba(4, 5, 10, 0.62);
   overflow-y: auto;
+}
+/* the backdrop covers the whole screen, wherever the letter scrolls */
+.letter-wrap::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: rgba(4, 5, 10, 0.62);
 }
 .letter {
   position: relative;
