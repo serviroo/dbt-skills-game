@@ -229,10 +229,10 @@ export const scenarios = {
         s.settings.names[SHADOW_IDS[0]] = 'Fern'; a.store.touch('name:' + SHADOW_IDS[0]);
         s.flags.titlesSeen = [TITLE_IDS.at(-1)];
         s.diary['2026-01-02'] = { day: '2026-01-02', emotions: { Joy: 3 }, urges: {}, note: 'A quiet afternoon.', updatedAt: 3 };
-        s.lists.comfort = [{ id: 'comfort-one', text: 'A soft blanket', at: 3 }];
-        s.lists.activities = [{ id: 'activity-one', text: 'A short walk', at: 3 }];
-        s.lists.reasons = [{ id: 'reason-one', text: 'Tomorrow', at: 3 }];
-        s.lists.people = [{ id: 'person-one', name: 'Kit', phone: '', at: 3 }];
+        s.lists.comfort = [{ id: 'comfort-one', text: 'A soft blanket', at: 3, place: 0 }];
+        s.lists.activities = [{ id: 'activity-one', text: 'A short walk', at: 3, place: 0 }];
+        s.lists.reasons = [{ id: 'reason-one', text: 'Tomorrow', at: 3, place: 0 }];
+        s.lists.people = [{ id: 'person-one', name: 'Kit', phone: '', at: 3, place: 0 }];
         s.maps = [{ id: 'map-one', t: 3, urge: 'Pause', p1: 'Rest', c1: 'Time', p2: 'Walk', c2: 'Energy', choice: 'Rest' }];
         s.lines = [{ day: '2026-01-02', id: 'quiet-line', tag: 'quiet', text: 'A quiet day.', t: 3 }];
         a.store.save();

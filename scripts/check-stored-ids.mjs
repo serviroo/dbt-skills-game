@@ -67,8 +67,8 @@ async function collect() {
     const s = store.freshState(t);
     s.events.push({ id: 'e1', t, day, k: 'skill', xp: 20, stat: stats[0], skill: dbt.SKILLS[0].id, data: { answer: 'Yes' } });
     s.diary[day] = { day, emotions: { Joy: 2 }, urges: { Rest: 1 }, note: 'n', updatedAt: t, ft: { [store.fieldKey('emotions', 'Joy')]: t, [store.fieldKey('urges', 'Rest')]: t, note: t } };
-    for (const k of ['comfort', 'activities', 'reasons']) s.lists[k].push({ id: `${k}1`, text: 'x', at: t });
-    s.lists.people.push({ id: 'p1', name: 'A', phone: '1', at: t });
+    for (const k of ['comfort', 'activities', 'reasons']) s.lists[k].push({ id: `${k}1`, text: 'x', at: t, place: 0, placeAt: t });
+    s.lists.people.push({ id: 'p1', name: 'A', phone: '1', at: t, place: 0, placeAt: t });
     s.maps.push({ id: 'm1', t, urge: 'u', p1: 'a', c1: 'b', p2: 'c', c2: 'd', choice: 'e', at: t });
     s.lines.push({ day, id: lines.TODAY_LINES.low[0].id, tag: 'STATUS', text: 'x', t });
     s.gone.g1 = t;

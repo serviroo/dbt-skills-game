@@ -11,8 +11,9 @@ import { REGIONS, regionById, regionFromLocale, type CrisisLine } from '../conte
 import type { App, Route, ScreenOut } from './app';
 import { icon } from './art';
 import { momentView } from './moment';
-import { uid } from './store';
-import { btn, chip, field, h, p, panel, redrawn, typo, wholeWords } from './ui';
+import { nextPlace, uid, type Item, type Person } from './store';
+import { entryList } from './entries';
+import { btn, chip, field, h, p, panel, typo, wholeWords } from './ui';
 import { supportListsCopy } from './support-lists';
 import { textSize } from './text-size';
 import { breathRing, coolChoice, pmrView, type Ctx } from './widgets';
@@ -268,19 +269,19 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   const nextBtn = (at: At, label = 'Next', kind: 'primary' | 'quiet' = 'primary') => btn(label, () => show(nextOf(at)), { kind });
 
   const listScreen = (at: 'reasons' | 'comfort', title: string, text: string | null, empty: string) => {
-    // the list follows another open copy's changes, and a clear, as they land
-    const list = redrawn(() => {
-      const items = st.state.lists[at];
-      return items.length ? h('ul', { class: 'dq-sz-list' }, items.map((i) => h('li', { 'data-item': i.id, text: typo(i.text) }))) : p(empty, 'dq-text dq-sz-empty');
-    }, () => addOne);
-    stops.push(st.onChange(list.update));
+    const hint = at === 'reasons' ? SAFE.reasons.add : 'Something that helps, even a little';
+    // the list follows another open copy's changes, and a clear, as they land; "Edit the list" shows each entry's Edit
+    // and moves
+    const list = entryList(app, { key: at, cls: 'dq-sz-list', row: 'dq-sz-entry', view: (x: Item) => [h('span', { class: 'dq-entry-t', text: typo(x.text) })], empty: () => p(empty, 'dq-text dq-sz-empty'), lost: () => addOne, say, hint, toggle: true });
+    stops.push(st.onChange(list.update), list.leave);
     const lists = supportListsCopy(app);
     stops.push(lists.dispose);
-    const f = field('Add one', { placeholder: at === 'reasons' ? SAFE.reasons.add : 'Something that helps, even a little', hideLabel: true });
+    const f = field('Add one', { placeholder: hint, hideLabel: true });
     const add = h('div', { class: 'dq-addrow is-hidden' }, f.el, btn('Save', () => {
       const v = f.input.value.trim();
       if (!v) return f.input.focus();
-      st.state.lists[at].push({ id: uid(), text: v.slice(0, 200), at: st.now() });
+      const items = st.state.lists[at];
+      items.push({ id: uid(), text: v.slice(0, 200), at: st.now(), place: nextPlace(items) });
       st.save();
       show(at);
     }, { kind: 'quiet' }));
@@ -293,7 +294,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
       [h3(title), text ? p(text, 'dq-text') : null],
       list.node,
       add,
-      h('div', { class: 'dq-actions dq-actions--stack' }, nextBtn(at), addOne, lists.open),
+      h('div', { class: 'dq-actions dq-actions--stack' }, nextBtn(at), addOne, list.flip, lists.open),
       lists.box,
     );
   };
@@ -385,26 +386,22 @@ export function safeScreen(app: App, route: Route): ScreenOut {
       case 'people': {
         // the people follow another open copy's changes, and a clear, as they land: someone removed elsewhere can't be
         // called from here, and focus on their Call or Text goes to Add a person
-        const list = redrawn(() => {
-          const ppl = st.state.lists.people;
-          return ppl.length
-            ? h(
-                'ul',
-                { class: 'dq-people' },
-                ppl.map((x) =>
-                  h(
-                    'li',
-                    { class: 'dq-person', 'data-item': x.id },
-                    h('span', { class: 'dq-person-n', text: x.name }),
-                    x.phone
-                      ? h('span', { class: 'dq-person-acts' }, h('a', { class: 'dq-btn dq-btn--quiet', href: telHref(x.phone), 'aria-label': `Call ${x.name}`, html: `<span class="dq-btn-ic">${icon('phone')}</span><span>Call</span>` }), h('a', { class: 'dq-btn dq-btn--quiet', href: smsHref(x.phone.replace(/[^\d+]/g, '')), 'aria-label': `Text ${x.name}`, html: `<span class="dq-btn-ic">${icon('text')}</span><span>Text</span>` }))
-                      : null,
-                  ),
-                ),
-              )
-            : p(SAFE.people.empty, 'dq-text dq-sz-empty');
-        }, () => addPerson);
-        stops.push(st.onChange(list.update));
+        const list = entryList(app, {
+          key: 'people',
+          cls: 'dq-people',
+          row: 'dq-person',
+          view: (x: Person) => [
+            h('span', { class: 'dq-person-n', text: x.name }),
+            x.phone
+              ? h('span', { class: 'dq-person-acts' }, h('a', { class: 'dq-btn dq-btn--quiet', href: telHref(x.phone), 'aria-label': `Call ${x.name}`, html: `<span class="dq-btn-ic">${icon('phone')}</span><span>Call</span>` }), h('a', { class: 'dq-btn dq-btn--quiet', href: smsHref(x.phone.replace(/[^\d+]/g, '')), 'aria-label': `Text ${x.name}`, html: `<span class="dq-btn-ic">${icon('text')}</span><span>Text</span>` }))
+              : null,
+          ],
+          empty: () => p(SAFE.people.empty, 'dq-text dq-sz-empty'),
+          lost: () => addPerson,
+          say,
+          toggle: true,
+        });
+        stops.push(st.onChange(list.update), list.leave);
         const n = field('Name', { placeholder: 'Name', autocomplete: 'off' });
         const ph = field('Number', { placeholder: 'Phone number', type: 'tel', inputmode: 'tel' });
         const lists = supportListsCopy(app);
@@ -412,7 +409,8 @@ export function safeScreen(app: App, route: Route): ScreenOut {
         const add = h('div', { class: 'dq-person-add is-hidden' }, n.el, ph.el, h('div', { class: 'dq-actions' }, btn('Save', () => {
           const name = n.input.value.trim();
           if (!name) return n.input.focus();
-          st.state.lists.people.push({ id: uid(), name: name.slice(0, 80), phone: ph.input.value.trim().slice(0, 40), at: st.now() });
+          const ppl = st.state.lists.people;
+          ppl.push({ id: uid(), name: name.slice(0, 80), phone: ph.input.value.trim().slice(0, 40), at: st.now(), place: nextPlace(ppl) });
           st.save();
           show('people');
         }, { kind: 'quiet' })));
@@ -425,7 +423,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
           [h3(SAFE.people.title), p(SAFE.people.text, 'dq-text')],
           list.node,
           add,
-          h('div', { class: 'dq-actions dq-actions--stack' }, nextBtn(at), addPerson, lists.open),
+          h('div', { class: 'dq-actions dq-actions--stack' }, nextBtn(at), addPerson, list.flip, lists.open),
           lists.box,
         );
       }

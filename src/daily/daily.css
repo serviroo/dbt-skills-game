@@ -3442,6 +3442,55 @@ textarea.dq-input {
   display: block;
   padding: 2px 14px 10px;
 }
+/* an entry of the player's own lists (entries.ts): its Edit, Move up and Move down (and Remove, on Comfort) sit together
+   at the end of its row, beside its words where they fit and under them where they don't, a tap in size each; the one
+   that can't go further is dimmed and keeps focus. Edited, the row is its words in a field (a person's name and number),
+   Save and Cancel under them */
+.dq-entry-t {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.dq-entry-tools {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-inline-start: auto;
+}
+/* the icon dims, never the focus ring around it */
+.dq-entry-tools [aria-disabled='true'] {
+  cursor: default;
+}
+.dq-entry-tools [aria-disabled='true'] .dq-ic {
+  opacity: 0.35;
+}
+.dq-item:has(> .dq-entry-tools) {
+  flex-wrap: wrap;
+  column-gap: 4px;
+}
+.dq-sz-list .dq-sz-entry:has(> .dq-entry-tools) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 8px;
+  padding-block: 2px;
+  padding-inline-end: 2px;
+}
+.dq-item.is-editing,
+.dq-sz-list .dq-sz-entry.is-editing,
+.dq-person.is-editing {
+  display: block;
+  padding: 10px 12px 12px;
+}
+.dq-entry-edit .dq-field:first-child {
+  margin-top: 0;
+}
+.dq-entry-edit .dq-field + .dq-field {
+  margin-top: 10px;
+}
+.dq-entry-edit .dq-actions {
+  margin-top: 10px;
+}
 .dq-listp .dq-small {
   margin-bottom: 4px !important;
 }
