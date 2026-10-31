@@ -77,9 +77,12 @@ export function refill(list: HTMLElement, shows: string, cards: () => HTMLElemen
   to?.focus({ preventScroll: true });
 }
 
+/** What an ally's card calls it. */
+export const allyName = (m: DrawingMeta) => m.name?.trim() || 'Shadow ally';
+
 /** A shadow ally as a full-art Shadow card. */
 export function allyCard(app: App, m: DrawingMeta, img?: HTMLImageElement | HTMLCanvasElement, star = false) {
-  const name = m.name?.trim() || 'Shadow ally';
+  const name = allyName(m);
   return h(
     'div',
     { class: 'dq-cardface dq-allycard' },

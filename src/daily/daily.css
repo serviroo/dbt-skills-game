@@ -2740,15 +2740,21 @@ textarea.dq-input {
    takes the whole row, so every word shows whole at its own size, and only that card: one alone in its row for any
    other reason (the last, or the one before a wide card) keeps its share. Each card sits in a cell its row stretches,
    followed by a spacer as wide as the cell past the share (the card a pixel under it, so rounding never parts them);
-   the spacer wraps under a card wider than its share, which then fills the cell. */
+   the spacer wraps under a card wider than its share, which then fills the cell. The share is a length worked out on
+   the cell, so the words inside a card that is a size container of its own (an ally's) can keep to it too. */
+@property --share {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
 .dq-collection {
-  --share: calc(50cqi - 6px);
   container-type: inline-size;
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
 }
 .dq-cardcell {
+  --share: calc(50cqi - 6px);
   flex: 1 1 var(--share);
   display: flex;
   flex-wrap: wrap;
@@ -2764,8 +2770,10 @@ textarea.dq-input {
    padding, with narrower sides (below), so a name's longest word fits its line */
 @media (max-width: 260px) {
   .dq-collection {
-    --share: 100cqi;
     margin: 0 -10px;
+  }
+  .dq-cardcell {
+    --share: 100cqi;
   }
 }
 .dq-cardbtn {
@@ -3401,8 +3409,15 @@ textarea.dq-input {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: start;
   }
+  /* four a row: a card too wide for its share takes the room its words need beside the others rather than the whole
+     row (a whole-row card here is near a screen tall), the others keep their own height beside it, and a short last row
+     keeps to the columns */
   .dq-collection {
+    align-items: flex-start;
+  }
+  .dq-cardcell {
     --share: calc(25cqi - 9px);
+    flex-grow: 0;
   }
   .dq-sz .dq-text {
     font-size: 21px;
@@ -4455,6 +4470,32 @@ textarea.dq-input {
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--accent);
+}
+/* in the Night Watch an ally's name, and the sides around it, keep the size they have in a card of its share, as every
+   card's words keep theirs, with the name again unseen beside the card at that size, inside the card's own sides: the
+   card is a size container, so its own words never widen it, and this does, so a name too wide for the share takes more
+   room as a long word does, up to the whole row (a name wider still wraps) */
+.dq-collection .dq-allycard-foot,
+.dq-allybtn-fit {
+  padding-right: calc(var(--share) * 8 / 100);
+  padding-left: calc(var(--share) * 8 / 100);
+}
+.dq-collection .dq-allycard-name,
+.dq-allybtn-fit {
+  font-size: clamp(15px, calc(var(--share) * 10.4 / 100), 34px);
+}
+.dq-allybtn {
+  gap: 0;
+}
+.dq-allybtn-fit {
+  height: 0;
+  max-width: 100cqi;
+  overflow: hidden;
+  visibility: hidden;
+  border-right: 1px solid transparent;
+  border-left: 1px solid transparent;
+  font-family: var(--font-display);
+  font-weight: 600;
 }
 .dq-cardbtn .dq-allycard,
 .dq-cardbtn .dq-allyslot-face {

@@ -6,7 +6,7 @@ import type { App, Route, ScreenOut, Visit } from './app';
 import { glyph, icon, mothSVG } from './art';
 import { skillCard } from './hub';
 import { regionPicker, telHref, smsHref } from './safe';
-import { allyCard, cardOf, favFirst, focusBack, refill } from './artroom';
+import { allyCard, allyName, cardOf, favFirst, focusBack, refill } from './artroom';
 import { artStore } from './artstore';
 import { storyStore } from './storystore';
 import { addDays, cleanName, dayKey, fieldKey, fieldTimes, isSkillId, ROW_CAP, uid, type DiaryEntry, type State, type Store } from './store';
@@ -276,7 +276,14 @@ export function shadowsScreen(app: App): ScreenOut {
     const mine = favFirst(list.filter((m) => m.kind === 'ally'));
     refill(allies, mine.map(cardOf).join('\n'), () => [
       ...mine.map((m) =>
-        cell(h('button', { type: 'button', class: 'dq-cardbtn dq-allybtn', 'data-piece': m.id, onclick: () => app.go({ name: 'piece', id: m.id }), 'aria-label': `${m.name || 'Shadow ally'}, a shadow ally you designed${m.fav ? ', a favourite' : ''}` }, allyCard(app, m, undefined, true))),
+        cell(
+          h(
+            'button',
+            { type: 'button', class: 'dq-cardbtn dq-allybtn', 'data-piece': m.id, onclick: () => app.go({ name: 'piece', id: m.id }), 'aria-label': `${m.name || 'Shadow ally'}, a shadow ally you designed${m.fav ? ', a favourite' : ''}` },
+            allyCard(app, m, undefined, true),
+            h('span', { class: 'dq-allybtn-fit', 'aria-hidden': 'true', text: typo(allyName(m)) }),
+          ),
+        ),
       ),
       slot,
     ]);
