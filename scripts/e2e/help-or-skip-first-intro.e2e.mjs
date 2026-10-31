@@ -49,6 +49,7 @@ async function visit(h, query, viewport = PHONE, { seed = {}, prepare } = {}) {
     const { AudioEngine } = await import('/src/audio/engine.ts');
     const play = AudioEngine.prototype.play;
     AudioEngine.prototype.play = function (cue, ...args) {
+      window.__engine = this;
       window.__cues.push({ cue, at: performance.now() });
       return play.call(this, cue, ...args);
     };
@@ -587,6 +588,45 @@ export const scenarios = {
       return { watch, skip };
     } finally {
       await skipped.ctx.close();
+    }
+  },
+
+  /** Skip as a closing screen's cue plays (a reward's chime, the letter opening, the end card's shimmer with its tail of
+   *  seconds): every sound of the intro still ringing at the press stops there, so none of it plays on over Home */
+  async 'skip-stops-the-intro-sound'(h) {
+    const cases = [
+      ['rewards', 'reward_chime', async () => {}],
+      ['letter', 'letter_open', (page) => tap(page, '.rw .sw-btn')],
+      ['end card', 'endcard', (page) => tap(page, '.letter .sw-btn')],
+    ];
+    for (const [i, [at, sound, open]] of cases.entries()) {
+      const { ctx, page, errors } = await visit(h, STAGES.rewards.query);
+      const tag = `Skip as the ${at} opens`;
+      try {
+        if (i) await STAGES[i === 1 ? 'rewards' : 'letter'].reach(page);
+        else await page.locator('.title-screen').click();
+        await open(page);
+        await cue(page, sound);
+        // what still rings as the press lands
+        await page.evaluate(() =>
+          addEventListener(
+            'click',
+            (e) => {
+              const engine = window.__engine;
+              if (e.target.closest?.('.ui-ways')) window.__ringing ??= [...engine.active].filter((v) => v.end > engine.ctx.currentTime);
+            },
+            true,
+          ),
+        );
+        await tap(page, '.ui-skip');
+        await homeAtOnce(h, page, tag);
+        const rang = await page.evaluate(() => ({ all: window.__ringing.length, on: window.__ringing.filter((v) => !v.stopped).length }));
+        h.expect(rang.all, `${tag}: nothing of the intro rang at the press, so this proves nothing`);
+        h.expect(!rang.on, `${tag}: ${rang.on} of the ${rang.all} sounds ringing at the press played on over Home`);
+        h.expect(!errors.length, errors.join('\n'));
+      } finally {
+        await ctx.close();
+      }
     }
   },
 

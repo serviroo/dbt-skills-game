@@ -156,6 +156,9 @@ async function intro(stage: Stage | null, audio: AppAudio | null, state: AppStat
   const way = new Promise<Way>((resolve) => {
     offWays = introWays((w) => {
       left.abort();
+      // none of the intro sounds on after it, whatever screen it was on: every cue still ringing, bed, charge hum and the
+      // score stop at the press
+      audio?.engine?.stopAll(SCORE.leaveSec);
       // help is quiet from the press on, while the companion loads too, as the Safe Zone is
       if (w === 'safe') audio?.engine?.quiet(true, SCORE.safeOutSec);
       resolve(w);

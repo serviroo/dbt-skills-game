@@ -120,6 +120,8 @@ export const SCORE = {
   safeOutSec: 0.015,
   /** Safe Zone out: the score fades back in */
   safeBackSec: 3,
+  /** Leaving the intro (the Safe Zone or Skip): every sound of it stops, click-free */
+  leaveSec: 0.04,
 } as const;
 
 /**
