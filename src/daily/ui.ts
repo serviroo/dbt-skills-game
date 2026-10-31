@@ -75,6 +75,16 @@ export function p(text: string, cls = 'dq-text') {
   return h('p', { class: cls, html: md(text) });
 }
 
+/**
+ * Marks `e` as showing `copy`, which may hold {name} or {companion}, drawn as text (or as `md`, with `html`): a name
+ * chosen in another open copy draws it again in place (see App).
+ */
+export function youCopy<T extends HTMLElement>(e: T, copy: string, html = false) {
+  e.dataset.youCopy = copy;
+  e.toggleAttribute('data-you-md', html);
+  return e;
+}
+
 export function panel(opts: { title?: string; ic?: string; cls?: string; tag?: 'section' | 'div' | 'article'; label?: string } = {}, ...kids: (Child | Child[])[]) {
   const head = opts.title
     ? h('header', { class: 'dq-chip' }, opts.ic ? h('span', { class: 'dq-chip-ic', html: opts.ic }) : null, h('h2', { class: 'dq-chip-t', text: opts.title }))

@@ -237,7 +237,7 @@ function campStage(app: App, arrived: ShadowDef[], open: (id: ShadowId, from: HT
  */
 export function rosterSection(app: App) {
   const st = app.store;
-  const n = visitCount(st);
+  let n = visitCount(st);
   const live = new Map<ShadowId, { el: HTMLElement; input: HTMLInputElement; nick: HTMLElement }>();
   const onName = (id: ShadowId, raw: string) => {
     const v = cleanName(raw);
@@ -253,25 +253,24 @@ export function rosterSection(app: App) {
       p.nick.classList.toggle('is-hidden', !v);
     }
   };
-  const panels: HTMLElement[] = [];
-  const arrived: ShadowDef[] = [];
-  for (const s of ROSTER) {
+  /** A watcher's panel: their own once they have arrived, a quiet outline until then, nothing for a hidden one. */
+  const panelOf = (s: ShadowDef) => {
     if (n >= s.at) {
       const p = namedPanel(app, s, onName);
       live.set(s.id, p);
-      panels.push(p.el);
-      arrived.push(s);
-    } else if (!s.hidden)
-      panels.push(
-        h(
-          'article',
-          { class: `w2-sh is-locked w2-sh--${s.id}`, 'data-shadow': s.id, 'aria-label': `${s.name}. ${ROSTER_COPY.arrives(s.at - n)}` },
-          h('div', { class: 'w2-sh-stage' }, h('div', { class: 'w2-sh-art', html: shadowSVG(s.id, { size: 96, locked: true }) })),
-          h('h3', { class: 'w2-sh-n', text: s.name }),
-          h('p', { class: 'w2-sh-when', text: ROSTER_COPY.arrives(s.at - n) }),
-        ),
-      );
-  }
+      return p.el;
+    }
+    if (s.hidden) return null;
+    return h(
+      'article',
+      { class: `w2-sh is-locked w2-sh--${s.id}`, 'data-shadow': s.id, 'aria-label': `${s.name}. ${ROSTER_COPY.arrives(s.at - n)}` },
+      h('div', { class: 'w2-sh-stage' }, h('div', { class: 'w2-sh-art', html: shadowSVG(s.id, { size: 96, locked: true }) })),
+      h('h3', { class: 'w2-sh-n', text: s.name }),
+      h('p', { class: 'w2-sh-when', text: ROSTER_COPY.arrives(s.at - n) }),
+    );
+  };
+  const arrived = () => ROSTER.filter((s) => n >= s.at);
+  const row = h('div', { class: 'w2-roster-row' }, ROSTER.map(panelOf));
 
   // the card sheet: the watcher's own panel moves into it while it is open, and back to its place in the row after
   let sheet: { wrap: HTMLElement; panel: HTMLElement; spot: Comment; from: HTMLButtonElement; inert: HTMLElement[] } | null = null;
@@ -316,17 +315,48 @@ export function rosterSection(app: App) {
     x.focus({ preventScroll: true });
   };
 
-  const camp = arrived.length ? campStage(app, arrived, openCard) : null;
+  let camp = arrived().length ? campStage(app, arrived(), openCard) : null;
   const el = h(
     'section',
     { class: 'w2-roster', 'aria-labelledby': 'w2-roster-h' },
     h('h2', { class: 'dq-sec-h', id: 'w2-roster-h' }, h('span', { text: ROSTER_COPY.title }), h('span', { class: 'dq-sec-sub', text: ROSTER_COPY.sub })),
     camp?.stage ?? null,
-    h('div', { class: 'w2-roster-row' }, panels),
+    row,
   );
+  /** Where a watcher is in the row: their panel, or the spot it keeps while their card is open. */
+  const placeOf = (id: ShadowId) => [...row.childNodes].find((c) => (c instanceof Element ? c.getAttribute('data-shadow') : c instanceof Comment ? c.data : null) === id);
+  /**
+   * Visit days counted since, here or in another open copy (a Save Crystal restored there): whoever arrives takes their
+   * place in the row, the rest count down, and the camp is built again only when someone joins it. Fields being typed
+   * in, an open card and focus in camp stay as they were.
+   */
+  const arrive = () => {
+    const now = visitCount(st);
+    if (now === n) return;
+    const had = arrived().length;
+    n = now;
+    ROSTER.forEach((s, i) => {
+      if (live.has(s.id)) return;
+      const next = panelOf(s);
+      const at = placeOf(s.id);
+      if (at && next) at.replaceWith(next);
+      else if (next) row.insertBefore(next, ROSTER.slice(i + 1).map((x) => placeOf(x.id)).find(Boolean) ?? null);
+    });
+    if (arrived().length === had) return;
+    const focused = camp?.stage.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.shadow : undefined;
+    camp?.unmount();
+    const next = campStage(app, arrived(), openCard);
+    if (camp) camp.stage.replaceWith(next.stage);
+    else row.before(next.stage);
+    camp = next;
+    const hit = (id: string | undefined) => (id ? next.stage.querySelector<HTMLButtonElement>(`[data-shadow="${id}"]`) : null);
+    if (sheet) sheet.from = hit(sheet.panel.dataset.shadow) ?? sheet.from;
+    hit(focused)?.focus({ preventScroll: true });
+  };
   // names set in another open copy show up here, without touching a field the player is typing in
   const off = st.onChange(() => {
     if (!el.isConnected) return void off();
+    arrive();
     for (const [id, p] of live) {
       const v = st.state.settings.names[id] ?? '';
       p.nick.textContent = v ? `“${v}”` : '';
@@ -360,22 +390,35 @@ export function pebbleSVG(size = 64) {
 </svg>`;
 }
 
-/** A small Inventory: the Legendary Pebble after a few visit days, otherwise one quiet empty slot. */
+/**
+ * A small Inventory: the Legendary Pebble after a few visit days, otherwise one quiet empty slot. `sync` lays the pebble
+ * in once the visit days reach it, here or in another open copy (a Save Crystal restored there).
+ */
 export function inventorySection(app: App) {
-  const n = visitCount(app.store);
-  const has = n >= INVENTORY.pebbleAt;
-  const slot = has
-    ? h(
-        'div',
-        { class: 'w2-item w2-item--legendary', 'data-item': 'pebble' },
-        h('div', { class: 'w2-item-art', html: pebbleSVG(70) }),
-        h('div', { class: 'w2-item-txt' }, h('span', { class: 'w2-item-r', text: INVENTORY.pebble.rarity }), h('h3', { class: 'w2-item-n', text: INVENTORY.pebble.name }), h('p', { class: 'w2-item-l', text: typo(INVENTORY.pebble.line) })),
-      )
-    : h('div', { class: 'w2-item is-empty', 'data-item': 'empty' }, h('div', { class: 'w2-item-art w2-item-art--empty', 'aria-hidden': 'true' }), h('p', { class: 'w2-item-l', text: typo(INVENTORY.empty) }));
-  return h(
+  const holds = () => visitCount(app.store) >= INVENTORY.pebbleAt;
+  const slotOf = (has: boolean) =>
+    has
+      ? h(
+          'div',
+          { class: 'w2-item w2-item--legendary', 'data-item': 'pebble' },
+          h('div', { class: 'w2-item-art', html: pebbleSVG(70) }),
+          h('div', { class: 'w2-item-txt' }, h('span', { class: 'w2-item-r', text: INVENTORY.pebble.rarity }), h('h3', { class: 'w2-item-n', text: INVENTORY.pebble.name }), h('p', { class: 'w2-item-l', text: typo(INVENTORY.pebble.line) })),
+        )
+      : h('div', { class: 'w2-item is-empty', 'data-item': 'empty' }, h('div', { class: 'w2-item-art w2-item-art--empty', 'aria-hidden': 'true' }), h('p', { class: 'w2-item-l', text: typo(INVENTORY.empty) }));
+  let has = holds();
+  let slot = slotOf(has);
+  const el = h(
     'section',
     { class: 'w2-inv', 'aria-labelledby': 'w2-inv-h' },
     h('h2', { class: 'dq-sec-h', id: 'w2-inv-h' }, h('span', { text: INVENTORY.title }), h('span', { class: 'dq-sec-sub', text: INVENTORY.sub })),
     slot,
   );
+  const sync = () => {
+    if (holds() === has) return;
+    has = holds();
+    const next = slotOf(has);
+    slot.replaceWith(next);
+    slot = next;
+  };
+  return { el, sync };
 }

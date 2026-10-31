@@ -11,7 +11,7 @@ import { allyCard, allyName, cardOf, favFirst, focusBack, refill } from './artro
 import { artStore } from './artstore';
 import { storyStore } from './storystore';
 import { addDays, cleanName, dayKey, fieldKey, fieldTimes, isSkillId, ROW_CAP, uid, type DiaryEntry, type State, type Store } from './store';
-import { btn, copyText, field, h, md, p, panel, place, quotes, redrawn, segmented, shareOrSave, toggle, typo } from './ui';
+import { btn, copyText, field, h, md, p, panel, place, quotes, redrawn, segmented, shareOrSave, toggle, typo, youCopy } from './ui';
 import type { KeepStatus } from '../pwa/register';
 import { volumeSliders } from '../ui/volume';
 import { STEALTH, STEALTH_LINES } from '../content/stealth-lines';
@@ -141,6 +141,20 @@ export function restScreen(app: App): ScreenOut {
     );
     return b;
   };
+  const fishBtn = mode(STEALTH.aquarium, ST_IC.fish, prefs.aquarium, setAquarium);
+  const wordsBtn = mode(STEALTH.words, ST_IC.breath, prefs.words, setWords, `${STEALTH.words}, ${STEALTH.wordsHint}`);
+  // the look chosen in another open copy's Stealth room: this one takes it on, the breath going on as it was
+  let kept = JSON.stringify(stealthPrefs(st.key));
+  const offLook = st.onChange(() => {
+    const now = stealthPrefs(st.key);
+    if (JSON.stringify(now) === kept) return;
+    kept = JSON.stringify(now);
+    for (const [b, on, set] of [[fishBtn, now.aquarium, setAquarium], [wordsBtn, now.words, setWords]] as const) {
+      if (b.getAttribute('aria-pressed') === String(on)) continue;
+      b.setAttribute('aria-pressed', String(on));
+      set(on);
+    }
+  });
   const slime = new Slime({ reduced: () => app.reduced(), label: STEALTH.slimeLabel, onPoke: () => app.sound('bubble') });
   el.append(
     h('header', { class: 'dq-pagehead dq-st-head' }, h('p', { class: 'dq-st-kicker', text: STEALTH.kicker }), h('h1', { class: 'dq-h1', 'data-focus': '', text: STEALTH.title }), p(STEALTH.sub, 'dq-text dq-pagesub dq-st-sub')),
@@ -149,10 +163,10 @@ export function restScreen(app: App): ScreenOut {
     h(
       'div',
       { class: 'dq-st-modes' },
-      mode(STEALTH.aquarium, ST_IC.fish, prefs.aquarium, setAquarium),
-      mode(STEALTH.words, ST_IC.breath, prefs.words, setWords, `${STEALTH.words}, ${STEALTH.wordsHint}`),
+      fishBtn,
+      wordsBtn,
     ),
-    p(line, 'dq-text dq-st-line'),
+    youCopy(p(line, 'dq-text dq-st-line'), line, true),
     h('section', { class: 'dq-st-bath', 'aria-label': 'Bubble bath' }, h('p', { class: 'dq-st-kicker', text: STEALTH.slimeKicker }), slime.el, p(STEALTH.slimeLine, 'dq-text dq-st-bath-l')),
   );
   el.classList.toggle('is-aquarium', prefs.aquarium);
@@ -217,6 +231,7 @@ export function restScreen(app: App): ScreenOut {
     bubbles: prefs.aquarium ? [13, 1.2] : [7, 1],
     leave: () => {
       offMotion();
+      offLook();
       timers.forEach((id) => clearTimeout(id));
       timers.clear();
       slime.destroy();
@@ -241,7 +256,7 @@ export function shadowsScreen(app: App): ScreenOut {
     'article',
     { class: 'dq-first' },
     h('div', { class: 'dq-first-art', html: mothSVG({ size: 150 }) }),
-    h('div', { class: 'dq-first-txt' }, h('h2', { class: 'dq-first-n', text: typo('{companion}') }), p('A small night moth, asleep. It was here before any skill, and it stays.', 'dq-text'), h('span', { class: 'dq-tag dq-mint', text: 'Yours' })),
+    h('div', { class: 'dq-first-txt' }, youCopy(h('h2', { class: 'dq-first-n', text: typo('{companion}') }), '{companion}'), p('A small night moth, asleep. It was here before any skill, and it stays.', 'dq-text'), h('span', { class: 'dq-tag dq-mint', text: 'Yours' })),
   );
   // every skill met and practised, another open copy's too, as it lands; focus stays on the same skill's card
   const grid = redrawn(() => {
@@ -266,7 +281,11 @@ export function shadowsScreen(app: App): ScreenOut {
         )
       : p('Flip a daily card or open any skill, and it joins here.', 'dq-text dq-empty');
   }, () => null);
-  const offShown = app.store.onChange(grid.update);
+  const inventory = inventorySection(app);
+  const offShown = app.store.onChange(() => {
+    grid.update();
+    inventory.sync();
+  });
   const designSlot = h(
     'button',
     { type: 'button', class: 'dq-cardbtn dq-allyslot', onclick: () => app.go({ name: 'draw', kind: 'ally' }) },
@@ -309,7 +328,7 @@ export function shadowsScreen(app: App): ScreenOut {
     allies,
     h('h2', { class: 'dq-sec-h' }, h('span', { text: 'Skill shadows' }), h('span', { class: 'dq-sec-sub', text: 'Every skill you have met' })),
     grid.node,
-    inventorySection(app),
+    inventory.el,
     h('div', { class: 'dq-actions' }, btn('All skills', () => app.go({ name: 'library' }), { kind: 'quiet', ic: 'book' })),
   );
   return { el, title: 'Shadows', mode: 'sub', leave: () => { turn++; off(); offShown(); roster.leave(); } };

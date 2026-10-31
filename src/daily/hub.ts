@@ -13,8 +13,8 @@ import { linePanel } from './lines';
 import { goNext } from './moment';
 import { isSkillId } from './store';
 import { loadoutArt } from './widgets';
-import { foilLayer, wandererRows, moonflower, titleRow, titleUnlock } from './wave2';
-import { cardBackArt } from './wardrobe';
+import { classRow, foilLayer, moonflower, nameRow, titleRow, titleUnlock } from './wave2';
+import { cardBackArt, worn } from './wardrobe';
 
 export function skillCard(id: string, opts: { label?: string; special?: 'comfort' | 'free'; small?: boolean } = {}) {
   const sk = SKILL[isSkillId(id) ? id : 'wise-mind'];
@@ -62,7 +62,8 @@ function statusPanel(app: App) {
       ? h('span', { class: 'dq-rank-letter', text: RANKS[r] })
       : h('span', { class: 'dq-rank-mark', html: '<svg viewBox="0 0 20 30" width="20" height="30" aria-hidden="true"><path d="M10 1.5 L18.5 15 L10 28.5 L1.5 15 Z"/><path class="dq-rank-slit" d="M10 7.5 C11.4 11 11.4 19 10 22.5 C8.6 19 8.6 11 10 7.5 Z"/></svg>' });
   }, () => null);
-  const title = redrawn(() => titleRow(app), () => el.querySelector('.w2-title-btn'));
+  const name = redrawn(() => nameRow(app), () => null);
+  const title = titleRow(app);
   const rank = redrawn(() => (d.rank > 0 ? h('div', { class: 'dq-kv' }, h('dt', { text: 'Rank' }), h('dd', { text: `${RANKS[d.rank]}-Rank Wanderer` })) : null), () => null);
   const xp = redrawn(() => h('div', { class: 'dq-kv' }, h('dt', { text: 'XP' }), h('dd', {}, h('span', { class: 'dq-num', text: String(d.xp) }))), () => null);
   const flower = redrawn(() => moonflower(app), () => el.querySelector('.w2-moonflower'));
@@ -78,7 +79,7 @@ function statusPanel(app: App) {
       ),
     () => null,
   );
-  const parts = [letter, title, rank, xp, flower, stats];
+  const parts = [letter, name, rank, xp, flower, stats];
   const el = panel(
     { title: 'Status', ic: icon('status'), cls: 'dq-status', label: 'Status' },
     h('div', { class: 'dq-hairbar', 'aria-hidden': 'true' }),
@@ -86,7 +87,7 @@ function statusPanel(app: App) {
       'div',
       { class: 'dq-player' },
       h('div', { class: 'dq-crystal', 'aria-hidden': 'true', html: crystalSVG(58) }, letter.node),
-      h('dl', { class: 'dq-kvs' }, wandererRows(app, title.node), rank.node, xp.node),
+      h('dl', { class: 'dq-kvs' }, name.node, title.el, classRow(), rank.node, xp.node),
       h('div', { class: 'dq-firstshadow', title: typo('{companion}, asleep'), html: mothSVG({ size: 84, label: typo('{companion}, a small night moth, asleep') }) }),
       flower.node,
     ),
@@ -139,6 +140,7 @@ function statusPanel(app: App) {
   const sync = () => {
     d = st.derived();
     parts.forEach((x) => x.update());
+    title.sync();
     // shown now, so it never counts up on a later visit to Home
     app.shown = { xp: d.xp, stats: { ...d.stats } };
   };
@@ -158,6 +160,7 @@ function questSection(app: App) {
   const cardName = q.special === 'comfort' ? 'Comfort' : q.special === 'free' ? 'Free choice' : SKILL[isSkillId(q.skill) ? q.skill : 'wise-mind'].sl;
   const openLabel = `Today's skill card: ${cardName}. Open it.`;
   const back = h('div', { class: 'dq-cardface dq-cardface--back', html: cardBackArt(app) }, h('span', { class: 'dq-cb-orn', 'aria-hidden': 'true' }), h('span', { class: 'dq-cb-t', text: 'Tap to reveal' }));
+  let backWorn = worn(st, 'cardBack');
   const inner = h('div', { class: 'dq-card-inner' }, back, front);
   const note = h('p', { class: 'dq-quest-note', 'aria-live': 'polite', text: done ? typo(QUEST.done) : '' });
   const card = h('button', { type: 'button', class: `dq-card ${open ? 'is-open' : ''}`, 'aria-label': open ? openLabel : "Reveal today's skill card" }, inner);
@@ -215,6 +218,11 @@ function questSection(app: App) {
     aside,
   );
   const sync = () => {
+    // a card back kept in another open copy's Wardrobe
+    if (worn(st, 'cardBack') !== backWorn) {
+      backWorn = worn(st, 'cardBack');
+      back.firstElementChild?.replaceWith(h('span', { html: cardBackArt(app) }).firstElementChild!);
+    }
     if (!open && st.state.flags.cardDay === today) {
       open = true;
       card.classList.add('is-open');

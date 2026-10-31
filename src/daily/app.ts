@@ -13,7 +13,7 @@ import { Sky } from './sky';
 import { wait } from './clock';
 import type { InkPad } from './ink';
 import { dayDiff, Store, type State } from './store';
-import { h, typo } from './ui';
+import { h, md, typo } from './ui';
 import { volumeButton, type VolumeButton, type VolumeCtrl } from '../ui/volume';
 import { wireWardrobe } from './wardrobe';
 import { vesperLap } from './roster';
@@ -202,7 +202,8 @@ export class App {
     // setting here or in another open copy): every scene and animation follows it
     this.offs.push(onMotion(() => this.showMotion()), releaseMotion);
     this.applyMotion();
-    // names chosen in another open copy: Home is redrawn, name plates elsewhere take the new name in place
+    // names chosen in another open copy: Home is redrawn; elsewhere name plates and copy with a name in it (see youCopy)
+    // take the new names in place
     let shown = `${playerName()}\n${companionName()}`;
     this.store.onChange(() => {
       // Motion chosen in another open copy, merged into this store, applies here too, to the scenes already moving
@@ -210,8 +211,15 @@ export class App {
       const now = `${playerName()}\n${companionName()}`;
       if (now === shown) return;
       shown = now;
-      if (this.route.name === 'hub') this.go({ name: 'hub' }, { replace: true, quiet: true });
-      else this.root.querySelectorAll('[data-you-name]').forEach((n) => (n.textContent = playerName()));
+      if (this.route.name === 'hub') {
+        this.go({ name: 'hub' }, { replace: true, quiet: true });
+        return;
+      }
+      this.root.querySelectorAll('[data-you-name]').forEach((n) => (n.textContent = playerName()));
+      this.root.querySelectorAll<HTMLElement>('[data-you-copy]').forEach((n) => {
+        if (n.hasAttribute('data-you-md')) n.innerHTML = md(n.dataset.youCopy!);
+        else n.textContent = typo(n.dataset.youCopy!);
+      });
     });
     this.applySound();
     this.offs.push(wireWardrobe(this));

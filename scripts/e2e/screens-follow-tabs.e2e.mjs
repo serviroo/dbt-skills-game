@@ -10,6 +10,15 @@
 //                             never takes a shadow or a count away
 //   moment-follows-tabs       How long chosen in another tab shows on a running moment, which goes on unbroken (its
 //                             low hum still on, focus on Done) and lasts that long from the change, never ending early
+//   home-looks-follow-tabs    a name plate, card back and title kept in another tab show on Home, and the open title
+//                             list stays open with focus on the same title
+//   night-watch-arrivals-tabs visit days restored in another tab bring their watchers into the row and the camp and the
+//                             pebble into the Inventory, building the camp once and keeping a half-typed name and its
+//                             focus; nothing unrelated builds it again, and the companion renamed there is renamed here
+//   skill-list-follows-tabs   Trade Places' Activities, open in a skill, takes an activity added and one removed in
+//                             another tab, staying on its step with what is typed and focus on the same choice
+//   stealth-look-follows-tabs the aquarium and Breathing words turned on in another tab's Stealth room turn on here, the
+//                             words joining the room's own breath, which goes on unbroken
 import { another, focusOn, go, until } from './safe-zone-tabs.e2e.mjs';
 
 const SIZES = [
@@ -29,10 +38,17 @@ const SAVE = JSON.stringify({
   ],
 });
 const WISE = 'Still Center, Wise Mind. Practise it.';
+/** A visit on each of `n` days, the latest two days ago. */
+const visits = (n) =>
+  Array.from({ length: n }, (_, i) => {
+    const t = Date.now() - (i + 2) * 86400e3;
+    const d = new Date(t);
+    return { id: `v${i}`, k: 'visit', day: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`, t, xp: 10 };
+  });
 const TIPP = 'Frost Rune, TIPP. Practise it.';
 
-async function open(h, viewport, prepare) {
-  const { ctx, page, errors } = await h.open({ [h.YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: T, companionAt: T }), 'dbt.app.v1': h.SEEN, [h.SAVE]: SAVE }, '?mute', viewport, prepare);
+async function open(h, viewport, prepare, save = SAVE) {
+  const { ctx, page, errors } = await h.open({ [h.YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: T, companionAt: T }), 'dbt.app.v1': h.SEEN, [h.SAVE]: save }, '?mute', viewport, prepare);
   await h.reachHub(page);
   return { ctx, page, errors };
 }
@@ -248,6 +264,190 @@ export const scenarios = {
       const fx = await page.evaluate(() => window.__fx);
       if (fx.length) problems.push(`${tag}: the moment played or showed this for another tab's doings: ${fx.join('; ')}`);
       await page.clock.resume();
+      problems.push(...[errors, other.errors].flat().map((e) => `${tag}: ${e}`));
+      await ctx.close();
+    }
+    h.expect(!problems.length, problems.join('\n'));
+  },
+
+  async 'home-looks-follow-tabs'(h) {
+    const problems = [];
+    const t = Date.now() - 2 * 86400e3;
+    const day = visits(1)[0].day;
+    const save = JSON.stringify({
+      v: 1,
+      created: T,
+      events: [...visits(5), { id: 'r1', k: 'rest', day, t: t + 1000, xp: 10 }, { id: 's2', k: 'skill', day, t: t + 2000, xp: 20, stat: 'stamina', skill: 'self-validation' }],
+      flags: { titlesSeen: ['professional-lurker', 'self-healer'] },
+    });
+    for (const [tag, viewport] of SIZES) {
+      const { ctx, page, errors } = await open(h, viewport, undefined, save);
+      const other = await another(ctx, h);
+      await watch(page);
+      const toggle = page.locator('.w2-title-btn');
+      await toggle.scrollIntoViewIfNeeded();
+      await toggle.click();
+      const healer = page.getByRole('radio', { name: 'Self-Healer' });
+      await healer.focus();
+      await mark(page);
+      const looks = () =>
+        page.evaluate(() => ({
+          plate: document.querySelector('.dq-status [data-you-name]')?.className,
+          back: document.querySelector('.dq-cardface--back svg')?.outerHTML.includes('M50 26Q53.6 54 50 82'),
+          title: document.querySelector('.w2-title-t')?.textContent,
+          open: document.querySelector('.w2-title-btn')?.getAttribute('aria-expanded') === 'true' && !document.querySelector('.w2-title-list')?.classList.contains('is-hidden'),
+          checked: document.querySelector('.w2-title-opt[aria-checked="true"]')?.textContent,
+        }));
+      const before = await looks();
+      await h.shot(page, `home-looks-before-${tag}`);
+      // another tab keeps Corner ticks, the Gate card back and Professional Lurker
+      await other.page.evaluate(() => {
+        const st = window.__daily.store;
+        st.sync();
+        Object.assign(st.state.settings, { plate: 'ticks', cardBack: 'gate', title: 'professional-lurker' });
+        for (const k of ['plate', 'cardBack', 'title']) st.touch(k);
+        st.save();
+      });
+      await until(page, () => window.__daily.store.state.settings.title === 'professional-lurker');
+      await page.waitForTimeout(400);
+      const after = await looks();
+      if (!after.plate?.includes('w2-plate--ticks')) problems.push(`${tag}: the name plate is ${after.plate} after Corner ticks was kept in another tab`);
+      if (!after.back) problems.push(`${tag}: Home's card back is not the Gate kept in another tab`);
+      if (after.title !== 'Professional Lurker' || after.checked !== 'Professional Lurker') problems.push(`${tag}: the title shows ${after.title} (checked ${after.checked}) after Professional Lurker was worn in another tab`);
+      if (!before.open || !after.open) problems.push(`${tag}: the open title list ${before.open ? 'closed' : 'never opened'} when a title was worn in another tab`);
+      if (!(await kept(page))) problems.push(`${tag}: focus left Self-Healer in the open list for ${await page.evaluate(() => document.activeElement?.textContent)}`);
+      else problems.push(...(await focusOn(healer, `${tag} Self-Healer in the open title list`)));
+      const fx = await page.evaluate(() => window.__fx);
+      if (fx.length) problems.push(`${tag}: Home played or showed this for another tab's doings: ${fx.join('; ')}`);
+      await h.shot(page, `home-looks-after-${tag}`);
+      problems.push(...[errors, other.errors].flat().map((e) => `${tag}: ${e}`));
+      await ctx.close();
+    }
+    h.expect(!problems.length, problems.join('\n'));
+  },
+
+  async 'night-watch-arrivals-tabs'(h) {
+    const problems = [];
+    for (const [tag, viewport] of SIZES) {
+      const { ctx, page, errors } = await open(h, viewport, undefined, JSON.stringify({ v: 1, created: T, events: visits(2) }));
+      const other = await another(ctx, h);
+      await go(page, { name: 'shadows' });
+      await page.locator('.w2-roster').waitFor();
+      await page.waitForFunction(() => window.__camp?.builds >= 1, null, { timeout: 30000 });
+      await watch(page);
+      const field = page.locator('[data-shadow="sable"] input');
+      await field.scrollIntoViewIfNeeded();
+      await field.click();
+      await page.keyboard.type('Pi');
+      await mark(page);
+      const roster = () =>
+        page.evaluate(() => ({
+          named: [...document.querySelectorAll('.w2-roster-row .w2-sh:not(.is-locked)')].map((e) => e.dataset.shadow),
+          camp: [...(window.__camp?.ids ?? [])],
+          builds: window.__camp?.builds,
+          pebble: !!document.querySelector('.w2-inv [data-item="pebble"]'),
+          typed: document.querySelector('[data-shadow="sable"] input')?.value,
+          first: document.querySelector('.dq-first-n')?.textContent,
+        }));
+      const before = await roster();
+      await h.shot(page, `night-watch-arrivals-before-${tag}`);
+      // another tab restores a save with eleven visit days
+      await other.page.evaluate(([k, v]) => localStorage.setItem(k, v), [h.SAVE, JSON.stringify({ v: 1, created: T, events: visits(10) })]);
+      const arrived = await until(page, () => !!document.querySelector('.w2-roster-row [data-shadow="vesper"]:not(.is-locked)'));
+      await page.waitForTimeout(600);
+      const after = await roster();
+      if (!arrived || !['bramble', 'vesper'].every((id) => after.named.includes(id) && after.camp.includes(id))) problems.push(`${tag}: after eleven visit days arrived elsewhere the row has ${after.named} and the camp ${after.camp}`);
+      if (!after.pebble) problems.push(`${tag}: the Inventory is still empty after eleven visit days arrived elsewhere`);
+      if (after.builds !== before.builds + 1) problems.push(`${tag}: the camp was built ${after.builds - before.builds} times for one arrival`);
+      if (after.typed !== 'Pi' || !(await kept(page))) problems.push(`${tag}: the half-typed name is "${after.typed}" and focus is on ${await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 80))}`);
+      await h.shot(page, `night-watch-arrivals-after-${tag}`);
+      // something unrelated there builds nothing here; the companion renamed there is renamed here
+      await go(other.page, { name: 'skill', id: 'tipp' });
+      await until(page, () => document.querySelector('[aria-label="Frost Rune, TIPP. Practise it."]'));
+      await go(other.page, { name: 'settings' });
+      const name = other.page.getByLabel(/companion.s name/);
+      await name.scrollIntoViewIfNeeded();
+      await name.fill('Moth');
+      await name.press('Enter');
+      await name.blur();
+      if (!(await until(page, () => document.querySelector('.dq-first-n')?.textContent === 'Moth'))) problems.push(`${tag}: the companion renamed Moth in another tab is still ${(await roster()).first} here`);
+      const last = await roster();
+      if (last.builds !== after.builds) problems.push(`${tag}: the camp was built again for a change that brought nobody (${after.builds} to ${last.builds})`);
+      const fx = await page.evaluate(() => window.__fx);
+      if (fx.length) problems.push(`${tag}: the Night Watch played or showed this for another tab's doings: ${fx.join('; ')}`);
+      problems.push(...[errors, other.errors].flat().map((e) => `${tag}: ${e}`));
+      await ctx.close();
+    }
+    h.expect(!problems.length, problems.join('\n'));
+  },
+
+  async 'skill-list-follows-tabs'(h) {
+    const problems = [];
+    const lists = { comfort: [], reasons: [], people: [], activities: [{ id: 'a1', text: 'Jigsaw puzzle', at: T }, { id: 'a2', text: 'Bake bread', at: T }] };
+    for (const [tag, viewport] of SIZES) {
+      const { ctx, page, errors } = await open(h, viewport, undefined, JSON.stringify({ v: 1, created: T, events: visits(1), lists }));
+      const other = await another(ctx, h);
+      await go(page, { name: 'skill', id: 'accepts', entry: 'a' });
+      const begin = page.getByRole('button', { name: 'Begin', exact: true });
+      if (await begin.isVisible().catch(() => false)) await begin.click();
+      const add = page.getByRole('button', { name: 'Add and pick' });
+      await add.waitFor();
+      await watch(page);
+      await page.locator('.dq-addrow input').fill('Kite');
+      const bread = page.getByRole('button', { name: 'Bake bread', exact: true });
+      await bread.focus();
+      await go(other.page, { name: 'comfort' });
+      await other.page.getByRole('button', { name: 'Remove Jigsaw puzzle' }).click();
+      const panel = other.page.locator('.dq-listp--activities');
+      await panel.locator('input').fill('Night swim');
+      await panel.getByRole('button', { name: 'Add', exact: true }).click();
+      const chips = () => page.evaluate(() => [...document.querySelectorAll('.dq-opts .dq-opt')].map((b) => b.textContent));
+      if (!(await until(page, () => [...document.querySelectorAll('.dq-opts .dq-opt')].map((b) => b.textContent).join('|') === 'Bake bread|Night swim'))) problems.push(`${tag}: Activities shows ${(await chips()).join(', ')} after another tab removed Jigsaw puzzle and added Night swim`);
+      await page.waitForTimeout(300);
+      const still = await page.evaluate(() => ({ typed: document.querySelector('.dq-addrow input')?.value, route: window.__daily.route.name }));
+      if (still.typed !== 'Kite' || still.route !== 'skill' || !(await page.getByText('A. Activities').first().isVisible())) problems.push(`${tag}: the step moved or lost what was typed: ${JSON.stringify(still)}`);
+      problems.push(...(await focusOn(page.getByRole('button', { name: 'Bake bread', exact: true }), `${tag} Bake bread in Activities`)));
+      const fx = await page.evaluate(() => window.__fx);
+      if (fx.length) problems.push(`${tag}: the skill played or showed this for another tab's doings: ${fx.join('; ')}`);
+      await h.shot(page, `skill-list-after-${tag}`);
+      problems.push(...[errors, other.errors].flat().map((e) => `${tag}: ${e}`));
+      await ctx.close();
+    }
+    h.expect(!problems.length, problems.join('\n'));
+  },
+
+  async 'stealth-look-follows-tabs'(h) {
+    const problems = [];
+    for (const [tag, viewport] of SIZES) {
+      const { ctx, page, errors } = await open(h, viewport);
+      const other = await another(ctx, h);
+      await go(page, { name: 'rest' });
+      await page.locator('.dq-stealth').waitFor();
+      await page.waitForTimeout(1200);
+      await watch(page);
+      await page.evaluate(() => (window.__breath = document.querySelector('.dq-st-glow').getAnimations()[0]));
+      const t0 = await page.evaluate(() => window.__breath?.currentTime);
+      await go(other.page, { name: 'rest' });
+      await other.page.locator('.dq-stealth').waitFor();
+      for (const b of await other.page.locator('.dq-st-mode').all()) await b.click();
+      const both = await until(page, () => !!document.querySelector('.dq-stealth.is-aquarium.is-words'));
+      await page.waitForTimeout(300);
+      const room = await page.evaluate(() => {
+        const glow = document.querySelector('.dq-st-glow').getAnimations()[0];
+        const word = document.querySelector('.dq-st-word span').getAnimations()[0];
+        const d = (a) => Number(a.effect.getTiming().duration);
+        return {
+          pressed: [...document.querySelectorAll('.dq-st-mode')].map((b) => b.getAttribute('aria-pressed')),
+          same: glow === window.__breath,
+          t: glow?.currentTime,
+          gap: word && glow ? Math.abs((word.currentTime % d(word)) - (glow.currentTime % d(glow))) : null,
+          period: glow ? d(glow) : null,
+        };
+      });
+      if (!both || room.pressed.join() !== 'true,true') problems.push(`${tag}: the aquarium and Breathing words turned on elsewhere show ${room.pressed} here`);
+      if (!room.same || !(room.t > t0)) problems.push(`${tag}: the room's breath started again (${t0} to ${room.t})`);
+      if (room.gap === null || Math.min(room.gap, room.period - room.gap) > 120) problems.push(`${tag}: Breathing words are ${room.gap} ms out of step with the room's breath`);
+      await h.shot(page, `stealth-look-after-${tag}`);
       problems.push(...[errors, other.errors].flat().map((e) => `${tag}: ${e}`));
       await ctx.close();
     }

@@ -54,58 +54,69 @@ function takeUnseen(app: App): TitleId[] {
   return fresh.filter((id) => id !== 'professional-lurker' && id !== 'night-warden');
 }
 
-/** The Wanderer card rows: Player (their plate style), their title (see titleRow), Class: Support. */
-export function wandererRows(app: App, title: Node) {
-  return [
-    h('div', { class: 'dq-kv' }, h('dt', { text: 'Name' }), h('dd', { class: `dq-mint w2-plate ${plateClass(app)}`, 'data-you-name': '', text: playerName() })),
-    title,
-    h('div', { class: 'dq-kv w2-class-kv' }, h('dt', { text: CLASS_LINE.k }), h('dd', {}, h('span', { text: CLASS_LINE.v }), h('span', { class: 'w2-class-sp', text: CLASS_LINE.specialty }))),
-  ];
+/** The Wanderer card's Name row, in their plate style. */
+export function nameRow(app: App) {
+  return h('div', { class: 'dq-kv' }, h('dt', { text: 'Name' }), h('dd', { class: `dq-mint w2-plate ${plateClass(app)}`, 'data-you-name': '', text: playerName() }));
 }
 
-/** The title the player wears, tap to equip another they have earned; null before the first. */
+/** The Wanderer card's Class: Support row. */
+export function classRow() {
+  return h('div', { class: 'dq-kv w2-class-kv' }, h('dt', { text: CLASS_LINE.k }), h('dd', {}, h('span', { text: CLASS_LINE.v }), h('span', { class: 'w2-class-sp', text: CLASS_LINE.specialty })));
+}
+
+/**
+ * The Wanderer card's title row: the title the player wears, tap to equip another they have earned. Hidden before the
+ * first. `sync` shows titles earned and worn since, here or in another open copy, in place: a list that is open stays
+ * open, and focus stays where it is.
+ */
 export function titleRow(app: App) {
   const st = app.store;
-  const earned = earnedTitles(st);
-  if (!earned.length) return null;
-  const cur = activeTitle(st)!;
-  const label = h('span', { class: 'w2-title-t', text: TITLES[cur].name });
+  const label = h('span', { class: 'w2-title-t' });
   const list = radioKeys(h('div', { class: 'w2-title-list is-hidden', role: 'radiogroup', 'aria-label': TITLE_COPY.choose }), { manual: true });
-  const toggleBtn = h('button', { type: 'button', class: 'w2-title-btn', 'aria-expanded': 'false', 'aria-label': `Title: ${TITLES[cur].name}. ${TITLE_COPY.choose}` }, label, h('span', { class: 'w2-title-chev', 'aria-hidden': 'true' }));
+  const toggleBtn = h('button', { type: 'button', class: 'w2-title-btn', 'aria-expanded': 'false' }, label, h('span', { class: 'w2-title-chev', 'aria-hidden': 'true' }));
+  const el = h('div', { class: 'dq-kv w2-title-kv' }, h('dt', { text: TITLE_COPY.label }), h('dd', {}, toggleBtn, list));
+  const option = (id: TitleId) =>
+    h('button', {
+      type: 'button',
+      role: 'radio',
+      class: 'dq-opt w2-title-opt',
+      'data-title': id,
+      text: TITLES[id].name,
+      onclick: () => {
+        st.sync();
+        st.state.settings.title = id;
+        st.touch('title');
+        st.save();
+        sync();
+        const inside = list.contains(document.activeElement);
+        list.classList.add('is-hidden');
+        toggleBtn.setAttribute('aria-expanded', 'false');
+        if (inside) toggleBtn.focus({ preventScroll: true });
+      },
+    });
   const sync = () => {
-    const now = activeTitle(st)!;
+    const earned = earnedTitles(st);
+    el.classList.toggle('is-hidden', !earned.length);
+    // newest first; one earned since goes in its place, and the ones already there stay put
+    const order = earned.map((x) => x.id).reverse();
+    order.forEach((id, i) => {
+      if (list.querySelector(`[data-title="${id}"]`)) return;
+      const after = order.slice(i + 1).map((x) => list.querySelector(`[data-title="${x}"]`)).find(Boolean) ?? null;
+      list.insertBefore(option(id), after);
+    });
+    const now = activeTitle(st);
+    if (!now) return;
     label.textContent = TITLES[now].name;
     toggleBtn.setAttribute('aria-label', `Title: ${TITLES[now].name}. ${TITLE_COPY.choose}`);
     list.querySelectorAll<HTMLElement>('[role=radio]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.title === now)));
   };
-  for (const x of earned.slice().reverse())
-    list.append(
-      h('button', {
-        type: 'button',
-        role: 'radio',
-        class: 'dq-opt w2-title-opt',
-        'data-title': x.id,
-        text: TITLES[x.id].name,
-        onclick: () => {
-          st.sync();
-          st.state.settings.title = x.id;
-          st.touch('title');
-          st.save();
-          sync();
-          const inside = list.contains(document.activeElement);
-          list.classList.add('is-hidden');
-          toggleBtn.setAttribute('aria-expanded', 'false');
-          if (inside) toggleBtn.focus({ preventScroll: true });
-        },
-      }),
-    );
   toggleBtn.addEventListener('click', () => {
     const open = list.classList.toggle('is-hidden') === false;
     toggleBtn.setAttribute('aria-expanded', String(open));
     if (open) animate(list, [{ opacity: 0 }, { opacity: 1 }], { duration: app.reduced() ? 120 : 220 });
   });
   sync();
-  return h('div', { class: 'dq-kv w2-title-kv' }, h('dt', { text: TITLE_COPY.label }), h('dd', {}, toggleBtn, list));
+  return { el, sync };
 }
 
 /** "[TITLE UNLOCKED] <name>. <line>" under the Wanderer card, once per title (held back on a heavy day, never lost). */

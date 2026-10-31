@@ -11,7 +11,7 @@ import { artStore, extrasOf, revOf, type Draft, type DrawingMeta, type DrawingRe
 import { canvasBlob, INKS, InkPad, PAGE, renderDrawing, SIZES, TOOLS, type Paper, type Stroke, type Tool } from './ink';
 import { dayLabel } from './lines';
 import { uid } from './store';
-import { btn, chip, field, h, p, panel, radioKeys, shareOrSave, typo } from './ui';
+import { btn, chip, field, h, p, panel, radioKeys, shareOrSave, typo, youCopy } from './ui';
 
 const store = (app: App) => artStore(app.store.key);
 const KEPT_APART = 'A newer copy of this drawing arrived, so this one was kept as its own page.';
@@ -209,7 +209,7 @@ export function artScreen(app: App): ScreenOut {
     h(
       'div',
       { class: 'dq-artentries' },
-      entry('today', ART.todayTitle, ART.todaySub, h('span', { class: 'dq-artentry-prompt', text: typo(todayPrompt(app)) })),
+      entry('today', ART.todayTitle, ART.todaySub, youCopy(h('span', { class: 'dq-artentry-prompt', text: typo(todayPrompt(app)) }), todayPrompt(app))),
       entry('ally', ART.allyTitle, ART.allySub, null),
     ),
     h('section', { class: 'dq-art-pages', 'aria-labelledby': 'dq-pages-h' }, h('h2', { class: 'dq-sec-h', id: 'dq-pages-h' }, h('span', { text: ART.pages })), gallery, note),
@@ -354,7 +354,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
       );
       return;
     }
-    promptText.textContent = typo(prompt);
+    youCopy(promptText, prompt).textContent = typo(prompt);
     promptRow.replaceChildren(
       h('span', { class: 'dq-prompt-k', html: `${icon('brush')}<span>Prompt</span>` }),
       promptText,
