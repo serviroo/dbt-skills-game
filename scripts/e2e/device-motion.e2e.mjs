@@ -13,7 +13,9 @@
 // reaches the intro the same way, with no reload: Reduced stills the title, a waiting window, the hold's breathing and
 // the end card's drift, and Auto moves them again; a window still opening and the end card still coming in land where
 // they end at once, also in a tab stopped for a while just as the change is made; one made while this tab was in the
-// page cache or out of sight reaches its title once it is back.
+// page cache or out of sight reaches its title once it is back. The intro's AWAKEN word, with motion off from the start,
+// only fades in and out, on its cue and for its time, and the hit doesn't shake the camera; motion turning off while the
+// word slams in, on the device or in another tab, stills it at once.
 
 const PHONE = { width: 390, height: 844 };
 
@@ -94,6 +96,63 @@ const endlessReach = (page, selector, n) =>
 
 /** The end card's drift: an animation on its stage that never ends. */
 const drifts = (page) => page.evaluate(() => document.querySelector('.ec-stage').getAnimations().filter((a) => a.effect.getTiming().iterations === Infinity && a.playState !== 'idle').length);
+
+/**
+ * The AWAKEN word as it shows: its animations still to end that move it or light it (anything but a fade), the glint and
+ * ghosts beside it, and the word's own opacity, transform and clip.
+ */
+const awakenNow = () => {
+  const root = document.querySelector('.awaken-word');
+  const w = root.querySelector('.w:not(.glint, .ghost)');
+  const fade = ['offset', 'computedOffset', 'easing', 'composite', 'opacity'];
+  const s = getComputedStyle(w);
+  return {
+    moving: root.getAnimations({ subtree: true }).filter((a) => !['finished', 'idle'].includes(a.playState) && a.effect.getKeyframes().some((k) => Object.keys(k).some((p) => !fade.includes(p)))).length,
+    layers: root.querySelectorAll('.glint, .ghost').length,
+    opacity: s.opacity,
+    transform: s.transform,
+    clip: s.clipPath,
+  };
+};
+/** The AWAKEN word stands still: nothing moves or lights it, and it shows whole, at its own size. */
+const awakenStill = (now) => !now.moving && !now.layers && now.opacity === '1' && now.transform === 'none' && now.clip === 'none';
+
+/**
+ * Watches the intro's AWAKEN beat from here on, on the stage clock: when the awaken_voice cue plays, when the word comes,
+ * what each of its animations changes and how long it runs, the glint and ghosts beside it, when its last animation
+ * ends and when it goes; when the hit plays, and whether the camera ever shakes.
+ */
+const watchAwaken = (page) =>
+  page.evaluate(async () => {
+    const [{ AudioEngine }, { WINDOW }] = await Promise.all([import('/src/audio/engine.ts'), import('/src/motion/tokens.ts')]);
+    const stage = window.__stage;
+    const seen = (window.__awaken = { fade: Math.max(WINDOW.reducedFadeMs, WINDOW.reducedCloseMs), shook: false });
+    const play = AudioEngine.prototype.play;
+    AudioEngine.prototype.play = function (cue, ...args) {
+      if (cue === 'awaken_voice') seen.voice = stage.time;
+      if (cue === 'awaken_hit') seen.hit = stage.time;
+      return play.call(this, cue, ...args);
+    };
+    new MutationObserver((records) => {
+      for (const r of records) {
+        for (const n of r.addedNodes) {
+          if (!n.matches?.('.awaken-word')) continue;
+          const anims = n.getAnimations({ subtree: true });
+          seen.at = stage.time;
+          seen.layers = n.querySelectorAll('.glint, .ghost').length;
+          seen.anims = anims.map((a) => ({ props: [...new Set(a.effect.getKeyframes().flatMap((k) => Object.keys(k)))].filter((p) => !['offset', 'computedOffset', 'easing', 'composite'].includes(p)), ms: a.effect.getTiming().duration }));
+          seen.end = Math.max(...anims.map((a) => a.effect.getComputedTiming().endTime));
+        }
+        for (const n of r.removedNodes) if (n.matches?.('.awaken-word')) seen.gone = stage.time;
+      }
+    }).observe(document.getElementById('ui'), { childList: true });
+    // the one shake moves the picture through the camera's projection, which then differs from the lens's own
+    stage.onUpdate(() => {
+      const lens = stage.camera.clone();
+      lens.updateProjectionMatrix();
+      if (!lens.projectionMatrix.equals(stage.camera.projectionMatrix)) seen.shook = true;
+    });
+  });
 
 /**
  * Stops the page, as a software renderer (CI's SwiftShader) does while it compiles a new frame's shaders: it runs nothing
@@ -630,6 +689,95 @@ export const scenarios = {
     await device('no-preference');
     await h.frames(page, 2);
     h.expect((await drifts(page)) === 1, `with it turned off again, the end card did not drift again (${await drifts(page)})`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  async 'intro-awaken-word-still-with-reduced-motion'(h) {
+    // the AWAKEN beat in real time from its start, three times: with motion on, the word slams in and the hit shakes the
+    // camera once; with the device's reduce-motion on under Auto, and with Motion saved as Reduced, the word only fades
+    // in and out, with no growth, glint or ghosts, and the camera holds. Each time it comes on the awaken_voice cue, its
+    // last animation ends where the slam's does, and it goes then
+    const runs = [
+      { name: 'motion on', seed: {}, device: 'no-preference' },
+      { name: "the device's reduce-motion", seed: {}, device: 'reduce' },
+      { name: 'Motion: Reduced', seed: { [h.SAVE]: JSON.stringify({ v: 1, settings: { motion: 'reduce' } }) }, device: 'no-preference' },
+    ];
+    const seen = [];
+    for (const [i, run] of runs.entries()) {
+      const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN, ...run.seed }, '?shot=awaken&mute', PHONE);
+      await (await deviceMotion(ctx, page))(run.device);
+      await page.locator('.title-screen').waitFor({ timeout: 60000 });
+      h.expect(await reducedHere(page, i > 0), `${run.name}: the intro did not start with motion ${i > 0 ? 'off' : 'on'}`);
+      await watchAwaken(page);
+      await page.locator('.title-screen').press('Enter');
+      // a third of a second after the hit, the one shake has had its time
+      await page.waitForFunction(() => window.__awaken.hit !== undefined && window.__stage.time > window.__awaken.hit + 0.35, null, { timeout: 120000 });
+      seen.push(await page.evaluate(() => window.__awaken));
+      h.expect(!errors.length, `${run.name}: ${errors.join('\n')}`);
+      await ctx.close();
+    }
+    const moves = (s) => s.anims.flatMap((a) => a.props).filter((p) => p !== 'opacity');
+    const [full] = seen;
+    h.expect(full.layers === 3 && ['transform', 'clipPath', 'backgroundPosition'].every((p) => moves(full).includes(p)), `with motion on, the word did not slam in: ${JSON.stringify(full)}`);
+    h.expect(full.shook, 'with motion on, the hit did not shake the camera');
+    for (const [i, s] of seen.entries()) {
+      const { name } = runs[i];
+      if (i > 0) {
+        h.expect(!s.layers && !moves(s).length, `${name}: the word still moved or lit up as it came: ${JSON.stringify(s)}`);
+        h.expect(s.anims.every((a) => a.ms <= s.fade), `${name}: the word's fades ran longer than ${s.fade} ms: ${JSON.stringify(s.anims)}`);
+        h.expect(!s.shook, `${name}: the hit shook the camera`);
+      }
+      h.expect(s.at === s.voice, `${name}: the word came at ${s.at} s, not on the awaken_voice cue at ${s.voice} s`);
+      h.expect(Math.abs(s.end - full.end) < 0.5, `${name}: the word's last animation ends ${s.end} ms in, not ${full.end} ms in as the slam's does`);
+      // it goes on the first frame after its time, and the stage moves at most 0.1 s a frame
+      const life = s.gone - s.at;
+      h.expect(life > s.end / 1000 - 1e-6 && life < s.end / 1000 + 0.1 + 1e-6, `${name}: the word stayed ${life} s, not the ${s.end / 1000} s of its animations`);
+    }
+  },
+
+  async 'intro-awaken-word-lands-when-motion-turns-off'(h) {
+    // the word alone in the window lab, which holds it up for half a minute, in a tab beside the companion. The page's
+    // animation clock stands still, so the word is still slamming in when motion turns off, however slow the machine:
+    // through the device's reduce-motion, and through Motion: Reduced chosen in the companion, with the word's tab
+    // stopped from before the change is made until it is stored. Either way it stands still at once, whole and in place
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', PHONE);
+    await h.openSettings(page);
+    const slamming = async () => {
+      const piece = await ctx.newPage();
+      piece.on('pageerror', (e) => errors.push('pageerror, word tab: ' + e.message));
+      const cdp = await ctx.newCDPSession(piece);
+      await cdp.send('Animation.enable');
+      await cdp.send('Animation.setPlaybackRate', { playbackRate: 0 });
+      await piece.goto(h.server.url + '/?lab=window&kind=awaken&mute');
+      await piece.locator('.awaken-word').waitFor({ state: 'attached', timeout: 30000 });
+      const coming = await piece.evaluate(awakenNow);
+      h.expect(coming.moving === 4 && coming.layers === 3, `the word was not slamming in to begin with: ${JSON.stringify(coming)}`);
+      return { piece, coming };
+    };
+
+    const byDevice = await slamming();
+    await (await deviceMotion(ctx, byDevice.piece))('reduce');
+    h.expect(await reducedHere(byDevice.piece, true), 'the word never heard the device turn reduce-motion on');
+    const device = await byDevice.piece.evaluate(awakenNow);
+    h.expect(awakenStill(device), `with the device's reduce-motion turned on, the word kept slamming in: ${JSON.stringify(device)}`);
+    await byDevice.piece.close();
+
+    const { piece, coming } = await slamming();
+    const stopped = await pause(ctx, piece);
+    let stored, held;
+    try {
+      await page.getByRole('radio', { name: 'Motion: Reduced', exact: true }).click();
+      // stored while the tab is stopped, which still shows just what it showed before
+      stored = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).settings.motion, h.SAVE);
+      held = await stopped.read(awakenNow);
+    } finally {
+      await stopped.resume();
+    }
+    h.expect(stored === 'reduce' && JSON.stringify(held) === JSON.stringify(coming), `the stop was not exercised: with Motion ${stored} stored in another tab, the stopped tab showed ${JSON.stringify(held)}`);
+    h.expect(await reducedHere(piece, true), 'the word never heard Motion: Reduced chosen in another tab');
+    const tab = await piece.evaluate(awakenNow);
+    h.expect(awakenStill(tab), `with Motion: Reduced chosen in another tab, the word kept slamming in: ${JSON.stringify(tab)}`);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },
