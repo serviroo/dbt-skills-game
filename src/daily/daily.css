@@ -2736,24 +2736,36 @@ textarea.dq-input {
   letter-spacing: 0.2em;
   text-transform: uppercase;
 }
-/* two cards a row (four on a wide screen), each its share; a card whose longest word doesn't fit its share takes the
-   whole row, so every word shows whole at its own size */
+/* two cards a row (four on a wide screen), each its share (--share); a card whose longest word doesn't fit its share
+   takes the whole row, so every word shows whole at its own size, and only that card: one alone in its row for any
+   other reason (the last, or the one before a wide card) keeps its share. Each card sits in a cell its row stretches,
+   followed by a spacer as wide as the cell past the share (the card a pixel under it, so rounding never parts them);
+   the spacer wraps under a card wider than its share, which then fills the cell. */
 .dq-collection {
+  --share: calc(50cqi - 6px);
+  container-type: inline-size;
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
 }
-.dq-collection > .dq-cardbtn {
-  flex: 1 1 calc(50% - 6px);
+.dq-cardcell {
+  flex: 1 1 var(--share);
+  display: flex;
+  flex-wrap: wrap;
+}
+.dq-cardcell::after {
+  content: '';
+  flex: 0 0 calc(100% - var(--share));
+}
+.dq-cardcell > .dq-cardbtn {
+  flex: 1 1 calc(var(--share) - 1px);
 }
 /* a phone zoomed to 200% (260 CSS pixels wide or less): one card a row, reaching only as far as the page's own 10 px
    padding, with narrower sides (below), so a name's longest word fits its line */
 @media (max-width: 260px) {
   .dq-collection {
+    --share: 100cqi;
     margin: 0 -10px;
-  }
-  .dq-collection > .dq-cardbtn {
-    flex-basis: 100%;
   }
 }
 .dq-cardbtn {
@@ -3389,8 +3401,8 @@ textarea.dq-input {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: start;
   }
-  .dq-collection > .dq-cardbtn {
-    flex-basis: calc(25% - 9px);
+  .dq-collection {
+    --share: calc(25cqi - 9px);
   }
   .dq-sz .dq-text {
     font-size: 21px;
@@ -4907,18 +4919,18 @@ textarea.dq-input {
   min-width: 44px;
   padding: 0 6px;
 }
-/* the tray, and the note after a save wherever it lies over the page (.dq-tools--over), cover the room the page has
-   (--room-*, measured) from its foot and never past it, so never under the top bar or over the tools: what doesn't
-   fit scrolls inside. With no room for the page at all (none measured), they cover the tools, the one place left. */
+/* the tray, and the note after a save wherever it lies over the page (.dq-tools--over), cover the room measured for
+   them (--room-*: the page's, or on a page too small for them, the page's and the tools' beside the Tools button) from
+   its foot and never past it, so never under the top bar or over the Tools button: what doesn't fit scrolls inside */
 .dq-tray,
 .dq-tools--over .dq-tools-msg {
   position: absolute;
   top: auto;
   right: auto;
-  bottom: var(--room-b, 0px);
-  left: var(--room-x, 0px);
-  width: var(--room-w, 100%);
-  max-height: var(--room-h, 100%);
+  bottom: var(--room-b);
+  left: var(--room-x);
+  width: var(--room-w);
+  max-height: var(--room-h);
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -5006,22 +5018,24 @@ textarea.dq-input {
   font-size: 15px;
 }
 
-/* the ally rises */
+/* the ally rises, from just below the top bar at its real height (--dq-top); on a short screen it scrolls */
 .dq-rise {
   position: fixed;
   inset: 0;
   z-index: 5;
   display: grid;
   place-items: center;
-  padding: calc(var(--safe-top) + 64px) 16px calc(var(--safe-bottom) + 16px);
+  padding: calc(var(--dq-top, 0px) + 8px) 16px calc(var(--safe-bottom) + 16px);
   overflow-y: auto;
 }
+/* fixed and solid, so however far the rise scrolls it stays behind all of it, and nothing of the drawing page shows
+   through */
 .dq-rise-bg {
-  position: absolute;
+  position: fixed;
   inset: 0;
   background:
     radial-gradient(55% 38% at 50% 60%, rgba(70, 34, 150, 0.32), transparent 70%),
-    rgba(4, 6, 12, 0.965);
+    #04060c;
 }
 .dq-rise-in {
   position: relative;
@@ -5112,6 +5126,10 @@ textarea.dq-input {
 }
 .dq-rise-acts {
   margin-top: 0;
+}
+/* how saving the card's image went, read as body text */
+.dq-rise-msg {
+  font-size: 16px;
 }
 
 /* ---------- one saved piece ---------- */

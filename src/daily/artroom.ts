@@ -662,6 +662,8 @@ export function drawScreen(app: App, route: Route): ScreenOut {
   // the height the page keeps with the prompt and every tool around it; a screen that can't give it that folds them
   // into the tray (the page itself is never moved, so a stroke in progress carries on)
   const ROOM = 180;
+  // the height of the page's room the tray needs to show a tool whole (44 px, with its padding)
+  const TRAY_ROOM = 62;
   let folded = false;
   // whether the note after a save sits in the tools when they are laid out unfolded (beside a wide screen's page)
   let noteInTools = false;
@@ -723,30 +725,37 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     const { side, row, gap, pad2, w, hh } = room();
     // the note after a save lies over the page everywhere but beside a wide screen's page, where it sits in the tools
     tools.classList.toggle('dq-tools--over', !row || side || folded);
-    if (w <= 0 || hh <= 0) {
-      // no room for the page at all (a short screen zoomed in): nothing kept from a roomier layout may reach past the
-      // screen, so the page keeps the zero size it was measured at, and with no room measured, the note and the tray
-      // cover the tools
+    // no room for the page at all (a short screen zoomed in): none of it shows, not even its frame, and nothing kept
+    // from a roomier layout may reach past the screen, so the page keeps the zero size it was measured at
+    const none = w <= 0 || hh <= 0;
+    frame.classList.toggle('is-hidden', none);
+    if (none) {
       fit.style.flex = '';
       promptRow.style.width = '';
-      for (const k of ['--room-x', '--room-b', '--room-w', '--room-h']) tools.style.removeProperty(k);
-      return;
+    } else {
+      const a = pad.W / pad.H;
+      const fw = Math.floor(Math.min(w, hh * a));
+      frame.style.width = `${fw}px`;
+      frame.style.height = `${Math.floor(fw / a)}px`;
+      fit.style.flex = row && !side ? `0 0 ${fw + pad2}px` : '';
+      promptRow.style.width = row && !side && !folded ? `${fw + pad2 + tools.offsetWidth + gap}px` : '';
+      pad.moved();
+      // the hint shows only on a page that holds all of it
+      hint.classList.remove('is-hidden');
+      hint.classList.toggle('is-hidden', hint.scrollWidth > hint.clientWidth || hint.offsetTop < 0);
     }
-    const a = pad.W / pad.H;
-    const fw = Math.floor(Math.min(w, hh * a));
-    frame.style.width = `${fw}px`;
-    frame.style.height = `${Math.floor(fw / a)}px`;
-    fit.style.flex = row && !side ? `0 0 ${fw + pad2}px` : '';
-    promptRow.style.width = row && !side && !folded ? `${fw + pad2 + tools.offsetWidth + gap}px` : '';
-    pad.moved();
-    // the room the page has (--room-*), which the note after a save covers from its foot wherever it lies over the
-    // page; folded, the tray covers it too
+    // the room the note after a save covers from its foot wherever it lies over the page, and folded the tray too
+    // (--room-*): the page's, or where that can't show a tool whole (a short screen zoomed in), from just below the top
+    // bar (--dq-top) down over the tools from Undo on, so the Tools button stays in reach to close the tray
     const t = tools.getBoundingClientRect();
     const f = fit.getBoundingClientRect();
-    tools.style.setProperty('--room-x', `${f.left - t.left - tools.clientLeft}px`);
-    tools.style.setProperty('--room-b', `${t.top + tools.clientTop + tools.clientHeight - f.bottom}px`);
-    tools.style.setProperty('--room-w', `${f.width}px`);
-    tools.style.setProperty('--room-h', `${f.height}px`);
+    const u = undoB.getBoundingClientRect();
+    const bar = parseFloat(getComputedStyle(el).getPropertyValue('--dq-top')) || f.top;
+    const r = folded && f.height < TRAY_ROOM ? new DOMRect(u.left, bar, t.right - u.left, t.bottom - bar) : f;
+    tools.style.setProperty('--room-x', `${r.left - t.left - tools.clientLeft}px`);
+    tools.style.setProperty('--room-b', `${t.top + tools.clientTop + tools.clientHeight - r.bottom}px`);
+    tools.style.setProperty('--room-w', `${r.width}px`);
+    tools.style.setProperty('--room-h', `${r.height}px`);
   };
   const ro = new ResizeObserver(layout);
   const el = h(

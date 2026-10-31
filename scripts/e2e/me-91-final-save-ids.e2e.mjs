@@ -200,8 +200,8 @@ async function shadowCounts(page, reachHub, url) {
   await page.locator('.dq-collection').first().waitFor({ timeout: 10000 });
   await page.waitForTimeout(800);
   return {
-    skills: await page.locator('.dq-collection:not(.dq-allies) > .dq-cardbtn').count(),
-    allies: await page.locator('.dq-allies > .dq-cardbtn:not(.dq-allyslot)').count(),
+    skills: await page.locator('.dq-collection:not(.dq-allies) .dq-cardbtn').count(),
+    allies: await page.locator('.dq-allies .dq-cardbtn:not(.dq-allyslot)').count(),
   };
 }
 
