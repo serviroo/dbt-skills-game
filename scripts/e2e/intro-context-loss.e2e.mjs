@@ -145,7 +145,7 @@ export const scenarios = {
       h.expect((await frame()) > f0 + 2, 'the scene drew no frames on the context it got back');
       h.expect(!(await canvasHidden(page)), 'the canvas stayed hidden after the context came back');
       await page.locator('.ui-skip').click();
-      await page.locator('.dq-top').waitFor({ timeout: 15000 });
+      await h.until(page, () => !!document.querySelector('.dq-top')?.checkVisibility(), null, { timeout: 15000 });
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();

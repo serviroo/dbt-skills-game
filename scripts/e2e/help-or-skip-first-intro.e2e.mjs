@@ -5,11 +5,15 @@
 // Leave goes straight to Home. Skip goes straight to Home with everything a watched intro gives. One press leaves the
 // intro once: the window under it never moves on, and a double tap or a held Enter lands nowhere else.
 import { installAudioRecorder, audioReady, audioRecorded } from './audio-recorder.mjs';
+import { until } from './harness.mjs';
 
 const PHONE = { width: 390, height: 844 };
 const SMALL = { width: 320, height: 568 };
 const SIDE = { width: 844, height: 390 };
 const DESK = { width: 1440, height: 900 };
+// the 3D scene is only a backdrop to these checks: drawn light, as the intro's other DOM checks draw it, so a software
+// renderer finishes its frames in the time a capture allows (see screenshot() in harness.mjs)
+const LIGHT = '&nopost&msaa=0&dpr=1';
 // silent at the speakers: a peak below one step of 16-bit audio and RMS below -100 dBFS, as in safe-zone-quiet
 const SILENT_PEAK = 2 ** -15;
 const SILENT_RMS = 1e-5;
@@ -39,7 +43,7 @@ async function visit(h, query, viewport = PHONE, { seed = {}, prepare } = {}) {
     await prepare?.(ctx);
   });
   const { page } = opened;
-  await page.locator('.title-screen').waitFor({ timeout: 60000 });
+  await appears(page, '.title-screen', 60000);
   await page.evaluate(async () => {
     window.__cues = [];
     const { AudioEngine } = await import('/src/audio/engine.ts');
@@ -52,24 +56,37 @@ async function visit(h, query, viewport = PHONE, { seed = {}, prepare } = {}) {
   return opened;
 }
 
+// The waits here count their timeouts in the time the page could run (see until() in harness.mjs): CI's software renderer
+// stops the tab for seconds at a time while it draws the scene, and leaving the intro loads the companion right then.
+
+/** Waits for `sel` to be on the page and drawn, as locator.waitFor() does. */
+const appears = (page, sel, timeout) => until(page, (s) => !!document.querySelector(s)?.checkVisibility(), sel, { timeout });
+
 /** Waits for one of the cues the scene plays. */
-const cue = (page, name) => page.waitForFunction((n) => window.__cues.some((c) => c.cue === n), name, { timeout: 60000, polling: 50 });
+const cue = (page, name) => until(page, (n) => window.__cues.some((c) => c.cue === n), name, { timeout: 60000, polling: 50 });
 
 /** Waits until `sel` is on top where it shows, faded in, scrolled to as a player would. */
 const shown = (page, sel) =>
-  page.waitForFunction((s) => {
+  until(page, (s) => {
     const b = document.querySelector(s);
     b?.scrollIntoView({ block: 'nearest' });
     const r = b?.getBoundingClientRect();
     return r && r.width && !b.closest('[inert]') && b.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)) && b.getAnimations({ subtree: true }).every((a) => a.playState !== 'running' || a.effect.getComputedTiming().iterations === Infinity);
   }, sel, { timeout: 30000 });
 
-/** A player's tap on the middle of `sel`, scrolled to first if it is out of sight (the end card's buttons never hold
- *  still for a Playwright scroll, so the page scrolls itself). */
+/** The middle of `sel`, scrolled to first if it is out of sight (the end card's buttons never hold still for a Playwright
+ *  scroll, so the page scrolls itself). */
+const middle = (page, sel) =>
+  page.evaluate((s) => {
+    const e = document.querySelector(s);
+    e.scrollIntoView({ block: 'nearest' });
+    const r = e.getBoundingClientRect();
+    return [r.x + r.width / 2, r.y + r.height / 2];
+  }, sel);
+
+/** A player's tap on the middle of `sel`. */
 async function tap(page, sel) {
-  await page.locator(sel).evaluate((e) => e.scrollIntoView({ block: 'nearest' }), null, { timeout: 10000 });
-  const box = await page.locator(sel).boundingBox({ timeout: 10000 });
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.click(...(await middle(page, sel)));
 }
 
 /** Taps a closing screen's button and waits for the next screen's. */
@@ -80,16 +97,16 @@ async function next(page, button, then) {
 
 /** The intro's screens, reached the way a player gets there, each from a fresh page at `query`. */
 const STAGES = {
-  title: { query: '?fresh&mute', reach: async () => {} },
-  names: { query: '?fresh&mute', reach: (page) => next(page, '.title-screen', '.sw .sw-btn.gold') },
-  gate: { query: '?shot=gate&mute', reach: async (page) => { await page.locator('.title-screen').click(); await cue(page, 'gate_air'); } },
-  windows: { query: '?shot=windows&mute', reach: async (page) => { await page.locator('.title-screen').click(); await page.locator('.sw[data-kind="notification"]').waitFor({ timeout: 60000 }); } },
-  silhouette: { query: '?shot=silhouette&mute', reach: async (page) => { await page.locator('.title-screen').click(); await cue(page, 'whoosh'); } },
-  awaken: { query: '?shot=awaken&mute', reach: async (page) => { await page.locator('.title-screen').click(); await cue(page, 'awaken_voice'); } },
-  chest: { query: '?shot=chest&mute', reach: async (page) => { await page.locator('.title-screen').click(); await page.locator('.chest-hold .ch-target').waitFor({ timeout: 60000 }); } },
-  rewards: { query: '?shot=rewards&mute', reach: async (page) => { await page.locator('.title-screen').click(); await shown(page, '.rw .sw-btn'); } },
-  letter: { query: '?shot=rewards&mute', reach: async (page) => { await STAGES.rewards.reach(page); await next(page, '.rw .sw-btn', '.letter .sw-btn'); } },
-  endcard: { query: '?shot=rewards&mute', reach: async (page) => { await STAGES.letter.reach(page); await next(page, '.letter .sw-btn', '.ec-actions .sw-btn.gold'); } },
+  title: { query: `?fresh&mute${LIGHT}`, reach: async () => {} },
+  names: { query: `?fresh&mute${LIGHT}`, reach: (page) => next(page, '.title-screen', '.sw .sw-btn.gold') },
+  gate: { query: `?shot=gate&mute${LIGHT}`, reach: async (page) => { await page.locator('.title-screen').click(); await cue(page, 'gate_air'); } },
+  windows: { query: `?shot=windows&mute${LIGHT}`, reach: async (page) => { await page.locator('.title-screen').click(); await appears(page, '.sw[data-kind="notification"]', 60000); } },
+  silhouette: { query: `?shot=silhouette&mute${LIGHT}`, reach: async (page) => { await page.locator('.title-screen').click(); await cue(page, 'whoosh'); } },
+  awaken: { query: `?shot=awaken&mute${LIGHT}`, reach: async (page) => { await page.locator('.title-screen').click(); await cue(page, 'awaken_voice'); } },
+  chest: { query: `?shot=chest&mute${LIGHT}`, reach: async (page) => { await page.locator('.title-screen').click(); await appears(page, '.chest-hold .ch-target', 60000); } },
+  rewards: { query: `?shot=rewards&mute${LIGHT}`, reach: async (page) => { await page.locator('.title-screen').click(); await shown(page, '.rw .sw-btn'); } },
+  letter: { query: `?shot=rewards&mute${LIGHT}`, reach: async (page) => { await STAGES.rewards.reach(page); await next(page, '.rw .sw-btn', '.letter .sw-btn'); } },
+  endcard: { query: `?shot=rewards&mute${LIGHT}`, reach: async (page) => { await STAGES.letter.reach(page); await next(page, '.letter .sw-btn', '.ec-actions .sw-btn.gold'); } },
 };
 
 /** Presses `key` until focus is on `sel`: how many presses it took, or Infinity after 8. */
@@ -207,16 +224,16 @@ const after = (page) =>
 async function sceneStill(h, page, tag) {
   const t = () => page.evaluate(() => window.__stage?.time ?? null);
   const t0 = await t();
-  await h.sleep(600);
+  await h.frames(page, 36);
   const t1 = await t();
   h.expect(t0 === t1, `${tag}: the 3D scene still ran behind the companion (${t0} -> ${t1})`);
 }
 
 /** The Safe Zone, opened at once from the intro and quiet, with nothing of the intro or of the companion's day first. */
 async function safeZoneAtOnce(h, page, tag) {
-  await page.waitForFunction(() => window.__daily?.route.name === 'safe' && document.querySelector('.dq-sz-talk'), null, { timeout: 30000 });
-  // long enough for anything the intro still had coming to show
-  await h.sleep(2000);
+  await until(page, () => window.__daily?.route.name === 'safe' && !!document.querySelector('.dq-sz-talk'), null, { timeout: 30000 });
+  // two seconds of frames at least: long enough for anything the intro still had coming to show
+  await h.frames(page, 120);
   const s = await after(page);
   h.expect(s.screens.join(' > ') === 'safe', `${tag}: the companion showed ${s.screens.join(' > ')} on the way to the Safe Zone`);
   h.expect(!s.intro.length && !s.late.length, `${tag}: the intro showed over the Safe Zone: ${[...s.intro, ...s.late].join(', ')}`);
@@ -232,7 +249,7 @@ async function safeZoneAtOnce(h, page, tag) {
 /** Leave goes straight to Home on a first visit; the day's visit and the first welcome come there, once. */
 async function leaveToHome(h, page, tag) {
   await page.locator('.dq-top .dq-back').click();
-  await page.waitForFunction(() => window.__daily.route.name === 'hub', null, { timeout: 5000 });
+  await until(page, () => window.__daily.route.name === 'hub', null, { timeout: 5000 });
   const closed = await h.reachHub(page);
   const s = await after(page);
   h.expect(s.screens.join(' > ') === 'safe > hub', `${tag}: Leave went ${s.screens.join(' > ')}, not straight to Home`);
@@ -243,9 +260,9 @@ async function leaveToHome(h, page, tag) {
 
 /** Skip lands on Home at once, with nothing of the intro after it and the first welcome there, as after a watched intro. */
 async function homeAtOnce(h, page, tag) {
-  await page.waitForFunction(() => window.__daily?.route.name === 'hub', null, { timeout: 30000 });
+  await until(page, () => window.__daily?.route.name === 'hub', null, { timeout: 30000 });
   const closed = await h.reachHub(page);
-  await h.sleep(800);
+  await h.frames(page, 48);
   const s = await after(page);
   h.expect(s.screens.join(' > ') === 'hub', `${tag}: Skip went ${s.screens.join(' > ')}, not straight to Home`);
   h.expect(!s.intro.length && !s.late.length, `${tag}: the intro showed over Home: ${[...s.intro, ...s.late].join(', ')}`);
@@ -257,11 +274,11 @@ async function homeAtOnce(h, page, tag) {
   return s;
 }
 
-/** Holds Space on the chest's hold, a third of the way to open, and returns the function that lets it go. */
-async function partCharge(h, page) {
+/** Holds Space on the chest's hold until it is a third of the way to open, and returns the function that lets it go. */
+async function partCharge(page) {
   await page.locator('.chest-hold .ch-target').focus();
   await page.keyboard.down('Space');
-  await h.sleep(500);
+  await until(page, () => +document.querySelector('.chest-hold').style.getPropertyValue('--c') >= 1 / 3, null, { timeout: 15000 });
   return () => page.keyboard.up('Space');
 }
 
@@ -270,13 +287,13 @@ async function leaveAt(h, at, way, tag = `${way === 'safe' ? 'Safe Zone' : 'Skip
   const { ctx, page, errors } = await visit(h, STAGES[at].query);
   try {
     await STAGES[at].reach(page);
-    const release = at === 'chest' ? await partCharge(h, page) : null;
-    await page.locator(way === 'safe' ? '.ui-safe' : '.ui-skip').click();
+    const release = at === 'chest' ? await partCharge(page) : null;
+    await tap(page, way === 'safe' ? '.ui-safe' : '.ui-skip');
     if (way === 'safe') await safeZoneAtOnce(h, page, tag);
     else await homeAtOnce(h, page, tag);
     if (release) {
       await release();
-      await h.sleep(500);
+      await h.frames(page, 30);
       const s = await after(page);
       h.expect(s.route === (way === 'safe' ? 'safe' : 'hub') && !s.late.length && !s.cues.length, `${tag}: letting go of the hold changed something: ${JSON.stringify(s)}`);
     }
@@ -332,11 +349,11 @@ async function welcomeNote(h, page) {
   await h.openSettings(page);
   await page.getByRole('button', { name: 'Welcome note' }).click();
   const win = page.locator('.dq-sw');
-  await win.waitFor({ timeout: 10000 });
-  await page.waitForFunction(() => getComputedStyle(document.querySelector('.dq-sw .sw-next') ?? document.body).opacity > 0, null, { timeout: 15000 });
+  await appears(page, '.dq-sw', 10000);
+  await until(page, () => getComputedStyle(document.querySelector('.dq-sw .sw-next') ?? document.body).opacity > 0, null, { timeout: 15000 });
   const text = (await win.innerText()).replace(/\s+/g, ' ');
   await win.press('Enter');
-  await win.waitFor({ state: 'detached', timeout: 10000 });
+  await h.gone(win, 10000);
   return text;
 }
 
@@ -382,7 +399,7 @@ export const scenarios = {
         await h.shot(page, `${size}-safe-zone-from-the-title`);
         await leaveToHome(h, page, `${size} Safe Zone from the first title`);
         await page.reload();
-        await page.locator('.dq-top').waitFor({ timeout: 30000 });
+        await appears(page, '.dq-top', 30000);
         h.expect(!(await page.locator('.title-screen').count()), `${size}: the intro played again after help was asked for in it`);
         h.expect(!errors.length, errors.join('\n'));
       } finally {
@@ -440,7 +457,7 @@ export const scenarios = {
     for (const [way, load, url] of cases) {
       let release;
       const held = new Promise((r) => (release = r));
-      const { ctx, page, errors } = await visit(h, '?fresh&mute', PHONE, {
+      const { ctx, page, errors } = await visit(h, STAGES.names.query, PHONE, {
         prepare: (c) => c.route(url, async (r) => (load.endsWith('failed') ? r.abort('failed') : held.then(() => r.continue()))),
       });
       const tag = `${way} with ${load}`;
@@ -449,11 +466,11 @@ export const scenarios = {
         const asked = page.waitForRequest((r) => r.url().includes(url.replace(/^\*\*|\*$/g, '')), { timeout: 30000 });
         await page.getByRole('button', { name: 'Continue' }).click();
         await asked;
-        if (load.endsWith('failed')) await page.getByRole('button', { name: 'Reload' }).waitFor({ timeout: 20000 });
+        if (load.endsWith('failed')) await h.poll(page, () => page.getByRole('button', { name: 'Reload' }).count(), Boolean, `${tag}: no reload was offered`, { timeout: 20000 });
         await bothThere(h, page, tag);
         await page.evaluate(() => (window.__samePage = true));
-        await page.locator(way === 'safe' ? '.ui-safe' : '.ui-skip').click();
-        await page.waitForFunction((w) => window.__daily?.route.name === w, way === 'safe' ? 'safe' : 'hub', { timeout: 30000 });
+        await tap(page, way === 'safe' ? '.ui-safe' : '.ui-skip');
+        await until(page, (w) => window.__daily?.route.name === w, way === 'safe' ? 'safe' : 'hub', { timeout: 30000 });
         release();
         if (way === 'safe') await safeZoneAtOnce(h, page, tag);
         else await homeAtOnce(h, page, tag);
@@ -473,7 +490,7 @@ export const scenarios = {
   async 'safe-zone-quiet-from-the-press'(h) {
     let release;
     const held = new Promise((r) => (release = r));
-    const { ctx, page, errors } = await visit(h, '?shot=windows', PHONE, {
+    const { ctx, page, errors } = await visit(h, `?shot=windows${LIGHT}`, PHONE, {
       prepare: async (c) => {
         await installAudioRecorder(c);
         await c.route('**/src/daily/index.ts*', (r) => held.then(() => r.continue()));
@@ -494,7 +511,7 @@ export const scenarios = {
       h.expect(before.rms > 1e-3, `the intro was not audible before the press (RMS ${before.rms}), so silence proves nothing`);
       h.expect(after.read >= 0.9, `the recorder read only ${Math.round(after.read * 100)}% of the time after the press`);
       h.expect(after.peak < SILENT_PEAK && after.rms < SILENT_RMS, `sound reached the speakers while the Safe Zone loaded (peak ${after.peak}, RMS ${after.rms})`);
-      await page.waitForFunction(() => window.__daily?.route.name === 'safe', null, { timeout: 30000 });
+      await until(page, () => window.__daily?.route.name === 'safe', null, { timeout: 30000 });
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       release();
@@ -515,7 +532,7 @@ export const scenarios = {
   /** A player who names themselves and then skips keeps the names, and has what one who watched to the end has: the
    *  visit, the first welcome, the intro kept as seen, and the welcome note with the moth, the Lantern and the paper star */
   async 'skip-gives-what-a-watch-gives'(h) {
-    const watched = await visit(h, '?shot=rewards&mute');
+    const watched = await visit(h, STAGES.endcard.query);
     let watch;
     try {
       const { page } = watched;
@@ -528,7 +545,7 @@ export const scenarios = {
     } finally {
       await watched.ctx.close();
     }
-    const skipped = await visit(h, '?fresh&mute');
+    const skipped = await visit(h, STAGES.names.query);
     try {
       const { page } = skipped;
       await STAGES.names.reach(page);
@@ -598,8 +615,7 @@ export const scenarios = {
       try {
         await STAGES[at].reach(page);
         if (tag.startsWith('double')) {
-          const box = await page.locator(sel).boundingBox();
-          await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2);
+          await page.mouse.dblclick(...(await middle(page, sel)));
         } else {
           await page.locator(sel).focus();
           for (let i = 0; i < 8; i++) {
@@ -608,10 +624,10 @@ export const scenarios = {
           }
           await page.keyboard.up('Enter');
         }
-        await page.waitForFunction((r) => window.__daily?.route.name === r && (r === 'hub' || document.querySelector('.dq-sz-talk')), lands, { timeout: 30000 });
+        await until(page, (r) => window.__daily?.route.name === r && (r === 'hub' || !!document.querySelector('.dq-sz-talk')), lands, { timeout: 30000 });
         const step = () => page.evaluate(() => document.querySelector('.dq-sz-t')?.textContent ?? null);
         const first = await step();
-        await h.sleep(1500);
+        await h.frames(page, 90);
         const s = await after(page);
         h.expect(s.route === lands && s.screens.join(' > ') === lands, `${tag}: went ${s.screens.join(' > ')}, not just ${lands}`);
         h.expect(!s.late.length, `${tag}: the intro moved on under the press: ${s.late.join(', ')}`);

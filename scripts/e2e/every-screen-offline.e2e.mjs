@@ -610,7 +610,7 @@ async function replayIntro(h, page, problems) {
   h.expect(shots.ok() && shots.fromServiceWorker(), `the awaken scene's script did not come from the offline cache (HTTP ${shots.status()})`);
   h.expect(!problems.length, `the intro's awaken scene offline:\n${problems.join('\n')}`);
   await tapWhereItIs(page, page.getByRole('button', { name: 'Skip intro' }));
-  await page.waitForFunction(() => !!window.__daily && document.querySelector('.dq')?.dataset.screen === 'hub', null, { timeout: 30000 });
+  await h.until(page, () => !!window.__daily && document.querySelector('.dq')?.dataset.screen === 'hub', null, { timeout: 30000 });
   await h.reachHub(page);
   await listen(page);
   h.expect(!problems.length, `the intro replayed offline:\n${problems.join('\n')}`);

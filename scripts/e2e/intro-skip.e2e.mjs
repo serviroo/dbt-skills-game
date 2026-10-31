@@ -141,10 +141,10 @@ export const scenarios = {
       });
       await page.locator('.chest-hold.is-full').waitFor({ state: 'attached', timeout: 30000 });
       await page.locator('.ui-skip').click();
-      await page.waitForFunction(() => window.__daily?.route.name === 'hub', null, { timeout: 15000 });
+      await h.until(page, () => window.__daily?.route.name === 'hub', null, { timeout: 15000 });
       const left = await page.locator('.chest-hold').count();
       await page.keyboard.up('Space');
-      await h.sleep(500);
+      await h.frames(page, 30);
       h.expect(!left, 'the full chest hold stayed on the page over Home while Space was held');
       h.expect(await page.evaluate(() => window.__daily.route.name === 'hub' && !document.querySelector('.rw')), 'letting go of Space after Skip moved on from Home');
       h.expect(!errors.length, errors.join('\n'));

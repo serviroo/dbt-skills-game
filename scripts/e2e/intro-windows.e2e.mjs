@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { gone } from './harness.mjs';
+import { gone, poll } from './harness.mjs';
 import { isSettled, windowCut } from './me-92-safe-zone-clean.e2e.mjs';
 
 const VIEWPORTS = [{ width: 390, height: 844 }, { width: 320, height: 568 }, { width: 844, height: 390 }];
@@ -995,11 +995,9 @@ export const scenarios = {
             await page.evaluate(skipTimes);
             await page.locator('.ui-skip').focus();
             await page.keyboard.press(how);
-            const skip = await page.waitForFunction(() => { const r = window.__skip; return r.at !== null && r.gone !== null && r.home !== null && r; }, null, { polling: 100, timeout: 8000 }).then((h) => h.jsonValue(), () => page.evaluate(() => window.__skip));
+            const skip = await poll(page, () => page.evaluate(() => window.__skip), (r) => r.at !== null && r.gone !== null && r.home !== null, (r) => `${at}: Skip never took the input, took the hold down or reached Home: ${JSON.stringify(r)}`, { timeout: 8000 });
             skipMs[at] = skip;
-            expect(skip.at !== null, `${at}: Skip never took the input`);
-            expect(skip.gone !== null && skip.gone <= 1000, `${at}: the hold prompt was still up 1 s after Skip (gone at ${skip.gone} ms, nodes ${skip.watched.join(', ')})`);
-            expect(skip.home !== null, `${at}: Home never came after Skip`);
+            expect(skip.gone <= 1000, `${at}: the hold prompt was still up 1 s after Skip (gone at ${skip.gone} ms, nodes ${skip.watched.join(', ')})`);
             await sleep(2500);
             const late = await page.evaluate(() => window.__afterSkip);
             expect(!late.length, `${at}: the skipped beat still showed ${late.join(', ')} after Skip`);
