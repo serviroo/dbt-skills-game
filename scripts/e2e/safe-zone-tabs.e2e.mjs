@@ -150,14 +150,17 @@ const focusIs = (page) =>
     if (!a || a === document.body) return { name: 'nothing', seen: false, ring: false, list: null };
     return { name: nameOf(a).slice(0, 40), seen: whole(a) && !a.closest('[aria-hidden="true"], [inert], .dq-sr'), ring: ringWhole(a), list: a.closest('.dq-listp')?.querySelector('.dq-chip-t')?.textContent ?? null };
   })()`);
-/** A problem unless focus is on `name` (in Comfort's `list`, if given) and the player sees it and its ring whole. */
-const focusOn = async (page, name, what, list) => {
-  const f = await focusIs(page);
-  const at = `${f.name}${f.list ? ` in ${f.list}` : ''}`, want = `${name}${list ? ` in ${list}` : ''}`;
-  if (at !== want) return [`${what}: focus is on ${at}, not ${want}`];
+/**
+ * A problem unless `target`, a locator for exactly one element, is that very element with focus (not another one with
+ * the same name) and the player sees it and its ring whole.
+ */
+const focusOn = async (target, what) => {
+  const f = await focusIs(target.page());
+  if (!(await target.evaluate((e) => e === document.activeElement))) return [`${what}: focus is on ${f.name}${f.list ? ` in ${f.list}` : ''}, not ${target}`];
   const cut = [f.seen ? '' : 'not seen whole', f.ring ? '' : 'its ring is cut'].filter(Boolean);
-  return cut.length ? [`${what}: focus is on ${at}, but ${cut.join(' and ')}`] : [];
+  return cut.length ? [`${what}: focus is on ${f.name}, but ${cut.join(' and ')}`] : [];
 };
+const button = (page, name) => page.getByRole('button', { name, exact: true });
 /** Leave goes at once, asking nothing. */
 async function leaves(page) {
   await page.locator('.dq-top .dq-back').click();
@@ -205,7 +208,7 @@ export const scenarios = {
         if (after.size !== 'regular' || after.lit) problems.push(`${tag} ${at}: text ${after.size} and light ${after.lit ? 'up' : 'down'} after a clear, not Regular and down`);
         if (!after.talk) problems.push(`${tag} ${at}: "Talk to someone now" is not pinned in view after the clear`);
         if (after.fx) problems.push(`${tag} ${at}: the clear showed ${after.fx} toast, window or effect in the Safe Zone`);
-        if (at === 'people') problems.push(...(await focusOn(page, 'Add a person', `${tag} after a clear elsewhere`)));
+        if (at === 'people') problems.push(...(await focusOn(button(page, 'Add a person'), `${tag} after a clear elsewhere`)));
         await h.shot(page, `clear-after-${at}-${tag}`);
         if (!(await leaves(page))) problems.push(`${tag} ${at}: Leave did not leave at once after the clear`);
       }
@@ -233,14 +236,14 @@ export const scenarios = {
       const wren = now.kept.filter((s) => s.startsWith('Wren') || s.includes('0958'));
       if (wren.length) problems.push(`${tag}: removed in another tab, still on the page: ${wren.join(', ')}`);
       if (JSON.stringify(now.people) !== '["Juno Pell"]') problems.push(`${tag}: Your people shows ${JSON.stringify(now.people)} after Wren was removed elsewhere`);
-      problems.push(...(await focusOn(page, 'Call Juno Pell', `${tag} when Wren went`)));
+      problems.push(...(await focusOn(page.getByRole('link', { name: 'Call Juno Pell', exact: true }), `${tag} when Wren went`)));
       await h.shot(page, `remove-one-${tag}`);
       await other.page.getByRole('button', { name: 'Remove Juno Pell' }).click();
       await until(page, (want) => document.querySelector('.dq-sz-empty')?.textContent === want, EMPTY.people);
       now = await zone(page);
       const juno = now.kept.filter((s) => s.startsWith('Juno') || s.includes('0123'));
       if (juno.length || now.people.length || now.empty !== EMPTY.people) problems.push(`${tag}: after the last person went elsewhere: ${JSON.stringify(now)}`);
-      problems.push(...(await focusOn(page, 'Add a person', `${tag} when Juno went`)));
+      problems.push(...(await focusOn(button(page, 'Add a person'), `${tag} when Juno went`)));
       if (JSON.stringify(now.typed) !== '["Half a name"]') problems.push(`${tag}: what was being typed became ${JSON.stringify(now.typed)} as people went elsewhere`);
       if (!now.talk || now.fx || now.xp !== was.xp) problems.push(`${tag}: Talk pinned ${now.talk}, ${now.fx} toast, window or effect, XP ${was.xp} to ${now.xp}`);
       await h.shot(page, `remove-last-${tag}`);
@@ -261,7 +264,10 @@ export const scenarios = {
       const other = await another(ctx, h);
       await go(other.page, { name: 'comfort' });
       await reasons.getByRole('button', { name: 'Add one' }).click();
-      await reasons.locator('.dq-addrow input').fill('Half a thought');
+      const typing = reasons.locator('.dq-addrow input');
+      await typing.fill('Half a thought');
+      // the caret partway along, as it is mid-word
+      await typing.evaluate((i) => i.setSelectionRange(4, 4));
       const mine = other.page.locator('.dq-listp--reasons');
       await mine.locator('input').fill('Kestrel feathers');
       await mine.getByRole('button', { name: 'Add', exact: true }).click();
@@ -273,8 +279,9 @@ export const scenarios = {
       const r = await zone(reasons);
       if (JSON.stringify(r.items) !== '["Lanternfish facts","Kestrel feathers"]') problems.push(`${tag}: Things that are yours shows ${JSON.stringify(r.items)} after an add and a removal elsewhere`);
       if (r.kept.includes('Quillfeather')) problems.push(`${tag}: Quillfeather walks, removed elsewhere, is still on the page`);
-      if ((await reasons.locator('.dq-addrow input').inputValue()) !== 'Half a thought') problems.push(`${tag}: the half-typed item went when the list changed`);
-      problems.push(...(await focusOn(reasons, 'Add one', `${tag} typing while the list changed`)));
+      const kept = await typing.evaluate((i) => `${i.value}|${i.selectionStart},${i.selectionEnd}`);
+      if (kept !== 'Half a thought|4,4') problems.push(`${tag}: the half-typed item and its caret became ${kept} as the list changed`);
+      problems.push(...(await focusOn(typing, `${tag} typing while the list changed`)));
       await h.shot(reasons, `lists-reasons-${tag}`);
       await other.page.getByRole('button', { name: 'Remove Marmalade toast tins' }).click();
       await until(comfort.page, (want) => document.querySelector('.dq-sz-empty')?.textContent === want, EMPTY.comfort);
@@ -301,7 +308,7 @@ export const scenarios = {
       await remove.focus();
       await other.page.getByRole('button', { name: 'Remove Quillfeather walks' }).click();
       await until(page, () => !document.querySelector('[aria-label="Remove Quillfeather walks"]'));
-      problems.push(...(await focusOn(page, 'Add', `${tag} when Quillfeather walks went`, 'Things that are yours')));
+      problems.push(...(await focusOn(button(page.locator('.dq-listp--reasons'), 'Add'), `${tag} when Quillfeather walks went`)));
       await other.page.getByRole('button', { name: 'Remove Wren Okafor' }).click();
       await until(page, () => !document.documentElement.outerHTML.includes('Wren Okafor'));
       const left = await page.evaluate((personal) => personal.filter((s) => document.documentElement.outerHTML.includes(s)), PERSONAL);
@@ -349,8 +356,8 @@ export const scenarios = {
       const safe = await zone(page);
       const left = await comfort.page.evaluate(() => document.querySelectorAll('[aria-label="Remove Sam Ash"]').length);
       if (safe.people.length !== 1 || left !== 1) problems.push(`${tag}: after one Sam Ash went elsewhere the Safe Zone shows ${safe.people.length} and the Comfort page ${left}`);
-      problems.push(...(await focusOn(page, 'Add a person', `${tag} Safe Zone when the focused Sam Ash went`)));
-      problems.push(...(await focusOn(comfort.page, 'Add person', `${tag} Comfort page when the focused Sam Ash went`, 'People')));
+      problems.push(...(await focusOn(button(page, 'Add a person'), `${tag} Safe Zone when the focused Sam Ash went`)));
+      problems.push(...(await focusOn(button(comfort.page, 'Add person'), `${tag} Comfort page when the focused Sam Ash went`)));
       await h.shot(page, `same-name-safe-${tag}`);
       problems.push(...[errors, comfort.errors, other.errors].flat().map((e) => `${tag}: ${e}`));
       await ctx.close();
