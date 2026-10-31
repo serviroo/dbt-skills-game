@@ -11,7 +11,7 @@ import { allyCard, allyName, cardOf, favFirst, focusBack, refill } from './artro
 import { artStore } from './artstore';
 import { storyStore } from './storystore';
 import { addDays, cleanName, dayKey, fieldKey, fieldTimes, isSkillId, ROW_CAP, uid, type DiaryEntry, type State, type Store } from './store';
-import { btn, copyText, field, h, md, p, panel, place, redrawn, segmented, shareOrSave, toggle, typo } from './ui';
+import { btn, copyText, field, h, md, p, panel, place, quotes, redrawn, segmented, shareOrSave, toggle, typo } from './ui';
 import type { KeepStatus } from '../pwa/register';
 import { volumeSliders } from '../ui/volume';
 import { STEALTH, STEALTH_LINES } from '../content/stealth-lines';
@@ -1088,10 +1088,11 @@ function clearedScreen(): ScreenOut {
   return { el, title: 'Cleared', mode: 'hub', leave: onClearStatus(render) };
 }
 
-/** The intro's welcome note and what came with it, the same for a player who skipped the intro as for one who watched. */
+/** The intro's welcome note and what came with it, the same for a player who skipped the intro as for one who watched.
+ *  The intro's copy has its names filled in. */
 function welcomeNote(app: App) {
-  const note = [LETTER.greeting, ...LETTER.paragraphs(mayMentionTherapist())].map((l) => `<p>${typo(l)}</p>`).join('');
-  const gifts = REWARDS.filter((r) => r.id !== 'letter').map((r) => `<p class="sys"><b>${r.name}.</b> ${typo(r.desc)}</p>`).join('');
+  const note = [LETTER.greeting, ...LETTER.paragraphs(mayMentionTherapist())].map((l) => `<p>${quotes(l)}</p>`).join('');
+  const gifts = REWARDS.filter((r) => r.id !== 'letter').map((r) => `<p class="sys"><b>${r.name}.</b> ${quotes(r.desc)}</p>`).join('');
   return app.window({ kind: 'notification', title: LETTER.title, html: `${note}<p class="sys">${LETTER.signoff}</p>${gifts}`, tapToContinue: true }, true);
 }
 

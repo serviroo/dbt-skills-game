@@ -344,6 +344,26 @@ async function everyStage(h, size, viewport) {
   return names;
 }
 
+/** Where a tap on `sel` lands on it, nearest its middle, with whatever is open over it: null if it is covered. */
+const tappable = (page, sel) =>
+  page.evaluate((s) => {
+    const b = document.querySelector(s);
+    const r = b.getBoundingClientRect();
+    const spots = [];
+    for (let i = 1; i < 6; i++) for (let j = 1; j < 6; j++) spots.push([r.left + (r.width * i) / 6, r.top + (r.height * j) / 6]);
+    const off = ([x, y]) => Math.hypot(x - r.left - r.width / 2, y - r.top - r.height / 2);
+    return spots.sort((p, q) => off(p) - off(q)).find(([x, y]) => b.contains(document.elementFromPoint(x, y))) ?? null;
+  }, sel);
+
+/** Opens Sound, then taps `sel` once where it shows, as a player would with the Sound panel still open. */
+async function tapWithSoundOpen(h, page, sel, tag) {
+  await page.locator('.vol-btn').click();
+  await page.locator('.vol.is-open .vol-pop').waitFor({ timeout: 10000 });
+  const at = await tappable(page, sel);
+  h.expect(at, `${tag}: the Sound panel covers ${sel}`);
+  await page.mouse.click(...at);
+}
+
 /** Settings' Welcome note, opened and read: the note, its sign-off and the gifts that came with it. */
 async function welcomeNote(h, page) {
   await h.openSettings(page);
@@ -530,7 +550,8 @@ export const scenarios = {
   },
 
   /** A player who names themselves and then skips keeps the names, and has what one who watched to the end has: the
-   *  visit, the first welcome, the intro kept as seen, and the welcome note with the moth, the Lantern and the paper star */
+   *  visit, the first welcome, the intro kept as seen, and the welcome note with the moth, the Lantern and the paper star.
+   *  The name is "{companion}", as a name that reads like a token stays itself: each name is filled in once */
   async 'skip-gives-what-a-watch-gives'(h) {
     const watched = await visit(h, STAGES.endcard.query);
     let watch;
@@ -549,7 +570,7 @@ export const scenarios = {
     try {
       const { page } = skipped;
       await STAGES.names.reach(page);
-      await page.locator('#np-name').fill('Ash');
+      await page.locator('#np-name').fill('{companion}');
       await page.locator('#np-comp').fill('Pip');
       await page.getByRole('button', { name: 'Continue' }).click();
       await cue(page, 'gate_air');
@@ -557,8 +578,8 @@ export const scenarios = {
       const s = await homeAtOnce(h, page, 'Skip after naming');
       const note = await welcomeNote(h, page);
       const names = [await page.locator('#set-playerName').inputValue(), await page.locator('#set-companion').inputValue()];
-      h.expect(names.join() === 'Ash,Pip', `Skip after naming kept ${names.join(' and ')}, not Ash and Pip`);
-      const skip = { xp: s.xp, visits: s.visits, seen: s.seen, welcomes: 1, note: note.replaceAll('Ash', 'Player').replaceAll('Pip', 'Moth') };
+      h.expect(names.join() === '{companion},Pip', `Skip after naming kept ${names.join(' and ')}, not {companion} and Pip`);
+      const skip = { xp: s.xp, visits: s.visits, seen: s.seen, welcomes: 1, note: note.replaceAll('{companion}', 'Player').replaceAll('Pip', 'Moth') };
       for (const k of ['xp', 'visits', 'seen', 'welcomes', 'note']) h.expect(skip[k] === watch[k], `Skip gave ${k} ${JSON.stringify(skip[k])}, a watched intro ${JSON.stringify(watch[k])}`);
       for (const gift of ['Welcome, Player.', 'The Lantern', 'Moth.', 'A small night moth.', 'Paper star.', 'Folded for luck.'])
         h.expect(watch.note.includes(gift), `the welcome note in Settings has no "${gift}": ${watch.note}`);
@@ -566,6 +587,54 @@ export const scenarios = {
       return { watch, skip };
     } finally {
       await skipped.ctx.close();
+    }
+  },
+
+  /** Help is one tap with the Sound panel open: the tap that closes it still lands on the intro's Skip and Safe Zone, and
+   *  in the companion on the Safe Zone, Talk to someone now and a number to call */
+  async 'one-tap-with-sound-open'(h) {
+    {
+      const { ctx, page, errors } = await visit(h, '?mute');
+      try {
+        await tapWithSoundOpen(h, page, '.ui-skip', 'Skip');
+        await homeAtOnce(h, page, 'Skip with Sound open');
+        h.expect(!errors.length, errors.join('\n'));
+      } finally {
+        await ctx.close();
+      }
+    }
+    {
+      const { ctx, page, errors } = await visit(h, '?mute');
+      try {
+        await tapWithSoundOpen(h, page, '.ui-safe', 'the intro');
+        await safeZoneAtOnce(h, page, 'Safe Zone from the intro with Sound open');
+        await tapWithSoundOpen(h, page, '.dq-sz-talk', 'the Safe Zone');
+        await until(page, () => [...document.querySelectorAll('.dq-sz-t')].some((t) => t.textContent.includes('Talk to someone now')), null, { timeout: 5000 });
+        // the number's tap is kept here, as no phone answers it
+        await page.evaluate(() =>
+          addEventListener('click', (e) => {
+            const a = e.target.closest?.('a[href^="tel:"]');
+            if (!a) return;
+            window.__dialled = a.getAttribute('href');
+            e.preventDefault();
+          }),
+        );
+        await tapWithSoundOpen(h, page, 'a[href^="tel:"]', 'Talk to someone now');
+        const dialled = await page.evaluate(() => window.__dialled ?? null);
+        h.expect(dialled, 'with Sound open, a tap on a number to call only closed the Sound panel');
+        h.expect(!errors.length, errors.join('\n'));
+      } finally {
+        await ctx.close();
+      }
+    }
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute');
+    try {
+      await h.reachHub(page);
+      await tapWithSoundOpen(h, page, 'header .dq-safe', 'Home');
+      await until(page, () => window.__daily.route.name === 'safe', null, { timeout: 5000 });
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
     }
   },
 
