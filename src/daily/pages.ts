@@ -48,11 +48,13 @@ function stealthPrefs(key: string) {
     return { aquarium: false, words: false };
   }
 }
-function saveStealthPrefs(key: string, prefs: { aquarium: boolean; words: boolean }) {
+/** `stored` runs once the look is stored, now or after a hold, and never where storage refuses it. */
+function saveStealthPrefs(key: string, prefs: { aquarium: boolean; words: boolean }, stored: () => void) {
   const out = JSON.stringify(prefs);
   write(() => {
     try {
       localStorage.setItem(`${key}${BESIDE.stealth}`, out);
+      stored();
     } catch {
       /* the room still works; the look resets next visit */
     }
@@ -135,7 +137,8 @@ export function restScreen(app: App): ScreenOut {
           const v = b.getAttribute('aria-pressed') !== 'true';
           b.setAttribute('aria-pressed', String(v));
           set(v);
-          saveStealthPrefs(st.key, prefs);
+          // this copy hears no storage event for its own write, so it notes the look it stored itself
+          saveStealthPrefs(st.key, prefs, () => (kept = JSON.stringify(stealthPrefs(st.key))));
         },
       },
       h('span', { class: 'dq-st-mode-ic', html: ic }),
@@ -720,7 +723,10 @@ export function diaryScreen(app: App, _route: Route, visit: Visit): ScreenOut {
   const status = h('span', { class: 'dq-hint', 'aria-live': 'polite' });
   const refresh = () => {
     keep();
-    return (pre.textContent = diaryText(st, range));
+    const text = diaryText(st, range);
+    // the same words stay the same text, so words selected to copy by hand stay selected
+    if (pre.textContent !== text) pre.textContent = text;
+    return text;
   };
   refresh();
   const exportPanel = panel(

@@ -90,14 +90,15 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   lightBtn.addEventListener('click', () => {
     lit = !lit;
     const light = lit ? 'up' : 'dim';
+    // noted once it is stored, now or after a hold: read before then, a write that waits leaves the old light noted
     write(() => {
       try {
         localStorage.setItem(lightKey(st.key), light);
+        stored = storedLight(st.key);
       } catch {
         /* stays for this visit only */
       }
     });
-    stored = storedLight(st.key);
     applyLight();
   });
   const foot = h('div', { class: 'dq-sz-foot' }, talkLink);

@@ -27,6 +27,13 @@
 //   stealth-look-follows-tabs the aquarium and Breathing words turned on in another tab's Stealth room turn on here, the
 //                             words joining the room's own breath, which goes on unbroken, and Bramble, arriving with
 //                             visit days restored there, settles in here, focus staying where it was
+//   own-choices-then-tabs     the Stealth room's aquarium, the Safe Zone's light and a moment's length, chosen here and
+//                             then changed back in another tab, follow that change here, whether this copy stored its
+//                             choice at once or only once another copy's clear had checked and let every write go, and
+//                             when the change back came while this copy was away, unheard, once it is back in view,
+//                             even after a sound level saved here meanwhile
+//   diary-preview-keeps-selection  words selected in the diary's export preview stay selected when another tab changes
+//                             something the diary doesn't show, and when this copy comes back into view
 import { another, focusOn, go, until } from './safe-zone-tabs.e2e.mjs';
 
 const SIZES = [
@@ -125,6 +132,29 @@ const mark = (page) => page.evaluate(() => document.activeElement?.setAttribute(
 const kept = (page) => page.evaluate(() => !!document.activeElement?.hasAttribute('data-had-focus'));
 /** An older copy of the save, from before any of this, lands as if another tab wrote it. */
 const older = (page, h) => page.evaluate(([k, v]) => localStorage.setItem(k, v), [h.SAVE, SAVE]);
+/**
+ * From `page`, holds every open copy's writes as a clear does while it checks its Save Crystal (src/core/cleared.ts),
+ * until all `copies` say they are held. What it returns lets them go, and the writes they kept waiting go through.
+ */
+const hold = async (page, copies) => {
+  await page.evaluate(
+    (n) =>
+      new Promise((done) => {
+        const id = `e2e.${Date.now()}`;
+        const ch = new BroadcastChannel('dbt.clear');
+        const held = new Set();
+        ch.onmessage = ({ data }) => data?.id === id && data.type === 'held' && held.add(data.tab).size >= n && done();
+        ch.postMessage({ type: 'stop', id });
+        // as a clear does, it waits three seconds at most (a copy that didn't hold shows in what it stores meanwhile)
+        setTimeout(done, 3000);
+        // the clear's own beat, so no copy carries on by itself
+        const beat = setInterval(() => ch.postMessage({ type: 'stop', id }), 1000);
+        window.__letGo = () => (clearInterval(beat), ch.postMessage({ type: 'resume', id }));
+      }),
+    copies,
+  );
+  return () => page.evaluate(() => window.__letGo());
+};
 
 export const scenarios = {
   async 'home-follows-tabs'(h) {
@@ -539,6 +569,125 @@ export const scenarios = {
       if (!still) problems.push(`${tag}: the room's breath started again when Bramble arrived`);
       if (!(await kept(page))) problems.push(`${tag}: focus left the Aquarium button for ${await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 80))}`);
       await h.shot(page, `stealth-look-after-${tag}`);
+      problems.push(...[errors, other.errors].flat().map((e) => `${tag}: ${e}`));
+      await ctx.close();
+    }
+    h.expect(!problems.length, problems.join('\n'));
+  },
+
+  async 'own-choices-then-tabs'(h) {
+    const problems = [];
+    for (const [tag, viewport] of SIZES) {
+      // while away a copy hears no storage event, as one frozen or in the page cache (a headless browser can't freeze one)
+      const { ctx, page, errors } = await open(h, viewport, (c) =>
+        c.addInitScript(() =>
+          window.addEventListener(
+            'storage',
+            (e) => {
+              if (!window.__away) return;
+              e.stopImmediatePropagation();
+              window.__missed.push(e.key);
+            },
+            true,
+          ),
+        ),
+      );
+      const other = await another(ctx, h);
+      const stored = (end) => page.evaluate((k) => localStorage.getItem(k), `${h.SAVE}${end}`);
+      // each choice: where it lives, how to make or undo it in a copy, and what a copy shows while it is made
+      const choices = [
+        {
+          what: 'the aquarium',
+          route: { name: 'rest' },
+          ready: '.dq-stealth',
+          end: '.stealth',
+          make: (p) => p.locator('.dq-st-mode').first().click(),
+          on: '.dq-stealth.is-aquarium',
+        },
+        {
+          what: 'the light',
+          route: { name: 'safe', at: 'start' },
+          ready: '.ca-sz-light',
+          end: '.safe-light',
+          make: (p) => p.locator('.ca-sz-light').click(),
+          on: '.dq-safezone.is-lit',
+        },
+        {
+          what: '3 minutes',
+          route: { name: 'moment' },
+          ready: '.dq-mo-len',
+          end: '.moment-length',
+          make: (p, on) => p.getByRole('radiogroup', { name: 'How long' }).getByRole('radio', { name: on ? '3 minutes' : /^Until I.m ready$/ }).check(),
+          on: '.dq-mo-len input[value="3"]:checked',
+        },
+      ];
+      for (const c of choices) {
+        await go(page, c.route);
+        await go(other.page, c.route);
+        await page.locator(c.ready).waitFor();
+        await other.page.locator(c.ready).waitFor();
+        for (const [held, away, how] of [
+          [false, false, 'stored at once, then undone in another tab'],
+          [true, false, 'stored once every write was let go, then undone in another tab'],
+          [false, true, 'stored at once, then undone in another tab while this copy was away'],
+        ]) {
+          const letGo = held ? await hold(other.page, 2) : null;
+          const was = await stored(c.end);
+          await c.make(page, true);
+          if (letGo) {
+            if ((await stored(c.end)) !== was) problems.push(`${tag}: ${c.what} chosen here was stored while every write was held`);
+            await letGo();
+          }
+          if (!(await until(other.page, (s) => !!document.querySelector(s), c.on))) problems.push(`${tag}: ${c.what}, chosen here and ${how.split(',')[0]}, does not show in another tab`);
+          if (away) await page.evaluate(() => ((window.__away = true), (window.__missed = [])));
+          await c.make(other.page, false);
+          if (away) {
+            // the undo's storage event reached this copy and went unheard; then it comes back into view
+            if (!(await until(page, (k) => window.__missed.includes(k), `${h.SAVE}${c.end}`))) problems.push(`${tag}: ${c.what} undone in another tab never sent this copy a storage event`);
+            if (!(await page.evaluate((s) => !!document.querySelector(s), c.on))) problems.push(`${tag}: ${c.what} undone in another tab reached this copy while it was away`);
+            await page.evaluate(() => ((window.__away = false), document.dispatchEvent(new Event('visibilitychange'))));
+          }
+          if (!(await until(page, (s) => !document.querySelector(s), c.on))) problems.push(`${tag}: ${c.what}, chosen here and ${how}, stays on here`);
+        }
+        // chosen in another tab while this copy was away, unheard; a sound level saved here before it is back in view
+        await page.evaluate(() => ((window.__away = true), (window.__missed = [])));
+        await c.make(other.page, true);
+        if (!(await until(page, (k) => window.__missed.includes(k), `${h.SAVE}${c.end}`))) problems.push(`${tag}: ${c.what} chosen in another tab never sent this copy a storage event`);
+        await page.evaluate((v) => window.__daily.opts.volume.set({ master: v }), 0.3 + choices.indexOf(c) / 10);
+        await page.evaluate(() => ((window.__away = false), document.dispatchEvent(new Event('visibilitychange'))));
+        if (!(await until(page, (s) => !!document.querySelector(s), c.on))) problems.push(`${tag}: ${c.what}, chosen in another tab while this copy was away, does not show here once back in view after a sound level saved here`);
+        await h.shot(page, `own-choices-${c.end.slice(1)}-${tag}`);
+      }
+      problems.push(...[errors, other.errors].flat().map((e) => `${tag}: ${e}`));
+      await ctx.close();
+    }
+    h.expect(!problems.length, problems.join('\n'));
+  },
+
+  async 'diary-preview-keeps-selection'(h) {
+    const problems = [];
+    for (const [tag, viewport] of SIZES) {
+      const { ctx, page, errors } = await open(h, viewport);
+      const other = await another(ctx, h);
+      await go(page, { name: 'diary' });
+      await page.locator('.dq-export summary').click();
+      const pre = page.locator('.dq-export .dq-pre');
+      await pre.waitFor();
+      // the preview's words selected to copy by hand, as the diary asks where copying isn't allowed
+      await pre.evaluate((e) => getSelection().selectAllChildren(e));
+      const selected = () => page.evaluate(() => {
+        const e = document.querySelector('.dq-export .dq-pre');
+        const s = getSelection();
+        return !!e.textContent && s.toString() === e.textContent && e.contains(s.anchorNode);
+      });
+      if (!(await selected())) problems.push(`${tag}: the preview's words could not be selected`);
+      // another tab changes something the diary doesn't show, then this copy comes back into view
+      await go(other.page, { name: 'settings' });
+      await other.page.getByRole('radio', { name: 'Motion: Reduced' }).click();
+      if (!(await until(page, () => window.__daily.store.state.settings.motion === 'reduce'))) problems.push(`${tag}: Motion chosen in another tab did not reach this copy`);
+      if (!(await selected())) problems.push(`${tag}: the preview's selected words were let go when another tab changed Motion`);
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+      if (!(await selected())) problems.push(`${tag}: the preview's selected words were let go when this copy came back into view`);
       problems.push(...[errors, other.errors].flat().map((e) => `${tag}: ${e}`));
       await ctx.close();
     }

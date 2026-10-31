@@ -60,9 +60,40 @@ export const canWrite = () => phase === 'open';
 export const cleared = () => phase === 'cleared';
 export const clearStatus = () => status;
 
+/** What is stored under k, or undefined where storage can't be read. */
+const storedAt = (k: string) => {
+  try {
+    return localStorage.getItem(k);
+  } catch {
+    return undefined;
+  }
+};
+const noting = new Set<{ keys: string[]; wrote: (k: string, v: string | null) => void }>();
+/**
+ * Calls wrote with each of keys a write changes (see write), now or once a hold ends, and what it holds now, as a page
+ * hears no storage event for its own writes. Returns the function that stops it.
+ */
+export function onWritten(keys: string[], wrote: (k: string, v: string | null) => void) {
+  const n = { keys, wrote };
+  noting.add(n);
+  return () => void noting.delete(n);
+}
+function run(fn: () => void) {
+  const before = [...noting].map((n) => [n, n.keys.map(storedAt)] as const);
+  try {
+    fn();
+  } finally {
+    for (const [n, was] of before)
+      n.keys.forEach((k, i) => {
+        const now = storedAt(k);
+        if (now !== undefined && now !== was[i]) n.wrote(k, now);
+      });
+  }
+}
+
 /** Runs a write now, after a hold ends, or never once clearing has begun. */
 export function write(fn: () => void) {
-  if (phase === 'open') fn();
+  if (phase === 'open') run(fn);
   else if (phase === 'held') queued.push(fn);
 }
 
@@ -171,7 +202,7 @@ function resume(id: string) {
   clearTimeout(holdTimer);
   for (const fn of queued.splice(0))
     try {
-      fn();
+      run(fn);
     } catch {
       /* the next write tries again */
     }
