@@ -260,15 +260,16 @@ function typing(phone, { zoom = 1, font = false, largest = false, elsewhere = fa
 /**
  * Turning the phone while typing, upright to sideways and back, with each kind of keyboard: wherever the keyboard
  * goes down the usual screen comes back with the field focused, and with it up "Talk to someone now", Leave, Lights up
- * and Sound are on screen, upright and, the keyboard down and up again, sideways. A phone that resizes the page, turned
- * with its keyboard up, shows a height it hasn't had with the keyboard down, so there it isn't checked until the
- * keyboard has been down once. At 200% zoom held sideways the keyboard leaves under 100 px, too little for Talk and a
+ * and Sound are on screen, upright, turned sideways, and sideways with the keyboard down and up again. A phone that
+ * resizes the page, turned with its keyboard up, shows a height it hasn't had with the keyboard down, and the keyboard
+ * stays up through the turn: turned from the bigger phone, where the usual screen fits above it upright, and from the
+ * smaller, where it doesn't. At 200% zoom held sideways the keyboard leaves under 100 px, too little for Talk and a
  * field, so there only the keyboard going down is checked.
  */
-function turned(zoom) {
+function turned(phone, zoom = 1) {
   return async (h) => {
-    const [upright, sideways] = [PHONES['390x844'], PHONES['844x390']].map((p) => ({ width: p.width / zoom, height: p.height / zoom, kb: Math.round(p.kb / zoom) }));
-    const size = `390x844 turned${zoom > 1 ? ' at 200%' : ''}`;
+    const [upright, sideways] = [phone, phone.split('x').reverse().join('x')].map((n) => PHONES[n]).map((p) => ({ width: p.width / zoom, height: p.height / zoom, kb: Math.round(p.kb / zoom) }));
+    const size = `${phone} turned${zoom > 1 ? ' at 200%' : ''}`;
     const problems = [];
     const { ctx, page, errors } = await boot(h, { width: upright.width, height: upright.height });
     await page.evaluate(overlay);
@@ -291,7 +292,7 @@ function turned(zoom) {
       await to(upright, kind, true);
       if (zoom === 1) for (const f of await up(page, words)) problems.push(`${state('upright')}: ${f}`);
       await to(sideways, kind, true);
-      if (zoom === 1 && kind === 'over') for (const f of await up(page, words)) problems.push(`${state('turned sideways')}: ${f}`);
+      if (zoom === 1) for (const f of await up(page, words)) problems.push(`${state('turned sideways')}: ${f}`);
       await to(sideways, kind, false);
       for (const f of await down(page)) problems.push(`${state('turned sideways, then down')}: ${f}`);
       if (zoom === 1) {
@@ -317,6 +318,7 @@ export const scenarios = Object.fromEntries([
   // at 200% zoom upright: held sideways the keyboard leaves under 100 px, too little for Talk and a field
   ...['390x844', '320x568'].map((phone) => [`safe-zone-typing-${phone}-200`, typing(phone, { zoom: 2 })]),
   ['safe-zone-typing-568x320-text-200-size-elsewhere', typing('568x320', { font: true, elsewhere: true })],
-  ['safe-zone-typing-turned', turned(1)],
-  ['safe-zone-typing-turned-200', turned(2)],
+  ['safe-zone-typing-turned', turned('390x844')],
+  ['safe-zone-typing-turned-200', turned('390x844', 2)],
+  ['safe-zone-typing-turned-320x568', turned('320x568')],
 ]);

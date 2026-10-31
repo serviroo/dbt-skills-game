@@ -141,9 +141,13 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   const wide = window.matchMedia('(min-width: 540px)');
   let typing = false;
   // the tallest the visual viewport has been at each width it has had: the room there with the keyboard down, since a
-  // keyboard only ever takes height. A width first had with the keyboard up (the phone turned while typing) counts once
-  // the keyboard has been down there
+  // keyboard only ever takes height
   const tallest = new Map<number, number>();
+  // widths first had with the keyboard up (the phone turned while typing, and turning leaves it up), each with the least
+  // height it has had there: the keyboard counts as up there, its room unknown, until the page grows past that as the
+  // keyboard goes down. `up`: the keyboard was up as of the last fit
+  const turned = new Map<number, number>();
+  let up = false;
   if (vv) tallest.set(Math.round(vv.width), vv.height);
   const typedIn = () => {
     const f = document.activeElement;
@@ -176,9 +180,15 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     if (!vv) return;
     const field = typedIn();
     const width = Math.round(vv.width);
-    const rest = Math.max(tallest.get(width) ?? 0, vv.height);
-    tallest.set(width, rest);
+    const low = turned.get(width);
+    if (low !== undefined && Math.round(vv.height) > Math.round(low)) turned.delete(width);
+    else if (low !== undefined || (up && field && !tallest.has(width))) turned.set(width, vv.height);
+    const rest = turned.has(width) ? Infinity : Math.max(tallest.get(width) ?? 0, vv.height);
+    if (rest !== Infinity) tallest.set(width, rest);
     const covered = Math.round(vv.height * vv.scale) < document.documentElement.clientHeight;
+    up = covered || vv.height < rest;
+    // down, the widths turned to with it up are only the room it left there
+    if (!up) turned.clear();
     const short = vv.height < rest && vv.height < (wide.matches ? 300 : 361);
     const on = (covered || short) && (typing || !!field);
     if (on) {
