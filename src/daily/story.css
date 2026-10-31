@@ -973,16 +973,9 @@
 .st-chsheet {
   background: linear-gradient(180deg, #0b1a2f, #060e1b 70%);
   width: min(100%, 520px);
-  max-height: 80vh;
-  max-height: 80dvh;
+  max-height: min(80vh, 100%);
+  max-height: min(80dvh, 100%);
   overflow-y: auto;
-}
-.st-sheet-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin: -6px -8px 8px 0;
 }
 .st-chlist {
   margin: 0;
@@ -1054,6 +1047,22 @@
 .st-chrow-i:disabled {
   opacity: 0.28;
   cursor: default;
+}
+/* a phone zoomed to 200% (260 CSS pixels wide or less): a chapter's tools wrap onto as many lines as they need, and its
+   name goes under its number where even its longest word doesn't fit beside it */
+@media (max-width: 260px) {
+  .st-chrow-b {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+  .st-chrow-t {
+    flex: 1 1 min-content;
+  }
+  .st-chrow-acts {
+    flex: 0 1 auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
 }
 .st-rename {
   flex: 1 1 120px;
@@ -1209,7 +1218,7 @@
 }
 .st-picks-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(120px, 100%), 1fr));
   gap: 14px 12px;
   align-items: start;
   padding-top: 12px;
@@ -1275,6 +1284,17 @@
   font-family: var(--font-display);
   font-weight: 500;
   line-height: 1;
+}
+/* a phone zoomed to 200% (260 CSS pixels wide or less): the three sizes stack, each as wide as the row, as Motion's
+   choices do */
+@media (max-width: 260px) {
+  .st-size {
+    flex-direction: column;
+  }
+  .st-size .dq-seg-b {
+    border-left: 0;
+    border-top: 1px solid rgba(125, 150, 197, 0.22);
+  }
 }
 .st-size-b--regular {
   font-size: 16px;

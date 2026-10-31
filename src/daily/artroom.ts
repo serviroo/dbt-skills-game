@@ -538,7 +538,12 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     sheet.replaceChildren(
       panel(
         { cls: 'dq-sheet-p' },
-        h('h2', { class: 'dq-sheet-h', id: 'dq-sheet-h', text: ART.nameAsk }),
+        h(
+          'div',
+          { class: 'dq-sheet-top' },
+          h('h2', { class: 'dq-sheet-h', id: 'dq-sheet-h', text: ART.nameAsk }),
+          h('button', { type: 'button', class: 'dq-icbtn dq-sheet-x', 'aria-label': 'Back to drawing', html: icon('close'), onclick: () => hideName(true) }),
+        ),
         p(ART.nameHint, 'dq-small'),
         f.el,
         h('div', { class: 'dq-opts dq-opts--names' }, ideas.map((n) => chip(n, () => ((f.input.value = n), f.input.focus())))),
@@ -620,7 +625,15 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     const pad2 = row ? 12 : 0;
     const w = row ? box.clientWidth - tools.offsetWidth - gap - pad2 : fit.clientWidth;
     const hh = fit.clientHeight - pad2;
-    if (w <= 0 || hh <= 0) return;
+    if (w <= 0 || hh <= 0) {
+      // no room for the page (a short screen zoomed in): no size kept from a roomier layout may reach past the screen
+      frame.style.width = '';
+      frame.style.height = '';
+      fit.style.flex = '';
+      promptRow.style.width = '';
+      tools.style.setProperty('--page-w', '');
+      return;
+    }
     const a = pad.W / pad.H;
     const fw = Math.floor(Math.min(w, hh * a));
     frame.style.width = `${fw}px`;

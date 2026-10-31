@@ -1149,7 +1149,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
       ta.focus({ preventScroll: true });
     };
     body.append(
-      h('div', { class: 'st-sheet-top' }, h('h2', { class: 'dq-sheet-h', id: 'st-ch-h', text: 'Chapters' }), h('button', { type: 'button', class: 'dq-icbtn st-sheet-x', 'aria-label': 'Close the chapter list', html: icon('close'), onclick: closeSheet })),
+      h('div', { class: 'dq-sheet-top' }, h('h2', { class: 'dq-sheet-h', id: 'st-ch-h', text: 'Chapters' }), h('button', { type: 'button', class: 'dq-icbtn dq-sheet-x', 'aria-label': 'Close the chapter list', html: icon('close'), onclick: closeSheet })),
       list,
       h('div', { class: 'dq-actions st-sheet-acts' }, btn('New chapter', () => void addNew(), { kind: 'quiet', ic: 'plus' })),
     );
@@ -1201,7 +1201,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
       await flushAll();
       if (alive) app.go({ name: 'art' });
     };
-    const top = h('div', { class: 'st-sheet-top' }, h('h2', { class: 'dq-sheet-h', id: 'st-pick-h', text: STORY_DRAWING.pick }), h('button', { type: 'button', class: 'dq-icbtn st-sheet-x', 'aria-label': STORY_DRAWING.close, html: icon('close'), onclick: closeSheet }));
+    const top = h('div', { class: 'dq-sheet-top' }, h('h2', { class: 'dq-sheet-h', id: 'st-pick-h', text: STORY_DRAWING.pick }), h('button', { type: 'button', class: 'dq-icbtn dq-sheet-x', 'aria-label': STORY_DRAWING.close, html: icon('close'), onclick: closeSheet }));
     const takeOff = h('div', { class: 'dq-actions st-sheet-acts' }, btn(STORY_DRAWING.remove, () => void placeDrawing(at, null), { kind: 'quiet', ic: 'close' }));
     let turn = 0;
     const fill = async () => {
@@ -1229,7 +1229,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
         ...(list.some((m) => m.id === placed) ? [takeOff] : []),
       ]);
       // focus that was on a pick or a button the change took away stays in the picker
-      if (inside && !body.contains(document.activeElement)) body.querySelector<HTMLElement>('.st-pick, .st-picks-none .dq-btn, .st-sheet-x')?.focus({ preventScroll: true });
+      if (inside && !body.contains(document.activeElement)) body.querySelector<HTMLElement>('.st-pick, .st-picks-none .dq-btn, .dq-sheet-x')?.focus({ preventScroll: true });
       return true;
     };
     if (!(await fill()) || !alive || cur?.id !== at) return;

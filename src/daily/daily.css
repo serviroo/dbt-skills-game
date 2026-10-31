@@ -834,14 +834,21 @@
 .dq-seg--10 .dq-seg-b:nth-child(n + 6) {
   border-top: 1px solid rgba(125, 150, 197, 0.22);
 }
+/* a phone zoomed to 200% (260 CSS pixels wide or less): two to a row, as five don't fit */
+@media (max-width: 260px) {
+  .dq-seg--10 {
+    grid-template-columns: repeat(2, minmax(44px, 1fr));
+  }
+}
 .dq-seg--6 {
   display: grid;
   grid-template-columns: repeat(6, minmax(44px, 1fr));
   width: 100%;
 }
+/* a small phone: three to a row, and two or one when even three don't fit */
 @media (max-width: 359px) {
   .dq-seg--6 {
-    grid-template-columns: repeat(3, minmax(44px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(max(44px, 30%), 1fr));
   }
 }
 .dq-seg--3,
@@ -862,17 +869,20 @@
   font-size: 14.5px;
   letter-spacing: 0.02em;
 }
-/* a phone zoomed to 200% (260 CSS pixels wide or less): Motion's three choices stack, each as wide as the row, so no
-   word runs into the next or past the screen */
+/* a phone zoomed to 200% (260 CSS pixels wide or less): Motion's three choices and the diary's ranges stack, each as
+   wide as the row, so no word runs into the next or past the screen */
 @media (max-width: 260px) {
-  .dq-seg--3 {
+  .dq-seg--3,
+  .dq-seg--range {
     flex-direction: column;
   }
-  .dq-seg--3 .dq-seg-b {
+  .dq-seg--3 .dq-seg-b,
+  .dq-seg--range .dq-seg-b {
     border-left: 0;
     border-top: 1px solid rgba(125, 150, 197, 0.22);
   }
-  .dq-seg--3 .dq-seg-b:first-child {
+  .dq-seg--3 .dq-seg-b:first-child,
+  .dq-seg--range .dq-seg-b:first-child {
     border-top: 0;
   }
 }
@@ -1373,6 +1383,7 @@ textarea.dq-input {
 .dq-sec-h {
   align-self: stretch;
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
@@ -1766,6 +1777,13 @@ textarea.dq-input {
 }
 .dq-suggest--rest {
   align-items: center;
+}
+/* a phone zoomed to 200% (260 CSS pixels wide or less): the picture sits above its words */
+@media (max-width: 260px) {
+  .dq-suggest {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 .dq-cat {
   flex: none;
@@ -2693,6 +2711,13 @@ textarea.dq-input {
   flex: none;
   width: 92px;
 }
+/* a phone zoomed to 200% (260 CSS pixels wide or less): the picture sits above its words */
+@media (max-width: 260px) {
+  .dq-first {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
 .dq-first-art svg {
   display: block;
   width: 100%;
@@ -2713,10 +2738,25 @@ textarea.dq-input {
   letter-spacing: 0.2em;
   text-transform: uppercase;
 }
+/* two cards a row (four on a wide screen), each its share; a card whose longest word doesn't fit its share takes the
+   whole row, so every word shows whole at its own size */
 .dq-collection {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 12px;
+}
+.dq-collection > .dq-cardbtn {
+  flex: 1 1 calc(50% - 6px);
+}
+/* a phone zoomed to 200% (260 CSS pixels wide or less): one card a row, reaching only as far as the page's own 10 px
+   padding, with narrower sides (below), so a name's longest word fits its line */
+@media (max-width: 260px) {
+  .dq-collection {
+    margin: 0 -10px;
+  }
+  .dq-collection > .dq-cardbtn {
+    flex-basis: 100%;
+  }
 }
 .dq-cardbtn {
   position: relative;
@@ -2731,10 +2771,14 @@ textarea.dq-input {
   text-align: left;
   cursor: pointer;
 }
+/* a card keeps its shape unless its words need more height (a narrow card), and is as tall as the tallest in its row;
+   clip rather than hidden, so it grows to fit them */
 .dq-cardbtn .dq-cardface {
   position: relative;
+  flex: 1 0 auto;
   transform: none;
   aspect-ratio: 5 / 6.4;
+  overflow: clip;
   padding: 14px 14px 12px;
   transition: border-color 0.2s;
 }
@@ -2762,6 +2806,12 @@ textarea.dq-input {
     letter-spacing: 0.08em;
   }
 }
+@media (max-width: 260px) {
+  .dq-cardbtn .dq-cardface {
+    padding-right: 6px;
+    padding-left: 6px;
+  }
+}
 .dq-cardbtn-n {
   font-size: 13.5px;
   color: var(--t-dim);
@@ -2778,6 +2828,7 @@ textarea.dq-input {
 }
 .dq-libsec-h {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   margin: 14px 2px 8px;
@@ -2978,6 +3029,40 @@ textarea.dq-input {
 }
 .dq-libsec--fav .dq-libsec-ic {
   color: var(--mint);
+}
+/* a phone at 200% zoom, held either way (300 CSS pixels wide or less): a skill's names take the whole row, its minutes
+   and arrow the line under them, and its pin a strip under the row, so no name is squeezed narrower than its words */
+@media (max-width: 300px) {
+  .dq-libitem {
+    flex-wrap: wrap;
+  }
+  .dq-libitem .dq-librow {
+    flex-basis: 100%;
+    grid-template-columns: minmax(0, 1fr) 20px;
+    padding: 11px 10px;
+  }
+  .dq-librow-n,
+  .dq-librow-r {
+    grid-column: 1 / -1;
+  }
+  .dq-librow-r {
+    letter-spacing: 0.06em;
+  }
+  .dq-librow-m {
+    grid-column: 1;
+    grid-row: 3;
+  }
+  .dq-librow-c {
+    grid-column: 2;
+    grid-row: 3;
+  }
+  .dq-libpin {
+    width: 100%;
+    justify-items: end;
+    padding: 0 10px;
+    border-left: 0;
+    border-top: 1px solid rgba(62, 100, 133, 0.3);
+  }
 }
 
 .dq-diary-grid,
@@ -3301,8 +3386,8 @@ textarea.dq-input {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: start;
   }
-  .dq-collection {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+  .dq-collection > .dq-cardbtn {
+    flex-basis: calc(25% - 9px);
   }
   .dq-sz .dq-text {
     font-size: 21px;
@@ -4039,6 +4124,13 @@ textarea.dq-input {
   padding: 14px 2px;
   border-bottom: 1px solid rgba(62, 100, 133, 0.26);
 }
+/* a phone zoomed to 200% (260 CSS pixels wide or less): the date sits above its line */
+@media (max-width: 260px) {
+  .dq-logrow {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+}
 .dq-logrow-d {
   padding-top: 1px;
   font-size: 13.5px;
@@ -4131,6 +4223,20 @@ textarea.dq-input {
   display: block;
   width: 92px;
   height: auto;
+}
+/* a phone zoomed to 200% (260 CSS pixels wide or less): each entry's picture gets a row of its own above its words, and
+   the unfinished drawing's picture sits above its words and buttons */
+@media (max-width: 260px) {
+  .dq-artentry {
+    grid-template-columns: minmax(0, 1fr) 20px;
+  }
+  .dq-artentry-art {
+    grid-column: 1 / -1;
+  }
+  .dq-art-draft {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 .dq-artentry-txt {
   display: flex;
@@ -4389,6 +4495,13 @@ textarea.dq-input {
   flex: none;
   white-space: nowrap;
 }
+/* a phone zoomed to 200% (260 CSS pixels wide or less): a title too long for the row wraps */
+@media (max-width: 260px) {
+  .dq-shadows .dq-sec-h > :first-child {
+    flex: 0 1 auto;
+    white-space: normal;
+  }
+}
 .dq-shadows .dq-sec-sub {
   font-size: 16px;
   text-align: right;
@@ -4453,6 +4566,7 @@ textarea.dq-input {
 }
 .dq-prompt-acts {
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 2px;
   margin-left: auto;
 }
@@ -4577,6 +4691,10 @@ textarea.dq-input {
   display: flex;
   align-items: center;
 }
+.dq-inks,
+.dq-pens {
+  flex-wrap: wrap;
+}
 .dq-inks {
   flex: 1 0 100%;
   justify-content: center;
@@ -4685,6 +4803,7 @@ textarea.dq-input {
 }
 .dq-tools-acts {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
 }
@@ -4768,13 +4887,30 @@ textarea.dq-input {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  padding: 16px 12px calc(var(--safe-bottom) + 12px);
+  /* under the top bar, which stays over every sheet so the Safe Zone is one tap away */
+  padding: calc(var(--dq-top, 0px) + 12px) 12px calc(var(--safe-bottom) + 12px);
   background: rgba(3, 5, 11, 0.62);
 }
+/* never taller than the room under the top bar; what doesn't fit scrolls inside */
 .dq-sheet-p {
   width: min(100%, 460px);
+  max-height: 100%;
+  overflow-y: auto;
   --plate-a: #091628;
   --plate-b: #050d19;
+}
+/* a sheet's title with its close button at its end, or where they don't share a line, the button on the line above, so
+   it is in reach the moment the sheet opens */
+.dq-sheet-top {
+  display: flex;
+  flex-wrap: wrap-reverse;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: -6px -8px 8px 0;
+}
+.dq-sheet-x {
+  margin-left: auto;
 }
 .dq-sheet-h {
   margin: 0 0 4px;
@@ -5085,9 +5221,11 @@ textarea.dq-input {
   .dq-timer--peers .dq-timer-stage {
     width: min(180px, 46vh);
   }
+  /* the tools' width follows the screen alone (never wider than it, with the gap beside them), so the page sized from
+     the room they leave can't squeeze them in turn */
   .dq-draw {
     display: grid;
-    grid-template-columns: auto 352px;
+    grid-template-columns: auto min(352px, calc(100% - 12px));
     grid-template-rows: 1fr auto auto 1fr;
     justify-content: center;
     gap: 0 12px;
@@ -5160,6 +5298,7 @@ textarea.dq-input {
     padding: 0;
     border: 0;
   }
+  /* the three pens fit one row of the tools with room to spare, so they never wrap */
   .dq-pen {
     flex: none;
     width: auto;
@@ -5168,7 +5307,7 @@ textarea.dq-input {
     grid-template-rows: none;
     grid-auto-flow: column;
     gap: 6px;
-    padding: 0 10px 0 8px;
+    padding: 0 8px 0 6px;
   }
   .dq-pen-n {
     position: static;
@@ -5203,7 +5342,6 @@ textarea.dq-input {
   }
   .dq-tools-acts {
     grid-area: 3 / 1;
-    flex-wrap: nowrap;
     padding: 0;
     border: 0;
   }
