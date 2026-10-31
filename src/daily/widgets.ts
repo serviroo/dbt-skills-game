@@ -5,7 +5,7 @@
 import { COOL, type Skill, type Visual } from '../content/dbt';
 import { hasScene, mountScene, playerAccent, type Beat } from '../scene/vignettes/host';
 import { onFrame, now, backInSight } from './clock';
-import { btn, h, p, typo } from './ui';
+import { btn, h, p, scrollerOf, typo } from './ui';
 
 const LN = 'fill="none" stroke="#a9dcff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"';
 const MINT = 'fill="none" stroke="#89cf9d" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"';
@@ -211,25 +211,30 @@ function willingHands(svg: SVGSVGElement) {
   return g;
 }
 
-function frost() {
-  const g = sv('g', { stroke: 'rgba(200,235,255,.85)', 'stroke-width': 1.6, 'stroke-linecap': 'round', fill: 'none' });
-  let d = '';
-  for (let i = 0; i < 6; i++) {
-    const a = (i / 6) * Math.PI * 2 - Math.PI / 2;
-    const c = Math.cos(a), s = Math.sin(a);
-    const p = (r: number) => [100 + c * r, 100 + s * r];
-    const [x1, y1] = p(30);
-    d += `M100 100L${x1.toFixed(1)} ${y1.toFixed(1)}`;
-    for (const r of [14, 22]) {
-      const [bx, by] = p(r);
-      for (const sg of [-1, 1]) {
-        const a2 = a + sg * 0.62;
-        d += `M${bx.toFixed(1)} ${by.toFixed(1)}l${(Math.cos(a2) * 7).toFixed(1)} ${(Math.sin(a2) * 7).toFixed(1)}`;
-      }
-    }
-  }
-  g.append(sv('path', { d }));
-  return g;
+/** A shallow bowl of cool water, its rim, its foot and the water inside with the moon on it: cold's flat picture. */
+function bowlOfWater() {
+  const g = sv('g', { stroke: 'rgba(200,235,255,.85)', 'stroke-width': 1.6, 'stroke-linecap': 'round', fill: 'none', class: 'dq-scene-flat' });
+  g.append(
+    sv('path', { d: 'M50 88C52 112 74 124 100 124S148 112 150 88' }),
+    sv('path', { d: 'M86 124L88 130H112L114 124' }),
+    sv('ellipse', { cx: 100, cy: 88, rx: 50, ry: 13 }),
+    sv('ellipse', { cx: 100, cy: 92, rx: 43, ry: 9.5, fill: 'rgba(137,190,230,.12)', stroke: 'rgba(170,215,255,.4)', 'stroke-width': 1 }),
+    sv('ellipse', { cx: 92, cy: 89, rx: 6, ry: 1.3, fill: 'rgba(230,241,255,.55)', stroke: 'none' }),
+  );
+  // two small ripples that drift slowly across the water
+  const ripples = sv('g', { stroke: 'rgba(190,228,255,.5)', 'stroke-width': 1 });
+  for (const [x, y] of [[90, 93], [108, 96]]) ripples.append(sv('path', { d: `M${x - 8} ${y}q8 -2.6 16 0` }));
+  g.append(ripples);
+  return { g, ripples };
+}
+
+/** Whether everything from the top of `from` down to the bottom of `to` fits on screen at once, clear of the pinned bars. */
+function fitsTogether(from: HTMLElement, to: HTMLElement) {
+  const box = scrollerOf(from);
+  if (!box) return true;
+  const s = getComputedStyle(box);
+  const room = box.clientHeight - (parseFloat(s.scrollPaddingTop) || 0) - (parseFloat(s.scrollPaddingBottom) || 0);
+  return to.getBoundingClientRect().bottom - from.getBoundingClientRect().top <= room;
 }
 
 /** A length of time as it is said: "30 seconds", "1 minute", "1 minute 30 seconds". */
@@ -243,19 +248,22 @@ function spoken(s: number) {
 /**
  * Countdown with an optional visual. Waits for a tap when `start` is given, or for the caller's own start() when `held`;
  * that start brings `reveal` (the countdown unless the caller names something further down) into view if it isn't,
- * stopping clear of anything pinned, and moves focus that was on Start to what takes its place. A screen reader hears
- * it start, get more time and end, never each second.
+ * stopping clear of anything pinned, and moves focus that was on Start to what takes its place. `keep`, above the
+ * countdown, stays in view too wherever it fits on screen with the countdown: the scroll then goes only as far as
+ * `reveal`, the countdown or at least its figures can come with it. A screen reader hears
+ * it start, get more time and end, never each second. A visual with a 3D scene shows it unless `scene` is false.
  */
-export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; input?: unknown; start?: string; held?: boolean; extend?: number; big?: string; extra?: HTMLElement[]; peers?: HTMLElement[]; reveal?: HTMLElement; onStart?: () => void; onDone: () => void }) {
+export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; scene?: boolean; input?: unknown; start?: string; held?: boolean; extend?: number; big?: string; extra?: HTMLElement[]; peers?: HTMLElement[]; reveal?: HTMLElement; keep?: HTMLElement; onStart?: () => void; onDone: () => void }) {
   let dur = opts.seconds;
   const visual = opts.visual ?? 'ring';
+  const scene = opts.scene !== false && hasScene(visual);
   const wide = visual === 'wave';
   const svg = sv('svg', { viewBox: wide ? '0 0 320 160' : '0 0 200 200', class: `dq-timer-svg dq-timer-svg--${visual}`, 'aria-hidden': 'true' }) as SVGSVGElement;
   const parts: Record<string, SVGElement> = {};
   if (!wide) {
     const gradId = ringBase(svg, visual !== 'drift' && visual !== 'tide');
     parts.orb = sv('circle', { cx: 100, cy: 100, r: 60, fill: `url(#${gradId})` });
-    if (hasScene(visual)) parts.orb.classList.add('dq-scene-flat');
+    if (scene) parts.orb.classList.add('dq-scene-flat');
     svg.append(parts.orb);
     parts.track = sv('circle', { cx: 100, cy: 100, r: 78, fill: 'none', stroke: 'rgba(125,150,197,.18)', 'stroke-width': 2 });
     parts.arc = sv('path', { d: '', class: 'dq-timer-arc', fill: 'none', stroke: visual === 'cold' ? '#bfe9ff' : '#4fb8ff', 'stroke-width': 2, 'stroke-linecap': 'round' });
@@ -290,7 +298,9 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; in
   } else if (visual === 'hands') {
     svg.append(willingHands(svg));
   } else if (visual === 'cold') {
-    svg.append(frost());
+    const bowl = bowlOfWater();
+    parts.ripples = bowl.ripples;
+    svg.append(bowl.g);
   }
   const num = h('div', { class: 'dq-timer-num' });
   const big = opts.big ? h('p', { class: 'dq-timer-big', text: typo(opts.big) }) : null;
@@ -313,7 +323,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; in
   // a visual with a 3D scene follows this countdown: the scene ticks only when the timer renders, with its beat
   const ticks = new Set<(t: number) => void>();
   let beat: Beat = { e: 0, dur, started: false, done: false };
-  const unmount = hasScene(visual)
+  const unmount = scene
     ? mountScene(stageEl, {
         kind: visual,
         // the breathing light is the player's own light, in their accent colour
@@ -354,6 +364,12 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; in
       parts.stone.setAttribute('cx', (100 + (still ? 0 : Math.sin(e * 0.9) * 6 * (1 - p))).toFixed(2));
       parts.stone.setAttribute('transform', `rotate(${(still ? 0 : Math.sin(e * 0.7) * 14 * (1 - p)).toFixed(2)} 100 ${(48 + k * 98).toFixed(2)})`);
       parts.rays.setAttribute('transform', `translate(${still ? 0 : (Math.sin(e * 0.3) * 6).toFixed(2)} 0)`);
+    }
+    if (parts.ripples) {
+      Array.from(parts.ripples.children).forEach((c, i) => {
+        c.setAttribute('transform', `translate(${still ? 0 : (Math.sin(e * 0.5 + i * 2.4) * 10).toFixed(2)} 0)`);
+        c.setAttribute('opacity', still ? '0.8' : (0.45 + 0.4 * Math.sin(e * 0.7 + i * 1.9)).toFixed(2));
+      });
     }
     if (parts.tide) {
       const kids = Array.from(parts.tide.children);
@@ -422,7 +438,9 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; in
     const keyed = !had && document.activeElement instanceof HTMLElement && document.activeElement.matches(':focus-visible') ? document.activeElement : null;
     begin();
     if (had) actions.querySelector('button')?.focus({ preventScroll: true });
-    (opts.reveal ?? stageEl).scrollIntoView({ block: 'nearest', behavior: ctx.reduced() || keyed ? 'auto' : 'smooth' });
+    const keep = opts.keep;
+    const to = keep ? ([opts.reveal ?? stageEl, stageEl, num].find((t) => fitsTogether(keep, t)) ?? stageEl) : (opts.reveal ?? stageEl);
+    to.scrollIntoView({ block: 'nearest', behavior: ctx.reduced() || keyed ? 'auto' : 'smooth' });
     keyed?.scrollIntoView({ block: 'nearest' });
   };
   const startB = opts.start ? btn(opts.start, tapped, { kind: 'primary' }) : null;
@@ -448,10 +466,13 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; in
 /**
  * Cool air or cold water: two choices of the same weight, with the caution right under them so it's read before anything
  * starts (DESIGN.md principle 11), then the countdown and how to do each. Either one starts the 30 seconds, about as
- * long as cold should last, so there is no "+15 s"; picking the other one after that only moves the mark.
+ * long as cold should last, so there is no "+15 s"; picking the other one after that only moves the mark. The caution
+ * stays in view with the countdown wherever they fit on screen together. The bowl of cool water beside it is a 3D scene unless `scene` is false.
  */
-export function coolChoice(ctx: Ctx, opts: { reveal?: HTMLElement; onDone: () => void }) {
-  const tv = timerView(ctx, { seconds: 30, visual: 'cold', held: true, reveal: opts.reveal, onDone: opts.onDone });
+export function coolChoice(ctx: Ctx, opts: { reveal?: HTMLElement; scene?: boolean; onDone: () => void }) {
+  const caution = p(COOL.caution, 'dq-text dq-text--step dq-cool-care');
+  caution.id = `dq-cool-${++gid}`;
+  const tv = timerView(ctx, { seconds: 30, visual: 'cold', scene: opts.scene, held: true, reveal: opts.reveal, keep: caution, onDone: opts.onDone });
   const pick = (b: HTMLElement) => {
     for (const x of picks) x.setAttribute('aria-pressed', String(x === b));
     if (!tv.started()) tv.start();
@@ -461,8 +482,6 @@ export function coolChoice(ctx: Ctx, opts: { reveal?: HTMLElement; onDone: () =>
     b.setAttribute('aria-pressed', 'false');
     return b;
   });
-  const caution = p(COOL.caution, 'dq-text dq-text--step dq-cool-care');
-  caution.id = `dq-cool-${++gid}`;
   picks[1].setAttribute('aria-describedby', caution.id);
   const el = h('div', { class: 'dq-cool' }, h('div', { class: 'dq-actions dq-actions--pair dq-cool-pick' }, picks), caution, tv.el, p(COOL.text, 'dq-text dq-text--step'));
   return { el, stop: tv.stop, running: tv.running };

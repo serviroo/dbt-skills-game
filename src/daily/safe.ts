@@ -338,7 +338,8 @@ export function safeScreen(app: App, route: Route): ScreenOut {
       }
       case 'cold': {
         const nb = nextBtn(at, 'Next', 'quiet');
-        const cc = coolChoice(ctx, { onDone: () => show(nextOf(at)) });
+        // no 3D scene in here, as with the moment: the flat bowl of water stays
+        const cc = coolChoice(ctx, { scene: false, onDone: () => show(nextOf(at)) });
         stops.push(cc.stop);
         return swap(at, [h3(COOL.title)], cc.el, h('div', { class: 'dq-actions dq-actions--center' }, nb, btn('Breathe instead', () => show('breathe', nextOf(at)), { kind: 'quiet' })));
       }
