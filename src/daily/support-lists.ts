@@ -67,9 +67,8 @@ export function supportListsCopy(app: App) {
     box.scrollIntoView({ block: 'nearest', behavior: app.reduced() || keyed ? 'auto' : 'smooth' });
     keyed?.scrollIntoView({ block: 'nearest' });
   }
-  // a list changed in another open copy: the open preview follows it, and nothing else on the screen moves
-  const off = st.onChange(() => {
-    if (!box.classList.contains('is-hidden')) render();
-  });
+  // a list changed in another open copy, or this game's data cleared: the preview follows it, closed too, so nothing
+  // removed stays in it, and nothing else on the screen moves
+  const off = st.onChange(render);
   return { open, box, dispose: () => void off() };
 }

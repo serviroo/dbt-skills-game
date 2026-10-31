@@ -129,6 +129,8 @@ const SET_KEYS: SetKey[] = [...BASE_SET_KEYS, ...PROFILE_SET_KEYS];
 const DEVICE_SET_KEYS: SetKey[] = ['sound', 'motion', 'vibrate'];
 export { cleanName };
 const LIST_KEYS = ['comfort', 'activities', 'reasons', 'people'] as const;
+/** Choices kept beside a save that open screens show: one made in another open copy reaches them too (see onChange). */
+const SHOWN_BESIDE = [BESIDE.readSize, BESIDE.safeLight] as const;
 const DAY_FLAGS = ['giftDay', 'cardDay', 'greetDay', 'checkinDay'] as const;
 const GONE_CAP = 1000;
 /** Top-level fields this build reads (and the ones only a Save Crystal carries); any other is kept as it was stored. */
@@ -933,6 +935,8 @@ export class Store {
    * stored copy of at least that version without one of them had it removed by the build that wrote it.
    */
   private keptBase: { v: number; keys: Set<string> } = { v: 0, keys: new Set() };
+  /** The choices in SHOWN_BESIDE as this copy last heard them, so one made while it was away is heard on its way back. */
+  private beside = '';
 
   constructor(
     readonly key = SAVE_KEY,
@@ -976,6 +980,7 @@ export class Store {
       window.addEventListener('pageshow', this.onShow);
       document.addEventListener('visibilitychange', this.onShow);
     }
+    this.beside = this.besideNow();
   }
 
   /** False when what is stored couldn't be read into this copy, so a Save Crystal made now can't hold it. */
@@ -1003,18 +1008,37 @@ export class Store {
     this.lastRaw = null;
     this.state = freshState(this.clock());
     this.dispose();
+    // the Safe Zone stays open through a clear: what it shows of the game's data goes with it
+    this.listeners.forEach((f) => f());
   }
 
   /** Back in view (or back from the page cache): storage events may have been missed meanwhile, so read what is stored. */
   private onShow = (e: Event) => {
     if (e.type === 'pageshow' ? !(e as PageTransitionEvent).persisted : document.visibilityState !== 'visible') return;
-    if (this.sync()) this.listeners.forEach((f) => f());
+    const moved = this.sync();
+    const beside = this.besideNow();
+    if (!moved && beside === this.beside) return;
+    this.beside = beside;
+    this.listeners.forEach((f) => f());
   };
+
+  private besideNow() {
+    try {
+      return SHOWN_BESIDE.map((b) => localStorage.getItem(`${this.key}${b}`)).join('\n');
+    } catch {
+      return this.beside;
+    }
+  }
 
   private onStorage = (e: StorageEvent) => {
     if (e.key === YOU_KEY && e.newValue !== null) {
       if (this.mirrorYou()) this.save();
       else this.listeners.forEach((f) => f());
+      return;
+    }
+    if (SHOWN_BESIDE.some((b) => e.key === `${this.key}${b}`)) {
+      this.beside = this.besideNow();
+      this.listeners.forEach((f) => f());
       return;
     }
     if (e.key !== this.key || e.newValue === null) return;
@@ -1131,6 +1155,10 @@ export class Store {
     return dayKey(this.clock());
   }
 
+  /**
+   * Calls fn whenever what this copy holds may have changed: a save here or in another open copy, a name or a choice in
+   * SHOWN_BESIDE set in another copy, or this game's data cleared. Returns the function that stops it.
+   */
   onChange(fn: () => void) {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);

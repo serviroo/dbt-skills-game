@@ -222,6 +222,37 @@ export function place(box: HTMLElement, kids: HTMLElement[], fallback?: () => HT
   to?.focus({ preventScroll: true });
 }
 
+/**
+ * Part of a screen drawn from the player's own data (null draws nothing), which `update` draws again in place when what
+ * it shows changed: in another open copy, or by a clear. Focus on a control that goes moves to that same control drawn
+ * again (the same item's, by the data-item id of the row it is in, with the same name, link and words), else to `lost`,
+ * never to a control of someone or something else.
+ */
+export function redrawn(draw: () => Element | null, lost: () => HTMLElement | null) {
+  const make = () => draw() ?? document.createComment('');
+  const html = (n: ChildNode) => (n instanceof Element ? n.outerHTML : '');
+  let node = make();
+  // what it showed as drawn: a map the player opened since is not a change
+  let shown = html(node);
+  return {
+    node,
+    update() {
+      const next = make();
+      const now = html(next);
+      if (now === shown) return;
+      const had = document.activeElement instanceof HTMLElement && node.contains(document.activeElement) ? document.activeElement : null;
+      node.replaceWith(next);
+      node = next;
+      shown = now;
+      if (!had) return;
+      const item = (e: Element) => e.closest('[data-item]')?.getAttribute('data-item') ?? null;
+      const like = (e: Element) => item(e) === item(had) && ['aria-label', 'href'].every((a) => e.getAttribute(a) === had.getAttribute(a)) && e.textContent === had.textContent;
+      const same = next instanceof Element ? [...next.querySelectorAll<HTMLElement>('a[href], button, summary')].find(like) : undefined;
+      (same ?? lost())?.focus({ preventScroll: true });
+    },
+  };
+}
+
 export function sr(text: string) {
   return h('span', { class: 'dq-sr', text });
 }

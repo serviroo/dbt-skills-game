@@ -10,7 +10,7 @@ import { allyCard, cardOf, favFirst, focusBack, refill } from './artroom';
 import { artStore } from './artstore';
 import { storyStore } from './storystore';
 import { addDays, cleanName, fieldKey, fieldTimes, isSkillId, ROW_CAP, uid, type DiaryEntry, type State, type Store } from './store';
-import { btn, copyText, field, h, md, p, panel, place, segmented, shareOrSave, toggle, typo } from './ui';
+import { btn, copyText, field, h, md, p, panel, place, redrawn, segmented, shareOrSave, toggle, typo } from './ui';
 import type { KeepStatus } from '../pwa/register';
 import { volumeSliders } from '../ui/volume';
 import { STEALTH, STEALTH_LINES } from '../content/stealth-lines';
@@ -592,8 +592,14 @@ export function diaryScreen(app: App): ScreenOut {
   };
   const onHide = () => document.visibilityState === 'hidden' && keep();
   document.addEventListener('visibilitychange', onHide);
-  const codes = st.skillCodes(today);
-  const used = Object.keys(codes).filter(isSkillId);
+  // a skill practised in another open copy shows up here too
+  const usedToday = redrawn(() => {
+    const codes = st.skillCodes(today);
+    const used = Object.keys(codes).filter(isSkillId);
+    return used.length
+      ? h('ul', { class: 'dq-skillsused' }, used.map((id) => h('li', {}, h('span', { text: typo(`${SKILL[id].sl} (${SKILL[id].real})`) }), h('span', { class: 'dq-code', text: codes[id] === 5 ? 'helped' : codes[id] === 4 ? "didn't help this time" : 'practised' }))))
+      : p('None yet today. That is fine.', 'dq-small');
+  }, () => null);
   const note = field('One line, optional', { value: draft.note, placeholder: 'A note for today (optional)', max: 300, oninput: (v) => {
     draft.note = v;
     noteTouched = true;
@@ -724,9 +730,7 @@ export function diaryScreen(app: App): ScreenOut {
         heads.urges,
         boxes.urges,
         h('h3', { class: 'dq-label', text: 'Skills today' }),
-        used.length
-          ? h('ul', { class: 'dq-skillsused' }, used.map((id) => h('li', {}, h('span', { text: typo(`${SKILL[id].sl} (${SKILL[id].real})`) }), h('span', { class: 'dq-code', text: codes[id] === 5 ? 'helped' : codes[id] === 4 ? "didn't help this time" : 'practised' }))))
-          : p('None yet today. That is fine.', 'dq-small'),
+        usedToday.node,
         note.el,
         h('div', { class: 'dq-actions' }, btn('Save', save, { kind: 'primary' }), btn('Edit rows', () => rowsEditor.classList.toggle('is-hidden'), { kind: 'link' }), saved),
         rowsEditor,
@@ -750,6 +754,7 @@ export function diaryScreen(app: App): ScreenOut {
       note.input.value = draft.note;
     }
     renderWeek();
+    usedToday.update();
     refresh();
   });
   return {
@@ -778,6 +783,9 @@ export function comfortScreen(app: App): ScreenOut {
         if (app.route.name === 'comfort') rerender();
       },
     });
+  // what the lists show follows another open copy's changes in place, so what is being typed here stays; focus on
+  // something removed goes to the Add button below it
+  const parts: ReturnType<typeof redrawn>[] = [];
   const listPanel = (key: 'comfort' | 'activities' | 'reasons', title: string, hint: string, ph: string, ic: string) => {
     const items = s.lists[key];
     const f = field(`Add to ${title}`, { placeholder: ph, hideLabel: true, max: 200 });
@@ -790,44 +798,54 @@ export function comfortScreen(app: App): ScreenOut {
       rerender();
     };
     f.input.addEventListener('keydown', (e) => (e as KeyboardEvent).key === 'Enter' && add());
-    return panel(
-      { title, ic: icon(ic), cls: `dq-listp dq-listp--${key}` },
-      p(hint, 'dq-small'),
+    const addBtn = btn('Add', add, { kind: 'quiet', ic: 'plus' });
+    const list = redrawn(() =>
       items.length
-        ? h('ul', { class: 'dq-items' }, items.map((it) => h('li', { class: 'dq-item' }, h('span', { text: typo(it.text) }), h('button', { type: 'button', class: 'dq-icbtn dq-icbtn--sm', 'aria-label': `Remove ${it.text}`, html: icon('close'), onclick: () => {
+        ? h('ul', { class: 'dq-items' }, items.map((it) => h('li', { class: 'dq-item', 'data-item': it.id }, h('span', { text: typo(it.text) }), h('button', { type: 'button', class: 'dq-icbtn dq-icbtn--sm', 'aria-label': `Remove ${it.text}`, html: icon('close'), onclick: () => {
             const out = st.removeItem(items, it.id);
             st.save();
             rerender();
             if (out) removed(out.item.text, () => st.reviveItem(app.store.state.lists[key], out.item, out.index));
           } }))))
         : null,
-      h('div', { class: 'dq-addrow' }, f.el, btn('Add', add, { kind: 'quiet', ic: 'plus' })),
+    () => addBtn);
+    parts.push(list);
+    return panel(
+      { title, ic: icon(ic), cls: `dq-listp dq-listp--${key}` },
+      p(hint, 'dq-small'),
+      list.node,
+      h('div', { class: 'dq-addrow' }, f.el, addBtn),
     );
   };
   const people = s.lists.people;
   const pn = field('Name', { placeholder: 'Name' });
   const pp = field('Number', { placeholder: 'Phone number', type: 'tel', inputmode: 'tel' });
-  const peoplePanel = panel(
-    { title: 'People', ic: icon('phone'), cls: 'dq-listp' },
-    p('People you could call or text. A professional too, if you have one. Added only by you.', 'dq-small'),
+  const addPerson = btn('Add person', () => {
+    const name = pn.input.value.trim();
+    if (!name) return pn.input.focus();
+    people.push({ id: uid(), name: name.slice(0, 80), phone: pp.input.value.trim().slice(0, 40), at: st.now() });
+    st.save();
+    rerender();
+  }, { kind: 'quiet', ic: 'plus' });
+  const peopleList = redrawn(() =>
     people.length
-      ? h('ul', { class: 'dq-items' }, people.map((x) => h('li', { class: 'dq-item dq-item--person' }, h('span', { class: 'dq-person-n', text: x.name }), x.phone ? h('span', { class: 'dq-person-acts' }, h('a', { class: 'dq-btn dq-btn--quiet dq-btn--sm', href: telHref(x.phone), html: `<span class="dq-btn-ic">${icon('phone')}</span><span>Call</span>` }), h('a', { class: 'dq-btn dq-btn--quiet dq-btn--sm', href: smsHref(x.phone.replace(/[^\d+]/g, '')), html: `<span class="dq-btn-ic">${icon('text')}</span><span>Text</span>` })) : null, h('button', { type: 'button', class: 'dq-icbtn dq-icbtn--sm', 'aria-label': `Remove ${x.name}`, html: icon('close'), onclick: () => {
+      ? h('ul', { class: 'dq-items' }, people.map((x) => h('li', { class: 'dq-item dq-item--person', 'data-item': x.id }, h('span', { class: 'dq-person-n', text: x.name }), x.phone ? h('span', { class: 'dq-person-acts' }, h('a', { class: 'dq-btn dq-btn--quiet dq-btn--sm', href: telHref(x.phone), html: `<span class="dq-btn-ic">${icon('phone')}</span><span>Call</span>` }), h('a', { class: 'dq-btn dq-btn--quiet dq-btn--sm', href: smsHref(x.phone.replace(/[^\d+]/g, '')), html: `<span class="dq-btn-ic">${icon('text')}</span><span>Text</span>` })) : null, h('button', { type: 'button', class: 'dq-icbtn dq-icbtn--sm', 'aria-label': `Remove ${x.name}`, html: icon('close'), onclick: () => {
           const out = st.removeItem(people, x.id);
           st.save();
           rerender();
           if (out) removed(out.item.name, () => st.reviveItem(app.store.state.lists.people, out.item, out.index));
         } }))))
       : null,
-    h('div', { class: 'dq-person-add' }, pn.el, pp.el, h('div', { class: 'dq-actions' }, btn('Add person', () => {
-      const name = pn.input.value.trim();
-      if (!name) return pn.input.focus();
-      people.push({ id: uid(), name: name.slice(0, 80), phone: pp.input.value.trim().slice(0, 40), at: st.now() });
-      st.save();
-      rerender();
-    }, { kind: 'quiet', ic: 'plus' }))),
+  () => addPerson);
+  parts.push(peopleList);
+  const peoplePanel = panel(
+    { title: 'People', ic: icon('phone'), cls: 'dq-listp' },
+    p('People you could call or text. A professional too, if you have one. Added only by you.', 'dq-small'),
+    peopleList.node,
+    h('div', { class: 'dq-person-add' }, pn.el, pp.el, h('div', { class: 'dq-actions' }, addPerson)),
   );
   const maps = s.maps;
-  const mapsPanel = maps.length
+  const mapsPanel = redrawn(() => maps.length
     ? panel(
         { title: 'Strategy maps', ic: icon('card'), cls: 'dq-listp' },
         p('Maps you saved in Pros and Cons. Reread one when that urge shows up.', 'dq-small'),
@@ -840,7 +858,7 @@ export function comfortScreen(app: App): ScreenOut {
             .map((m) =>
               h(
                 'li',
-                { class: 'dq-item dq-item--map' },
+                { class: 'dq-item dq-item--map', 'data-item': m.id },
                 h(
                   'details',
                   { class: 'dq-details' },
@@ -851,7 +869,9 @@ export function comfortScreen(app: App): ScreenOut {
             ),
         ),
       )
-    : null;
+    : null,
+  () => null);
+  parts.push(mapsPanel);
   const lists = supportListsCopy(app);
   const el = h(
     'div',
@@ -865,10 +885,19 @@ export function comfortScreen(app: App): ScreenOut {
       listPanel('activities', 'Go-to activities', 'Absorbing things for Trade Places: games, shows, songs, foods.', 'A game, a show, a song', 'shadows'),
       listPanel('reasons', 'Things that are yours', 'Things you like, want to see, want to do, want to try.', 'Something you like', 'rest'),
       peoplePanel,
-      mapsPanel,
+      mapsPanel.node,
     ),
   );
-  return { el, title: 'Comfort', mode: 'sub', leave: lists.dispose };
+  const off = st.onChange(() => parts.forEach((x) => x.update()));
+  return {
+    el,
+    title: 'Comfort',
+    mode: 'sub',
+    leave: () => {
+      lists.dispose();
+      off();
+    },
+  };
 }
 
 // ---------------- Settings ----------------
@@ -996,6 +1025,18 @@ export function settingsScreen(app: App): ScreenOut {
   const notSaving = p("This device isn't saving right now (storage may be full or private browsing). Your progress is safe for this visit; a Save Crystal keeps a copy.", `dq-small${st.saving ? ' is-hidden' : ''}`);
   const keeps = browserKeeps();
   const restoreBtn = btn('Restore', () => file.click(), { kind: 'quiet', ic: 'import' });
+  /** Each choice as it is now: brought back by a Save Crystal, or made in another open copy. */
+  const showChoices = () => {
+    app.root.querySelectorAll('.dq-settings [aria-label="Motion"] [role="radio"]').forEach((b, i) => b.setAttribute('aria-checked', String(['system', 'reduce', 'full'][i] === s.settings.motion)));
+    // the group moves its Tab stop to the Text size shown
+    const size = textSize(app);
+    app.root.querySelectorAll('.dq-settings [aria-label="Text size"] [role="radio"]').forEach((b, i) => b.setAttribute('aria-checked', String(READ_SIZES[i] === size)));
+    if (!app.opts.volume) {
+      const sound = app.root.querySelector<HTMLInputElement>('.dq-settings input[role="switch"]');
+      if (sound) sound.checked = s.settings.sound;
+    }
+    if (buzzIn) buzzIn.checked = s.settings.vibrate;
+  };
   const restore = async ({ raw, data, incomplete: fileIncomplete }: Peek) => {
     const merged = st.merge(data);
     const draftsSaved = restoreSkillDrafts(st.key, raw.skillDrafts);
@@ -1004,15 +1045,7 @@ export function settingsScreen(app: App): ScreenOut {
     const unreadBack = restoreUnread((raw as { unreadSaves?: unknown }).unreadSaves, st);
     app.applyMotion();
     app.applySound();
-    app.root.querySelectorAll('.dq-settings [aria-label="Motion"] [role="radio"]').forEach((b, i) => b.setAttribute('aria-checked', String(['system', 'reduce', 'full'][i] === s.settings.motion)));
-    // the Text size the crystal brought back (the group moves its Tab stop to it)
-    const size = textSize(app);
-    app.root.querySelectorAll('.dq-settings [aria-label="Text size"] [role="radio"]').forEach((b, i) => b.setAttribute('aria-checked', String(READ_SIZES[i] === size)));
-    if (!app.opts.volume) {
-      const sound = app.root.querySelector<HTMLInputElement>('.dq-settings input[role="switch"]');
-      if (sound) sound.checked = s.settings.sound;
-    }
-    if (buzzIn) buzzIn.checked = s.settings.vibrate;
+    showChoices();
     app.shown = null;
     const rawArt = (raw as { art?: unknown }).art;
     let art: Awaited<ReturnType<ReturnType<typeof artStore>['importAll']>> | null = null;
@@ -1317,11 +1350,10 @@ export function settingsScreen(app: App): ScreenOut {
         if (v) app.buzz('start');
       }, 'One soft buzz as it starts, two as it ends.')
     : null;
-  // another open copy can turn it on or off: the switch shows the choice a buzz follows
+  // another open copy can turn it on or off: the switch shows the choice a buzz follows, as Motion, Text size and Sound
+  // show theirs
   const buzzIn = vibrate?.querySelector('input');
-  const offBuzz = st.onChange(() => {
-    if (buzzIn) buzzIn.checked = s.settings.vibrate;
-  });
+  const offChoices = st.onChange(showChoices);
   const levels = app.opts.volume ? volumeSliders(app.opts.volume, { hum: true }) : null;
   const robe = wardrobePanel(app);
   const el = h(
@@ -1419,7 +1451,7 @@ export function settingsScreen(app: App): ScreenOut {
     leave: () => {
       robe.leave();
       offSaving();
-      offBuzz();
+      offChoices();
       keeps.stop();
       gone = true;
       pick++;
