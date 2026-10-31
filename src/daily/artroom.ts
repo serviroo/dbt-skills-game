@@ -647,6 +647,11 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     },
     true,
   );
+  // over a small page the note after a save can cover all of it: a tap on its words puts it away, so the page takes
+  // strokes again (its links still do what they say)
+  msg.addEventListener('click', (e) => {
+    if (folded && !(e.target as Element).closest('button, a')) say();
+  });
   const main = h('div', { class: 'dq-draw-main' }, fit, tools);
   // the height the page keeps with the prompt and every tool around it; a screen that can't give it that folds them
   // into the tray (the page itself is never moved, so a stroke in progress carries on)

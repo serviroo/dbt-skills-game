@@ -12,9 +12,12 @@
 //   sideways  nothing scrolls sideways, and the page never scrolls to show a tool
 //   hint      the page's hint is at least 16 px (DESIGN.md's body text), stays on the page and overlaps no button
 // Then a pen, an ink and a size are picked from wherever they are, a line is drawn with them, and Save keeps it on
-// Draw today and asks for the ally's name on the shadow ally page. Last, a line begun at 390x844 goes on while the
-// phone zooms to 200%: what was drawn stays, the rest lands under the pointer, and it is kept as a draft and saved;
-// Back with the tray open closes only the tray, and as the tools unfold again focus on Tools moves to the ink.
+// Draw today and asks for the ally's name on the shadow ally page. At 200% the note after Save shows whole over the
+// page, at body size and never under the top bar, and a tap on its words puts it away for the next line. Last, a line
+// begun at 390x844 goes on while the phone zooms to 200%: what was drawn stays and the rest lands under the pointer.
+// Back with the tray open closes only the tray, and as the tools unfold again focus on Tools moves to the ink. What is
+// kept is read from the device's storage, as a reload would read it: the line as drawn is there as a draft before
+// anything is tapped, and as a page after Save.
 import { boot, settle } from './layout-fit.e2e.mjs';
 
 const PHONES = [
@@ -27,14 +30,48 @@ const MIN_PAGE = 180;
 const MIN_TEXT = 16;
 const CONTROLS = '.dq-swatch, .dq-pen, .dq-size, .dq-tools .dq-tool, .dq-save, .dq-prompt button, .dq-top .dq-safe';
 
-/** What the art store keeps now: the drafts of new pages, and every saved page, each with its strokes as JSON. */
+/**
+ * What a reload would find on this device: the drafts of new pages and every saved page, read from IndexedDB itself
+ * (never the art store's copy in memory) and cleaned as the art store reads them back, as each matches the strokes on
+ * the drawing page when kept whole; and those strokes (`drawn`). Strokes come as JSON with their keys in order.
+ */
 const stored = (page) =>
   page.evaluate(async () => {
-    const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
-    const drafts = (await as.drafts()).filter((d) => !d.editId).map((d) => ({ kind: d.kind, strokes: JSON.stringify(d.strokes) }));
-    const pages = await Promise.all((await as.list()).map(async (m) => ({ id: m.id, strokes: JSON.stringify((await as.get(m.id))?.strokes) })));
-    return { drafts, pages };
+    const { artStore, cleanDraft, cleanStrokes } = await import('/src/daily/artstore.ts');
+    const db = await new Promise((ok, bad) => Object.assign(indexedDB.open(artStore(window.__daily.store.key).name), { onsuccess: (e) => ok(e.target.result), onerror: bad }));
+    const read = (store, how) => new Promise((ok, bad) => Object.assign(db.transaction(store).objectStore(store)[how](), { onsuccess: (e) => ok(e.target.result), onerror: bad }));
+    const [drafts, metas, ids, strokes] = await Promise.all([read('drafts', 'getAll'), read('meta', 'getAll'), read('strokes', 'getAllKeys'), read('strokes', 'getAll')]);
+    db.close();
+    const json = (s) => JSON.stringify(s ?? null, (_, v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v));
+    return {
+      drafts: drafts.map(cleanDraft).filter((d) => d && !d.editId).map((d) => ({ kind: d.kind, strokes: json(d.strokes) })),
+      pages: metas.map((m) => ({ id: m.id, strokes: json(cleanStrokes(strokes[ids.indexOf(m.id)], m.kind)) })),
+      drawn: json(window.__daily.ink?.strokes),
+    };
   });
+
+/**
+ * What keeps the note after a save from showing whole, over the page's room: reaching past the room or under the top
+ * bar, being covered, words cut off with no way to scroll to them, or words under body size.
+ */
+const noteShown = (page) =>
+  page.evaluate((MIN_TEXT) => {
+    const bad = [];
+    const m = document.querySelector('.dq-tools-msg');
+    const r = m.getBoundingClientRect();
+    const room = document.querySelector('.dq-draw-fit').getBoundingClientRect();
+    const at = `${Math.round(r.left)},${Math.round(r.top)} to ${Math.round(r.right)},${Math.round(r.bottom)}`;
+    if (r.top < document.querySelector('.dq-top').getBoundingClientRect().bottom - 0.5) bad.push(`the note after Save reaches under the top bar (${at})`);
+    if (r.top < room.top - 0.5 || r.bottom > room.bottom + 0.5 || r.left < room.left - 0.5 || r.right > room.right + 0.5) bad.push(`the note after Save reaches past the page's room (${at})`);
+    else if (![[r.left + r.width / 2, r.top + 2], [r.left + r.width / 2, r.bottom - 2]].every(([x, y]) => m.contains(document.elementFromPoint(x, y)))) bad.push('something covers the note after Save');
+    if (m.scrollHeight > m.clientHeight + 1 && !/auto|scroll/.test(getComputedStyle(m).overflowY)) bad.push(`the note after Save is cut off, ${m.scrollHeight} px in ${m.clientHeight}`);
+    for (const e of [m, ...m.querySelectorAll('*')]) {
+      if (!e.checkVisibility() || ![...e.childNodes].some((n) => n.nodeType === 3 && n.data.trim())) continue;
+      const px = parseFloat(getComputedStyle(e).fontSize);
+      if (px < MIN_TEXT - 0.01) bad.push(`"${e.textContent.trim().slice(0, 24)}" in the note after Save is ${px} px`);
+    }
+    return bad;
+  }, MIN_TEXT);
 
 /** Opens a drawing page and waits until it takes strokes. */
 async function open(page, kind) {
@@ -172,9 +209,9 @@ function phoneAt(phone) {
             const strokes = await page.evaluate(() => window.__daily.ink.strokes.map((s) => ({ i: s.i, m: s.m, w: s.w, n: s.p.length })));
             const w = await page.evaluate(() => Math.round(0.05 * window.__daily.ink.W * 10) / 10);
             if (strokes.length !== 1 || strokes[0].m !== 'glow' || strokes[0].i !== 3 || strokes[0].w !== w) bad.push(`the line was not drawn with Soft glow, Mint and Bold: ${JSON.stringify(strokes)}`);
-            const drawn = await page.evaluate(() => JSON.stringify(window.__daily.ink.strokes));
             // Back closes the open tray first, and the drawing page and its line stay
             if (await tray.isVisible()) {
+              const drawn = await page.evaluate(() => JSON.stringify(window.__daily.ink.strokes));
               await tray.click();
               await page.evaluate(() => history.back());
               await page.waitForFunction(() => window.__daily.route.name !== 'draw' || document.querySelector('.dq-tray')?.classList.contains('is-hidden'), null, { timeout: 10000 });
@@ -192,10 +229,18 @@ function phoneAt(phone) {
               await page.keyboard.press('Escape');
             } else {
               await page.locator('.dq-tools-saved').waitFor({ timeout: 10000 });
-              // Save waits for the store, so the page is there as the note shows
-              const kept = (await stored(page)).pages.filter((m) => !before.some((b) => b.id === m.id));
-              if (kept.length !== 1 || kept[0].strokes !== drawn) bad.push(`Save did not keep the line as drawn: ${kept.length} new pages`);
+              // the note shows whole, then the page is on the device as drawn, read back as a reload would
+              if (zoom === 2) bad.push(...(await noteShown(page)));
               await h.shot(page, `${shot}-saved`);
+              const fresh = (s) => s.pages.filter((m) => !before.some((b) => b.id === m.id));
+              await h.poll(page, () => stored(page), (s) => fresh(s).length === 1 && fresh(s)[0].strokes === s.drawn, (s) => `Save did not keep the line as drawn on the device: ${s ? `${fresh(s).length} new pages` : 'storage unread'}`).catch((e) => bad.push(e.message));
+              // the note can cover all the page's room: a tap on its words puts it away, and the page takes a line again
+              if (zoom === 2) {
+                await page.locator('.dq-tools-saved').click();
+                await line(page);
+                const lines = await page.evaluate(() => window.__daily.ink.strokes.length);
+                if (lines !== 2) bad.push(`after a tap on the note's words, a new line did not land on the page (${lines} lines)`);
+              }
             }
             if (await scrolled(page)) bad.push('the page scrolled');
             failed.push(...bad.map((b) => `${where}: ${b}`));
@@ -238,17 +283,14 @@ async function strokeKept(h) {
     h.expect(near(pts[0], [0.2, 0.3]), `the line begins at ${at(pts[0])}, not ${0.2 * W},${0.3 * H}`);
     h.expect(pts.some((q) => near(q, [0.5, 0.4])), `the part drawn before the zoom, to ${0.5 * W},${0.4 * H}, is gone: ${pts.map(at).join(' ')}`);
     h.expect(near(pts.at(-1), [0.7, 0.7]), `the line ends at ${at(pts.at(-1))}, not under the pointer at ${0.7 * W},${0.7 * H}`);
-    // the line is kept as a draft as it was drawn, every point from before the zoom and after it, before anything else
-    // is tapped; then Save keeps those same strokes as a page from the folded tools, and the draft goes
-    const drawn = await page.evaluate(() => JSON.stringify(window.__daily.ink.strokes));
-    const { pages: before } = await h.poll(page, () => stored(page), (s) => s.drafts.some((d) => d.kind === 'today' && d.strokes === drawn), (s) => `no draft kept the line as drawn: ${s ? `${s.drafts.filter((d) => d.kind === 'today').length} drafts of the page, none the same` : 'the store was not read'}`);
+    // on the device, as a reload would find it: the line is kept as a draft as it was drawn, every point from before the
+    // zoom and after it, before anything else is tapped; then Save keeps those same strokes as a page from the folded
+    // tools, and the draft goes
+    const { pages: before } = await h.poll(page, () => stored(page), (s) => s.drafts.some((d) => d.kind === 'today' && d.strokes === s.drawn), (s) => `no draft on the device kept the line as drawn: ${s ? `${s.drafts.filter((d) => d.kind === 'today').length} drafts of the page, none the same` : 'storage was not read'}`);
     await page.locator('.dq-save').click();
     await page.locator('.dq-tools-saved').waitFor({ timeout: 10000 });
-    // Save waits for the store, so the page is there, and the draft gone, as the note shows
-    const after = await stored(page);
-    const kept = after.pages.filter((m) => !before.some((b) => b.id === m.id));
-    h.expect(kept.length === 1 && kept[0].strokes === drawn, `Save did not keep the line as drawn: ${kept.length} new pages`);
-    h.expect(!after.drafts.some((d) => d.kind === 'today'), 'the draft stayed after Save');
+    const fresh = (s) => s.pages.filter((m) => !before.some((b) => b.id === m.id));
+    await h.poll(page, () => stored(page), (s) => fresh(s).length === 1 && fresh(s)[0].strokes === s.drawn && !s.drafts.some((d) => d.kind === 'today'), (s) => `after Save the device has ${s ? `${fresh(s).length} new pages, ${fresh(s).filter((m) => m.strokes === s.drawn).length} the line as drawn, and ${s.drafts.filter((d) => d.kind === 'today').length} drafts of the page` : 'storage unread'}`);
     // back at the phone's own size the tools unfold, and focus on the Tools button moves to the ink it showed
     await page.locator('.dq-tray-b').focus();
     await page.setViewportSize({ width: 390, height: 844 });

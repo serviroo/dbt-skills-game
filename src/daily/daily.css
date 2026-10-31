@@ -4900,7 +4900,8 @@ textarea.dq-input {
   min-width: 44px;
   padding: 0 6px;
 }
-/* the tray, and the note after a save, cover the room the page has (--room-*, measured), from its foot */
+/* the tray, and the note after a save, cover the room the page has (--room-*, measured), from its foot and never past
+   it, so never under the top bar: what doesn't fit scrolls inside */
 .dq-tray,
 .dq-draw--tray .dq-tools .dq-tools-msg {
   position: absolute;
@@ -4909,16 +4910,16 @@ textarea.dq-input {
   bottom: var(--room-b);
   left: var(--room-x);
   width: var(--room-w);
+  max-height: var(--room-h);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .dq-tray {
   z-index: 4;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: var(--room-h);
   padding: 8px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
   /* solid, so nothing on the page shows through it */
   background: linear-gradient(180deg, var(--plate-a), var(--plate-b)), #07080f;
   border: 1px solid;
@@ -4930,8 +4931,17 @@ textarea.dq-input {
   justify-content: center;
   padding: 4px 12px;
   border: 1px solid rgba(125, 150, 197, 0.45);
-  background: rgba(6, 14, 26, 0.94);
+  /* solid, as the tray is, so nothing on the page shows through it */
+  background: rgb(6, 14, 26);
   box-shadow: 0 12px 30px -12px rgba(0, 0, 0, 0.9);
+}
+/* its words at body size, and its links a full tap high */
+.dq-draw--tray .dq-tools-msg,
+.dq-draw--tray .dq-tools-msg :is(.dq-small, .dq-xp, .dq-btn--link) {
+  font-size: 16px;
+}
+.dq-draw--tray .dq-tools-msg .dq-btn--link {
+  min-height: 44px;
 }
 /* the size dots wrap in a narrow tray, as the inks and pens do */
 .dq-tray .dq-sizes {
