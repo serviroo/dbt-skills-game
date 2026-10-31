@@ -53,16 +53,16 @@
 .ca-hold--heal:focus-visible {
   outline-color: #89cf9d;
 }
-.ca-hold--heal::after {
+.ca-hold--heal .dq-hold-ring::after {
   content: '';
   position: absolute;
-  inset: 14px;
+  inset: 7%;
   border-radius: 50%;
   border: 2px solid rgba(137, 207, 157, 0.7);
   opacity: 0;
   pointer-events: none;
 }
-.ca-hold--heal.ca-healed::after {
+.ca-hold--heal.ca-healed .dq-hold-ring::after {
   animation: ca-heal-ring 1.4s cubic-bezier(0.16, 1, 0.3, 1) 1;
 }
 @keyframes ca-heal-ring {
