@@ -38,9 +38,17 @@ const SCREENS = [
 
 /**
  * In place of the page's visual viewport, one that reports the part of the screen above a keyboard that `window.__kb`
- * sets ({ height, top }, or null for none), never taller than the page, and passes on the real one's events.
+ * sets ({ height, top }, or null for none), never taller than the page, and passes on the real one's events. And the
+ * way the phone is held, `heldAs` and then as `window.__held` sets it ('portrait' or 'landscape'), as a phone reports
+ * it in screen.orientation, since Chromium here takes it from the page's shape, which a keyboard or another app beside
+ * it changes.
  */
-const overlay = () => {
+const overlay = (heldAs) => {
+  let held = heldAs ?? (innerWidth > innerHeight ? 'landscape' : 'portrait');
+  Object.defineProperty(screen, 'orientation', { configurable: true, get: () => ({ type: `${held}-primary`, angle: held === 'portrait' ? 0 : 90 }) });
+  window.__held = (h) => {
+    held = h;
+  };
   const real = window.visualViewport;
   const own = new EventTarget();
   let kb = null;
@@ -258,31 +266,41 @@ function typing(phone, { zoom = 1, font = false, largest = false, elsewhere = fa
 }
 
 /**
+ * A phone at `viewport`, held as `held` is, typing on the Safe Zone's things that are yours, and the size of Talk's
+ * words there.
+ */
+async function typeIn(h, viewport, held) {
+  const { ctx, page, errors } = await boot(h, viewport);
+  await page.evaluate(overlay, held);
+  await page.locator('header .dq-safe').click();
+  await page.evaluate(() => window.__daily.go({ name: 'safe', at: 'reasons' }));
+  await page.locator('.dq-sz-t', { hasText: 'Things that are yours' }).first().waitFor({ timeout: 10000 });
+  await page.locator('.dq-sz-body').getByRole('button', { name: 'Add one', exact: true }).last().evaluate((b) => b.click());
+  await page.locator('.dq-sz-body').getByLabel('Add one', { exact: true }).focus();
+  await settle(page);
+  const words = await page.evaluate(() => parseFloat(getComputedStyle(document.querySelector('.dq-sz-talk').lastElementChild).fontSize));
+  return { ctx, page, errors, words };
+}
+
+/**
  * Turning the phone while typing, upright to sideways and back, with each kind of keyboard: wherever the keyboard
  * goes down the usual screen comes back with the field focused, and with it up "Talk to someone now", Leave, Lights up
  * and Sound are on screen, upright, turned sideways, and sideways with the keyboard down and up again. A phone that
  * resizes the page, turned with its keyboard up, shows a height it hasn't had with the keyboard down, and the keyboard
  * stays up through the turn, coming up a strip taller first and then settling: turned from the bigger phone, where the
- * usual screen fits above it upright, and from the smaller, where it doesn't. At 200% zoom held sideways the keyboard leaves under 100 px, too little for Talk and a
- * field, so there only the keyboard going down is checked.
+ * usual screen fits above it upright, and from the smaller, where it doesn't. At 200% zoom held sideways the keyboard
+ * leaves under 100 px, too little for Talk and a field, so there only the keyboard going down is checked.
  */
 function turned(phone, zoom = 1) {
   return async (h) => {
     const [upright, sideways] = [phone, phone.split('x').reverse().join('x')].map((n) => PHONES[n]).map((p) => ({ width: p.width / zoom, height: p.height / zoom, kb: Math.round(p.kb / zoom) }));
     const size = `${phone} turned${zoom > 1 ? ' at 200%' : ''}`;
     const problems = [];
-    const { ctx, page, errors } = await boot(h, { width: upright.width, height: upright.height });
-    await page.evaluate(overlay);
-    await page.locator('header .dq-safe').click();
-    await page.evaluate(() => window.__daily.go({ name: 'safe', at: 'reasons' }));
-    await page.locator('.dq-sz-t', { hasText: 'Things that are yours' }).first().waitFor({ timeout: 10000 });
-    await page.locator('.dq-sz-body').getByRole('button', { name: 'Add one', exact: true }).last().evaluate((b) => b.click());
-    await page.locator('.dq-sz-body').getByLabel('Add one', { exact: true }).focus();
-    await settle(page);
-    const words = await page.evaluate(() => parseFloat(getComputedStyle(document.querySelector('.dq-sz-talk').lastElementChild).fontSize));
-    // the keyboard up or down on the phone held as `s` is, the page resized to the part above it or with only that showing;
-    // `strip`: it comes up that much taller first, a frame before it settles
+    const { ctx, page, errors, words } = await typeIn(h, { width: upright.width, height: upright.height }, 'portrait');
+    // the keyboard up or down on the phone held as `s` is, the page resized to the part above it or with only that
+    // showing; `strip`: it comes up that much taller first, a frame before it settles
     const to = async (s, kind, up, strip = 0) => {
+      await page.evaluate((held) => window.__held(held), s === upright ? 'portrait' : 'landscape');
       for (const kb of strip ? [s.kb + strip, s.kb] : [s.kb]) {
         await page.setViewportSize({ width: s.width, height: kind === 'resize' && up ? s.height - kb : s.height });
         await page.evaluate((k) => window.__kb(k), kind === 'over' && up ? { height: s.height - kb, top: Math.round(kb / 4) } : null);
@@ -313,6 +331,34 @@ function turned(phone, zoom = 1) {
   };
 }
 
+/**
+ * The window resized beside another app while typing, the smaller phone held sideways with a keyboard that resizes the
+ * page: from half the screen's width to all of it, or from all of it to half, with the keyboard up. The screen's height
+ * stays, so its room does too. Widened, "Talk to someone now", Leave, Lights up and Sound stay on screen; narrowed, too
+ * narrow for those and the field above the keyboard, the usual screen comes back as the keyboard goes down.
+ */
+function beside(widened) {
+  return async (h) => {
+    const p = PHONES['568x320'];
+    const [from, to] = widened ? [p.width / 2, p.width] : [p.width, p.width / 2];
+    const size = `568x320 ${widened ? 'widened from half' : 'narrowed to half'} beside another app`;
+    const problems = [];
+    const { ctx, page, errors, words } = await typeIn(h, { width: from, height: p.height }, 'landscape');
+    for (const viewport of [{ width: from, height: p.height - p.kb }, { width: to, height: p.height - p.kb }]) {
+      await page.setViewportSize(viewport);
+      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    }
+    await page.evaluate(() => document.activeElement?.scrollIntoView({ block: 'nearest', behavior: 'instant' }));
+    await settle(page);
+    if (widened) for (const f of await up(page, words)) problems.push(`${size}, keyboard up: ${f}`);
+    await page.setViewportSize({ width: to, height: p.height });
+    for (const f of await down(page)) problems.push(`${size}, then down: ${f}`);
+    if (errors.length) problems.push(`${size}: ${errors.join(' | ')}`);
+    await ctx.close();
+    h.expect(!problems.length, `${problems.length} problems:\n${problems.join('\n')}`);
+  };
+}
+
 export const scenarios = Object.fromEntries([
   ...Object.keys(PHONES).flatMap((phone) => [
     [`safe-zone-typing-${phone}`, typing(phone)],
@@ -325,4 +371,6 @@ export const scenarios = Object.fromEntries([
   ['safe-zone-typing-turned', turned('390x844')],
   ['safe-zone-typing-turned-200', turned('390x844', 2)],
   ['safe-zone-typing-turned-320x568', turned('320x568')],
+  ['safe-zone-typing-widened', beside(true)],
+  ['safe-zone-typing-narrowed', beside(false)],
 ]);
