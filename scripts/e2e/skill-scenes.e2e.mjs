@@ -8,8 +8,8 @@
 // the water comes in and goes out), keeps to its timer's clock, stops on leaving, holds still with reduced motion (and
 // as the device's own setting changes while it is up) and leaves its flat picture with no WebGL. The breathing light is
 // a small hot core in a halo gone by half its ring, with the countdown readable (3:1) under it all breath long; the
-// wave's moon is a light that shows whole at every size. The soft glow's checks (glow-scene.e2e.mjs) use the helpers
-// exported here.
+// wave's moon is a light that shows whole at every size. The open hands', the soft glow's and the cool water's checks
+// (hands-scene.e2e.mjs, glow-scene.e2e.mjs, cool-water-scene.e2e.mjs) use the helpers exported here.
 import fs from 'node:fs';
 import sharp from 'sharp';
 import { deviceMotion } from './device-motion.e2e.mjs';
