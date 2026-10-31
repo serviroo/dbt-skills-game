@@ -1,4 +1,4 @@
-import { poll } from './harness.mjs';
+import { poll, until } from './harness.mjs';
 
 async function intro(h, beat, reduced = false, hiddenStart = false) {
   const opened = await h.open({ 'dbt.app.v1': h.SEEN }, `?shot=${beat}&mute&dpr=1&nopost${reduced ? '&reduced' : ''}`, { width: 390, height: 844 }, async (ctx) => {
@@ -88,6 +88,8 @@ const read = (page) => page.evaluate(() => ({
   cues: window.__introCues.length,
 }));
 const hidden = (page, on) => page.evaluate((on) => window.__introHide(on), on);
+/** Waits for the companion, which Skip opens straight from the scene, for up to `timeout` of the page running. */
+const companion = (page, timeout = 15000) => until(page, () => !!document.querySelector('.dq-top')?.checkVisibility(), null, { timeout });
 /** The window's opening once its pending play or pause has taken effect, so its time no longer moves by itself. */
 async function opening(page) {
   await poll(page, () => page.evaluate(() => window.__introOpening.ready.then(() => true)), Boolean, 'the window opening never settled', { timeout: 5000 });
@@ -149,7 +151,7 @@ export const scenarios = {
       h.expect(JSON.stringify(cues.filter((c) => expected.includes(c))) === JSON.stringify(expected), `awaken cues changed order or repeated: ${cues.join(', ')}`);
     }
     await page.locator('.ui-skip').press('Enter');
-    await page.getByRole('button', { name: 'Read the note' }).waitFor({ timeout: 15000 });
+    await companion(page);
     h.expect(!errors.length, errors.join('\n'));
   }])),
   ...Object.fromEntries([false, true].map((reduced) => [`intro-pause-window-${reduced ? 'reduced' : 'full'}`, async (h) => {
@@ -183,7 +185,7 @@ export const scenarios = {
       h.expect(done.created === (at >= 300), `the delay created while hidden lost its duration at ${at} ms`);
     }
     await page.locator('.ui-skip').press('Enter');
-    await page.getByRole('button', { name: 'Read the note' }).waitFor({ timeout: 15000 });
+    await companion(page);
     h.expect(!errors.length, errors.join('\n'));
   }])),
   async 'intro-pause-window-hidden-start'(h) {
@@ -198,23 +200,14 @@ export const scenarios = {
     await h.sleep(200);
     h.expect(await page.evaluate(() => window.__introOpening.currentTime > 0 && window.__introOpening.playState !== 'paused'), 'the hidden-start window did not resume');
     await page.locator('.ui-skip').press('Enter');
-    await page.getByRole('button', { name: 'Read the note' }).waitFor({ timeout: 15000 });
+    await companion(page);
     h.expect(!errors.length, errors.join('\n'));
   },
   async 'intro-pause-leaves-companion-alone'(h) {
     const { page, errors } = await intro(h, 'chest');
     await checkPause(h, page, 'before leaving the intro');
     await page.locator('.ui-skip').press('Enter');
-    await page.getByRole('button', { name: 'Read the note' }).evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
-    await page.getByRole('button', { name: 'Read the note' }).press('Enter');
-    await page.clock.fastForward(400);
-    await page.locator('.sw-actions').evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
-    await page.getByRole('button', { name: 'Continue', exact: true }).press('Enter');
-    await page.clock.fastForward(600);
-    await page.locator('.ec-actions').evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
-    await page.getByRole('button', { name: 'Enter the Lantern', exact: true }).press('Enter');
-    await page.clock.fastForward(700);
-    await page.locator('.dq-top').waitFor({ timeout: 30000 });
+    await companion(page, 30000);
     await page.clock.resume();
     await hidden(page, true);
     const untouched = await page.evaluate(async () => {

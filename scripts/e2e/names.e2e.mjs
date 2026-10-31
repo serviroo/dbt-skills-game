@@ -93,7 +93,7 @@ export const scenarios = {
     await tapTitle(page);
     await page.locator('#np-name').waitFor({ timeout: 15000 });
     const left = leaves(page, '#np-name');
-    await page.getByRole('button', { name: 'Skip' }).click();
+    await page.getByRole('button', { name: 'Skip', exact: true }).click();
     await left(10000);
     const you = await youOf(page);
     expect(you && you.name === '' && you.companion === '' && you.nameAt === 0 && you.companionAt === 0, 'skip did not record an empty choice: ' + JSON.stringify(you));
@@ -242,7 +242,7 @@ export const scenarios = {
     await sleep(300);
     const leftB = leaves(b, '#np-name');
     note(b, 'tap Skip');
-    await b.getByRole('button', { name: 'Skip' }).click();
+    await b.getByRole('button', { name: 'Skip', exact: true }).click();
     await leftB(10000);
     for (const p of [a, b]) {
       const you = await youOf(p);
@@ -309,7 +309,7 @@ export const scenarios = {
     await sleep(1200);
     await shot(page, '08-landscape-prompt');
     for (const label of ['Skip', 'Continue']) {
-      const box = await page.getByRole('button', { name: label }).boundingBox();
+      const box = await page.getByRole('button', { name: label, exact: true }).boundingBox();
       expect(box && box.y >= 0 && box.y + box.height <= 320 && box.x >= 0 && box.x + box.width <= 568, `${label} is off screen: ${JSON.stringify(box)}`);
     }
     await page.locator('#np-name').fill('Robin');

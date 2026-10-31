@@ -1,5 +1,8 @@
 /** Crisp geometric SVG emblems drawn in code (no image assets). */
 
+/** The Safe Zone's shield, one shape in the intro and the companion (24 x 24, drawn with a stroke). */
+export const SAFE_SHIELD = '<path d="M12 3.2l7 2.9v5.3c0 4.4-2.9 7.9-7 9.6-4.1-1.7-7-5.2-7-9.6V6.1z"/><path d="M8.6 12.4q1.7-1.6 3.4 0t3.4 0"/>';
+
 export const ICON_LETTER = `<svg viewBox="0 0 120 120" aria-hidden="true">
   <defs>
     <linearGradient id="lg-gold" x1="0" y1="0" x2="0" y2="1">

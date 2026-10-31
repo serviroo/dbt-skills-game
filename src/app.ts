@@ -1,6 +1,6 @@
 import type { Stage } from './core/stage';
 import { params } from './core/params';
-import { endCard, letterView, namePrompt, rewardCards, showTitle, uiSounds } from './ui/cutscene-ui';
+import { endCard, introWays, letterView, namePrompt, rewardCards, showTitle, uiSounds, unlessLeft, type Way } from './ui/cutscene-ui';
 import { lanternMessage, windowSounds, type WindowKind } from './ui/lantern-window';
 import { useRealClock, useStageClock } from './ui/anim';
 import type { AudioLike } from './cutscene/director';
@@ -134,13 +134,46 @@ export async function runApp(stage: Stage | null, makeStage: () => Stage | null)
       .catch(() => undefined);
 
   const wantCutscene = !state.seenCutscene || !!params.shot || params.cutscene;
+  let help = false;
   // only the intro draws on the 3D stage: the companion is DOM only (its small scenes bring their own renderer), so a
   // returning player never sets up WebGL for it
   if (wantCutscene) {
     stage ??= makeStage();
-    await (stage ? playIntro(stage, audio, state) : playWithoutStage(audio, state));
+    help = await intro(stage, audio, state);
   }
-  await enterDaily(stage, audio, state);
+  await enterDaily(stage, audio, state, help);
+}
+
+/**
+ * The intro, with the Safe Zone and Skip on every screen of it. However it ends (watched to the end card, skipped, or
+ * left for help, even while a load is pending or the graphics fail), it ends here: it counts as seen, and the companion
+ * opens next. True when the player left it for the Safe Zone.
+ */
+async function intro(stage: Stage | null, audio: AppAudio | null, state: AppState): Promise<boolean> {
+  mountCutsceneVolume(audio);
+  const left = new AbortController();
+  let offWays = () => {};
+  const way = new Promise<Way>((resolve) => {
+    offWays = introWays((w) => {
+      // the sound goes first, before anything else of the intro, however long the rest takes on a slow phone. Help is
+      // silent from the press on, while the companion loads too, as the Safe Zone is: its gate closes under every sound
+      // and echo at once. Skip lets what plays fade. Either way none of the intro sounds on after it: every cue still
+      // ringing, bed, charge hum and the score stop at the press
+      if (w === 'safe') audio?.engine?.quiet(true, SCORE.safeOutSec);
+      audio?.engine?.stopAll(w === 'safe' ? SCORE.safeOutSec : SCORE.leaveSec);
+      left.abort();
+      resolve(w);
+    });
+  });
+  const end = await Promise.race([stage ? playIntro(stage, audio, left.signal) : playWithoutStage(audio, left.signal), way]);
+  offWays();
+  state.seenCutscene = true;
+  save(state);
+  if (end === 'replay') {
+    location.search = '?cutscene=1';
+    await new Promise(() => undefined);
+  }
+  return end === 'safe';
 }
 
 /** The speaker on every cutscene beat, from the title screen to the end card (none without Web Audio or in captures). */
@@ -151,66 +184,52 @@ function mountCutsceneVolume(audio: AppAudio | null) {
   document.getElementById('ui')!.append(cutsceneVol);
 }
 
-async function closingCards(audio: AppAudio | null) {
+async function closingCards(audio: AppAudio | null, left: AbortSignal) {
   audio?.music?.to('reward', 1.5);
-  await rewardCards(REWARDS);
-  await letterView();
+  await rewardCards(REWARDS, { left });
+  await letterView(left);
   audio?.music?.to('end', 2);
-  return endCard();
+  return endCard(left);
 }
 
-async function offerReload(err: unknown): Promise<never> {
+/** Offered in the intro, it goes with the intro when the player leaves it (`left`), and nothing reloads. */
+async function offerReload(err: unknown, left?: AbortSignal): Promise<never> {
   console.warn('[app] a file for this version is gone, offering a reload', err);
-  await lanternMessage({ kind: 'info', icon: 'info', title: NEW_VERSION.title, html: NEW_VERSION.html, actions: [{ label: NEW_VERSION.action, value: 'reload' }] });
+  await unlessLeft(lanternMessage({ kind: 'info', icon: 'info', title: NEW_VERSION.title, html: NEW_VERSION.html, actions: [{ label: NEW_VERSION.action, value: 'reload' }] }, { left }), left);
   location.reload();
   return new Promise<never>(() => undefined);
 }
 
 /** No WebGL on this device: the title, rewards, letter and end card are DOM only, so the player still gets every word. */
-async function playWithoutStage(audio: AppAudio | null, state: AppState) {
-  mountCutsceneVolume(audio);
-  await showTitle(() => audio?.unlock?.());
-  await askNames();
-  const choice = await closingCards(audio);
-  state.seenCutscene = true;
-  save(state);
-  if (choice === 'replay') {
-    location.search = '?cutscene=1';
-    await new Promise(() => undefined);
-  }
+async function playWithoutStage(audio: AppAudio | null, left: AbortSignal) {
+  await showTitle(() => audio?.unlock?.(), left);
+  await askNames(left);
+  return closingCards(audio, left);
 }
 
-async function playIntro(stage: Stage, audio: AppAudio | null, state: AppState) {
+async function playIntro(stage: Stage, audio: AppAudio | null, left: AbortSignal) {
   stage.paused = false;
   // the title and name prompt are DOM only: one still frame of the empty scene behind them, the 3D frames start with
   // the cinematic
   if (!params.capture) stage.step(0);
-  mountCutsceneVolume(audio);
-  await showTitle(() => audio?.unlock?.());
-  await askNames();
+  await showTitle(() => audio?.unlock?.(), left);
+  await askNames(left);
   useStageClock(stage);
   stage.start();
-  const { playCutscene } = await stage.loading(import('./cutscene/director')).catch(offerReload);
-  let choice: 'replay' | 'enter';
+  const { playCutscene } = await unlessLeft(stage.loading(import('./cutscene/director')), left).catch((err) => offerReload(err, left));
   try {
-    choice = await playCutscene(stage, audio ?? undefined, { skippable: state.seenCutscene });
+    return await unlessLeft(playCutscene(stage, audio ?? undefined, left), left);
   } catch (err) {
     console.warn('[intro] the scene failed, finishing without it', err);
     useRealClock();
     stage.stop();
     stage.canvas.style.opacity = '0';
-    document.getElementById('ui')!.querySelectorAll('.ov, .lb, .ui-skip, .sw-layer').forEach((n) => n.remove());
-    choice = await closingCards(audio);
-  }
-  state.seenCutscene = true;
-  save(state);
-  if (choice === 'replay') {
-    location.search = '?cutscene=1';
-    await new Promise(() => undefined);
+    document.getElementById('ui')!.querySelectorAll('.ov, .lb, .sw-layer').forEach((n) => n.remove());
+    return closingCards(audio, left);
   }
 }
 
-async function enterDaily(stage: Stage | null, audio: AppAudio | null, state: AppState) {
+async function enterDaily(stage: Stage | null, audio: AppAudio | null, state: AppState, help: boolean) {
   // the companion is DOM only: stop the WebGL loop to save battery and keep UI timing on the page clock
   useRealClock();
   if (stage && !params.capture) stage.stop();
@@ -219,13 +238,14 @@ async function enterDaily(stage: Stage | null, audio: AppAudio | null, state: Ap
   audio?.engine?.setVolume(0.6);
   audio?.music?.to('calm', SCORE.inSec);
   const root = document.getElementById('ui')!;
-  root.querySelectorAll('.ov, .lb, .ui-skip').forEach((n) => n.remove());
+  root.querySelectorAll('.ov, .lb').forEach((n) => n.remove());
   cutsceneVol?.dispose();
   cutsceneVol = null;
   const k = Object.keys(dailyMods)[0];
   if (!k) return;
   const m = (await dailyMods[k]().catch(offerReload)) as { mountDaily:(r: HTMLElement, o: unknown) => { unmount(): void; settled: Promise<void>; route(): string } };
   const daily = m.mountDaily(root, {
+    help,
     onReplay: () => {
       state.seenCutscene = true;
       save(state);
@@ -250,7 +270,7 @@ async function enterDaily(stage: Stage | null, audio: AppAudio | null, state: Ap
 }
 
 /** The first run asks for the two names once (the dev shot and capture flags go straight to the scene). */
-async function askNames() {
+async function askNames(left: AbortSignal) {
   if (readYou() || params.shot || params.capture) return;
-  await namePrompt();
+  await namePrompt(left);
 }

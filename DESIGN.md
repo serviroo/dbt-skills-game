@@ -100,7 +100,8 @@ All timings live in `src/motion/tokens.ts`. Change them there, not in the compon
    always optional. Sound, motion, the diary and every urge row can be turned off.
 5. **Private, on this device only.** No accounts, server, analytics, third-party scripts or remote fonts. The only
    network calls are links the player taps. The Home Screen name and icon say nothing about mental health.
-6. **The Safe Zone is one tap away** from every screen after the intro. Inside it, "Talk to someone now" is pinned on
+6. **The Safe Zone is one tap away** from every screen, the intro too: beside Skip from its title to its end card,
+   it opens the Safe Zone at once, with nothing asked or shown first. Inside it, "Talk to someone now" is pinned on
    every screen and numbers dial with one tap. No XP, toasts, particles, glow bursts, sound effects or vibration
    inside, and leaving never asks "are you sure". Whatever comes due while it is open (a rank-up, the first welcome, a
    new day) waits until the player leaves. The button says "Safe Zone", plainly: in a crisis, clarity beats theme.

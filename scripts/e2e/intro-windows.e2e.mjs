@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { gone } from './harness.mjs';
+import { gone, poll } from './harness.mjs';
 import { isSettled, windowCut } from './me-92-safe-zone-clean.e2e.mjs';
 
 const VIEWPORTS = [{ width: 390, height: 844 }, { width: 320, height: 568 }, { width: 844, height: 390 }];
@@ -371,18 +371,18 @@ const afterSkip = () => {
   new MutationObserver((recs) => {
     for (const r of recs)
       for (const n of r.addedNodes)
-        if (n instanceof Element && n.matches('.sw, .chest-hold, .awaken-word')) window.__afterSkip.push(n.className);
+        if (n instanceof Element && n.matches('.sw, .chest-hold, .awaken-word') && !n.closest('.dq-sw-layer')) window.__afterSkip.push(n.className);
   }).observe(document.getElementById('ui'), { childList: true, subtree: true });
 };
 
 const skipTimes = () => {
-  const rec = (window.__skip = { at: null, gone: null, rewards: null });
+  const rec = (window.__skip = { at: null, gone: null, home: null });
   const watched = [...document.querySelectorAll('.sw, .chest-hold')];
   rec.watched = watched.map(window.__name);
   const seen = () => {
     if (rec.at === null) return;
     if (rec.gone === null && watched.every((w) => !w.isConnected)) rec.gone = Math.round(performance.now() - rec.at);
-    if (rec.rewards === null && document.querySelector('.rw')) rec.rewards = Math.round(performance.now() - rec.at);
+    if (rec.home === null && document.querySelector('.dq')) rec.home = Math.round(performance.now() - rec.at);
   };
   document.addEventListener(
     'click',
@@ -987,7 +987,7 @@ export const scenarios = {
         try {
           await pastStartup(page);
           await watch(page);
-          await traced(page, out, `chest-skip-keys-${how}`, '.sw, .chest-hold, .rw', async () => {
+          await traced(page, out, `chest-skip-keys-${how}`, '.sw, .chest-hold, .dq', async () => {
             await page.locator('.title-screen').click();
             // the hold takes its keys from the moment it is on the page, so the press goes in then, faded in or not
             await page.locator('.chest-hold .ch-target').waitFor({ timeout: 60000 });
@@ -995,17 +995,15 @@ export const scenarios = {
             await page.evaluate(skipTimes);
             await page.locator('.ui-skip').focus();
             await page.keyboard.press(how);
-            const skip = await page.waitForFunction(() => { const r = window.__skip; return r.at !== null && r.gone !== null && r.rewards !== null && r; }, null, { polling: 100, timeout: 8000 }).then((h) => h.jsonValue(), () => page.evaluate(() => window.__skip));
+            const skip = await poll(page, () => page.evaluate(() => window.__skip), (r) => r.at !== null && r.gone !== null && r.home !== null, (r) => `${at}: Skip never took the input, took the hold down or reached Home: ${JSON.stringify(r)}`, { timeout: 8000 });
             skipMs[at] = skip;
-            expect(skip.at !== null, `${at}: Skip never took the input`);
-            expect(skip.gone !== null && skip.gone <= 1000, `${at}: the hold prompt was still up 1 s after Skip (gone at ${skip.gone} ms, nodes ${skip.watched.join(', ')})`);
-            expect(skip.rewards !== null && skip.rewards <= 2500, `${at}: the rewards were not up 2.5 s after Skip (at ${skip.rewards} ms)`);
+            expect(skip.gone <= 1000, `${at}: the hold prompt was still up 1 s after Skip (gone at ${skip.gone} ms, nodes ${skip.watched.join(', ')})`);
             await sleep(2500);
             const late = await page.evaluate(() => window.__afterSkip);
             expect(!late.length, `${at}: the skipped beat still showed ${late.join(', ')} after Skip`);
             const bars = await page.evaluate(() => [...document.querySelectorAll('.lb')].map((b) => b.getBoundingClientRect().height));
-            expect(bars.every((px) => px < 1), `${at}: the letterbox stayed over the rewards after Skip (${bars.map(Math.round).join(', ')} px)`);
-            expect(await page.locator('.rw').count(), `${at}: the rewards did not stay up after Skip`);
+            expect(bars.every((px) => px < 1), `${at}: the letterbox stayed over Home after Skip (${bars.map(Math.round).join(', ')} px)`);
+            expect(await page.evaluate(() => window.__daily?.route.name === 'hub'), `${at}: Home did not stay up after Skip`);
             expect(!errors.length, errors.join('\n'));
           });
         } finally {
@@ -1165,8 +1163,11 @@ export const scenarios = {
         await page.evaluate(entrances, FADE_MS);
         expect(await reducedNow(page), 'replay: the intro ignored the saved Motion: Reduced');
         await page.locator('.title-screen').click();
-        if (await page.locator('#np-name').waitFor({ timeout: 4000 }).then(() => true, () => false)) await page.getByRole('button', { name: 'Skip' }).click();
-        await traced(page, out, 'reduced-screens-replay-skip', '.ui-skip', () => page.locator('.ui-skip').click({ timeout: 30000 }));
+        if (await page.locator('#np-name').waitFor({ timeout: 4000 }).then(() => true, () => false)) await page.getByRole('button', { name: 'Skip', exact: true }).click();
+        // the closing screens come at once when the scene ends early, as when its graphics context is lost (Skip leaves
+        // the intro for Home)
+        await page.locator('.lb').first().waitFor({ state: 'attached', timeout: 30000 });
+        await traced(page, out, 'reduced-screens-replay-lost', '.rw', () => page.evaluate(() => window.__stage.renderer.getContext().getExtension('WEBGL_lose_context').loseContext()));
         result.replay = await screens(page, 'replay');
         expect(!errors.length, errors.join('\n'));
       } finally {

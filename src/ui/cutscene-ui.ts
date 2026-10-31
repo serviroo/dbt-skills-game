@@ -2,10 +2,10 @@ import '../styles/cutscene.css';
 import { after, animate, complete, el, finished, wait } from './anim';
 import { inertUntil, onTaps } from './taps';
 import { onMotion, params } from '../core/params';
-import { EASE, WINDOW as W, css } from '../motion/tokens';
-import { ICON_LETTER, ICON_LANTERN, ICON_MOTH, ICON_STAR, FLOURISH } from './icons';
+import { EASE, WAYS, WINDOW as W, css } from '../motion/tokens';
+import { ICON_LETTER, ICON_LANTERN, ICON_MOTH, ICON_STAR, FLOURISH, SAFE_SHIELD } from './icons';
 import type { RewardItem } from '../content/intro';
-import { LETTER, END_CARD, NAME_PROMPT, TITLE_SCREEN } from '../content/intro';
+import { INTRO_WAYS, LETTER, END_CARD, NAME_PROMPT, TITLE_SCREEN } from '../content/intro';
 import { DEFAULT_COMPANION, DEFAULT_NAME, chooseYou, cleanName } from '../core/you';
 import { mayMentionTherapist } from '../core/session';
 import { LanternWindow, lanternLayer } from './lantern-window';
@@ -16,10 +16,24 @@ const snd = (cue: string, opts?: Record<string, number>) => uiSounds.play?.(cue,
 
 const ui = () => document.getElementById('ui')!;
 
+/**
+ * `p`, unless the player leaves the intro first (`left`, the Safe Zone or Skip): then it never settles, so nothing that
+ * waits on it goes on. Every intro screen takes `left` and goes at once when it aborts.
+ */
+export function unlessLeft<T>(p: Promise<T>, left?: AbortSignal): Promise<T> {
+  if (!left) return p;
+  return new Promise<T>((resolve, reject) =>
+    p.then(
+      (v) => left.aborted || resolve(v),
+      (err) => left.aborted || reject(err),
+    ),
+  );
+}
+
 /* ---------------------------------------------------------------- title */
 
-export function showTitle(onGesture?: () => void): Promise<void> {
-  return new Promise((resolve) => {
+export function showTitle(onGesture?: () => void, left?: AbortSignal): Promise<void> {
+  return unlessLeft(new Promise((resolve) => {
     const root = el('div', 'ov title-screen');
     root.setAttribute('role', 'button');
     const label = matchMedia('(pointer: fine)').matches ? TITLE_SCREEN.promptMouse : TITLE_SCREEN.prompt;
@@ -85,7 +99,12 @@ export function showTitle(onGesture?: () => void): Promise<void> {
     // click a touch makes after it would land on whatever is under the finger (a name field, popping up the keyboard)
     root.addEventListener('touchend', (e) => e.preventDefault());
     if (params.capture) wait(0.6).then(go);
-  });
+    left?.addEventListener('abort', () => {
+      offPulse();
+      pulses.forEach((a) => a.cancel());
+      root.remove();
+    });
+  }), left);
 }
 
 /** Takes the auto-repeat of a held key until it is released, wherever focus goes meanwhile. */
@@ -108,7 +127,7 @@ function swallowRepeat(key: string) {
 /* ---------------------------------------------------------------- first-run names */
 
 /** Asks once, right after the title: the player's name and their companion's, both optional. Skip keeps the defaults. */
-export async function namePrompt(): Promise<void> {
+export async function namePrompt(left?: AbortSignal): Promise<void> {
   const field = (id: string, label: string, ph: string) =>
     `<label class="np-f" for="${id}"><span class="np-l">${label}</span><input id="${id}" class="np-in" type="text" maxlength="24" autocomplete="off" autocapitalize="words" spellcheck="false" enterkeyhint="next" placeholder="${ph}"></label>`;
   const html = `<p>${NAME_PROMPT.line}</p><div class="sw-custom np">${field('np-name', NAME_PROMPT.nameLabel, DEFAULT_NAME)}${field('np-comp', NAME_PROMPT.companionLabel, DEFAULT_COMPANION)}<p class="np-hint">${NAME_PROMPT.hint}</p></div>`;
@@ -144,14 +163,19 @@ export async function namePrompt(): Promise<void> {
     into.focus({ preventScroll: true });
   };
   window.addEventListener('keydown', onKey);
-  await opened;
-  const v = params.capture ? 'skip' : await w.waitForInput();
+  // left from here, the prompt goes at once and keeps nothing typed: the names stay unchosen
+  left?.addEventListener('abort', () => {
+    window.removeEventListener('keydown', onKey);
+    w.dismiss();
+  });
+  await unlessLeft(opened, left);
+  const v = params.capture ? 'skip' : await unlessLeft(w.waitForInput(), left);
   window.removeEventListener('keydown', onKey);
   const keep = v === 'go';
   chooseYou(keep ? cleanName(name.value) : '', keep ? cleanName(comp.value) : '', Date.now());
   name.blur();
   comp.blur();
-  await w.close();
+  await unlessLeft(w.close(), left);
 }
 
 /* ---------------------------------------------------------------- letterbox */
@@ -176,23 +200,45 @@ export class Letterbox {
   }
 }
 
-/* ---------------------------------------------------------------- skip */
+/* ---------------------------------------------------------------- Safe Zone and Skip */
 
-export function skipButton(onSkip: () => void) {
-  const b = el('button', 'ui-skip', 'Skip') as HTMLButtonElement;
-  b.type = 'button';
-  b.addEventListener('click', (e) => {
-    e.stopPropagation();
-    onSkip();
-  });
-  ui().append(b);
-  return () => b.remove();
+export type Way = 'safe' | 'skip';
+
+/**
+ * The Safe Zone and Skip, above every intro screen from the title to the end card. A press is the button's alone (no
+ * window or card under it moves on) and takes its way out at once, through `on`. For a moment after, taps land on
+ * nothing, and a held Enter's repeats go nowhere, so a double tap or a held key settles once. Returns the function
+ * that takes the two buttons away.
+ */
+export function introWays(on: (way: Way) => void) {
+  const bar = el('div', 'ui-ways');
+  const safe = el('button', 'ui-safe', `<svg viewBox="0 0 24 24" aria-hidden="true">${SAFE_SHIELD}</svg><span>${INTRO_WAYS.safe}</span>`) as HTMLButtonElement;
+  safe.setAttribute('aria-label', INTRO_WAYS.safeLabel);
+  const skip = el('button', 'ui-skip', INTRO_WAYS.skip) as HTMLButtonElement;
+  let taken = false;
+  for (const [b, way] of [[safe, 'safe'], [skip, 'skip']] as const) {
+    b.type = 'button';
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (taken) return;
+      taken = true;
+      const catcher = el('div', 'ui-ways-catch');
+      ui().append(catcher);
+      void after(WAYS.settleMs).then(() => catcher.remove());
+      on(way);
+    });
+  }
+  // Enter presses a button as it goes down
+  bar.addEventListener('keydown', (e) => e.key === 'Enter' && !e.repeat && swallowRepeat('Enter'));
+  bar.append(safe, skip);
+  ui().append(bar);
+  return () => bar.remove();
 }
 
 /* ---------------------------------------------------------------- AWAKEN word */
 
 /** Outline word slam: strokes draw on with a glint sweep, push toward camera, ghost exit (pacing W5, lengthened). */
-export async function awakenWord(text = 'AWAKEN', holdSec = 0.5) {
+export async function awakenWord(text = 'AWAKEN', holdSec = 0.5, until?: Promise<unknown>) {
   const root = el('div', 'awaken-word');
   const aw = el('div', 'aw');
   const w = el('div', 'w', text);
@@ -221,6 +267,8 @@ export async function awakenWord(text = 'AWAKEN', holdSec = 0.5) {
       { opacity: 0.5, transform: `scale(1.18) translateX(${dx * 2}%)`, offset: 0.82 },
       { opacity: 0, transform: `scale(1.26) translateX(${dx * 5}%)` },
     ], { duration: D, easing: 'ease-out' });
+  // the scene ending early (Skip, a lost context) takes the word with it
+  void until?.then(() => root.remove());
   await wait(D / 1000);
   root.remove();
 }
@@ -234,7 +282,8 @@ function still(frames: Keyframe[]): Keyframe[] {
   return [{ ...end, opacity: frames[0].opacity ?? end.opacity ?? 1 }, end];
 }
 
-function entrance() {
+/** A closing screen's entrance and exit. Left from (`left`), the screen goes at once, without a sound. */
+function entrance(root: HTMLElement, left?: AbortSignal) {
   let reduced = params.reduced;
   const anims: Animation[] = [];
   const due = new Set<() => void>();
@@ -248,6 +297,13 @@ function entrance() {
   const offMotion = onMotion(() => {
     reduced = params.reduced;
     if (reduced) finish();
+  });
+  left?.addEventListener('abort', () => {
+    due.clear();
+    off();
+    offMotion();
+    anims.forEach((a) => a.cancel());
+    root.remove();
   });
   return {
     get reduced() {
@@ -274,7 +330,9 @@ function entrance() {
     buttons(acts: HTMLElement, shown: Animation) {
       inertUntil(acts, finished(shown));
     },
-    async leave(root: HTMLElement, ms: number) {
+    /** `p`, unless the player leaves the intro first */
+    until: <T>(p: Promise<T>) => unlessLeft(p, left),
+    async leave(ms: number) {
       flush();
       off();
       offMotion();
@@ -282,7 +340,7 @@ function entrance() {
       const out = reduced ? W.reducedCloseMs : ms;
       animate(root, [{ opacity: 1 }, { opacity: 0 }], reduced ? { duration: out, easing: css(EASE.outCubic) } : { duration: out, easing: 'ease-in' });
       // page timers, like a window's close: the screen leaves on time however slowly the 3D scene behind it draws
-      await after(out);
+      await unlessLeft(after(out), left);
       root.remove();
     },
   };
@@ -296,7 +354,7 @@ const EMBLEM: Record<RewardItem['id'], () => string> = {
 };
 
 /** Gacha-style reveal: cards flip in one by one, rarity light first, then the item. Resolves with the action. */
-export async function rewardCards(items: RewardItem[], opts: { onCard?: (i: number) => void } = {}): Promise<'letter'> {
+export async function rewardCards(items: RewardItem[], opts: { onCard?: (i: number) => void; left?: AbortSignal } = {}): Promise<'letter'> {
   const root = el('div', 'ov interactive rw');
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-label', 'Rewards');
@@ -317,7 +375,7 @@ export async function rewardCards(items: RewardItem[], opts: { onCard?: (i: numb
   actions.append(btn);
   root.append(head, grid, actions);
   ui().append(root);
-  const e = entrance();
+  const e = entrance(root, opts.left);
   e.animate(root, [{ opacity: 0 }, { opacity: 1 }], { duration: 500, easing: 'ease-out' });
   e.animate(head, [{ opacity: 0, letterSpacing: '0.5em' }, { opacity: 1, letterSpacing: '0.22em' }], { duration: 700, easing: 'cubic-bezier(.16,1,.3,1)' });
   let at = 450;
@@ -337,11 +395,13 @@ export async function rewardCards(items: RewardItem[], opts: { onCard?: (i: numb
   });
   at += 300;
   e.buttons(btn, e.animate(btn, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 420, delay: at, easing: 'cubic-bezier(.16,1,.3,1)' }));
-  await new Promise<void>((resolve) => {
-    btn.addEventListener('click', () => resolve(), { once: true });
-    if (params.capture) wait(at / 1000 + 2.2).then(resolve);
-  });
-  await e.leave(root, 380);
+  await e.until(
+    new Promise<void>((resolve) => {
+      btn.addEventListener('click', () => resolve(), { once: true });
+      if (params.capture) wait(at / 1000 + 2.2).then(resolve);
+    }),
+  );
+  await e.leave(380);
   return 'letter';
 }
 
@@ -349,22 +409,20 @@ const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 
 /* ---------------------------------------------------------------- letter */
 
-export async function letterView(): Promise<void> {
-  // the letter mentions a therapist, so nothing else in the companion does this session
-  mayMentionTherapist();
+export async function letterView(left?: AbortSignal): Promise<void> {
   const wrap = el('div', 'ov interactive letter-wrap');
   const card = el('article', 'letter');
   card.setAttribute('aria-label', 'Welcome note');
   card.innerHTML = `
     <div class="curl l">${FLOURISH}</div><div class="curl r">${FLOURISH}</div>
     <h2>${LETTER.greeting}</h2>
-    ${LETTER.paragraphs.map((p) => `<p>${p}</p>`).join('')}
+    ${LETTER.paragraphs(mayMentionTherapist()).map((p) => `<p>${p}</p>`).join('')}
     <div class="sign">${LETTER.signoff}</div>
     <div class="sw-actions"><button type="button" class="sw-btn gold">Continue</button></div>`;
   wrap.append(card);
   ui().append(wrap);
   snd('letter_open');
-  const e = entrance();
+  const e = entrance(wrap, left);
   e.animate(wrap, [{ opacity: 0 }, { opacity: 1 }], { duration: 600, easing: 'ease-out' });
   e.animate(card, [{ opacity: 0, transform: 'translateY(24px) scale(.985)', filter: 'brightness(1.6)' }, { opacity: 1, transform: 'translateY(0) scale(1)', filter: 'brightness(1)' }], {
     duration: 900,
@@ -377,16 +435,18 @@ export async function letterView(): Promise<void> {
     if (p === acts) e.buttons(acts, a);
   });
   const btn = card.querySelector<HTMLButtonElement>('button')!;
-  await new Promise<void>((resolve) => {
-    btn.addEventListener('click', () => resolve(), { once: true });
-    if (params.capture) wait(9).then(resolve);
-  });
-  await e.leave(wrap, 500);
+  await e.until(
+    new Promise<void>((resolve) => {
+      btn.addEventListener('click', () => resolve(), { once: true });
+      if (params.capture) wait(9).then(resolve);
+    }),
+  );
+  await e.leave(500);
 }
 
 /* ---------------------------------------------------------------- end card */
 
-export async function endCard(): Promise<'replay' | 'enter'> {
+export async function endCard(left?: AbortSignal): Promise<'replay' | 'enter'> {
   const root = el('div', 'ov endcard');
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-label', END_CARD.title);
@@ -408,7 +468,7 @@ export async function endCard(): Promise<'replay' | 'enter'> {
   const acts = stage.querySelector<HTMLElement>('.ec-actions')!;
   const r1 = stage.querySelector<SVGCircleElement>('.r1')!;
   const curls = stage.querySelector<HTMLElement>('.ec-curls')!;
-  const e = entrance();
+  const e = entrance(root, left);
   e.animate(root, [{ opacity: 0 }, { opacity: 1 }], { duration: 600, easing: 'ease-out' });
   // soft slam (no white blur frame), then a slow exponential settle
   e.animate(title, [
@@ -432,12 +492,18 @@ export async function endCard(): Promise<'replay' | 'enter'> {
   };
   sway();
   const offSway = onMotion(sway);
-  const v = await new Promise<'replay' | 'enter'>((resolve) => {
-    acts.querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => resolve(b.dataset.v as 'replay' | 'enter'), { once: true }));
-    if (params.capture) wait(6).then(() => resolve('enter'));
+  left?.addEventListener('abort', () => {
+    offSway();
+    rest();
   });
+  const v = await e.until(
+    new Promise<'replay' | 'enter'>((resolve) => {
+      acts.querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => resolve(b.dataset.v as 'replay' | 'enter'), { once: true }));
+      if (params.capture) wait(6).then(() => resolve('enter'));
+    }),
+  );
   offSway();
-  await e.leave(root, 600);
+  await e.leave(600);
   // the drift ends with the end card: endless, it would run on in the removed stage
   rest();
   return v;

@@ -82,35 +82,112 @@
   bottom: 0;
 }
 
-/* ---- skip ---- */
-.ui-skip {
+/* ---- Safe Zone and Skip: on every intro screen, inside the safe area, on the speaker's row ---- */
+.ui-ways {
   position: fixed;
-  top: calc(14px + var(--safe-top));
-  right: 14px;
+  top: calc(12px + var(--safe-top));
+  right: calc(14px + var(--safe-right));
   z-index: 60;
-  font: 500 12px/1 var(--font-ui);
-  letter-spacing: 0.18em;
-  padding: 10px 14px 10px 16px;
-  color: rgba(196, 221, 243, 0.7);
-  background: rgba(5, 17, 31, 0.5);
-  border: 1px solid rgba(125, 150, 197, 0.35);
+  display: flex;
+  gap: 16px;
+}
+.ui-safe,
+.ui-skip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 13px;
+  font: 500 14px/1 var(--font-ui);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
   cursor: pointer;
   pointer-events: auto;
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition:
+    color 140ms ease-out,
+    border-color 140ms ease-out;
 }
+/* a tap 46 px tall on each, whatever the row's height, and 16 px wider; the gap keeps the two apart */
+.ui-safe::after,
 .ui-skip::after {
   content: '';
   position: absolute;
-  inset: -7px -8px;
+  top: calc(50% - 23px);
+  bottom: calc(50% - 23px);
+  left: -8px;
+  right: -8px;
 }
+.ui-safe {
+  padding-left: 10px;
+  color: #d8ecfb;
+  background: rgba(10, 26, 46, 0.72);
+  border: 1px solid rgba(137, 190, 230, 0.5);
+}
+.ui-safe svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: #a9dcff;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ui-skip {
+  color: rgba(196, 221, 243, 0.78);
+  background: rgba(5, 17, 31, 0.6);
+  border: 1px solid rgba(125, 150, 197, 0.35);
+}
+.ui-safe:hover,
+.ui-safe:focus-visible,
 .ui-skip:hover,
 .ui-skip:focus-visible {
   color: var(--ice);
   border-color: rgba(168, 221, 255, 0.8);
   outline: none;
 }
+.ui-safe:focus-visible,
 .ui-skip:focus-visible {
   box-shadow: 0 0 0 1px #a8dcff;
+}
+/* for a moment after one is pressed, taps land here */
+.ui-ways-catch {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  pointer-events: auto;
+}
+/* while they are up, the intro's windows, rewards and letter scroll only below them, so nothing ever passes behind
+   them (their backdrops still cover the screen), and the end card starts below them */
+.ui-ways ~ .sw-layer,
+.ui-ways ~ .rw,
+.ui-ways ~ .letter-wrap {
+  top: calc(var(--safe-top) + 46px);
+  padding-top: 12px;
+}
+.ui-ways ~ .endcard {
+  padding-top: calc(var(--safe-top) + 58px);
+}
+/* a phone on its side with little height: a slimmer row, so a window, with room for its top bar, still fits under it */
+@media (max-height: 400px) {
+  .ui-ways {
+    top: calc(8px + var(--safe-top));
+  }
+  .ui-safe,
+  .ui-skip {
+    height: 28px;
+  }
+  .ui-ways ~ .sw-layer,
+  .ui-ways ~ .rw,
+  .ui-ways ~ .letter-wrap {
+    top: calc(var(--safe-top) + 36px);
+    padding-top: 11px;
+  }
+  .ui-ways ~ .endcard {
+    padding-top: calc(var(--safe-top) + 46px);
+  }
 }
 
 /* ---- AWAKEN ---- */
@@ -160,11 +237,21 @@
 /* ---- reward cards ---- */
 .rw {
   display: grid;
-  align-content: center;
+  /* taller than the screen, it starts at the top and scrolls to Read the note */
+  align-content: safe center;
   justify-items: center;
   gap: clamp(18px, 4vw, 30px);
   padding: calc(var(--safe-top) + 24px) 16px calc(var(--safe-bottom) + 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   z-index: 30;
+}
+/* the backdrop covers the whole screen, wherever the cards scroll */
+.rw::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
   background: radial-gradient(70% 55% at 50% 50%, rgba(201, 164, 92, 0.1), rgba(7, 8, 15, 0.72) 70%);
 }
 .rw-head {
@@ -285,9 +372,17 @@
   transform: translateX(-100%);
   pointer-events: none;
 }
-@media (max-width: 720px) and (max-height: 640px), (max-width: 340px) {
+/* small phones and phones held sideways: shorter cards, so all four and Read the note fit under the Safe Zone and Skip */
+@media (max-width: 720px) and (max-height: 640px), (max-width: 340px), (max-height: 480px) and (min-width: 721px) {
+  .rw {
+    gap: 10px;
+  }
+  .rw-card {
+    aspect-ratio: auto;
+    padding: 12px 8% 14px;
+  }
   .rw-card .em {
-    width: 48%;
+    width: 36%;
   }
 }
 .rw-actions {
@@ -301,8 +396,15 @@
   place-items: center;
   z-index: 32;
   padding: calc(var(--safe-top) + 18px) 14px calc(var(--safe-bottom) + 18px);
-  background: rgba(4, 5, 10, 0.62);
   overflow-y: auto;
+}
+/* the backdrop covers the whole screen, wherever the letter scrolls */
+.letter-wrap::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: rgba(4, 5, 10, 0.62);
 }
 .letter {
   position: relative;

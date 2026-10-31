@@ -22,7 +22,13 @@ export function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Attrs = 
 
 /** Typographic quotes and apostrophes for display copy, with {name} and {companion} filled in. */
 export function typo(s: string) {
-  return fillYou(s)
+  return quotes(fillYou(s));
+}
+
+/** Typographic quotes and apostrophes alone, for copy whose names are filled in already (the intro's): a name is never
+ *  read as a token, so a player named "{companion}" stays that. */
+export function quotes(s: string) {
+  return s
     .replace(/(^|[\s(\[—-])"/g, '$1“')
     .replace(/"/g, '”')
     .replace(/(\w)'(\w)/g, '$1’$2')

@@ -191,6 +191,10 @@ export function volumeSliders(ctrl: VolumeCtrl, o: { compact?: boolean; hum?: bo
 
 export type VolumeButton = HTMLElement & { close(focus?: boolean): void; dispose(): void };
 
+/** Help is one tap with the popover open too: a tap on the Safe Zone, Talk to someone now, a number to call or text, or the
+ *  intro's Safe Zone and Skip closes the popover and lands. */
+const ONE_TAP = '.dq-safe, .dq-sz-talk, a[href^="tel:"], a[href^="sms:"], .ui-ways button';
+
 /** The speaker button and its Lantern-window popover. */
 export function volumeButton(ctrl: VolumeCtrl, o: { placement: 'cutscene' | 'top'; align: 'left' | 'right' }): VolumeButton {
   const n = ++uid;
@@ -239,10 +243,11 @@ export function volumeButton(ctrl: VolumeCtrl, o: { placement: 'cutscene' | 'top
   };
   const onOutside = (e: PointerEvent) => {
     if (!open || root.contains(e.target as Node)) return;
-    // the tap that dismisses the popover is spent on that: it never continues a window or charges the chest
+    close(false);
+    if ((e.target as Element).closest(ONE_TAP)) return;
+    // any other tap that dismisses the popover is spent on that: it never continues a window or charges the chest
     e.stopPropagation();
     swallowId = e.pointerId;
-    close(false);
   };
   const onUpCapture = (e: PointerEvent) => {
     if (swallowId === null || e.pointerId !== swallowId) return;

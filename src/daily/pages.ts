@@ -1,6 +1,7 @@
 import { LOADOUT, LOADOUT_COPY, MODULES, MODULE_ORDER, SAFE, SKILL, SKILLS, type Skill } from '../content/dbt';
 import { LABEL_SECONDS, LIBRARY_COPY, NEEDS, TIMES, TOPICS } from '../content/skill-library';
 import { CRISIS_CHECKED } from '../content/crisis-lines';
+import { LETTER, REWARDS } from '../content/intro';
 import { ABOUT, CLEAR_COPY, CRYSTAL_COPY, KEEP_COPY, PEEK_COPY } from '../content/daily-lines';
 import type { App, Route, ScreenOut, Visit } from './app';
 import { glyph, icon, mothSVG } from './art';
@@ -10,7 +11,7 @@ import { allyCard, allyName, cardOf, favFirst, focusBack, refill } from './artro
 import { artStore } from './artstore';
 import { storyStore } from './storystore';
 import { addDays, cleanName, dayKey, fieldKey, fieldTimes, isSkillId, ROW_CAP, uid, type DiaryEntry, type State, type Store } from './store';
-import { btn, copyText, field, h, md, p, panel, place, redrawn, segmented, shareOrSave, toggle, typo } from './ui';
+import { btn, copyText, field, h, md, p, panel, place, quotes, redrawn, segmented, shareOrSave, toggle, typo } from './ui';
 import type { KeepStatus } from '../pwa/register';
 import { volumeSliders } from '../ui/volume';
 import { STEALTH, STEALTH_LINES } from '../content/stealth-lines';
@@ -1087,6 +1088,14 @@ function clearedScreen(): ScreenOut {
   return { el, title: 'Cleared', mode: 'hub', leave: onClearStatus(render) };
 }
 
+/** The intro's welcome note and what came with it, the same for a player who skipped the intro as for one who watched.
+ *  The intro's copy has its names filled in. */
+function welcomeNote(app: App) {
+  const note = [LETTER.greeting, ...LETTER.paragraphs(mayMentionTherapist())].map((l) => `<p>${quotes(l)}</p>`).join('');
+  const gifts = REWARDS.filter((r) => r.id !== 'letter').map((r) => `<p class="sys"><b>${r.name}.</b> ${quotes(r.desc)}</p>`).join('');
+  return app.window({ kind: 'notification', title: LETTER.title, html: `${note}<p class="sys">${LETTER.signoff}</p>${gifts}`, tapToContinue: true }, true);
+}
+
 export function settingsScreen(app: App): ScreenOut {
   if (cleared()) return clearedScreen();
   const st = app.store;
@@ -1479,7 +1488,7 @@ export function settingsScreen(app: App): ScreenOut {
       panel(
         { title: 'Intro', ic: icon('replay') },
         p('The cutscene, the shadows and the chest. As many times as you like.', 'dq-text'),
-        h('div', { class: 'dq-actions' }, btn('Replay cutscene', () => app.opts.onReplay(), { kind: 'quiet', ic: 'replay' })),
+        h('div', { class: 'dq-actions' }, btn('Replay cutscene', () => app.opts.onReplay(), { kind: 'quiet', ic: 'replay' }), btn(LETTER.title, () => void welcomeNote(app), { kind: 'quiet', ic: 'book' })),
       ),
       panel(
         { title: 'Your data', ic: icon('export') },

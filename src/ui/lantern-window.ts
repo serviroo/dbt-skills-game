@@ -51,14 +51,15 @@ const CHEVRON = `<svg viewBox="0 0 14 9"><path d="M1 1.5l6 6 6-6" fill="none" st
 
 let texCache: { plasma: string; plasmaB: string; scratch: string } | null = null;
 
-/** Procedural textures, drawn once: boiling plasma strips and the panel's diagonal scratch streaks. */
+/** Procedural textures, drawn once: boiling plasma strips and the panel's diagonal scratch streaks. Drawn and read on the
+ *  CPU: reading a GPU canvas waits for all the GPU has queued, the 3D scene's frames too. */
 function textures() {
   if (texCache) return texCache;
   const strip = (w: number, seed: number, blobs: number) => {
     const c = document.createElement('canvas');
     c.width = w;
     c.height = 16;
-    const g = c.getContext('2d')!;
+    const g = c.getContext('2d', { willReadFrequently: true })!;
     let s = seed;
     const r = () => ((s = (s * 16807) % 2147483647) / 2147483647);
     for (let i = 0; i < blobs; i++) {
@@ -85,7 +86,7 @@ function textures() {
   const scratch = (() => {
     const c = document.createElement('canvas');
     c.width = c.height = 512;
-    const g = c.getContext('2d')!;
+    const g = c.getContext('2d', { willReadFrequently: true })!;
     let s = 7;
     const r = () => ((s = (s * 16807) % 2147483647) / 2147483647);
     g.lineCap = 'round';
@@ -645,9 +646,10 @@ export function lanternLayer() {
   return layer;
 }
 
-/** Convenience: open, wait for input, close. */
-export async function lanternMessage(spec: WindowSpec, opts: { hold?: number; timeout?: number } = {}) {
+/** Convenience: open, wait for input, close. `left` aborting (the player left the intro) takes the window away at once. */
+export async function lanternMessage(spec: WindowSpec, opts: { hold?: number; timeout?: number; left?: AbortSignal } = {}) {
   const w = new LanternWindow(lanternLayer(), spec);
+  opts.left?.addEventListener('abort', () => w.dismiss());
   await w.open();
   let v = 'auto';
   if (spec.tapToContinue || spec.actions?.length) v = await w.waitForInput(opts.timeout ?? 0);

@@ -4,6 +4,7 @@
  * including rasterised into a texture via an <img> data URL.
  */
 import type { ModuleId } from '../content/dbt';
+import { SAFE_SHIELD } from '../ui/icons';
 
 type P = [number, number];
 let svgN = 0;
@@ -151,7 +152,7 @@ const ICON: Record<string, string> = {
   back: '<path d="M14.5 5.5L8 12l6.5 6.5"/>',
   close: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
   chev: '<path d="M9.5 5.5L16 12l-6.5 6.5"/>',
-  safe: '<path d="M12 3.2l7 2.9v5.3c0 4.4-2.9 7.9-7 9.6-4.1-1.7-7-5.2-7-9.6V6.1z"/><path d="M8.6 12.4q1.7-1.6 3.4 0t3.4 0"/>',
+  safe: SAFE_SHIELD,
   rest: '<path d="M18.8 14.6A7.6 7.6 0 1 1 9.4 5.2a6.2 6.2 0 0 0 9.4 9.4z"/>',
   shadows: '<rect x="7.5" y="5" width="11" height="15" rx="1"/><path d="M5 7.5v12.2c0 .7.5 1.3 1.3 1.3h9.2"/>',
   diary: '<rect x="5" y="4.5" width="14" height="15" rx="1"/><path d="M5 9h14M9.7 9v10.5M14.3 9v10.5M5 14.2h14"/>',

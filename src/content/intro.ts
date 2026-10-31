@@ -82,16 +82,18 @@ export const REWARDS: RewardItem[] = [
   { id: 'charm', rarity: 'rare', name: 'Paper star', kind: 'Charm', desc: 'Folded for luck. Keeps bad days at a distance.' },
 ];
 
-/** The welcome note at the end of the intro. */
+/** The welcome note at the end of the intro, and in Settings any time after. */
 export const LETTER = {
+  title: 'Welcome note',
   get greeting() {
     return fillYou('Welcome, {name}.');
   },
-  get paragraphs() {
+  /** `therapist`: whether the note may mention a therapist (DESIGN.md principle 7: once a session at most). */
+  paragraphs(therapist: boolean) {
     return [
       `This is a quiet corner for practising DBT skills: one small skill a day, a calm Safe Zone for hard moments, and a one-tap check-in.`,
       `Nothing here leaves your device, nothing keeps score, and you can't do it wrong. Open it on loud days, slow days, or never.`,
-      `It's practice, not therapy. If you have a therapist, the diary card is yours to share with them if you want.`,
+      `It's practice, not therapy.${therapist ? ' If you have a therapist, the diary card is yours to share with them if you want.' : ''}`,
       fillYou(`{companion} will keep watch, when it's awake.`),
     ];
   },
@@ -103,6 +105,14 @@ export const END_CARD = {
     return fillYou('Welcome, {name}');
   },
   line: `Status: already strong.`,
+};
+
+/** On every intro screen, from the title to the end card. The Safe Zone is named plainly (DESIGN.md principle 6). */
+export const INTRO_WAYS = {
+  safe: 'Safe Zone',
+  /** what a screen reader says for it, as in the companion */
+  safeLabel: 'Safe Zone, help right now',
+  skip: 'Skip intro',
 };
 
 export const TITLE_SCREEN = {

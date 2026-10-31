@@ -8,7 +8,7 @@ import { BED_NAMES, startBed, startCharge, type BedHandle, type BedName, type Ch
 import { Music, SECTIONS, type Section, type SectionOpts } from './music';
 import { clipCurve, makeCrackle, makeIR, makeNoise, dB, type Ctx } from './dsp';
 import { holdAt, taper } from './param';
-import { Voice, type Lib } from './voice';
+import { Voice, stoppedBy, type Lib } from './voice';
 
 export type { BedHandle, BedName, ChargeHandle, Section, SectionOpts };
 export { BED_NAMES, SECTIONS };
@@ -69,6 +69,11 @@ const UI_DUCK = new Set<string>(['ui_open', 'reward_chime', 'level_resolve', 'le
 const LIMIT = { threshold: -5, knee: 2, ratio: 16, attack: 0.002, release: 0.14 };
 const LIMIT_MAKEUP_DB = 2.47;
 
+/** Effects' and Music's sends into the echo, to the room and the hall, each at its level. */
+type Sends = { sfxRoom: GainNode; sfxHall: GainNode; musRoom: GainNode; musHall: GainNode };
+/** A room and hall echo, each behind its own return level, and the sends that feed it. */
+type Echo = { sends: Sends; room: ConvolverNode; hall: ConvolverNode; out: GainNode[] };
+
 export class AudioEngine {
   readonly ctx: Ctx;
   readonly live: boolean;
@@ -81,16 +86,16 @@ export class AudioEngine {
   /** Their levels: Effects (cues, beds, charge, their reverb) and Music (score and its reverb). */
   private sfxUser: GainNode;
   private bedUser: GainNode;
-  private sfxRoomIn: GainNode;
-  private sfxHallIn: GainNode;
   private musUser: GainNode;
-  private musRoomIn: GainNode;
-  private musHallIn: GainNode;
+  /** Effects' and Music's levels as setUser last set them, and the time constant it moves them by: sends made later go
+   *  there too. */
+  private sendLevels: { sfx: number; mus: number; tau: number };
   /** The Safe Zone's gate: the last stage before the speaker level, so the score, effects, beds and echo all pass it. */
   private safe: GainNode;
   private isQuiet = false;
-  /** The shared room and hall echo, each behind its own return level; leaving the Safe Zone swaps in empty ones. */
-  private echo!: { room: ConvolverNode; hall: ConvolverNode; out: GainNode[] };
+  /** The shared room and hall echo and its sends; leaving the Safe Zone swaps in an empty echo on the same sends, and
+   *  stopAll an empty echo with sends of its own. */
+  private echo: Echo;
   private userMaster = 1;
   private bedBus: GainNode;
   private hushBeds: GainNode;
@@ -168,6 +173,7 @@ export class AudioEngine {
     this.duckG.connect(this.yieldG).connect(pre);
     const sfxLevel = taper(opts.user?.sfx ?? 1);
     const musLevel = taper(opts.user?.music ?? 1);
+    this.sendLevels = { sfx: sfxLevel, mus: musLevel, tau: 0.003 };
     const level = (v: number) => {
       const g = C.createGain();
       g.gain.value = v;
@@ -175,11 +181,7 @@ export class AudioEngine {
     };
     this.sfxUser = level(sfxLevel);
     this.bedUser = level(sfxLevel);
-    this.sfxRoomIn = level(sfxLevel);
-    this.sfxHallIn = level(sfxLevel);
     this.musUser = level(musLevel);
-    this.musRoomIn = level(musLevel);
-    this.musHallIn = level(musLevel);
     this.sfx = C.createGain();
     this.sfx.connect(this.sfxUser).connect(pre);
 
@@ -187,7 +189,8 @@ export class AudioEngine {
     this.hushHall = C.createGain();
     this.hushRoom.connect(pre);
     this.hushHall.connect(pre);
-    this.freshEcho(
+    this.echo = this.makeEcho(
+      this.makeSends(),
       makeIR(C, this.seedN + 1, { rt60: 0.9, length: 1.1, preDelay: 0.008, damp0: 11000, damp1: 3500, early: 0.03, onset: 0.004 }),
       makeIR(C, this.seedN + 2, { rt60: 3.2, length: 3.6, preDelay: 0.024, damp0: 12000, damp1: 2000, early: 0.07, onset: 0.03 }),
     );
@@ -227,8 +230,8 @@ export class AudioEngine {
       brown: makeNoise(C, this.seedN + 13, 4, 'brown'),
       crackle: makeCrackle(C, this.seedN + 14, 0.14, 16),
       crackleLong: makeCrackle(C, this.seedN + 15, 3.7, 150),
-      room: this.sfxRoomIn,
-      hall: this.sfxHallIn,
+      room: this.echo.sends.sfxRoom,
+      hall: this.echo.sends.sfxHall,
       live: this.live,
       track: track
         ? (a, b) => {
@@ -238,7 +241,7 @@ export class AudioEngine {
           }
         : () => null,
     };
-    this.libMusic = { ...this.lib, room: this.musRoomIn, hall: this.musHallIn };
+    this.libMusic = { ...this.lib, room: this.echo.sends.musRoom, hall: this.echo.sends.musHall };
     this.music = new Music(
       {
         lib: this.libMusic,
@@ -370,9 +373,10 @@ export class AudioEngine {
     this.isMuted = !!l.muted;
     this.volume.gain.setTargetAtTime(this.masterTarget(), t, tau);
     const m = taper(l.music);
-    for (const g of [this.musUser, this.musRoomIn, this.musHallIn]) g.gain.setTargetAtTime(m, t, tau);
+    for (const g of [this.musUser, this.echo.sends.musRoom, this.echo.sends.musHall]) g.gain.setTargetAtTime(m, t, tau);
     const s = taper(l.sfx);
-    for (const g of [this.sfxUser, this.bedUser, this.sfxRoomIn, this.sfxHallIn]) g.gain.setTargetAtTime(s, t, tau);
+    this.sendLevels = { sfx: s, mus: m, tau };
+    for (const g of [this.sfxUser, this.bedUser, this.echo.sends.sfxRoom, this.echo.sends.sfxHall]) g.gain.setTargetAtTime(s, t, tau);
   }
 
   /** Current output gains (QA): master after scene level and mute, the Music / Effects levels, and the Safe Zone's gate. */
@@ -544,7 +548,11 @@ export class AudioEngine {
    */
   quiet(on: boolean, sec: number, at = this.ctx.currentTime) {
     this.isQuiet = on;
-    if (!on) this.freshEcho(this.echo.room.buffer!, this.echo.hall.buffer!);
+    if (!on) {
+      const old = this.echo;
+      this.echo = this.makeEcho(old.sends, old.room.buffer!, old.hall.buffer!);
+      this.dropEcho(old);
+    }
     for (const p of on ? [this.safe.gain, ...this.echo.out.map((g) => g.gain)] : [this.safe.gain]) {
       holdAt(p, at);
       if (on) p.linearRampToValueAtTime(0, at + sec);
@@ -558,27 +566,41 @@ export class AudioEngine {
     this.charge?.stop(at, sec);
   }
 
-  /** Wires an empty room and hall echo with these responses in place of the current one, which is dropped with its tail. */
-  private freshEcho(roomIR: AudioBuffer, hallIR: AudioBuffer) {
-    const old = this.echo;
-    const make = (ir: AudioBuffer, sends: GainNode[], hush: GainNode, prev?: ConvolverNode) => {
+  /** Effects' and Music's sends into an echo, at their levels; made in place of `from`, they start where those are and go
+   *  on to where setUser last sent them, so a level still on its way gets there in the new sends too. */
+  private makeSends(from?: Sends): Sends {
+    const { sfx, mus, tau } = this.sendLevels;
+    const level = (to: number, was?: GainNode) => {
+      const g = this.ctx.createGain();
+      g.gain.value = was?.gain.value ?? to;
+      if (was) g.gain.setTargetAtTime(to, this.ctx.currentTime, tau);
+      return g;
+    };
+    return { sfxRoom: level(sfx, from?.sfxRoom), sfxHall: level(sfx, from?.sfxHall), musRoom: level(mus, from?.musRoom), musHall: level(mus, from?.musHall) };
+  }
+
+  /** An empty room and hall echo with these responses, fed by `sends`. */
+  private makeEcho(sends: Sends, roomIR: AudioBuffer, hallIR: AudioBuffer): Echo {
+    const make = (ir: AudioBuffer, from: GainNode[], hush: GainNode) => {
       const c = this.ctx.createConvolver();
       c.normalize = false;
       c.buffer = ir;
       const out = this.ctx.createGain();
-      for (const s of sends) {
-        if (prev) s.disconnect(prev);
-        s.connect(c);
-      }
+      for (const g of from) g.connect(c);
       c.connect(out).connect(hush);
       return { c, out };
     };
-    const room = make(roomIR, [this.sfxRoomIn, this.musRoomIn], this.hushRoom, old?.room);
-    const hall = make(hallIR, [this.sfxHallIn, this.musHallIn], this.hushHall, old?.hall);
-    this.echo = { room: room.c, hall: hall.c, out: [room.out, hall.out] };
-    if (!old) return;
-    old.room.disconnect();
-    old.hall.disconnect();
+    const room = make(roomIR, [sends.sfxRoom, sends.musRoom], this.hushRoom);
+    const hall = make(hallIR, [sends.sfxHall, sends.musHall], this.hushHall);
+    return { sends, room: room.c, hall: hall.c, out: [room.out, hall.out] };
+  }
+
+  /** Drops an echo another has replaced, with its tail: its sends no longer feed it (the new one may share them). */
+  private dropEcho(old: Echo) {
+    const { sends: s, room, hall } = old;
+    for (const [from, to] of [[s.sfxRoom, room], [s.musRoom, room], [s.sfxHall, hall], [s.musHall, hall]] as const) from.disconnect(to);
+    room.disconnect();
+    hall.disconnect();
     for (const g of old.out) g.disconnect();
   }
 
@@ -588,7 +610,9 @@ export class AudioEngine {
     this.duckG.gain.setTargetAtTime(dB(db), at, Math.max(0.003, ramp / 4));
   }
 
-  /** Stop beds, charge and score (e.g. on replay or leaving the cutscene). */
+  /** Stop every cue still sounding, the beds, charge and score, and the echo's tail with them (e.g. on replay or leaving
+   *  the cutscene): what plays next starts in an empty echo. Under the Safe Zone's quiet the echo is closed already, and
+   *  leaving the quiet brings the empty one (see quiet). */
   stopAll(fade = 0.4, at = this.ctx.currentTime) {
     for (const v of this.active) v.stop(at, fade);
     this.active.clear();
@@ -596,6 +620,28 @@ export class AudioEngine {
     this.beds.clear();
     this.charge?.stop(at, fade);
     this.music.stop(fade, at);
+    if (this.isQuiet) return;
+    // what plays from here on gets an empty echo with sends of its own at once. What was stopped keeps the old one, whose
+    // return closes as they fade, until they are silent and it is dropped, timed on the audio clock, which stands still
+    // while the page is hidden: none of their fade rings on, in the old echo or the new
+    const old = this.echo;
+    for (const g of old.out) {
+      holdAt(g.gain, at);
+      g.gain.linearRampToValueAtTime(0, at + fade);
+    }
+    const sends = this.makeSends(old.sends);
+    this.echo = this.makeEcho(sends, old.room.buffer!, old.hall.buffer!);
+    Object.assign(this.lib, { room: sends.sfxRoom, hall: sends.sfxHall });
+    Object.assign(this.libMusic, { room: sends.musRoom, hall: sends.musHall });
+    const silent = this.ctx.createConstantSource();
+    silent.offset.value = 0;
+    silent.connect(this.ctx.destination);
+    silent.onended = () => {
+      silent.disconnect();
+      this.dropEcho(old);
+    };
+    silent.start(at);
+    silent.stop(stoppedBy(at, fade));
   }
 
   /** Stop everything and restore the score controls (level, low-pass, lift, duck, hush) for a clean replay. */

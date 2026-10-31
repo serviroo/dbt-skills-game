@@ -1,8 +1,8 @@
 # The Lantern: a DBT skills game
 
 A small, calm game for practising DBT (Dialectical Behavior Therapy) skills. A Gate opens, the Lantern chooses you as
-its Wanderer, and a short 3D intro plays. After that it becomes a quiet daily companion you can install on your phone's
-Home Screen.
+its Wanderer, and a short 3D intro plays, with Skip and the Safe Zone on every screen of it. After that it becomes a
+quiet daily companion you can install on your phone's Home Screen.
 
 You can't fail at it. There are no streaks, no penalties and no "you missed a day" counts. XP only goes up, and coming
 back after a long break is always fine.
