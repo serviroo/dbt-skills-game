@@ -62,6 +62,10 @@ export const WINDOW = {
   reducedCloseMs: 180,
 } as const;
 
+/** The intro's Safe Zone and Skip: taps land on nothing this long after one is pressed, as under a closing window in the
+ *  companion, so the second tap of a double tap never presses what opens in its place. */
+export const WAYS = { settleMs: 450 } as const;
+
 /** A skill timer's buzz, in ms on and off: one short, gentle pulse as it starts, a soft double pulse as it ends. */
 export const BUZZ = {
   start: [40],

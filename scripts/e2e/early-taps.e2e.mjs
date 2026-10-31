@@ -37,7 +37,7 @@ export const scenarios = {
     const title = page.locator('.title-screen');
     await title.waitFor({ timeout: 30000 });
     await title.click();
-    await page.getByRole('button', { name: 'Skip' }).click({ timeout: 15000 });
+    await page.getByRole('button', { name: 'Skip', exact: true }).click({ timeout: 15000 });
     const reload = page.getByRole('button', { name: 'Reload' });
     await reload.waitFor({ timeout: 20000 });
     const reloaded = page.waitForEvent('load', { timeout: 10000 }).then(() => true, () => false);

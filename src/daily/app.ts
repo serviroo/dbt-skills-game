@@ -107,6 +107,8 @@ const buzzLeft = (pattern: readonly number[], ms: number) => {
 
 export interface DailyOpts {
   onReplay(): void;
+  /** The player asked for help in the intro: the companion opens on the Safe Zone, with Home's entry behind it. */
+  help?: boolean;
   sound?: { play(cue: string): void; setMuted?(muted: boolean): void; quiet?(on: boolean): void };
   /** Their levels (the speaker control). When present it owns mute; the old Sound switch goes away. */
   volume?: VolumeCtrl;
@@ -337,10 +339,14 @@ export class App {
   /**
    * Opening is always quiet: Home, no window, no chime. The daily gift waits in the chest on Home. Only the very
    * first open ever gets one short, silent welcome window. Rank-ups wait until the player moves around the app.
+   * Opened for help, it is the Safe Zone alone: the day, its visit and any welcome open as the player leaves (see show).
    */
   start() {
-    this.store.openDay();
-    this.lastDay = this.store.today();
+    const help = !!this.opts.help;
+    if (!help) {
+      this.store.openDay();
+      this.lastDay = this.store.today();
+    }
     // Home is always the companion's first history entry. Opened again on a later one (a reload, the intro replayed),
     // it goes back to that first entry: the page opens on Home and nothing is credited again.
     const s: unknown = history.state;
@@ -353,6 +359,7 @@ export class App {
       }
     }
     this.write('replace', HOME);
+    if (help) return this.show({ name: 'safe' }, { again: false, key: this.write('push', { dq: 1, i: 1, key: this.newKey(), route: { name: 'safe' } }).key });
     this.greeting = true;
     this.go({ name: 'hub' }, { replace: true });
     this.greeting = false;
@@ -370,10 +377,11 @@ export class App {
   }
 
   private lastDay = '';
-  /** Counts the new day's visit when the day has turned since the companion last looked. True when it had. */
+  /** Counts the new day's visit when the day has turned since the companion last looked (or it has not looked yet,
+   *  opened on the Safe Zone). True when it had. */
   private turnDay() {
     const today = this.store.today();
-    const turned = !!this.lastDay && this.lastDay !== today;
+    const turned = this.lastDay !== today;
     if (turned) this.store.openDay();
     this.lastDay = today;
     return turned;
@@ -607,7 +615,6 @@ export class App {
       return HOME.key;
     }
     if (o.replace && o.quiet && route.name === this.route.name) return this.visitKey;
-    const fresh = () => `v${Date.now().toString(36)}${++this.keyN}`;
     // what is open over the screen goes first, so the next screen takes its entry instead of stacking past it
     if (this.sheets.length) {
       const under = this.sheets[0].i - 1;
@@ -616,12 +623,12 @@ export class App {
     }
     const first = this.firstOfVisit();
     if (ROOMS.has(route.name)) {
-      if (route.name === this.route.name && !o.replace) return same(route, this.route) ? this.visitKey : this.write('replace', { dq: 1, i: this.at, key: fresh(), route }).key;
+      if (route.name === this.route.name && !o.replace) return same(route, this.route) ? this.visitKey : this.write('replace', { dq: 1, i: this.at, key: this.newKey(), route }).key;
       // the Safe Zone is never gone back to: it always comes right after the screen it was opened from, so one Back returns there
       for (let j = route.name === 'safe' ? 0 : first - 1; j > 0; j--) {
         const e = this.trail[j];
         if (!e || e.sheet || e.route.name !== route.name) continue;
-        const to = same(route, e.route) ? e : { ...e, key: fresh(), route, place: undefined };
+        const to = same(route, e.route) ? e : { ...e, key: this.newKey(), route, place: undefined };
         // the visit it replaces leaves history too, so Forward can't open it again (a removed drawing, a finished skill)
         if (o.replace) {
           this.travel(j - 1);
@@ -633,7 +640,11 @@ export class App {
     }
     // a new visit in place of this one (Practise again, a skill that leads to another) drops this visit's places too
     if (o.replace && first > 0) this.travel(first - 1);
-    return this.write('push', { dq: 1, i: this.at + 1, key: fresh(), route }).key;
+    return this.write('push', { dq: 1, i: this.at + 1, key: this.newKey(), route }).key;
+  }
+
+  private newKey() {
+    return `v${Date.now().toString(36)}${++this.keyN}`;
   }
 
   /** Where the visit the player is on began: its places and anything open over it come after. */

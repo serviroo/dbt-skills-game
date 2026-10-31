@@ -609,21 +609,7 @@ async function replayIntro(h, page, problems) {
   h.expect(!!shots, 'the replayed intro never reached the awaken scene');
   h.expect(shots.ok() && shots.fromServiceWorker(), `the awaken scene's script did not come from the offline cache (HTTP ${shots.status()})`);
   h.expect(!problems.length, `the intro's awaken scene offline:\n${problems.join('\n')}`);
-  const skip = page.getByRole('button', { name: 'Skip' });
-  if (await skip.isVisible()) await skip.click();
-  const note = page.getByRole('button', { name: 'Read the note' });
-  await note.waitFor({ timeout: 60000 });
-  for (let i = 0; i < 40 && (await page.locator('.rw').count()); i++) {
-    await tapWhereItIs(page, note).catch(() => {});
-    await h.sleep(500);
-  }
-  const cont = page.getByRole('button', { name: 'Continue' });
-  await cont.waitFor({ timeout: 20000 });
-  await tapWhereItIs(page, cont);
-  // the end card breathes, so on slow frames its buttons never hold still for a click: tap Enter the Lantern where it is
-  const enter = page.getByRole('button', { name: 'Enter the Lantern' });
-  await enter.waitFor({ timeout: 20000 });
-  await tapWhereItIs(page, enter);
+  await tapWhereItIs(page, page.getByRole('button', { name: 'Skip intro' }));
   await page.waitForFunction(() => !!window.__daily && document.querySelector('.dq')?.dataset.screen === 'hub', null, { timeout: 30000 });
   await h.reachHub(page);
   await listen(page);

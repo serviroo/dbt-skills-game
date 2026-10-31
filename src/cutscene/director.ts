@@ -5,7 +5,7 @@ import { clamp, cubicBezier, ease, fbm1, lerp, smoothstep } from '../core/math';
 import { animate, wait, uiNow, pauseAfter, onAnimate } from '../ui/anim';
 import { LanternWindow, levelBody, lanternLayer, type RevealCtx } from '../ui/lantern-window';
 import { GATE, LEVEL } from '../motion/tokens';
-import { Letterbox, awakenWord, rewardCards, letterView, endCard, fader, skipButton } from '../ui/cutscene-ui';
+import { Letterbox, awakenWord, rewardCards, letterView, endCard, fader } from '../ui/cutscene-ui';
 import { INTRO, WINDOWS, REWARDS } from '../content/intro';
 import { POSES } from '../scene/character/hero';
 import { light } from '../scene/toon';
@@ -28,7 +28,7 @@ export interface AudioLike {
 }
 const NOAUDIO: AudioLike = { play: () => undefined };
 type Sound = { stop(at?: number, ramp?: number): void };
-/** thrown by a beat's wait when the player skips, so the rest of that beat never runs */
+/** thrown by a beat's wait once the scene has ended early, so the rest of that beat never runs */
 const SKIP = Symbol('skip');
 
 type Track = (lt: number, dt: number) => void;
@@ -56,15 +56,15 @@ export class Director {
   private shakeT0 = -1;
   private handheld = 0.6;
   skipped = false;
-  private removeSkip: (() => void) | null = null;
   private removeVisibility: (() => void) | null = null;
   private resolveSkip: () => void = () => {};
-  /** resolves when the player taps Skip, so whatever the beat in flight is waiting on ends there */
+  /** resolves when the scene ends early (the player leaves the intro, or the context is lost), so whatever the beat in
+   *  flight is waiting on ends there */
   private readonly skip = new Promise<void>((r) => (this.resolveSkip = r));
   private baseBloom = 1.15;
 
   readonly audio: AudioLike;
-  /** every sound, charge hum and bed the cut scene starts, so Skip can stop whatever still plays */
+  /** every sound, charge hum and bed the cut scene starts, so an early end can stop whatever still plays */
   private sounds = new Set<Sound>();
   private beds = new Set<string>();
 
@@ -91,7 +91,6 @@ export class Director {
 
   async init() {
     this.w = await this.stage.loading(buildWorld(this.stage));
-    this.lb = new Letterbox();
     characterLighting();
     this.baseBloom = this.stage.bloom.intensity;
     const cam = this.w.cam;
@@ -151,15 +150,15 @@ export class Director {
     fn(0, 0);
   }
 
-  /** Skip: the beat in flight ends at its wait, its moving parts land on their last frame, its pending cues stay silent,
-   *  and the picture and sound are left as the rewards expect. */
+  /** The scene ends early: the beat in flight ends at its wait, its moving parts land on their last frame, its pending
+   *  cues stay silent, and the picture and sound are left as the rewards expect. */
   private skipNow() {
     if (this.skipped) return;
     this.removeVisibility?.();
     this.skipped = true;
     for (const tr of this.tracks) tr.fn(tr.until, 0);
     this.tracks.clear();
-    // the camera holds where Skip found it: no shot, sway or shake moves it behind the rewards
+    // the camera holds where the end found it: no shot, sway or shake moves it behind the rewards
     this.shot = null;
     // every sound the cut scene started stops here; the rewards bring their own
     for (const s of this.sounds) s.stop(undefined, 0.04);
@@ -173,12 +172,12 @@ export class Director {
     this.resolveSkip();
   }
 
-  /** Ends the beat in flight once the player has skipped. */
+  /** Ends the beat in flight once the scene has ended early. */
   private stopIfSkipped() {
     if (this.skipped) throw SKIP;
   }
 
-  /** A cue `sec` from now on the beat clock, dropped if the player skips first. */
+  /** A cue `sec` from now on the beat clock, dropped if the scene ends first. */
   private cue(sec: number, fn: () => void) {
     wait(sec).then(() => {
       if (!this.skipped) fn();
@@ -191,8 +190,8 @@ export class Director {
     this.stopIfSkipped();
   }
 
-  /** Lantern window: opens, waits for their tap (auto-advance in capture mode or after a long idle). Skip takes it down
-   *  at once, opening, waiting or closing. */
+  /** Lantern window: opens, waits for their tap (auto-advance in capture mode or after a long idle). An early end takes
+   *  it down at once, opening, waiting or closing. */
   private async window(spec: ConstructorParameters<typeof LanternWindow>[1], readSec: number) {
     this.stopIfSkipped();
     const win = new LanternWindow(lanternLayer(), { tapToContinue: true, ...spec });
@@ -215,7 +214,12 @@ export class Director {
 
   /* ======================================================================================= */
 
-  async play(opts: { skippable?: boolean } = {}): Promise<'replay' | 'enter'> {
+  /** Plays from the gate (or `?shot`'s beat) to the end card. `left` aborts when the player leaves the intro (the Safe
+   *  Zone or Skip): the scene ends there, and nothing after it shows. */
+  async play(left?: AbortSignal): Promise<'replay' | 'enter'> {
+    // left while the world loaded: none of the scene starts
+    if (left?.aborted) return new Promise<never>(() => undefined);
+    this.lb = new Letterbox();
     const paused = new Set<Animation>();
     const offAnimate = onAnimate((a) => {
       if (!document.hidden || a.playState !== 'running') return;
@@ -244,10 +248,11 @@ export class Director {
       this.removeVisibility = null;
     };
     visibility();
-    if (opts.skippable) this.removeSkip = skipButton(() => this.skipNow());
-    // the scene can't go on without its WebGL context: losing it ends the scene as Skip does (also on a first run, which
-    // has no Skip), and the rewards, letter and end card need no 3D
+    // the scene can't go on without its WebGL context: losing it ends the scene, and the rewards, letter and end card
+    // need no 3D
     const offLost = this.stage.onLost(() => this.skipNow());
+    const leave = () => this.skipNow();
+    left?.addEventListener('abort', leave);
     const start = params.shot || '';
     const order = ['gate', 'windows', 'silhouette', 'awaken', 'chest', 'rewards'];
     const from = Math.max(0, order.indexOf(start));
@@ -262,10 +267,11 @@ export class Director {
       if (e !== SKIP) throw e;
     } finally {
       offLost();
+      left?.removeEventListener('abort', leave);
       this.removeVisibility?.();
     }
-    this.removeSkip?.();
-    return this.beatRewards();
+    if (left?.aborted) return new Promise<never>(() => undefined);
+    return this.beatRewards(left);
   }
 
   /* ---------------------------------------------------------------- beat 1: void and gate */
@@ -445,7 +451,7 @@ export class Director {
     this.cue(1.85, () => this.audio.play('whoosh', { gain: 0.6 }));
     this.cue(3.48, () => {
       this.audio.play('awaken_voice');
-      awakenWord('AWAKEN', 0.42);
+      awakenWord('AWAKEN', 0.42, this.skip);
     });
     this.cue(HIT - 0.75, () => {
       if (this.audio.hush) this.audio.hush();
@@ -545,26 +551,26 @@ export class Director {
   }
 
   /* ---------------------------------------------------------------- beats 7-8: rewards, letter, end card */
-  private async beatRewards(): Promise<'replay' | 'enter'> {
+  private async beatRewards(left?: AbortSignal): Promise<'replay' | 'enter'> {
     this.stage.grade.u('flashAmount').value = 0;
     this.audio.music?.to('reward', 1.5);
-    await rewardCards(REWARDS);
-    await letterView();
+    await rewardCards(REWARDS, { left });
+    await letterView(left);
     this.audio.music?.to('end', 2);
     const g = this.stage.grade;
     this.track(1.2, (lt) => (g.u('fade').value = 0.82 * ease.inOutSine(clamp(lt / 1.2))));
     const f = fader();
     f.set(0);
-    const v = await endCard();
+    const v = await endCard(left);
     void INTRO;
     return v;
   }
 }
 
-export async function playCutscene(stage: Stage, audio?: AudioLike, opts: { skippable?: boolean } = {}) {
+export async function playCutscene(stage: Stage, audio?: AudioLike, left?: AbortSignal) {
   const d = new Director(stage, audio);
   await d.init();
-  return d.play(opts);
+  return d.play(left);
 }
 
 export { light };

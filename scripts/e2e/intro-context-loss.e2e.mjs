@@ -1,6 +1,6 @@
 // A lost WebGL context in the intro (a GPU reset, a phone in the background, too many contexts) never freezes it: the
-// scene ends there as Skip ends it, also on a first run, which has no Skip; the dead canvas is hidden instead of showing
-// the browser's broken-canvas picture; and the rewards, letter and end card carry on to Home. The beat checks step the
+// scene ends there; the dead canvas is hidden instead of showing the browser's broken-canvas picture; and the rewards,
+// letter and end card carry on to Home, with the Safe Zone and Skip still over them. The beat checks step the
 // real intro frame by frame in ?capture and read what the scene asked of the audio from the capture's audio log; the
 // last two play in real time.
 
@@ -27,10 +27,10 @@ const canvasHidden = (page) => page.evaluate(() => getComputedStyle(window.__sta
 async function lose(h, page, tag) {
   const before = await page.evaluate(() => window.__audioLog.length);
   await loseContext(page);
-  // two seconds of the scene at most: the scene ends at once, as on Skip, and the rewards open on its next frames
+  // two seconds of the scene at most: the scene ends at once, and the rewards open on its next frames
   h.expect(await page.evaluate(() => window.__steps(() => !!document.querySelector('.rw'), 30)), `${tag}: the rewards never came after the context was lost`);
   h.expect(await canvasHidden(page), `${tag}: the lost canvas still shows over the page`);
-  h.expect(!(await page.locator('.ui-skip').count()), `${tag}: Skip stayed over the rewards`);
+  h.expect((await page.locator('.ui-safe').count()) && (await page.locator('.ui-skip').count()), `${tag}: the Safe Zone and Skip left with the scene`);
   await page.evaluate(() => { let i = 0; return window.__steps(() => ++i > 30); });
   return page.evaluate((n) => window.__audioLog.slice(n).map((e) => `${e.kind} ${e.name}`), before);
 }
@@ -125,7 +125,7 @@ export const scenarios = {
   },
 
   /** Real time: lost on the title screen and given back before the tap, the scene plays and draws as ever, and Skip still
-   *  takes it to the rewards. */
+   *  takes it to Home. */
   async 'context-back-before-the-scene'(h) {
     const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?shot=silhouette&mute', { width: 1440, height: 900 });
     try {
@@ -145,7 +145,7 @@ export const scenarios = {
       h.expect((await frame()) > f0 + 2, 'the scene drew no frames on the context it got back');
       h.expect(!(await canvasHidden(page)), 'the canvas stayed hidden after the context came back');
       await page.locator('.ui-skip').click();
-      await page.locator('.rw').waitFor({ timeout: 15000 });
+      await page.locator('.dq-top').waitFor({ timeout: 15000 });
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();

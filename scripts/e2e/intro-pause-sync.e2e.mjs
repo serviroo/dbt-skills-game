@@ -149,7 +149,7 @@ export const scenarios = {
       h.expect(JSON.stringify(cues.filter((c) => expected.includes(c))) === JSON.stringify(expected), `awaken cues changed order or repeated: ${cues.join(', ')}`);
     }
     await page.locator('.ui-skip').press('Enter');
-    await page.getByRole('button', { name: 'Read the note' }).waitFor({ timeout: 15000 });
+    await page.locator('.dq-top').waitFor({ timeout: 15000 });
     h.expect(!errors.length, errors.join('\n'));
   }])),
   ...Object.fromEntries([false, true].map((reduced) => [`intro-pause-window-${reduced ? 'reduced' : 'full'}`, async (h) => {
@@ -183,7 +183,7 @@ export const scenarios = {
       h.expect(done.created === (at >= 300), `the delay created while hidden lost its duration at ${at} ms`);
     }
     await page.locator('.ui-skip').press('Enter');
-    await page.getByRole('button', { name: 'Read the note' }).waitFor({ timeout: 15000 });
+    await page.locator('.dq-top').waitFor({ timeout: 15000 });
     h.expect(!errors.length, errors.join('\n'));
   }])),
   async 'intro-pause-window-hidden-start'(h) {
@@ -198,22 +198,13 @@ export const scenarios = {
     await h.sleep(200);
     h.expect(await page.evaluate(() => window.__introOpening.currentTime > 0 && window.__introOpening.playState !== 'paused'), 'the hidden-start window did not resume');
     await page.locator('.ui-skip').press('Enter');
-    await page.getByRole('button', { name: 'Read the note' }).waitFor({ timeout: 15000 });
+    await page.locator('.dq-top').waitFor({ timeout: 15000 });
     h.expect(!errors.length, errors.join('\n'));
   },
   async 'intro-pause-leaves-companion-alone'(h) {
     const { page, errors } = await intro(h, 'chest');
     await checkPause(h, page, 'before leaving the intro');
     await page.locator('.ui-skip').press('Enter');
-    await page.getByRole('button', { name: 'Read the note' }).evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
-    await page.getByRole('button', { name: 'Read the note' }).press('Enter');
-    await page.clock.fastForward(400);
-    await page.locator('.sw-actions').evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
-    await page.getByRole('button', { name: 'Continue', exact: true }).press('Enter');
-    await page.clock.fastForward(600);
-    await page.locator('.ec-actions').evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
-    await page.getByRole('button', { name: 'Enter the Lantern', exact: true }).press('Enter');
-    await page.clock.fastForward(700);
     await page.locator('.dq-top').waitFor({ timeout: 30000 });
     await page.clock.resume();
     await hidden(page, true);

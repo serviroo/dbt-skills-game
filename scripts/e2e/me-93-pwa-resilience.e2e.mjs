@@ -208,7 +208,7 @@ async function startIntro(page, sleep) {
   await page.locator('.title-screen').waitFor({ timeout: 20000 });
   await sleep(1500);
   await page.mouse.click(195, 500);
-  await page.getByRole('button', { name: 'Skip' }).click({ timeout: 20000 });
+  await page.getByRole('button', { name: 'Skip', exact: true }).click({ timeout: 20000 });
 }
 
 // pwa-preview-retries-raced-port swaps net.createServer for the whole process, so nothing else here may make a server then.

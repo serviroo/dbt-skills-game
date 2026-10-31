@@ -645,9 +645,10 @@ export function lanternLayer() {
   return layer;
 }
 
-/** Convenience: open, wait for input, close. */
-export async function lanternMessage(spec: WindowSpec, opts: { hold?: number; timeout?: number } = {}) {
+/** Convenience: open, wait for input, close. `left` aborting (the player left the intro) takes the window away at once. */
+export async function lanternMessage(spec: WindowSpec, opts: { hold?: number; timeout?: number; left?: AbortSignal } = {}) {
   const w = new LanternWindow(lanternLayer(), spec);
+  opts.left?.addEventListener('abort', () => w.dismiss());
   await w.open();
   let v = 'auto';
   if (spec.tapToContinue || spec.actions?.length) v = await w.waitForInput(opts.timeout ?? 0);
