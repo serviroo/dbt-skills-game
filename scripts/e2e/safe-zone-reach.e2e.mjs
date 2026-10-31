@@ -22,10 +22,9 @@
 //   keyboard    while a list item or a person is typed, the on-screen keyboard takes the bottom of the screen (the page
 //               gets the height above it, as a phone that resizes for the keyboard gives it): the field and its Save
 //               show whole and take a tap, and the rest still passes reach. Held sideways at 200% zoom the keyboard
-//               leaves under 100 px, and on the smaller phone held sideways with its text at 200% 126 px, less than
-//               "Talk to someone now" and the field need together, so typing is checked upright at 200% zoom and on
-//               all but that phone with the text at 200% (a phone that keeps the page's full height under its keyboard
-//               is the check without it)
+//               leaves under 100 px, less than "Talk to someone now" and the field need together, so typing is checked
+//               upright there (a phone that keeps the page's full height under its keyboard is the check without it;
+//               safe-zone-typing checks both kinds of keyboard, held either way, where Talk pins at the top)
 // And on every other screen with a top bar, at 200%, the Safe Zone button stays one tap away: it and the rest of the bar
 // show whole and take their taps, with the Sound panel open too, and Give me a moment's Done shows whole once scrolled
 // to; Home and Settings also fit whole, with no text on top of other text.
@@ -189,7 +188,7 @@ function walk(phone, zoom, { font = false } = {}) {
       await h.shot(page, `safe-zone-reach-${phone}-${font ? 'text-200' : zoom * 100}-${String(++shots).padStart(2, '0')}-${label.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`);
     };
     // where the room above the keyboard holds "Talk to someone now" and the field (see the top)
-    const typing = font ? phone !== '568x320' : zoom === 1 || p.width < p.height;
+    const typing = font || zoom === 1 || p.width < p.height;
     const keyboard = async (page, label) => {
       await page.setViewportSize({ width: viewport.width, height: Math.round((p.height - p.kb) / zoom) });
       await look(page, `${label} with the keyboard up`, { typing: true });

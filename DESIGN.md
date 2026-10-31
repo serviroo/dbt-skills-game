@@ -158,4 +158,6 @@ Every step is skippable. The lists are set up only when the player chooses to, a
 - The Safe Zone starts each screen at the top with "Talk to someone now" one Tab away, and Tab reaches every control
   in reading order. It says each step politely to a screen reader, and a countdown as it starts and ends, never each
   second. Its words follow Text size in Settings, and it fits at 200% zoom on a 320 px phone at any text size, and
-  with the phone's own text at 200%.
+  with the phone's own text at 200%. Typing with the keyboard up, it fits in the part above the keyboard: "Talk to
+  someone now" pins at the top with Leave, Lights up and Sound, in their row held sideways (or beside them where its
+  words don't fit there) and just under them upright, and the field stays in view.

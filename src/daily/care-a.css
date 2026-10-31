@@ -196,7 +196,9 @@
     background: linear-gradient(180deg, rgba(48, 72, 102, 0.97) 60%, rgba(48, 72, 102, 0));
   }
 }
-.dq-safezone.is-lit .dq-sz-talk {
+/* pinned at the top too, typing */
+.dq-safezone.is-lit .dq-sz-talk,
+.dq.ca-szlit.is-typing .dq-sz-talk {
   color: #ffffff;
 }
 .dq.ca-szlit .ca-sz-light {
