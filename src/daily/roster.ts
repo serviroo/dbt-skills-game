@@ -360,16 +360,17 @@ export function rosterSection(app: App) {
       if (at && next) at.replaceWith(next);
       else if (next) row.insertBefore(next, ROSTER.slice(i + 1).map((x) => placeOf(x.id)).find(Boolean) ?? null);
     });
+    if (arrived().length !== had) {
+      const focused = camp?.stage.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.shadow : undefined;
+      camp?.unmount();
+      const next = campStage(app, arrived(), openCard, focused as ShadowId | undefined);
+      if (camp) camp.stage.replaceWith(next.stage);
+      else row.before(next.stage);
+      camp = next;
+      const hit = next.stage.querySelector<HTMLButtonElement>(`[data-shadow="${sheet?.panel.dataset.shadow}"]`);
+      if (sheet && hit) sheet.from = hit;
+    }
     hold({ part: row });
-    if (arrived().length === had) return;
-    const focused = camp?.stage.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.shadow : undefined;
-    camp?.unmount();
-    const next = campStage(app, arrived(), openCard, focused as ShadowId | undefined);
-    if (camp) camp.stage.replaceWith(next.stage);
-    else row.before(next.stage);
-    camp = next;
-    const hit = next.stage.querySelector<HTMLButtonElement>(`[data-shadow="${sheet?.panel.dataset.shadow}"]`);
-    if (sheet && hit) sheet.from = hit;
   };
   // names set in another open copy show up here, without touching a field the player is typing in
   const off = st.onChange(() => {

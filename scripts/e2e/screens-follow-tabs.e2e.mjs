@@ -20,6 +20,8 @@
 //                             pebble into the Inventory, building the camp once and keeping a half-typed name and its
 //                             focus; nothing unrelated builds it again, the companion renamed there is renamed here, and
 //                             focus on a watcher in camp comes back to them, seen whole, once the camp built again shows
+//   night-watch-arrivals-unfocused  with nothing focused and the view partway into Sable's panel, watchers arriving from
+//                             another tab leave Sable, and all above, where it was; what is below may grow
 //   skill-list-follows-tabs   Trade Places' Activities, open in a skill, takes an activity added and one removed in
 //                             another tab, staying on its step with what is typed and focus on the same choice
 //   stealth-look-follows-tabs the aquarium and Breathing words turned on in another tab's Stealth room turn on here, the
@@ -116,6 +118,8 @@ const moved = (a, b, landmarks = true) => [
   ...(a.focus && b.focus && a.focus.some((v, i) => Math.abs(v - b.focus[i]) > 1) ? [`the focused control went from [${a.focus.map(Math.round)}] to [${b.focus.map(Math.round)}] (x, y, width, height)`] : []),
   ...(landmarks ? Object.keys(a.seen).filter((k) => k in b.seen && Math.abs(a.seen[k] - b.seen[k]) > 1).map((k) => `"${k.trim()}" moved from ${Math.round(a.seen[k])} to ${Math.round(b.seen[k])}`) : []),
 ];
+/** Waits for the screen to come to rest: its own way in (a short slide and fade) has finished. */
+const still = (page) => page.evaluate(() => Promise.all(['.dq-view', '.dq-page', '.dq-hub'].flatMap((q) => [...document.querySelectorAll(q)].flatMap((e) => e.getAnimations())).map((a) => a.finished.catch(() => undefined))));
 /** Marks what has focus now, so it can be told apart from a control drawn again in its place. */
 const mark = (page) => page.evaluate(() => document.activeElement?.setAttribute('data-had-focus', ''));
 const kept = (page) => page.evaluate(() => !!document.activeElement?.hasAttribute('data-had-focus'));
@@ -136,6 +140,7 @@ export const scenarios = {
       const toggle = page.locator('.dq-stats-toggle');
       await toggle.evaluate((e) => e.scrollIntoView({ block: 'center' }));
       await toggle.focus();
+      await still(page);
       await mark(page);
       const before = await home(page);
       const was = await layout(page);
@@ -219,6 +224,7 @@ export const scenarios = {
       await watch(page);
       await wise.scrollIntoViewIfNeeded();
       await wise.focus();
+      await still(page);
       const was = await layout(page);
       await h.shot(page, `night-watch-before-${tag}`);
       await go(other.page, { name: 'skill', id: 'wise-mind' });
@@ -355,6 +361,7 @@ export const scenarios = {
       // renamed there: Home keeps its open Stats, title list, focus and scroll
       await page.locator('.dq-stats-toggle').click();
       await healer.focus();
+      await still(page);
       const was = await layout(page);
       await go(other.page, { name: 'settings' });
       for (const [label, v] of [[/^Your name/, 'Rowan'], [/companion.s name/, 'Moth']]) {
@@ -589,6 +596,38 @@ export const scenarios = {
       const got = went.name === 'skill' ? `skill ${went.id}` : went.name;
       if (got !== wanted) problems.push(`${tag}: Begin went to ${got}, not today's ${wanted}`);
       problems.push(...[errors, art.errors, room.errors, other.errors].flat().map((e) => `${tag}: ${e}`));
+      await ctx.close();
+    }
+    h.expect(!problems.length, problems.join('\n'));
+  },
+
+  async 'night-watch-arrivals-unfocused'(h) {
+    const problems = [];
+    for (const [tag, viewport] of SIZES) {
+      const { ctx, page, errors } = await open(h, viewport, undefined, JSON.stringify({ v: 1, created: T, events: visits(2) }));
+      const other = await another(ctx, h);
+      await go(page, { name: 'shadows' });
+      await page.locator('.w2-roster-row > [data-shadow="sable"]').waitFor();
+      await still(page);
+      // the view starts 40 px into Sable's panel, and nothing has focus
+      await page.evaluate(() => {
+        const sable = document.querySelector('.w2-roster-row > [data-shadow="sable"]');
+        let box = sable.parentElement;
+        while (box && !(/auto|scroll/.test(getComputedStyle(box).overflowY) && box.scrollHeight > box.clientHeight)) box = box.parentElement;
+        box ??= document.scrollingElement;
+        const top = (box === document.scrollingElement ? 0 : box.getBoundingClientRect().top) + (parseFloat(getComputedStyle(box).scrollPaddingTop) || 0);
+        box.scrollTop += sable.getBoundingClientRect().top - top + 40;
+        document.activeElement?.blur();
+      });
+      const tops = () => page.evaluate(() => ['.w2-roster', '.w2-roster-row > [data-shadow="sable"]', '.w2-roster-row > [data-shadow="sable"] .w2-sh-n'].map((q) => document.querySelector(q).getBoundingClientRect().top));
+      const at = await tops();
+      await other.page.evaluate(([k, v]) => localStorage.setItem(k, v), [h.SAVE, JSON.stringify({ v: 1, created: T, events: visits(10) })]);
+      if (!(await until(page, () => !!document.querySelector('.w2-roster-row > [data-shadow="vesper"]:not(.is-locked)')))) problems.push(`${tag}: Vesper did not arrive from another tab`);
+      await page.waitForTimeout(400);
+      const now = await tops();
+      if (now.some((y, i) => Math.abs(y - at[i]) > 1)) problems.push(`${tag}: as watchers arrived elsewhere the Night Watch, Sable's panel and his name moved from ${at.map(Math.round)} to ${now.map(Math.round)}`);
+      await h.shot(page, `night-watch-arrivals-unfocused-${tag}`);
+      problems.push(...[errors, other.errors].flat().map((e) => `${tag}: ${e}`));
       await ctx.close();
     }
     h.expect(!problems.length, problems.join('\n'));

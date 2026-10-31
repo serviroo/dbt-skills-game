@@ -243,13 +243,8 @@ export function scrollerOf(e: Element) {
   return document.scrollingElement as HTMLElement | null;
 }
 
-/** Whether `e` starts above what its scroller shows, under the pinned bars (the scroller's scroll padding). */
-export function above(e: Element) {
-  const box = scrollerOf(e);
-  if (!box || !e.getClientRects().length) return false;
-  const top = (box === document.scrollingElement ? 0 : box.getBoundingClientRect().top) + (parseFloat(getComputedStyle(box).scrollPaddingTop) || 0);
-  return e.getBoundingClientRect().top < top;
-}
+/** The top of what `box` shows, under its pinned bars (its scroll padding). */
+const viewTop = (box: Element) => (box === document.scrollingElement ? 0 : box.getBoundingClientRect().top) + (parseFloat(getComputedStyle(box).scrollPaddingTop) || 0);
 
 /** Notes where `e`'s top (or bottom) is on screen; what it returns scrolls so `to` has it there again. */
 function pin(e: Element, edge: 'top' | 'bottom' = 'top') {
@@ -260,19 +255,39 @@ function pin(e: Element, edge: 'top' | 'bottom' = 'top') {
   };
 }
 
+type Held = (now?: { focus?: Element | null; part?: Element | null }) => void;
 /**
  * Before `part` of a screen changes: notes what the player is looking at, so it stays where it is after. That is the
- * control with focus, if it is on this screen; else, when `part` starts above what is in view, all that follows `part`.
- * Call the result once the change is made, with the control drawn in place of the focused one if that went, and with
- * what stands in `part`'s place now.
+ * control with focus, if it is on this screen; else, with `part` partly in view, the first of its children in view (or,
+ * if that went, `part`'s top); else, with all of `part` above what is in view, what follows it. Call the result once the
+ * change is made, with the control drawn in place of the focused one if that went, and with what stands in `part`'s
+ * place now.
  */
-export function holdView(part: Element | null) {
+export function holdView(part: Element | null): Held {
+  const box = part && scrollerOf(part);
+  if (!part || !box) return () => {};
   const f = document.activeElement;
-  const focused = part && f instanceof HTMLElement && f !== document.body && scrollerOf(f) === scrollerOf(part) ? f : null;
-  const back = focused ? pin(focused) : part && above(part) ? pin(part, 'bottom') : null;
-  return (now: { focus?: Element | null; part?: Element | null } = {}) => {
-    const to = focused ? (focused.isConnected ? focused : now.focus) : now.part;
-    if (back && to) back(to);
+  if (f instanceof HTMLElement && f !== document.body && scrollerOf(f) === box) {
+    const back = pin(f);
+    return ({ focus } = {}) => {
+      const to = f.isConnected ? f : focus;
+      if (to) back(to);
+    };
+  }
+  if (!part.getClientRects().length) return () => {};
+  const top = viewTop(box);
+  const { top: from, bottom } = part.getBoundingClientRect();
+  if (bottom <= top) {
+    const back = pin(part, 'bottom');
+    return ({ part: now } = {}) => now && back(now);
+  }
+  if (from >= top) return () => {};
+  const kid = [...part.children].find((c) => c.getBoundingClientRect().bottom > top);
+  const backKid = kid && pin(kid);
+  const back = pin(part);
+  return ({ part: now } = {}) => {
+    if (kid?.isConnected && backKid) backKid(kid);
+    else if (now) back(now);
   };
 }
 
