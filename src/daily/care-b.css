@@ -293,6 +293,16 @@
   opacity: 0.55;
   pointer-events: none;
 }
+/* a phone zoomed to 200% (260 CSS pixels wide or less): the moth sits above the badge, at its end, clear of it as it
+   floats */
+@media (max-width: 260px) {
+  .dq-ease-sea {
+    position: static;
+    order: -1;
+    align-self: flex-end;
+    margin: 0 0 8px;
+  }
+}
 .dq-ease-sea svg {
   display: block;
   width: 100%;

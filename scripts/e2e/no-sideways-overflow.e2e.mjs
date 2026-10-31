@@ -3,10 +3,11 @@
 // half the size, as browser zoom does), one scenario each, opens every screen on a returning save with everything
 // unlocked: on each, the page is exactly as wide as the screen, nothing scrolls sideways inside the companion, and the
 // Safe Zone button is whole on screen. Outside a skill's window and the Safe Zone, no row or card squeezes a word, so
-// none breaks onto the next line without a hyphen. The same holds inside every watcher's card in the Night Watch camp,
-// and inside the sheets opened from the drawing page and the story editor, which are opened at the phone's own size and
-// checked once it zooms to 200%. A failure names the widest boxes, or the words, that reach past the edge, and the
-// words that break.
+// none breaks onto the next line without a hyphen; no Night Watch card cuts its words, and A quiet minute's moth stays
+// clear of its badge. The same holds inside every watcher's card in the Night Watch camp, and inside the sheets opened
+// from the drawing page and the story editor, which are opened at the phone's own size and checked once it zooms to
+// 200%; each sits below the top bar, its close button whole and taking a tap. A failure names the widest boxes, or the
+// words, that reach past the edge, and the words that break.
 import { fullSave, seedStores } from './me-91-final-save-ids.e2e.mjs';
 import { cutShort } from './safe-zone-reach.e2e.mjs';
 
@@ -63,8 +64,9 @@ const settle = (page) =>
   });
 
 /**
- * How wide the page and the companion's own scroller are against the screen, the widest boxes past its edge, and with
- * `sheet`, the boxes inside that sheet that scroll or clip sideways.
+ * How wide the page and the companion's own scroller are against the screen, the widest boxes past its edge, the cards
+ * that cut their words, and whether A quiet minute's moth is over its badge; with `sheet`, the boxes inside that sheet
+ * that scroll or clip sideways, and whether its top is under the top bar.
  */
 const width = (page, sheet = null) =>
   page.evaluate((sheet) => {
@@ -95,6 +97,10 @@ const width = (page, sheet = null) =>
     }
     const box = sheet && document.querySelector(sheet);
     const inner = box ? [box, ...box.querySelectorAll('*')].filter((e) => getComputedStyle(e).overflowX !== 'visible' && e.scrollWidth > e.clientWidth + 1 && e.checkVisibility() && !e.closest('.dq-sr')).map((e) => `${label(e)} ${e.scrollWidth - e.clientWidth} px wider than it shows`) : [];
+    const bar = document.querySelector('.dq-top').getBoundingClientRect().bottom;
+    const meets = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    const cut = [...document.querySelectorAll('.dq-cardbtn .dq-cardface')].filter((c) => c.scrollHeight > c.clientHeight + 1 || c.scrollWidth > c.clientWidth + 1).map((c) => `"${c.textContent.trim().slice(0, 20)}"`);
+    const moth = document.querySelector('.dq-ease-sea svg')?.getBoundingClientRect();
     const safe = document.querySelector('.dq-top .dq-safe')?.getBoundingClientRect();
     return {
       doc: doc.scrollWidth,
@@ -103,8 +109,20 @@ const width = (page, sheet = null) =>
       safe: !safe || (safe.left >= -0.5 && safe.right <= innerWidth + 0.5),
       past: past.slice(0, 6),
       inner,
+      under: !!box && box.getBoundingClientRect().top < bar - 0.5,
+      cut,
+      moth: !!moth && [...document.querySelectorAll('.dq-ease-panel > .dq-chip > *')].some((c) => meets(c.getBoundingClientRect(), moth)),
     };
   }, sheet);
+
+/** Whether the control `sel` names shows whole on screen below the top bar and takes its own tap. */
+const takesTap = (page, sel) =>
+  page.evaluate((sel) => {
+    const e = document.querySelector(sel);
+    const r = e.getBoundingClientRect();
+    const bar = document.querySelector('.dq-top').getBoundingClientRect().bottom;
+    return r.top >= bar - 0.5 && r.bottom <= innerHeight + 0.5 && r.left >= -0.5 && r.right <= innerWidth + 0.5 && e.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
+  }, sel);
 
 /** Every screen, and the sheets, on one phone at 200% zoom. */
 function sweep(phone) {
@@ -121,7 +139,7 @@ function sweep(phone) {
       await seedStores(page, h.SAVE, now);
       await page.reload();
       await h.reachHub(page);
-      const check = async (where, { words = true, sheet = null } = {}) => {
+      const check = async (where, { words = true, sheet = null, close = null } = {}) => {
         await settle(page);
         const w = await width(page, sheet);
         const bad = [];
@@ -129,6 +147,10 @@ function sweep(phone) {
         if (w.dq > 0) bad.push(`the companion scrolls ${w.dq} px sideways`);
         if (!w.safe) bad.push('the Safe Zone button is off the edge');
         if (w.inner.length) bad.push(`inside the sheet: ${w.inner.join(', ')}`);
+        if (w.under) bad.push('the top of the sheet is under the top bar');
+        if (close && !(await takesTap(page, close))) bad.push('its close button is not whole below the top bar');
+        if (w.cut.length) bad.push(`${w.cut.length} cards cut their words (${w.cut.slice(0, 3).join(', ')})`);
+        if (w.moth) bad.push('the moth is over the badge');
         if (bad.length) failed.push(`${size} ${where}: ${bad.join('; ')} on a ${w.vw} px screen; past the edge: ${w.past.join(', ') || 'nothing found'}`);
         if (words) for (const f of await cutShort(page, { scope: sheet ? `${sheet} *` : '#dq-main *' })) failed.push(`${size} ${where}: ${f}`);
         await h.shot(page, `wide-${phone.width}x${phone.height}-${where.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`);
@@ -151,7 +173,7 @@ function sweep(phone) {
 
       // the sheets opened from the drawing page and the story editor
       // each sheet opens at the phone's own size, where the page can be drawn on, and is checked once zoomed to 200%
-      const sheet = async (where, panel, open) => {
+      const sheet = async (where, { panel, close = null }, open) => {
         await page.setViewportSize(phone);
         try {
           await open();
@@ -159,10 +181,10 @@ function sweep(phone) {
           return failed.push(`${size} ${where}: could not open it: ${String(e.message).split('\n')[0]}`);
         }
         await page.setViewportSize(zoomed);
-        await check(where, { sheet: panel });
+        await check(where, { sheet: panel, close });
         await page.keyboard.press('Escape');
       };
-      await sheet('shadow ally name sheet', '.dq-sheet:not(.is-hidden)', async () => {
+      await sheet('shadow ally name sheet', { panel: '.dq-sheet:not(.is-hidden) .dq-sheet-p' }, async () => {
         await page.evaluate(() => window.__daily.go({ name: 'draw', kind: 'ally' }));
         const frame = page.locator('.dq-draw-frame');
         await frame.waitFor({ timeout: 10000 });
@@ -184,13 +206,13 @@ function sweep(phone) {
         await page.locator('.dq-save:enabled').click({ timeout: 10000 });
         await page.locator('.dq-sheet:not(.is-hidden) .dq-sheet-h').waitFor({ timeout: 10000 });
       });
-      await sheet('chapter sheet', '.st-chsheet', async () => {
+      await sheet('chapter sheet', { panel: '.st-chsheet', close: '.st-chsheet .st-sheet-x' }, async () => {
         await page.evaluate(() => window.__daily.go({ name: 'write', id: 'tale-1' }));
         await page.getByRole('textbox', { name: /^Page,/ }).waitFor({ timeout: 10000 });
         await page.locator('.st-chbtn').click();
         await page.locator('.st-chsheet').first().waitFor({ timeout: 10000 });
       });
-      await sheet('drawing picker sheet', '.st-picks', async () => {
+      await sheet('drawing picker sheet', { panel: '.st-picks', close: '.st-picks .st-sheet-x' }, async () => {
         await page.locator('.st-chsheet').first().waitFor({ state: 'detached', timeout: 10000 });
         await page.locator('.st-pic-b').click();
         await page.locator('.st-picks').waitFor({ timeout: 10000 });
@@ -204,7 +226,7 @@ function sweep(phone) {
         await page.locator(`.w2-camp-hit[data-shadow="${id}"]`).focus();
         await page.keyboard.press('Enter');
         await page.locator('.w2-camp-card[role="dialog"]').waitFor({ timeout: 10000 });
-        await check(`${id}'s card`, { sheet: '.w2-camp-card' });
+        await check(`${id}'s card`, { sheet: '.w2-camp-card', close: '.w2-camp-x' });
         await page.keyboard.press('Escape');
         await page.locator('.w2-camp-card').waitFor({ state: 'hidden', timeout: 10000 });
       }

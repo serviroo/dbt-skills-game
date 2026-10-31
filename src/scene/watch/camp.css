@@ -121,10 +121,7 @@
   opacity: 1;
 }
 
-/* the card sheet: the watcher's own panel, over the page and under the top bar */
-.w2-camp-sheet {
-  padding-top: calc(var(--dq-top, 0px) + 12px);
-}
+/* the card sheet: the watcher's own panel, over the page and under the top bar, as every sheet is */
 .w2-camp-card {
   position: relative;
   width: min(100%, 340px);

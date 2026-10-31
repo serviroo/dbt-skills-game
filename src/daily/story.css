@@ -973,8 +973,8 @@
 .st-chsheet {
   background: linear-gradient(180deg, #0b1a2f, #060e1b 70%);
   width: min(100%, 520px);
-  max-height: 80vh;
-  max-height: 80dvh;
+  max-height: min(80vh, 100%);
+  max-height: min(80dvh, 100%);
   overflow-y: auto;
 }
 .st-sheet-top {
@@ -984,14 +984,14 @@
   gap: 8px;
   margin: -6px -8px 8px 0;
 }
-/* a phone zoomed to 200% (260 CSS pixels wide or less): a smaller title, and where it and the close button still don't
-   share a line, the button takes the line above it, at its end */
+/* a phone zoomed to 200% (260 CSS pixels wide or less): a smaller title, beside the close button on a 390 px phone, and
+   where they still don't share a line, the button takes the line above it, at its end */
 @media (max-width: 260px) {
   .st-sheet-top {
     flex-wrap: wrap-reverse;
   }
   .st-sheet-top .dq-sheet-h {
-    font-size: 24px;
+    font-size: 22px;
   }
   .st-sheet-x {
     margin-left: auto;

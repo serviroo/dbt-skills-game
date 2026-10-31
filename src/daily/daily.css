@@ -2762,18 +2762,24 @@ textarea.dq-input {
   text-align: left;
   cursor: pointer;
 }
+/* a card keeps its shape unless its words need more height (a narrow card), and is as tall as the tallest in its row;
+   clip rather than hidden, so it grows to fit them */
 .dq-cardbtn .dq-cardface {
   position: relative;
+  flex: 1 0 auto;
   transform: none;
   aspect-ratio: 5 / 6.4;
+  overflow: clip;
+  container-type: inline-size;
   padding: 14px 14px 12px;
   transition: border-color 0.2s;
 }
 .dq-cardbtn:hover .dq-cardface {
   border-color: rgba(175, 215, 245, 0.85);
 }
+/* the longest word of its name, and of its real name, fits the card's line however narrow the card */
 .dq-cardbtn .dq-cf-name {
-  font-size: 22px;
+  font-size: min(22px, 16cqi);
 }
 .dq-cardbtn .dq-cf-top {
   font-size: 12px;
@@ -2782,7 +2788,7 @@ textarea.dq-input {
   display: none;
 }
 .dq-cardbtn .dq-cf-real {
-  font-size: 12px;
+  font-size: min(12px, 10cqi);
   letter-spacing: 0.12em;
 }
 @media (max-width: 359px) {
@@ -4868,11 +4874,15 @@ textarea.dq-input {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  padding: 16px 12px calc(var(--safe-bottom) + 12px);
+  /* under the top bar, which stays over every sheet so the Safe Zone is one tap away */
+  padding: calc(var(--dq-top, 0px) + 12px) 12px calc(var(--safe-bottom) + 12px);
   background: rgba(3, 5, 11, 0.62);
 }
+/* never taller than the room under the top bar; what doesn't fit scrolls inside */
 .dq-sheet-p {
   width: min(100%, 460px);
+  max-height: 100%;
+  overflow-y: auto;
   --plate-a: #091628;
   --plate-b: #050d19;
 }
