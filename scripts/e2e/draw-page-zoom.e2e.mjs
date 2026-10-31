@@ -27,14 +27,14 @@ const MIN_PAGE = 180;
 const MIN_TEXT = 16;
 const CONTROLS = '.dq-swatch, .dq-pen, .dq-size, .dq-tools .dq-tool, .dq-save, .dq-prompt button, .dq-top .dq-safe';
 
-const artStore = (page, fn, arg) =>
-  page.evaluate(
-    async ({ fn, arg }) => {
-      const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
-      return fn === 'list' ? (await as.list()).map((m) => ({ id: m.id, n: m.n })) : (await as.drafts()).filter((d) => d.kind === arg && !d.editId).map((d) => d.strokes.length);
-    },
-    { fn, arg },
-  );
+/** What the art store keeps now: the drafts of new pages, and every saved page, each with its strokes as JSON. */
+const stored = (page) =>
+  page.evaluate(async () => {
+    const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+    const drafts = (await as.drafts()).filter((d) => !d.editId).map((d) => ({ kind: d.kind, strokes: JSON.stringify(d.strokes) }));
+    const pages = await Promise.all((await as.list()).map(async (m) => ({ id: m.id, strokes: JSON.stringify((await as.get(m.id))?.strokes) })));
+    return { drafts, pages };
+  });
 
 /** Opens a drawing page and waits until it takes strokes. */
 async function open(page, kind) {
@@ -165,16 +165,16 @@ function phoneAt(phone) {
             // a page out of reach is not drawn on and saved here; one in reach gets a line, with tools picked from
             // wherever they are, then saved
             if (bad.length) continue;
-            const before = await artStore(page, 'list');
+            const { pages: before } = await stored(page);
             for (const name of ['Soft glow', 'Mint ink', 'Bold size']) await pick(page, name);
             if (await page.locator('.dq-tray-b[aria-expanded="true"]').count()) await tray.click();
             await line(page);
             const strokes = await page.evaluate(() => window.__daily.ink.strokes.map((s) => ({ i: s.i, m: s.m, w: s.w, n: s.p.length })));
             const w = await page.evaluate(() => Math.round(0.05 * window.__daily.ink.W * 10) / 10);
             if (strokes.length !== 1 || strokes[0].m !== 'glow' || strokes[0].i !== 3 || strokes[0].w !== w) bad.push(`the line was not drawn with Soft glow, Mint and Bold: ${JSON.stringify(strokes)}`);
+            const drawn = await page.evaluate(() => JSON.stringify(window.__daily.ink.strokes));
             // Back closes the open tray first, and the drawing page and its line stay
             if (await tray.isVisible()) {
-              const drawn = await page.evaluate(() => JSON.stringify(window.__daily.ink.strokes));
               await tray.click();
               await page.evaluate(() => history.back());
               await page.waitForFunction(() => window.__daily.route.name !== 'draw' || document.querySelector('.dq-tray')?.classList.contains('is-hidden'), null, { timeout: 10000 });
@@ -192,8 +192,9 @@ function phoneAt(phone) {
               await page.keyboard.press('Escape');
             } else {
               await page.locator('.dq-tools-saved').waitFor({ timeout: 10000 });
-              const kept = (await artStore(page, 'list')).filter((m) => !before.some((b) => b.id === m.id));
-              if (kept.length !== 1 || kept[0].n !== 1) bad.push(`Save did not keep the line: ${JSON.stringify(kept)}`);
+              // Save waits for the store, so the page is there as the note shows
+              const kept = (await stored(page)).pages.filter((m) => !before.some((b) => b.id === m.id));
+              if (kept.length !== 1 || kept[0].strokes !== drawn) bad.push(`Save did not keep the line as drawn: ${kept.length} new pages`);
               await h.shot(page, `${shot}-saved`);
             }
             if (await scrolled(page)) bad.push('the page scrolled');
@@ -237,14 +238,17 @@ async function strokeKept(h) {
     h.expect(near(pts[0], [0.2, 0.3]), `the line begins at ${at(pts[0])}, not ${0.2 * W},${0.3 * H}`);
     h.expect(pts.some((q) => near(q, [0.5, 0.4])), `the part drawn before the zoom, to ${0.5 * W},${0.4 * H}, is gone: ${pts.map(at).join(' ')}`);
     h.expect(near(pts.at(-1), [0.7, 0.7]), `the line ends at ${at(pts.at(-1))}, not under the pointer at ${0.7 * W},${0.7 * H}`);
-    // kept as a draft as it was drawn, then saved from the folded tools
-    await page.waitForFunction(async () => (await (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).drafts()).some((d) => d.kind === 'today' && !d.editId && d.strokes.length === 1), null, { timeout: 10000 });
-    const before = await artStore(page, 'list');
+    // the line is kept as a draft as it was drawn, every point from before the zoom and after it, before anything else
+    // is tapped; then Save keeps those same strokes as a page from the folded tools, and the draft goes
+    const drawn = await page.evaluate(() => JSON.stringify(window.__daily.ink.strokes));
+    const { pages: before } = await h.poll(page, () => stored(page), (s) => s.drafts.some((d) => d.kind === 'today' && d.strokes === drawn), (s) => `no draft kept the line as drawn: ${s ? `${s.drafts.filter((d) => d.kind === 'today').length} drafts of the page, none the same` : 'the store was not read'}`);
     await page.locator('.dq-save').click();
     await page.locator('.dq-tools-saved').waitFor({ timeout: 10000 });
-    const kept = (await artStore(page, 'list')).filter((m) => !before.some((b) => b.id === m.id));
-    h.expect(kept.length === 1 && kept[0].n === 1, `Save did not keep the line: ${JSON.stringify(kept)}`);
-    h.expect(!(await artStore(page, 'drafts', 'today')).length, 'the draft stayed after Save');
+    // Save waits for the store, so the page is there, and the draft gone, as the note shows
+    const after = await stored(page);
+    const kept = after.pages.filter((m) => !before.some((b) => b.id === m.id));
+    h.expect(kept.length === 1 && kept[0].strokes === drawn, `Save did not keep the line as drawn: ${kept.length} new pages`);
+    h.expect(!after.drafts.some((d) => d.kind === 'today'), 'the draft stayed after Save');
     // back at the phone's own size the tools unfold, and focus on the Tools button moves to the ink it showed
     await page.locator('.dq-tray-b').focus();
     await page.setViewportSize({ width: 390, height: 844 });
