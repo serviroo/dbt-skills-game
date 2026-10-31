@@ -9,7 +9,7 @@ import { SCORE, WINDOW } from '../motion/tokens';
 import { holdAt, taper } from '../audio/param';
 import { type Next } from '../content/dbt';
 import { CHECKIN } from '../content/daily-lines';
-import { write } from '../core/cleared';
+import { cleared, write } from '../core/cleared';
 import { BESIDE, MOMENT_LENGTHS, type MomentLength } from '../core/stored-names';
 import type { App, Route, ScreenOut } from './app';
 import { icon, mothSVG } from './art';
@@ -216,8 +216,12 @@ function lowHum(scale: number) {
 const LINE_S = 7;
 const LENGTH_S: Record<MomentLength, number> = { '1': 60, '3': 180, open: Infinity };
 const lengthKey = (key: string) => `${key}${BESIDE.momentLength}`;
-/** The length chosen on this device. None chosen means until the player is ready, as it was before the choice. */
+/**
+ * The length chosen on this device. None chosen means until the player is ready, as it was before the choice, and none is
+ * once this game's data is cleared, even while another copy is still taking it off the device.
+ */
 const readLength = (key: string): MomentLength => {
+  if (cleared()) return 'open';
   try {
     const v = localStorage.getItem(lengthKey(key));
     return (MOMENT_LENGTHS as readonly (string | null)[]).includes(v) ? (v as MomentLength) : 'open';
@@ -293,6 +297,8 @@ export function momentView(app: App, o: { done: () => void; then?: string; hum?:
   // how long it lasts: a timed moment ends softly that long after it began or after the last change, never counted out
   const LEN = CHECKIN.momentLength;
   let length = readLength(st.key);
+  /** the length as stored when last read: only a change there (another open copy's, or a clear) changes it here */
+  let stored = length;
   const group = `dqmo-len-${Math.random().toString(36).slice(2, 8)}`;
   const lengthBox = h(
     'fieldset',
@@ -308,20 +314,34 @@ export function momentView(app: App, o: { done: () => void; then?: string; hum?:
       }),
     ),
   );
-  const choose = (v: MomentLength) => {
+  const take = (v: MomentLength) => {
     length = v;
     from = now();
     arm();
     // a line that promises no timing goes at once: the next frame shows a line again, from the timed ones
     if (v !== 'open' && CHECKIN.momentOpen.some((l) => words.textContent === typo(l))) shown = -1;
+  };
+  const choose = (v: MomentLength) => {
+    take(v);
     write(() => {
       try {
         localStorage.setItem(lengthKey(st.key), v);
+        stored = readLength(st.key);
       } catch {
         /* stays for this visit only */
       }
     });
   };
+  // chosen in another open copy: the moment goes on, its breath and lines unbroken, and lasts that long from now, as if
+  // chosen here. Nothing plays and focus stays where it is
+  const offLength = st.onChange(() => {
+    const v = readLength(st.key);
+    if (v === stored) return;
+    stored = v;
+    if (endAt >= 0 || v === length) return;
+    lengthBox.querySelectorAll<HTMLInputElement>('input').forEach((i) => (i.checked = i.value === v));
+    take(v);
+  });
 
   const t0 = now();
   let from = t0;
@@ -428,6 +448,7 @@ export function momentView(app: App, o: { done: () => void; then?: string; hum?:
       unmount?.();
       fades.forEach((a) => a.cancel());
       offVolume?.();
+      offLength();
       hum?.stop();
       hum = null;
     },

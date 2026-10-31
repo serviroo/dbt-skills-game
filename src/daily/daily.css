@@ -4138,6 +4138,10 @@ textarea.dq-input {
 .dq-lineslog {
   max-width: 720px;
 }
+/* the months sit in the page's own column, spaced like its other parts */
+.dq-logall {
+  display: contents;
+}
 .dq-loggroup {
   display: flex;
   flex-direction: column;

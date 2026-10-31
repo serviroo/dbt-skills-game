@@ -8,7 +8,7 @@ import { DAILY_GIFTS, WARDEN_XP, RANK_XP, RANKS, STAT_BASE, TODAY_LINES, type Da
 import { ACCENT_IDS, CARD_BACK_IDS, PLATE_IDS, SHADOW_IDS, THEME_IDS, TITLE_IDS, type AccentId, type CardBackId, type PlateId, type ShadowId, type ThemeId, type TitleId } from '../content/roster-lines';
 import { cleanName, readYou, writeYou } from '../core/you';
 import { APP_ID, BESIDE, SAVE_KEY, YOU_KEY } from '../core/stored-names';
-import { begunOf, canWrite, cleared, goneElsewhere, onClear, replacedBy, sawStored, write } from '../core/cleared';
+import { begunOf, canWrite, cleared, goneElsewhere, onClear, onWritten, replacedBy, sawStored, write } from '../core/cleared';
 
 /**
  * The save version this build writes. A save from a newer build is read too and keeps its higher number: this build
@@ -130,7 +130,7 @@ const DEVICE_SET_KEYS: SetKey[] = ['sound', 'motion', 'vibrate'];
 export { cleanName };
 const LIST_KEYS = ['comfort', 'activities', 'reasons', 'people'] as const;
 /** Choices kept beside a save that open screens show: one made in another open copy reaches them too (see onChange). */
-const SHOWN_BESIDE = [BESIDE.readSize, BESIDE.safeLight] as const;
+const SHOWN_BESIDE = [BESIDE.readSize, BESIDE.safeLight, BESIDE.momentLength, BESIDE.stealth] as const;
 const DAY_FLAGS = ['giftDay', 'cardDay', 'greetDay', 'checkinDay'] as const;
 const GONE_CAP = 1000;
 /** Top-level fields this build reads (and the ones only a Save Crystal carries); any other is kept as it was stored. */
@@ -928,6 +928,7 @@ export class Store {
   private locked = false;
   private lastRaw: string | null = null;
   private offClear: (() => void) | null = null;
+  private offWritten: (() => void) | null = null;
   /** a save waiting out a clear's hold */
   private deferred = false;
   /**
@@ -935,8 +936,12 @@ export class Store {
    * stored copy of at least that version without one of them had it removed by the build that wrote it.
    */
   private keptBase: { v: number; keys: Set<string> } = { v: 0, keys: new Set() };
-  /** The choices in SHOWN_BESIDE as this copy last heard them, so one made while it was away is heard on its way back. */
-  private beside = '';
+  /**
+   * The choices in SHOWN_BESIDE as this copy last heard or stored them, so one made while it was away is heard on its way
+   * back. Its own writes get no storage event, so a choice it stores is noted as it is written, and only that one: one
+   * changed in another copy and missed meanwhile still differs on the way back.
+   */
+  private beside: (string | null)[] = [];
 
   constructor(
     readonly key = SAVE_KEY,
@@ -979,6 +984,8 @@ export class Store {
       window.addEventListener('storage', this.onStorage);
       window.addEventListener('pageshow', this.onShow);
       document.addEventListener('visibilitychange', this.onShow);
+      const keys = this.besideKeys();
+      this.offWritten = onWritten(keys, (k, v) => (this.beside[keys.indexOf(k)] = v));
     }
     this.beside = this.besideNow();
   }
@@ -1017,14 +1024,18 @@ export class Store {
     if (e.type === 'pageshow' ? !(e as PageTransitionEvent).persisted : document.visibilityState !== 'visible') return;
     const moved = this.sync();
     const beside = this.besideNow();
-    if (!moved && beside === this.beside) return;
+    if (!moved && beside.every((v, i) => v === this.beside[i])) return;
     this.beside = beside;
     this.listeners.forEach((f) => f());
   };
 
+  private besideKeys() {
+    return SHOWN_BESIDE.map((b) => `${this.key}${b}`);
+  }
+
   private besideNow() {
     try {
-      return SHOWN_BESIDE.map((b) => localStorage.getItem(`${this.key}${b}`)).join('\n');
+      return this.besideKeys().map((k) => localStorage.getItem(k));
     } catch {
       return this.beside;
     }
@@ -1067,6 +1078,8 @@ export class Store {
     if (typeof window === 'undefined') return;
     this.offClear?.();
     this.offClear = null;
+    this.offWritten?.();
+    this.offWritten = null;
     window.removeEventListener('storage', this.onStorage);
     window.removeEventListener('pageshow', this.onShow);
     document.removeEventListener('visibilitychange', this.onShow);

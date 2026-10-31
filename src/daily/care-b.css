@@ -107,6 +107,10 @@
 .dq-chest.is-open .dq-chest-lock {
   opacity: 0;
 }
+/* opened in another open copy: it lands open, with nothing swinging */
+.dq-chest.is-quiet * {
+  transition: none;
+}
 /* its name over its line, as blocks, so it is no narrower than its longest word */
 .dq-chest-txt {
   line-height: 1.25;
