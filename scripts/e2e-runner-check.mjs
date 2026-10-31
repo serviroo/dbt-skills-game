@@ -199,6 +199,14 @@ export const scenarios = {
       console.log('fixture ready');
       await page.waitForTimeout(60000);
     },
+    async '${name}-hang'(h) {
+      record(h);
+      const { page } = await h.open();
+      await h.shot(page, '${name}-before-hang');
+      console.log('fixture ready');
+      // a wait nothing settles, not even the browser closing, so the runner never gets to this scenario's failure
+      await new Promise(() => {});
+    },
     async '${name}-popup-throttle-failure'(h) {
       record(h);
       const ctx = await h.browser.newContext();
@@ -283,6 +291,19 @@ chromium.launchServer = (options) => launchServer({ ...options, args: [...option
   assert.equal(signal.code, 130);
   const sigint = await run('sigint-cleanup', [`--scenario=${name}-signal`], 'SIGINT');
   assert.equal(sigint.code, 130);
+  // a scenario that hangs where closing the browser can't reach, stopped as its CI step runs out of time: the runner never
+  // gets to its failure and keeps nothing itself, but its mark in running/ says it was cut off, and scripts/e2e/keep.mjs
+  // (CI's next step) keeps what it wrote for the upload
+  const hang = await run('hang-kept', [`--scenario=${name}-hang`], 'SIGINT');
+  assert.notEqual(hang.code, 0);
+  const hangOut = JSON.parse(fs.readFileSync(state, 'utf8')).out;
+  assert(fs.existsSync(path.join(hangOut, `${name}-before-hang.png`)), 'the hung scenario wrote no screenshot');
+  assert(!fs.existsSync(path.join(hangOut, 'failed')) && fs.readdirSync(path.join(hangOut, 'running')).length === 1, 'the runner itself got to the hung scenario, so this checks nothing');
+  const keptHang = execFileSync(process.execPath, [path.join(root, 'scripts/e2e/keep.mjs'), hangOut], { cwd: out, encoding: 'utf8' });
+  assert.match(keptHang, new RegExp(`^${name}-hang was cut off midway`, 'm'));
+  const hangFiles = fs.readdirSync(path.join(hangOut, 'failed'), { recursive: true });
+  assert.deepEqual(hangFiles.sort(), [`${name}-hang`, path.join(`${name}-hang`, `${name}-before-hang.png`)].sort(), `failed/ after keep.mjs: ${JSON.stringify(hangFiles)}`);
+  assert.equal(fs.readdirSync(path.join(hangOut, 'running')).length, 0, 'keep.mjs left the mark of the scenario it kept');
   fs.writeFileSync(duplicate, `export const scenarios = { '${name}-signal': async () => {} };`, { flag: 'wx' });
   const collision = await run('duplicate-name', [`--file=${name}`]);
   assert.notEqual(collision.code, 0);
