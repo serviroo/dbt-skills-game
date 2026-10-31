@@ -292,6 +292,13 @@ function alter(rec: object, fields: Record<string, unknown>) {
     }
   if (raw) was!.read = JSON.stringify(rec);
 }
+/** A copy of a record to change, kept as stored as the record is (see alter), so the record itself stays as it was. */
+function copied<T extends object>(rec: T): T {
+  const c = { ...rec };
+  const was = AS_STORED.get(rec);
+  if (was) AS_STORED.set(c, { raw: isObj(was.raw) ? { ...was.raw } : was.raw, read: was.read });
+  return c;
+}
 const EV_KEYS = ['id', 't', 'day', 'k', 'xp', 'stat', 'skill', 'data'];
 const ENTRY_KEYS = ['day', 'emotions', 'urges', 'note', 'updatedAt', 'ft'];
 const ITEM_KEYS = ['id', 'text', 'at', 'place', 'placeAt'];
@@ -326,11 +333,18 @@ function stored(s: State) {
   const profileAt: Record<string, unknown> = { ...k?.profileAt };
   for (const [key, t] of Object.entries(s.setAt)) if (typeof t === 'number') putOwn((PROFILE_SET_KEYS as string[]).includes(key) ? profileAt : setAt, key, t);
   const back = <T>(l: T[], extra?: unknown[]) => (extra?.length ? [...l.map(asStored), ...extra] : l.map(asStored));
+  // a list's places are written for every record or none: one written without a place beside others with one would
+  // load after them all (see normalize), so a record kept as stored without one takes the place it has here
+  const placed = (l: (Item | Person)[]) => {
+    const out: unknown[] = l.map(asStored);
+    if (!out.some((x) => isObj(x) && num(x.place) !== null)) return out;
+    return out.map((x, i) => (isObj(x) && num(x.place) === null ? { ...x, place: l[i].place } : x));
+  };
   return {
     ...s,
     events: back(s.events, k?.events),
     diary: { ...k?.days, ...Object.fromEntries(Object.entries(s.diary).map(([d, e]) => [d, asStored(e)])) },
-    lists: { ...Object.fromEntries(LIST_KEYS.map((key) => [key, back<Item | Person>(s.lists[key], k?.dropped[key])])), ...k?.lists },
+    lists: { ...Object.fromEntries(LIST_KEYS.map((key) => [key, [...placed(s.lists[key]), ...(k?.dropped[key] ?? [])]])), ...k?.lists },
     maps: back(s.maps, k?.dropped.maps),
     lines: back(s.lines, k?.dropped.lines),
     skillPins: { ...k?.pins, ...Object.fromEntries(Object.entries(s.skillPins).map(([id, p]) => [id, asStored(p)])) },
@@ -585,9 +599,13 @@ function unionList<T extends Item | Person>(mine: T[], theirs: T[]) {
     if (!s || xa > sa || (xa === sa && x.place < s.place)) spot.set(x.id, { place: x.place, placeAt: x.placeAt });
   }
   unionInto(mine, theirs);
-  for (const x of mine) {
-    const s = spot.get(x.id)!;
-    if (x.place !== s.place || x.placeAt !== s.placeAt) alter(x, s);
+  const incoming = new Set(theirs);
+  for (let i = 0; i < mine.length; i++) {
+    const s = spot.get(mine[i].id)!;
+    if (mine[i].place === s.place && mine[i].placeAt === s.placeAt) continue;
+    // one taken from the other copy changes as a copy: that copy is what this one is checked against after (holdsMoreThan)
+    if (incoming.has(mine[i])) mine[i] = copied(mine[i]);
+    alter(mine[i], s);
   }
   mine.sort(byPlace);
 }

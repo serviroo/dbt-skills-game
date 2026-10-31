@@ -15,10 +15,10 @@
 //                           carries the words and the order to a new device, or after a device's own
 //   edit-your-lists-newer-save  what a newer build stored past this build's limits, and fields it doesn't know, stay
 //                           as stored through a move, a change to the number alone, a removal undone, a Crystal and a
-//                           restore after a device's own entries
+//                           restore after a device's own entries; one with no places yet keeps every place a move gives
 //   edit-your-lists-tabs    an edit in one tab and a move in another both stay: the open edit keeps its words, caret
 //                           and focus as the move lands, the mover keeps focus, and a copy that never saw either
-//                           change can't undo them
+//                           change, or saw all but the move, can't undo them, where they are stored or after a reload
 //   edit-your-lists-fit     with Edit and the moves showing and an edit open, everything fits at 390 and 320 wide,
 //                           held sideways and at 200% zoom: nothing runs off the side, every button is a tap in size,
 //                           the field shows whole and "Talk to someone now" stays pinned
@@ -387,6 +387,19 @@ export const scenarios = {
     intact(await stored(h, d.page), 'restored next to the device\'s own');
     problems.push(...d.errors);
     await d.ctx.close();
+    // a newer build's save with no places yet: after a move every entry keeps its place, after a reload and in a Crystal
+    const bare = await open(h, { width: 390, height: 844 }, { v: 2, lists: { comfort: [{ id: 'c1', text: 'Tea', at: T, mood: 'kept' }, { id: 'c2', text: 'Blanket', at: T }, { id: 'c3', text: 'Rain', at: T }], activities: [], reasons: [], people: [] } });
+    await go(bare.page, { name: 'comfort' });
+    await button(bare.page, 'Move Rain up').click();
+    const moved = await order(bare.page);
+    await bare.page.reload();
+    await h.reachHub(bare.page);
+    await go(bare.page, { name: 'comfort' });
+    const back = await order(bare.page);
+    const kit = (await crystalOf(h, bare.page, 'edit-your-lists-newer-bare')).raw.lists.comfort;
+    if (moved !== 'c1,c3,c2' || back !== moved || kit.map((x) => x.id).join() !== moved || kit[0].mood !== 'kept') problems.push(`newer save with no places: moved ${moved}, reloaded ${back}, Crystal ${JSON.stringify(kit)}`);
+    problems.push(...bare.errors);
+    await bare.ctx.close();
     h.expect(!problems.length, problems.join('\n'));
   },
 
@@ -426,6 +439,21 @@ export const scenarios = {
       if (!(await until(a, (want) => [...document.querySelectorAll('.dq-listp--comfort .dq-entry-t')].map((e) => e.textContent).join('|') === want, want, { timeout: 5000 }).then(() => true, () => false))) problems.push(`${tag}: after an older copy's write Comfort shows ${JSON.stringify(await shown(a, PANEL.comfort))}`);
       const s = await stored(h, b);
       if (words(s.lists.comfort).join('|') !== want) problems.push(`${tag}: stored ${JSON.stringify(s.lists.comfort)}`);
+      // Tea moves down here, and a copy that saw everything but that move changes Tea: the move still holds where it is
+      // stored, so a reload shows it too
+      const unmoved = await h.ls(b, h.SAVE);
+      await button(b, 'Move Tea down').click();
+      const stale = JSON.parse(unmoved);
+      Object.assign(stale.lists.comfort.find((x) => x.id === 'c1'), { text: 'Tea for two', at: Date.now() });
+      await a.evaluate(([k, v]) => localStorage.setItem(k, v), [h.SAVE, JSON.stringify(stale)]);
+      const last = 'Rain on the roof|Tea for two|Blanket, the heavy one';
+      const reads = (page, sel) => until(page, ([sel, want]) => [...document.querySelectorAll(sel)].map((e) => e.textContent).join('|') === want, [sel, last], { timeout: 5000 }).then(() => true, () => false);
+      if (!(await reads(b, '.dq-sz-list .dq-entry-t'))) problems.push(`${tag}: after a copy that missed the move, the Safe Zone shows ${JSON.stringify(await shown(b))}`);
+      if (!(await until(b, ([k, want]) => JSON.parse(localStorage.getItem(k)).lists.comfort.map((x) => x.text).join('|') === want, [h.SAVE, last], { timeout: 5000 }).then(() => true, () => false))) problems.push(`${tag}: after a copy that missed the move, stored ${JSON.stringify(words((await stored(h, b)).lists.comfort))}`);
+      await b.reload();
+      await b.waitForFunction(() => !!window.__daily, null, { timeout: 30000 });
+      await safeAt(b, 'comfort');
+      if (!(await reads(b, '.dq-sz-list .dq-entry-t'))) problems.push(`${tag}: reloaded after a copy that missed the move, the Safe Zone shows ${JSON.stringify(await shown(b))}`);
       await h.shot(a, `tabs-comfort-${tag}`);
       await h.shot(b, `tabs-safe-zone-${tag}`);
       problems.push(...[...errors, ...bErrors].map((e) => `${tag}: ${e}`));
