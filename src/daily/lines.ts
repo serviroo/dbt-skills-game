@@ -132,7 +132,7 @@ export function linesScreen(app: App): ScreenOut {
               h(
                 'ol',
                 { class: 'dq-log' },
-                list.map((l) => h('li', { class: 'dq-logrow', 'data-item': l.id }, h('span', { class: 'dq-logrow-d', text: dayLabel(l.day) }), lineEl(l.tag, l.text))),
+                list.map((l) => h('li', { class: 'dq-logrow', 'data-item': l.day }, h('span', { class: 'dq-logrow-d', text: dayLabel(l.day) }), lineEl(l.tag, l.text))),
               ),
             );
           }),

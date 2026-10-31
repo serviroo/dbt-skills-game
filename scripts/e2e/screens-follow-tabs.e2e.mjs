@@ -63,12 +63,12 @@ const visits = (n) =>
     return { id: `v${i}`, k: 'visit', day: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`, t, xp: 10 };
   });
 const TIPP = 'Frost Rune, TIPP. Practise it.';
-/** A line picked on each of `n` days, the latest two days ago. */
+/** A line picked on each of `n` days, the latest two days ago: five quotes, each picked again every fifth day. */
 const lines = (n) =>
   Array.from({ length: n }, (_, i) => {
     const t = Date.now() - (i + 2) * 86400e3;
     const d = new Date(t);
-    return { day: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`, id: `l${i}`, tag: 'calm', text: `Line ${i}, kept.`, t };
+    return { day: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`, id: `q${i % 5}`, tag: 'calm', text: `Line ${i}, kept.`, t };
   });
 
 async function open(h, viewport, prepare, save = SAVE) {
@@ -805,10 +805,10 @@ export const scenarios = {
       await into(row('Line 20,'));
       const tops = () => Promise.all(['Line 20,', 'Line 21,', 'Line 22,'].map((t) => row(t).evaluate((e) => e.getBoundingClientRect().top)));
       const at = await tops();
-      // another tab picks today's line, which goes at the top of the history
+      // another tab picks today's line, the quote picked on the day in view, which goes at the top of the history
       await other.page.evaluate((k) => {
         const s = JSON.parse(localStorage.getItem(k));
-        s.lines.push({ day: window.__daily.store.today(), id: 'today', tag: 'calm', text: 'Picked in another tab.', t: Date.now() });
+        s.lines.push({ day: window.__daily.store.today(), id: 'q0', tag: 'calm', text: 'Picked in another tab.', t: Date.now() });
         localStorage.setItem(k, JSON.stringify(s));
       }, h.SAVE);
       if (!(await until(page, () => [...document.querySelectorAll('.dq-logrow')].some((r) => r.textContent.includes('Picked in another tab.'))))) problems.push(`${tag}: the line picked in another tab did not reach the open history`);
