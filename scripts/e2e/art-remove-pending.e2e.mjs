@@ -5,6 +5,7 @@
 // screen (Home keeps it), Forward can't reopen it, and a change in another tab keeps the focused card.
 import fs from 'node:fs';
 import path from 'node:path';
+import { holdToast } from './art-rename-favourite.e2e.mjs';
 import { pause } from './device-motion.e2e.mjs';
 
 const line = (x, y, i = 1) => ({ i, w: 25, p: [x, y, x + 300, y + 80, x + 520, y + 20] });
@@ -203,12 +204,15 @@ export const scenarios = {
     // A removes pg-b: B's gallery hides it too, and A's Undo brings it back there
     await b.evaluate(() => window.__daily.go({ name: 'art' }));
     await h.poll(b, () => order(b), (o) => o.includes('pg-a') && o.includes('pg-b'), 'the other tab\'s gallery is not showing the pages', { timeout: 12000 });
-    await removePiece(a, 'pg-b');
+    await openPiece(a, 'pg-b');
+    await holdToast(h, a, () => a.getByRole('button', { name: 'Remove', exact: true }).click());
+    await a.locator('.dq-toast').getByText('Page removed.', { exact: true }).waitFor();
     await h.poll(b, () => order(b), (o) => o.includes('pg-a') && !o.includes('pg-b'), 'the other tab still shows the removed page', { timeout: 2000 });
     await toGallery(b);
     await steady(b);
     await h.shot(b, 'other-tab-hides-320');
     await a.locator('.dq-toast').getByRole('button', { name: 'Undo', exact: true }).click();
+    await a.clock.resume();
     await h.poll(b, () => order(b), (o) => o.includes('pg-b'), 'Undo did not bring the page back in the other tab', { timeout: 12000 });
     h.expect(!(await goneMarks(a)), 'Undo left the removal stored');
     h.expect(!errors.length, errors.join('\n'));

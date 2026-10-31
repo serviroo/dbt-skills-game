@@ -5,7 +5,10 @@
 // long the page took, and count the app's own work in full: one task past the limit, two under it that add up past it,
 // or an app call a test makes in the page fail quick(), and so does a page that stops answering anywhere in it. gone()
 // takes something that goes only once the page has run past its deadline as late, and gives up on a page that stops
-// answering just after it has gone.
+// answering just after it has gone. Playwright's own calls count their timeouts the same way, through the harness: a
+// click, a fill and a waitFor pass on a page stopped mid-wait past the deadline, fail at it with Playwright's call log
+// when what they wait for never comes, follow a page to its next document with what was left, and end at the stuck
+// limit on a page that never runs again; and every call that takes a timeout counts it so.
 import { pause } from './device-motion.e2e.mjs';
 
 /**
@@ -22,6 +25,25 @@ const freezeThenLet = (page, sel) =>
       }, 300),
     sel,
   );
+
+/**
+ * act(), on a page that stops a moment after it starts, for 3 s, as a busy machine stops a browser: counted in full, the
+ * stop alone is past act's 2 s deadline. What act waits for comes once the page has run 0.6 s, so after the stop, and
+ * shown(), read while the page is stopped, makes sure it hadn't come yet. Resolves with what act came to.
+ */
+async function stopped(h, ctx, page, shown, act) {
+  const after = act().then(() => 'done', (e) => e.message);
+  const stop = await pause(ctx, page);
+  let early;
+  try {
+    early = await stop.read(shown);
+    await h.sleep(3000);
+  } finally {
+    await stop.resume();
+  }
+  h.expect(!early, 'the page stopped only once what the step waits for had come');
+  return after;
+}
 
 const STUCK = 'still waiting 30 s later';
 /**
@@ -310,6 +332,120 @@ export const scenarios = {
       const after = await h.gone(page.getByRole('dialog', { name: 'Pick' }), 2000, { stuck: 2000 }).then((ms) => `left after ${ms} ms`, (e) => e.message);
       const took = Date.now() - t0;
       h.expect(/ left, then the page answered nothing until 2 s after the wait began$/.test(after) && took < 6000, `a page that stopped once the dialog had gone gave "${after}" after ${took} ms`);
+    } finally { await ctx.close(); }
+  },
+
+  async 'click-waits-out-a-stop'(h) {
+    const ctx = await h.browser.newContext();
+    try {
+      const page = await ctx.newPage();
+      // the page's default, as most scenarios set it, and not a timeout of the click's own
+      page.setDefaultTimeout(2000);
+      await page.setContent('<button hidden>x</button>');
+      await page.evaluate(() => {
+        const button = document.querySelector('button');
+        button.onclick = () => (window.clicked = true);
+        setTimeout(() => (button.hidden = false), 600);
+      });
+      const after = await stopped(h, ctx, page, () => !document.querySelector('button').hidden, () => page.locator('button').click());
+      h.expect(after === 'done' && (await page.evaluate(() => window.clicked)), `a click whose page stopped for 3 s, before the button showed, gave "${after}"`);
+    } finally { await ctx.close(); }
+  },
+
+  async 'fill-waits-out-a-stop'(h) {
+    const ctx = await h.browser.newContext();
+    try {
+      const page = await ctx.newPage();
+      await page.setContent('<input disabled>');
+      await page.evaluate(() => setTimeout(() => (document.querySelector('input').disabled = false), 600));
+      const after = await stopped(h, ctx, page, () => !document.querySelector('input').disabled, () => page.locator('input').fill('calm', { timeout: 2000 }));
+      h.expect(after === 'done' && (await page.locator('input').inputValue()) === 'calm', `a fill whose page stopped for 3 s, before the field opened, gave "${after}"`);
+    } finally { await ctx.close(); }
+  },
+
+  async 'waitfor-waits-out-a-stop'(h) {
+    const ctx = await h.browser.newContext();
+    try {
+      const page = await ctx.newPage();
+      await page.setContent('<p>x</p>');
+      await page.evaluate(() => setTimeout(() => document.body.append(Object.assign(document.createElement('p'), { id: 'late', textContent: 'late' })), 600));
+      const after = await stopped(h, ctx, page, () => !!document.querySelector('#late'), () => page.locator('#late').waitFor({ timeout: 2000 }));
+      h.expect(after === 'done', `a waitFor whose page stopped for 3 s, before the element came, gave "${after}"`);
+    } finally { await ctx.close(); }
+  },
+
+  async 'actions-fail-at-their-deadline'(h) {
+    const ctx = await h.browser.newContext();
+    try {
+      const page = await ctx.newPage();
+      await page.setContent('<button hidden>x</button>');
+      const failed = (wait) => timed(page, () => wait().then(() => 'done', (e) => `${e.name}: ${e.message}`));
+      for (const [api, click] of [['locator.click', () => page.locator('button').click({ timeout: 500 })], ['page.click', () => page.click('button', { timeout: 500 })], ['frame.click', () => page.mainFrame().click('button', { timeout: 500 })]]) {
+        const { after, ms } = await failed(click);
+        h.expect(after.startsWith(`TimeoutError: ${api}: Timeout 500ms of the page running exceeded\nCall log:\n`) && ms < 2000, `a button that never showed gave "${after}" after ${ms} ms of the page running`);
+      }
+      const event = await failed(() => page.waitForEvent('download', { timeout: 500 }));
+      h.expect(/^TimeoutError: Timeout 500ms of the page running exceeded\npage\.waitForEvent: /.test(event.after) && event.ms < 2000, `a download that never came gave "${event.after}" after ${event.ms} ms of the page running`);
+    } finally { await ctx.close(); }
+  },
+
+  async 'waits-follow-the-page-to-its-next-document'(h) {
+    const ctx = await h.browser.newContext();
+    try {
+      const page = await ctx.newPage();
+      // both documents are made here, so nothing goes over the network
+      const next = `<script>setTimeout(() => document.body.append(Object.assign(document.createElement('p'), { id: 'next', textContent: 'next' })), 300)</script>`;
+      // a document that goes on at once, before the wait can count there
+      const hop = `<script>setTimeout(() => location.assign('/next'), 10)</script>`;
+      await page.route('http://lantern.test/*', (r) => r.fulfill({ contentType: 'text/html', body: { next, hop }[new URL(r.request().url()).pathname.slice(1)] ?? '<p>first</p>' }));
+      const across = async (timeout, via = '/next') => {
+        await page.goto('http://lantern.test/first');
+        await page.evaluate((via) => setTimeout(() => location.assign(via), 350), via);
+        return page.locator('#next').waitFor({ timeout }).then(() => 'found', (e) => `${e.name}: ${e.message.split('\n')[0]}`);
+      };
+      const after = await across(3000);
+      h.expect(after === 'found', `a wait the page went to another document during gave "${after}"`);
+      // 0.35 s in the first document and 0.3 s in the next come to more than 0.5 s
+      const late = await across(500);
+      h.expect(late === 'TimeoutError: locator.waitFor: Timeout 500ms of the page running exceeded', `a wait whose page ran past its deadline over two documents gave "${late}"`);
+      const hopped = await across(500, '/hop');
+      h.expect(hopped === 'TimeoutError: locator.waitFor: Timeout 500ms of the page running exceeded', `a wait whose page ran past its deadline over three documents gave "${hopped}"`);
+    } finally { await ctx.close(); }
+  },
+
+  // a page that never runs again fails each call at the stuck limit, an element handle's too, which knows its page
+  // without asking it
+  async 'calls-end-on-a-page-that-stops'(h) {
+    const ctx = await h.browser.newContext();
+    try {
+      const page = await ctx.newPage();
+      await page.setContent('<button hidden>x</button><input type="file">');
+      const button = await page.$('button');
+      const input = await page.$('input');
+      await pause(ctx, page);
+      const t0 = Date.now();
+      const calls = {
+        'locator.click': page.locator('button').click({ timeout: 1000 }),
+        'elementHandle.click': button.click({ timeout: 1000 }),
+        // which first asks the page for the element's frame, a step no abort reaches
+        'elementHandle.setInputFiles': input.setInputFiles({ name: 'a.txt', mimeType: 'text/plain', buffer: Buffer.from('a') }, { timeout: 1000 }),
+      };
+      const said = await Promise.race([
+        Promise.all(Object.values(calls).map((c) => c.then(() => 'done', (e) => `${e.name}: ${e.message.split('\n')[0]}`))),
+        h.sleep(90000).then(() => [STUCK]),
+      ]);
+      const took = Date.now() - t0;
+      const stuck = (call) => `TimeoutError: ${call}: Timeout 1000ms of the page running exceeded (60 s went by, the page stopped for most of them)`;
+      h.expect(Object.keys(calls).every((call, i) => said[i] === stuck(call)) && took < 70000, `calls on a page that never ran again gave ${JSON.stringify(said)} after ${took} ms`);
+    } finally { await ctx.close(); }
+  },
+
+  // a Playwright update that adds a call with a timeout fails this until the harness counts it too
+  async 'every-timed-call-counts-page-time'(h) {
+    const ctx = await h.browser.newContext();
+    try {
+      const missing = await h.untimed(await ctx.newPage());
+      h.expect(!missing.length, `these calls count their timeout on the wall clock: ${missing.join(', ')}`);
     } finally { await ctx.close(); }
   },
 };

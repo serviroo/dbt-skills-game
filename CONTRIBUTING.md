@@ -122,6 +122,13 @@ scenario gets an `h` object from `scripts/e2e/harness.mjs`, the same but for `br
   stop lands in it. Use them for any wait on the page; keep `Date.now()` deadlines for waits on something outside
   it, such as a server or a file. They count a task that holds the page for seconds as a stop, so a check that the
   app is quick uses `quick` or `stopwatch` instead.
+- Playwright's own timeouts count the same way, with nothing to do in a scenario: the harness sets every call that
+  waits on a page (`click`, `fill`, `press`, `check`, `waitFor`, `waitForFunction`, `waitForEvent`, `goto`,
+  `screenshot` and the rest, on a page, frame, locator or element handle) to count its timeout, or the page's
+  default, in the time the page could run, and to fail with Playwright's own message and call log once it has.
+  `timeout: 0` still waits without one. For a deadline on the wall clock, give `timeout: 0` and
+  `signal: AbortSignal.timeout(ms)`. `every-timed-call-counts-page-time` fails if a Playwright update brings a call
+  with a timeout the harness leaves out.
 - `quick(page, ms, what, step)`: check that the app is quick over `step(ran)`: its waits end within `ms` of the page
   running (give its own steps `timeout: 0`), and `stopwatch` puts it under `ms`. A page that stops answering anywhere
   in it fails it, at the stuck limit the waits use.

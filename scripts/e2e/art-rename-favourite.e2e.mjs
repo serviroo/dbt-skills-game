@@ -126,6 +126,18 @@ const toGallery = (page) =>
 /** Nothing on screen is mid-animation (a fade, a window), so a shot shows the screen as it rests. */
 const steady = (page) => page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.getComputedTiming().iterations === Infinity));
 
+/**
+ * Holds the page's clock, runs tap(), which raises a toast, and lets the screen it opens settle for 1 s of that clock.
+ * The toast's Undo lasts 6 s of the page's timers, and a screenshot on a slow machine, or a browser stopped for a while,
+ * can take longer; held, it waits for the scenario. page.clock.resume() lets it run out again.
+ */
+export async function holdToast(h, page, tap) {
+  await page.clock.install();
+  await h.pauseClock(page);
+  await tap();
+  await page.clock.runFor(1000);
+}
+
 /** Nothing sticks out sideways, and the piece page's controls sit inside the screen with readable text. */
 async function fits(h, page, where) {
   const r = await page.evaluate(() => {
@@ -367,7 +379,7 @@ export const scenarios = {
       await h.poll(page, () => records(page), (rs) => !rs.find((r) => r.id === 'pg-b')?.name, `${at}: the empty name was stored`, { timeout: 12000 });
 
       // Remove: no question, the page goes at once, Undo brings it back to its place with focus on it
-      await page.getByRole('button', { name: 'Remove', exact: true }).click();
+      await holdToast(h, page, () => page.getByRole('button', { name: 'Remove', exact: true }).click());
       await page.locator('.dq-artroom').waitFor();
       h.expect(!(await page.locator('.dq-piece-confirm, [role=alertdialog]').count()) && !(await page.getByRole('button', { name: 'Keep it' }).count()), `${at}: Remove still asks`);
       const toast = page.locator('.dq-toast');
@@ -381,6 +393,7 @@ export const scenarios = {
       await steady(page);
       await h.shot(page, `${at}-removed-toast`);
       await toast.getByRole('button', { name: 'Undo', exact: true }).click();
+      await page.clock.resume();
       await h.poll(page, () => order(page, '.dq-galitem'), (o) => JSON.stringify(o) === '["pg-a","al-c","pg-b"]', `${at}: Undo did not bring the page back to its place`, { timeout: 12000 });
       await h.poll(page, () => page.evaluate(() => document.activeElement?.dataset?.piece), (f) => f === 'pg-b', `${at}: focus did not go to the page Undo brought back`, { timeout: 12000 });
       await h.sleep(7000);
@@ -794,7 +807,7 @@ export const scenarios = {
       await page.locator('.dq-piece-labels').waitFor();
       await fits(h, page, `${at} ally`);
       await h.shot(page, `${at}-ally`);
-      await page.getByRole('button', { name: 'Release', exact: true }).click();
+      await holdToast(h, page, () => page.getByRole('button', { name: 'Release', exact: true }).click());
       await page.locator('.dq-toast').getByText('Ally released.', { exact: true }).waitFor();
       await h.sleep(900);
       await h.shot(page, `${at}-release-toast`);
