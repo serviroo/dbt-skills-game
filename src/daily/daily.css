@@ -2738,15 +2738,24 @@ textarea.dq-input {
   letter-spacing: 0.2em;
   text-transform: uppercase;
 }
+/* two cards a row (four on a wide screen), each its share; a card whose longest word doesn't fit its share takes the
+   whole row, so every word shows whole at its own size */
 .dq-collection {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 12px;
 }
-/* a phone zoomed to 200% (260 CSS pixels wide or less): one card a row, so its words have room */
+.dq-collection > .dq-cardbtn {
+  flex: 1 1 calc(50% - 6px);
+}
+/* a phone zoomed to 200% (260 CSS pixels wide or less): one card a row, reaching only as far as the page's own 10 px
+   padding, with narrower sides (below), so a name's longest word fits its line */
 @media (max-width: 260px) {
   .dq-collection {
-    grid-template-columns: minmax(0, 1fr);
+    margin: 0 -10px;
+  }
+  .dq-collection > .dq-cardbtn {
+    flex-basis: 100%;
   }
 }
 .dq-cardbtn {
@@ -2770,16 +2779,14 @@ textarea.dq-input {
   transform: none;
   aspect-ratio: 5 / 6.4;
   overflow: clip;
-  container-type: inline-size;
   padding: 14px 14px 12px;
   transition: border-color 0.2s;
 }
 .dq-cardbtn:hover .dq-cardface {
   border-color: rgba(175, 215, 245, 0.85);
 }
-/* the longest word of its name, and of its real name, fits the card's line however narrow the card */
 .dq-cardbtn .dq-cf-name {
-  font-size: min(22px, 16cqi);
+  font-size: 22px;
 }
 .dq-cardbtn .dq-cf-top {
   font-size: 12px;
@@ -2788,7 +2795,7 @@ textarea.dq-input {
   display: none;
 }
 .dq-cardbtn .dq-cf-real {
-  font-size: min(12px, 10cqi);
+  font-size: 12px;
   letter-spacing: 0.12em;
 }
 @media (max-width: 359px) {
@@ -2797,6 +2804,12 @@ textarea.dq-input {
   }
   .dq-cardbtn .dq-cf-real {
     letter-spacing: 0.08em;
+  }
+}
+@media (max-width: 260px) {
+  .dq-cardbtn .dq-cardface {
+    padding-right: 6px;
+    padding-left: 6px;
   }
 }
 .dq-cardbtn-n {
@@ -3373,8 +3386,8 @@ textarea.dq-input {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: start;
   }
-  .dq-collection {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+  .dq-collection > .dq-cardbtn {
+    flex-basis: calc(25% - 9px);
   }
   .dq-sz .dq-text {
     font-size: 21px;
@@ -4885,6 +4898,19 @@ textarea.dq-input {
   overflow-y: auto;
   --plate-a: #091628;
   --plate-b: #050d19;
+}
+/* a sheet's title with its close button at its end, or where they don't share a line, the button on the line above, so
+   it is in reach the moment the sheet opens */
+.dq-sheet-top {
+  display: flex;
+  flex-wrap: wrap-reverse;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: -6px -8px 8px 0;
+}
+.dq-sheet-x {
+  margin-left: auto;
 }
 .dq-sheet-h {
   margin: 0 0 4px;

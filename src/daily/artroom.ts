@@ -538,7 +538,12 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     sheet.replaceChildren(
       panel(
         { cls: 'dq-sheet-p' },
-        h('h2', { class: 'dq-sheet-h', id: 'dq-sheet-h', text: ART.nameAsk }),
+        h(
+          'div',
+          { class: 'dq-sheet-top' },
+          h('h2', { class: 'dq-sheet-h', id: 'dq-sheet-h', text: ART.nameAsk }),
+          h('button', { type: 'button', class: 'dq-icbtn dq-sheet-x', 'aria-label': 'Back to drawing', html: icon('close'), onclick: () => hideName(true) }),
+        ),
         p(ART.nameHint, 'dq-small'),
         f.el,
         h('div', { class: 'dq-opts dq-opts--names' }, ideas.map((n) => chip(n, () => ((f.input.value = n), f.input.focus())))),

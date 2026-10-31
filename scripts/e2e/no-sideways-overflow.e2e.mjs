@@ -3,10 +3,11 @@
 // half the size, as browser zoom does), one scenario each, opens every screen on a returning save with everything
 // unlocked: on each, the page is exactly as wide as the screen, nothing scrolls sideways inside the companion, and the
 // Safe Zone button is whole on screen. Outside a skill's window and the Safe Zone, no row or card squeezes a word, so
-// none breaks onto the next line without a hyphen; no Night Watch card cuts its words, and A quiet minute's moth stays
-// clear of its badge. The same holds inside every watcher's card in the Night Watch camp, and inside the sheets opened
-// from the drawing page and the story editor, which are opened at the phone's own size and checked once it zooms to
-// 200%; each sits below the top bar, its close button whole and taking a tap. A failure names the widest boxes, or the
+// none breaks onto the next line without a hyphen; no Night Watch card cuts its words or sets them smaller than its own
+// sizes (at the phone's own size too), and A quiet minute's moth stays clear of its badge. The same holds inside every
+// watcher's card in the Night Watch camp, and inside the sheets opened from the drawing page and the story editor,
+// checked as they open at the phone's own size and once it zooms to 200%; each sits below the top bar, its close button
+// at least 44 px, whole and taking a tap. A failure names the widest boxes, or the
 // words, that reach past the edge, and the words that break.
 import { fullSave, seedStores } from './me-91-final-save-ids.e2e.mjs';
 import { cutShort } from './safe-zone-reach.e2e.mjs';
@@ -99,6 +100,8 @@ const width = (page, sheet = null) =>
     const inner = box ? [box, ...box.querySelectorAll('*')].filter((e) => getComputedStyle(e).overflowX !== 'visible' && e.scrollWidth > e.clientWidth + 1 && e.checkVisibility() && !e.closest('.dq-sr')).map((e) => `${label(e)} ${e.scrollWidth - e.clientWidth} px wider than it shows`) : [];
     const bar = document.querySelector('.dq-top').getBoundingClientRect().bottom;
     const meets = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    // a card's words at main's sizes or larger
+    const small = Object.entries({ '.dq-cf-name': 22, '.dq-cf-real': 12, '.dq-cf-top': 12, '.dq-cardbtn-n': 13.5 }).flatMap(([sel, px]) => [...document.querySelectorAll(`.dq-cardbtn ${sel}`)].filter((e) => parseFloat(getComputedStyle(e).fontSize) < px - 0.01).slice(0, 1).map((e) => `${sel} at ${getComputedStyle(e).fontSize}, under ${px}px`));
     const cut = [...document.querySelectorAll('.dq-cardbtn .dq-cardface')].filter((c) => c.scrollHeight > c.clientHeight + 1 || c.scrollWidth > c.clientWidth + 1).map((c) => `"${c.textContent.trim().slice(0, 20)}"`);
     const moth = document.querySelector('.dq-ease-sea svg')?.getBoundingClientRect();
     const safe = document.querySelector('.dq-top .dq-safe')?.getBoundingClientRect();
@@ -111,17 +114,19 @@ const width = (page, sheet = null) =>
       inner,
       under: !!box && box.getBoundingClientRect().top < bar - 0.5,
       cut,
+      small,
       moth: !!moth && [...document.querySelectorAll('.dq-ease-panel > .dq-chip > *')].some((c) => meets(c.getBoundingClientRect(), moth)),
     };
   }, sheet);
 
-/** Whether the control `sel` names shows whole on screen below the top bar and takes its own tap. */
+/** Whether the control `sel` names is at least 44 px each way, whole on screen below the top bar, and takes its own tap. */
 const takesTap = (page, sel) =>
   page.evaluate((sel) => {
     const e = document.querySelector(sel);
+    if (!e) return false;
     const r = e.getBoundingClientRect();
     const bar = document.querySelector('.dq-top').getBoundingClientRect().bottom;
-    return r.top >= bar - 0.5 && r.bottom <= innerHeight + 0.5 && r.left >= -0.5 && r.right <= innerWidth + 0.5 && e.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
+    return r.width >= 43.5 && r.height >= 43.5 && r.top >= bar - 0.5 && r.bottom <= innerHeight + 0.5 && r.left >= -0.5 && r.right <= innerWidth + 0.5 && e.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
   }, sel);
 
 /** Every screen, and the sheets, on one phone at 200% zoom. */
@@ -149,6 +154,7 @@ function sweep(phone) {
         if (w.inner.length) bad.push(`inside the sheet: ${w.inner.join(', ')}`);
         if (w.under) bad.push('the top of the sheet is under the top bar');
         if (close && !(await takesTap(page, close))) bad.push('its close button is not whole below the top bar');
+        if (w.small.length) bad.push(`card text below its size: ${w.small.join(', ')}`);
         if (w.cut.length) bad.push(`${w.cut.length} cards cut their words (${w.cut.slice(0, 3).join(', ')})`);
         if (w.moth) bad.push('the moth is over the badge');
         if (bad.length) failed.push(`${size} ${where}: ${bad.join('; ')} on a ${w.vw} px screen; past the edge: ${w.past.join(', ') || 'nothing found'}`);
@@ -165,6 +171,12 @@ function sweep(phone) {
         }
         await check(where, { words: route.name !== 'skill' && route.name !== 'safe' });
       }
+      // Night Watch at the phone's own size, where its cards keep their words whole at their own sizes too
+      await page.setViewportSize(phone);
+      await page.evaluate(() => window.__daily.go({ name: 'shadows' }));
+      await page.waitForFunction(() => window.__daily.route.name === 'shadows', null, { timeout: 10000 });
+      await check('Night Watch, unzoomed');
+      await page.setViewportSize(zoomed);
       // Home once the check-in is answered with a feeling that asks how strong it is
       await page.evaluate(() => window.__daily.go({ name: 'hub' }));
       await page.locator('.dq-feels .dq-opt').filter({ hasText: 'Tired' }).click({ timeout: 10000 });
@@ -180,11 +192,12 @@ function sweep(phone) {
         } catch (e) {
           return failed.push(`${size} ${where}: could not open it: ${String(e.message).split('\n')[0]}`);
         }
+        await check(`${where}, unzoomed`, { sheet: panel, close });
         await page.setViewportSize(zoomed);
         await check(where, { sheet: panel, close });
         await page.keyboard.press('Escape');
       };
-      await sheet('shadow ally name sheet', { panel: '.dq-sheet:not(.is-hidden) .dq-sheet-p' }, async () => {
+      await sheet('shadow ally name sheet', { panel: '.dq-sheet:not(.is-hidden) .dq-sheet-p', close: '.dq-sheet:not(.is-hidden) .dq-sheet-x' }, async () => {
         await page.evaluate(() => window.__daily.go({ name: 'draw', kind: 'ally' }));
         const frame = page.locator('.dq-draw-frame');
         await frame.waitFor({ timeout: 10000 });
@@ -206,13 +219,13 @@ function sweep(phone) {
         await page.locator('.dq-save:enabled').click({ timeout: 10000 });
         await page.locator('.dq-sheet:not(.is-hidden) .dq-sheet-h').waitFor({ timeout: 10000 });
       });
-      await sheet('chapter sheet', { panel: '.st-chsheet', close: '.st-chsheet .st-sheet-x' }, async () => {
+      await sheet('chapter sheet', { panel: '.st-chsheet', close: '.st-chsheet .dq-sheet-x' }, async () => {
         await page.evaluate(() => window.__daily.go({ name: 'write', id: 'tale-1' }));
         await page.getByRole('textbox', { name: /^Page,/ }).waitFor({ timeout: 10000 });
         await page.locator('.st-chbtn').click();
         await page.locator('.st-chsheet').first().waitFor({ timeout: 10000 });
       });
-      await sheet('drawing picker sheet', { panel: '.st-picks', close: '.st-picks .st-sheet-x' }, async () => {
+      await sheet('drawing picker sheet', { panel: '.st-picks', close: '.st-picks .dq-sheet-x' }, async () => {
         await page.locator('.st-chsheet').first().waitFor({ state: 'detached', timeout: 10000 });
         await page.locator('.st-pic-b').click();
         await page.locator('.st-picks').waitFor({ timeout: 10000 });
