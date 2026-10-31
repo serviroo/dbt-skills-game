@@ -143,6 +143,11 @@ function sweep(phone) {
         }
         await check(where, { words: route.name !== 'skill' && route.name !== 'safe' });
       }
+      // Home once the check-in is answered with a feeling that asks how strong it is
+      await page.evaluate(() => window.__daily.go({ name: 'hub' }));
+      await page.locator('.dq-feels .dq-opt').filter({ hasText: 'Tired' }).click({ timeout: 10000 });
+      await page.locator('.dq-level [role=radiogroup]').waitFor({ timeout: 10000 });
+      await check('Home, How strong');
 
       // the sheets opened from the drawing page and the story editor
       // each sheet opens at the phone's own size, where the page can be drawn on, and is checked once zoomed to 200%

@@ -834,6 +834,12 @@
 .dq-seg--10 .dq-seg-b:nth-child(n + 6) {
   border-top: 1px solid rgba(125, 150, 197, 0.22);
 }
+/* a phone zoomed to 200% (260 CSS pixels wide or less): two to a row, as five don't fit */
+@media (max-width: 260px) {
+  .dq-seg--10 {
+    grid-template-columns: repeat(2, minmax(44px, 1fr));
+  }
+}
 .dq-seg--6 {
   display: grid;
   grid-template-columns: repeat(6, minmax(44px, 1fr));
@@ -875,7 +881,8 @@
     border-left: 0;
     border-top: 1px solid rgba(125, 150, 197, 0.22);
   }
-  .dq-seg--3 .dq-seg-b:first-child {
+  .dq-seg--3 .dq-seg-b:first-child,
+  .dq-seg--range .dq-seg-b:first-child {
     border-top: 0;
   }
 }
@@ -1770,6 +1777,13 @@ textarea.dq-input {
 }
 .dq-suggest--rest {
   align-items: center;
+}
+/* a phone zoomed to 200% (260 CSS pixels wide or less): the picture sits above its words */
+@media (max-width: 260px) {
+  .dq-suggest {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 .dq-cat {
   flex: none;
