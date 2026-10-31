@@ -230,10 +230,11 @@ export function place(box: HTMLElement, kids: HTMLElement[], fallback?: () => HT
 
 /**
  * Part of a screen drawn from the player's own data (null draws nothing), which `update` draws again in place when what
- * it shows changed: in another open copy, or by a clear. Focus on a control that goes moves to that same control drawn
- * again (the same item's, by the data-item id of the row it is in, with the same name, link and words), else to `lost`,
- * never to a control of someone or something else. It goes only where the player can see it, brought whole into view,
- * focus ring and all, clear of the pinned bars (their scroll padding in daily.css).
+ * it shows changed: in another open copy, or by a clear. `node` is what shows now, and `update` says whether it drew.
+ * Focus on a control that goes moves to that same control drawn again (the same item's, by the data-item id of the row
+ * it is in, with the same name and link: its label, else its words), else to `lost`, never to a control of someone or
+ * something else. It goes only where the player can see it, brought whole into view, focus ring and all, clear of the
+ * pinned bars (their scroll padding in daily.css).
  */
 /** Whether the player can see `e`: shown, with a size, and not hidden from anyone, a screen reader's eyes only included. */
 const seen = (e: HTMLElement) => {
@@ -248,21 +249,24 @@ export function redrawn(draw: () => Element | null, lost: () => HTMLElement | nu
   // what it showed as drawn: a map the player opened since is not a change
   let shown = html(node);
   return {
-    node,
+    get node() {
+      return node;
+    },
     update() {
       const next = make();
       const now = html(next);
-      if (now === shown) return;
+      if (now === shown) return false;
       const had = document.activeElement instanceof HTMLElement && node.contains(document.activeElement) ? document.activeElement : null;
       node.replaceWith(next);
       node = next;
       shown = now;
-      if (!had) return;
+      if (!had) return true;
       const item = (e: Element) => e.closest('[data-item]')?.getAttribute('data-item') ?? null;
-      const like = (e: Element) => item(e) === item(had) && ['aria-label', 'href'].every((a) => e.getAttribute(a) === had.getAttribute(a)) && e.textContent === had.textContent;
+      const name = (e: Element) => e.getAttribute('aria-label') ?? e.textContent;
+      const like = (e: Element) => item(e) === item(had) && name(e) === name(had) && e.getAttribute('href') === had.getAttribute('href');
       const same = next instanceof Element ? [...next.querySelectorAll<HTMLElement>('a[href], button, summary')].find(like) : undefined;
       const to = [same, lost()].find((e): e is HTMLElement => !!e && seen(e));
-      if (!to) return;
+      if (!to) return true;
       to.focus({ preventScroll: true });
       // the ring is drawn outside the box, by its width and gap: the scroll takes it in too, past whatever scroll margin
       // the control has of its own
@@ -272,6 +276,7 @@ export function redrawn(draw: () => Element | null, lost: () => HTMLElement | nu
       to.style.scrollMargin = (['Top', 'Right', 'Bottom', 'Left'] as const).map((s) => `${parseFloat(cs[`scrollMargin${s}`]) + ring}px`).join(' ');
       to.scrollIntoView({ block: 'nearest' });
       to.style.scrollMargin = own;
+      return true;
     },
   };
 }

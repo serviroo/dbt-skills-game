@@ -5,7 +5,7 @@ import { CHECKIN, QUEST, RANKS } from '../content/daily-lines';
 import type { App, ScreenOut } from './app';
 import { cardArtSVG, catSVG, crystalSVG, glyph, icon, mothSVG } from './art';
 import { wait } from './clock';
-import { breakable, btn, chip, h, md, panel, segmented, typo } from './ui';
+import { breakable, btn, chip, h, md, panel, redrawn, segmented, typo } from './ui';
 import { artStore } from './artstore';
 import { storyStore } from './storystore';
 import { cardOf, refill, todayPrompt, thumbImg } from './artroom';
@@ -13,7 +13,7 @@ import { linePanel } from './lines';
 import { goNext } from './moment';
 import { isSkillId } from './store';
 import { loadoutArt } from './widgets';
-import { foilLayer, wandererRows, moonflower, titleUnlock } from './wave2';
+import { foilLayer, wandererRows, moonflower, titleRow, titleUnlock } from './wave2';
 import { cardBackArt } from './wardrobe';
 
 export function skillCard(id: string, opts: { label?: string; special?: 'comfort' | 'free'; small?: boolean } = {}) {
@@ -52,41 +52,43 @@ export function skillCard(id: string, opts: { label?: string; special?: 'comfort
 }
 
 function statusPanel(app: App) {
-  const d = app.store.derived();
-  const { from, to, order } = app.statFrom();
-  const rank = RANKS[d.rank];
-  const ranked = d.rank > 0;
-  const letter = ranked
-    ? h('span', { class: 'dq-rank-letter', text: rank })
-    : h('span', { class: 'dq-rank-mark', html: '<svg viewBox="0 0 20 30" width="20" height="30" aria-hidden="true"><path d="M10 1.5 L18.5 15 L10 28.5 L1.5 15 Z"/><path class="dq-rank-slit" d="M10 7.5 C11.4 11 11.4 19 10 22.5 C8.6 19 8.6 11 10 7.5 Z"/></svg>' });
-  const xpEl = h('span', { class: 'dq-num', text: String(from.xp) });
-  const statEls: Record<string, HTMLElement> = {};
-  const stats = h(
-    'dl',
-    { class: 'dq-stats', id: 'dq-stats' },
-    MODULE_ORDER.map((mid) => {
-      const m = MODULES[mid];
-      const n = h('dd', { class: 'dq-stat-n dq-num', text: String(from.stats[m.stat]) });
-      statEls[m.stat] = n;
-      return h('div', { class: `dq-stat dq-mod-${mid}` }, h('dt', {}, h('span', { class: 'dq-stat-ic', html: glyph(mid) }), h('span', { class: 'dq-stat-k', text: m.statName }), h('span', { class: 'dq-stat-m', text: m.name })), n);
-    }),
+  const st = app.store;
+  const { from } = app.statFrom();
+  // each part shows the save as it is now: gains and choices made in another open copy land in it at once, quietly
+  let d = st.derived();
+  const letter = redrawn(() => {
+    const r = d.rank;
+    return r > 0
+      ? h('span', { class: 'dq-rank-letter', text: RANKS[r] })
+      : h('span', { class: 'dq-rank-mark', html: '<svg viewBox="0 0 20 30" width="20" height="30" aria-hidden="true"><path d="M10 1.5 L18.5 15 L10 28.5 L1.5 15 Z"/><path class="dq-rank-slit" d="M10 7.5 C11.4 11 11.4 19 10 22.5 C8.6 19 8.6 11 10 7.5 Z"/></svg>' });
+  }, () => null);
+  const title = redrawn(() => titleRow(app), () => el.querySelector('.w2-title-btn'));
+  const rank = redrawn(() => (d.rank > 0 ? h('div', { class: 'dq-kv' }, h('dt', { text: 'Rank' }), h('dd', { text: `${RANKS[d.rank]}-Rank Wanderer` })) : null), () => null);
+  const xp = redrawn(() => h('div', { class: 'dq-kv' }, h('dt', { text: 'XP' }), h('dd', {}, h('span', { class: 'dq-num', text: String(d.xp) }))), () => null);
+  const flower = redrawn(() => moonflower(app), () => el.querySelector('.w2-moonflower'));
+  const stats = redrawn(
+    () =>
+      h(
+        'dl',
+        { class: 'dq-stats', id: 'dq-stats' },
+        MODULE_ORDER.map((mid) => {
+          const m = MODULES[mid];
+          return h('div', { class: `dq-stat dq-mod-${mid}` }, h('dt', {}, h('span', { class: 'dq-stat-ic', html: glyph(mid) }), h('span', { class: 'dq-stat-k', text: m.statName }), h('span', { class: 'dq-stat-m', text: m.name })), h('dd', { class: 'dq-stat-n dq-num', text: String(d.stats[m.stat]) }));
+        }),
+      ),
+    () => null,
   );
+  const parts = [letter, title, rank, xp, flower, stats];
   const el = panel(
     { title: 'Status', ic: icon('status'), cls: 'dq-status', label: 'Status' },
     h('div', { class: 'dq-hairbar', 'aria-hidden': 'true' }),
     h(
       'div',
       { class: 'dq-player' },
-      h('div', { class: 'dq-crystal', 'aria-hidden': 'true', html: crystalSVG(58) }, letter),
-      h(
-        'dl',
-        { class: 'dq-kvs' },
-        wandererRows(app),
-        ranked ? h('div', { class: 'dq-kv' }, h('dt', { text: 'Rank' }), h('dd', { text: `${rank}-Rank Wanderer` })) : null,
-        h('div', { class: 'dq-kv' }, h('dt', { text: 'XP' }), h('dd', {}, xpEl)),
-      ),
+      h('div', { class: 'dq-crystal', 'aria-hidden': 'true', html: crystalSVG(58) }, letter.node),
+      h('dl', { class: 'dq-kvs' }, wandererRows(app, title.node), rank.node, xp.node),
       h('div', { class: 'dq-firstshadow', title: typo('{companion}, asleep'), html: mothSVG({ size: 84, label: typo('{companion}, a small night moth, asleep') }) }),
-      moonflower(app),
+      flower.node,
     ),
     titleUnlock(app),
     h(
@@ -99,18 +101,23 @@ function statusPanel(app: App) {
         onclick: (e: Event) => {
           const open = el.classList.toggle('is-open');
           (e.currentTarget as HTMLElement).setAttribute('aria-expanded', String(open));
-          if (open) animate(stats, app.reduced() ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'translateY(-6px)' }, { opacity: 1, transform: 'none' }], { duration: app.reduced() ? WINDOW.reducedFadeMs : 220, easing: 'cubic-bezier(.16,1,.3,1)' });
+          if (open) animate(stats.node as Element, app.reduced() ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'translateY(-6px)' }, { opacity: 1, transform: 'none' }], { duration: app.reduced() ? WINDOW.reducedFadeMs : 220, easing: 'cubic-bezier(.16,1,.3,1)' });
         },
       },
       h('span', { text: 'Stats' }),
       h('span', { class: 'dq-stats-chev', 'aria-hidden': 'true' }),
     ),
-    stats,
+    stats.node,
   );
-  // count up anything earned since the panel was last shown
+  // count up anything earned since the panel was last shown: drawn as they are now, the numbers start from then
+  const xpEl = (xp.node as Element).querySelector<HTMLElement>('.dq-num')!;
   const grow: [HTMLElement, number, number][] = [];
-  if (to.xp > from.xp) grow.push([xpEl, from.xp, to.xp]);
-  for (const s of order) if (to.stats[s] > from.stats[s]) grow.push([statEls[s], from.stats[s], to.stats[s]]);
+  if (d.xp > from.xp) grow.push([xpEl, from.xp, d.xp]);
+  for (const mid of MODULE_ORDER) {
+    const s = MODULES[mid].stat;
+    if (d.stats[s] > from.stats[s]) grow.push([(stats.node as Element).querySelector<HTMLElement>(`.dq-mod-${mid} .dq-stat-n`)!, from.stats[s], d.stats[s]]);
+  }
+  for (const [node, a] of grow) node.textContent = String(a);
   if (grow.length) {
     if (grow.some(([node]) => node !== xpEl)) {
       el.classList.add('is-open');
@@ -129,7 +136,13 @@ function statusPanel(app: App) {
       for (const [e] of grow) e.closest('.dq-stat, .dq-kv')?.classList.remove('is-up');
     });
   }
-  return el;
+  const sync = () => {
+    d = st.derived();
+    parts.forEach((x) => x.update());
+    // shown now, so it never counts up on a later visit to Home
+    app.shown = { xp: d.xp, stats: { ...d.stats } };
+  };
+  return { el, sync };
 }
 
 function questSection(app: App) {
@@ -233,27 +246,34 @@ function questSection(app: App) {
 
 function checkinPanel(app: App) {
   const st = app.store;
-  const body = h('div', { class: 'dq-checkin-body' });
-  const el = panel({ title: 'Check-in', ic: icon('checkin'), cls: 'dq-checkin', label: 'Check-in' }, body);
-  const fade = () => animate(body, [{ opacity: 0 }, { opacity: 1 }], { duration: app.reduced() ? 150 : 380 });
-  const ask = () => {
-    body.replaceChildren(
-      h('p', { class: 'dq-text dq-ask', text: typo(CHECKIN.ask) }),
-      h(
-        'div',
-        { class: 'dq-opts dq-opts--wrap dq-feels' },
-        FEELINGS.map((f) => chip(f, () => answer(f))),
-      ),
-    );
+  /** what it shows follows the save, until the player answers or asks again here */
+  let following = true;
+  const again = () => {
+    following = false;
+    body().replaceChildren(...ask());
+    fade();
   };
+  const ask = () => [
+    h('p', { class: 'dq-text dq-ask', text: typo(CHECKIN.ask) }),
+    h(
+      'div',
+      { class: 'dq-opts dq-opts--wrap dq-feels' },
+      FEELINGS.map((f) => chip(f, () => answer(f))),
+    ),
+  ];
   /** After a heavy check-in today: no question, no task, a door left open. */
-  const after = () => {
-    body.replaceChildren(
-      h('p', { class: 'dq-lead dq-after' }, CHECKIN.after.map((l) => h('span', { text: typo(l) }))),
-      h('div', { class: 'dq-actions dq-actions--end' }, btn('Check in again', () => (ask(), fade()), { kind: 'link' })),
-    );
-  };
+  const after = () => [
+    h('p', { class: 'dq-lead dq-after' }, CHECKIN.after.map((l) => h('span', { text: typo(l) }))),
+    h('div', { class: 'dq-actions dq-actions--end' }, btn('Check in again', again, { kind: 'link' })),
+  ];
+  // as Home opens it shows the latest check-in today, another open copy's too: after a heavy one there only the open door
+  // shows here as well, and a lighter one after it asks again
+  const view = redrawn(() => h('div', { class: 'dq-checkin-body' }, app.hushed() ? after() : ask()), (): HTMLElement | null => body().querySelector('button'));
+  const body = () => view.node as HTMLElement;
+  const el = panel({ title: 'Check-in', ic: icon('checkin'), cls: 'dq-checkin', label: 'Check-in' }, view.node);
+  const fade = () => animate(body(), [{ opacity: 0 }, { opacity: 1 }], { duration: app.reduced() ? 150 : 380 });
   const answer = (feel: Feeling) => {
+    following = false;
     st.sync();
     const first = st.state.flags.checkinDay !== st.today();
     const ev = st.add('checkin', first ? 10 : 0, { data: { feel, level: null } });
@@ -306,17 +326,18 @@ function checkinPanel(app: App) {
     const s = suggestFor(feel, null, st.quest().skill);
     // Numb gets no label echoed back; the two newest answers get their own first line
     const lead = s.lead ?? (feel === 'Numb' ? CHECKIN.thanks : `${feel}. ${CHECKIN.thanks}`);
-    body.replaceChildren(
+    body().replaceChildren(
       h('p', { class: 'dq-lead' }, h('span', { text: typo(lead) })),
       ...(strength ? [strength] : []),
       sug,
-      h('div', { class: 'dq-actions dq-actions--end' }, btn('Check in again', () => (ask(), fade()), { kind: 'link' })),
+      h('div', { class: 'dq-actions dq-actions--end' }, btn('Check in again', again, { kind: 'link' })),
     );
     fade();
   };
-  if (app.hushed()) after();
-  else ask();
-  return el;
+  const sync = () => {
+    if (following && view.update()) fade();
+  };
+  return { el, sync };
 }
 
 /** Home's top strip: the daily gift chest (opens only when tapped) and Give me a moment, next to the Safe Zone. */
@@ -368,20 +389,35 @@ function lobby(app: App, giftLine: HTMLElement) {
     }
   });
   sync();
+  // opened in another open copy: it shows open here too, the lid already up rather than swinging, and the gift fades in
+  const follow = () => {
+    if (busy || (st.state.flags.giftDay === today) === chest.classList.contains('is-open')) return;
+    chest.classList.add('is-quiet');
+    sync();
+    // the lid's open place is taken while nothing moves, so letting go of is-quiet starts no swing
+    void getComputedStyle(chest.querySelector('.dq-chest-lid')!).transform;
+    chest.classList.remove('is-quiet');
+    if (!giftLine.classList.contains('is-hidden')) animate(giftLine, [{ opacity: 0 }, { opacity: 1 }], { duration: app.reduced() ? WINDOW.reducedFadeMs : CALM.fadeMs, easing: css(CALM.ease) });
+  };
   const moment = h(
     'button',
     { type: 'button', class: 'dq-momentbtn', onclick: () => app.go({ name: 'moment' }) },
     h('span', { class: 'dq-momentbtn-ring', 'aria-hidden': 'true' }),
     h('span', { class: 'dq-momentbtn-t', text: 'Give me a moment' }),
   );
-  return h('div', { class: 'dq-lobby' }, chest, moment);
+  return { el: h('div', { class: 'dq-lobby' }, chest, moment), sync: follow };
 }
 
 function menu(app: App) {
-  const n = app.store.derived().collection.size;
+  /** the companion, every skill met and every ally drawn */
+  const allyLine = (allies: number) => {
+    const n = app.store.derived().collection.size;
+    return n || allies ? `${n + 1 + allies} allies` : 'Your first shadow';
+  };
+  let allies = 0;
   const items: [string, string, string, () => void][] = [
     ['rest', 'Stealth', 'Unseen. No task.', () => app.go({ name: 'rest' })],
-    ['shadows', 'Shadows', n ? `${n + 1} allies` : 'Your first shadow', () => app.go({ name: 'shadows' })],
+    ['shadows', 'Shadows', allyLine(allies), () => app.go({ name: 'shadows' })],
     ['book', 'Skills', 'All of them, any time', () => app.go({ name: 'library' })],
     ['diary', 'Diary card', 'Optional', () => app.go({ name: 'diary' })],
     ['comfort', 'Comfort', 'Your own lists', () => app.go({ name: 'comfort' })],
@@ -399,8 +435,8 @@ function menu(app: App) {
       art.append(artThumb);
       refill(artThumb, cardOf(list[0]), () => [thumbImg(app, list[0], '')]);
     } else artThumb.remove();
-    const allies = list.filter((m) => m.kind === 'ally').length;
-    shadowsSub.textContent = allies ? `${n + 1 + allies} allies` : typo(items[1][2]);
+    allies = list.filter((m) => m.kind === 'ally').length;
+    shadowsSub.textContent = typo(allyLine(allies));
   };
   const art = h(
     'button',
@@ -411,6 +447,7 @@ function menu(app: App) {
     artThumb,
   );
   const storySub = h('span', { class: 'dq-tile-s dq-tile-story', text: 'Start your first story' });
+  const ss = storyStore(app.store.key);
   const story = h(
     'button',
     { type: 'button', class: 'dq-tile dq-tile--story', onclick: () => app.go({ name: 'stories' }) },
@@ -418,23 +455,37 @@ function menu(app: App) {
     h('span', { class: 'dq-tile-t', text: 'Story Room' }),
     storySub,
   );
-  void storyStore(app.store.key)
-    .list()
-    .then((list) => {
-      if (!list[0]) return;
-      storySub.textContent = breakable(list[0].title.trim()) || 'Untitled story';
-      storySub.classList.add('is-title');
-    })
-    .catch(() => undefined);
+  // the newest story, as every tab has it now
+  let told = 0;
+  const showStory = () => {
+    const t = ++told;
+    void ss
+      .list()
+      .then((list) => {
+        if (t !== told) return;
+        storySub.textContent = list[0] ? breakable(list[0].title.trim()) || 'Untitled story' : 'Start your first story';
+        storySub.classList.toggle('is-title', !!list[0]);
+      })
+      .catch(() => undefined);
+  };
+  showStory();
   const tiles = items.map(([ic, t, sub, fn]) => h('button', { type: 'button', class: 'dq-tile', onclick: fn }, h('span', { class: 'dq-tile-ic', html: icon(ic) }), h('span', { class: 'dq-tile-t', text: t }), h('span', { class: 'dq-tile-s', text: typo(sub) })));
   const shadowsSub = tiles[1].querySelector<HTMLElement>('.dq-tile-s')!;
   const off = as.onChange(() => void showArt());
+  const offStory = ss.onChange(showStory);
   void showArt();
   return {
     el: h('nav', { class: 'dq-menu', 'aria-label': 'Places' }, art, story, tiles),
+    // a skill met in another open copy
+    sync: () => {
+      const line = typo(allyLine(allies));
+      if (shadowsSub.textContent !== line) shadowsSub.textContent = line;
+    },
     off: () => {
       turn++;
+      told++;
       off();
+      offStory();
     },
   };
 }
@@ -442,16 +493,21 @@ function menu(app: App) {
 export function hubScreen(app: App): ScreenOut {
   const gift = h('p', { class: 'dq-gift' }, h('span', { class: 'dq-gift-k', text: 'Daily gift' }), h('span', { class: 'dq-gift-t', html: md(app.store.giftLine()) }));
   const quest = questSection(app);
-  let places!: ReturnType<typeof menu>;
+  const chest = lobby(app, gift);
+  const line = linePanel(app);
+  const status = statusPanel(app);
+  const checkin = checkinPanel(app);
+  const places = menu(app);
   const el = h(
     'div',
     { class: 'dq-hub' },
     h('h1', { class: 'dq-sr', text: 'The Lantern' }),
-    h('div', { class: 'dq-col dq-col--t' }, lobby(app, gift)),
-    h('div', { class: 'dq-hcol dq-hcol--m' }, h('div', { class: 'dq-col dq-col--b' }, quest.el), h('div', { class: 'dq-col dq-col--g' }, gift), h('div', { class: 'dq-col dq-col--l' }, linePanel(app))),
-    h('div', { class: 'dq-hcol dq-hcol--l' }, h('div', { class: 'dq-col dq-col--a' }, statusPanel(app))),
-    h('div', { class: 'dq-hcol dq-hcol--r' }, h('div', { class: 'dq-col dq-col--c' }, checkinPanel(app)), h('div', { class: 'dq-col dq-col--m' }, (places = menu(app)).el)),
+    h('div', { class: 'dq-col dq-col--t' }, chest.el),
+    h('div', { class: 'dq-hcol dq-hcol--m' }, h('div', { class: 'dq-col dq-col--b' }, quest.el), h('div', { class: 'dq-col dq-col--g' }, gift), h('div', { class: 'dq-col dq-col--l' }, line.el)),
+    h('div', { class: 'dq-hcol dq-hcol--l' }, h('div', { class: 'dq-col dq-col--a' }, status.el)),
+    h('div', { class: 'dq-hcol dq-hcol--r' }, h('div', { class: 'dq-col dq-col--c' }, checkin.el), h('div', { class: 'dq-col dq-col--m' }, places.el)),
   );
-  const off = app.store.onChange(quest.sync);
+  // what another open copy changes shows here as it lands: nothing it did plays, counts up or celebrates here
+  const off = app.store.onChange(() => [chest, quest, line, status, checkin, places].forEach((x) => x.sync()));
   return { el, title: 'The Lantern', mode: 'hub', bubbles: [2.4, 0.75], leave: () => { off(); places.off(); } };
 }

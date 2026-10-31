@@ -237,30 +237,36 @@ export function restScreen(app: App): ScreenOut {
 const cell = (card: HTMLElement) => h('div', { class: 'dq-cardcell' }, card);
 
 export function shadowsScreen(app: App): ScreenOut {
-  const d = app.store.derived();
-  const counts: Record<string, number> = {};
-  for (const e of app.store.state.events) if (e.k === 'skill' && e.skill) counts[e.skill] = (counts[e.skill] ?? 0) + 1;
-  const owned = SKILLS.filter((s) => d.collection.has(s.id));
   const first = h(
     'article',
     { class: 'dq-first' },
     h('div', { class: 'dq-first-art', html: mothSVG({ size: 150 }) }),
     h('div', { class: 'dq-first-txt' }, h('h2', { class: 'dq-first-n', text: typo('{companion}') }), p('A small night moth, asleep. It was here before any skill, and it stays.', 'dq-text'), h('span', { class: 'dq-tag dq-mint', text: 'Yours' })),
   );
-  const grid = h(
-    'div',
-    { class: 'dq-collection' },
-    owned.map((s) =>
-      cell(
-        h(
-          'button',
-          { type: 'button', class: 'dq-cardbtn', onclick: () => app.go({ name: 'skill', id: s.id }), 'aria-label': `${s.sl}, ${s.real}. Practise it.` },
-          skillCard(s.id, { small: true }),
-          counts[s.id] ? h('span', { class: 'dq-cardbtn-n', text: `Practised ${counts[s.id]}x` }) : h('span', { class: 'dq-cardbtn-n', text: 'Met' }),
-        ),
-      ),
-    ),
-  );
+  // every skill met and practised, another open copy's too, as it lands; focus stays on the same skill's card
+  const grid = redrawn(() => {
+    const d = app.store.derived();
+    const counts: Record<string, number> = {};
+    for (const e of app.store.state.events) if (e.k === 'skill' && e.skill) counts[e.skill] = (counts[e.skill] ?? 0) + 1;
+    const owned = SKILLS.filter((s) => d.collection.has(s.id));
+    return owned.length
+      ? h(
+          'div',
+          { class: 'dq-collection' },
+          owned.map((s) =>
+            cell(
+              h(
+                'button',
+                { type: 'button', class: 'dq-cardbtn', 'data-item': s.id, onclick: () => app.go({ name: 'skill', id: s.id }), 'aria-label': `${s.sl}, ${s.real}. Practise it.` },
+                skillCard(s.id, { small: true }),
+                counts[s.id] ? h('span', { class: 'dq-cardbtn-n', text: `Practised ${counts[s.id]}x` }) : h('span', { class: 'dq-cardbtn-n', text: 'Met' }),
+              ),
+            ),
+          ),
+        )
+      : p('Flip a daily card or open any skill, and it joins here.', 'dq-text dq-empty');
+  }, () => null);
+  const offShown = app.store.onChange(grid.update);
   const designSlot = h(
     'button',
     { type: 'button', class: 'dq-cardbtn dq-allyslot', onclick: () => app.go({ name: 'draw', kind: 'ally' }) },
@@ -302,11 +308,11 @@ export function shadowsScreen(app: App): ScreenOut {
     h('h2', { class: 'dq-sec-h' }, h('span', { text: 'Designed by you' }), h('span', { class: 'dq-sec-sub', text: 'From the Art room' })),
     allies,
     h('h2', { class: 'dq-sec-h' }, h('span', { text: 'Skill shadows' }), h('span', { class: 'dq-sec-sub', text: 'Every skill you have met' })),
-    owned.length ? grid : p('Flip a daily card or open any skill, and it joins here.', 'dq-text dq-empty'),
+    grid.node,
     inventorySection(app),
     h('div', { class: 'dq-actions' }, btn('All skills', () => app.go({ name: 'library' }), { kind: 'quiet', ic: 'book' })),
   );
-  return { el, title: 'Shadows', mode: 'sub', leave: () => { turn++; off(); roster.leave(); } };
+  return { el, title: 'Shadows', mode: 'sub', leave: () => { turn++; off(); offShown(); roster.leave(); } };
 }
 
 // ---------------- Library ----------------

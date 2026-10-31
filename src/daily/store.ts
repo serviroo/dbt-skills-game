@@ -130,7 +130,7 @@ const DEVICE_SET_KEYS: SetKey[] = ['sound', 'motion', 'vibrate'];
 export { cleanName };
 const LIST_KEYS = ['comfort', 'activities', 'reasons', 'people'] as const;
 /** Choices kept beside a save that open screens show: one made in another open copy reaches them too (see onChange). */
-const SHOWN_BESIDE = [BESIDE.readSize, BESIDE.safeLight] as const;
+const SHOWN_BESIDE = [BESIDE.readSize, BESIDE.safeLight, BESIDE.momentLength] as const;
 const DAY_FLAGS = ['giftDay', 'cardDay', 'greetDay', 'checkinDay'] as const;
 const GONE_CAP = 1000;
 /** Top-level fields this build reads (and the ones only a Save Crystal carries); any other is kept as it was stored. */

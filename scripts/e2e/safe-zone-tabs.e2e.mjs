@@ -57,7 +57,7 @@ async function first(h, viewport, { lists = LISTS, size = 'largest', light = 'up
   return { ctx, page, errors };
 }
 /** Another tab of the same browser, on Home. */
-async function another(ctx, h) {
+export async function another(ctx, h) {
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
@@ -65,7 +65,7 @@ async function another(ctx, h) {
   await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
   return { page, errors };
 }
-const go = (page, route) => page.evaluate((r) => window.__daily.go(r), route);
+export const go = (page, route) => page.evaluate((r) => window.__daily.go(r), route);
 const safeAt = async (page, at) => {
   await go(page, { name: 'safe', at });
   await page.locator('.dq-sz-t', { hasText: HEADING[at] }).first().waitFor({ timeout: 10000 });
@@ -154,7 +154,7 @@ const focusIs = (page) =>
  * A problem unless `target`, a locator for exactly one element, is that very element with focus (not another one with
  * the same name) and the player sees it and its ring whole.
  */
-const focusOn = async (target, what) => {
+export const focusOn = async (target, what) => {
   const f = await focusIs(target.page());
   if (!(await target.evaluate((e) => e === document.activeElement))) return [`${what}: focus is on ${f.name}${f.list ? ` in ${f.list}` : ''}, not ${target}`];
   const cut = [f.seen ? '' : 'not seen whole', f.ring ? '' : 'its ring is cut'].filter(Boolean);
@@ -174,7 +174,7 @@ async function clearGame(page) {
   await page.getByRole('button', { name: /^Clear this game.s data$/ }).click();
   await page.locator('.dq-cleared-h', { hasText: 'All clear' }).waitFor({ timeout: 30000 });
 }
-const until = (page, fn, arg) => page.waitForFunction(fn, arg, { timeout: 10000 }).then(() => true, () => false);
+export const until = (page, fn, arg) => page.waitForFunction(fn, arg, { timeout: 10000 }).then(() => true, () => false);
 
 export const scenarios = {
   async 'safe-zone-tabs-clear'(h) {
