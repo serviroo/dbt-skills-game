@@ -3,9 +3,10 @@
 // half the size, as browser zoom does), one scenario each, opens every screen on a returning save with everything
 // unlocked: on each, the page is exactly as wide as the screen, nothing scrolls sideways inside the companion, and the
 // Safe Zone button is whole on screen. Outside a skill's window and the Safe Zone, no row or card squeezes a word, so
-// none breaks onto the next line without a hyphen. The sheets opened from the drawing page and the story editor are
-// opened at the phone's own size, and the same holds for each once the phone zooms to 200%. A failure names the widest
-// boxes, or the words, that reach past the edge, and the words that break.
+// none breaks onto the next line without a hyphen. The same holds inside every watcher's card in the Night Watch camp,
+// and inside the sheets opened from the drawing page and the story editor, which are opened at the phone's own size and
+// checked once it zooms to 200%. A failure names the widest boxes, or the words, that reach past the edge, and the
+// words that break.
 import { fullSave, seedStores } from './me-91-final-save-ids.e2e.mjs';
 import { cutShort } from './safe-zone-reach.e2e.mjs';
 
@@ -189,6 +190,19 @@ function sweep(phone) {
         await page.locator('.st-pic-b').click();
         await page.locator('.st-picks').waitFor({ timeout: 10000 });
       });
+
+      // every watcher's card in the Night Watch camp, opened from the keyboard
+      await page.evaluate(() => window.__daily.go({ name: 'shadows' }));
+      await page.locator('.w2-camp').evaluate((e) => e.scrollIntoView({ block: 'center' }));
+      await page.locator('.w2-camp.is-scene-live').waitFor({ timeout: 30000 });
+      for (const id of await page.locator('.w2-camp-hit').evaluateAll((bs) => bs.map((b) => b.dataset.shadow))) {
+        await page.locator(`.w2-camp-hit[data-shadow="${id}"]`).focus();
+        await page.keyboard.press('Enter');
+        await page.locator('.w2-camp-card[role="dialog"]').waitFor({ timeout: 10000 });
+        await check(`${id}'s card`, { sheet: '.w2-camp-card' });
+        await page.keyboard.press('Escape');
+        await page.locator('.w2-camp-card').waitFor({ state: 'hidden', timeout: 10000 });
+      }
       if (errors.length) failed.push(`${size}: ${errors.join(' | ')}`);
     } finally {
       await ctx.close();

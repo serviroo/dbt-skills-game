@@ -148,7 +148,9 @@
   height: 44px;
   color: #e6f1ff;
 }
-@media (orientation: landscape) and (max-height: 520px) {
+/* held sideways, the picture beside its words where the screen has room for both; a phone at 200% zoom held sideways
+   (300 CSS pixels wide or less) keeps them one above the other */
+@media (orientation: landscape) and (max-height: 520px) and (min-width: 301px) {
   .w2-camp-card {
     width: min(100%, 600px);
   }
