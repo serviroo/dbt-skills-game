@@ -13,6 +13,9 @@
 //                         and every day reads as an open column
 //   diary-print-two-tabs  with the ratings focused, their last row removed in another open copy takes them off the page
 //                         there, and focus moves on to Print
+//   diary-print-export-fit  every range, Preview and button in the diary's Export panel, Print a week among them, is at
+//                         least 16 px, inside the panel and the screen and clear of the others, each range on one line, at 390x844, 320x568 and
+//                         844x390 (where the diary passes layout-fit's checks) and at 200% on both phones
 //   diary-print-fit       with the longest, widest name the game keeps, the page passes layout-fit's checks at 390x844,
 //                         320x568 and 844x390, every word on it (the week's heading and the buttons too) is at least
 //                         16 px, every word but the ratings (which scroll in their own box) is on screen, and at 200% zoom
@@ -327,6 +330,62 @@ export const scenarios = {
     } finally {
       await ctx.close();
     }
+  },
+
+  async 'diary-print-export-fit'(h) {
+    const now = Date.now();
+    const problems = [];
+    for (const [zoom, vp] of [
+      [1, { width: 390, height: 844 }],
+      [1, { width: 320, height: 568 }],
+      [1, { width: 844, height: 390 }],
+      [2, { width: 390, height: 844 }],
+      [2, { width: 320, height: 568 }],
+    ]) {
+      const size = `${vp.width}x${vp.height}${zoom === 2 ? '-200' : ''}`;
+      const { ctx, page, errors } = await boot(h, { width: vp.width / zoom, height: vp.height / zoom }, { prepare: (ctx) => ctx.clock.setFixedTime(new Date(now)) });
+      try {
+        await page.evaluate(() => window.__daily.go({ name: 'diary' }));
+        await route(page, 'diary');
+        await settle(page);
+        if (zoom === 1) problems.push(...(await audit(page, PAGE, SKIP)).map((f) => `${size} ${f.kind} ${f.what} (${f.detail})`));
+        await page.locator('.dq-export').scrollIntoViewIfNeeded();
+        await h.shot(page.locator('.dq-export'), `diary-print-export-${size}`);
+        // every choice and button in the Export panel, Print a week among them: body size, on screen, clear of each other
+        const found = await page.evaluate(() => {
+          const out = [];
+          const panel = document.querySelector('.dq-export').getBoundingClientRect();
+          const controls = [...document.querySelectorAll('.dq-export :is(button, summary)')].filter((e) => e.checkVisibility());
+          if (!controls.some((e) => e.textContent.trim() === 'Print a week')) out.push('Print a week is not in the Export panel');
+          for (const e of controls) {
+            const name = e.textContent.trim();
+            const px = parseFloat(getComputedStyle(e).fontSize);
+            if (px < 16) out.push(`"${name}" is ${px} px`);
+            // a range is two short words: split over two lines beside one that isn't, the row reads unevenly
+            if (e.matches('.dq-seg-b')) {
+              const range = document.createRange();
+              range.selectNodeContents(e);
+              const lines = new Set([...range.getClientRects()].map((q) => Math.round(q.top)));
+              if (lines.size > 1) out.push(`"${name}" takes ${lines.size} lines`);
+            }
+            const r = e.getBoundingClientRect();
+            if (r.left < -0.5 || r.right > innerWidth + 0.5 || r.left < panel.left - 0.5 || r.right > panel.right + 0.5) out.push(`"${name}" runs off: ${Math.round(r.left)} to ${Math.round(r.right)}, the panel ${Math.round(panel.left)} to ${Math.round(panel.right)} of ${innerWidth}`);
+            for (const o of controls) {
+              if (o === e || o.contains(e) || e.contains(o) || controls.indexOf(o) < controls.indexOf(e)) continue;
+              const q = o.getBoundingClientRect();
+              if (r.left < q.right - 0.5 && q.left < r.right - 0.5 && r.top < q.bottom - 0.5 && q.top < r.bottom - 0.5) out.push(`"${name}" overlaps "${o.textContent.trim()}"`);
+            }
+          }
+          for (const s of [document.scrollingElement, document.querySelector('.dq')]) if (s.scrollWidth > s.clientWidth + 1) out.push(`scrolls sideways: ${s.scrollWidth} px in ${s.clientWidth}`);
+          return out;
+        });
+        problems.push(...found.map((f) => `${size} ${f}`));
+        h.expect(!errors.length, `${size}: ${errors.join('\n')}`);
+      } finally {
+        await ctx.close();
+      }
+    }
+    h.expect(!problems.length, `the diary's Export panel:\n${problems.join('\n')}`);
   },
 
   async 'diary-print-fit'(h) {
