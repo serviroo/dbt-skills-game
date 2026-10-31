@@ -148,8 +148,9 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   // either leaves it up), each with the least height it has had there and the room it should have there: turned, the
   // screen's sides swap, so that's the width turned from and its room, less the width turned to; resized, the screen's
   // height stays, and with it the room. The keyboard counts as up there, the room not yet seen, until the page is
-  // halfway from the least to that room or tall enough for the usual screen; short of that it's the keyboard settling
-  // after the move, a little taller or shorter. Moved on again before the keyboard goes down, the room carries over.
+  // halfway from the least to that room; short of that it's the keyboard settling after the move, a little taller or
+  // shorter. That holds where the usual screen fits above the keyboard too, since pinching in can still leave too
+  // little. Moved on again before the keyboard goes down, the room carries over.
   // `up`: the keyboard was up as of the last fit; `last`, `lastHeld`: the last width the visual viewport had and how
   // the screen was held then
   const moved = new Map<number, { low: number; room: number }>();
@@ -197,7 +198,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     const t = moved.get(width) ?? (up && field && !tallest.has(width) ? { low: height, room } : null);
     if (t) {
       t.low = Math.min(t.low, height);
-      if (vv.height >= fits || height >= (t.low + t.room) / 2) moved.delete(width);
+      if (height >= (t.low + t.room) / 2) moved.delete(width);
       else moved.set(width, t);
     }
     if (width !== last) [last, lastHeld] = [width, now];

@@ -368,29 +368,38 @@ function beside(widened) {
 }
 
 /**
- * Pinching in to 200% while typing, the smaller phone held sideways with its keyboard over the page, as Safari has it:
- * the typing layout holds with the keyboard up, and as the keyboard goes down, still pinched in, the usual screen comes
- * back, and stays as the pinch goes back out.
+ * Pinching in to 200% while typing: the smaller phone held sideways with its keyboard over the page, as Safari has it,
+ * and the bigger phone turned upright from sideways with a keyboard that resizes the page, where the usual screen fits
+ * above the keyboard until the pinch. Pinched in with the keyboard up the typing layout is on, and as the keyboard goes
+ * down, still pinched in, the usual screen comes back, and stays as the pinch goes back out.
  */
-async function pinched(h) {
-  const p = PHONES['568x320'];
-  const size = '568x320 pinched in to 200%';
-  const problems = [];
-  const { ctx, page, errors } = await typeIn(h, { width: p.width, height: p.height }, 'landscape');
-  const typing = () => page.evaluate(() => !!document.querySelector('.dq.is-typing'));
-  await page.evaluate((k) => window.__kb(k), { height: p.height - p.kb, top: Math.round(p.kb / 4) });
-  await settle(page);
-  await page.evaluate(() => window.__zoom(2));
-  await settle(page);
-  if (!(await typing())) problems.push(`${size}, keyboard up: the typing layout went away`);
-  await page.evaluate(() => window.__kb(null));
-  for (const f of await down(page)) problems.push(`${size}, then down: ${f}`);
-  await page.evaluate(() => window.__zoom(1));
-  await settle(page);
-  if (await typing()) problems.push(`${size}, down and pinched back out: the typing layout came back`);
-  if (errors.length) problems.push(`${size}: ${errors.join(' | ')}`);
-  await ctx.close();
-  h.expect(!problems.length, `${problems.length} problems:\n${problems.join('\n')}`);
+function pinched(turnedFirst) {
+  return async (h) => {
+    const [p, from] = turnedFirst ? [PHONES['390x844'], PHONES['844x390']] : [PHONES['568x320'], PHONES['568x320']];
+    const size = turnedFirst ? '390x844 turned upright while typing, then pinched in to 200%' : '568x320 pinched in to 200%';
+    const problems = [];
+    const { ctx, page, errors } = await typeIn(h, { width: from.width, height: from.height }, 'landscape');
+    const typing = () => page.evaluate(() => !!document.querySelector('.dq.is-typing'));
+    if (turnedFirst) {
+      await page.setViewportSize({ width: from.width, height: from.height - from.kb });
+      await settle(page);
+      await page.evaluate(() => window.__held('portrait'));
+      await page.setViewportSize({ width: p.width, height: p.height - p.kb });
+    } else await page.evaluate((k) => window.__kb(k), { height: p.height - p.kb, top: Math.round(p.kb / 4) });
+    await settle(page);
+    await page.evaluate(() => window.__zoom(2));
+    await settle(page);
+    if (!(await typing())) problems.push(`${size}, keyboard up: the typing layout isn't on`);
+    if (turnedFirst) await page.setViewportSize({ width: p.width, height: p.height });
+    else await page.evaluate(() => window.__kb(null));
+    for (const f of await down(page)) problems.push(`${size}, then down: ${f}`);
+    await page.evaluate(() => window.__zoom(1));
+    await settle(page);
+    if (await typing()) problems.push(`${size}, down and pinched back out: the typing layout came back`);
+    if (errors.length) problems.push(`${size}: ${errors.join(' | ')}`);
+    await ctx.close();
+    h.expect(!problems.length, `${problems.length} problems:\n${problems.join('\n')}`);
+  };
 }
 
 export const scenarios = Object.fromEntries([
@@ -407,5 +416,6 @@ export const scenarios = Object.fromEntries([
   ['safe-zone-typing-turned-320x568', turned('320x568')],
   ['safe-zone-typing-widened', beside(true)],
   ['safe-zone-typing-narrowed', beside(false)],
-  ['safe-zone-typing-pinched', pinched],
+  ['safe-zone-typing-pinched', pinched(false)],
+  ['safe-zone-typing-turned-pinched', pinched(true)],
 ]);
