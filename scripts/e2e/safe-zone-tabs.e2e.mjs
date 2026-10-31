@@ -19,7 +19,7 @@
 //                             read, and the Safe Zone's light turned up in another tab turns up here
 //   safe-zone-tabs-held       where storage refuses them, a text size and light held for the visit give way to a size
 //                             stored later in another tab, and a clear there takes both
-// Wherever focus is or goes, the player sees all of it, clear of the top bar and "Talk to someone now"
+// Wherever focus is or goes, the player sees all of it, its ring too, clear of the top bar and "Talk to someone now"
 import { boot } from './layout-fit.e2e.mjs';
 import { nameOf, whole } from './safe-zone-access.e2e.mjs';
 
@@ -113,21 +113,50 @@ const zone = (page) =>
     };
   }, PERSONAL);
 /**
- * What has focus: its name, the Comfort list it is in, and whether the player sees it whole (on the screen, under no
- * pinned bar, and not hidden from anyone).
+ * Whether the focus ring around `e` shows whole: its outer edge (the outline's width past its gap) on the screen, inside
+ * every scroll area around it and clear of the pinned bars. Runs in the page.
+ */
+const ringWhole = (e) => {
+  const cs = getComputedStyle(e);
+  const ring = cs.outlineStyle === 'none' ? 0 : parseFloat(cs.outlineWidth) + Math.max(0, parseFloat(cs.outlineOffset));
+  const r = e.getBoundingClientRect();
+  const o = { top: r.top - ring, bottom: r.bottom + ring, left: r.left - ring, right: r.right + ring };
+  const within = (b) => o.top >= b.top - 0.5 && o.bottom <= b.bottom + 0.5 && o.left >= b.left - 0.5 && o.right <= b.right + 0.5;
+  if (!within({ top: 0, left: 0, bottom: innerHeight, right: innerWidth })) return false;
+  for (let p = e.parentElement; p; p = p.parentElement) {
+    const ps = getComputedStyle(p);
+    if (ps.overflowX === 'visible' && ps.overflowY === 'visible') continue;
+    // what a scroll area shows is its padding box
+    const b = p.getBoundingClientRect();
+    const top = b.top + p.clientTop, left = b.left + p.clientLeft;
+    if (!within({ top, left, bottom: top + p.clientHeight, right: left + p.clientWidth })) return false;
+  }
+  return [...document.querySelectorAll('.dq-top, .dq-sz-foot')].every((bar) => {
+    if (bar.contains(e)) return true;
+    const b = bar.getBoundingClientRect();
+    return o.bottom <= b.top + 0.5 || o.top >= b.bottom - 0.5 || o.right <= b.left + 0.5 || o.left >= b.right - 0.5;
+  });
+};
+/**
+ * What has focus: its name, the Comfort list it is in, whether the player sees it whole (on the screen, under no pinned
+ * bar, and not hidden from anyone), and whether its ring shows whole as well.
  */
 const focusIs = (page) =>
   page.evaluate(`(() => {
     const nameOf = ${nameOf};
     const whole = ${whole};
+    const ringWhole = ${ringWhole};
     const a = document.activeElement;
-    if (!a || a === document.body) return { name: 'nothing', seen: false, list: null };
-    return { name: nameOf(a).slice(0, 40), seen: whole(a) && !a.closest('[aria-hidden="true"], [inert], .dq-sr'), list: a.closest('.dq-listp')?.querySelector('.dq-chip-t')?.textContent ?? null };
+    if (!a || a === document.body) return { name: 'nothing', seen: false, ring: false, list: null };
+    return { name: nameOf(a).slice(0, 40), seen: whole(a) && !a.closest('[aria-hidden="true"], [inert], .dq-sr'), ring: ringWhole(a), list: a.closest('.dq-listp')?.querySelector('.dq-chip-t')?.textContent ?? null };
   })()`);
-/** A problem unless focus is on `name` (in Comfort's `list`, if given) and the player sees it whole. */
+/** A problem unless focus is on `name` (in Comfort's `list`, if given) and the player sees it and its ring whole. */
 const focusOn = async (page, name, what, list) => {
   const f = await focusIs(page);
-  return f.name === name && f.seen && (!list || f.list === list) ? [] : [`${what}: focus is on ${f.name}${f.list ? ` in ${f.list}` : ''}${f.seen ? '' : ', not seen whole'}, not ${name}${list ? ` in ${list}` : ''}`];
+  const at = `${f.name}${f.list ? ` in ${f.list}` : ''}`, want = `${name}${list ? ` in ${list}` : ''}`;
+  if (at !== want) return [`${what}: focus is on ${at}, not ${want}`];
+  const cut = [f.seen ? '' : 'not seen whole', f.ring ? '' : 'its ring is cut'].filter(Boolean);
+  return cut.length ? [`${what}: focus is on ${at}, but ${cut.join(' and ')}`] : [];
 };
 /** Leave goes at once, asking nothing. */
 async function leaves(page) {
