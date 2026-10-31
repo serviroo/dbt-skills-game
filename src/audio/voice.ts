@@ -34,6 +34,9 @@ export interface VoiceOpts {
   hall?: number;
 }
 
+/** When a voice stopped at `at` over `ramp` (see Voice.stop) has gone silent and its sources have ended. */
+export const stoppedBy = (at: number, ramp: number) => at + ramp * 1.6 + 0.02;
+
 /**
  * One sounding thing (a cue, a bed, a music layer). Owns a stop-able output, optional reverb sends, a pan, and a
  * transposition (detune in cents applied to every oscillator and filter it creates).
@@ -255,7 +258,7 @@ export class Voice {
       g.cancelScheduledValues(at);
       g.setTargetAtTime(0, at, tau);
     }
-    const kill = at + ramp * 1.6 + 0.02;
+    const kill = stoppedBy(at, ramp);
     for (const s of this.sources) {
       if (s.stop > kill) {
         try {

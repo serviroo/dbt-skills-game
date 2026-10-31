@@ -8,7 +8,7 @@ import { BED_NAMES, startBed, startCharge, type BedHandle, type BedName, type Ch
 import { Music, SECTIONS, type Section, type SectionOpts } from './music';
 import { clipCurve, makeCrackle, makeIR, makeNoise, dB, type Ctx } from './dsp';
 import { holdAt, taper } from './param';
-import { Voice, type Lib } from './voice';
+import { Voice, stoppedBy, type Lib } from './voice';
 
 export type { BedHandle, BedName, ChargeHandle, Section, SectionOpts };
 export { BED_NAMES, SECTIONS };
@@ -588,7 +588,8 @@ export class AudioEngine {
     this.duckG.gain.setTargetAtTime(dB(db), at, Math.max(0.003, ramp / 4));
   }
 
-  /** Stop beds, charge and score (e.g. on replay or leaving the cutscene). */
+  /** Stop every cue still sounding, the beds, charge and score, and the echo's tail with them (e.g. on replay or leaving
+   *  the cutscene): what plays next starts in an empty echo. */
   stopAll(fade = 0.4, at = this.ctx.currentTime) {
     for (const v of this.active) v.stop(at, fade);
     this.active.clear();
@@ -596,6 +597,14 @@ export class AudioEngine {
     this.beds.clear();
     this.charge?.stop(at, fade);
     this.music.stop(fade, at);
+    // the echo's return closes with them, and once they are silent an empty echo takes its place: what they still sent
+    // into it while fading never rings on, in the old one or in the new
+    const old = this.echo;
+    for (const g of old.out) {
+      holdAt(g.gain, at);
+      g.gain.linearRampToValueAtTime(0, at + fade);
+    }
+    setTimeout(() => this.echo === old && this.freshEcho(old.room.buffer!, old.hall.buffer!), (stoppedBy(at, fade) - this.ctx.currentTime) * 1000 + 50);
   }
 
   /** Stop everything and restore the score controls (level, low-pass, lift, duck, hush) for a clean replay. */

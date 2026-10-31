@@ -49,7 +49,6 @@ async function visit(h, query, viewport = PHONE, { seed = {}, prepare } = {}) {
     const { AudioEngine } = await import('/src/audio/engine.ts');
     const play = AudioEngine.prototype.play;
     AudioEngine.prototype.play = function (cue, ...args) {
-      window.__engine = this;
       window.__cues.push({ cue, at: performance.now() });
       return play.call(this, cue, ...args);
     };
@@ -592,37 +591,36 @@ export const scenarios = {
   },
 
   /** Skip as a closing screen's cue plays (a reward's chime, the letter opening, the end card's shimmer with its tail of
-   *  seconds): every sound of the intro still ringing at the press stops there, so none of it plays on over Home */
+   *  seconds): the speakers go silent at the press, the echo's tail too, so none of the intro plays on over Home. Music
+   *  and the hum are off, so Home's own score and hum don't sound there */
   async 'skip-stops-the-intro-sound'(h) {
+    const levels = JSON.stringify({ v: 1, master: 1, music: 0, sfx: 1, hum: 0, muted: false });
     const cases = [
       ['rewards', 'reward_chime', async () => {}],
       ['letter', 'letter_open', (page) => tap(page, '.rw .sw-btn')],
       ['end card', 'endcard', (page) => tap(page, '.letter .sw-btn')],
     ];
     for (const [i, [at, sound, open]] of cases.entries()) {
-      const { ctx, page, errors } = await visit(h, STAGES.rewards.query);
+      const { ctx, page, errors } = await visit(h, `?shot=rewards${LIGHT}`, PHONE, { seed: { 'dbt.audio.v1': levels }, prepare: installAudioRecorder });
       const tag = `Skip as the ${at} opens`;
       try {
         if (i) await STAGES[i === 1 ? 'rewards' : 'letter'].reach(page);
         else await page.locator('.title-screen').click();
+        await audioReady(page);
         await open(page);
         await cue(page, sound);
-        // what still rings as the press lands
-        await page.evaluate(() =>
-          addEventListener(
-            'click',
-            (e) => {
-              const engine = window.__engine;
-              if (e.target.closest?.('.ui-ways')) window.__ringing ??= [...engine.active].filter((v) => v.end > engine.ctx.currentTime);
-            },
-            true,
-          ),
-        );
+        await page.evaluate(() => addEventListener('click', (e) => e.target.closest?.('.ui-ways') && (window.__pressAt ??= window.__taps[0].context.currentTime), true));
         await tap(page, '.ui-skip');
+        const at = await page.evaluate(() => window.__pressAt);
+        await audioRecorded(page, 0, at + 2);
+        // past the 40 ms cut (SCORE.leaveSec), with room for its last few samples
+        const before = await heard(page, at - 0.2, at);
+        const after = await heard(page, at + 0.15, at + 2);
+        // the cue sounding as the press lands, ten times over silence (the letter's opening swells in from soft)
+        h.expect(before.rms > 10 * SILENT_RMS, `${tag}: the intro was not audible at the press (RMS ${before.rms}), so silence proves nothing`);
+        h.expect(after.read >= 0.9, `${tag}: the recorder read only ${Math.round(after.read * 100)}% of the time after the press`);
+        h.expect(after.peak < SILENT_PEAK && after.rms < SILENT_RMS, `${tag}: the intro played on over Home (peak ${after.peak}, RMS ${after.rms})`);
         await homeAtOnce(h, page, tag);
-        const rang = await page.evaluate(() => ({ all: window.__ringing.length, on: window.__ringing.filter((v) => !v.stopped).length }));
-        h.expect(rang.all, `${tag}: nothing of the intro rang at the press, so this proves nothing`);
-        h.expect(!rang.on, `${tag}: ${rang.on} of the ${rang.all} sounds ringing at the press played on over Home`);
         h.expect(!errors.length, errors.join('\n'));
       } finally {
         await ctx.close();
