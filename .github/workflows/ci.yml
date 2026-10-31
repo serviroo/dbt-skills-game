@@ -43,15 +43,23 @@ jobs:
           LANTERN_GL: software
       - name: The build changes no committed file
         run: test -z "$(git status --porcelain)" || { git status --short; echo "npm run build changed the files above; if it redrew the PWA images, commit them with scripts/icons.stamp"; exit 1; }
+      # Each browser step has a limit of its own, about three times its slowest passing run (42, 42, 150, 53 and 55 s in
+      # October), so one that hangs fails as a step and its output is uploaded below. Left to the job's 30 minutes, the job
+      # would be cancelled, and a cancelled job uploads nothing.
       - name: PWA offline launch
+        timeout-minutes: 3
         run: node scripts/pwa-verify.mjs --software --check
       - name: PWA update
+        timeout-minutes: 3
         run: node scripts/pwa-verify.mjs --software --update --check
       - name: CSP sweep
+        timeout-minutes: 6
         run: node scripts/pwa-csp-sweep.mjs --software --check
       - name: E2E runner contract
+        timeout-minutes: 3
         run: node scripts/e2e-runner-check.mjs --software
       - name: PWA failure paths and Firefox storage
+        timeout-minutes: 3
         run: node scripts/e2e/me-93-pwa-resilience.e2e.mjs --software
       # Only from a job that failed: a run that passes stores nothing. Kept 3 days: a failed run's output matters until its
       # PR's next run, and from 17 to 31 October that came within a day every time
@@ -137,16 +145,26 @@ jobs:
       - name: Browsers come from the container
         run: test "$(npx playwright --version)" = "Version 1.64.1" || { echo "package-lock has $(npx playwright --version); set the same version in the container image above"; exit 1; }
       - name: E2E part ${{ matrix.shard }} of 18
+        # the slowest part took 20 minutes in October: one that hangs fails here, as a step, with time left in the job's 30
+        # for the upload below (a job that runs out of its own time is cancelled, and uploads nothing)
+        timeout-minutes: 27
         run: node scripts/e2e.mjs --software --shard=${{ matrix.shard }}/18
-      # as in check, only from a part that failed and kept 3 days, and only the report and what its failed scenarios wrote
-      # (scripts/e2e.mjs keeps that in failed/), not every screenshot of the ones that passed
+      # the part's report.json, a few KB, from every run that wasn't cancelled: scripts/e2e-timings.mjs rebalances the
+      # parts from every part's report (CONTRIBUTING.md)
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: e2e-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: artifacts/e2e/*/report.json
+          retention-days: 3
+          if-no-files-found: ignore
+      # as in check, only from a part that failed, and only what its failed scenarios wrote (scripts/e2e.mjs keeps that in
+      # failed/), not every screenshot of the ones that passed
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
-          name: e2e-${{ matrix.shard }}-${{ github.run_attempt }}
-          path: |
-            artifacts/e2e/*/report.json
-            artifacts/e2e/*/failed
+          name: failed-e2e-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: artifacts/e2e/*/failed
           retention-days: 3
           if-no-files-found: ignore
 

@@ -130,18 +130,27 @@ let failed = 0;
  */
 function keep(name, since) {
   const to = path.join(h.out, 'failed', name.replace(/[^\w-]+/g, '-'));
+  const missed = [];
+  let files = [];
   try {
-    for (const f of fs.readdirSync(h.out, { recursive: true })) {
-      if (f.split(path.sep)[0] === 'failed') continue;
+    files = fs.readdirSync(h.out, { recursive: true });
+  } catch (e) {
+    missed.push(String(e?.message ?? e));
+  }
+  // file by file, so one that can't be read (another browser's, gone meanwhile) costs only itself
+  for (const f of files) {
+    if (f.split(path.sep)[0] === 'failed') continue;
+    try {
       const from = path.join(h.out, f);
       const st = fs.statSync(from);
       if (!st.isFile() || st.mtimeMs < since) continue;
       fs.mkdirSync(path.dirname(path.join(to, f)), { recursive: true });
       fs.copyFileSync(from, path.join(to, f));
+    } catch (e) {
+      missed.push(`${f}: ${e?.message ?? e}`);
     }
-  } catch (e) {
-    console.log(`${name}: not everything it wrote could be kept in ${path.relative(root, to)}: ${e?.message ?? e}`);
   }
+  if (missed.length) console.log(`${name}: not everything it wrote could be kept in ${path.relative(root, to)}: ${missed.join('; ')}`);
 }
 try {
   h = await startHarness(flags);
