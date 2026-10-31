@@ -22,7 +22,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseAst } from 'vite';
 import { startHarness } from './e2e/harness.mjs';
-import { keep, markOf } from './e2e/keep.mjs';
+import { keep, mark } from './e2e/keep.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.join(root, 'scripts/e2e');
@@ -134,9 +134,8 @@ try {
         if (interrupted) break;
         const t = Date.now();
         // marked as running until it ends: one that hangs past its CI step's time is kept from its mark (scripts/e2e/keep.mjs)
-        const mark = markOf(h.out, name);
-        fs.mkdirSync(path.dirname(mark), { recursive: true });
-        fs.writeFileSync(mark, JSON.stringify({ name, since: t }));
+        const running = mark(h.out, name);
+        const since = fs.statSync(running).mtimeMs;
         try {
           let result;
           try {
@@ -155,10 +154,10 @@ try {
           report.scenarios.push({ name, file, ok: false, ms: Date.now() - t, i, error: String(e?.message ?? e) });
           console.log(`FAIL ${name}: ${e?.message ?? e}`);
           // what it wrote (its screenshots and notes, and the fail- evidence above), for CI to upload
-          const missed = keep(h.out, name, t);
+          const missed = keep(h.out, name, since);
           if (missed.length) console.log(`${name}: not everything it wrote could be kept: ${missed.join('; ')}`);
         } finally {
-          fs.rmSync(mark, { force: true });
+          fs.rmSync(running, { force: true });
         }
       }
     }
