@@ -591,26 +591,60 @@ export const scenarios = {
   },
 
   /** Skip as a closing screen's cue plays (a reward's chime, the letter opening, the end card's shimmer with its tail of
-   *  seconds): the speakers go silent at the press, the echo's tail too, so none of the intro plays on over Home. Music
-   *  and the hum are off, so Home's own score and hum don't sound there */
+   *  seconds), and once with the page hidden right after the press, which stands the sound still mid-fade: the speakers
+   *  go silent at the press, the echo's tail too, so none of the intro plays on over Home. Music and the hum are off, so
+   *  Home's own score and hum don't sound there */
   async 'skip-stops-the-intro-sound'(h) {
     const levels = JSON.stringify({ v: 1, master: 1, music: 0, sfx: 1, hum: 0, muted: false });
     const cases = [
-      ['rewards', 'reward_chime', async () => {}],
-      ['letter', 'letter_open', (page) => tap(page, '.rw .sw-btn')],
-      ['end card', 'endcard', (page) => tap(page, '.letter .sw-btn')],
+      ['rewards', 'reward_chime', 'title'],
+      ['letter', 'letter_open', 'rewards'],
+      ['end card', 'endcard', 'letter'],
+      ['end card', 'endcard', 'letter', 'hidden'],
     ];
-    for (const [i, [at, sound, open]] of cases.entries()) {
-      const { ctx, page, errors } = await visit(h, `?shot=rewards${LIGHT}`, PHONE, { seed: { 'dbt.audio.v1': levels }, prepare: installAudioRecorder });
-      const tag = `Skip as the ${at} opens`;
+    for (const [screen, sound, from, hidden] of cases) {
+      const { ctx, page, errors } = await visit(h, `?shot=rewards${LIGHT}`, PHONE, {
+        seed: { 'dbt.audio.v1': levels },
+        prepare: async (c) => {
+          await installAudioRecorder(c);
+          // the page as the browser reports it hidden: the sound stops where it is until it is shown again
+          if (hidden)
+            await c.addInitScript(() => {
+              let off = false;
+              Object.defineProperty(document, 'hidden', { configurable: true, get: () => off });
+              Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (off ? 'hidden' : 'visible') });
+              window.__hide = (on) => {
+                off = on;
+                document.dispatchEvent(new Event('visibilitychange'));
+              };
+            });
+        },
+      });
+      const tag = `Skip as the ${screen} opens${hidden ? ', the page hidden right after' : ''}`;
+      const open = { title: async () => {}, rewards: (page) => tap(page, '.rw .sw-btn'), letter: (page) => tap(page, '.letter .sw-btn') }[from];
       try {
-        if (i) await STAGES[i === 1 ? 'rewards' : 'letter'].reach(page);
-        else await page.locator('.title-screen').click();
+        if (from === 'title') await page.locator('.title-screen').click();
+        else await STAGES[from].reach(page);
         await audioReady(page);
         await open(page);
         await cue(page, sound);
-        await page.evaluate(() => addEventListener('click', (e) => e.target.closest?.('.ui-ways') && (window.__pressAt ??= window.__taps[0].context.currentTime), true));
+        await page.evaluate((hidden) => {
+          addEventListener(
+            'click',
+            (e) => {
+              if (!e.target.closest?.('.ui-ways') || window.__pressAt !== undefined) return;
+              window.__pressAt = window.__taps[0].context.currentTime;
+              if (hidden) setTimeout(() => window.__hide(true));
+            },
+            true,
+          );
+        }, !!hidden);
         await tap(page, '.ui-skip');
+        if (hidden) {
+          // hidden for longer than the fade at the press lasts, then back
+          await h.sleep(600);
+          await page.evaluate(() => window.__hide(false));
+        }
         const at = await page.evaluate(() => window.__pressAt);
         await audioRecorded(page, 0, at + 2);
         // past the 40 ms cut (SCORE.leaveSec), with room for its last few samples

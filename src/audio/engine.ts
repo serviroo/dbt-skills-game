@@ -598,13 +598,22 @@ export class AudioEngine {
     this.charge?.stop(at, fade);
     this.music.stop(fade, at);
     // the echo's return closes with them, and once they are silent an empty echo takes its place: what they still sent
-    // into it while fading never rings on, in the old one or in the new
+    // into it while fading never rings on, in the old one or in the new. Timed on the audio clock, which stands still
+    // while the page is hidden, so the fade they have left when it comes back still goes into the closed one
     const old = this.echo;
     for (const g of old.out) {
       holdAt(g.gain, at);
       g.gain.linearRampToValueAtTime(0, at + fade);
     }
-    setTimeout(() => this.echo === old && this.freshEcho(old.room.buffer!, old.hall.buffer!), (stoppedBy(at, fade) - this.ctx.currentTime) * 1000 + 50);
+    const silent = this.ctx.createConstantSource();
+    silent.offset.value = 0;
+    silent.connect(this.ctx.destination);
+    silent.onended = () => {
+      silent.disconnect();
+      if (this.echo === old) this.freshEcho(old.room.buffer!, old.hall.buffer!);
+    };
+    silent.start(at);
+    silent.stop(stoppedBy(at, fade));
   }
 
   /** Stop everything and restore the score controls (level, low-pass, lift, duck, hush) for a clean replay. */

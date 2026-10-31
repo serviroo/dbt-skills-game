@@ -632,7 +632,7 @@
   "skip-keeps-default": 72,
   "skip-late-in-awaken": 14,
   "skip-mid-silhouette": 5,
-  "skip-stops-the-intro-sound": 70,
+  "skip-stops-the-intro-sound": 110,
   "skip-then-restore": 18,
   "slow-gpu-settles-fast": 5,
   "small-plans": 23,
