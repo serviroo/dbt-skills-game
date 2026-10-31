@@ -89,7 +89,8 @@ jobs:
         with:
           name: deploy-checks
           path: artifacts/
-          retention-days: 7
+          # as in CI: only from a failed build, kept 3 days
+          retention-days: 3
       - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
