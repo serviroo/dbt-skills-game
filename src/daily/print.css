@@ -1,0 +1,227 @@
+/* Print a week: one week of the diary card as a page, read on screen in the Lantern's own colours and printed black on
+   white, alone, on A4 or Letter. */
+
+/* ---------- the page, on screen ---------- */
+.dq-paper {
+  /* the page's colours: the Lantern's on screen, ink on paper (below) */
+  --ink: var(--t-title);
+  --ink-soft: var(--t-dim);
+  --line: rgba(62, 100, 133, 0.5);
+  color: var(--ink);
+  font-size: 16px;
+}
+.dq-paper-t {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.5em;
+  line-height: 1.15;
+}
+.dq-paper-meta {
+  margin: 4px 0 0;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+/* one even ground under the ratings, so the row names can hold still over the days scrolling under them */
+.dq-paper-scroll {
+  --ground: linear-gradient(var(--plate-b), var(--plate-b)) #07080f;
+  overflow-x: auto;
+  margin-top: 14px;
+  background: var(--ground);
+}
+.dq-paper-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+}
+.dq-paper-table th,
+.dq-paper-table td {
+  padding: 6px 2px;
+  border-bottom: 1px solid var(--line);
+  font-weight: 400;
+  text-align: center;
+}
+.dq-paper-table thead th {
+  vertical-align: bottom;
+  color: var(--ink-soft);
+}
+.dq-paper-table thead th span {
+  display: block;
+}
+.dq-paper-table thead th span + span {
+  color: var(--ink);
+}
+.dq-paper-table .dq-paper-group {
+  padding-top: 14px;
+  color: var(--ink-soft);
+  font-weight: 500;
+  text-align: left;
+}
+/* the row names stay in sight while a narrow screen scrolls the days */
+.dq-paper-table thead td,
+.dq-paper-table th[scope='row'] {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 5em;
+  max-width: 9em;
+  padding-right: 10px;
+  text-align: left;
+  overflow-wrap: break-word;
+  background: var(--ground);
+}
+.dq-paper-h {
+  margin: 22px 0 2px;
+  font-size: 1em;
+  font-weight: 500;
+  color: var(--ink-soft);
+}
+.dq-paper-days {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.dq-paper-days li {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.dq-paper-day {
+  font-weight: 500;
+}
+.dq-paper-days p {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+.dq-paper-key {
+  margin: 14px 0 0;
+  color: var(--ink-soft);
+}
+/* every word on the print screen is body size, the week's heading and the buttons too, broken evenly on a phone */
+.dq-print .dq-chip-t,
+.dq-print .dq-btn {
+  font-size: 16px;
+}
+.dq-print .dq-chip-t,
+.dq-print .dq-btn-t {
+  text-wrap: balance;
+}
+@media (max-width: 420px) {
+  .dq-print .dq-paper {
+    padding: 14px;
+  }
+}
+@media (min-width: 560px) {
+  .dq-paper-days li {
+    display: grid;
+    grid-template-columns: 7.5em 1fr;
+    column-gap: 12px;
+  }
+  .dq-paper-days p {
+    grid-column: 2;
+    margin: 0;
+  }
+}
+
+/* ---------- on paper ---------- */
+@media print {
+  @page {
+    margin: 12mm;
+  }
+  /* only the page prints: everything around it goes, and every box that holds it lays out as plain paper */
+  body:has(.dq-paper) :not(:has(.dq-paper), .dq-paper, .dq-paper *) {
+    display: none !important;
+  }
+  html:has(.dq-paper),
+  body:has(.dq-paper),
+  body:has(.dq-paper) :has(.dq-paper) {
+    position: static !important;
+    display: block !important;
+    width: auto !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    border: 0 !important;
+    background: none !important;
+    box-shadow: none !important;
+    filter: none !important;
+    transform: none !important;
+  }
+  html:has(.dq-paper) {
+    color-scheme: light;
+  }
+  body:has(.dq-paper) :has(.dq-paper)::before,
+  body:has(.dq-paper) :has(.dq-paper)::after,
+  .dq .dq-paper::before,
+  .dq .dq-paper::after {
+    display: none !important;
+  }
+  .dq .dq-paper {
+    --ink: #000;
+    --ink-soft: #000;
+    --line: #888;
+    padding: 0 !important;
+    border: 0 !important;
+    font-size: 10pt;
+    line-height: 1.35;
+    letter-spacing: 0;
+  }
+  /* no ink under or around the words, whatever look the Wardrobe puts on panels or focus puts on the ratings */
+  .dq-paper,
+  .dq-paper * {
+    background: none !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    outline: none !important;
+  }
+  .dq-paper-scroll {
+    overflow: visible;
+    margin-top: 5mm;
+  }
+  .dq-paper-table {
+    table-layout: fixed;
+  }
+  .dq-paper-table th,
+  .dq-paper-table td {
+    padding: 1.4mm 1mm;
+    border-bottom-width: 0.5pt;
+  }
+  .dq-paper-table thead th,
+  .dq-paper-table td {
+    border-left: 0.5pt solid var(--line);
+  }
+  .dq-paper-table thead td,
+  .dq-paper-table th[scope='row'] {
+    position: static;
+    width: 30%;
+    max-width: none;
+  }
+  .dq-paper-table .dq-paper-group {
+    padding-top: 3mm;
+  }
+  .dq-paper-table tr,
+  .dq-paper-days li {
+    break-inside: avoid;
+  }
+  .dq-paper-h {
+    margin-top: 6mm;
+    break-after: avoid;
+  }
+  .dq-paper-days li {
+    display: grid;
+    grid-template-columns: 26mm 1fr;
+    column-gap: 3mm;
+    padding: 1.6mm 0;
+    border-bottom-width: 0.5pt;
+  }
+  .dq-paper-days p {
+    grid-column: 2;
+    margin: 0;
+  }
+  .dq-paper-key {
+    margin-top: 4mm;
+  }
+}

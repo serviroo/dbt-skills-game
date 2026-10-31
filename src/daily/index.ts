@@ -10,9 +10,10 @@ import './care-b.css';
 import './stealth.css';
 import './story.css';
 import './wave2.css';
+import './print.css';
 import { App, type DailyOpts } from './app';
 import { hubScreen } from './hub';
-import { comfortScreen, diaryScreen, libraryScreen, restScreen, settingsScreen, shadowsScreen } from './pages';
+import { comfortScreen, diaryScreen, libraryScreen, printScreen, restScreen, settingsScreen, shadowsScreen } from './pages';
 import { artScreen, drawScreen, pieceScreen } from './artroom';
 import { readScreen, storiesScreen, writeScreen } from './storyroom';
 import { linesScreen } from './lines';
@@ -32,6 +33,7 @@ export function mountDaily(root: HTMLElement, opts: DailyOpts): { unmount(): voi
     shadows: shadowsScreen,
     library: libraryScreen,
     diary: diaryScreen,
+    print: printScreen,
     comfort: comfortScreen,
     settings: settingsScreen,
     art: artScreen,
