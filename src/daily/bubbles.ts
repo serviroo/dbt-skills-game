@@ -117,7 +117,9 @@ export function scratchTexture() {
   if (scratch) return scratch;
   const c = document.createElement('canvas');
   c.width = c.height = 384;
-  const g = c.getContext('2d')!;
+  // drawn and read on the CPU: reading a GPU canvas waits for all the GPU has queued, the intro's last frames too, and
+  // this is read as the companion first opens
+  const g = c.getContext('2d', { willReadFrequently: true })!;
   const r = mulberry32(19);
   g.lineCap = 'round';
   for (let i = 0; i < 150; i++) {

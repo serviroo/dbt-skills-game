@@ -754,6 +754,40 @@ export const scenarios = {
     }
   },
 
+  /** Home opens straight after Skip without waiting on the GPU: every canvas the page reads from the press on (the
+   *  companion's own textures, the first welcome's window) is drawn on the CPU. Reading a GPU canvas waits for everything
+   *  the GPU has queued, the 3D scene's frames too, which a slow GPU takes a minute to draw */
+  async 'home-opens-without-waiting-on-the-gpu'(h) {
+    const { ctx, page, errors } = await visit(h, STAGES.awaken.query, PHONE, {
+      prepare: (c) =>
+        c.addInitScript(() => {
+          window.__reads = [];
+          const note = (how, g) => window.__leftAt !== null && window.__reads.push({ how, cpu: g?.getContextAttributes?.().willReadFrequently === true });
+          const toDataURL = HTMLCanvasElement.prototype.toDataURL;
+          HTMLCanvasElement.prototype.toDataURL = function (...a) {
+            note('toDataURL', this.getContext('2d'));
+            return toDataURL.apply(this, a);
+          };
+          const getImageData = CanvasRenderingContext2D.prototype.getImageData;
+          CanvasRenderingContext2D.prototype.getImageData = function (...a) {
+            note('getImageData', this);
+            return getImageData.apply(this, a);
+          };
+        }),
+    });
+    try {
+      await STAGES.awaken.reach(page);
+      await tap(page, '.ui-skip');
+      await homeAtOnce(h, page, 'Skip at awaken');
+      const reads = await page.evaluate(() => window.__reads);
+      h.expect(reads.length, 'Home read no canvas after Skip, so this proves nothing');
+      h.expect(reads.every((r) => r.cpu), `Home read a GPU canvas after Skip, which waits for the 3D scene's frames: ${JSON.stringify(reads)}`);
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** Help is one tap with the Sound panel open: the tap that closes it still lands on the intro's Skip and Safe Zone, and
    *  in the companion on the Safe Zone, Talk to someone now and a number to call */
   async 'one-tap-with-sound-open'(h) {
