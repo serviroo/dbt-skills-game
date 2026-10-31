@@ -247,7 +247,7 @@ export function place(box: HTMLElement, kids: HTMLElement[], fallback?: () => HT
  * pinned bars (their scroll padding in daily.css).
  */
 /** Whether the player can see `e`: shown, with a size, and not hidden from anyone, a screen reader's eyes only included. */
-const seen = (e: HTMLElement) => {
+export const seen = (e: HTMLElement) => {
   const r = e.getBoundingClientRect();
   return e.checkVisibility({ visibilityProperty: true }) && r.width > 0 && r.height > 0 && !e.closest('[aria-hidden="true"], [inert], .dq-sr');
 };
@@ -276,19 +276,23 @@ export function redrawn(draw: () => Element | null, lost: () => HTMLElement | nu
       const like = (e: Element) => item(e) === item(had) && name(e) === name(had) && e.getAttribute('href') === had.getAttribute('href');
       const same = next instanceof Element ? [...next.querySelectorAll<HTMLElement>('a[href], button, summary')].find(like) : undefined;
       const to = [same, lost()].find((e): e is HTMLElement => !!e && seen(e));
-      if (!to) return true;
-      to.focus({ preventScroll: true });
-      // the ring is drawn outside the box, by its width and gap: the scroll takes it in too, past whatever scroll margin
-      // the control has of its own
-      const cs = getComputedStyle(to);
-      const ring = cs.outlineStyle === 'none' ? 0 : parseFloat(cs.outlineWidth) + Math.max(0, parseFloat(cs.outlineOffset));
-      const own = to.style.scrollMargin;
-      to.style.scrollMargin = (['Top', 'Right', 'Bottom', 'Left'] as const).map((s) => `${parseFloat(cs[`scrollMargin${s}`]) + ring}px`).join(' ');
-      to.scrollIntoView({ block: 'nearest' });
-      to.style.scrollMargin = own;
+      if (to) focusWhole(to);
       return true;
     },
   };
+}
+
+/** Focuses `to` and brings all of it into view, focus ring and all, clear of the pinned bars. */
+export function focusWhole(to: HTMLElement) {
+  to.focus({ preventScroll: true });
+  // the ring is drawn outside the box, by its width and gap: the scroll takes it in too, past whatever scroll margin the
+  // control has of its own
+  const cs = getComputedStyle(to);
+  const ring = cs.outlineStyle === 'none' ? 0 : parseFloat(cs.outlineWidth) + Math.max(0, parseFloat(cs.outlineOffset));
+  const own = to.style.scrollMargin;
+  to.style.scrollMargin = (['Top', 'Right', 'Bottom', 'Left'] as const).map((s) => `${parseFloat(cs[`scrollMargin${s}`]) + ring}px`).join(' ');
+  to.scrollIntoView({ block: 'nearest' });
+  to.style.scrollMargin = own;
 }
 
 export function sr(text: string) {

@@ -14,11 +14,13 @@
 //                             list stays open with focus on the same title
 //   night-watch-arrivals-tabs visit days restored in another tab bring their watchers into the row and the camp and the
 //                             pebble into the Inventory, building the camp once and keeping a half-typed name and its
-//                             focus; nothing unrelated builds it again, and the companion renamed there is renamed here
+//                             focus; nothing unrelated builds it again, the companion renamed there is renamed here, and
+//                             focus on a watcher in camp comes back to them, seen whole, once the camp built again shows
 //   skill-list-follows-tabs   Trade Places' Activities, open in a skill, takes an activity added and one removed in
 //                             another tab, staying on its step with what is typed and focus on the same choice
 //   stealth-look-follows-tabs the aquarium and Breathing words turned on in another tab's Stealth room turn on here, the
-//                             words joining the room's own breath, which goes on unbroken
+//                             words joining the room's own breath, which goes on unbroken, and Bramble, arriving with
+//                             visit days restored there, settles in here, focus staying where it was
 import { another, focusOn, go, until } from './safe-zone-tabs.e2e.mjs';
 
 const SIZES = [
@@ -373,6 +375,29 @@ export const scenarios = {
       if (!(await until(page, () => document.querySelector('.dq-first-n')?.textContent === 'Moth'))) problems.push(`${tag}: the companion renamed Moth in another tab is still ${(await roster()).first} here`);
       const last = await roster();
       if (last.builds !== after.builds) problems.push(`${tag}: the camp was built again for a change that brought nobody (${after.builds} to ${last.builds})`);
+      // Crest arrives while Sable has focus in camp: once the camp built again shows, Sable has it again
+      // the camp's scene runs, and its buttons show, only while it is on screen
+      await page.locator('.w2-camp').scrollIntoViewIfNeeded();
+      const sable = page.locator('.w2-camp.is-scene-live .w2-camp-hit[data-shadow="sable"]');
+      await sable.waitFor({ timeout: 30000 });
+      await sable.focus();
+      await other.page.evaluate(([k, v]) => localStorage.setItem(k, v), [h.SAVE, JSON.stringify({ v: 1, created: T, events: visits(14) })]);
+      if (!(await until(page, () => window.__camp?.ids.includes('crest') && document.activeElement?.matches('.w2-camp-hit[data-shadow="sable"]')))) problems.push(`${tag}: with Crest arrived elsewhere focus is on ${await page.evaluate(() => document.activeElement?.tagName)}, not Sable in camp (camp ${(await roster()).camp})`);
+      else {
+        // seen whole, ring and all, under the top bar; where Vesper stands behind him, his button lies over part of
+        // Sable's box on purpose, so only Sable's middle has to be his
+        const seen = await page.evaluate(() => {
+          const e = document.activeElement;
+          const cs = getComputedStyle(e);
+          const ring = cs.outlineStyle === 'none' ? 0 : parseFloat(cs.outlineWidth) + Math.max(0, parseFloat(cs.outlineOffset));
+          const r = e.getBoundingClientRect();
+          const top = document.querySelector('.dq-top').getBoundingClientRect().bottom;
+          const mid = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+          return r.top - ring >= top - 0.5 && r.bottom + ring <= innerHeight + 0.5 && r.left - ring >= -0.5 && r.right + ring <= innerWidth + 0.5 && (mid === e || e.contains(mid));
+        });
+        if (!seen) problems.push(`${tag}: Sable has focus again in the camp built again, but is not all in view`);
+      }
+      await h.shot(page, `night-watch-camp-focus-${tag}`);
       const fx = await page.evaluate(() => window.__fx);
       if (fx.length) problems.push(`${tag}: the Night Watch played or showed this for another tab's doings: ${fx.join('; ')}`);
       problems.push(...[errors, other.errors].flat().map((e) => `${tag}: ${e}`));
@@ -427,6 +452,8 @@ export const scenarios = {
       await watch(page);
       await page.evaluate(() => (window.__breath = document.querySelector('.dq-st-glow').getAnimations()[0]));
       const t0 = await page.evaluate(() => window.__breath?.currentTime);
+      await page.locator('.dq-st-mode').first().focus();
+      await mark(page);
       await go(other.page, { name: 'rest' });
       await other.page.locator('.dq-stealth').waitFor();
       for (const b of await other.page.locator('.dq-st-mode').all()) await b.click();
@@ -447,6 +474,12 @@ export const scenarios = {
       if (!both || room.pressed.join() !== 'true,true') problems.push(`${tag}: the aquarium and Breathing words turned on elsewhere show ${room.pressed} here`);
       if (!room.same || !(room.t > t0)) problems.push(`${tag}: the room's breath started again (${t0} to ${room.t})`);
       if (room.gap === null || Math.min(room.gap, room.period - room.gap) > 120) problems.push(`${tag}: Breathing words are ${room.gap} ms out of step with the room's breath`);
+      // visit days restored there bring Bramble here
+      await other.page.evaluate(([k, v]) => localStorage.setItem(k, v), [h.SAVE, JSON.stringify({ v: 1, created: T, events: visits(10) })]);
+      if (!(await until(page, () => document.querySelector('.dq-stealth .w2-bramble')?.checkVisibility()))) problems.push(`${tag}: Bramble, arrived with visit days restored elsewhere, is not in the Stealth room`);
+      const still = await page.evaluate(() => document.querySelector('.dq-st-glow').getAnimations()[0] === window.__breath);
+      if (!still) problems.push(`${tag}: the room's breath started again when Bramble arrived`);
+      if (!(await kept(page))) problems.push(`${tag}: focus left the Aquarium button for ${await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 80))}`);
       await h.shot(page, `stealth-look-after-${tag}`);
       problems.push(...[errors, other.errors].flat().map((e) => `${tag}: ${e}`));
       await ctx.close();

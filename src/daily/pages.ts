@@ -1,3 +1,5 @@
+import { animate } from '../ui/anim';
+import { CALM, css, WINDOW } from '../motion/tokens';
 import { LOADOUT, LOADOUT_COPY, MODULES, MODULE_ORDER, SAFE, SKILL, SKILLS, type Skill } from '../content/dbt';
 import { LABEL_SECONDS, LIBRARY_COPY, NEEDS, TIMES, TOPICS } from '../content/skill-library';
 import { CRISIS_CHECKED } from '../content/crisis-lines';
@@ -86,7 +88,8 @@ export function restScreen(app: App): ScreenOut {
     h('div', { class: 'dq-st-shark-dir' }, h('span', { class: 'dq-st-wake' }), h('span', { class: 'dq-st-pop dq-st-pop0' }), h('span', { class: 'dq-st-pop dq-st-pop1' }), h('span', { class: 'dq-st-tail', html: sharkTailSVG() }), h('span', { class: 'dq-st-fin', html: sharkFinSVG() })),
   );
   const floor = h('div', { class: 'dq-st-floor', 'aria-hidden': 'true' }, shark);
-  const stage = h('div', { class: 'dq-st-stage' }, tank, glow, sea, word, floor, cat, brambleNap(app));
+  let nap = brambleNap(app);
+  const stage = h('div', { class: 'dq-st-stage' }, tank, glow, sea, word, floor, cat, nap);
 
   const title = firstEver
     ? h(
@@ -143,9 +146,14 @@ export function restScreen(app: App): ScreenOut {
   };
   const fishBtn = mode(STEALTH.aquarium, ST_IC.fish, prefs.aquarium, setAquarium);
   const wordsBtn = mode(STEALTH.words, ST_IC.breath, prefs.words, setWords, `${STEALTH.words}, ${STEALTH.wordsHint}`);
-  // the look chosen in another open copy's Stealth room: this one takes it on, the breath going on as it was
+  // the look chosen in another open copy's Stealth room: this one takes it on, the breath going on as it was. Bramble,
+  // arriving with visit days counted there (a Save Crystal restored), settles into his corner with a slow fade
   let kept = JSON.stringify(stealthPrefs(st.key));
   const offLook = st.onChange(() => {
+    if (!nap && (nap = brambleNap(app))) {
+      stage.append(nap);
+      animate(nap, [{ opacity: 0 }, { opacity: getComputedStyle(nap).opacity }], { duration: app.reduced() ? WINDOW.reducedFadeMs : CALM.fadeMs, easing: css(CALM.ease) });
+    }
     const now = stealthPrefs(st.key);
     if (JSON.stringify(now) === kept) return;
     kept = JSON.stringify(now);

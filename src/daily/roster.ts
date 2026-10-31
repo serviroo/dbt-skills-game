@@ -12,7 +12,7 @@ import { now, onFrame } from './clock';
 import { INVENTORY, ROSTER, ROSTER_COPY, type ShadowDef, type ShadowId } from '../content/roster-lines';
 import type { App } from './app';
 import { cleanName, type Store } from './store';
-import { h, typo } from './ui';
+import { focusWhole, h, seen, typo } from './ui';
 
 let svgN = 0;
 
@@ -190,7 +190,7 @@ function namedPanel(app: App, s: ShadowDef, onName: (id: ShadowId, v: string) =>
  * loading or running (a lost context leaves its room until it comes back); with no WebGL or a failed load it takes no
  * room and the roster under it is the Watch.
  */
-function campStage(app: App, arrived: ShadowDef[], open: (id: ShadowId, from: HTMLButtonElement) => void) {
+function campStage(app: App, arrived: ShadowDef[], open: (id: ShadowId, from: HTMLButtonElement) => void, back?: ShadowId) {
   const btns = new Map<ShadowId, HTMLButtonElement>();
   const hits = h('div', { class: 'w2-camp-hits', role: 'group', 'aria-label': ROSTER_COPY.campLabel });
   for (const s of arrived) {
@@ -226,7 +226,24 @@ function campStage(app: App, arrived: ShadowDef[], open: (id: ShadowId, from: HT
     },
   };
   const unmount = mountScene(stage, { kind: 'camp', clock: { now, onFrame }, reduced: () => app.reduced(), onMotion: (fn) => app.onMotion(fn), waitMs: Infinity, input });
-  return { stage, unmount };
+  // a camp built again while a watcher in it had focus: focus goes back to them once the scene shows them where they
+  // stand, unless the player has put it somewhere since
+  const was = back && btns.get(back);
+  const returns = was
+    ? new MutationObserver(() => {
+        if (!seen(was) || !was.style.getPropertyValue('--w')) return;
+        returns?.disconnect();
+        if (document.activeElement === document.body) focusWhole(was);
+      })
+    : null;
+  returns?.observe(stage, { subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
+  return {
+    stage,
+    unmount: () => {
+      returns?.disconnect();
+      unmount();
+    },
+  };
 }
 
 /**
@@ -345,13 +362,12 @@ export function rosterSection(app: App) {
     if (arrived().length === had) return;
     const focused = camp?.stage.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.shadow : undefined;
     camp?.unmount();
-    const next = campStage(app, arrived(), openCard);
+    const next = campStage(app, arrived(), openCard, focused as ShadowId | undefined);
     if (camp) camp.stage.replaceWith(next.stage);
     else row.before(next.stage);
     camp = next;
-    const hit = (id: string | undefined) => (id ? next.stage.querySelector<HTMLButtonElement>(`[data-shadow="${id}"]`) : null);
-    if (sheet) sheet.from = hit(sheet.panel.dataset.shadow) ?? sheet.from;
-    hit(focused)?.focus({ preventScroll: true });
+    const hit = next.stage.querySelector<HTMLButtonElement>(`[data-shadow="${sheet?.panel.dataset.shadow}"]`);
+    if (sheet && hit) sheet.from = hit;
   };
   // names set in another open copy show up here, without touching a field the player is typing in
   const off = st.onChange(() => {
