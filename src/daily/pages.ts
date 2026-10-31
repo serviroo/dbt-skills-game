@@ -105,14 +105,15 @@ export function restScreen(app: App): ScreenOut {
     app.bubbles.set(on ? 13 : 7, on ? 1.2 : 1);
   };
   /**
-   * The room's one breath, counted from when the room opened on the clock its animations run on. The glow and the
-   * Breathing words take their place in it whenever either starts again (the words turned on, or the glow breathing
-   * again once motion is back), so they always breathe together.
+   * The room's one breath, started when the room opened on the clock its animations run on. The glow and the
+   * Breathing words take that start whenever either starts again (the words turned on, or the glow breathing again
+   * once motion is back), so they always breathe together. A start, not a place in the breath: one that waits for its
+   * first frame would only count from that frame, however long a slow device takes to draw it. The words, paused while
+   * they are off, stay paused.
    */
   const opened = Number(document.timeline.currentTime);
   const inStep = () => {
-    const since = Number(document.timeline.currentTime) - opened;
-    for (const a of [glow, ...word.querySelectorAll('span')].flatMap((e) => e.getAnimations())) a.currentTime = since % Number(a.effect?.getTiming().duration);
+    for (const a of [glow, ...word.querySelectorAll('span')].flatMap((e) => e.getAnimations())) if (a.playState !== 'paused') a.startTime = opened;
   };
   const setWords = (on: boolean) => {
     prefs.words = on;
