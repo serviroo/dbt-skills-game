@@ -144,11 +144,14 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   // keyboard only ever takes height
   const tallest = new Map<number, number>();
   // widths first had with the keyboard up (the phone turned while typing, and turning leaves it up), each with the least
-  // height it has had there: the keyboard counts as up there, its room unknown, until the page grows past that as the
-  // keyboard goes down. `up`: the keyboard was up as of the last fit
-  const turned = new Map<number, number>();
+  // height it has had there and the room a turn gives there: a turn swaps the screen's sides, so that's the width turned
+  // from and its room, less the width turned to. The keyboard counts as up there, the room not yet seen, until the page
+  // is halfway from the least to that room or tall enough for the usual screen; short of that it's the keyboard settling
+  // after the turn, a little taller or shorter. `up`: the keyboard was up as of the last fit, at width `last`
+  const turned = new Map<number, { low: number; room: number }>();
   let up = false;
-  if (vv) tallest.set(Math.round(vv.width), vv.height);
+  let last = vv ? Math.round(vv.width) : 0;
+  if (vv) tallest.set(last, vv.height);
   const typedIn = () => {
     const f = document.activeElement;
     return f?.matches('input.dq-input, textarea.dq-input') && el.contains(f) ? f : null;
@@ -180,16 +183,21 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     if (!vv) return;
     const field = typedIn();
     const width = Math.round(vv.width);
-    const low = turned.get(width);
-    if (low !== undefined && Math.round(vv.height) > Math.round(low)) turned.delete(width);
-    else if (low !== undefined || (up && field && !tallest.has(width))) turned.set(width, vv.height);
+    const fits = wide.matches ? 300 : 361;
+    const t = turned.get(width) ?? (up && field && !tallest.has(width) ? { low: vv.height, room: last + (tallest.get(last) ?? Infinity) - width } : null);
+    if (t) {
+      t.low = Math.min(t.low, vv.height);
+      if (vv.height >= Math.min(fits, (t.low + t.room) / 2)) turned.delete(width);
+      else turned.set(width, t);
+    }
+    last = width;
     const rest = turned.has(width) ? Infinity : Math.max(tallest.get(width) ?? 0, vv.height);
     if (rest !== Infinity) tallest.set(width, rest);
     const covered = Math.round(vv.height * vv.scale) < document.documentElement.clientHeight;
     up = covered || vv.height < rest;
     // down, the widths turned to with it up are only the room it left there
     if (!up) turned.clear();
-    const short = vv.height < rest && vv.height < (wide.matches ? 300 : 361);
+    const short = vv.height < rest && vv.height < fits;
     const on = (covered || short) && (typing || !!field);
     if (on) {
       app.root.style.setProperty('--vv-top', `${vv.offsetTop}px`);

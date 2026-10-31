@@ -262,8 +262,8 @@ function typing(phone, { zoom = 1, font = false, largest = false, elsewhere = fa
  * goes down the usual screen comes back with the field focused, and with it up "Talk to someone now", Leave, Lights up
  * and Sound are on screen, upright, turned sideways, and sideways with the keyboard down and up again. A phone that
  * resizes the page, turned with its keyboard up, shows a height it hasn't had with the keyboard down, and the keyboard
- * stays up through the turn: turned from the bigger phone, where the usual screen fits above it upright, and from the
- * smaller, where it doesn't. At 200% zoom held sideways the keyboard leaves under 100 px, too little for Talk and a
+ * stays up through the turn, coming up a strip taller first and then settling: turned from the bigger phone, where the
+ * usual screen fits above it upright, and from the smaller, where it doesn't. At 200% zoom held sideways the keyboard leaves under 100 px, too little for Talk and a
  * field, so there only the keyboard going down is checked.
  */
 function turned(phone, zoom = 1) {
@@ -280,10 +280,14 @@ function turned(phone, zoom = 1) {
     await page.locator('.dq-sz-body').getByLabel('Add one', { exact: true }).focus();
     await settle(page);
     const words = await page.evaluate(() => parseFloat(getComputedStyle(document.querySelector('.dq-sz-talk').lastElementChild).fontSize));
-    // the keyboard up or down on the phone held as `s` is, the page resized to the part above it or with only that showing
-    const to = async (s, kind, up) => {
-      await page.setViewportSize({ width: s.width, height: kind === 'resize' && up ? s.height - s.kb : s.height });
-      await page.evaluate((k) => window.__kb(k), kind === 'over' && up ? { height: s.height - s.kb, top: Math.round(s.kb / 4) } : null);
+    // the keyboard up or down on the phone held as `s` is, the page resized to the part above it or with only that showing;
+    // `strip`: it comes up that much taller first, a frame before it settles
+    const to = async (s, kind, up, strip = 0) => {
+      for (const kb of strip ? [s.kb + strip, s.kb] : [s.kb]) {
+        await page.setViewportSize({ width: s.width, height: kind === 'resize' && up ? s.height - kb : s.height });
+        await page.evaluate((k) => window.__kb(k), kind === 'over' && up ? { height: s.height - kb, top: Math.round(kb / 4) } : null);
+        await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+      }
       await page.evaluate(() => document.activeElement?.scrollIntoView({ block: 'nearest', behavior: 'instant' }));
       await settle(page);
     };
@@ -291,7 +295,7 @@ function turned(phone, zoom = 1) {
       const state = (what) => `${size}, keyboard ${kind === 'resize' ? 'resizing the page' : 'over the page'}, ${what}`;
       await to(upright, kind, true);
       if (zoom === 1) for (const f of await up(page, words)) problems.push(`${state('upright')}: ${f}`);
-      await to(sideways, kind, true);
+      await to(sideways, kind, true, Math.round(16 / zoom));
       if (zoom === 1) for (const f of await up(page, words)) problems.push(`${state('turned sideways')}: ${f}`);
       await to(sideways, kind, false);
       for (const f of await down(page)) problems.push(`${state('turned sideways, then down')}: ${f}`);
