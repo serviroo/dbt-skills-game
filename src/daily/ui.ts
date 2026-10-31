@@ -235,7 +235,8 @@ export function place(box: HTMLElement, kids: HTMLElement[], fallback?: () => HT
  * Focus on a control that goes moves to that same control drawn again (the same item's, by the data-item id of the row
  * it is in, with the same name and link: its label, else its words), else to `lost`, never to a control of someone or
  * something else. It goes only where the player can see it, brought whole into view, focus ring and all, clear of the
- * pinned bars (their scroll padding in daily.css). What the player is looking at stays put (see holdView).
+ * pinned bars (their scroll padding in daily.css). What the player is looking at stays put (see holdView), and a box
+ * in it that the player scrolled stays scrolled (see keepScrolled).
  */
 /** The nearest box that scrolls `e`, else the page. */
 export function scrollerOf(e: Element) {
@@ -310,6 +311,29 @@ export const seen = (e: HTMLElement) => {
   return e.checkVisibility({ visibilityProperty: true }) && r.width > 0 && r.height > 0 && !e.closest('[aria-hidden="true"], [inert], .dq-sr');
 };
 
+/**
+ * Before `part` is drawn anew: notes each box in it, `part` too, that is scrolled from its start (ratings wider than the
+ * screen, say). The result scrolls the same box drawn anew, found by its row's data-item id, its classes and its label,
+ * back to where it was.
+ */
+function keepScrolled(part: ChildNode) {
+  if (!(part instanceof Element)) return () => {};
+  const key = (e: Element) => [e.closest('[data-item]')?.getAttribute('data-item'), e.getAttribute('class'), e.getAttribute('aria-label')].join('\n');
+  const boxes = (p: Element) => [p, ...p.querySelectorAll('*')];
+  const was = boxes(part);
+  const kept = was.filter((e) => e.scrollLeft || e.scrollTop).map((e) => ({ key: key(e), nth: was.filter((o) => key(o) === key(e)).indexOf(e), left: e.scrollLeft, top: e.scrollTop }));
+  return (now: ChildNode) => {
+    if (!kept.length || !(now instanceof Element)) return;
+    const is = boxes(now);
+    for (const k of kept) {
+      const e = is.filter((o) => key(o) === k.key)[k.nth];
+      if (!e) continue;
+      e.scrollLeft = k.left;
+      e.scrollTop = k.top;
+    }
+  };
+}
+
 export function redrawn(draw: () => Element | null, lost: () => HTMLElement | null) {
   const make = () => draw() ?? document.createComment('');
   const html = (n: ChildNode) => (n instanceof Element ? n.outerHTML : '');
@@ -326,7 +350,9 @@ export function redrawn(draw: () => Element | null, lost: () => HTMLElement | nu
       if (now === shown && !again) return false;
       const had = document.activeElement instanceof HTMLElement && node.contains(document.activeElement) ? document.activeElement : null;
       const hold = holdView(node instanceof Element ? node : node.parentElement);
+      const scrolled = keepScrolled(node);
       node.replaceWith(next);
+      scrolled(next);
       node = next;
       shown = now;
       if (!had) {

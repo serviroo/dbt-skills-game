@@ -13,6 +13,9 @@
 //                         and every day reads as an open column
 //   diary-print-two-tabs  with the ratings focused, their last row removed in another open copy takes them off the page
 //                         there, and focus moves on to Print
+//   diary-print-tabs-keep-scroll  at 320x568, with the ratings focused and scrolled along to the last day, a note saved
+//                         in another open copy shows on the page there, and the ratings stay focused and scrolled where
+//                         they were
 //   diary-print-day-turns with the page open on a new save, the day turns and the app comes back into view: the page
 //                         keeps its week, Later week and This week come back, and Later week reaches the new day and,
 //                         with no week button left, hands focus to Print
@@ -339,6 +342,40 @@ export const scenarios = {
       h.expect(!Object.keys(s.rows).length && !s.groups.length && s.perDay.length === 7, `the page once the last row went: ${JSON.stringify(s)}`);
       h.expect((await focused(a)) === 'Print or save as PDF', `focus once the ratings went is on ${await focused(a)}`);
       await h.shot(a, 'diary-print-two-tabs');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'diary-print-tabs-keep-scroll'(h) {
+    const { storage, now } = seeded(h);
+    const { ctx, page: a, errors } = await h.open(storage, '?mute', { width: 320, height: 568 }, prepared(now));
+    try {
+      await openDiary(h, a);
+      await a.locator('.dq-export').getByRole('button', { name: 'Print a week', exact: true }).click();
+      await route(a, 'print');
+      await printBtn(a).focus();
+      await a.keyboard.press('Tab');
+      h.expect((await focused(a)) === 'Ratings, day by day', `before: focus is on ${await focused(a)}`);
+      // the ratings scrolled along as far as they go, to the last day
+      const end = await a.locator('.dq-paper-scroll').evaluate((e) => {
+        e.scrollLeft = e.scrollWidth;
+        return e.scrollLeft;
+      });
+      h.expect(end > 0, `at 320x568 the ratings have nothing to scroll: ${end}`);
+      const b = await ctx.newPage();
+      b.on('pageerror', (e) => errors.push('pageerror B: ' + e.message));
+      await b.goto(h.server.url + '/?mute');
+      await openDiary(h, b);
+      await b.locator('.dq-today').getByRole('textbox', { name: 'One line, optional' }).fill('Tea with a friend. Slept well.');
+      await b.locator('.dq-today').getByRole('button', { name: 'Save', exact: true }).click();
+      await a.bringToFront();
+      await a.waitForFunction(() => document.querySelector('.dq-paper-days')?.textContent.includes('Slept well.'), null, { timeout: 5000 });
+      const kept = await a.locator('.dq-paper-scroll').evaluate((e) => e.scrollLeft);
+      h.expect(kept === end, `the ratings scrolled to ${end} are at ${kept} once the note from the other copy showed`);
+      h.expect((await focused(a)) === 'Ratings, day by day', `focus once the note showed is on ${await focused(a)}`);
+      await h.shot(a, 'diary-print-tabs-keep-scroll');
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();
