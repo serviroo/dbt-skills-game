@@ -517,8 +517,9 @@
   color: var(--t-dim);
   max-width: 38em;
 }
+/* how something went (saved, copied, restored): read as body text, so never under 16px */
 .dq-hint {
-  font-size: 14.5px;
+  font-size: 16px;
   color: var(--t-dim);
 }
 .dq-lead {
@@ -1981,9 +1982,6 @@ textarea.dq-input {
 .dq-step-body .dq-small {
   margin-top: 14px;
 }
-.dq-step-body .dq-hint {
-  font-size: 16px;
-}
 
 .dq-ring {
   display: flex;
@@ -3106,6 +3104,15 @@ textarea.dq-input {
   font-style: italic;
   white-space: nowrap;
 }
+.dq-daynav {
+  margin: -6px 0 10px;
+}
+.dq-diary .dq-daynote {
+  margin: 0 0 18px;
+}
+.dq-btn--icend {
+  flex-direction: row-reverse;
+}
 .dq-diary .dq-small {
   font-size: 16px;
 }
@@ -3223,10 +3230,6 @@ textarea.dq-input {
 }
 .dq-settings .dq-panel .dq-small {
   margin-top: 12px;
-  font-size: 16px;
-}
-/* how a Save Crystal, a Restore or a clear went: read as body text, so never under 16px */
-.dq-settings .dq-panel .dq-hint {
   font-size: 16px;
 }
 .dq-settings .dq-panel .dq-hint:not(:empty) {

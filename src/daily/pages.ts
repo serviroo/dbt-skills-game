@@ -2,14 +2,14 @@ import { LOADOUT, LOADOUT_COPY, MODULES, MODULE_ORDER, SAFE, SKILL, SKILLS, type
 import { LABEL_SECONDS, LIBRARY_COPY, NEEDS, TIMES, TOPICS } from '../content/skill-library';
 import { CRISIS_CHECKED } from '../content/crisis-lines';
 import { ABOUT, CLEAR_COPY, CRYSTAL_COPY, KEEP_COPY, PEEK_COPY } from '../content/daily-lines';
-import type { App, ScreenOut } from './app';
+import type { App, Route, ScreenOut, Visit } from './app';
 import { glyph, icon, mothSVG } from './art';
 import { skillCard } from './hub';
 import { regionPicker, telHref, smsHref } from './safe';
 import { allyCard, cardOf, favFirst, focusBack, refill } from './artroom';
 import { artStore } from './artstore';
 import { storyStore } from './storystore';
-import { addDays, cleanName, fieldKey, fieldTimes, isSkillId, ROW_CAP, uid, type DiaryEntry, type State, type Store } from './store';
+import { addDays, cleanName, dayKey, fieldKey, fieldTimes, isSkillId, ROW_CAP, uid, type DiaryEntry, type State, type Store } from './store';
 import { btn, copyText, field, h, md, p, panel, place, redrawn, segmented, shareOrSave, toggle, typo } from './ui';
 import type { KeepStatus } from '../pwa/register';
 import { volumeSliders } from '../ui/volume';
@@ -508,14 +508,22 @@ export function diaryText(st: Store, days: number) {
 }
 
 
-export function diaryScreen(app: App): ScreenOut {
+export function diaryScreen(app: App, _route: Route, visit: Visit): ScreenOut {
   const st = app.store;
   const today = st.today();
   const s = st.state;
-  const entry = s.diary[today] ?? { day: today, emotions: {}, urges: {}, note: '', updatedAt: 0 };
-  const draft = { emotions: { ...entry.emotions }, urges: { ...entry.urges }, note: entry.note };
+  // how far back Earlier day goes: a week, or to the day the save or its diary began if that is earlier
+  const earliest = () => [addDays(today, -6), dayKey(s.created), ...Object.keys(s.diary)].reduce((a, b) => (b < a ? b : a));
+  let day = visit.again && typeof visit.kept === 'string' && visit.kept < today && visit.kept >= earliest() ? visit.kept : today;
+  const draftOf = (d: string) => {
+    const e = s.diary[d];
+    return { emotions: { ...e?.emotions }, urges: { ...e?.urges }, note: e?.note ?? '' };
+  };
+  let draft = draftOf(day);
   type Kind = 'emotions' | 'urges';
   const rowsShown = new Map<string, { kind: Kind; name: string; el: HTMLElement; mount: () => void; busy: () => boolean }>();
+  // an earlier day keeps the rows it was rated on while it is open, beside today's rows to fill in
+  const dayRows = { emotions: new Set<string>(), urges: new Set<string>() };
   const touched = new Map<string, { kind: Kind; name: string }>();
   let noteTouched = false;
   const rowEl = (name: string, kind: Kind) => {
@@ -539,9 +547,15 @@ export function diaryScreen(app: App): ScreenOut {
   const ROWS = { emotions: 'emotionRows', urges: 'urgeRows' } as const;
   const heads = { emotions: h('h3', { class: 'dq-label', text: 'Feelings, 0 to 5' }), urges: h('h3', { class: 'dq-label', text: 'Urges, 0 to 5' }) };
   const boxes = { emotions: h('div', { class: 'dq-drows' }), urges: h('div', { class: 'dq-drows' }) };
+  const rowNames = (kind: Kind) => {
+    const names = s.settings[ROWS[kind]];
+    if (day === today) return names;
+    for (const r of rowsFor(s, kind, [day])) if (!names.includes(r)) dayRows[kind].add(r);
+    return [...names, ...[...dayRows[kind]].filter((r) => !names.includes(r))];
+  };
   const renderRows = () => {
     for (const kind of ['emotions', 'urges'] as const) {
-      const names = s.settings[ROWS[kind]];
+      const names = rowNames(kind);
       for (const [key, r] of rowsShown) if (r.kind === kind && !names.includes(r.name)) rowsShown.delete(key);
       place(boxes[kind], names.map((n) => rowsShown.get(`${kind}:${n}`)?.el ?? rowEl(n, kind)), () => (kind === 'emotions' ? boxes.urges.querySelector('button') : null) ?? note.input);
       heads[kind].classList.toggle('is-hidden', !names.length);
@@ -551,12 +565,12 @@ export function diaryScreen(app: App): ScreenOut {
   renderRows();
   const writeTouched = () => {
     st.sync();
-    const cur = s.diary[today];
+    const cur = s.diary[day];
     const known = fieldTimes(cur);
     const at = Math.max(st.now(), Math.max(cur?.updatedAt ?? -Infinity, ...Object.values(known)) + 1);
     // what a newer build stored on the day and its field times stays as it was; only the fields edited here change
     const ft = { ...cur?.ft, ...known };
-    const e: DiaryEntry = { ...cur, day: today, emotions: { ...cur?.emotions }, urges: { ...cur?.urges }, note: cur?.note ?? '', updatedAt: cur?.updatedAt ?? 0, ft };
+    const e: DiaryEntry = { ...cur, day, emotions: { ...cur?.emotions }, urges: { ...cur?.urges }, note: cur?.note ?? '', updatedAt: cur?.updatedAt ?? 0, ft };
     for (const { kind, name } of touched.values()) {
       e[kind][name] = draft[kind][name] ?? null;
       ft[fieldKey(kind, name)] = at;
@@ -566,7 +580,7 @@ export function diaryScreen(app: App): ScreenOut {
       ft.note = at;
     }
     if (!cur || touched.size || noteTouched) e.updatedAt = Math.max(e.updatedAt, at);
-    s.diary[today] = e;
+    s.diary[day] = e;
   };
   const written = () => {
     if (!st.saving) return;
@@ -592,15 +606,19 @@ export function diaryScreen(app: App): ScreenOut {
   };
   const onHide = () => document.visibilityState === 'hidden' && keep();
   document.addEventListener('visibilitychange', onHide);
-  // a skill practised in another open copy shows up here too
-  const usedToday = redrawn(() => {
-    const codes = st.skillCodes(today);
+  const skillsHead = h('h3', { class: 'dq-label' });
+  // a skill practised in another open copy shows up here too; an earlier day without one shows nothing
+  const usedOn = redrawn(() => {
+    const codes = st.skillCodes(day);
     const used = Object.keys(codes).filter(isSkillId);
+    skillsHead.textContent = day === today ? 'Skills today' : 'Skills that day';
+    skillsHead.classList.toggle('is-hidden', !used.length && day !== today);
     return used.length
       ? h('ul', { class: 'dq-skillsused' }, used.map((id) => h('li', {}, h('span', { text: typo(`${SKILL[id].sl} (${SKILL[id].real})`) }), h('span', { class: 'dq-code', text: codes[id] === 5 ? 'helped' : codes[id] === 4 ? "didn't help this time" : 'practised' }))))
-      : p('None yet today. That is fine.', 'dq-small');
+      : day === today ? p('None yet today. That is fine.', 'dq-small') : null;
   }, () => null);
-  const note = field('One line, optional', { value: draft.note, placeholder: 'A note for today (optional)', max: 300, oninput: (v) => {
+  const notePrompt = () => (day === today ? 'A note for today (optional)' : 'A note for this day (optional)');
+  const note = field('One line, optional', { value: draft.note, placeholder: notePrompt(), max: 300, oninput: (v) => {
     draft.note = v;
     noteTouched = true;
     touch();
@@ -610,12 +628,16 @@ export function diaryScreen(app: App): ScreenOut {
     window.clearTimeout(timer);
     dirty = false;
     writeTouched();
-    const first = !s.events.some((e) => e.k === 'diary' && e.day === today);
+    // the diary's XP is for today's card, once a day: an earlier day's card saves without it
+    const first = day === today && !s.events.some((e) => e.k === 'diary' && e.day === today);
     if (first) st.add('diary', 10);
     else st.save();
     written();
     app.sound('check');
-    saved.textContent = st.saving ? (first ? 'Saved on this device. +10 XP' : 'Updated on this device.') : `${NOT_SAVING}${first ? ' +10 XP' : ''}`;
+    if (day !== today) saved.textContent = st.saving ? `Saved to ${dayLabel(day)} on this device.` : NOT_SAVING;
+    else saved.textContent = st.saving ? (first ? 'Saved on this device. +10 XP' : 'Updated on this device.') : `${NOT_SAVING}${first ? ' +10 XP' : ''}`;
+    // Save tapped at the bottom of the screen brings the line under it into sight
+    saved.scrollIntoView({ block: 'nearest', behavior: app.reduced() ? 'auto' : 'smooth' });
   };
   const week = h('div', { class: 'dq-week' });
   const renderWeek = () => {
@@ -716,6 +738,51 @@ export function diaryScreen(app: App): ScreenOut {
   };
   const groups = [rowsGroup('emotions', 'Feelings'), rowsGroup('urges', 'Urges')];
   const rowsEditor = h('div', { class: 'dq-rowsed is-hidden' }, p('Rename by removing and adding. Use private words if you like. Past entries keep their rows.', 'dq-small'), groups.map((g) => g.el));
+  const earlier = btn('Earlier day', () => openDay(addDays(day, -1)), { kind: 'link', ic: 'back' });
+  const later = btn('Later day', () => openDay(addDays(day, 1)), { kind: 'link', ic: 'chev', cls: 'dq-btn--icend' });
+  const toToday = btn('Today', () => openDay(today), { kind: 'link' });
+  const pastNote = p('An earlier day. Anything you add or change here stays with this day.', 'dq-small dq-daynote');
+  const card = panel(
+    { title: dayLabel(day), ic: icon('diary'), cls: 'dq-today' },
+    h('div', { class: 'dq-actions dq-daynav' }, earlier, later, toToday),
+    pastNote,
+    heads.emotions,
+    boxes.emotions,
+    heads.urges,
+    boxes.urges,
+    skillsHead,
+    usedOn.node,
+    note.el,
+    h('div', { class: 'dq-actions' }, btn('Save', save, { kind: 'primary' }), btn('Edit rows', () => rowsEditor.classList.toggle('is-hidden'), { kind: 'link' }), saved),
+    rowsEditor,
+  );
+  const title = card.querySelector<HTMLElement>('.dq-chip-t')!;
+  title.setAttribute('aria-live', 'polite');
+  const showDay = () => {
+    const was = document.activeElement;
+    earlier.classList.toggle('is-hidden', day <= earliest());
+    for (const e of [later, toToday, pastNote]) e.classList.toggle('is-hidden', day === today);
+    // focus on a button the new day hides moves to the one beside it
+    if (was instanceof HTMLElement && was.classList.contains('is-hidden')) (earlier.classList.contains('is-hidden') ? later : earlier).focus({ preventScroll: true });
+  };
+  showDay();
+  const openDay = (d: string) => {
+    keep();
+    touched.clear();
+    noteTouched = false;
+    day = d;
+    draft = draftOf(d);
+    rowsShown.clear();
+    dayRows.emotions.clear();
+    dayRows.urges.clear();
+    renderRows();
+    note.input.value = draft.note;
+    note.input.placeholder = typo(notePrompt());
+    title.textContent = dayLabel(d);
+    saved.textContent = '';
+    usedOn.update();
+    showDay();
+  };
   const el = h(
     'div',
     { class: 'dq-page dq-diary' },
@@ -723,25 +790,15 @@ export function diaryScreen(app: App): ScreenOut {
     h(
       'div',
       { class: 'dq-diary-grid' },
-      panel(
-        { title: dayLabel(today), ic: icon('diary'), cls: 'dq-today' },
-        heads.emotions,
-        boxes.emotions,
-        heads.urges,
-        boxes.urges,
-        h('h3', { class: 'dq-label', text: 'Skills today' }),
-        usedToday.node,
-        note.el,
-        h('div', { class: 'dq-actions' }, btn('Save', save, { kind: 'primary' }), btn('Edit rows', () => rowsEditor.classList.toggle('is-hidden'), { kind: 'link' }), saved),
-        rowsEditor,
-      ),
+      card,
       h('div', { class: 'dq-diary-side' }, panel({ title: 'Past 7 days', ic: icon('diary'), cls: 'dq-weekp' }, p('Only what you entered. No averages, no trends.', 'dq-small'), week), exportPanel),
     ),
   );
   const off = st.onChange(() => {
     renderRows();
     groups.forEach((g) => g.render());
-    const cur = s.diary[today];
+    showDay();
+    const cur = s.diary[day];
     for (const [key, r] of rowsShown) {
       if (touched.has(key) || r.busy()) continue;
       const v = cur?.[r.kind][r.name] ?? null;
@@ -754,13 +811,14 @@ export function diaryScreen(app: App): ScreenOut {
       note.input.value = draft.note;
     }
     renderWeek();
-    usedToday.update();
+    usedOn.update();
     refresh();
   });
   return {
     el,
     title: 'Diary card',
     mode: 'sub',
+    keep: () => day,
     leave: () => {
       keep();
       off();
