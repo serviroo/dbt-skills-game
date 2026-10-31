@@ -9,6 +9,9 @@
 // camp, and inside the sheets opened from the drawing page and the story editor, checked as they open at the phone's
 // own size and once it zooms to 200%; each sits below the top bar, its close button at least 44 px and in reach the
 // same way. A failure names the widest boxes, or the words, that reach past the edge, and the words that break.
+// A second scenario for each phone walks every kind of skill step, at 200% and at the phone's own size: every control in
+// the step (a hold, a timer's More time, choices, a slider, Next and Done) is in reach the same way once scrolled into
+// view, at least 44 px, with its words inside it and at least 16 px.
 import { fullSave, seedStores } from './me-91-final-save-ids.e2e.mjs';
 import { cutShort } from './safe-zone-reach.e2e.mjs';
 
@@ -42,12 +45,16 @@ const SCREENS = [
   ...SAFE_AT.map((at) => [`Safe Zone ${at}`, { name: 'safe', at }]),
 ];
 
-/** Waits until the screen stops changing: no DOM changes for 300 ms (at most 3 s), and its entry motion done. */
+/**
+ * Waits until the screen stops changing: no DOM changes for 300 ms (at most 3 s), and its entry motion done. A ring that
+ * redraws inside its SVG every frame doesn't count as a change.
+ */
 const settle = (page) =>
   page.evaluate(async () => {
     await new Promise((done) => {
       let quiet;
-      const mo = new MutationObserver(() => {
+      const mo = new MutationObserver((records) => {
+        if (records.every((r) => r.type === 'attributes' && r.target.closest?.('svg'))) return;
         clearTimeout(quiet);
         quiet = setTimeout(end, 300);
       });
@@ -118,15 +125,15 @@ const width = (page, sheet = null) =>
   }, sheet);
 
 /**
- * Why the control `sel` names is out of reach, or '' if it isn't: it is at least 44 px each way, its whole box is on
- * screen (with `below`, under the top bar) and inside every box that clips it, and it takes the tap at its centre and at
- * a point a quarter in from each corner, so a control a scrolling sheet cuts at one edge is out of reach though its centre
- * still takes the tap. With `optional`, a control the screen doesn't have is no problem.
+ * Why the control `sel` names (or `sel` itself, an element) is out of reach, or '' if it isn't: it is at least 44 px each
+ * way, its whole box is on screen (with `below`, under the top bar) and inside every box that clips it, and it takes the
+ * tap at its centre and at a point a quarter in from each corner, so a control a scrolling sheet cuts at one edge is out
+ * of reach though its centre still takes the tap. With `optional`, a control the screen doesn't have is no problem.
  */
 const reach = (page, sel, { below = true, optional = false } = {}) =>
   page.evaluate(
     ({ sel, below, optional }) => {
-      const e = document.querySelector(sel);
+      const e = typeof sel === 'string' ? document.querySelector(sel) : sel;
       if (!e) return optional ? '' : 'it is missing';
       const r = e.getBoundingClientRect();
       if (r.width < 43.5 || r.height < 43.5) return `it is ${Math.round(r.width)}x${Math.round(r.height)} px`;
@@ -300,4 +307,134 @@ function sweep(phone) {
   };
 }
 
-export const scenarios = Object.fromEntries(SIZES.map((phone) => [`no-sideways-overflow-${phone.width}x${phone.height}`, sweep(phone)]));
+/** What a player can tap, type in or slide inside a skill step. */
+const CONTROLS = 'button, input, textarea, select';
+
+/**
+ * The skill steps to walk, each as its skill's id, its number from 0, for a hold how long its words for done are, and
+ * for a ranking the number of the choice whose picks it ranks: every hold, whose words sit inside the control, and of
+ * every other kind the first step and the first to have each part that kind can add (a second pace, choices beside
+ * Start, a way to add your own).
+ */
+const stepsToWalk = (page) =>
+  page.evaluate(async () => {
+    const seen = new Set();
+    return (await import('/src/content/dbt.ts')).SKILLS.flatMap((sk) =>
+      sk.steps.flatMap((s, at) => {
+        const parts = [s.kind, ...Object.keys(s).filter((k) => !['id', 'kind', 'text', 'title', 'go', 'key'].includes(k)).map((k) => `${s.kind}.${k}`)].filter((k) => !seen.has(k));
+        if (s.kind === 'branch' || (s.kind !== 'hold' && !parts.length)) return [];
+        parts.forEach((k) => seen.add(k));
+        return [{ what: `${sk.id} step ${at + 1} (${s.kind})`, id: sk.id, at, done: s.kind === 'hold' ? s.done.length : 0, from: s.kind === 'tier' ? sk.steps.findIndex((c) => c.key === s.from) : -1 }];
+      }),
+    );
+  });
+
+/**
+ * Every kind of skill step on one phone at 200% zoom and at its own size: nothing scrolls sideways, the Safe Zone button
+ * is in reach, and so is every control in the step once it is scrolled into view the way focus brings it there, its
+ * words inside it and at least 16 px. The hold with the longest words for done is held through and checked again, and so
+ * are a cool choice once picked and the end once answered.
+ */
+function steps(phone) {
+  return async (h) => {
+    const failed = [];
+    const now = Date.now();
+    const save = fullSave(now);
+    const you = JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: save.created, companionAt: save.created });
+    const zoomed = { width: phone.width / 2, height: phone.height / 2 };
+    const { ctx, page, errors } = await h.open({ [h.SAVE]: JSON.stringify(save), [h.YOU]: you, 'dbt.app.v1': h.SEEN }, '?mute', zoomed);
+    try {
+      await h.reachHub(page);
+      const walk = await stepsToWalk(page);
+      const held = walk.reduce((a, b) => (b.done > a.done ? b : a));
+      const check = async (where) => {
+        await settle(page);
+        const w = await width(page);
+        const bad = [];
+        if (w.doc !== w.vw) bad.push(`the page is ${w.doc} px wide`);
+        if (w.dq > 0) bad.push(`the companion scrolls ${w.dq} px sideways`);
+        const safe = await reach(page, '.dq-top .dq-safe', { below: false });
+        if (safe) bad.push(`the Safe Zone button is out of reach: ${safe}`);
+        for (const c of await page.locator('.dq-step-body').locator(CONTROLS).elementHandles()) {
+          const what = await c.evaluate((e) => {
+            if (!e.checkVisibility()) return '';
+            document.querySelector('.dq').scrollTo({ top: 0, behavior: 'instant' });
+            e.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+            return `${e.tagName.toLowerCase()} "${(e.getAttribute('aria-label') || e.textContent || e.placeholder || e.type).trim().slice(0, 24)}"`;
+          });
+          if (!what) continue;
+          const why = await reach(page, c);
+          if (why) bad.push(`${what} is out of reach: ${why}`);
+          // its words: inside it and at least 16 px, a field's and every label's, capitals and one word too
+          const words = await c.evaluate((e) => {
+            const r = e.getBoundingClientRect();
+            const out = [];
+            if (e.matches('textarea, input:not([type=range])') && parseFloat(getComputedStyle(e).fontSize) < 15.99) out.push(`its text is ${getComputedStyle(e).fontSize}`);
+            const walk = document.createTreeWalker(e, NodeFilter.SHOW_TEXT);
+            for (let n; (n = walk.nextNode()); ) {
+              if (!n.textContent.trim() || n.parentElement.closest('.dq-sr')) continue;
+              const range = document.createRange();
+              range.selectNodeContents(n);
+              const t = range.getBoundingClientRect();
+              if (t.left < r.left - 0.5 || t.right > r.right + 0.5 || t.top < r.top - 0.5 || t.bottom > r.bottom + 0.5) out.push('it has words outside it');
+              const css = getComputedStyle(n.parentElement);
+              if (parseFloat(css.fontSize) < 15.99) out.push(`its words are ${css.fontSize}`);
+            }
+            return [...new Set(out)];
+          });
+          for (const x of words) bad.push(`${what}: ${x}`);
+        }
+        // the shot shows the step's controls: the end of the step in view
+        const vh = await page.evaluate(() => {
+          document.querySelector('.dq').scrollTo({ top: 0, behavior: 'instant' });
+          document.querySelector('.dq-step-body').lastElementChild?.scrollIntoView({ block: 'end', behavior: 'instant' });
+          return innerHeight;
+        });
+        if (bad.length) failed.push(`${where} on a ${w.vw}x${vh} screen: ${bad.join('; ')}; past the edge: ${w.past.join(', ') || 'nothing found'}`);
+        await h.shot(page, `step-${w.vw}x${vh}-${where.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`);
+      };
+      // a step opened the way Back and Forward return to it; a ranking ranks what its choice picked, so three are picked
+      // there first
+      const open = async (id, at, from = -1) => {
+        await page.evaluate((id) => window.__daily.go({ name: 'skill', id }), id);
+        await page.locator('.dq-skill .dq-step-body > *').first().waitFor({ timeout: 10000 });
+        if (from >= 0) {
+          await page.evaluate((at) => window.__daily.current.moveTo(at), from);
+          for (const o of (await page.locator('.dq-step-body .dq-opts .dq-opt').all()).slice(0, 3)) await o.click();
+        }
+        await page.evaluate((at) => window.__daily.current.moveTo(at), at);
+      };
+      for (const [size, viewport] of [[`${phone.width}x${phone.height} at 200%`, zoomed], [`${phone.width}x${phone.height}`, phone]]) {
+        await page.setViewportSize(viewport);
+        for (const { what, id, at, from } of walk) {
+          await open(id, at, from);
+          if (from >= 0 && (await page.locator('.dq-step-body .ca-tier-row').count()) !== 3) failed.push(`${size} ${what}: the three picks are not there to rank`);
+          await check(`${size} ${what}`);
+          if (what === held.what) {
+            await page.locator('.dq-hold').scrollIntoViewIfNeeded();
+            const b = await page.locator('.dq-hold').boundingBox();
+            await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+            await page.mouse.down();
+            await page.locator('.dq-hold.is-done').waitFor({ timeout: 15000 });
+            await page.mouse.up();
+            await check(`${size} ${what}, held`);
+          }
+          if (await page.locator('.dq-cool-pick').count()) {
+            await page.locator('.dq-cool-pick .dq-btn').first().click();
+            await check(`${size} ${what}, picked`);
+          }
+        }
+        await open(walk[0].id, 'end');
+        await check(`${size} the end`);
+        await page.locator('.dq-feedback .dq-opt').first().click();
+        await check(`${size} the end, answered`);
+      }
+      if (errors.length) failed.push(errors.join(' | '));
+    } finally {
+      await ctx.close();
+    }
+    h.expect(!failed.length, failed.join('\n'));
+  };
+}
+
+export const scenarios = Object.fromEntries(SIZES.flatMap((phone) => [[`no-sideways-overflow-${phone.width}x${phone.height}`, sweep(phone)], [`no-sideways-overflow-steps-${phone.width}x${phone.height}`, steps(phone)]]));
