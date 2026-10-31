@@ -237,7 +237,10 @@ export function introWays(on: (way: Way) => void) {
 
 /* ---------------------------------------------------------------- AWAKEN word */
 
-/** Outline word slam: strokes draw on with a glint sweep, push toward camera, ghost exit (pacing W5, lengthened). */
+/**
+ * Outline word slam: strokes draw on with a glint sweep, push toward camera, ghost exit (pacing W5, lengthened). With
+ * motion off, the word stands still for the same time instead: no growth, glint or ghosts, a short soft fade each way.
+ */
 export async function awakenWord(text = 'AWAKEN', holdSec = 0.5, until?: Promise<unknown>) {
   const root = el('div', 'awaken-word');
   const aw = el('div', 'aw');
@@ -249,28 +252,55 @@ export async function awakenWord(text = 'AWAKEN', holdSec = 0.5, until?: Promise
   root.append(aw);
   ui().append(root);
   const D = (holdSec + 0.25) * 1000;
-  animate(w, [
-    { opacity: 0, transform: 'scale(1.06)', clipPath: 'inset(0 100% 0 0)' },
-    { opacity: 1, transform: 'scale(1)', clipPath: 'inset(0 0% 0 0)', offset: 0.12 },
-    { opacity: 1, transform: 'scale(1.12)', clipPath: 'inset(0 0% 0 0)', offset: 0.8 },
-    { opacity: 0, transform: 'scale(1.16)', clipPath: 'inset(0 0% 0 0)' },
-  ], { duration: D, easing: 'linear' });
-  animate(glint, [
-    { backgroundPosition: '100% 0', opacity: 1, transform: 'scale(1)' },
-    { backgroundPosition: '0% 0', opacity: 1, transform: 'scale(1.02)', offset: 0.22 },
-    { backgroundPosition: '0% 0', opacity: 0, transform: 'scale(1.12)' },
-  ], { duration: D, easing: 'linear' });
-  for (const [g, dx] of [[g1, -1], [g2, 1]] as [HTMLElement, number][])
-    animate(g, [
-      { opacity: 0, transform: 'scale(1.12) translateX(0)' },
-      { opacity: 0, transform: 'scale(1.12) translateX(0)', offset: 0.7 },
-      { opacity: 0.5, transform: `scale(1.18) translateX(${dx * 2}%)`, offset: 0.82 },
-      { opacity: 0, transform: `scale(1.26) translateX(${dx * 5}%)` },
-    ], { duration: D, easing: 'ease-out' });
+  const soft = css(EASE.outCubic);
+  /** The still word from `at` ms into its time: up, and gone with a fade that ends where the slam would have. */
+  const still = (at: number) => {
+    for (const g of [glint, g1, g2]) g.remove();
+    animate(w, [{ opacity: 1 }, { opacity: 0 }], { duration: W.reducedCloseMs, delay: D - W.reducedCloseMs - at, easing: soft, fill: 'forwards' });
+  };
+  let slam: Animation[] = [];
+  if (params.reduced) {
+    animate(w, [{ opacity: 0 }, { opacity: 1 }], { duration: W.reducedFadeMs, easing: soft });
+    still(0);
+  } else {
+    slam = [
+      animate(w, [
+        { opacity: 0, transform: 'scale(1.06)', clipPath: 'inset(0 100% 0 0)' },
+        { opacity: 1, transform: 'scale(1)', clipPath: 'inset(0 0% 0 0)', offset: 0.12 },
+        { opacity: 1, transform: 'scale(1.12)', clipPath: 'inset(0 0% 0 0)', offset: 0.8 },
+        { opacity: 0, transform: 'scale(1.16)', clipPath: 'inset(0 0% 0 0)' },
+      ], { duration: D, easing: 'linear' }),
+      animate(glint, [
+        { backgroundPosition: '100% 0', opacity: 1, transform: 'scale(1)' },
+        { backgroundPosition: '0% 0', opacity: 1, transform: 'scale(1.02)', offset: 0.22 },
+        { backgroundPosition: '0% 0', opacity: 0, transform: 'scale(1.12)' },
+      ], { duration: D, easing: 'linear' }),
+      ...([[g1, -1], [g2, 1]] as [HTMLElement, number][]).map(([g, dx]) =>
+        animate(g, [
+          { opacity: 0, transform: 'scale(1.12) translateX(0)' },
+          { opacity: 0, transform: 'scale(1.12) translateX(0)', offset: 0.7 },
+          { opacity: 0.5, transform: `scale(1.18) translateX(${dx * 2}%)`, offset: 0.82 },
+          { opacity: 0, transform: `scale(1.26) translateX(${dx * 5}%)` },
+        ], { duration: D, easing: 'ease-out' }),
+      ),
+    ];
+  }
+  // motion turning off while it slams in stills the word at once, and it still leaves on time
+  const offMotion = onMotion(() => {
+    if (!params.reduced || !slam.length) return;
+    const at = Number(slam[0].currentTime ?? 0);
+    slam.forEach((a) => a.cancel());
+    slam = [];
+    still(at);
+  });
+  const gone = () => {
+    offMotion();
+    root.remove();
+  };
   // the scene ending early (Skip, a lost context) takes the word with it
-  void until?.then(() => root.remove());
+  void until?.then(gone);
   await wait(D / 1000);
-  root.remove();
+  gone();
 }
 
 /* ---------------------------------------------------------------- rewards */

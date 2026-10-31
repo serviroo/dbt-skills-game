@@ -1253,4 +1253,30 @@ export const scenarios = {
       },
     ]),
   ),
+  // the AWAKEN word, alone in the window lab, fits a phone's width upright and on its side: still with motion off, and
+  // with motion on as it slams in, at its widest before it leaves (four fifths through, as its exit starts)
+  async 'intro-awaken-word-fits'(h) {
+    const problems = [];
+    for (const [w, ht] of [[390, 844], [320, 568], [844, 390], [568, 320]]) {
+      for (const reducedMotion of ['reduce', 'no-preference']) {
+        const { ctx, page, errors } = await h.open({}, `?lab=window&kind=awaken&mute${LIGHT}`, { width: w, height: ht }, undefined, { reducedMotion });
+        await page.locator('.awaken-word').waitFor({ state: 'attached', timeout: 30000 });
+        const word = await page.evaluate(async () => {
+          await document.fonts.ready;
+          const w = document.querySelector('.awaken-word .w:not(.glint, .ghost)');
+          for (const a of w.getAnimations()) {
+            a.pause();
+            a.currentTime = 0.8 * a.effect.getTiming().duration;
+          }
+          const r = w.getBoundingClientRect();
+          return { left: r.left, right: r.right, font: document.fonts.check(`700 ${getComputedStyle(w).fontSize} "Bodoni Moda"`) };
+        });
+        if (!word.font) problems.push(`${w}x${ht} ${reducedMotion}: Bodoni Moda never loaded`);
+        if (word.left < 0 || word.right > w) problems.push(`${w}x${ht} ${reducedMotion}: the word spans ${Math.round(word.left)} to ${Math.round(word.right)} px`);
+        problems.push(...errors);
+        await ctx.close();
+      }
+    }
+    h.expect(!problems.length, problems.join('; '));
+  },
 };
