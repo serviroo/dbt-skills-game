@@ -439,7 +439,7 @@ export function holdButton(ctx: Ctx, opts: { seconds: number; label: string; don
   const cross = heal ? sv('path', { d: 'M100 58V82M88 70H112', stroke: 'rgba(201,240,212,.22)', 'stroke-width': 6, 'stroke-linecap': 'round', fill: 'none', class: 'ca-heal-cross' }) : null;
   if (cross) svg.insertBefore(cross, arc);
   const label = h('span', { class: 'dq-hold-t', text: typo(opts.label) });
-  const b = h('button', { type: 'button', class: `dq-hold ${heal ? 'ca-hold--heal' : ''}` }, svg, label);
+  const b = h('button', { type: 'button', class: `dq-hold ${heal ? 'ca-hold--heal' : ''}` }, h('span', { class: 'dq-hold-ring' }, svg), label);
   const hint = h('p', { class: 'dq-hint', 'aria-live': 'polite' });
   const el = h('div', { class: 'dq-hold-wrap' }, b, hint);
   let v = 0;
