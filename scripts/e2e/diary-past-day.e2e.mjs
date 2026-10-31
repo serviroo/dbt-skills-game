@@ -13,7 +13,8 @@
 //   diary-past-day-fit         the earlier day's card passes layout-fit's checks at 390x844, 320x568 and 844x390, and
 //                              at 200% zoom nothing scrolls sideways and the day buttons and Safe Zone button are on
 //                              screen; after Save, at every size, every status line on the diary is at least 16 px and
-//                              the line after Save sits on screen clear of the buttons
+//                              the line after Save sits in sight, below the top bar, and clear of the buttons. Each
+//                              scenario runs on one fixed time, so today never turns over partway
 import { addDays, dayOf, returning, route } from './first-actions.e2e.mjs';
 import { audit, boot, PAGE, settle, SKIP } from './layout-fit.e2e.mjs';
 import { crystal, restore } from './newer-save-safety.e2e.mjs';
@@ -26,6 +27,8 @@ const label = (day) => {
   return `${DOW[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]} ${d} ${MON[m - 1]}`;
 };
 
+/** Every page in a scenario reads one fixed time, so today can't turn over between the seed, the screen and a check. */
+const at = (now) => (ctx) => ctx.clock.setFixedTime(new Date(now));
 /** A returning save with today's and yesterday's cards filled in, yesterday's on a row the card no longer has. */
 function seeded(h) {
   const now = Date.now();
@@ -38,7 +41,7 @@ function seeded(h) {
     [today]: { day: today, emotions: { Joy: 4 }, urges: {}, note: 'Tea with a friend.', updatedAt: now - 60e3 },
   };
   storage[h.SAVE] = JSON.stringify(save);
-  return { storage, today, y };
+  return { storage, now, today, y };
 }
 
 async function openDiary(h, page) {
@@ -77,8 +80,8 @@ const focused = (page) => page.evaluate(() => document.activeElement?.textConten
 
 export const scenarios = {
   async 'diary-past-day-open-edit'(h) {
-    const { storage, today, y } = seeded(h);
-    const { ctx, page, errors } = await h.open(storage);
+    const { storage, now, today, y } = seeded(h);
+    const { ctx, page, errors } = await h.open(storage, '?mute', undefined, at(now));
     try {
       await openDiary(h, page);
       let c = await card(page);
@@ -170,8 +173,8 @@ export const scenarios = {
   },
 
   async 'diary-past-day-two-tabs'(h) {
-    const { storage, today, y } = seeded(h);
-    const { ctx, page: a, errors } = await h.open(storage);
+    const { storage, now, today, y } = seeded(h);
+    const { ctx, page: a, errors } = await h.open(storage, '?mute', undefined, at(now));
     try {
       await openDiary(h, a);
       const b = await ctx.newPage();
@@ -206,9 +209,9 @@ export const scenarios = {
   },
 
   async 'diary-past-day-crystal'(h) {
-    const { storage, today } = seeded(h);
+    const { storage, now, today } = seeded(h);
     const d2 = addDays(today, -2);
-    const { ctx, page, errors } = await h.open(storage);
+    const { ctx, page, errors } = await h.open(storage, '?mute', undefined, at(now));
     let fresh;
     try {
       await openDiary(h, page);
@@ -231,7 +234,7 @@ export const scenarios = {
       const file = await crystal(h, page, 'diary-past-day-crystal');
       h.expect(JSON.stringify(file.diary?.[d2]) === JSON.stringify(kept[d2]), `the Save Crystal's copy of the day: ${JSON.stringify(file.diary?.[d2])}`);
 
-      fresh = await h.open(returning(h, 0));
+      fresh = await h.open(returning(h, 0), '?mute', undefined, at(now));
       const said2 = await restore(h, fresh.page, file, 'diary-past-day-crystal.json');
       h.expect(/Restored/.test(said2), `restoring said: ${said2}`);
       const back = await stored(h, fresh.page);
@@ -250,6 +253,7 @@ export const scenarios = {
   },
 
   async 'diary-past-day-fit'(h) {
+    const now = Date.now();
     const problems = [];
     for (const [zoom, vp] of [
       [1, { width: 390, height: 844 }],
@@ -260,7 +264,7 @@ export const scenarios = {
       [2, { width: 844, height: 390 }],
     ]) {
       const size = `${vp.width}x${vp.height}${zoom === 2 ? '-200' : ''}`;
-      const { ctx, page, errors } = await boot(h, { width: vp.width / zoom, height: vp.height / zoom });
+      const { ctx, page, errors } = await boot(h, { width: vp.width / zoom, height: vp.height / zoom }, { prepare: at(now) });
       try {
         await page.evaluate(() => window.__daily.go({ name: 'diary' }));
         await route(page, 'diary');
@@ -271,8 +275,13 @@ export const scenarios = {
         await h.shot(page, `diary-past-day-fit-${size}`);
         // the line after Save is body text, like every status line on the diary, and sits on screen clear of the buttons
         await save(page).click();
-        await said(page).filter({ hasText: `Saved to ${label(addDays(dayOf(Date.now()), -1))}` }).waitFor({ timeout: 5000 });
+        await said(page).filter({ hasText: `Saved to ${label(addDays(dayOf(now), -1))}` }).waitFor({ timeout: 5000 });
         await settle(page);
+        // it may come up with a smooth scroll: measured once in sight, or after 3 s
+        await page.waitForFunction(() => {
+          const m = document.querySelector('.dq-today .dq-hint[aria-live]').getBoundingClientRect();
+          return m.top >= document.querySelector('.dq-top').getBoundingClientRect().bottom - 0.5 && m.bottom <= innerHeight + 0.5;
+        }, null, { timeout: 3000 }).catch(() => {});
         const lines = await page.evaluate(() => {
           const out = [];
           for (const e of document.querySelectorAll('.dq-diary .dq-hint')) {
@@ -281,6 +290,9 @@ export const scenarios = {
           }
           const m = document.querySelector('.dq-today .dq-hint[aria-live]').getBoundingClientRect();
           if (m.left < 0 || m.right > innerWidth + 0.5) out.push(`the line after Save is off screen: ${Math.round(m.left)} to ${Math.round(m.right)} of ${innerWidth}`);
+          // in sight where Save was tapped, below the pinned top bar
+          const top = document.querySelector('.dq-top').getBoundingClientRect().bottom;
+          if (m.top < top - 0.5 || m.bottom > innerHeight + 0.5) out.push(`the line after Save is out of sight: ${Math.round(m.top)} to ${Math.round(m.bottom)}, the screen shows ${Math.round(top)} to ${innerHeight}`);
           for (const b of document.querySelectorAll('.dq-today .dq-actions button')) {
             const r = b.getBoundingClientRect();
             if (m.left < r.right && r.left < m.right && m.top < r.bottom && r.top < m.bottom) out.push(`the line after Save overlaps ${b.textContent.trim()}`);

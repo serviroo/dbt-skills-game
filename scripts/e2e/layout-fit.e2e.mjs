@@ -66,7 +66,7 @@ export async function boot(h, viewport, o = {}) {
   const save = fullSave(now);
   o.edit?.(save);
   const you = JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: save.created, companionAt: save.created });
-  const { ctx, page, errors } = await h.open({ [h.SAVE]: JSON.stringify(save), [h.YOU]: you, 'dbt.app.v1': h.SEEN }, '?mute', viewport, undefined, o.device);
+  const { ctx, page, errors } = await h.open({ [h.SAVE]: JSON.stringify(save), [h.YOU]: you, 'dbt.app.v1': h.SEEN }, '?mute', viewport, o.prepare, o.device);
   await home(page);
   await seedStores(page, h.SAVE, now);
   if (o.media) await page.emulateMedia(o.media);

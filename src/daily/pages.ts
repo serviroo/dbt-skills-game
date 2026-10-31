@@ -512,7 +512,7 @@ export function diaryScreen(app: App, _route: Route, visit: Visit): ScreenOut {
   const st = app.store;
   const today = st.today();
   const s = st.state;
-  // the card goes back a week, and to every day since the save or its diary began
+  // how far back Earlier day goes: a week, or to the day the save or its diary began if that is earlier
   const earliest = () => [addDays(today, -6), dayKey(s.created), ...Object.keys(s.diary)].reduce((a, b) => (b < a ? b : a));
   let day = visit.again && typeof visit.kept === 'string' && visit.kept < today && visit.kept >= earliest() ? visit.kept : today;
   const draftOf = (d: string) => {
@@ -636,6 +636,8 @@ export function diaryScreen(app: App, _route: Route, visit: Visit): ScreenOut {
     app.sound('check');
     if (day !== today) saved.textContent = st.saving ? `Saved to ${dayLabel(day)} on this device.` : NOT_SAVING;
     else saved.textContent = st.saving ? (first ? 'Saved on this device. +10 XP' : 'Updated on this device.') : `${NOT_SAVING}${first ? ' +10 XP' : ''}`;
+    // Save tapped at the bottom of the screen brings the line under it into sight
+    saved.scrollIntoView({ block: 'nearest', behavior: app.reduced() ? 'auto' : 'smooth' });
   };
   const week = h('div', { class: 'dq-week' });
   const renderWeek = () => {
