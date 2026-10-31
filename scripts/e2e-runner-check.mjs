@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { holdDaily } from './e2e/first-actions.e2e.mjs';
@@ -133,13 +133,15 @@ import { checkRenderer } from '../gl.mjs';
 const state = ${JSON.stringify(state)};
 function record(h) {
   const children = execFileSync('ps', ['-axo', 'pid=,ppid=,comm='], { encoding: 'utf8' }).trim().split(String.fromCharCode(10)).map((line) => line.trim().split(/\\s+/)).filter((fields) => Number(fields[1]) === process.pid && path.basename(fields[2]) !== 'ps').map((fields) => Number(fields[0]));
-  const saved = { url: h.server.url, out: h.out, children, disconnected: false };
+  const saved = { url: h.server.url, out: h.root, children, disconnected: false };
   fs.writeFileSync(state, JSON.stringify(saved));
   h.browser.once('disconnected', () => fs.writeFileSync(state, JSON.stringify({ ...saved, disconnected: true })));
 }
 export const serial = true;
 export const scenarios = {
   async '${name}-fail'(h) {
+    // written the moment it starts, to its own folder
+    fs.writeFileSync(path.join(h.out, '${name}-first.txt'), 'first');
     record(h);
     const { page } = await h.open({ 'dbt.app.v1': h.SEEN });
     h.expect(await page.title() === 'The Lantern', 'app did not load');
@@ -180,17 +182,33 @@ export const scenarios = {
   assert.notEqual(failed.code, 0);
   assert(failed.report.scenarios.some((s) => s.name === `${name}-fail` && !s.ok && /deliberate runner failure/.test(s.error)));
   assert(failed.report.scenarios.some((s) => s.name === `${name}-clean` && s.ok));
+  // what the failed scenario wrote, its own screenshot and its page's evidence, is kept in failed/<scenario>/ of the run's
+  // folder, which CI uploads, and nothing of the scenarios that passed
+  const failedOut = JSON.parse(fs.readFileSync(state, 'utf8')).out;
+  const kept = fs.readdirSync(path.join(failedOut, 'failed'), { recursive: true }).sort();
+  assert(fs.existsSync(path.join(failedOut, `${name}-clean`, `${name}-clean.png`)), 'the passing scenario wrote no screenshot in its own folder');
+  assert(!fs.existsSync(path.join(failedOut, `${name}-fail`)), 'the failed scenario\'s folder is still beside the others');
+  assert(['first.txt', 'failure.png', 'fail-1.json'].every((f) => kept.includes(path.join(`${name}-fail`, f.startsWith('fail-') ? `fail-${name}-${f}` : `${name}-${f}`))), `failed/ lacks the failed scenario's first file, screenshot or evidence: ${JSON.stringify(kept)}`);
+  assert(kept.every((f) => f.split(path.sep)[0] === `${name}-fail`) && !kept.some((f) => f.includes('clean')), `failed/ holds more than the failed scenario's files: ${JSON.stringify(kept)}`);
   const prelude = fs.readFileSync(fixture, 'utf8').split('export const scenarios = {')[0];
   fs.writeFileSync(fixture, prelude + `export const scenarios = {
     async '${name}-report-error'(h) {
       record(h);
-      fs.mkdirSync(path.join(h.out, 'report.json'));
+      fs.mkdirSync(path.join(h.root, 'report.json'));
     },
     async '${name}-signal'(h) {
       record(h);
       const { page } = await h.open();
       console.log('fixture ready');
       await page.waitForTimeout(60000);
+    },
+    async '${name}-hang'(h) {
+      record(h);
+      const { page } = await h.open();
+      await h.shot(page, '${name}-before-hang');
+      console.log('fixture ready');
+      // a wait nothing settles, not even the browser closing, so the runner never gets to this scenario's failure
+      await new Promise(() => {});
     },
     async '${name}-popup-throttle-failure'(h) {
       record(h);
@@ -276,6 +294,32 @@ chromium.launchServer = (options) => launchServer({ ...options, args: [...option
   assert.equal(signal.code, 130);
   const sigint = await run('sigint-cleanup', [`--scenario=${name}-signal`], 'SIGINT');
   assert.equal(sigint.code, 130);
+  // a scenario that hangs where closing the browser can't reach, stopped as its CI step runs out of time: the runner never
+  // gets to its failure and keeps nothing itself, but its mark in running/ says it was cut off, and scripts/e2e/keep.mjs
+  // (CI's next step) keeps what it wrote for the upload
+  // (and the interrupted run ends as interrupted, 130, though that scenario never ends)
+  const hang = await run('hang-kept', [`--scenario=${name}-hang`], 'SIGINT');
+  assert.equal(hang.code, 130, hang.log.slice(-600));
+  const hangOut = JSON.parse(fs.readFileSync(state, 'utf8')).out;
+  assert(fs.existsSync(path.join(hangOut, `${name}-hang`, `${name}-before-hang.png`)), 'the hung scenario wrote no screenshot in its folder');
+  assert(!fs.existsSync(path.join(hangOut, 'failed')) && fs.readdirSync(path.join(hangOut, 'running')).length === 1, 'the runner itself got to the hung scenario, so this checks nothing');
+  const keepRun = () => spawnSync(process.execPath, [path.join(root, 'scripts/e2e/keep.mjs'), hangOut], { cwd: out, encoding: 'utf8' });
+  const hangKept = [`${name}-hang`, path.join(`${name}-hang`, `${name}-before-hang.png`)].sort();
+  // one it can't keep (failed/ can't be made: a file has its name) says why, exits 1 and keeps its mark, so a later run
+  // of keep.mjs can still keep it
+  fs.writeFileSync(path.join(hangOut, 'failed'), '');
+  const blocked = keepRun();
+  fs.rmSync(path.join(hangOut, 'failed'));
+  assert.equal(blocked.status, 1, blocked.stdout + blocked.stderr);
+  assert.match(blocked.stdout, new RegExp(`^${name}-hang was cut off midway, and what it wrote couldn't be kept: .*(EEXIST|ENOTDIR)`, 'm'));
+  assert(fs.existsSync(path.join(hangOut, `${name}-hang`, `${name}-before-hang.png`)), 'keep.mjs lost the files of a scenario it could not keep');
+  assert.equal(fs.readdirSync(path.join(hangOut, 'running')).length, 1, 'keep.mjs dropped the mark of a scenario it could not keep');
+  const whole = keepRun();
+  assert.equal(whole.status, 0, whole.stdout + whole.stderr);
+  assert.match(whole.stdout, new RegExp(`^${name}-hang was cut off midway: what it wrote is kept in \\S+$`, 'm'));
+  const hangFiles = fs.readdirSync(path.join(hangOut, 'failed'), { recursive: true });
+  assert.deepEqual(hangFiles.sort(), hangKept, `failed/ after keep.mjs: ${JSON.stringify(hangFiles)}`);
+  assert.equal(fs.readdirSync(path.join(hangOut, 'running')).length, 0, 'keep.mjs left the mark of the scenario it kept');
   fs.writeFileSync(duplicate, `export const scenarios = { '${name}-signal': async () => {} };`, { flag: 'wx' });
   const collision = await run('duplicate-name', [`--file=${name}`]);
   assert.notEqual(collision.code, 0);
@@ -301,6 +345,15 @@ async function meet(h, me) {
   met[me] = h.browser;
   for (const end = Date.now() + 20000; !(met.a && met.b); await h.sleep(100)) h.expect(Date.now() < end, 'the other scenario did not run at the same time');
   h.expect(met.a !== met.b, 'both scenarios ran in one browser');
+  if (h.flags.sidefail) {
+    await h.shot(page, '${name}-' + me);
+    if (me === 'a') met.shot = true;
+    else {
+      // b fails only once a, beside it, has written its screenshot
+      for (const end = Date.now() + 20000; !met.shot; await h.sleep(100)) h.expect(Date.now() < end, 'a wrote no screenshot');
+      throw new Error('deliberate side failure');
+    }
+  }
   if (h.flags.hold) {
     console.log('fixture ready');
     await page.waitForTimeout(60000);
@@ -316,6 +369,14 @@ export const scenarios = {
   assert.equal(both.report.jobs, 2);
   assert.deepEqual(both.report.scenarios.map((s) => [s.name, s.ok]), [[`${name}-side-a`, true], [`${name}-side-b`, true]]);
   assert.equal([...both.log.matchAll(/<launched> pid=/g)].length, 2);
+  // side by side, what each scenario writes is its own: b fails after a wrote its screenshot, and failed/ holds b's alone
+  const sideFail = await run('side-by-side-fail', [`--file=${name}-side`, '--jobs=2', '--sidefail']);
+  assert.notEqual(sideFail.code, 0);
+  assert.deepEqual(sideFail.report.scenarios.map((s) => [s.name, s.ok]), [[`${name}-side-a`, true], [`${name}-side-b`, false]]);
+  const sideOut = JSON.parse(fs.readFileSync(state, 'utf8')).out;
+  const sideKept = fs.readdirSync(path.join(sideOut, 'failed'), { recursive: true }).sort();
+  assert(sideKept.includes(path.join(`${name}-side-b`, `${name}-b.png`)) && sideKept.every((f) => f.split(path.sep)[0] === `${name}-side-b` && !f.includes(`${name}-a.png`)), `failed/ after a side-by-side failure: ${JSON.stringify(sideKept)}`);
+  assert(fs.existsSync(path.join(sideOut, `${name}-side-a`, `${name}-a.png`)), 'the passing scenario beside it lost its screenshot');
   const bothSignal = await run('side-by-side-signal', [`--file=${name}-side`, '--jobs=2', '--hold'], 'SIGTERM');
   assert.equal(bothSignal.code, 130);
   fs.unlinkSync(side);

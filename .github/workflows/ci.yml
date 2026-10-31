@@ -18,49 +18,71 @@ jobs:
     container:
       image: mcr.microsoft.com/playwright:v1.64.1-noble
       options: --user 1001
-    timeout-minutes: 30
+    # Every step has its own limit and the job's is their sum, so a step that hangs fails as a step, with the job's time
+    # still left for the upload at its end (a job that runs out of its own time is cancelled, and uploads nothing): 5 for
+    # starting the container (40 s at most in October) + 3 checkout + 1 tested tree + 3 Node + 3 npm ci + 1 browsers
+    # + 3 type check + 1 stored ids + 5 build + 1 build check + 18 the browser steps + 3 upload = 47
+    timeout-minutes: 47
     env:
       STORED_IDS_BASE: ${{ github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha }}
     steps:
       - uses: actions/checkout@v7
+        timeout-minutes: 3
         with:
           fetch-depth: 0
           persist-credentials: false
       - name: Tested tree
+        timeout-minutes: 1
         run: echo "::notice title=Tested tree::$(git rev-parse 'HEAD^{tree}')"
       - uses: actions/setup-node@v7
+        timeout-minutes: 3
         with:
           node-version: 20.x
           cache: npm
       - run: npm ci
+        timeout-minutes: 3
       - name: Browsers come from the container
+        timeout-minutes: 1
         run: test "$(npx playwright --version)" = "Version 1.64.1" || { echo "package-lock has $(npx playwright --version); set the same version in the container image above"; exit 1; }
       - run: npx tsc --noEmit -p .
+        timeout-minutes: 3
       - name: Stored ids
+        timeout-minutes: 1
         run: npm run check:ids
       - run: npm run build
+        timeout-minutes: 5
         env:
           LANTERN_GL: software
       - name: The build changes no committed file
+        timeout-minutes: 1
         run: test -z "$(git status --porcelain)" || { git status --short; echo "npm run build changed the files above; if it redrew the PWA images, commit them with scripts/icons.stamp"; exit 1; }
+      # each browser step's limit is about three times its slowest passing run (42, 42, 150, 53 and 55 s in October)
       - name: PWA offline launch
+        timeout-minutes: 3
         run: node scripts/pwa-verify.mjs --software --check
       - name: PWA update
+        timeout-minutes: 3
         run: node scripts/pwa-verify.mjs --software --update --check
       - name: CSP sweep
+        timeout-minutes: 6
         run: node scripts/pwa-csp-sweep.mjs --software --check
       - name: E2E runner contract
+        timeout-minutes: 3
         run: node scripts/e2e-runner-check.mjs --software
       - name: PWA failure paths and Firefox storage
+        timeout-minutes: 3
         run: node scripts/e2e/me-93-pwa-resilience.e2e.mjs --software
+      # Only from a job that failed: a run that passes stores nothing. Kept 3 days: a failed run's output matters until its
+      # PR's next run, and from 17 to 31 October that came within a day every time
       - uses: actions/upload-artifact@v7
-        if: always()
+        if: failure()
+        timeout-minutes: 3
         with:
           name: checks-${{ github.run_attempt }}
           path: |
             artifacts/e2e
             qa/out/pwa
-          retention-days: 7
+          retention-days: 3
           if-no-files-found: ignore
 
   # A push to main after a squash merge of an up-to-date PR has exactly the tree that PR's last run already proved, so
@@ -114,7 +136,9 @@ jobs:
     container:
       image: mcr.microsoft.com/playwright:v1.64.1-noble
       options: --user 1001
-    timeout-minutes: 30
+    # as in check, every step has its own limit and the job's is their sum: 5 for starting the container + 3 checkout
+    # + 3 Node + 3 npm ci + 1 browsers + 27 the part + 1 keeping a hung scenario's files + 2 + 3 the uploads = 48
+    timeout-minutes: 48
     env:
       STORED_IDS_BASE: ${{ github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha }}
     strategy:
@@ -124,24 +148,49 @@ jobs:
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
     steps:
       - uses: actions/checkout@v7
+        timeout-minutes: 3
         with:
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v7
+        timeout-minutes: 3
         with:
           node-version: 20.x
           cache: npm
       - run: npm ci
+        timeout-minutes: 3
       - name: Browsers come from the container
+        timeout-minutes: 1
         run: test "$(npx playwright --version)" = "Version 1.64.1" || { echo "package-lock has $(npx playwright --version); set the same version in the container image above"; exit 1; }
       - name: E2E part ${{ matrix.shard }} of 18
+        # the slowest part took 20 minutes in October
+        timeout-minutes: 27
         run: node scripts/e2e.mjs --software --shard=${{ matrix.shard }}/18
+      - name: Keep what a scenario cut off midway wrote
+        # a part that ran out of time while a scenario hung never got to keep that scenario's files: its mark in running/
+        # says which it was and since when
+        if: failure()
+        timeout-minutes: 1
+        run: node scripts/e2e/keep.mjs
+      # the part's report.json, a few KB, from every run that wasn't cancelled: scripts/e2e-timings.mjs rebalances the
+      # parts from every part's report (CONTRIBUTING.md)
       - uses: actions/upload-artifact@v7
-        if: always()
+        if: ${{ !cancelled() }}
+        timeout-minutes: 2
         with:
           name: e2e-${{ matrix.shard }}-${{ github.run_attempt }}
-          path: artifacts/e2e
-          retention-days: 7
+          path: artifacts/e2e/*/report.json
+          retention-days: 3
+          if-no-files-found: ignore
+      # as in check, only from a part that failed, and only what its failed scenarios wrote (scripts/e2e.mjs keeps that in
+      # failed/), not every screenshot of the ones that passed
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        timeout-minutes: 3
+        with:
+          name: failed-e2e-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: artifacts/e2e/*/failed
+          retention-days: 3
           if-no-files-found: ignore
 
   secrets:
