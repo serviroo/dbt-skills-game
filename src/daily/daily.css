@@ -3106,6 +3106,15 @@ textarea.dq-input {
   font-style: italic;
   white-space: nowrap;
 }
+.dq-daynav {
+  margin: -6px 0 10px;
+}
+.dq-diary .dq-daynote {
+  margin: 0 0 18px;
+}
+.dq-btn--icend {
+  flex-direction: row-reverse;
+}
 .dq-diary .dq-small {
   font-size: 16px;
 }
