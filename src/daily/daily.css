@@ -3504,10 +3504,12 @@ textarea.dq-input {
 }
 
 /* ---------- reduced motion ---------- */
+/* changes land at once: a zero duration starts no transition, where even a tiny one would make every change (a grid's
+   columns too) land a frame late, after whatever measured it */
 .dq.is-still *,
 .dq.is-still *::before,
 .dq.is-still *::after {
-  transition-duration: 0.01ms !important;
+  transition-duration: 0s !important;
   animation: none !important;
 }
 
@@ -4738,7 +4740,8 @@ textarea.dq-input {
     0 0 0 1px rgba(150, 120, 255, 0.55) inset,
     0 0 10px 1px var(--g);
 }
-.dq-swatch[aria-checked='true'] .dq-swatch-dot {
+.dq-swatch[aria-checked='true'] .dq-swatch-dot,
+.dq-tray-b[aria-expanded='true'] .dq-swatch-dot {
   transform: scale(1.08);
   box-shadow:
     0 0 0 2px #07080f,
@@ -4877,6 +4880,67 @@ textarea.dq-input {
 }
 .dq-tools-saved {
   color: #cfe3f5;
+}
+
+/* the tools folded into the tray: the button that opens it, Undo and Save stay in one row by the page, and the tray
+   opens over the page from its foot */
+.dq-draw--tray .dq-tools {
+  position: relative;
+  flex-direction: row;
+  align-items: center;
+  gap: 2px;
+}
+.dq-draw--tray .dq-tools > .dq-tools-acts {
+  flex-wrap: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 2px;
+}
+.dq-draw--tray .dq-save {
+  min-width: 44px;
+  padding: 0 6px;
+}
+/* the tray, and the note after a save, cover the room the page has (--room-*, measured), from its foot */
+.dq-tray,
+.dq-draw--tray .dq-tools .dq-tools-msg {
+  position: absolute;
+  top: auto;
+  right: auto;
+  bottom: var(--room-b);
+  left: var(--room-x);
+  width: var(--room-w);
+}
+.dq-tray {
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: var(--room-h);
+  padding: 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* solid, so nothing on the page shows through it */
+  background: linear-gradient(180deg, var(--plate-a), var(--plate-b)), #07080f;
+  border: 1px solid;
+  border-color: var(--hl) var(--hs) var(--hs) var(--hl);
+  box-shadow: 0 12px 30px -12px rgba(0, 0, 0, 0.9);
+}
+.dq-draw--tray .dq-tools .dq-tools-msg {
+  z-index: 3;
+  justify-content: center;
+  padding: 4px 12px;
+  border: 1px solid rgba(125, 150, 197, 0.45);
+  background: rgba(6, 14, 26, 0.94);
+  box-shadow: 0 12px 30px -12px rgba(0, 0, 0, 0.9);
+}
+/* the size dots wrap in a narrow tray, as the inks and pens do */
+.dq-tray .dq-sizes {
+  flex-wrap: wrap;
+}
+.dq-tray .dq-pens,
+.dq-tray .dq-sizes,
+.dq-tray .dq-tools-acts {
+  justify-content: center;
 }
 
 /* name sheet */
@@ -5376,6 +5440,41 @@ textarea.dq-input {
     background: rgba(6, 14, 26, 0.94);
     box-shadow: 0 12px 30px -12px rgba(0, 0, 0, 0.9);
   }
+  .dq-draw--tray {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .dq-tray .dq-tools-pick {
+    display: flex;
+  }
+  .dq-tray .dq-inks {
+    justify-content: center;
+  }
+  .dq-tray .dq-sizes {
+    flex-direction: row;
+  }
+}
+/* the tray's button and Undo side by side by the page, Save under them (a phone on its side, or a wide screen) */
+@media (min-width: 760px), (orientation: landscape) and (max-height: 500px) {
+  .dq-draw--tray .dq-tools {
+    display: grid;
+    grid-template-columns: 44px 44px;
+    grid-template-rows: none;
+    gap: 4px;
+    width: auto;
+    padding: 0;
+    background: none;
+    border: 0;
+  }
+  .dq-draw--tray .dq-tools > .dq-tools-acts {
+    display: contents;
+  }
+  .dq-draw--tray .dq-tools-gap {
+    display: none;
+  }
+  .dq-draw--tray .dq-save {
+    grid-column: 1 / -1;
+    width: auto;
+  }
 }
 .dq-tile--art .dq-tile-t,
 .dq-tile--art .dq-tile-s {
@@ -5425,18 +5524,19 @@ textarea.dq-input {
   max-width: 100%;
   margin: 0 auto;
 }
+/* a quiet line at body size; on a small page (a phone zoomed in) it sits nearer the foot, so all of it stays on it */
 .dq-draw-hint {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 18px;
+  bottom: min(18px, 7%);
   z-index: 1;
   pointer-events: none;
   text-align: center;
-  font-size: 12px !important;
-  font-weight: 500;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+  text-wrap: balance;
+  font-size: 16px !important;
+  line-height: 1.25;
+  letter-spacing: 0.02em;
   color: #8a9fba;
   transition: opacity 0.6s ease;
 }

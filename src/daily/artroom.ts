@@ -19,6 +19,8 @@ const pageHead = (title: string, sub?: string) => h('header', { class: 'dq-pageh
 
 /** A draft untouched this long was left by an earlier session (iOS can hand a relaunched app a new tab id). */
 const ORPHAN_MS = 120e3;
+/** The colours an ink's dot is drawn in (.dq-swatch-dot). */
+const dotStyle = (ink: (typeof INKS)[number]) => `--b:${ink.body};--c:${ink.core ?? ink.mid ?? ink.body};--g:${ink.halo}`;
 
 export function todayPrompt(app: App, roll = 0) {
   return ART_PROMPTS[(app.store.visitIndex() * 5 + roll) % ART_PROMPTS.length];
@@ -376,7 +378,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     h(
       'button',
       { type: 'button', role: 'radio', class: `dq-swatch dq-swatch--${ink.id}`, 'aria-label': `${ink.name} ink`, title: ink.name, onclick: () => pickInk(i) },
-      h('span', { class: 'dq-swatch-dot', style: `--b:${ink.body};--c:${ink.core ?? ink.mid ?? ink.body};--g:${ink.halo}` }),
+      h('span', { class: 'dq-swatch-dot', style: dotStyle(ink) }),
       h('span', { class: 'dq-swatch-n', text: ink.name }),
     ),
   );
@@ -390,6 +392,29 @@ export function drawScreen(app: App, route: Route): ScreenOut {
   const saveB = btn('Save', () => void save(), { kind: 'primary', cls: 'dq-save' });
   const acts = h('div', { class: 'dq-tools-acts' }, undoB, redoB, clearB, h('span', { class: 'dq-tools-gap' }), saveB);
   const confirmRow = h('div', { class: 'dq-tools-acts dq-tools-confirm is-hidden', role: 'group', 'aria-label': 'Clear the page' });
+  // On a screen too short for the page with the prompt and every tool around it (a phone zoomed in), they fold into a
+  // tray that opens over the page from a button showing the ink, with Undo and Save always beside it.
+  const trayDot = h('span', { class: 'dq-swatch-dot' });
+  const trayB = h('button', { type: 'button', class: 'dq-tool dq-tray-b', 'aria-label': 'Tools', title: 'Tools', 'aria-expanded': 'false', 'aria-controls': 'dq-tray', onclick: () => openTray(!trayOpen) }, trayDot);
+  const trayActs = h('div', { class: 'dq-tools-acts' });
+  const tray = h('div', { class: 'dq-tray is-hidden', id: 'dq-tray', role: 'group', 'aria-label': 'Tools' }, trayActs);
+  let trayOpen = false;
+  // open, the tray is a sheet: Back and Escape close it first, back to the Tools button
+  let trayDone: (() => void) | null = null;
+  const openTray = (on: boolean) => {
+    trayOpen = on;
+    trayB.setAttribute('aria-expanded', String(on));
+    tray.classList.toggle('is-hidden', !on);
+    if (on) {
+      trayDone ??= app.sheet(() => {
+        openTray(false);
+        trayB.focus({ preventScroll: true });
+      });
+    } else {
+      trayDone?.();
+      trayDone = null;
+    }
+  };
   const askClear = () => {
     if (!pad.strokes.length) return;
     confirmRow.replaceChildren(
@@ -401,19 +426,20 @@ export function drawScreen(app: App, route: Route): ScreenOut {
         closeClear();
       }, { kind: 'quiet', cls: 'dq-btn--sm' }),
     );
-    acts.classList.add('is-hidden');
+    clearB.parentElement!.classList.add('is-hidden');
     confirmRow.classList.remove('is-hidden');
     confirmRow.querySelector<HTMLElement>('.dq-btn--primary')?.focus();
   };
   const closeClear = () => {
     confirmRow.classList.add('is-hidden');
-    acts.classList.remove('is-hidden');
+    clearB.parentElement!.classList.remove('is-hidden');
   };
   const sync = () => {
     toolBtns.forEach((b, i) => b.setAttribute('aria-checked', String(TOOLS[i].id === pad.tool)));
     tools.dataset.tool = pad.tool;
     inkBtns.forEach((b, i) => b.setAttribute('aria-checked', String(i === pad.inkIdx)));
     sizeBtns.forEach((b, i) => b.setAttribute('aria-checked', String(i === pad.sizeIdx)));
+    trayDot.setAttribute('style', dotStyle(INKS[pad.inkIdx]));
     pad.el.style.setProperty('--ink', INKS[pad.inkIdx].body);
     tools.style.setProperty('--ink-b', INKS[pad.inkIdx].body);
     tools.style.setProperty('--ink-g', INKS[pad.inkIdx].halo);
@@ -422,14 +448,8 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     (clearB as HTMLButtonElement).disabled = !pad.strokes.length;
     (saveB as HTMLButtonElement).disabled = !pad.strokes.length;
   };
-  const tools = h(
-    'div',
-    { class: 'dq-tools' },
-    h('div', { class: 'dq-tools-pick' }, radioKeys(h('div', { class: 'dq-inks', role: 'radiogroup', 'aria-label': 'Ink' }, inkBtns)), radioKeys(h('div', { class: 'dq-pens', role: 'radiogroup', 'aria-label': 'Tool' }, toolBtns)), radioKeys(h('div', { class: 'dq-sizes', role: 'radiogroup', 'aria-label': 'Size' }, sizeBtns))),
-    acts,
-    confirmRow,
-    msg,
-  );
+  const pick = h('div', { class: 'dq-tools-pick' }, radioKeys(h('div', { class: 'dq-inks', role: 'radiogroup', 'aria-label': 'Ink' }, inkBtns)), radioKeys(h('div', { class: 'dq-pens', role: 'radiogroup', 'aria-label': 'Tool' }, toolBtns)), radioKeys(h('div', { class: 'dq-sizes', role: 'radiogroup', 'aria-label': 'Size' }, sizeBtns)));
+  const tools = h('div', { class: 'dq-tools' }, pick, acts, confirmRow, msg);
 
   const persist = async (name?: string) => {
     if (!key.endsWith(`:${tab.id}`)) key = own(recId);
@@ -494,6 +514,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
 
   const save = async () => {
     if (!pad.strokes.length || saving) return;
+    openTray(false);
     if (kind === 'ally') return nameSheet();
     saving = true;
     const result = await persist().finally(() => (saving = false));
@@ -616,19 +637,76 @@ export function drawScreen(app: App, route: Route): ScreenOut {
   const hint = h('p', { class: 'dq-draw-hint', 'aria-hidden': 'true', text: matchMedia('(pointer: coarse)').matches ? 'Tap two fingers to undo' : 'Draw anywhere on the page.' });
   const fit = h('div', { class: 'dq-draw-fit' }, h('div', { class: `dq-draw-frame dq-draw-frame--${kind}` }, pad.el, hint));
   const frame = fit.firstElementChild as HTMLElement;
-  const layout = () => {
-    const main = fit.parentElement!;
+  // a tap on the page while the tray is open closes it, and draws nothing
+  fit.addEventListener(
+    'pointerdown',
+    (e) => {
+      if (!trayOpen) return;
+      e.stopPropagation();
+      openTray(false);
+    },
+    true,
+  );
+  const main = h('div', { class: 'dq-draw-main' }, fit, tools);
+  // the height the page keeps with the prompt and every tool around it; a screen that can't give it that folds them
+  // into the tray (the page itself is never moved, so a stroke in progress carries on)
+  const ROOM = 180;
+  let folded = false;
+  const place = (on: boolean) => {
+    if (on === folded) return;
+    folded = on;
+    el.classList.toggle('dq-draw--tray', on);
+    if (on) {
+      trayActs.append(redoB, clearB);
+      tray.prepend(promptRow, pick);
+      tray.append(confirmRow);
+      tools.prepend(trayB, tray);
+    } else {
+      el.insertBefore(promptRow, main);
+      tools.prepend(pick);
+      undoB.after(redoB, clearB);
+      acts.after(confirmRow);
+      trayB.remove();
+      tray.remove();
+    }
+  };
+  const room = () => {
     const side = getComputedStyle(main).display === 'contents';
     const box = side ? el : main;
     const row = side || getComputedStyle(main).flexDirection === 'row';
     const gap = parseFloat(getComputedStyle(box).columnGap) || 0;
-    const pad2 = row ? 12 : 0;
+    const pad2 = row && !folded ? 12 : 0;
     const w = row ? box.clientWidth - tools.offsetWidth - gap - pad2 : fit.clientWidth;
-    const hh = fit.clientHeight - pad2;
+    return { side, row, gap, pad2, w, hh: fit.clientHeight - pad2 };
+  };
+  const layout = () => {
+    const was = folded;
+    const had = document.activeElement;
+    // measured with every tool laid out, and the page taking no room of its own
+    place(false);
+    frame.style.width = frame.style.height = '0px';
+    const full = room();
+    const b = el.getBoundingClientRect();
+    const inside = (e: Element) => {
+      const r = e.getBoundingClientRect();
+      return r.top >= b.top - 1 && r.bottom <= b.bottom + 1;
+    };
+    place(Math.min(full.hh, (full.w * pad.H) / pad.W) < ROOM || !inside(promptRow) || !inside(tools));
+    if (folded !== was) {
+      // an open Clear question moves with Clear, and opens the tray it is now in
+      const asking = !confirmRow.classList.contains('is-hidden');
+      acts.classList.remove('is-hidden');
+      trayActs.classList.remove('is-hidden');
+      if (asking) clearB.parentElement!.classList.add('is-hidden');
+      openTray(folded && (asking || tray.contains(had)));
+    }
+    // the Tools button goes as the tools unfold: focus moves to the ink it showed
+    const back = had === trayB && !folded ? inkBtns[pad.inkIdx] : had;
+    if (back instanceof HTMLElement && back !== document.activeElement && back.isConnected) back.focus({ preventScroll: true });
+    const { side, row, gap, pad2, w, hh } = room();
     if (w <= 0 || hh <= 0) {
-      // no room for the page (a short screen zoomed in): no size kept from a roomier layout may reach past the screen
-      frame.style.width = '';
-      frame.style.height = '';
+      // no room for the page at all (a short screen zoomed in): no size kept from a roomier layout may reach past the
+      // screen, so the page keeps the zero size it was measured at
       fit.style.flex = '';
       promptRow.style.width = '';
       tools.style.setProperty('--page-w', '');
@@ -639,9 +717,18 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     frame.style.width = `${fw}px`;
     frame.style.height = `${Math.floor(fw / a)}px`;
     fit.style.flex = row && !side ? `0 0 ${fw + pad2}px` : '';
-    promptRow.style.width = row && !side ? `${fw + pad2 + tools.offsetWidth + gap}px` : '';
+    promptRow.style.width = row && !side && !folded ? `${fw + pad2 + tools.offsetWidth + gap}px` : '';
     const cs = getComputedStyle(fit);
     tools.style.setProperty('--page-w', side ? `${fw + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight)}px` : '');
+    pad.moved();
+    if (!folded) return;
+    // the room the page has, which the tray and the note after a save cover from its foot
+    const t = tools.getBoundingClientRect();
+    const f = fit.getBoundingClientRect();
+    tools.style.setProperty('--room-x', `${f.left - t.left - tools.clientLeft}px`);
+    tools.style.setProperty('--room-b', `${t.top + tools.clientTop + tools.clientHeight - f.bottom}px`);
+    tools.style.setProperty('--room-w', `${f.width}px`);
+    tools.style.setProperty('--room-h', `${f.height}px`);
   };
   const ro = new ResizeObserver(layout);
   const el = h(
@@ -649,7 +736,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     { class: `dq-draw dq-draw--${kind}` },
     h('h1', { class: 'dq-sr', 'data-focus': '', text: kind === 'ally' ? ART.allyTitle : ART.todayTitle }),
     promptRow,
-    h('div', { class: 'dq-draw-main' }, fit, tools),
+    main,
   );
   sync();
 
@@ -741,7 +828,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     bubbles: [0, 0],
     after: () => {
       app.sheetLayer.append(sheet, riseEl);
-      ro.observe(fit.parentElement!);
+      ro.observe(main);
       ro.observe(el);
       layout();
     },

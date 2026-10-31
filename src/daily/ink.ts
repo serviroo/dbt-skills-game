@@ -754,6 +754,15 @@ export class InkPad {
   get drawing() {
     return !!this.cur;
   }
+  /** The page moved or changed size under a stroke in progress: its next points land where the pointer is on it now. */
+  moved() {
+    const c = this.cur;
+    if (!c) return;
+    const r = this.live.getBoundingClientRect();
+    c.left = r.left;
+    c.top = r.top;
+    c.k = this.W / Math.max(1, r.width);
+  }
 
   private push() {
     this.undoStack.push(this.strokes);
