@@ -42,13 +42,19 @@ const SCREENS = [
  * narrower and shorter in the page's px, its scale that much more), and passes on the real one's events. And the
  * way the phone is held, `heldAs` and then as `window.__held` sets it ('portrait' or 'landscape'), as a phone reports
  * it in screen.orientation, since Chromium here takes it from the page's shape, which a keyboard or another app beside
- * it changes.
+ * it changes. And the page without focus while `window.__away` says so, as when the phone takes it to put the page
+ * beside another app, since Chromium here gives every page focus.
  */
 const overlay = (heldAs) => {
   let held = heldAs ?? (innerWidth > innerHeight ? 'landscape' : 'portrait');
   Object.defineProperty(screen, 'orientation', { configurable: true, get: () => ({ type: `${held}-primary`, angle: held === 'portrait' ? 0 : 90 }) });
   window.__held = (h) => {
     held = h;
+  };
+  let away = false;
+  document.hasFocus = () => !away;
+  window.__away = (a) => {
+    away = a;
   };
   const real = window.visualViewport;
   const own = new EventTarget();
@@ -404,27 +410,36 @@ function pinched(turnedFirst) {
 
 /**
  * Typing in a window shorter than the screen, the Safe Zone put above another app after it opened, with a keyboard
- * that resizes the page: the room is the window's, so as the keyboard goes down the usual screen comes back.
+ * that resizes the page: before typing, or while typing, the field keeping focus as the phone takes the page's focus,
+ * and the keyboard with it, to put it there. The room is the window's, so as the keyboard goes down the usual screen
+ * comes back.
  */
-async function split(h) {
-  const p = PHONES['390x844'];
-  const size = '390x844 put above another app, 340 px tall';
-  const problems = [];
-  const { ctx, page, errors } = await typeIn(h, { width: p.width, height: p.height }, 'portrait');
-  const field = page.locator('.dq-sz-body').getByLabel('Add one', { exact: true });
-  await field.blur();
-  await page.setViewportSize({ width: p.width, height: 340 });
-  await settle(page);
-  await field.focus();
-  await page.setViewportSize({ width: p.width, height: 340 - 150 });
-  await page.evaluate(() => document.activeElement?.scrollIntoView({ block: 'nearest', behavior: 'instant' }));
-  await settle(page);
-  if (!(await page.evaluate(() => !!document.querySelector('.dq.is-typing')))) problems.push(`${size}, keyboard up: the typing layout isn't on`);
-  await page.setViewportSize({ width: p.width, height: 340 });
-  for (const f of await down(page)) problems.push(`${size}, then down: ${f}`);
-  if (errors.length) problems.push(`${size}: ${errors.join(' | ')}`);
-  await ctx.close();
-  h.expect(!problems.length, `${problems.length} problems:\n${problems.join('\n')}`);
+function split(midway) {
+  return async (h) => {
+    const p = PHONES['390x844'];
+    const size = `390x844 put above another app ${midway ? 'while typing' : 'before typing'}, 340 px tall`;
+    const problems = [];
+    const { ctx, page, errors } = await typeIn(h, { width: p.width, height: p.height }, 'portrait');
+    const field = page.locator('.dq-sz-body').getByLabel('Add one', { exact: true });
+    if (midway) {
+      await page.setViewportSize({ width: p.width, height: p.height - p.kb });
+      await settle(page);
+      await page.evaluate(() => window.__away(true));
+    } else await field.blur();
+    await page.setViewportSize({ width: p.width, height: 340 });
+    await settle(page);
+    if (midway) await page.evaluate(() => window.__away(false));
+    else await field.focus();
+    await page.setViewportSize({ width: p.width, height: 340 - 150 });
+    await page.evaluate(() => document.activeElement?.scrollIntoView({ block: 'nearest', behavior: 'instant' }));
+    await settle(page);
+    if (!(await page.evaluate(() => !!document.querySelector('.dq.is-typing')))) problems.push(`${size}, keyboard up: the typing layout isn't on`);
+    await page.setViewportSize({ width: p.width, height: 340 });
+    for (const f of await down(page)) problems.push(`${size}, then down: ${f}`);
+    if (errors.length) problems.push(`${size}: ${errors.join(' | ')}`);
+    await ctx.close();
+    h.expect(!problems.length, `${problems.length} problems:\n${problems.join('\n')}`);
+  };
 }
 
 export const scenarios = Object.fromEntries([
@@ -443,5 +458,6 @@ export const scenarios = Object.fromEntries([
   ['safe-zone-typing-narrowed', beside(false)],
   ['safe-zone-typing-pinched', pinched(false)],
   ['safe-zone-typing-turned-pinched', pinched(true)],
-  ['safe-zone-typing-split', split],
+  ['safe-zone-typing-split', split(false)],
+  ['safe-zone-typing-split-while-typing', split(true)],
 ]);

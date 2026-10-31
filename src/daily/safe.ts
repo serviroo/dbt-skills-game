@@ -141,9 +141,9 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   const wide = window.matchMedia('(min-width: 540px)');
   let typing = false;
   // the tallest the visual viewport has been at each width it has had while typing: the room there with the keyboard
-  // down, since a keyboard only ever takes height. Resized with nothing typed in, there's no keyboard, so its height is
-  // the room, taller or shorter (another app put above or below it, a toolbar coming or going). Both as it shows on the
-  // screen, in the page's px unpinched, so pinching in or out changes neither
+  // down, since a keyboard only ever takes height. Resized with nothing typed in (see typedIn), there's no keyboard, so
+  // its height is the room, taller or shorter (another app put above or below it, a toolbar coming or going). Both as
+  // it shows on the screen, in the page's px unpinched, so pinching in or out changes neither
   const tallest = new Map<number, number>();
   // widths first had with the keyboard up (the phone turned, or the window resized beside another app, while typing;
   // either leaves it up), each with the least height it has had there and the room it should have there: turned, the
@@ -160,9 +160,11 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   let last = vv ? Math.round(vv.width * vv.scale) : 0;
   let lastHeld = held();
   if (vv) tallest.set(last, vv.height * vv.scale);
+  // the field being typed in: one here with focus while the page has it too, since the keyboard goes when the page
+  // loses it (the phone putting the page beside another app, say), though the field keeps focus
   const typedIn = () => {
     const f = document.activeElement;
-    return f?.matches('input.dq-input, textarea.dq-input') && el.contains(f) ? f : null;
+    return document.hasFocus() && f?.matches('input.dq-input, textarea.dq-input') && el.contains(f) ? f : null;
   };
   /**
    * Talk goes back under the frame, or while typing into the top bar's row between Leave and Lights up, where its words
