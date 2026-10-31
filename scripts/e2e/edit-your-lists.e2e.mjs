@@ -12,7 +12,8 @@
 //                           what is stored and after a reload
 //   edit-your-lists-saves   a save from before places loads in its stored order (an older build's add goes last), two
 //                           added at the same place keep their order through an edit and a reload, and a Save Crystal
-//                           carries the words and the order to a new device, or after a device's own
+//                           carries the words and the order to a new device, or after a device's own, where a copy
+//                           that missed the restore can't move them back
 //   edit-your-lists-newer-save  what a newer build stored past this build's limits, and fields it doesn't know, stay
 //                           as stored through a move, a change to the number alone, a removal undone, a Crystal and a
 //                           restore after a device's own entries; one with no places yet keeps every place a move gives
@@ -340,6 +341,31 @@ export const scenarios = {
     // a device with its own comfort kit: what the Crystal adds comes after it, in the Crystal's order
     const own = await restore({ lists: { comfort: [{ id: 'own', text: 'Own mug', at: T, place: 0 }] } }, ['Own mug', ...order.comfort], 'own device');
     await own.close();
+    // Tea removed, Own mug added, then Tea restored from a Crystal after it: a copy that saw none of that writes its old
+    // list, and Tea stays after Own mug, where it is stored and after a reload
+    const r = await open(h, { width: 390, height: 844 }, { lists: { ...LISTS, comfort: [{ id: 'c1', text: 'Tea', at: T, place: 0 }, { id: 'c2', text: 'Blanket', at: T, place: 1 }] } });
+    const old = await h.ls(r.page, h.SAVE);
+    const kept = await crystalOf(h, r.page, 'edit-your-lists-restore-stale');
+    await go(r.page, { name: 'comfort' });
+    await button(r.page, 'Remove Tea').click();
+    const kit = r.page.locator('.dq-listp--comfort');
+    await kit.locator('.dq-addrow input').fill('Own mug');
+    await kit.getByRole('button', { name: 'Add', exact: true }).click();
+    await restoreFrom(r.page, kept.file);
+    const stale = await r.ctx.newPage();
+    await stale.goto(`${h.server.url}/?mute`);
+    await stale.waitForFunction(() => !!window.__daily, null, { timeout: 30000 });
+    await stale.evaluate(([k, v]) => localStorage.setItem(k, v), [h.SAVE, old]);
+    const want = 'Blanket,Own mug,Tea';
+    const settled = await until(r.page, ([k, want]) => JSON.parse(localStorage.getItem(k)).lists.comfort.map((x) => x.text).join() === want && window.__daily.store.state.lists.comfort.map((x) => x.text).join() === want, [h.SAVE, want], { timeout: 5000 }).then(() => true, () => false);
+    if (!settled) problems.push(`restored then a stale copy: shown ${JSON.stringify(await r.page.evaluate(() => window.__daily.store.state.lists.comfort.map((x) => x.text)))}, stored ${JSON.stringify(words((await stored(h, r.page)).lists.comfort))}`);
+    await stale.close();
+    await r.page.reload();
+    await h.reachHub(r.page);
+    await go(r.page, { name: 'comfort' });
+    if ((await shown(r.page, PANEL.comfort)).join() !== want) problems.push(`restored then a stale copy, reloaded: ${JSON.stringify(await shown(r.page, PANEL.comfort))}`);
+    problems.push(...r.errors);
+    await r.ctx.close();
     h.expect(!problems.length, problems.join('\n'));
   },
 

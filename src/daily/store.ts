@@ -1687,13 +1687,14 @@ export class Store {
         mine.push(x);
       }
     };
-    // what the file adds goes after this device's own entries, in the file's order, at the file's places where they fit
+    // what the file adds goes after this device's own entries, in the file's order, at the file's places where they fit;
+    // a place moved to fit counts as a move made now, so a copy that still holds the old place never undoes it
     for (const k of LIST_KEYS) {
       const mine: (Item | Person)[] = this.state.lists[k];
       const have = new Set(mine.map((x) => x.id));
       const low = other.lists[k].reduce((m, x) => (have.has(x.id) ? m : Math.min(m, x.place)), Infinity);
       const shift = Math.max(0, nextPlace(mine) - low);
-      bring(mine, other.lists[k], shift ? (x) => alter(x, { place: x.place + shift }) : undefined);
+      bring(mine, other.lists[k], shift ? (x) => alter(x, { place: x.place + shift, placeAt: Math.max(this.now(), (x.placeAt ?? 0) + 1) }) : undefined);
     }
     bring(this.state.maps, other.maps);
     adoptRaw(this.state, other, { newer, now: this.now() });
