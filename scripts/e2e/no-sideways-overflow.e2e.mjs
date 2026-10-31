@@ -21,6 +21,8 @@ const SIZES = [
   { width: 568, height: 320 },
   { width: 844, height: 390 },
 ];
+// the skill steps also on a 320 phone with its browser's bars showing, which at 200% is narrow and short at once
+const STEP_SIZES = [...SIZES, { width: 320, height: 534 }];
 const SAFE_AT = ['start', 'breathe', 'squeeze', 'cold', 'check', 'stop', 'reasons', 'comfort', 'people', 'talk', 'close'];
 const SCREENS = [
   ['Home', { name: 'hub' }],
@@ -136,7 +138,7 @@ const reach = (page, sel, { below = true, optional = false } = {}) =>
       const e = typeof sel === 'string' ? document.querySelector(sel) : sel;
       if (!e) return optional ? '' : 'it is missing';
       const r = e.getBoundingClientRect();
-      if (r.width < 43.5 || r.height < 43.5) return `it is ${Math.round(r.width)}x${Math.round(r.height)} px`;
+      if (r.width < 44 || r.height < 44) return `it is ${Math.round(r.width)}x${Math.round(r.height)} px`;
       const room = { left: 0, top: below ? document.querySelector('.dq-top').getBoundingClientRect().bottom : 0, right: innerWidth, bottom: innerHeight };
       // the boxes that clip it: an absolutely placed box only from its containing block out, a fixed one only within a
       // transformed ancestor
@@ -437,4 +439,7 @@ function steps(phone) {
   };
 }
 
-export const scenarios = Object.fromEntries(SIZES.flatMap((phone) => [[`no-sideways-overflow-${phone.width}x${phone.height}`, sweep(phone)], [`no-sideways-overflow-steps-${phone.width}x${phone.height}`, steps(phone)]]));
+export const scenarios = Object.fromEntries([
+  ...SIZES.map((phone) => [`no-sideways-overflow-${phone.width}x${phone.height}`, sweep(phone)]),
+  ...STEP_SIZES.map((phone) => [`no-sideways-overflow-steps-${phone.width}x${phone.height}`, steps(phone)]),
+]);

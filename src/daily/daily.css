@@ -2224,15 +2224,15 @@ textarea.dq-input {
     padding: 0;
   }
 }
-/* on a narrow step with height to spare, the words go under the ring, and the ring takes the room's height less the
-   110 px that four lines of words under it need */
-@media (max-width: 260px) and (min-height: 281px) {
+/* on a narrow step, short or not, the words go under the ring, as beside it they'd have no width left; the ring takes
+   the room's height less the 110 px that four lines of words under it need, from 32 to 120 px */
+@media (max-width: 260px) {
   .dq-hold {
     flex-direction: column;
     text-align: center;
   }
   .dq-hold-ring {
-    width: clamp(64px, calc(100dvh - var(--dq-top, 0px) - var(--top-shade) - 110px), 120px);
+    width: clamp(32px, calc(100dvh - var(--dq-top, 0px) - var(--top-shade) - 110px), 120px);
     height: auto;
     aspect-ratio: 1;
   }
