@@ -12,7 +12,7 @@ import { now, onFrame } from './clock';
 import { INVENTORY, ROSTER, ROSTER_COPY, type ShadowDef, type ShadowId } from '../content/roster-lines';
 import type { App } from './app';
 import { cleanName, type Store } from './store';
-import { focusWhole, h, seen, typo } from './ui';
+import { focusWhole, h, holdView, seen, typo } from './ui';
 
 let svgN = 0;
 
@@ -352,6 +352,7 @@ export function rosterSection(app: App) {
     if (now === n) return;
     const had = arrived().length;
     n = now;
+    const hold = holdView(row);
     ROSTER.forEach((s, i) => {
       if (live.has(s.id)) return;
       const next = panelOf(s);
@@ -359,6 +360,7 @@ export function rosterSection(app: App) {
       if (at && next) at.replaceWith(next);
       else if (next) row.insertBefore(next, ROSTER.slice(i + 1).map((x) => placeOf(x.id)).find(Boolean) ?? null);
     });
+    hold({ part: row });
     if (arrived().length === had) return;
     const focused = camp?.stage.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.shadow : undefined;
     camp?.unmount();
@@ -433,8 +435,10 @@ export function inventorySection(app: App) {
     if (holds() === has) return;
     has = holds();
     const next = slotOf(has);
+    const hold = holdView(slot);
     slot.replaceWith(next);
     slot = next;
+    hold({ part: next });
   };
   return { el, sync };
 }

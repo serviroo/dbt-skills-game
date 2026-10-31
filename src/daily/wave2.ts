@@ -9,7 +9,7 @@ import { playerName } from '../core/you';
 import { CLASS_LINE, MOONFLOWER, TITLE_COPY, TITLES, type TitleId } from '../content/roster-lines';
 import type { App } from './app';
 import type { Store } from './store';
-import { h, radioKeys, typo } from './ui';
+import { h, holdView, radioKeys, typo } from './ui';
 import { plateClass } from './wardrobe';
 
 /** Every title the player has earned, oldest first, with when it was earned. Never shrinks: each rests on an event. */
@@ -97,13 +97,15 @@ export function titleRow(app: App) {
   const sync = () => {
     const earned = earnedTitles(st);
     el.classList.toggle('is-hidden', !earned.length);
-    // newest first; one earned since goes in its place, and the ones already there stay put
+    // newest first; one earned since goes in its place, and the ones already there stay put, on screen too
     const order = earned.map((x) => x.id).reverse();
+    const hold = holdView(list);
     order.forEach((id, i) => {
       if (list.querySelector(`[data-title="${id}"]`)) return;
       const after = order.slice(i + 1).map((x) => list.querySelector(`[data-title="${x}"]`)).find(Boolean) ?? null;
       list.insertBefore(option(id), after);
     });
+    hold({ part: list });
     const now = activeTitle(st);
     if (!now) return;
     label.textContent = TITLES[now].name;

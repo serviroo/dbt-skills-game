@@ -13,7 +13,7 @@ import { allyCard, allyName, cardOf, favFirst, focusBack, refill } from './artro
 import { artStore } from './artstore';
 import { storyStore } from './storystore';
 import { addDays, cleanName, dayKey, fieldKey, fieldTimes, isSkillId, ROW_CAP, uid, type DiaryEntry, type State, type Store } from './store';
-import { btn, copyText, field, h, md, p, panel, place, quotes, redrawn, segmented, shareOrSave, toggle, typo } from './ui';
+import { btn, copyText, field, h, md, p, panel, place, quotes, redrawn, scrollerOf, segmented, shareOrSave, toggle, typo } from './ui';
 import type { KeepStatus } from '../pwa/register';
 import { volumeSliders } from '../ui/volume';
 import { STEALTH, STEALTH_LINES } from '../content/stealth-lines';
@@ -370,12 +370,6 @@ function fits(s: Skill, f: Finding) {
     .split(' ')
     .every((w) => hay.includes(w));
 }
-
-/** The nearest box that scrolls the page. */
-const scrollerOf = (el: HTMLElement) => {
-  for (let e = el.parentElement; e; e = e.parentElement) if (/auto|scroll/.test(getComputedStyle(e).overflowY) && e.scrollHeight > e.clientHeight) return e;
-  return document.scrollingElement as HTMLElement | null;
-};
 
 export function libraryScreen(app: App): ScreenOut {
   const st = app.store;

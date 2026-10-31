@@ -235,8 +235,47 @@ export function place(box: HTMLElement, kids: HTMLElement[], fallback?: () => HT
  * Focus on a control that goes moves to that same control drawn again (the same item's, by the data-item id of the row
  * it is in, with the same name and link: its label, else its words), else to `lost`, never to a control of someone or
  * something else. It goes only where the player can see it, brought whole into view, focus ring and all, clear of the
- * pinned bars (their scroll padding in daily.css).
+ * pinned bars (their scroll padding in daily.css). What the player is looking at stays put (see holdView).
  */
+/** The nearest box that scrolls `e`, else the page. */
+export function scrollerOf(e: Element) {
+  for (let p = e.parentElement; p; p = p.parentElement) if (/auto|scroll/.test(getComputedStyle(p).overflowY) && p.scrollHeight > p.clientHeight) return p;
+  return document.scrollingElement as HTMLElement | null;
+}
+
+/** Whether `e` starts above what its scroller shows, under the pinned bars (the scroller's scroll padding). */
+export function above(e: Element) {
+  const box = scrollerOf(e);
+  if (!box || !e.getClientRects().length) return false;
+  const top = (box === document.scrollingElement ? 0 : box.getBoundingClientRect().top) + (parseFloat(getComputedStyle(box).scrollPaddingTop) || 0);
+  return e.getBoundingClientRect().top < top;
+}
+
+/** Notes where `e`'s top (or bottom) is on screen; what it returns scrolls so `to` has it there again. */
+function pin(e: Element, edge: 'top' | 'bottom' = 'top') {
+  const box = scrollerOf(e);
+  const at = e.getBoundingClientRect()[edge];
+  return (to: Element) => {
+    if (box && to.isConnected) box.scrollTop += to.getBoundingClientRect()[edge] - at;
+  };
+}
+
+/**
+ * Before `part` of a screen changes: notes what the player is looking at, so it stays where it is after. That is the
+ * control with focus, if it is on this screen; else, when `part` starts above what is in view, all that follows `part`.
+ * Call the result once the change is made, with the control drawn in place of the focused one if that went, and with
+ * what stands in `part`'s place now.
+ */
+export function holdView(part: Element | null) {
+  const f = document.activeElement;
+  const focused = part && f instanceof HTMLElement && f !== document.body && scrollerOf(f) === scrollerOf(part) ? f : null;
+  const back = focused ? pin(focused) : part && above(part) ? pin(part, 'bottom') : null;
+  return (now: { focus?: Element | null; part?: Element | null } = {}) => {
+    const to = focused ? (focused.isConnected ? focused : now.focus) : now.part;
+    if (back && to) back(to);
+  };
+}
+
 /** Whether the player can see `e`: shown, with a size, and not hidden from anyone, a screen reader's eyes only included. */
 export const seen = (e: HTMLElement) => {
   const r = e.getBoundingClientRect();
@@ -258,15 +297,20 @@ export function redrawn(draw: () => Element | null, lost: () => HTMLElement | nu
       const now = html(next);
       if (now === shown && !again) return false;
       const had = document.activeElement instanceof HTMLElement && node.contains(document.activeElement) ? document.activeElement : null;
+      const hold = holdView(node instanceof Element ? node : node.parentElement);
       node.replaceWith(next);
       node = next;
       shown = now;
-      if (!had) return true;
+      if (!had) {
+        hold({ part: next instanceof Element ? next : null });
+        return true;
+      }
       const item = (e: Element) => e.closest('[data-item]')?.getAttribute('data-item') ?? null;
       const name = (e: Element) => e.getAttribute('aria-label') ?? e.textContent;
       const like = (e: Element) => item(e) === item(had) && name(e) === name(had) && e.getAttribute('href') === had.getAttribute('href');
       const same = next instanceof Element ? [...next.querySelectorAll<HTMLElement>('a[href], button, summary')].find(like) : undefined;
       const to = [same, lost()].find((e): e is HTMLElement => !!e && seen(e));
+      hold({ focus: to === same ? to : null });
       if (to) focusWhole(to);
       return true;
     },

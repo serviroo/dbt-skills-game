@@ -5,7 +5,7 @@ import { CHECKIN, QUEST, RANKS } from '../content/daily-lines';
 import type { App, ScreenOut } from './app';
 import { cardArtSVG, catSVG, crystalSVG, glyph, icon, mothSVG } from './art';
 import { wait } from './clock';
-import { breakable, btn, chip, h, md, panel, redrawn, segmented, typo } from './ui';
+import { breakable, btn, chip, h, holdView, md, panel, redrawn, segmented, typo } from './ui';
 import { artStore } from './artstore';
 import { storyStore } from './storystore';
 import { cardOf, refill, todayPrompt, thumbImg } from './artroom';
@@ -438,7 +438,11 @@ function lobby(app: App, giftLine: HTMLElement) {
   const follow = () => {
     if (busy || (st.state.flags.giftDay === today) === chest.classList.contains('is-open')) return;
     chest.classList.add('is-quiet');
+    // the gift's line comes in above what follows it, which stays where it is if the player is looking at it
+    const after = giftLine.parentElement?.nextElementSibling ?? null;
+    const hold = holdView(after);
     sync();
+    hold({ part: after });
     // the lid's open place is taken while nothing moves, so letting go of is-quiet starts no swing
     void getComputedStyle(chest.querySelector('.dq-chest-lid')!).transform;
     chest.classList.remove('is-quiet');

@@ -95,9 +95,27 @@ const home = (page) =>
       checkin: document.querySelector('.dq-checkin .dq-after') ? 'after' : document.querySelector('.dq-checkin .dq-ask') ? 'ask' : 'other',
       fx: window.__fx,
       xps: window.__xps,
-      y: scrollY,
     };
   });
+/**
+ * Where things are on screen: the box of what has focus, and the top of each heading and section in view, so a check can
+ * tell that what the player is looking at did not move or change size.
+ */
+const layout = (page) =>
+  page.evaluate(() => {
+    const box = (e) => Object.values(e.getBoundingClientRect().toJSON()).slice(0, 4);
+    const top = document.querySelector('.dq-top')?.getBoundingClientRect().bottom ?? 0;
+    const seen = [...document.querySelectorAll('.dq-view h1, .dq-view h2, .dq-view section')].filter((e) => {
+      const r = e.getBoundingClientRect();
+      return r.height && r.bottom > top && r.top < innerHeight;
+    });
+    return { focus: document.activeElement === document.body ? null : box(document.activeElement), seen: Object.fromEntries(seen.map((e) => [`${e.tagName} ${e.id} ${e.className} ${e.textContent.slice(0, 24)}`, e.getBoundingClientRect().top])) };
+  });
+/** What moved by more than a pixel between two layouts: the focused box, and anything in view in both. */
+const moved = (a, b, landmarks = true) => [
+  ...(a.focus && b.focus && a.focus.some((v, i) => Math.abs(v - b.focus[i]) > 1) ? [`the focused control went from [${a.focus.map(Math.round)}] to [${b.focus.map(Math.round)}] (x, y, width, height)`] : []),
+  ...(landmarks ? Object.keys(a.seen).filter((k) => k in b.seen && Math.abs(a.seen[k] - b.seen[k]) > 1).map((k) => `"${k.trim()}" moved from ${Math.round(a.seen[k])} to ${Math.round(b.seen[k])}`) : []),
+];
 /** Marks what has focus now, so it can be told apart from a control drawn again in its place. */
 const mark = (page) => page.evaluate(() => document.activeElement?.setAttribute('data-had-focus', ''));
 const kept = (page) => page.evaluate(() => !!document.activeElement?.hasAttribute('data-had-focus'));
@@ -116,10 +134,11 @@ export const scenarios = {
       await h.reachHub(other.page);
       await watch(page);
       const toggle = page.locator('.dq-stats-toggle');
-      await toggle.scrollIntoViewIfNeeded();
+      await toggle.evaluate((e) => e.scrollIntoView({ block: 'center' }));
       await toggle.focus();
       await mark(page);
       const before = await home(page);
+      const was = await layout(page);
       await h.shot(page, `home-before-${tag}`);
 
       // another tab meets TIPP, picks today's line and opens the daily gift
@@ -141,7 +160,7 @@ export const scenarios = {
       if (!after.line?.includes(picked)) problems.push(`${tag}: today's line picked in another tab ("${picked}") is not on Home, which shows ${JSON.stringify(after.line)}`);
       if (!(await until(log.page, (t) => document.querySelector('.dq-log')?.textContent.includes(t), picked))) problems.push(`${tag}: the open line history does not show the line picked in another tab`);
       if (!(await kept(page))) problems.push(`${tag}: focus left the Stats button for ${await page.evaluate(() => document.activeElement?.textContent)}`);
-      if (Math.abs(after.y - before.y) > 1) problems.push(`${tag}: Home scrolled from ${before.y} to ${after.y}`);
+      problems.push(...moved(was, await layout(page), false).map((m) => `${tag}: on Home ${m}`));
       await h.shot(page, `home-after-${tag}`);
       await h.shot(log.page, `lines-history-after-${tag}`);
 
@@ -200,7 +219,7 @@ export const scenarios = {
       await watch(page);
       await wise.scrollIntoViewIfNeeded();
       await wise.focus();
-      const y = await page.evaluate(() => scrollY);
+      const was = await layout(page);
       await h.shot(page, `night-watch-before-${tag}`);
       await go(other.page, { name: 'skill', id: 'wise-mind' });
       await go(other.page, { name: 'skill', id: 'tipp' });
@@ -209,8 +228,8 @@ export const scenarios = {
       if (!(await until(page, (w) => Object.entries(w).every(([k, v]) => [...document.querySelectorAll('.dq-cardbtn')].some((b) => b.getAttribute('aria-label') === k && b.querySelector('.dq-cardbtn-n')?.textContent === v)), want))) problems.push(`${tag}: the skill shadows show ${JSON.stringify(await cards())} after another tab practised Wise Mind again and met TIPP`);
       await page.waitForTimeout(300);
       problems.push(...(await focusOn(page.getByRole('button', { name: WISE }), `${tag} Wise Mind's card after its count changed elsewhere`)));
-      const at = await page.evaluate(() => scrollY);
-      if (Math.abs(at - y) > 1) problems.push(`${tag}: the Night Watch scrolled from ${y} to ${at}`);
+      // the second skill landing neither resizes the card the player is on nor moves what is in view
+      problems.push(...moved(was, await layout(page)).map((m) => `${tag}: on the Night Watch ${m}`));
       await h.shot(page, `night-watch-after-${tag}`);
       const had = await cards();
       await older(other.page, h);
@@ -336,7 +355,7 @@ export const scenarios = {
       // renamed there: Home keeps its open Stats, title list, focus and scroll
       await page.locator('.dq-stats-toggle').click();
       await healer.focus();
-      const y = await page.evaluate(() => scrollY);
+      const was = await layout(page);
       await go(other.page, { name: 'settings' });
       for (const [label, v] of [[/^Your name/, 'Rowan'], [/companion.s name/, 'Moth']]) {
         const f = other.page.getByLabel(label);
@@ -346,9 +365,10 @@ export const scenarios = {
         await f.blur();
       }
       const named = await until(page, () => document.querySelector('.dq-status [data-you-name]')?.textContent === 'Rowan' && document.querySelector('.dq-firstshadow')?.title.startsWith('Moth') && !!document.querySelector('.dq-firstshadow svg')?.getAttribute('aria-label')?.startsWith('Moth'));
-      const home_ = await page.evaluate(() => ({ stats: document.querySelector('.dq-status')?.classList.contains('is-open'), list: !document.querySelector('.w2-title-list')?.classList.contains('is-hidden'), y: scrollY }));
+      const home_ = await page.evaluate(() => ({ stats: document.querySelector('.dq-status')?.classList.contains('is-open'), list: !document.querySelector('.w2-title-list')?.classList.contains('is-hidden') }));
       if (!named) problems.push(`${tag}: Home shows ${await page.evaluate(() => `${document.querySelector('.dq-status [data-you-name]')?.textContent} and ${document.querySelector('.dq-firstshadow')?.title}`)} after Rowan and Moth were chosen in another tab`);
-      if (!home_.stats || !home_.list || Math.abs(home_.y - y) > 1) problems.push(`${tag}: renaming elsewhere left Stats ${home_.stats ? 'open' : 'closed'}, the title list ${home_.list ? 'open' : 'closed'}, and moved Home from ${y} to ${home_.y}`);
+      if (!home_.stats || !home_.list) problems.push(`${tag}: renaming elsewhere left Stats ${home_.stats ? 'open' : 'closed'} and the title list ${home_.list ? 'open' : 'closed'}`);
+      problems.push(...moved(was, await layout(page), false).map((m) => `${tag}: renaming elsewhere, on Home ${m}`));
       problems.push(...(await focusOn(healer, `${tag} Self-Healer after renaming elsewhere`)));
       const fx = await page.evaluate(() => window.__fx);
       if (fx.length) problems.push(`${tag}: Home played or showed this for another tab's doings: ${fx.join('; ')}`);
