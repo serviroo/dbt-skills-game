@@ -61,9 +61,12 @@ const settle = (page) =>
     await Promise.race([Promise.all(ending.map((a) => a.finished.catch(() => {}))), new Promise((r) => setTimeout(r, 2000))]);
   });
 
-/** How wide the page and the companion's own scroller are against the screen, and the widest boxes past its edge. */
-const width = (page) =>
-  page.evaluate(() => {
+/**
+ * How wide the page and the companion's own scroller are against the screen, the widest boxes past its edge, and with
+ * `sheet`, the boxes inside that sheet that scroll or clip sideways.
+ */
+const width = (page, sheet = null) =>
+  page.evaluate((sheet) => {
     const doc = document.documentElement;
     const dq = document.querySelector('.dq');
     const clips = (e) => {
@@ -89,6 +92,8 @@ const width = (page) =>
       const r = range.getBoundingClientRect();
       if (out(r) && !past.some((x) => x.startsWith(label(p)))) past.push(`"${n.textContent.trim().slice(0, 24)}" in ${label(p)} ${Math.round(r.left)}..${Math.round(r.right)}`);
     }
+    const box = sheet && document.querySelector(sheet);
+    const inner = box ? [box, ...box.querySelectorAll('*')].filter((e) => getComputedStyle(e).overflowX !== 'visible' && e.scrollWidth > e.clientWidth + 1 && e.checkVisibility() && !e.closest('.dq-sr')).map((e) => `${label(e)} ${e.scrollWidth - e.clientWidth} px wider than it shows`) : [];
     const safe = document.querySelector('.dq-top .dq-safe')?.getBoundingClientRect();
     return {
       doc: doc.scrollWidth,
@@ -96,8 +101,9 @@ const width = (page) =>
       vw: innerWidth,
       safe: !safe || (safe.left >= -0.5 && safe.right <= innerWidth + 0.5),
       past: past.slice(0, 6),
+      inner,
     };
-  });
+  }, sheet);
 
 /** Every screen, and the sheets, on one phone at 200% zoom. */
 function sweep(phone) {
@@ -114,15 +120,16 @@ function sweep(phone) {
       await seedStores(page, h.SAVE, now);
       await page.reload();
       await h.reachHub(page);
-      const check = async (where, words = true) => {
+      const check = async (where, { words = true, sheet = null } = {}) => {
         await settle(page);
-        const w = await width(page);
+        const w = await width(page, sheet);
         const bad = [];
         if (w.doc !== w.vw) bad.push(`the page is ${w.doc} px wide`);
         if (w.dq > 0) bad.push(`the companion scrolls ${w.dq} px sideways`);
         if (!w.safe) bad.push('the Safe Zone button is off the edge');
+        if (w.inner.length) bad.push(`inside the sheet: ${w.inner.join(', ')}`);
         if (bad.length) failed.push(`${size} ${where}: ${bad.join('; ')} on a ${w.vw} px screen; past the edge: ${w.past.join(', ') || 'nothing found'}`);
-        if (words) for (const f of await cutShort(page, { scope: '#dq-main *' })) failed.push(`${size} ${where}: ${f}`);
+        if (words) for (const f of await cutShort(page, { scope: sheet ? `${sheet} *` : '#dq-main *' })) failed.push(`${size} ${where}: ${f}`);
         await h.shot(page, `wide-${phone.width}x${phone.height}-${where.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`);
       };
       for (const [where, route] of SCREENS) {
@@ -133,12 +140,12 @@ function sweep(phone) {
           await page.locator('.dq-step-body .dq-intro').waitFor({ timeout: 10000 });
           await page.locator('.dq-step-body .dq-actions .dq-btn--primary').first().click();
         }
-        await check(where, route.name !== 'skill' && route.name !== 'safe');
+        await check(where, { words: route.name !== 'skill' && route.name !== 'safe' });
       }
 
       // the sheets opened from the drawing page and the story editor
       // each sheet opens at the phone's own size, where the page can be drawn on, and is checked once zoomed to 200%
-      const sheet = async (where, open) => {
+      const sheet = async (where, panel, open) => {
         await page.setViewportSize(phone);
         try {
           await open();
@@ -146,14 +153,16 @@ function sweep(phone) {
           return failed.push(`${size} ${where}: could not open it: ${String(e.message).split('\n')[0]}`);
         }
         await page.setViewportSize(zoomed);
-        await check(where);
+        await check(where, { sheet: panel });
         await page.keyboard.press('Escape');
       };
-      await sheet('shadow ally name sheet', async () => {
+      await sheet('shadow ally name sheet', '.dq-sheet:not(.is-hidden)', async () => {
         await page.evaluate(() => window.__daily.go({ name: 'draw', kind: 'ally' }));
         const frame = page.locator('.dq-draw-frame');
         await frame.waitFor({ timeout: 10000 });
         await frame.scrollIntoViewIfNeeded();
+        // the page takes strokes once its drafts are read
+        await page.waitForFunction(() => document.querySelector('.dq-ink-stage')?.inert === false, null, { timeout: 10000 });
         await settle(page);
         // a short line inside the part of the page that shows
         const b = await frame.evaluate((e) => {
@@ -169,13 +178,13 @@ function sweep(phone) {
         await page.locator('.dq-save:enabled').click({ timeout: 10000 });
         await page.locator('.dq-sheet:not(.is-hidden) .dq-sheet-h').waitFor({ timeout: 10000 });
       });
-      await sheet('chapter sheet', async () => {
+      await sheet('chapter sheet', '.st-chsheet', async () => {
         await page.evaluate(() => window.__daily.go({ name: 'write', id: 'tale-1' }));
         await page.getByRole('textbox', { name: /^Page,/ }).waitFor({ timeout: 10000 });
         await page.locator('.st-chbtn').click();
         await page.locator('.st-chsheet').first().waitFor({ timeout: 10000 });
       });
-      await sheet('drawing picker sheet', async () => {
+      await sheet('drawing picker sheet', '.st-picks', async () => {
         await page.locator('.st-chsheet').first().waitFor({ state: 'detached', timeout: 10000 });
         await page.locator('.st-pic-b').click();
         await page.locator('.st-picks').waitFor({ timeout: 10000 });

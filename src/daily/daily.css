@@ -5248,6 +5248,7 @@ textarea.dq-input {
     padding: 0;
     border: 0;
   }
+  /* the three pens fit one row of the tools with room to spare, so they never wrap */
   .dq-pen {
     flex: none;
     width: auto;
@@ -5256,7 +5257,7 @@ textarea.dq-input {
     grid-template-rows: none;
     grid-auto-flow: column;
     gap: 6px;
-    padding: 0 10px 0 8px;
+    padding: 0 8px 0 6px;
   }
   .dq-pen-n {
     position: static;

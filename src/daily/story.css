@@ -984,6 +984,19 @@
   gap: 8px;
   margin: -6px -8px 8px 0;
 }
+/* a phone zoomed to 200% (260 CSS pixels wide or less): a smaller title, and where it and the close button still don't
+   share a line, the button takes the line above it, at its end */
+@media (max-width: 260px) {
+  .st-sheet-top {
+    flex-wrap: wrap-reverse;
+  }
+  .st-sheet-top .dq-sheet-h {
+    font-size: 24px;
+  }
+  .st-sheet-x {
+    margin-left: auto;
+  }
+}
 .st-chlist {
   margin: 0;
   padding: 0;
@@ -1054,6 +1067,22 @@
 .st-chrow-i:disabled {
   opacity: 0.28;
   cursor: default;
+}
+/* a phone zoomed to 200% (260 CSS pixels wide or less): a chapter's tools wrap onto as many lines as they need, and its
+   name goes under its number where even its longest word doesn't fit beside it */
+@media (max-width: 260px) {
+  .st-chrow-b {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+  .st-chrow-t {
+    flex: 1 1 min-content;
+  }
+  .st-chrow-acts {
+    flex: 0 1 auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
 }
 .st-rename {
   flex: 1 1 120px;
@@ -1209,7 +1238,7 @@
 }
 .st-picks-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(120px, 100%), 1fr));
   gap: 14px 12px;
   align-items: start;
   padding-top: 12px;
