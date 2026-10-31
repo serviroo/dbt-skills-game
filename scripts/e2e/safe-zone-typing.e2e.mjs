@@ -38,7 +38,8 @@ const SCREENS = [
 
 /**
  * In place of the page's visual viewport, one that reports the part of the screen above a keyboard that `window.__kb`
- * sets ({ height, top }, or null for none), never taller than the page, and passes on the real one's events. And the
+ * sets ({ height, top }, or null for none), never taller than the page, pinched in `window.__zoom` times (that much
+ * narrower and shorter in the page's px, its scale that much more), and passes on the real one's events. And the
  * way the phone is held, `heldAs` and then as `window.__held` sets it ('portrait' or 'landscape'), as a phone reports
  * it in screen.orientation, since Chromium here takes it from the page's shape, which a keyboard or another app beside
  * it changes.
@@ -52,12 +53,13 @@ const overlay = (heldAs) => {
   const real = window.visualViewport;
   const own = new EventTarget();
   let kb = null;
+  let zoom = 1;
   const vv = {
     get width() {
-      return real.width;
+      return real.width / zoom;
     },
     get height() {
-      return kb ? Math.min(kb.height, real.height) : real.height;
+      return (kb ? Math.min(kb.height, real.height) : real.height) / zoom;
     },
     get offsetTop() {
       return kb ? kb.top : real.offsetTop;
@@ -72,7 +74,7 @@ const overlay = (heldAs) => {
       return real.pageLeft;
     },
     get scale() {
-      return real.scale;
+      return real.scale * zoom;
     },
     addEventListener(...a) {
       real.addEventListener(...a);
@@ -86,6 +88,11 @@ const overlay = (heldAs) => {
   Object.defineProperty(window, 'visualViewport', { configurable: true, get: () => vv });
   window.__kb = (k) => {
     kb = k;
+    own.dispatchEvent(new Event('resize'));
+    own.dispatchEvent(new Event('scroll'));
+  };
+  window.__zoom = (z) => {
+    zoom = z;
     own.dispatchEvent(new Event('resize'));
     own.dispatchEvent(new Event('scroll'));
   };
@@ -333,9 +340,10 @@ function turned(phone, zoom = 1) {
 
 /**
  * The window resized beside another app while typing, the smaller phone held sideways with a keyboard that resizes the
- * page: from half the screen's width to all of it, or from all of it to half, with the keyboard up. The screen's height
- * stays, so its room does too. Widened, "Talk to someone now", Leave, Lights up and Sound stay on screen; narrowed, too
- * narrow for those and the field above the keyboard, the usual screen comes back as the keyboard goes down.
+ * page: from half the screen's width to all of it, or from all of it to half, with the keyboard up, dragged there by
+ * way of three quarters. The screen's height stays, so its room does too. Widened, "Talk to someone now", Leave, Lights
+ * up and Sound stay on screen; narrowed, too narrow for those and the field above the keyboard, the usual screen comes
+ * back as the keyboard goes down.
  */
 function beside(widened) {
   return async (h) => {
@@ -344,8 +352,8 @@ function beside(widened) {
     const size = `568x320 ${widened ? 'widened from half' : 'narrowed to half'} beside another app`;
     const problems = [];
     const { ctx, page, errors, words } = await typeIn(h, { width: from, height: p.height }, 'landscape');
-    for (const viewport of [{ width: from, height: p.height - p.kb }, { width: to, height: p.height - p.kb }]) {
-      await page.setViewportSize(viewport);
+    for (const width of [from, (3 * p.width) / 4, to]) {
+      await page.setViewportSize({ width, height: p.height - p.kb });
       await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
     }
     await page.evaluate(() => document.activeElement?.scrollIntoView({ block: 'nearest', behavior: 'instant' }));
@@ -357,6 +365,32 @@ function beside(widened) {
     await ctx.close();
     h.expect(!problems.length, `${problems.length} problems:\n${problems.join('\n')}`);
   };
+}
+
+/**
+ * Pinching in to 200% while typing, the smaller phone held sideways with its keyboard over the page, as Safari has it:
+ * the typing layout holds with the keyboard up, and as the keyboard goes down, still pinched in, the usual screen comes
+ * back, and stays as the pinch goes back out.
+ */
+async function pinched(h) {
+  const p = PHONES['568x320'];
+  const size = '568x320 pinched in to 200%';
+  const problems = [];
+  const { ctx, page, errors } = await typeIn(h, { width: p.width, height: p.height }, 'landscape');
+  const typing = () => page.evaluate(() => !!document.querySelector('.dq.is-typing'));
+  await page.evaluate((k) => window.__kb(k), { height: p.height - p.kb, top: Math.round(p.kb / 4) });
+  await settle(page);
+  await page.evaluate(() => window.__zoom(2));
+  await settle(page);
+  if (!(await typing())) problems.push(`${size}, keyboard up: the typing layout went away`);
+  await page.evaluate(() => window.__kb(null));
+  for (const f of await down(page)) problems.push(`${size}, then down: ${f}`);
+  await page.evaluate(() => window.__zoom(1));
+  await settle(page);
+  if (await typing()) problems.push(`${size}, down and pinched back out: the typing layout came back`);
+  if (errors.length) problems.push(`${size}: ${errors.join(' | ')}`);
+  await ctx.close();
+  h.expect(!problems.length, `${problems.length} problems:\n${problems.join('\n')}`);
 }
 
 export const scenarios = Object.fromEntries([
@@ -373,4 +407,5 @@ export const scenarios = Object.fromEntries([
   ['safe-zone-typing-turned-320x568', turned('320x568')],
   ['safe-zone-typing-widened', beside(true)],
   ['safe-zone-typing-narrowed', beside(false)],
+  ['safe-zone-typing-pinched', pinched],
 ]);

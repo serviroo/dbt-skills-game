@@ -141,21 +141,23 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   const wide = window.matchMedia('(min-width: 540px)');
   let typing = false;
   // the tallest the visual viewport has been at each width it has had: the room there with the keyboard down, since a
-  // keyboard only ever takes height
+  // keyboard only ever takes height. Both as it shows on the screen, in the page's px unpinched, so pinching in or out
+  // changes neither
   const tallest = new Map<number, number>();
   // widths first had with the keyboard up (the phone turned, or the window resized beside another app, while typing;
   // either leaves it up), each with the least height it has had there and the room it should have there: turned, the
   // screen's sides swap, so that's the width turned from and its room, less the width turned to; resized, the screen's
   // height stays, and with it the room. The keyboard counts as up there, the room not yet seen, until the page is
   // halfway from the least to that room or tall enough for the usual screen; short of that it's the keyboard settling
-  // after the move, a little taller or shorter. `up`: the keyboard was up as of the last fit; `last`, `lastHeld`: the
-  // last width the visual viewport had and how the screen was held then
+  // after the move, a little taller or shorter. Moved on again before the keyboard goes down, the room carries over.
+  // `up`: the keyboard was up as of the last fit; `last`, `lastHeld`: the last width the visual viewport had and how
+  // the screen was held then
   const moved = new Map<number, { low: number; room: number }>();
   let up = false;
   const held = () => screen.orientation?.type.split('-')[0];
-  let last = vv ? Math.round(vv.width) : 0;
+  let last = vv ? Math.round(vv.width * vv.scale) : 0;
   let lastHeld = held();
-  if (vv) tallest.set(last, vv.height);
+  if (vv) tallest.set(last, vv.height * vv.scale);
   const typedIn = () => {
     const f = document.activeElement;
     return f?.matches('input.dq-input, textarea.dq-input') && el.contains(f) ? f : null;
@@ -186,24 +188,26 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   const fit = (e: Event) => {
     if (!vv) return;
     const field = typedIn();
-    const width = Math.round(vv.width);
+    // as it shows on the screen (see tallest)
+    const width = Math.round(vv.width * vv.scale);
+    const height = vv.height * vv.scale;
     const fits = wide.matches ? 300 : 361;
     const now = held();
-    const room = (tallest.get(last) ?? Infinity) + (now !== lastHeld ? last - width : 0);
-    const t = moved.get(width) ?? (up && field && !tallest.has(width) ? { low: vv.height, room } : null);
+    const room = (tallest.get(last) ?? moved.get(last)?.room ?? Infinity) + (now !== lastHeld ? last - width : 0);
+    const t = moved.get(width) ?? (up && field && !tallest.has(width) ? { low: height, room } : null);
     if (t) {
-      t.low = Math.min(t.low, vv.height);
-      if (vv.height >= Math.min(fits, (t.low + t.room) / 2)) moved.delete(width);
+      t.low = Math.min(t.low, height);
+      if (vv.height >= fits || height >= (t.low + t.room) / 2) moved.delete(width);
       else moved.set(width, t);
     }
     if (width !== last) [last, lastHeld] = [width, now];
-    const rest = moved.has(width) ? Infinity : Math.max(tallest.get(width) ?? 0, vv.height);
+    const rest = moved.has(width) ? Infinity : Math.max(tallest.get(width) ?? 0, height);
     if (rest !== Infinity) tallest.set(width, rest);
-    const covered = Math.round(vv.height * vv.scale) < document.documentElement.clientHeight;
-    up = covered || vv.height < rest;
+    const covered = Math.round(height) < document.documentElement.clientHeight;
+    up = covered || height < rest;
     // down, the widths moved to with it up are only the room it left there
     if (!up) moved.clear();
-    const short = vv.height < rest && vv.height < fits;
+    const short = height < rest && vv.height < fits;
     const on = (covered || short) && (typing || !!field);
     if (on) {
       app.root.style.setProperty('--vv-top', `${vv.offsetTop}px`);
