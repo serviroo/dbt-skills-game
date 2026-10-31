@@ -140,9 +140,10 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   const vv = window.visualViewport;
   const wide = window.matchMedia('(min-width: 540px)');
   let typing = false;
-  // the tallest the visual viewport has been at each width it has had: the room there with the keyboard down, since a
-  // keyboard only ever takes height. Both as it shows on the screen, in the page's px unpinched, so pinching in or out
-  // changes neither
+  // the tallest the visual viewport has been at each width it has had while typing: the room there with the keyboard
+  // down, since a keyboard only ever takes height. Resized with nothing typed in, there's no keyboard, so its height is
+  // the room, taller or shorter (another app put above or below it, a toolbar coming or going). Both as it shows on the
+  // screen, in the page's px unpinched, so pinching in or out changes neither
   const tallest = new Map<number, number>();
   // widths first had with the keyboard up (the phone turned, or the window resized beside another app, while typing;
   // either leaves it up), each with the least height it has had there and the room it should have there: turned, the
@@ -196,7 +197,10 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     const now = held();
     const room = (tallest.get(last) ?? moved.get(last)?.room ?? Infinity) + (now !== lastHeld ? last - width : 0);
     const t = moved.get(width) ?? (up && field && !tallest.has(width) ? { low: height, room } : null);
-    if (t) {
+    if (!field && e.type === 'resize') {
+      moved.delete(width);
+      tallest.set(width, height);
+    } else if (t) {
       t.low = Math.min(t.low, height);
       if (height >= (t.low + t.room) / 2) moved.delete(width);
       else moved.set(width, t);
