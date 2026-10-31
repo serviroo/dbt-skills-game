@@ -64,8 +64,8 @@ one that file records. Commit the new images in `public/` with that file: CI fai
 file.
 
 `scripts/e2e.mjs` starts its own dev server and Playwright Chromium, runs every scenario in `scripts/e2e/*.e2e.mjs`
-and saves screenshots and `report.json` to `artifacts/e2e/<time>/`. It exits non-zero if any scenario fails. Scenarios
-run side by side, longest first, each in a browser of its own: `--jobs=<n>` browsers, by default one for every 4 of the
+and saves `report.json` to `artifacts/e2e/<time>/`, each scenario's screenshots in a folder of its own there (a failed
+one's under `failed/`). It exits non-zero if any scenario fails. Scenarios run side by side, longest first, each in a browser of its own: `--jobs=<n>` browsers, by default one for every 4 of the
 machine's CPU threads and at most 4, so one on CI's 4-vCPU runners. CI runs the same checks on every pull request and
 splits the scenarios into parts with `--shard=<i>/<n>`, spread by the seconds each one took on CI, kept in
 `scripts/e2e/timings.json`. A scenario not listed there counts as 15 s; after adding a long one, refresh the file from

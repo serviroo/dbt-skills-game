@@ -14,15 +14,15 @@
 // renderer check expects SwiftShader) and listens on that machine's 127.0.0.1 only. An SSH tunnel from here forwards
 // its port (-L) and the dev server's (-R), so both sides use 127.0.0.1. --ws needs --port, which keeps the dev server
 // on the forwarded port, and the run first checks that the browser reaches this run's dev server (CONTRIBUTING.md).
-// Writes screenshots and report.json to artifacts/e2e/<time>/, and copies what a failed scenario wrote there to
-// failed/<scenario>/ in it; each scenario is marked in running/ there while it runs (scripts/e2e/keep.mjs).
+// Writes report.json to artifacts/e2e/<time>/ and each scenario's screenshots to a folder of its own there, moved to
+// failed/<scenario>/ when it fails; each scenario is marked in running/ there while it runs (scripts/e2e/keep.mjs).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseAst } from 'vite';
 import { startHarness } from './e2e/harness.mjs';
-import { keep, mark } from './e2e/keep.mjs';
+import { folderOf, keep, mark } from './e2e/keep.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.join(root, 'scripts/e2e');
@@ -118,9 +118,26 @@ const units = unitsOf(pick);
 let h;
 let report;
 let interrupted = false;
+let hung;
+let ended = false;
 const onSignal = () => {
   interrupted = true;
-  if (h) void h.stop().catch((e) => console.error(e));
+  // an interrupted run never passes, however it ends
+  process.exitCode = 130;
+  if (!h) return;
+  // Once the browsers and the server are stopped, every scenario ends within moments and the run writes its report. One
+  // that hangs where stopping them can't reach never ends, and the run would wait on it for good: 2 s after the stop the
+  // run ends as interrupted anyway, leaving that scenario's mark (scripts/e2e/keep.mjs keeps it).
+  void h
+    .stop()
+    .catch((e) => console.error(e))
+    .finally(() => {
+      if (ended || hung) return;
+      hung = setTimeout(() => {
+        console.log("interrupted, and a scenario still hadn't ended 2 s after the browsers and the server stopped");
+        process.exit(130);
+      }, 2000);
+    });
 };
 for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, onSignal);
 let failed = 0;
@@ -133,9 +150,12 @@ try {
       for (const { name, file, run, i } of unit.scenarios) {
         if (interrupted) break;
         const t = Date.now();
-        // marked as running until it ends: one that hangs past its CI step's time is kept from its mark (scripts/e2e/keep.mjs)
-        const running = mark(h.out, name);
-        const since = fs.statSync(running).mtimeMs;
+        // a folder of its own for what it writes, and a mark until it ends: one that hangs past its CI step's time is
+        // kept from its mark (scripts/e2e/keep.mjs)
+        lane.out = folderOf(h.root, name);
+        fs.mkdirSync(lane.out, { recursive: true });
+        const running = mark(h.root, name);
+        let ended = true;
         try {
           let result;
           try {
@@ -153,12 +173,15 @@ try {
           failed++;
           report.scenarios.push({ name, file, ok: false, ms: Date.now() - t, i, error: String(e?.message ?? e) });
           console.log(`FAIL ${name}: ${e?.message ?? e}`);
-          // what it wrote (its screenshots and notes, and the fail- evidence above), for CI to upload
-          const missed = keep(h.out, name, since);
-          if (missed.length) console.log(`${name}: not everything it wrote could be kept: ${missed.join('; ')}`);
-        } finally {
-          fs.rmSync(running, { force: true });
+          // what it wrote (its screenshots and notes, and the fail- evidence above), for CI to upload; one that couldn't
+          // be kept keeps its mark, so CI's keep step tries again
+          const why = keep(h.root, name);
+          if (why) {
+            ended = false;
+            console.log(`${name}: what it wrote couldn't be kept in failed/: ${why}`);
+          }
         }
+        if (ended) fs.rmSync(running, { force: true });
       }
     }
   }));
@@ -171,7 +194,7 @@ try {
     stopError = e;
   }
   try {
-    if (report) fs.writeFileSync(path.join(h.out, 'report.json'), JSON.stringify(report, null, 2));
+    if (report) fs.writeFileSync(path.join(h.root, 'report.json'), JSON.stringify(report, null, 2));
   } catch (e) {
     if (stopError) console.error(stopError);
     throw e;
@@ -180,5 +203,7 @@ try {
   }
   if (stopError) throw stopError;
 }
-console.log(`${report.scenarios.filter((s) => s.ok).length}/${pick.length} passed, artifacts in ${path.relative(root, h.out)}`);
+ended = true;
+clearTimeout(hung);
+console.log(`${report.scenarios.filter((s) => s.ok).length}/${pick.length} passed, artifacts in ${path.relative(root, h.root)}`);
 process.exitCode = interrupted ? 130 : failed ? 1 : 0;
