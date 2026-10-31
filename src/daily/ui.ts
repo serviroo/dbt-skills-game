@@ -246,22 +246,31 @@ export function scrollerOf(e: Element) {
 /** The top of what `box` shows, under its pinned bars (its scroll padding). */
 const viewTop = (box: Element) => (box === document.scrollingElement ? 0 : box.getBoundingClientRect().top) + (parseFloat(getComputedStyle(box).scrollPaddingTop) || 0);
 
+type Span = { top: number; bottom: number };
+/** Where `e` reaches on screen, top to bottom; one with no box of its own (display: contents) spans its children. */
+function span(e: Element): Span | null {
+  if (e.getClientRects().length) return e.getBoundingClientRect();
+  const kids = [...e.children].map(span).filter((r): r is Span => !!r);
+  return kids.length ? { top: Math.min(...kids.map((r) => r.top)), bottom: Math.max(...kids.map((r) => r.bottom)) } : null;
+}
+
 /** Notes where `e`'s top (or bottom) is on screen; what it returns scrolls so `to` has it there again. */
 function pin(e: Element, edge: 'top' | 'bottom' = 'top') {
   const box = scrollerOf(e);
-  const at = e.getBoundingClientRect()[edge];
+  const at = span(e)?.[edge];
   return (to: Element) => {
-    if (box && to.isConnected) box.scrollTop += to.getBoundingClientRect()[edge] - at;
+    const now = to.isConnected ? span(to)?.[edge] : undefined;
+    if (box && at !== undefined && now !== undefined) box.scrollTop += now - at;
   };
 }
 
 type Held = (now?: { focus?: Element | null; part?: Element | null }) => void;
 /**
  * Before `part` of a screen changes: notes what the player is looking at, so it stays where it is after. That is the
- * control with focus, if it is on this screen; else, with `part` partly in view, the first of its children in view (or,
- * if that went, `part`'s top); else, with all of `part` above what is in view, what follows it. Call the result once the
- * change is made, with the control drawn in place of the focused one if that went, and with what stands in `part`'s
- * place now.
+ * control with focus, if it is on this screen; else, with `part` partly in view, the first item in view (a row with
+ * its data-item id, found again by that id when it is drawn anew), else the first of its children in view (or, if that
+ * went, `part`'s top); else, with all of `part` above what is in view, what follows it. Call the result once the change
+ * is made, with the control drawn in place of the focused one if that went, and with what stands in `part`'s place now.
  */
 export function holdView(part: Element | null): Held {
   const box = part && scrollerOf(part);
@@ -274,19 +283,23 @@ export function holdView(part: Element | null): Held {
       if (to) back(to);
     };
   }
-  if (!part.getClientRects().length) return () => {};
+  const at = span(part);
+  if (!at) return () => {};
   const top = viewTop(box);
-  const { top: from, bottom } = part.getBoundingClientRect();
-  if (bottom <= top) {
+  if (at.bottom <= top) {
     const back = pin(part, 'bottom');
     return ({ part: now } = {}) => now && back(now);
   }
-  if (from >= top) return () => {};
-  const kid = [...part.children].find((c) => c.getBoundingClientRect().bottom > top);
+  if (at.top >= top) return () => {};
+  const inView = (e: Element) => (span(e)?.bottom ?? -Infinity) > top;
+  const item = [...part.querySelectorAll('[data-item]')].find(inView);
+  const id = item?.getAttribute('data-item');
+  const kid = item ?? [...part.children].find(inView);
   const backKid = kid && pin(kid);
   const back = pin(part);
   return ({ part: now } = {}) => {
-    if (kid?.isConnected && backKid) backKid(kid);
+    const again = kid?.isConnected ? kid : id != null ? now?.querySelector(`[data-item="${CSS.escape(id)}"]`) : null;
+    if (again && backKid) backKid(again);
     else if (now) back(now);
   };
 }

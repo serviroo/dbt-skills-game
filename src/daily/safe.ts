@@ -158,7 +158,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     // the list follows another open copy's changes, and a clear, as they land
     const list = redrawn(() => {
       const items = st.state.lists[at];
-      return items.length ? h('ul', { class: 'dq-sz-list' }, items.map((i) => h('li', { text: typo(i.text) }))) : p(empty, 'dq-text dq-sz-empty');
+      return items.length ? h('ul', { class: 'dq-sz-list' }, items.map((i) => h('li', { 'data-item': i.id, text: typo(i.text) }))) : p(empty, 'dq-text dq-sz-empty');
     }, () => addOne);
     stops.push(st.onChange(list.update));
     const lists = supportListsCopy(app);

@@ -663,7 +663,7 @@ export function diaryScreen(app: App, _route: Route, visit: Visit): ScreenOut {
     skillsHead.textContent = day === today ? 'Skills today' : 'Skills that day';
     skillsHead.classList.toggle('is-hidden', !used.length && day !== today);
     return used.length
-      ? h('ul', { class: 'dq-skillsused' }, used.map((id) => h('li', {}, h('span', { text: typo(`${SKILL[id].sl} (${SKILL[id].real})`) }), h('span', { class: 'dq-code', text: codes[id] === 5 ? 'helped' : codes[id] === 4 ? "didn't help this time" : 'practised' }))))
+      ? h('ul', { class: 'dq-skillsused' }, used.map((id) => h('li', { 'data-item': id }, h('span', { text: typo(`${SKILL[id].sl} (${SKILL[id].real})`) }), h('span', { class: 'dq-code', text: codes[id] === 5 ? 'helped' : codes[id] === 4 ? "didn't help this time" : 'practised' }))))
       : day === today ? p('None yet today. That is fine.', 'dq-small') : null;
   }, () => null);
   const notePrompt = () => (day === today ? 'A note for today (optional)' : 'A note for this day (optional)');

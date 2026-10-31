@@ -34,6 +34,8 @@
 //                             even after a sound level saved here meanwhile
 //   diary-preview-keeps-selection  words selected in the diary's export preview stay selected when another tab changes
 //                             something the diary doesn't show, and when this copy comes back into view
+//   line-history-holds-view   with the view partway down an open line history and nothing focused, a line picked in
+//                             another tab joins the top of the history and the rows in view stay where they were
 import { another, focusOn, go, until } from './safe-zone-tabs.e2e.mjs';
 
 const SIZES = [
@@ -61,6 +63,13 @@ const visits = (n) =>
     return { id: `v${i}`, k: 'visit', day: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`, t, xp: 10 };
   });
 const TIPP = 'Frost Rune, TIPP. Practise it.';
+/** A line picked on each of `n` days, the latest two days ago. */
+const lines = (n) =>
+  Array.from({ length: n }, (_, i) => {
+    const t = Date.now() - (i + 2) * 86400e3;
+    const d = new Date(t);
+    return { day: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`, id: `l${i}`, tag: 'calm', text: `Line ${i}, kept.`, t };
+  });
 
 async function open(h, viewport, prepare, save = SAVE) {
   const { ctx, page, errors } = await h.open({ [h.YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: T, companionAt: T }), 'dbt.app.v1': h.SEEN, [h.SAVE]: save }, '?mute', viewport, prepare);
@@ -130,6 +139,16 @@ const still = (page) => page.evaluate(() => Promise.all(['.dq-view', '.dq-page',
 /** Marks what has focus now, so it can be told apart from a control drawn again in its place. */
 const mark = (page) => page.evaluate(() => document.activeElement?.setAttribute('data-had-focus', ''));
 const kept = (page) => page.evaluate(() => !!document.activeElement?.hasAttribute('data-had-focus'));
+/** Scrolls the screen so the view starts 40 px into `target` (a locator), under the pinned bars, with nothing focused. */
+const into = (target) =>
+  target.evaluate((e) => {
+    let box = e.parentElement;
+    while (box && !(/auto|scroll/.test(getComputedStyle(box).overflowY) && box.scrollHeight > box.clientHeight)) box = box.parentElement;
+    box ??= document.scrollingElement;
+    const top = (box === document.scrollingElement ? 0 : box.getBoundingClientRect().top) + (parseFloat(getComputedStyle(box).scrollPaddingTop) || 0);
+    box.scrollTop += e.getBoundingClientRect().top - top + 40;
+    document.activeElement?.blur();
+  });
 /** An older copy of the save, from before any of this, lands as if another tab wrote it. */
 const older = (page, h) => page.evaluate(([k, v]) => localStorage.setItem(k, v), [h.SAVE, SAVE]);
 /**
@@ -759,15 +778,7 @@ export const scenarios = {
       await page.locator('.w2-roster-row > [data-shadow="sable"]').waitFor();
       await still(page);
       // the view starts 40 px into Sable's panel, and nothing has focus
-      await page.evaluate(() => {
-        const sable = document.querySelector('.w2-roster-row > [data-shadow="sable"]');
-        let box = sable.parentElement;
-        while (box && !(/auto|scroll/.test(getComputedStyle(box).overflowY) && box.scrollHeight > box.clientHeight)) box = box.parentElement;
-        box ??= document.scrollingElement;
-        const top = (box === document.scrollingElement ? 0 : box.getBoundingClientRect().top) + (parseFloat(getComputedStyle(box).scrollPaddingTop) || 0);
-        box.scrollTop += sable.getBoundingClientRect().top - top + 40;
-        document.activeElement?.blur();
-      });
+      await into(page.locator('.w2-roster-row > [data-shadow="sable"]'));
       const tops = () => page.evaluate(() => ['.w2-roster', '.w2-roster-row > [data-shadow="sable"]', '.w2-roster-row > [data-shadow="sable"] .w2-sh-n'].map((q) => document.querySelector(q).getBoundingClientRect().top));
       const at = await tops();
       await other.page.evaluate(([k, v]) => localStorage.setItem(k, v), [h.SAVE, JSON.stringify({ v: 1, created: T, events: visits(10) })]);
@@ -776,6 +787,35 @@ export const scenarios = {
       const now = await tops();
       if (now.some((y, i) => Math.abs(y - at[i]) > 1)) problems.push(`${tag}: as watchers arrived elsewhere the Night Watch, Sable's panel and his name moved from ${at.map(Math.round)} to ${now.map(Math.round)}`);
       await h.shot(page, `night-watch-arrivals-unfocused-${tag}`);
+      problems.push(...[errors, other.errors].flat().map((e) => `${tag}: ${e}`));
+      await ctx.close();
+    }
+    h.expect(!problems.length, problems.join('\n'));
+  },
+  async 'line-history-holds-view'(h) {
+    const problems = [];
+    for (const [tag, viewport] of SIZES) {
+      const { ctx, page, errors } = await open(h, viewport, undefined, JSON.stringify({ ...JSON.parse(SAVE), lines: lines(35) }));
+      const other = await another(ctx, h);
+      await go(page, { name: 'lines' });
+      const row = (text) => page.locator('.dq-logrow', { hasText: text });
+      await row('Line 20,').waitFor();
+      await still(page);
+      // the view starts 40 px into a row well down the history, and nothing has focus
+      await into(row('Line 20,'));
+      const tops = () => Promise.all(['Line 20,', 'Line 21,', 'Line 22,'].map((t) => row(t).evaluate((e) => e.getBoundingClientRect().top)));
+      const at = await tops();
+      // another tab picks today's line, which goes at the top of the history
+      await other.page.evaluate((k) => {
+        const s = JSON.parse(localStorage.getItem(k));
+        s.lines.push({ day: window.__daily.store.today(), id: 'today', tag: 'calm', text: 'Picked in another tab.', t: Date.now() });
+        localStorage.setItem(k, JSON.stringify(s));
+      }, h.SAVE);
+      if (!(await until(page, () => [...document.querySelectorAll('.dq-logrow')].some((r) => r.textContent.includes('Picked in another tab.'))))) problems.push(`${tag}: the line picked in another tab did not reach the open history`);
+      await page.waitForTimeout(400);
+      const now = await tops();
+      if (now.some((y, i) => Math.abs(y - at[i]) > 1)) problems.push(`${tag}: as a line was picked in another tab, the rows in view moved from ${at.map(Math.round)} to ${now.map(Math.round)}`);
+      await h.shot(page, `line-history-holds-view-${tag}`);
       problems.push(...[errors, other.errors].flat().map((e) => `${tag}: ${e}`));
       await ctx.close();
     }
