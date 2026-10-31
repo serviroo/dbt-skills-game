@@ -19,7 +19,8 @@
 // kept is read from the device's storage, as a reload would read it: the line as drawn is there as a draft before
 // anything is tapped, and as a page after Save. On a wide screen (760x700) the note shows whole as it comes in the
 // tools beside the page, and as the screen turns wide under a note shown over the page; once another line clears it,
-// the tools lie as they do without it.
+// the tools lie as they do without it. With no room for the page at all (320x340 at 200%), nothing a roomier layout
+// placed is kept: the note and the tray show whole over the tools.
 import { boot, settle } from './layout-fit.e2e.mjs';
 
 const PHONES = [
@@ -85,6 +86,38 @@ const noteShown = (page) =>
     }
     return bad;
   }, MIN_TEXT);
+
+/**
+ * What keeps `sel` (the note after a save, or the tray) from showing whole with no room for the page at all: the page
+ * having room after all, a place or size kept from a roomier layout (--room-*), reaching off the screen or under the
+ * top bar, being covered, too short for a line of words, words cut off with no way to scroll to them, or, with
+ * `words`, words under body size.
+ */
+const noRoomShown = (page, sel, words) =>
+  page.evaluate(
+    ({ sel, words, MIN_TEXT }) => {
+      const bad = [];
+      const f = document.querySelector('.dq-draw-frame').getBoundingClientRect();
+      if (f.width && f.height) bad.push(`the page has room, ${Math.round(f.width)}x${Math.round(f.height)} px`);
+      const kept = ['--room-x', '--room-b', '--room-w', '--room-h'].filter((k) => document.querySelector('.dq-tools').style.getPropertyValue(k));
+      if (kept.length) bad.push(`${kept.join(', ')} kept from a roomier layout`);
+      const e = document.querySelector(sel);
+      const r = e.getBoundingClientRect();
+      const at = `${Math.round(r.left)},${Math.round(r.top)} to ${Math.round(r.right)},${Math.round(r.bottom)}`;
+      if (r.top < document.querySelector('.dq-top').getBoundingClientRect().bottom - 0.5 || r.bottom > innerHeight + 0.5 || r.left < -0.5 || r.right > innerWidth + 0.5) bad.push(`${sel} reaches off the screen or under the top bar (${at})`);
+      else if (![[r.left + r.width / 2, r.top + 2], [r.left + r.width / 2, r.bottom - 2]].every(([x, y]) => e.contains(document.elementFromPoint(x, y)))) bad.push(`something covers ${sel} (${at})`);
+      const cs = getComputedStyle(e);
+      if (e.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) < MIN_TEXT * 1.2) bad.push(`${sel} is too short for a line of words (${at})`);
+      if (e.scrollHeight > e.clientHeight + 1 && !/auto|scroll/.test(cs.overflowY)) bad.push(`${sel} is cut off, ${e.scrollHeight} px in ${e.clientHeight}`);
+      for (const t of words ? [e, ...e.querySelectorAll('*')] : []) {
+        if (!t.checkVisibility() || ![...t.childNodes].some((n) => n.nodeType === 3 && n.data.trim())) continue;
+        const px = parseFloat(getComputedStyle(t).fontSize);
+        if (px < MIN_TEXT - 0.01) bad.push(`"${t.textContent.trim().slice(0, 24)}" in ${sel} is ${px} px`);
+      }
+      return bad;
+    },
+    { sel, words, MIN_TEXT },
+  );
 
 /** Opens a drawing page and waits until it takes strokes. */
 async function open(page, kind) {
@@ -353,8 +386,58 @@ async function noteRoom(h) {
   h.expect(!failed.length, failed.join('\n'));
 }
 
+/**
+ * A phone 320 px wide, split to 340 px tall, zooms to 200% with the note after a save showing: with no room for the
+ * page at all, nothing a roomier layout placed is kept, and the note shows whole over the tools; back with room it
+ * shows whole over the page's room again. With no room, a tap on its words puts it away with Save back in a tap, and
+ * the tray opens whole over the tools too, closed by Escape.
+ */
+async function noRoom(h) {
+  const roomy = { width: 195, height: 422 };
+  const none = { width: 160, height: 170 };
+  const failed = [];
+  const { ctx, page, errors } = await boot(h, roomy);
+  const at = async (size) => {
+    await page.setViewportSize(size);
+    await settle(page);
+  };
+  try {
+    await open(page, 'today');
+    await line(page);
+    await page.locator('.dq-save').click();
+    await page.locator('.dq-tools-saved').waitFor({ timeout: 10000 });
+    await at(none);
+    failed.push(...(await noRoomShown(page, '.dq-tools-msg', true)).map((b) => `with no room: ${b}`));
+    await h.shot(page, 'draw-page-zoom-no-room-note');
+    // a note out of place is not tapped here
+    h.expect(!failed.length, failed.join('\n'));
+    await at(roomy);
+    failed.push(...(await noteShown(page)).map((b) => `back with room: ${b}`));
+    await at(none);
+    await page.locator('.dq-tools-saved').click();
+    const save = await page.evaluate(() => {
+      const s = document.querySelector('.dq-save');
+      const q = s.getBoundingClientRect();
+      return { note: document.querySelector('.dq-tools-msg').hasChildNodes(), tap: s.contains(document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2)) };
+    });
+    if (save.note || !save.tap) failed.push(`with no room, after a tap on the note's words the note is ${save.note ? 'still there' : 'gone'} and Save is ${save.tap ? 'in' : 'out of'} a tap`);
+    await page.locator('.dq-tray-b').click();
+    await settle(page);
+    failed.push(...(await noRoomShown(page, '.dq-tray', false)).map((b) => `with no room: ${b}`));
+    await h.shot(page, 'draw-page-zoom-no-room-tray');
+    await page.keyboard.press('Escape');
+    const shut = await page.evaluate(() => document.querySelector('.dq-tray').classList.contains('is-hidden') && document.activeElement === document.querySelector('.dq-tray-b'));
+    if (!shut) failed.push('with no room, Escape left the tray open, or focus away from the Tools button');
+    if (errors.length) failed.push(errors.join(' | '));
+  } finally {
+    await ctx.close();
+  }
+  h.expect(!failed.length, failed.join('\n'));
+}
+
 export const scenarios = {
   ...Object.fromEntries(PHONES.map((phone) => [`draw-page-zoom-${phone.width}x${phone.height}`, phoneAt(phone)])),
   'draw-page-zoom-stroke-kept': strokeKept,
   'draw-page-zoom-note-room': noteRoom,
+  'draw-page-zoom-no-room': noRoom,
 };

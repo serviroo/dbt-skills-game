@@ -721,11 +721,15 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     const back = had === trayB && !folded ? inkBtns[pad.inkIdx] : had;
     if (back instanceof HTMLElement && back !== document.activeElement && back.isConnected) back.focus({ preventScroll: true });
     const { side, row, gap, pad2, w, hh } = room();
+    // the note after a save lies over the page everywhere but beside a wide screen's page, where it sits in the tools
+    tools.classList.toggle('dq-tools--over', !row || side || folded);
     if (w <= 0 || hh <= 0) {
-      // no room for the page at all (a short screen zoomed in): no size kept from a roomier layout may reach past the
-      // screen, so the page keeps the zero size it was measured at
+      // no room for the page at all (a short screen zoomed in): nothing kept from a roomier layout may reach past the
+      // screen, so the page keeps the zero size it was measured at, and with no room measured, the note and the tray
+      // cover the tools
       fit.style.flex = '';
       promptRow.style.width = '';
+      for (const k of ['--room-x', '--room-b', '--room-w', '--room-h']) tools.style.removeProperty(k);
       return;
     }
     const a = pad.W / pad.H;
@@ -736,8 +740,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     promptRow.style.width = row && !side && !folded ? `${fw + pad2 + tools.offsetWidth + gap}px` : '';
     pad.moved();
     // the room the page has (--room-*), which the note after a save covers from its foot wherever it lies over the
-    // page: everywhere but beside a wide screen's page, where it sits in the tools. Folded, the tray covers it too.
-    tools.classList.toggle('dq-tools--over', !row || side || folded);
+    // page; folded, the tray covers it too
     const t = tools.getBoundingClientRect();
     const f = fit.getBoundingClientRect();
     tools.style.setProperty('--room-x', `${f.left - t.left - tools.clientLeft}px`);

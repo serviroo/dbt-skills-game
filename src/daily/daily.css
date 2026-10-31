@@ -4906,16 +4906,16 @@ textarea.dq-input {
 }
 /* the tray, and the note after a save wherever it lies over the page (.dq-tools--over), cover the room the page has
    (--room-*, measured) from its foot and never past it, so never under the top bar or over the tools: what doesn't
-   fit scrolls inside */
+   fit scrolls inside. With no room for the page at all (none measured), they cover the tools, the one place left. */
 .dq-tray,
 .dq-tools--over .dq-tools-msg {
   position: absolute;
   top: auto;
   right: auto;
-  bottom: var(--room-b);
-  left: var(--room-x);
-  width: var(--room-w);
-  max-height: var(--room-h);
+  bottom: var(--room-b, 0px);
+  left: var(--room-x, 0px);
+  width: var(--room-w, 100%);
+  max-height: var(--room-h, 100%);
   overflow-y: auto;
   overscroll-behavior: contain;
 }

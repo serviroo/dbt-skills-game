@@ -199,6 +199,7 @@
   "draw-page-zoom-320x568": 26,
   "draw-page-zoom-390x844": 26,
   "draw-page-zoom-568x320": 26,
+  "draw-page-zoom-no-room": 7,
   "draw-page-zoom-note-room": 8,
   "draw-page-zoom-stroke-kept": 5,
   "ended-controls-out-of-reach": 4,
