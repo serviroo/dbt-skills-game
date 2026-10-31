@@ -663,8 +663,9 @@ export const scenarios = {
   },
 
   /** A sound that starts right as the player leaves rings in the echo in full: only what was playing at the press loses
-   *  its tail. A tap just after Skip has as much echo as the same tap on Home a moment later (Music and the hum are off,
-   *  and Home itself is silent, so the taps are all the speakers play) */
+   *  its tail. A tap 30 ms after Skip has as much echo as the same tap on Home a moment later (Music and the hum are off,
+   *  and Home itself is silent, so the taps are all the speakers play). Each tap's echo is read from where the tap starts
+   *  in the recording: a page this busy can hand a sound to the speakers a moment late */
   async 'sound-after-leaving-keeps-its-echo'(h) {
     const levels = JSON.stringify({ v: 1, master: 1, music: 0, sfx: 1, hum: 0, muted: false });
     const { ctx, page, errors } = await visit(h, `?shot=rewards${LIGHT}`, PHONE, { seed: { 'dbt.audio.v1': levels }, prepare: installAudioRecorder });
@@ -674,12 +675,14 @@ export const scenarios = {
       await shown(page, '.rw .sw-btn');
       await page.evaluate(async () => {
         const { uiSounds } = await import('/src/ui/cutscene-ui.ts');
+        // a tap 30 ms ahead on the audio clock
         window.__tap = () => {
-          const at = window.__taps[0].context.currentTime;
-          uiSounds.play('ui_tap');
+          const at = window.__taps[0].context.currentTime + 0.03;
+          uiSounds.play('ui_tap', { at });
           return at;
         };
-        addEventListener('click', (e) => e.target.closest?.('.ui-ways') && window.__tapAt === undefined && setTimeout(() => (window.__tapAt = window.__tap())), true);
+        // after the intro's own handler on the button, in the same press
+        document.querySelector('.ui-skip').addEventListener('click', () => (window.__tapAt ??= window.__tap()));
       });
       await tap(page, '.ui-skip');
       await until(page, () => window.__tapAt !== undefined, null, { timeout: 5000 });
@@ -687,9 +690,22 @@ export const scenarios = {
       // the same tap two seconds later, once everything of the press is long gone
       await until(page, (t) => window.__taps[0].context.currentTime > t + 2, first, { timeout: 15000 });
       const later = await page.evaluate(() => window.__tap());
-      await audioRecorded(page, 0, later + 0.7);
+      await audioRecorded(page, 0, later + 3);
+      /** Where the tap scheduled at `t` starts in the recording, before `by`: its first block over -60 dBFS. */
+      const onset = (t, by) =>
+        page.evaluate(
+          ([t, by]) => {
+            const tap = window.__taps[0];
+            const q = 128 / tap.context.sampleRate;
+            for (let k = Math.floor((t - 0.005) / q); k * q < by; k++) if ((tap.q.get(k)?.[0] ?? 0) > 1e-3) return k * q;
+            return null;
+          },
+          [t, by],
+        );
+      const [o1, o2] = [await onset(first, later), await onset(later, later + 3)];
+      h.expect(o1 !== null && o2 !== null, `a tap never played: after Skip ${o1}, on Home ${o2}`);
       // past each tap itself (a 26 ms tick), into its room
-      const [right, ref] = [await heard(page, first + 0.12, first + 0.6), await heard(page, later + 0.12, later + 0.6)];
+      const [right, ref] = [await heard(page, o1 + 0.12, o1 + 0.6), await heard(page, o2 + 0.12, o2 + 0.6)];
       h.expect(right.read >= 0.9 && ref.read >= 0.9, `the recorder read only ${Math.round(Math.min(right.read, ref.read) * 100)}% of the taps' echo`);
       h.expect(ref.rms > 10 * SILENT_RMS, `a tap on Home had no echo to compare with (RMS ${ref.rms})`);
       h.expect(right.rms >= 0.7 * ref.rms, `a tap right after Skip lost its echo: RMS ${right.rms}, against ${ref.rms} on Home a moment later`);

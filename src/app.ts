@@ -155,12 +155,13 @@ async function intro(stage: Stage | null, audio: AppAudio | null, state: AppStat
   let offWays = () => {};
   const way = new Promise<Way>((resolve) => {
     offWays = introWays((w) => {
-      left.abort();
-      // none of the intro sounds on after it, whatever screen it was on: every cue still ringing, bed, charge hum and the
-      // score stop at the press
-      audio?.engine?.stopAll(SCORE.leaveSec);
-      // help is quiet from the press on, while the companion loads too, as the Safe Zone is
+      // the sound goes first, before anything else of the intro, however long the rest takes on a slow phone. Help is
+      // silent from the press on, while the companion loads too, as the Safe Zone is: its gate closes under every sound
+      // and echo at once. Skip lets what plays fade. Either way none of the intro sounds on after it: every cue still
+      // ringing, bed, charge hum and the score stop at the press
       if (w === 'safe') audio?.engine?.quiet(true, SCORE.safeOutSec);
+      audio?.engine?.stopAll(w === 'safe' ? SCORE.safeOutSec : SCORE.leaveSec);
+      left.abort();
       resolve(w);
     });
   });

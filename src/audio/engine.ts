@@ -611,7 +611,8 @@ export class AudioEngine {
   }
 
   /** Stop every cue still sounding, the beds, charge and score, and the echo's tail with them (e.g. on replay or leaving
-   *  the cutscene): what plays next starts in an empty echo. */
+   *  the cutscene): what plays next starts in an empty echo. Under the Safe Zone's quiet the echo is closed already, and
+   *  leaving the quiet brings the empty one (see quiet). */
   stopAll(fade = 0.4, at = this.ctx.currentTime) {
     for (const v of this.active) v.stop(at, fade);
     this.active.clear();
@@ -619,6 +620,7 @@ export class AudioEngine {
     this.beds.clear();
     this.charge?.stop(at, fade);
     this.music.stop(fade, at);
+    if (this.isQuiet) return;
     // what plays from here on gets an empty echo with sends of its own at once. What was stopped keeps the old one, whose
     // return closes as they fade, until they are silent and it is dropped, timed on the audio clock, which stands still
     // while the page is hidden: none of their fade rings on, in the old echo or the new
