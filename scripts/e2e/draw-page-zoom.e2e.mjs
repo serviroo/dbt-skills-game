@@ -19,8 +19,11 @@
 // kept is read from the device's storage, as a reload would read it: the line as drawn is there as a draft before
 // anything is tapped, and as a page after Save. On a wide screen (760x700) the note shows whole as it comes in the
 // tools beside the page, and as the screen turns wide under a note shown over the page; once another line clears it,
-// the tools lie as they do without it. With no room for the page at all (320x340 at 200%), nothing a roomier layout
-// placed is kept: the note and the tray show whole over the tools.
+// the tools lie as they do without it. With no room for the page at all (320x340 at 200%) none of it shows, and with
+// little (360x364 at 200%, a page a few pixels high) its hint shows only whole on it; either way the note and the tray
+// show a line or more on screen, beside the Tools button, which closes the tray however it opened. On the shadow ally
+// page at 320x568 and 390x844, at 200% and at the phone's own size, the message after Save card image reads at body size
+// in a room of its own, over the rise's backdrop and clear of every button.
 import { boot, settle } from './layout-fit.e2e.mjs';
 
 const PHONES = [
@@ -88,23 +91,38 @@ const noteShown = (page) =>
   }, MIN_TEXT);
 
 /**
- * What keeps `sel` (the note after a save, or the tray) from showing whole with no room for the page at all: the page
- * having room after all, a place or size kept from a roomier layout (--room-*), reaching off the screen or under the
- * top bar, being covered, too short for a line of words, words cut off with no way to scroll to them, or, with
- * `words`, words under body size.
+ * What of a fresh page shows where it has little room for it, or none: with none, the page having room after all, or
+ * any of it showing (its frame drew a 10 px square); with little, a hint that shows reaching past the page.
  */
-const noRoomShown = (page, sel, words) =>
+const pageShown = (page, none) =>
+  page.evaluate((none) => {
+    const frame = document.querySelector('.dq-draw-frame');
+    const f = frame.getBoundingClientRect();
+    const size = `${Math.round(f.width)}x${Math.round(f.height)} px`;
+    if (none) return f.width && f.height ? [`the page has room, ${size}`] : frame.checkVisibility({ opacityProperty: true, visibilityProperty: true }) ? ['the page shows with no room for it'] : [];
+    const hint = document.querySelector('.dq-draw-hint');
+    if (!hint.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return [];
+    const range = document.createRange();
+    range.selectNodeContents(hint);
+    return [...range.getClientRects()].some((l) => l.left < f.left - 0.5 || l.right > f.right + 0.5 || l.top < f.top - 0.5 || l.bottom > f.bottom + 0.5) ? [`the hint "${hint.textContent}" reaches past the ${size} page`] : [];
+  }, none);
+
+/**
+ * What keeps `sel` (the note after a save, or the tray) from showing whole where the page has little room or none:
+ * reaching off the screen or under the top bar (as one placed for a roomier layout would), covering the Tools button,
+ * being covered, too short for a line of words, words cut off with no way to scroll to them, or, with `words`, words
+ * under body size.
+ */
+const tightShown = (page, sel, words) =>
   page.evaluate(
     ({ sel, words, MIN_TEXT }) => {
       const bad = [];
-      const f = document.querySelector('.dq-draw-frame').getBoundingClientRect();
-      if (f.width && f.height) bad.push(`the page has room, ${Math.round(f.width)}x${Math.round(f.height)} px`);
-      const kept = ['--room-x', '--room-b', '--room-w', '--room-h'].filter((k) => document.querySelector('.dq-tools').style.getPropertyValue(k));
-      if (kept.length) bad.push(`${kept.join(', ')} kept from a roomier layout`);
       const e = document.querySelector(sel);
       const r = e.getBoundingClientRect();
       const at = `${Math.round(r.left)},${Math.round(r.top)} to ${Math.round(r.right)},${Math.round(r.bottom)}`;
+      const b = document.querySelector('.dq-tray-b').getBoundingClientRect();
       if (r.top < document.querySelector('.dq-top').getBoundingClientRect().bottom - 0.5 || r.bottom > innerHeight + 0.5 || r.left < -0.5 || r.right > innerWidth + 0.5) bad.push(`${sel} reaches off the screen or under the top bar (${at})`);
+      else if (r.left < b.right && b.left < r.right && r.top < b.bottom && b.top < r.bottom) bad.push(`${sel} covers the Tools button (${at})`);
       else if (![[r.left + r.width / 2, r.top + 2], [r.left + r.width / 2, r.bottom - 2]].every(([x, y]) => e.contains(document.elementFromPoint(x, y)))) bad.push(`something covers ${sel} (${at})`);
       const cs = getComputedStyle(e);
       if (e.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) < MIN_TEXT * 1.2) bad.push(`${sel} is too short for a line of words (${at})`);
@@ -118,6 +136,58 @@ const noRoomShown = (page, sel, words) =>
     },
     { sel, words, MIN_TEXT },
   );
+
+/**
+ * Why a tap on the Tools button doesn't close the open tray, or '' if it does: the Tools button shows whole, at least
+ * 44 px and uncovered at its middle and just inside each edge, and a tap in its middle closes the tray.
+ */
+async function toolsCloses(page) {
+  const b = await page.evaluate(() => {
+    const e = document.querySelector('.dq-tray-b');
+    const r = e.getBoundingClientRect();
+    const [x, y] = [r.left + r.width / 2, r.top + r.height / 2];
+    const missed = [[x, y], [x, r.top + 2], [x, r.bottom - 2], [r.left + 2, y], [r.right - 2, y]].filter(([px, py]) => !e.contains(document.elementFromPoint(px, py)));
+    return { x, y, w: r.width, h: r.height, open: e.getAttribute('aria-expanded') === 'true', missed: missed.length };
+  });
+  if (!b.open) return 'the tray did not open';
+  if (b.w < MIN_TAP - 0.5 || b.h < MIN_TAP - 0.5) return `the Tools button is ${Math.round(b.w)}x${Math.round(b.h)} px`;
+  if (b.missed) return `the open tray covers the Tools button at ${b.missed} of its 5 tap points`;
+  await page.mouse.click(b.x, b.y);
+  const shut = await page.evaluate(() => document.querySelector('.dq-tray').classList.contains('is-hidden') && document.querySelector('.dq-tray-b').getAttribute('aria-expanded') === 'false');
+  return shut ? '' : 'a tap on the Tools button left the tray open';
+}
+
+/**
+ * What keeps the message on the rise from reading in a room of its own once brought into view: words under body size,
+ * reaching off the screen or under the top bar, anywhere along its lines anything over or under it before the rise's
+ * backdrop (a button of the rise or the top bar, or the drawing page with no backdrop there), or a backdrop the drawing
+ * page shows through.
+ */
+const riseMsgShown = (page) =>
+  page.evaluate((MIN_TEXT) => {
+    const bad = [];
+    const m = document.querySelector('.dq-rise-msg');
+    m.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+    const px = parseFloat(getComputedStyle(m).fontSize);
+    if (px < MIN_TEXT - 0.01) bad.push(`the message is ${px} px`);
+    const r = m.getBoundingClientRect();
+    if (r.top < document.querySelector('.dq-top').getBoundingClientRect().bottom - 0.5 || r.bottom > innerHeight + 0.5 || r.left < -0.5 || r.right > innerWidth + 0.5) bad.push(`the message reaches off the screen or under the top bar (${Math.round(r.left)},${Math.round(r.top)} to ${Math.round(r.right)},${Math.round(r.bottom)})`);
+    const backdrop = getComputedStyle(document.querySelector('.dq-rise-bg')).backgroundColor.match(/[\d.]+/g).map(Number);
+    if (backdrop.length > 3 && backdrop[3] < 1) bad.push(`the drawing page shows through the rise's backdrop (${backdrop.join(', ')})`);
+    const label = (e) => e.getAttribute('aria-label') || (e.matches('button, a') ? e.textContent.trim() : `${e.tagName.toLowerCase()}.${[...e.classList].join('.')}`);
+    const range = document.createRange();
+    range.selectNodeContents(m);
+    for (const l of range.getClientRects()) {
+      for (const x of [l.left + 2, (l.left + l.right) / 2, l.right - 2]) {
+        const y = (l.top + l.bottom) / 2;
+        const stack = document.elementsFromPoint(x, y);
+        const bg = stack.findIndex((e) => e.matches('.dq-rise-bg'));
+        const crossed = stack.slice(0, bg < 0 ? stack.length : bg).filter((e) => !m.contains(e) && !e.contains(m));
+        if (bg < 0 || crossed.length) bad.push(`at ${Math.round(x)},${Math.round(y)} the message crosses ${crossed.map(label).slice(0, 3).join(', ') || 'nothing'}${bg < 0 ? ', with no backdrop under it' : ''}`);
+      }
+    }
+    return bad;
+  }, MIN_TEXT);
 
 /** Opens a drawing page and waits until it takes strokes. */
 async function open(page, kind) {
@@ -387,50 +457,113 @@ async function noteRoom(h) {
 }
 
 /**
- * A phone 320 px wide, split to 340 px tall, zooms to 200% with the note after a save showing: with no room for the
- * page at all, nothing a roomier layout placed is kept, and the note shows whole over the tools; back with room it
- * shows whole over the page's room again. With no room, a tap on its words puts it away with Save back in a tap, and
- * the tray opens whole over the tools too, closed by Escape.
+ * A phone zoomed to 200% with no room for the page (320 px wide, split to 340 px tall) or little (360x364, a page a few
+ * pixels high). As a fresh page opens, none of the page shows with no room, and with little its hint shows only whole
+ * on it. The tray opened by Tools shows whole beside the Tools button, Tools closes it, and Escape does too, back to
+ * Tools. A line drawn with room is saved at that size: the note shows whole beside the Tools button too, shows whole
+ * over the page's room once the page has room again, and back at that size shows as it did, with nothing kept from the
+ * roomier layout; a tap on its words puts it away with Save back in a tap. Last, Tools closes the tray when it opened
+ * as the tools folded, with focus in them or with the Clear question open.
  */
-async function noRoom(h) {
-  const roomy = { width: 195, height: 422 };
-  const none = { width: 160, height: 170 };
-  const failed = [];
-  const { ctx, page, errors } = await boot(h, roomy);
-  const at = async (size) => {
-    await page.setViewportSize(size);
-    await settle(page);
-  };
-  try {
-    await open(page, 'today');
-    await line(page);
-    await page.locator('.dq-save').click();
-    await page.locator('.dq-tools-saved').waitFor({ timeout: 10000 });
-    await at(none);
-    failed.push(...(await noRoomShown(page, '.dq-tools-msg', true)).map((b) => `with no room: ${b}`));
-    await h.shot(page, 'draw-page-zoom-no-room-note');
-    // a note out of place is not tapped here
+function tight(size, none) {
+  return async (h) => {
+    const roomy = { width: 195, height: 422 };
+    const where = none ? 'with no room' : 'with little room';
+    const shot = `draw-page-zoom-${none ? 'no' : 'little'}-room`;
+    const failed = [];
+    const { ctx, page, errors } = await boot(h, roomy);
+    const at = async (s) => {
+      await page.setViewportSize(s);
+      await settle(page);
+    };
+    try {
+      await open(page, 'today');
+      await at(size);
+      failed.push(...(await pageShown(page, none)).map((b) => `${where}: ${b}`));
+      await h.shot(page, shot);
+      await page.locator('.dq-tray-b').click();
+      await settle(page);
+      failed.push(...(await tightShown(page, '.dq-tray', false)).map((b) => `${where}: ${b}`));
+      await h.shot(page, `${shot}-tray`);
+      const shut = await toolsCloses(page);
+      if (shut) failed.push(`${where}, the tray opened by Tools: ${shut}`);
+      if (await page.locator('.dq-tray-b[aria-expanded="false"]').count()) await page.locator('.dq-tray-b').click();
+      await page.keyboard.press('Escape');
+      const back = await page.evaluate(() => document.querySelector('.dq-tray').classList.contains('is-hidden') && document.activeElement === document.querySelector('.dq-tray-b'));
+      if (!back) failed.push(`${where}, Escape left the tray open, or focus away from the Tools button`);
+
+      await at(roomy);
+      await line(page);
+      await at(size);
+      await page.locator('.dq-save').click();
+      await page.locator('.dq-tools-saved').waitFor({ timeout: 10000 });
+      await settle(page);
+      const note = await tightShown(page, '.dq-tools-msg', true);
+      failed.push(...note.map((b) => `${where}: ${b}`));
+      await h.shot(page, `${shot}-note`);
+      // a note out of place is not tapped here
+      if (!note.length) {
+        await at(roomy);
+        failed.push(...(await noteShown(page)).map((b) => `back with room: ${b}`));
+        await at(size);
+        failed.push(...(await tightShown(page, '.dq-tools-msg', true)).map((b) => `${where} again: ${b}`));
+        await page.locator('.dq-tools-saved').click();
+        const save = await page.evaluate(() => {
+          const s = document.querySelector('.dq-save');
+          const q = s.getBoundingClientRect();
+          return { note: document.querySelector('.dq-tools-msg').hasChildNodes(), tap: s.contains(document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2)) };
+        });
+        if (save.note || !save.tap) failed.push(`${where}, after a tap on the note's words the note is ${save.note ? 'still there' : 'gone'} and Save is ${save.tap ? 'in' : 'out of'} a tap`);
+      }
+
+      // the tray opens as the tools fold with focus in them, or with the Clear question open in it
+      for (const how of ['with focus in them', 'with the Clear question open']) {
+        await at({ width: 390, height: 844 });
+        if (how === 'with focus in them') await page.getByRole('radio', { name: 'Mint ink' }).focus();
+        else {
+          await line(page);
+          await page.locator('.dq-tool--clear').click();
+        }
+        await at(size);
+        const why = await toolsCloses(page);
+        if (why) failed.push(`${where}, the tray opened as the tools folded ${how}: ${why}`);
+      }
+      if (errors.length) failed.push(errors.join(' | '));
+    } finally {
+      await ctx.close();
+    }
     h.expect(!failed.length, failed.join('\n'));
-    await at(roomy);
-    failed.push(...(await noteShown(page)).map((b) => `back with room: ${b}`));
-    await at(none);
-    await page.locator('.dq-tools-saved').click();
-    const save = await page.evaluate(() => {
-      const s = document.querySelector('.dq-save');
-      const q = s.getBoundingClientRect();
-      return { note: document.querySelector('.dq-tools-msg').hasChildNodes(), tap: s.contains(document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2)) };
-    });
-    if (save.note || !save.tap) failed.push(`with no room, after a tap on the note's words the note is ${save.note ? 'still there' : 'gone'} and Save is ${save.tap ? 'in' : 'out of'} a tap`);
-    await page.locator('.dq-tray-b').click();
-    await settle(page);
-    failed.push(...(await noRoomShown(page, '.dq-tray', false)).map((b) => `with no room: ${b}`));
-    await h.shot(page, 'draw-page-zoom-no-room-tray');
-    await page.keyboard.press('Escape');
-    const shut = await page.evaluate(() => document.querySelector('.dq-tray').classList.contains('is-hidden') && document.activeElement === document.querySelector('.dq-tray-b'));
-    if (!shut) failed.push('with no room, Escape left the tray open, or focus away from the Tools button');
-    if (errors.length) failed.push(errors.join(' | '));
-  } finally {
-    await ctx.close();
+  };
+}
+
+/**
+ * On the shadow ally page at 320x568 and 390x844, at 200% and at the phone's own size, a line is saved as an ally and it
+ * rises; Save card image then says how that went, in a room of its own, read with the rise scrolled to it.
+ */
+async function riseMessage(h) {
+  const failed = [];
+  for (const phone of [PHONES[0], PHONES[1]]) {
+    for (const zoom of [2, 1]) {
+      const size = `${phone.width}x${phone.height} at ${zoom * 100}%`;
+      const { ctx, page, errors } = await boot(h, { width: phone.width / zoom, height: phone.height / zoom });
+      try {
+        await open(page, 'ally');
+        await line(page);
+        await page.locator('.dq-save').click();
+        await page.locator('.dq-sheet:not(.is-hidden) .dq-sheet-h').waitFor({ timeout: 10000 });
+        await page.keyboard.press('Enter');
+        await page.locator('.dq-rise:not(.is-hidden) .dq-rise-acts').waitFor({ timeout: 10000 });
+        await settle(page);
+        await page.getByRole('button', { name: 'Save card image' }).click();
+        await page.waitForFunction(() => document.querySelector('.dq-rise-msg')?.textContent, null, { timeout: 10000 });
+        await settle(page);
+        failed.push(...(await riseMsgShown(page)).map((b) => `${size}: ${b}`));
+        await h.shot(page, `draw-page-zoom-rise-${phone.width}x${phone.height}-${zoom * 100}`);
+        if (errors.length) failed.push(`${size}: ${errors.join(' | ')}`);
+      } finally {
+        await ctx.close();
+      }
+    }
   }
   h.expect(!failed.length, failed.join('\n'));
 }
@@ -439,5 +572,7 @@ export const scenarios = {
   ...Object.fromEntries(PHONES.map((phone) => [`draw-page-zoom-${phone.width}x${phone.height}`, phoneAt(phone)])),
   'draw-page-zoom-stroke-kept': strokeKept,
   'draw-page-zoom-note-room': noteRoom,
-  'draw-page-zoom-no-room': noRoom,
+  'draw-page-zoom-no-room': tight({ width: 160, height: 170 }, true),
+  'draw-page-zoom-little-room': tight({ width: 180, height: 182 }, false),
+  'draw-page-zoom-rise': riseMessage,
 };

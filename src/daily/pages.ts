@@ -6,7 +6,7 @@ import type { App, Route, ScreenOut, Visit } from './app';
 import { glyph, icon, mothSVG } from './art';
 import { skillCard } from './hub';
 import { regionPicker, telHref, smsHref } from './safe';
-import { allyCard, cardOf, favFirst, focusBack, refill } from './artroom';
+import { allyCard, allyName, cardOf, favFirst, focusBack, refill } from './artroom';
 import { artStore } from './artstore';
 import { storyStore } from './storystore';
 import { addDays, cleanName, dayKey, fieldKey, fieldTimes, isSkillId, ROW_CAP, uid, type DiaryEntry, type State, type Store } from './store';
@@ -231,6 +231,9 @@ export function restScreen(app: App): ScreenOut {
 }
 
 // ---------------- Shadows (collection) ----------------
+/** A card in a collection, in the cell its row stretches (.dq-cardcell). */
+const cell = (card: HTMLElement) => h('div', { class: 'dq-cardcell' }, card);
+
 export function shadowsScreen(app: App): ScreenOut {
   const d = app.store.derived();
   const counts: Record<string, number> = {};
@@ -246,11 +249,13 @@ export function shadowsScreen(app: App): ScreenOut {
     'div',
     { class: 'dq-collection' },
     owned.map((s) =>
-      h(
-        'button',
-        { type: 'button', class: 'dq-cardbtn', onclick: () => app.go({ name: 'skill', id: s.id }), 'aria-label': `${s.sl}, ${s.real}. Practise it.` },
-        skillCard(s.id, { small: true }),
-        counts[s.id] ? h('span', { class: 'dq-cardbtn-n', text: `Practised ${counts[s.id]}x` }) : h('span', { class: 'dq-cardbtn-n', text: 'Met' }),
+      cell(
+        h(
+          'button',
+          { type: 'button', class: 'dq-cardbtn', onclick: () => app.go({ name: 'skill', id: s.id }), 'aria-label': `${s.sl}, ${s.real}. Practise it.` },
+          skillCard(s.id, { small: true }),
+          counts[s.id] ? h('span', { class: 'dq-cardbtn-n', text: `Practised ${counts[s.id]}x` }) : h('span', { class: 'dq-cardbtn-n', text: 'Met' }),
+        ),
       ),
     ),
   );
@@ -259,7 +264,8 @@ export function shadowsScreen(app: App): ScreenOut {
     { type: 'button', class: 'dq-cardbtn dq-allyslot', onclick: () => app.go({ name: 'draw', kind: 'ally' }) },
     h('span', { class: 'dq-cardface dq-allyslot-face' }, h('span', { class: 'dq-allyslot-ic', html: icon('brush') }), h('span', { class: 'dq-allyslot-t', text: 'Design an ally' }), h('span', { class: 'dq-allyslot-s', text: 'Draw one. It joins your army.' })),
   );
-  const allies = h('div', { class: 'dq-collection dq-allies' }, designSlot);
+  const slot = cell(designSlot);
+  const allies = h('div', { class: 'dq-collection dq-allies' }, slot);
   const roster = rosterSection(app);
   const as = artStore(app.store.key);
   let turn = 0;
@@ -270,9 +276,16 @@ export function shadowsScreen(app: App): ScreenOut {
     const mine = favFirst(list.filter((m) => m.kind === 'ally'));
     refill(allies, mine.map(cardOf).join('\n'), () => [
       ...mine.map((m) =>
-        h('button', { type: 'button', class: 'dq-cardbtn dq-allybtn', 'data-piece': m.id, onclick: () => app.go({ name: 'piece', id: m.id }), 'aria-label': `${m.name || 'Shadow ally'}, a shadow ally you designed${m.fav ? ', a favourite' : ''}` }, allyCard(app, m, undefined, true)),
+        cell(
+          h(
+            'button',
+            { type: 'button', class: 'dq-cardbtn dq-allybtn', 'data-piece': m.id, onclick: () => app.go({ name: 'piece', id: m.id }), 'aria-label': `${m.name || 'Shadow ally'}, a shadow ally you designed${m.fav ? ', a favourite' : ''}` },
+            allyCard(app, m, undefined, true),
+            h('span', { class: 'dq-allybtn-fit', 'aria-hidden': 'true', text: typo(allyName(m)) }),
+          ),
+        ),
       ),
-      designSlot,
+      slot,
     ]);
     focusBack(allies);
   };
