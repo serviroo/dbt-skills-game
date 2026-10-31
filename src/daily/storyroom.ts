@@ -1983,6 +1983,8 @@ export function readScreen(app: App, route: Route): ScreenOut {
     if (keep) keepTextSize(app, v);
   };
   setSize(textSize(app));
+  // a size chosen in another open copy
+  const offSize = app.store.onChange(() => setSize(textSize(app)));
 
   let unkeep = () => {};
   /**
@@ -2082,6 +2084,7 @@ export function readScreen(app: App, route: Route): ScreenOut {
       alive = false;
       unkeep();
       offArt();
+      offSize();
     },
   };
 }

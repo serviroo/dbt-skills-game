@@ -123,14 +123,14 @@ const still = (page) =>
   );
 const xp = (page) => page.evaluate(() => JSON.stringify(window.__daily.store.state.events.map((e) => [e.k, e.xp ?? 0])));
 /** What a control is called: its aria-label, else its label's words, else its own. Runs in the page. */
-const nameOf = (e) => (e?.getAttribute('aria-label') || (e?.labels?.length ? e.labels[0].textContent : e?.textContent) || '').replace(/\s+/g, ' ').trim();
+export const nameOf = (e) => (e?.getAttribute('aria-label') || (e?.labels?.length ? e.labels[0].textContent : e?.textContent) || '').replace(/\s+/g, ' ').trim();
 
 /**
  * Whether `e` shows whole: each of its lines on the screen and, at its corners, its middle and between them, not under
  * anything, a pinned bar most of all. A choice inside its label shows as the label. One taller than half the screen is
  * centred as it gets focus, so it need only show its first line, 22px down, across its width. Runs in the page.
  */
-const whole = (e) => {
+export const whole = (e) => {
   if (e.matches('input') && e.closest('label')) e = e.closest('label');
   const rs = [...e.getClientRects()].filter((r) => r.width && r.height);
   return (
