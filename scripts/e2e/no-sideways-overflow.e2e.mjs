@@ -1,16 +1,20 @@
-// At 200% no companion screen is wider than the phone, so a sideways scroll can never push the Safe Zone button off the
-// edge (DESIGN.md principle 6). A phone at 320x568, 390x844, 568x320 and 844x390 at 200% zoom (the page laid out at
-// half the size, as browser zoom does), one scenario each, opens every screen on a returning save with everything
-// unlocked: on each, the page is exactly as wide as the screen, nothing scrolls sideways inside the companion, and the
-// Safe Zone button is in reach (whole inside the screen and every box that clips it, and taking taps at its corners).
-// Outside a skill's window and the Safe Zone, no row or card squeezes a word, so none breaks onto the next line without
-// a hyphen; no Night Watch card cuts its words or sets them smaller than its own sizes (at the phone's own size too),
-// and A quiet minute's moth stays clear of its badge. The same holds inside every watcher's card in the Night Watch
-// camp, and inside the sheets opened from the drawing page and the story editor, checked as they open at the phone's
-// own size and once it zooms to 200%; each sits below the top bar, its close button at least 44 px and in reach the
-// same way. A failure names the widest boxes, or the words, that reach past the edge, and the words that break.
+// At 200% no companion screen is wider than the phone, so a sideways scroll can never push the Safe Zone button off
+// the edge (DESIGN.md principle 6). A phone at 320x568, 390x844, 568x320 and 844x390, one scenario each at 200% zoom
+// (the page laid out at half the size, as browser zoom does) and one with the phone's own text at 200% (each word
+// twice its size in a page as wide as before, see scaleText), opens every screen on a returning save with everything
+// unlocked and its drawings named with a long word, Settings with a look tried on in the Wardrobe too: on each, the
+// page is exactly as wide as the screen, nothing scrolls sideways inside the companion, nothing reaches past the
+// screen's edge, no box that clips its words (a card's edge) cuts one at its side, a word kept whole breaks only where
+// its hyphen shows, and the Safe Zone button is in reach (whole inside the screen and every box that clips it, and
+// taking taps at its corners). Outside a skill's window and the Safe Zone, no row or card squeezes a word, so none
+// breaks onto the next line without a hyphen; no Night Watch card cuts its words or sets them smaller than its own
+// sizes (at the phone's own size too), and A quiet minute's moth stays clear of its badge. The same holds inside every
+// watcher's card in the Night Watch camp, and inside the sheets opened from the drawing page and the story editor,
+// checked as they open at the phone's own size and once it zooms to 200% (with the phone's text at 200%, there alone);
+// each sits below the top bar, its close button at least 44 px and in reach the same way. A failure names the widest
+// boxes, or the words, that reach past the edge, and the words that break or are cut.
 import { fullSave, seedStores } from './me-91-final-save-ids.e2e.mjs';
-import { cutShort } from './safe-zone-reach.e2e.mjs';
+import { cutShort, scaleText } from './safe-zone-reach.e2e.mjs';
 
 const SIZES = [
   { width: 320, height: 568 },
@@ -28,6 +32,8 @@ const SCREENS = [
   ['A quiet minute', { name: 'ease' }],
   ['Rest', { name: 'rest' }],
   ['Diary', { name: 'diary' }],
+  ['Pick a day', { name: 'days' }],
+  ['Print a week', { name: 'print' }],
   ['Comfort', { name: 'comfort' }],
   ['Lines', { name: 'lines' }],
   ['Night Watch', { name: 'shadows' }],
@@ -36,6 +42,7 @@ const SCREENS = [
   ['drawing page', { name: 'draw', kind: 'today' }],
   ['shadow ally page', { name: 'draw', kind: 'ally' }],
   ['a drawing', { name: 'piece', id: 'draw-today' }],
+  ['a shadow ally', { name: 'piece', id: 'draw-ally' }],
   ['Story Room', { name: 'stories' }],
   ['writing', { name: 'write', id: 'tale-1' }],
   ['reading', { name: 'read', id: 'tale-1' }],
@@ -65,8 +72,9 @@ const settle = (page) =>
   });
 
 /**
- * How wide the page and the companion's own scroller are against the screen, the widest boxes past its edge, the cards
- * that cut their words, and whether A quiet minute's moth is over its badge; with `sheet`, the boxes inside that sheet
+ * How wide the page and the companion's own scroller are against the screen, the widest boxes past its edge, the words
+ * a box cuts at its side, the cards that cut their words, and whether A quiet minute's moth is over its badge; with
+ * `sheet`, the boxes inside that sheet
  * that scroll or clip sideways, and whether its top is under the top bar.
  */
 const width = (page, sheet = null) =>
@@ -79,6 +87,8 @@ const width = (page, sheet = null) =>
     };
     const label = (e) => e.tagName.toLowerCase() + [...e.classList].slice(0, 2).map((c) => `.${c}`).join('');
     const out = (r) => r.width && (r.right > innerWidth + 0.5 || r.left < -0.5);
+    // words only a screen reader hears, as .dq-sr is or a label clipped to nothing as it is
+    const unseen = (e) => !!e.closest('.dq-sr') || getComputedStyle(e).clipPath === 'inset(50%)';
     const past = [...document.querySelectorAll('body *')]
       .filter((e) => out(e.getBoundingClientRect()) && e.checkVisibility() && !clips(e))
       .filter((e, _, all) => !all.includes(e.parentElement))
@@ -90,12 +100,41 @@ const width = (page, sheet = null) =>
     const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     for (let n; (n = walk.nextNode()) && past.length < 6; ) {
       const p = n.parentElement;
-      if (!n.textContent.trim() || !p.checkVisibility() || clips(p) || p.closest('.dq-sr')) continue;
+      if (!n.textContent.trim() || !p.checkVisibility() || clips(p) || unseen(p)) continue;
       const range = document.createRange();
       range.selectNodeContents(n);
       const r = range.getBoundingClientRect();
       if (out(r) && !past.some((x) => x.startsWith(label(p)))) past.push(`"${n.textContent.trim().slice(0, 24)}" in ${label(p)} ${Math.round(r.left)}..${Math.round(r.right)}`);
     }
+    // words the nearest box that clips them (a card's edge) cuts at its side; a box that scrolls them shows them whole
+    const sides = [];
+    const main = document.querySelector('#dq-main');
+    const texts = main && document.createTreeWalker(main, NodeFilter.SHOW_TEXT);
+    for (let n; texts && (n = texts.nextNode()) && sides.length < 6; ) {
+      const p = n.parentElement;
+      if (!n.textContent.trim() || !p.checkVisibility() || unseen(p)) continue;
+      let at = p;
+      while (at !== main && getComputedStyle(at).overflowX === 'visible') at = at.parentElement;
+      if (at === main || /auto|scroll/.test(getComputedStyle(at).overflowX)) continue;
+      const range = document.createRange();
+      range.selectNodeContents(n);
+      const r = range.getBoundingClientRect();
+      const left = at.getBoundingClientRect().left + at.clientLeft;
+      if (r.width && (r.left < left - 0.5 || r.right > left + at.clientWidth + 0.5)) sides.push(`"${n.textContent.trim().slice(0, 24)}" in ${label(p)}, cut by ${label(at)}`);
+    }
+    // a word kept whole (wholeWords in ui.ts) that breaks at a soft hyphen draws the hyphen there, which gives it a width
+    const bare = [...document.querySelectorAll('dq-shy')]
+      .filter((s) => {
+        if (!s.parentElement.checkVisibility() || unseen(s.parentElement)) return false;
+        const [before, after] = [s.previousSibling, s.nextSibling].map((t) => {
+          const range = document.createRange();
+          range.selectNodeContents(t);
+          return [...range.getClientRects()];
+        });
+        const [a, b] = [before.at(-1), after[0]];
+        return !!a && !!b && b.top > a.top + a.height / 2 && s.getBoundingClientRect().width < 0.5;
+      })
+      .map((s) => `"${s.previousSibling.textContent}|${s.nextSibling.textContent}" in "${s.parentElement.textContent.slice(0, 24)}"`);
     const box = sheet && document.querySelector(sheet);
     const inner = box ? [box, ...box.querySelectorAll('*')].filter((e) => getComputedStyle(e).overflowX !== 'visible' && e.scrollWidth > e.clientWidth + 1 && e.checkVisibility() && !e.closest('.dq-sr')).map((e) => `${label(e)} ${e.scrollWidth - e.clientWidth} px wider than it shows`) : [];
     const bar = document.querySelector('.dq-top').getBoundingClientRect().bottom;
@@ -109,6 +148,8 @@ const width = (page, sheet = null) =>
       dq: dq ? dq.scrollWidth - dq.clientWidth : 0,
       vw: innerWidth,
       past: past.slice(0, 6),
+      sides,
+      bare: bare.slice(0, 6),
       inner,
       under: !!box && box.getBoundingClientRect().top < bar - 0.5,
       cut,
@@ -156,27 +197,37 @@ const reach = (page, sel, { below = true, optional = false } = {}) =>
     { sel, below, optional },
   );
 
-/** Every screen, and the sheets, on one phone at 200% zoom. */
-function sweep(phone) {
+/** Every screen, and the sheets, on one phone at 200% zoom, or with `font`, with the phone's own text at 200%. */
+function sweep(phone, { font = false } = {}) {
   return async (h) => {
     const failed = [];
-    const size = `${phone.width}x${phone.height} at 200%`;
-    const zoomed = { width: phone.width / 2, height: phone.height / 2 };
+    const size = `${phone.width}x${phone.height} ${font ? 'with its text at 200%' : 'at 200%'}`;
+    const zoomed = font ? phone : { width: phone.width / 2, height: phone.height / 2 };
     const now = Date.now();
     const save = fullSave(now);
     const you = JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: save.created, companionAt: save.created });
-    const { ctx, page, errors } = await h.open({ [h.SAVE]: JSON.stringify(save), [h.YOU]: you, 'dbt.app.v1': h.SEEN }, '?mute', zoomed);
+    const { ctx, page, errors } = await h.open({ [h.SAVE]: JSON.stringify(save), [h.YOU]: you, 'dbt.app.v1': h.SEEN }, '?mute', zoomed, undefined, font ? { isMobile: true, hasTouch: true } : {});
     try {
       await h.reachHub(page);
       await seedStores(page, h.SAVE, now);
+      // the drawings named with a long word, as a player may name them
+      await page.evaluate(async (key) => {
+        const { artStore } = await import('/src/daily/artstore.ts');
+        await artStore(key).setLabels('draw-today', { name: 'Chrysanthemums' });
+        await artStore(key).setLabels('draw-ally', { name: 'Chrysanthemum' });
+      }, h.SAVE);
       await page.reload();
       await h.reachHub(page);
+      if (font) await scaleText(page);
       const check = async (where, { words = true, sheet = null, close = null } = {}) => {
         await settle(page);
         const w = await width(page, sheet);
         const bad = [];
         if (w.doc !== w.vw) bad.push(`the page is ${w.doc} px wide`);
         if (w.dq > 0) bad.push(`the companion scrolls ${w.dq} px sideways`);
+        if (w.past.length) bad.push('something reaches past the edge');
+        if (w.sides.length) bad.push(`words cut at the side: ${w.sides.join(', ')}`);
+        if (w.bare.length) bad.push(`words broken with no hyphen drawn: ${w.bare.join(', ')}`);
         const safe = await reach(page, '.dq-top .dq-safe', { below: false, optional: true });
         if (safe) bad.push(`the Safe Zone button is out of reach: ${safe}`);
         if (w.inner.length) bad.push(`inside the sheet: ${w.inner.join(', ')}`);
@@ -188,7 +239,7 @@ function sweep(phone) {
         if (w.moth) bad.push('the moth is over the badge');
         if (bad.length) failed.push(`${size} ${where}: ${bad.join('; ')} on a ${w.vw} px screen; past the edge: ${w.past.join(', ') || 'nothing found'}`);
         if (words) for (const f of await cutShort(page, { scope: sheet ? `${sheet} *` : '#dq-main *' })) failed.push(`${size} ${where}: ${f}`);
-        await h.shot(page, `wide-${phone.width}x${phone.height}-${where.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`);
+        await h.shot(page, `wide-${phone.width}x${phone.height}${font ? '-text' : ''}-${where.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`);
       };
       for (const [where, route] of SCREENS) {
         await page.evaluate((r) => window.__daily.go(r), route);
@@ -201,19 +252,27 @@ function sweep(phone) {
         await check(where, { words: route.name !== 'skill' && route.name !== 'safe' });
       }
       // Night Watch at the phone's own size, where its cards keep their words whole at their own sizes too
-      await page.setViewportSize(phone);
-      await page.evaluate(() => window.__daily.go({ name: 'shadows' }));
-      await page.waitForFunction(() => window.__daily.route.name === 'shadows', null, { timeout: 10000 });
-      await check('Night Watch, unzoomed');
-      await page.setViewportSize(zoomed);
+      if (!font) {
+        await page.setViewportSize(phone);
+        await page.evaluate(() => window.__daily.go({ name: 'shadows' }));
+        await page.waitForFunction(() => window.__daily.route.name === 'shadows', null, { timeout: 10000 });
+        await check('Night Watch, unzoomed');
+        await page.setViewportSize(zoomed);
+      }
       // Home once the check-in is answered with a feeling that asks how strong it is
       await page.evaluate(() => window.__daily.go({ name: 'hub' }));
       await page.locator('.dq-feels .dq-opt').filter({ hasText: 'Tired' }).click({ timeout: 10000 });
       await page.locator('.dq-level [role=radiogroup]').waitFor({ timeout: 10000 });
       await check('Home, How strong');
+      // Settings with a look tried on in the Wardrobe, its bar under the page
+      await page.evaluate(() => window.__daily.go({ name: 'settings' }));
+      await page.locator('.w2-wopt:enabled[aria-checked="false"]').first().click({ timeout: 10000 });
+      await page.locator('.w2-try').waitFor({ timeout: 10000 });
+      await check('Wardrobe, a look tried on');
 
       // the sheets opened from the drawing page and the story editor
-      // each sheet opens at the phone's own size, where the page can be drawn on, and is checked once zoomed to 200%
+      // each sheet opens at the phone's own size, where the page can be drawn on, and is checked there and once zoomed to
+      // 200%, or with the phone's text at 200%, there alone
       const sheet = async (where, { panel, close = null, clip = false }, open) => {
         await page.setViewportSize(phone);
         try {
@@ -221,8 +280,10 @@ function sweep(phone) {
         } catch (e) {
           return failed.push(`${size} ${where}: could not open it: ${String(e.message).split('\n')[0]}`);
         }
-        await check(`${where}, unzoomed`, { sheet: panel, close });
-        await page.setViewportSize(zoomed);
+        if (!font) {
+          await check(`${where}, unzoomed`, { sheet: panel, close });
+          await page.setViewportSize(zoomed);
+        }
         await check(where, { sheet: panel, close });
         // the close check itself: a close the sheet cuts at its edge, by 10 px and by half, is out of reach though its centre
         // may still take the tap
@@ -300,4 +361,9 @@ function sweep(phone) {
   };
 }
 
-export const scenarios = Object.fromEntries(SIZES.map((phone) => [`no-sideways-overflow-${phone.width}x${phone.height}`, sweep(phone)]));
+export const scenarios = Object.fromEntries(
+  SIZES.flatMap((phone) => [
+    [`no-sideways-overflow-${phone.width}x${phone.height}`, sweep(phone)],
+    [`no-sideways-overflow-${phone.width}x${phone.height}-text-200`, sweep(phone, { font: true })],
+  ]),
+);

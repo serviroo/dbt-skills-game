@@ -518,7 +518,8 @@
 }
 /* words kept whole (wholeWords in ui.ts): a word moves to the next line whole, and breaks, with a hyphen, at a soft
    hyphen only where it alone is wider than its line. Its whole width is the least room it asks for, as a word's is, so a
-   row lays out as it would without the breaks; in a flex row the words go narrower than that only where the row is */
+   row lays out as it would without the breaks; in a flex row the words go narrower than that only where the row is. A
+   word's own lines wrap as usual inside lines set to balance: balancing them drops the hyphen where the word breaks */
 dq-words {
   min-width: 0;
 }
@@ -526,6 +527,7 @@ dq-word {
   display: inline-block;
   width: max-content;
   max-width: 100%;
+  text-wrap: wrap;
 }
 /* a skill's window lets its rows narrow past a word, as it always has: there the word asks only for its widest piece */
 .dq-skill dq-word {
@@ -2806,7 +2808,9 @@ textarea.dq-input {
    other reason (the last, or the one before a wide card) keeps its share. Each card sits in a cell its row stretches,
    followed by a spacer as wide as the cell past the share (the card a pixel under it, so rounding never parts them);
    the spacer wraps under a card wider than its share, which then fills the cell. The share is a length worked out on
-   the cell, so the words inside a card that is a size container of its own (an ally's) can keep to it too. */
+   the cell, so the words inside a card that is a size container of its own (an ally's) can keep to it too. No card is
+   wider than the row: a word wider than the whole row (the phone's own text at 200%) breaks there with a hyphen
+   (skillCard keeps its words whole). */
 @property --share {
   syntax: '<length>';
   inherits: true;
@@ -2823,6 +2827,7 @@ textarea.dq-input {
   flex: 1 1 var(--share);
   display: flex;
   flex-wrap: wrap;
+  max-width: 100%;
 }
 .dq-cardcell::after {
   content: '';
@@ -2830,6 +2835,7 @@ textarea.dq-input {
 }
 .dq-cardcell > .dq-cardbtn {
   flex: 1 1 calc(var(--share) - 1px);
+  max-width: 100%;
 }
 /* a phone zoomed to 200% (260 CSS pixels wide or less): one card a row, reaching only as far as the page's own 10 px
    padding, with narrower sides (below), so a name's longest word fits its line */
@@ -2932,6 +2938,7 @@ textarea.dq-input {
   color: var(--t-dim);
 }
 .dq-liblist {
+  container-type: inline-size;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -2996,9 +3003,10 @@ textarea.dq-input {
   gap: 10px;
   margin: 4px 0 0;
 }
+/* the labels' column in characters (ch), which grow with the phone's own text size as the labels do; em doesn't */
 .dq-libf {
   display: grid;
-  grid-template-columns: 3.6em minmax(0, 1fr);
+  grid-template-columns: 6ch minmax(0, 1fr);
   align-items: center;
   column-gap: 12px;
 }
@@ -3112,9 +3120,10 @@ textarea.dq-input {
 .dq-libsec--fav .dq-libsec-ic {
   color: var(--mint);
 }
-/* a phone at 200% zoom, held either way (300 CSS pixels wide or less): a skill's names take the whole row, its minutes
-   and arrow the line under them, and its pin a strip under the row, so no name is squeezed narrower than its words */
-@media (max-width: 300px) {
+/* a phone at 200% zoom, held either way, or with its own text at 200% (the list 27 characters wide or less, counted in
+   ch, which grow with the phone's own text size): a skill's names take the whole row, its minutes and arrow the line
+   under them, and its pin a strip under the row, so no name is squeezed narrower than its words */
+@container (max-width: 27ch) {
   .dq-libitem {
     flex-wrap: wrap;
   }
@@ -3307,7 +3316,8 @@ textarea.dq-input {
   font-weight: 400;
   line-height: 1.2;
   color: var(--t-body);
-  max-width: 9em;
+  /* in characters, which grow with the phone's own text size as the words do; em doesn't */
+  max-width: 14ch;
   hyphens: auto;
 }
 .dq-table td {
@@ -3818,7 +3828,7 @@ textarea.dq-input {
     padding: 6px 2px;
   }
   .dq-table tbody th {
-    max-width: 6.6em;
+    max-width: 10.5ch;
     padding-right: 6px;
   }
 }
@@ -4532,6 +4542,7 @@ textarea.dq-input {
   padding-bottom: 48px;
 }
 .dq-artentries {
+  container-type: inline-size;
   display: grid;
   gap: 12px;
 }
@@ -4577,18 +4588,14 @@ textarea.dq-input {
   width: 92px;
   height: auto;
 }
-/* a phone zoomed to 200% (260 CSS pixels wide or less): each entry's picture gets a row of its own above its words, and
-   the unfinished drawing's picture sits above its words and buttons */
-@media (max-width: 260px) {
+/* a phone zoomed to 200%, or with its own text at 200% (the list 24 characters wide or less, counted in ch, which grow
+   with the phone's own text size): each entry's picture gets a row of its own above its words */
+@container (max-width: 24ch) {
   .dq-artentry {
     grid-template-columns: minmax(0, 1fr) 20px;
   }
   .dq-artentry-art {
     grid-column: 1 / -1;
-  }
-  .dq-art-draft {
-    flex-direction: column;
-    align-items: flex-start;
   }
 }
 .dq-artentry-txt {
@@ -4619,8 +4626,10 @@ textarea.dq-input {
   height: 20px;
   color: var(--t-dim);
 }
+/* the unfinished drawing's words and button go under its picture once they no longer fit beside it */
 .dq-art-draft {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 16px;
   padding: 12px 14px;
@@ -4636,10 +4645,14 @@ textarea.dq-input {
 .dq-art-draft-img .dq-thumb {
   height: auto;
 }
+.dq-art-draft-txt {
+  flex: 1 1 0;
+}
 .dq-art-draft .dq-actions {
   margin-top: 10px;
 }
 .dq-art-pages {
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -4650,6 +4663,13 @@ textarea.dq-input {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px 12px;
   align-items: start;
+}
+/* a phone zoomed to 200%, or with its own text at 200% (the list 24 characters wide or less, counted in ch, which grow
+   with the phone's own text size): one drawing a row, so a card has room for its words */
+@container (max-width: 24ch) {
+  .dq-gallery {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .dq-galitem {
   display: flex;
@@ -5657,8 +5677,10 @@ textarea.dq-input {
   .dq-sheet {
     align-items: center;
   }
+  /* the drawing's name and buttons go under it once they no longer fit beside it */
   .dq-piece-body {
     flex-direction: row;
+    flex-wrap: wrap;
     align-items: flex-start;
     gap: 40px;
   }
@@ -5666,6 +5688,7 @@ textarea.dq-input {
     flex: none;
   }
   .dq-piece-side {
+    flex: 1 1 0;
     padding-top: 12px;
   }
 }

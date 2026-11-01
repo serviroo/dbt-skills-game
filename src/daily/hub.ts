@@ -5,7 +5,7 @@ import { CHECKIN, QUEST, RANKS } from '../content/daily-lines';
 import type { App, ScreenOut } from './app';
 import { cardArtSVG, catSVG, crystalSVG, glyph, icon, mothSVG } from './art';
 import { wait } from './clock';
-import { breakable, btn, chip, h, holdView, longName, md, panel, redrawn, segmented, typo } from './ui';
+import { breakable, btn, chip, h, holdView, keptWhole, longName, md, panel, redrawn, segmented, typo } from './ui';
 import { artStore } from './artstore';
 import { storyStore } from './storystore';
 import { cardOf, refill, todayPrompt, thumbImg } from './artroom';
@@ -16,7 +16,12 @@ import { loadoutArt } from './widgets';
 import { classRow, foilLayer, moonflower, nameRow, titleRow, titleUnlock } from './wave2';
 import { cardBackArt, worn } from './wardrobe';
 
-export function skillCard(id: string, opts: { label?: string; special?: 'comfort' | 'free'; small?: boolean } = {}) {
+/** A skill's card face, its words kept whole: a word wider than the card breaks there with a hyphen, never past its edge. */
+export function skillCard(...args: Parameters<typeof cardFace>) {
+  return keptWhole(cardFace(...args));
+}
+
+function cardFace(id: string, opts: { label?: string; special?: 'comfort' | 'free'; small?: boolean } = {}) {
   const sk = SKILL[isSkillId(id) ? id : 'wise-mind'];
   const m = MODULES[sk.module];
   if (opts.special === 'comfort')

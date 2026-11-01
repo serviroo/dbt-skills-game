@@ -11,11 +11,11 @@ import { artStore, extrasOf, revOf, type Draft, type DrawingMeta, type DrawingRe
 import { canvasBlob, INKS, InkPad, PAGE, renderDrawing, SIZES, TOOLS, type Paper, type Stroke, type Tool } from './ink';
 import { dayLabel } from './lines';
 import { uid } from './store';
-import { btn, chip, field, h, p, panel, radioKeys, redrawn, shareOrSave, typo } from './ui';
+import { btn, chip, field, h, keptWhole, p, panel, radioKeys, redrawn, shareOrSave, typo } from './ui';
 
 const store = (app: App) => artStore(app.store.key);
 const KEPT_APART = 'A newer copy of this drawing arrived, so this one was kept as its own page.';
-const pageHead = (title: string, sub?: string) => h('header', { class: 'dq-pagehead' }, h('h1', { class: 'dq-h1', 'data-focus': '', text: title }), sub ? p(sub, 'dq-text dq-pagesub') : null);
+const pageHead = (title: string, sub?: string) => h('header', { class: 'dq-pagehead' }, keptWhole(h('h1', { class: 'dq-h1', 'data-focus': '', text: title })), sub ? p(sub, 'dq-text dq-pagesub') : null);
 
 /** A draft untouched this long was left by an earlier session (iOS can hand a relaunched app a new tab id). */
 const ORPHAN_MS = 120e3;
@@ -88,7 +88,7 @@ export function allyCard(app: App, m: DrawingMeta, img?: HTMLImageElement | HTML
     { class: 'dq-cardface dq-allycard' },
     h('div', { class: 'dq-allycard-art' }, img ?? thumbImg(app, m, `${name}, drawn by you`)),
     h('div', { class: 'dq-allycard-top' }, h('span', { class: 'dq-allycard-tag', html: `${icon('ally')}<span>Shadow ally</span>` }), star && m.fav ? h('span', { class: 'dq-allycard-fav', html: icon('star') }) : null),
-    h('div', { class: 'dq-allycard-foot' }, h('div', { class: 'dq-allycard-name', text: typo(name) }), h('div', { class: 'dq-allycard-by', text: 'Your design' })),
+    h('div', { class: 'dq-allycard-foot' }, keptWhole(h('div', { class: 'dq-allycard-name', text: typo(name) })), h('div', { class: 'dq-allycard-by', text: 'Your design' })),
   );
 }
 
@@ -258,7 +258,7 @@ export function artScreen(app: App): ScreenOut {
               'button',
               { type: 'button', class: `dq-galitem dq-galitem--${m.kind}`, 'data-piece': m.id, onclick: () => app.go({ name: 'piece', id: m.id }), 'aria-label': m.fav ? `${label}, a favourite` : label },
               m.kind === 'ally' ? allyCard(app, m) : h('span', { class: 'dq-galitem-img' }, thumbImg(app, m, '')),
-              h('span', { class: 'dq-galitem-d' }, m.fav ? h('span', { class: 'dq-galitem-fav', html: icon('star') }) : null, h('span', { text: name ? `${name} · ${dayLabel(m.day)}` : dayLabel(m.day) })),
+              h('span', { class: 'dq-galitem-d' }, m.fav ? h('span', { class: 'dq-galitem-fav', html: icon('star') }) : null, keptWhole(h('span', { text: name ? `${name} · ${dayLabel(m.day)}` : dayLabel(m.day) }))),
             );
           }),
     );
@@ -952,11 +952,15 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
       const r = rec!;
       const name = r.name?.trim();
       title.textContent = ally ? typo(name || 'Shadow ally') : name ? typo(name) : dayLabel(r.day);
+      keptWhole(title);
       day.classList.toggle('is-hidden', ally || !name);
       fav.setAttribute('aria-pressed', String(!!r.fav));
       art.setAttribute('aria-label', ally ? `${name || 'Shadow ally'}, your shadow ally` : name ? `${name}, your page from ${dayLabel(r.day)}` : `Your page from ${dayLabel(r.day)}`);
-      const cardName = card?.querySelector('.dq-allycard-name');
-      if (cardName) cardName.textContent = typo(name || 'Shadow ally');
+      const cardName = card?.querySelector<HTMLElement>('.dq-allycard-name');
+      if (cardName) {
+        cardName.textContent = typo(name || 'Shadow ally');
+        keptWhole(cardName);
+      }
     };
     const closeRename = (focus: boolean) => {
       editing = false;
