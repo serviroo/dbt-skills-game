@@ -6,7 +6,7 @@
 import { canvasBlob, INKS, PAGE, renderDrawing, STROKE_MODES, type Paper, type Stroke, type StrokeMode } from './ink';
 import { connectionLost, uid, validDay } from './store';
 import { ART_DB, BESIDE, TAB_KEY } from '../core/stored-names';
-import { canWrite, cleared, goneElsewhere, mayWrite, onClear, write as writeOut } from '../core/cleared';
+import { canWrite, cleared, dropBefore, fromBefore, goneElsewhere, marked, mayWrite, onClear, removeStored, setStored, write as writeOut } from '../core/cleared';
 
 export interface DrawingMeta {
   id: string;
@@ -251,10 +251,15 @@ interface Gone {
 /** Another tab's removal is finished here only after this long: that tab's own toast ends it in seconds, unless it closed. */
 const GONE_WAIT = 60e3;
 const sameGone = (a: Gone | null, b: Gone) => !!a && a.rev === b.rev && a.at === b.at && a.tab === b.tab;
-/** A stored removal as it was written, or null when there is none or it can't be read. */
-function readGone(raw: string | null): Gone | null {
+/**
+ * The removal stored under k as it was written, or null when there is none, it can't be read, or it was stored before
+ * this device's latest clear (that one goes: finished, it would remove a drawing restored since under the same id).
+ */
+function readGone(k: string): Gone | null {
   try {
+    const raw = localStorage.getItem(k);
     const g: unknown = JSON.parse(raw ?? 'null');
+    if (raw !== null && fromBefore(g)) return dropBefore(k, raw), null;
     return isObj(g) && typeof g.rev === 'string' && fin(g.at) && typeof g.tab === 'string' ? { rev: g.rev, at: g.at, tab: g.tab } : null;
   } catch {
     return null;
@@ -576,10 +581,9 @@ export class ArtStore {
     const out: Record<string, Gone> = Object.create(null);
     const at = `${this.goneKey}.`;
     try {
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (!k?.startsWith(at)) continue;
-        const g = readGone(localStorage.getItem(k));
+      // the keys first: reading one from before the latest clear takes it away, which would shift the ones after it
+      for (const k of Object.keys(localStorage).filter((k) => k.startsWith(at))) {
+        const g = readGone(k);
         if (g) out[k.slice(at.length)] = g;
       }
     } catch {
@@ -593,8 +597,8 @@ export class ArtStore {
     const k = `${this.goneKey}.${id}`;
     writeOut(() => {
       try {
-        if (g) localStorage.setItem(k, JSON.stringify(g));
-        else if (!was || sameGone(readGone(localStorage.getItem(k)), was)) localStorage.removeItem(k);
+        if (g) setStored(k, JSON.stringify(marked(g)));
+        else if (!was || sameGone(readGone(k), was)) removeStored(k);
       } catch {
         /* storage is full or off: this tab still hides its own */
       }

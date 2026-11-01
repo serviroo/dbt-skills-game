@@ -94,7 +94,7 @@ async function collect() {
     const json = (k) => Object.keys(JSON.parse(localStorage.getItem(k) ?? '{}'));
 
     return {
-      'local-storage': [names.SAVE_KEY, names.LAB_SAVE_KEY, names.APP_KEY, names.YOU_KEY, names.AUDIO_KEY, names.COWRITER_KEY, names.INSTALL_HINT_KEY],
+      'local-storage': [names.SAVE_KEY, names.LAB_SAVE_KEY, names.APP_KEY, names.YOU_KEY, names.AUDIO_KEY, names.COWRITER_KEY, names.INSTALL_HINT_KEY, names.CLEARED_KEY],
       'beside-save-key': Object.values(names.BESIDE),
       'moment-length': [...names.MOMENT_LENGTHS],
       'indexeddb-store': [...names.ART_DB.stores.map((x) => `${names.BESIDE.art}/${x}`), ...names.STORY_DB.stores.map((x) => `${names.BESIDE.story}/${x}`), `${names.BESIDE.story}/chapters/index:${names.STORY_DB.chapterIndex}`],

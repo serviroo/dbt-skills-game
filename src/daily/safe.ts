@@ -6,7 +6,7 @@
 import { animate } from '../ui/anim';
 import { COOL, SAFE } from '../content/dbt';
 import { BESIDE } from '../core/stored-names';
-import { cleared, write } from '../core/cleared';
+import { cleared, setStored, write } from '../core/cleared';
 import { REGIONS, regionById, regionFromLocale, type CrisisLine } from '../content/crisis-lines';
 import type { App, Route, ScreenOut } from './app';
 import { icon } from './art';
@@ -94,7 +94,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     // noted once it is stored, now or after a hold: read before then, a write that waits leaves the old light noted
     write(() => {
       try {
-        localStorage.setItem(lightKey(st.key), light);
+        setStored(lightKey(st.key), light);
         stored = storedLight(st.key);
       } catch {
         /* stays for this visit only */
