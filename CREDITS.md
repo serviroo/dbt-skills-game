@@ -51,8 +51,8 @@ or outside assets went into them.
 
 ## Made in code for this project
 
-- Every other 3D scene (the gate, the knight, the Night Watch's camp and banner, the chest, rubble, smoke and
-  particles), built from three.js primitives and shaders.
+- Every other 3D scene (the gate, the knight, the Night Watch's camp and banner, the chest, the Lantern resting in
+  mist, rubble, smoke and particles), built from three.js primitives and shaders.
 - All 2D art: icons, the moth, the Night Watch cards, the pebble, the moonflower, the flourish and the app icons and
   splash screens (`scripts/icons.mjs`).
 - The open hands in Willing Hands and Radical Acceptance: a stylised hand modelled in code as a smooth shape round its

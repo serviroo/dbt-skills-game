@@ -232,6 +232,28 @@ function frost() {
   return g;
 }
 
+/**
+ * The Lantern resting on a flat stone, its light at (100, 118) where glow's orb sits, with two threads of mist that
+ * drift slowly past: glow's flat picture.
+ */
+function lanternOnStone() {
+  const g = sv('g', { stroke: 'rgba(200,235,255,.85)', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', fill: 'none', class: 'dq-scene-flat' });
+  g.append(
+    sv('path', { d: 'M58 151C61 144 80 141 100 141C121 141 140 144 143 151C140 158 121 161 100 161C79 161 60 158 58 151Z', fill: 'rgba(137,180,220,.08)', stroke: 'rgba(170,215,255,.45)', 'stroke-width': 1.2 }),
+    sv('path', { d: 'M84 102H116V134H84Z', fill: 'rgba(190,228,255,.16)', stroke: 'none' }),
+    sv('path', { d: 'M100 108C104 113 105 118 100 124C95 118 96 113 100 108Z', fill: 'rgba(230,241,255,.9)', stroke: 'none' }),
+    sv('path', { d: 'M92 102V134M108 102V134', 'stroke-width': 1.1 }),
+    sv('path', { d: 'M84 102V134M116 102V134' }),
+    sv('path', { d: 'M82 98H118V102H82ZM80 98Q90 94 95 84H105Q110 94 120 98M97 84V80H103V84' }),
+    sv('circle', { cx: 100, cy: 76, r: 3.6 }),
+    sv('path', { d: 'M82 134H118L120 141H80Z' }),
+  );
+  const mist = sv('g', { stroke: 'rgba(170,215,255,.3)', 'stroke-width': 1 });
+  mist.append(sv('path', { d: 'M44 146q14 -3 28 0t28 0' }), sv('path', { d: 'M104 156q14 -3 28 0t24 0' }));
+  g.append(mist);
+  return { g, mist };
+}
+
 /** A length of time as it is said: "30 seconds", "1 minute", "1 minute 30 seconds". */
 function spoken(s: number) {
   const m = Math.floor(s / 60);
@@ -254,7 +276,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; in
   const parts: Record<string, SVGElement> = {};
   if (!wide) {
     const gradId = ringBase(svg, visual !== 'drift' && visual !== 'tide');
-    parts.orb = sv('circle', { cx: 100, cy: 100, r: 60, fill: `url(#${gradId})` });
+    parts.orb = sv('circle', { cx: 100, cy: visual === 'glow' ? 118 : 100, r: 60, fill: `url(#${gradId})` });
     if (hasScene(visual)) parts.orb.classList.add('dq-scene-flat');
     svg.append(parts.orb);
     parts.track = sv('circle', { cx: 100, cy: 100, r: 78, fill: 'none', stroke: 'rgba(125,150,197,.18)', 'stroke-width': 2 });
@@ -291,6 +313,10 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; in
     svg.append(willingHands(svg));
   } else if (visual === 'cold') {
     svg.append(frost());
+  } else if (visual === 'glow') {
+    const lantern = lanternOnStone();
+    parts.mist = lantern.mist;
+    svg.append(lantern.g);
   }
   const num = h('div', { class: 'dq-timer-num' });
   const big = opts.big ? h('p', { class: 'dq-timer-big', text: typo(opts.big) }) : null;
@@ -345,7 +371,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; in
     if (parts.arc) parts.arc.setAttribute('d', arcPath(78, 1 - p));
     if (parts.orb) {
       const pulse = still ? 0.5 : 0.5 + 0.5 * Math.sin((e / 10) * Math.PI * 2 - Math.PI / 2);
-      parts.orb.setAttribute('r', String(visual === 'glow' ? 46 + pulse * 18 : 58));
+      parts.orb.setAttribute('r', String(visual === 'glow' ? 26 + pulse * 12 : 58));
       parts.orb.setAttribute('opacity', String(visual === 'glow' ? 0.55 + pulse * 0.45 : 0.6));
     }
     if (parts.stone) {
@@ -354,6 +380,9 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; in
       parts.stone.setAttribute('cx', (100 + (still ? 0 : Math.sin(e * 0.9) * 6 * (1 - p))).toFixed(2));
       parts.stone.setAttribute('transform', `rotate(${(still ? 0 : Math.sin(e * 0.7) * 14 * (1 - p)).toFixed(2)} 100 ${(48 + k * 98).toFixed(2)})`);
       parts.rays.setAttribute('transform', `translate(${still ? 0 : (Math.sin(e * 0.3) * 6).toFixed(2)} 0)`);
+    }
+    if (parts.mist) {
+      Array.from(parts.mist.children).forEach((c, i) => c.setAttribute('transform', `translate(${still ? 0 : (Math.sin(e * 0.25 + i * 2.1) * 8).toFixed(2)} 0)`));
     }
     if (parts.tide) {
       const kids = Array.from(parts.tide.children);

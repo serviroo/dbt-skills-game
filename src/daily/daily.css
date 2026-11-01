@@ -2114,6 +2114,7 @@ textarea.dq-input {
 .dq-timer-svg--tide ~ .dq-timer-center .dq-timer-num,
 .dq-timer-svg--hands ~ .dq-timer-center .dq-timer-num,
 .dq-timer-svg--cold ~ .dq-timer-center .dq-timer-num,
+.dq-timer-svg--glow ~ .dq-timer-center .dq-timer-num,
 .dq-timer-stage.is-wide .dq-timer-num {
   font-size: calc(26px * var(--text-scale, 1));
 }
@@ -2121,6 +2122,11 @@ textarea.dq-input {
 .dq-timer-svg--cold ~ .dq-timer-center {
   justify-content: flex-end;
   padding-bottom: 14%;
+}
+/* the soft glow's Lantern rests low in the picture, so its countdown sits above it, on the dark */
+.dq-timer-svg--glow ~ .dq-timer-center {
+  justify-content: flex-start;
+  padding-top: 17%;
 }
 .dq-ring-round {
   font-size: calc(16px * var(--text-scale, 1));
