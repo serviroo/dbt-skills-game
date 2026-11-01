@@ -405,6 +405,20 @@ export async function after(h, page, ms) {
 }
 
 /**
+ * The scene's beats on a stopped page clock, from the one it shows now, the clock moving on `ms` between them: a jump as
+ * in after, or with `run` every frame on the way. The loop reading them ends it. Once the page has run the step's whole
+ * length its countdown is over, so a loop still waiting then is waiting on a scene that stopped drawing, and fails.
+ */
+export async function* steps(h, page, where, ms, { run = false } = {}) {
+  const first = (await scenes(page)).last;
+  for (let ran = 0, at = first; ; ran += ms) {
+    yield at;
+    h.expect(ran < first.dur * 1000, `${where}: the scene stopped drawing at e=${at.e.toFixed(1)} s, ${ran / 1000} s on, past the step's ${first.dur} s (${JSON.stringify(at)})`);
+    at = run ? (await page.clock.runFor(ms), (await scenes(page)).last) : await after(h, page, ms);
+  }
+}
+
+/**
  * Waits, with the page clock stopped, until the scene shows: it shows once its first frame is drawn, which it looks for
  * on animation frames, so the clock is stepped a frame at a time until then. The scene's time then starts from where it
  * first shows, however long the GPU took, and moves only when a check moves it.
@@ -1022,8 +1036,11 @@ export const scenarios = {
       await showsStopped(h, page, `wave ${tag}`);
       const first = (await scenes(page)).last;
       await looks(h, page, tag, 'wave', vp, undefined, { stopped: true });
-      const seen = [first, await after(h, page, 0)];
-      while (seen[seen.length - 1].probe.t < 34) seen.push(await after(h, page, 2500));
+      const seen = [first];
+      for await (const at of steps(h, page, `wave ${tag}`, 2500)) {
+        seen.push(at);
+        if (at.probe.t >= 34) break;
+      }
       const at = (a, b) => seen.filter((x) => x.probe.t >= a && x.probe.t <= b).map((x) => x.probe.board);
       const [start, crest, past] = [at(0, 4), at(12, 18), at(26, 34)];
       const ride = seen.map((x) => `${x.probe.t.toFixed(1)}s ${x.probe.board.toFixed(2)}`).join(', ');
