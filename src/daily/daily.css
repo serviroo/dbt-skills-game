@@ -329,6 +329,8 @@
   height: 44px;
   min-width: 0;
   max-width: max-content;
+  /* hidden where clip isn't known (Safari before 16) */
+  overflow: hidden;
   overflow: clip;
 }
 .dq:not([data-screen='safe']) .dq-top > .dq-back {
@@ -2812,12 +2814,21 @@ textarea.dq-input {
   .dq-sz-talk > span:first-child {
     display: none;
   }
-  /* the pinned bar holds two or three lines here: solid behind them, fading only above, so no words show through */
+}
+/* a phone at 200% zoom, upright or held sideways, where the page scrolls under "Talk to someone now": its pinned bar is
+   solid behind it, fading only on the side the page passes in from, so no words or controls show through */
+@media (max-width: 260px), (max-width: 539px) and (max-height: 360px) {
   .dq .dq-sz-foot {
     background: linear-gradient(0deg, #07080f calc(100% - 8px), rgba(7, 8, 15, 0));
   }
+  .dq .dq-sz-foot.is-top {
+    background: linear-gradient(180deg, #07080f calc(100% - 8px), rgba(7, 8, 15, 0));
+  }
   .dq .dq-safezone.is-lit .dq-sz-foot {
     background: linear-gradient(0deg, #304866 calc(100% - 8px), rgba(48, 72, 102, 0));
+  }
+  .dq .dq-safezone.is-lit .dq-sz-foot.is-top {
+    background: linear-gradient(180deg, #304866 calc(100% - 8px), rgba(48, 72, 102, 0));
   }
 }
 .dq-person-add {
@@ -4289,6 +4300,8 @@ textarea.dq-input {
   inset: var(--vv-top) auto auto var(--vv-left);
   width: var(--vv-w);
   height: var(--vv-h);
+  /* hidden where clip isn't known (Safari before 16): it holds the screen exactly, so there's nothing in it to scroll */
+  overflow: hidden;
   overflow: clip;
   display: flex;
   flex-direction: column;

@@ -264,6 +264,8 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     app.root.classList.toggle('is-typing', on);
     if (!on) for (const v of vvProps) app.root.style.removeProperty(v);
     pin();
+    // "Talk to someone now" has just left the foot or come back to it, so the scroll stops clear of it at its height
+    app.pinned();
     typedIn()?.scrollIntoView({ block: 'nearest' });
   };
   vv?.addEventListener('resize', fit);
