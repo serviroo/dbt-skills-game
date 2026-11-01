@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import { copyFiles, nodeImports, viteConfigFiles } from './harness.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 // Hosted CI's slowest two-draw scenario took 25.6 s; allow over five times that per child.
@@ -38,10 +39,7 @@ const hashes = (dir) => {
 // write the stamp stay short. Returns the copy's scripts/pwa-spec.mjs.
 async function smallIconCopy(copy, expect, files = []) {
   fs.symlinkSync(path.join(root, 'node_modules'), path.join(copy, 'node_modules'));
-  for (const f of ['scripts/icons.mjs', 'scripts/gl.mjs', ...files]) {
-    fs.mkdirSync(path.dirname(path.join(copy, f)), { recursive: true });
-    fs.copyFileSync(path.join(root, f), path.join(copy, f));
-  }
+  copyFiles(copy, [...nodeImports('scripts/icons.mjs'), ...files]);
   let source = fs.readFileSync(path.join(root, 'scripts/pwa-spec.mjs'), 'utf8');
   for (const [list, keep] of [['ICONS', "[{ file: 'icons/favicon-32.png', size: 32, kind: 'tiny' }]"], ['SPLASH_DEVICES', '[]']]) {
     const whole = new RegExp(`export const ${list} = \\[[\\s\\S]*?\\n\\];`);
@@ -120,7 +118,7 @@ export const scenarios = {
     // a checkout whose stamp matches the code, building once as committed and once with its icon swapped for another
     const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'lantern-icons-build-'));
     try {
-      await smallIconCopy(copy, expect, ['package.json', 'vite.config.ts', 'scripts/sw-build.mjs', 'src/pwa/sw-template.js']);
+      await smallIconCopy(copy, expect, ['package.json', 'src/pwa/sw-template.js', ...(await viteConfigFiles())]);
       fs.writeFileSync(path.join(copy, 'index.html'), '<!doctype html><title>icons</title>\n');
       await runIconChild([path.join(copy, 'scripts/icons.mjs'), '--quiet']);
       const icon = path.join(copy, 'public/icons/favicon-32.png');
