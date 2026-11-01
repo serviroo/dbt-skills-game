@@ -415,6 +415,54 @@ export async function showsStopped(h, page, where, stage = '.dq-timer-stage') {
 }
 
 /**
+ * Reloads with the page clock installed, goes to a scene's step with `reach`, stops the clock there and waits until the
+ * scene shows (see showsStopped). However long the GPU takes to build it, the countdown has moved on only by the frames
+ * the clock was stepped while it looked, a few seconds at most.
+ */
+export async function openStopped(h, page, reach, where) {
+  await page.clock.install();
+  await page.reload();
+  await reach(h, page);
+  await h.pauseClock(page);
+  await showsStopped(h, page, where);
+}
+
+/**
+ * On a scene shown by openStopped: a lost WebGL context hands back to the flat picture and the scene stops; restored, it
+ * shows again in step, and then keeps drawing in step. The page clock stays stopped while the GPU rebuilds the scene,
+ * which took CI's software GPU most of a step, so the check takes the countdown only about 10 s on however slow the GPU;
+ * a step shorter than that left needs more time first, since a scene draws nothing more once its countdown is done.
+ * `shot` names the picture of the flat one, and `whileLost` checks more while it shows. Returns the last beat drawn before
+ * the loss and the scene and countdown after the restore.
+ */
+export async function losesContext(h, page, where, shot, whileLost = async () => {}) {
+  const was = await after(h, page, 2000);
+  const parts = (await flat(page)).length;
+  await page.evaluate(() => {
+    window.__lose = document.querySelector('.dq-scene canvas').getContext('webgl2').getExtension('WEBGL_lose_context');
+    window.__lose.loseContext();
+  });
+  await page.locator('.dq-timer-stage:not(.is-scene-live)').waitFor({ timeout: 5000 });
+  const a = await scenes(page);
+  await page.clock.runFor(1600);
+  const b = await scenes(page);
+  h.expect(a.live === 0 && b.frames === a.frames, `lost ${where}: the scene kept drawing (${a.frames} -> ${b.frames})`);
+  // the flat picture fades back in on the browser's own time, whatever the page clock does
+  await h.poll(page, () => flat(page), (s) => parts && s.length === parts && s.every(Boolean), (s) => `lost ${where}: the flat picture did not come back (${JSON.stringify(s)})`, { timeout: 3000, polling: 50 });
+  await whileLost();
+  await h.shot(page, shot);
+  await page.evaluate(() => window.__lose.restoreContext());
+  await showsStopped(h, page, `restored ${where}`);
+  inStep(h, await pair(page), `restored ${where}, shown`);
+  await page.clock.runFor(1000);
+  const now = await pair(page);
+  h.expect(now.s.live === 1 && now.s.contexts === 1 && now.s.frames > b.frames + 10, `restored ${where}: ${JSON.stringify(now.s)}`);
+  inStep(h, now, `restored ${where}`);
+  await drawn(h, page, `restored ${where}`);
+  return { was, now };
+}
+
+/**
  * The clock runs again, as when the page comes back. Returns once the scene has drawn 10 more frames and moved on 1 s:
  * a slow page can still be on one long frame when a fixed wait ends, but a scene that stays put still fails.
  */
