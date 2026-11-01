@@ -13,7 +13,7 @@ import './wave2.css';
 import './print.css';
 import { App, type DailyOpts } from './app';
 import { hubScreen } from './hub';
-import { comfortScreen, diaryScreen, libraryScreen, printScreen, restScreen, settingsScreen, shadowsScreen } from './pages';
+import { comfortScreen, daysScreen, diaryScreen, libraryScreen, printScreen, restScreen, settingsScreen, shadowsScreen } from './pages';
 import { artScreen, drawScreen, pieceScreen } from './artroom';
 import { readScreen, storiesScreen, writeScreen } from './storyroom';
 import { linesScreen } from './lines';
@@ -34,6 +34,7 @@ export function mountDaily(root: HTMLElement, opts: DailyOpts): { unmount(): voi
     library: libraryScreen,
     diary: diaryScreen,
     print: printScreen,
+    days: daysScreen,
     comfort: comfortScreen,
     settings: settingsScreen,
     art: artScreen,

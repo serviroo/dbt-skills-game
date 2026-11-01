@@ -12,8 +12,8 @@ import { regionPicker, telHref, smsHref } from './safe';
 import { allyCard, allyName, cardOf, favFirst, focusBack, refill } from './artroom';
 import { artStore } from './artstore';
 import { storyStore } from './storystore';
-import { addDays, cleanName, dayKey, fieldKey, fieldTimes, isSkillId, ROW_CAP, uid, type DiaryEntry, type State, type Store } from './store';
-import { btn, copyText, field, h, md, p, panel, place, quotes, redrawn, scrollerOf, segmented, shareOrSave, toggle, typo } from './ui';
+import { addDays, cleanName, dayKey, fieldKey, fieldTimes, isSkillId, ROW_CAP, uid, type DiaryEntry, type Ev, type State, type Store } from './store';
+import { btn, copyText, field, focusWhole, h, md, p, panel, place, quotes, redrawn, scrollerOf, segmented, shareOrSave, toggle, typo } from './ui';
 import type { KeepStatus } from '../pwa/register';
 import { volumeSliders } from '../ui/volume';
 import { STEALTH, STEALTH_LINES } from '../content/stealth-lines';
@@ -494,7 +494,8 @@ export function libraryScreen(app: App): ScreenOut {
 
 // ---------------- Diary card ----------------
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTH = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const MON = MONTH.map((m) => m.slice(0, 3));
 const dayParts = (day: string) => {
   const [y, m, d] = day.split('-').map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d));
@@ -510,8 +511,9 @@ const rowsFor = (s: State, kind: 'emotions' | 'urges', days: string[]) => {
   for (const d of days) for (const [k, v] of Object.entries(s.diary[d]?.[kind] ?? {})) if (v !== null && !out.includes(k)) out.push(k);
   return out;
 };
-// how far back the diary opens: a week, or to the day the save or its diary began if that is earlier
-const firstDay = (s: State, today: string) => [addDays(today, -6), dayKey(s.created), ...Object.keys(s.diary)].reduce((a, b) => (b < a ? b : a));
+// how far back the diary and Print a week go: a week, or to the day the save, its diary or its skills began if that is
+// earlier, so every day Pick a day lists opens
+const firstDay = (s: State, today: string) => [addDays(today, -6), dayKey(s.created), ...Object.keys(s.diary), ...s.events.filter((e) => isSkillId(e.skill)).map((e) => e.day)].reduce((a, b) => (b < a ? b : a));
 /** A skill's use on a day, as the diary card words it. */
 const useWord = (code: number | 'p') => (code === 5 ? 'helped' : code === 4 ? "didn't help this time" : 'practised');
 const NOT_SAVING = "Kept for this visit. This device isn't saving right now.";
@@ -560,13 +562,100 @@ export function diaryText(st: Store, days: number) {
   return out.join('\n');
 }
 
+/** What a visit to the diary card keeps for Back: the day it showed, and whether the player left it for Pick a day. */
+interface DiaryKept {
+  day: string;
+  picking: boolean;
+}
+
+/** What a day's card holds, in a few words: "Ratings, a note and skills". */
+const holds = (parts: string[]) => {
+  const t = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0];
+  return t[0].toUpperCase() + t.slice(1);
+};
+
+/**
+ * Pick a day: every earlier day with something on its card, newest first, a month at a time, and a tap opens one on
+ * the card. A day with nothing on it isn't listed, and nothing counts the days or the time between them.
+ */
+export function daysScreen(app: App): ScreenOut {
+  const st = app.store;
+  const s = st.state;
+  const list = redrawn(() => {
+    const today = st.today();
+    // each day's skill events, in one pass, so a year or more of days draws at once
+    const skills = new Map<string, Ev[]>();
+    for (const e of s.events) {
+      if (e.day >= today || !isSkillId(e.skill)) continue;
+      const on = skills.get(e.day);
+      if (on) on.push(e);
+      else skills.set(e.day, [e]);
+    }
+    const days = [...new Set([...Object.keys(s.diary), ...skills.keys()])].filter((d) => d < today).sort().reverse();
+    const months = new Map<string, HTMLElement[]>();
+    for (const d of days) {
+      const e = s.diary[d];
+      const ev = skills.get(d);
+      const parts = [
+        e && [...Object.values(e.emotions), ...Object.values(e.urges)].some((v) => typeof v === 'number') && 'ratings',
+        e?.note && 'a note',
+        ev && Object.keys(st.skillCodes(d, ev)).length && 'skills',
+      ].filter((w): w is string => !!w);
+      if (!parts.length) continue;
+      // named by its day alone, what is on it said after, so a change to that in another open copy keeps focus on the day
+      const row = h(
+        'li',
+        { 'data-item': d },
+        h(
+          'button',
+          { type: 'button', class: 'dq-dayrow', 'aria-label': dayLabel(d), 'aria-describedby': `dq-holds-${d}`, onclick: () => app.go({ name: 'diary' }, { hand: d }) },
+          h('span', { class: 'dq-dayrow-d', text: dayLabel(d) }),
+          h('span', { class: 'dq-dayrow-w', id: `dq-holds-${d}`, text: holds(parts) }),
+          h('span', { class: 'dq-dayrow-c', html: icon('chev') }),
+        ),
+      );
+      const month = months.get(d.slice(0, 7));
+      if (month) month.push(row);
+      else months.set(d.slice(0, 7), [row]);
+    }
+    if (!months.size) return p('No earlier days yet. Each day you fill in shows up here.', 'dq-text dq-days-none');
+    return h(
+      'div',
+      {},
+      [...months].map(([m, rows]) => {
+        const [y, mo] = m.split('-').map(Number);
+        // a list role of its own: Safari reads a list drawn without markers as no list
+        const month = h('section', { class: 'dq-daysmonth' }, h('h2', { class: 'dq-daysmonth-h', text: `${MONTH[mo - 1]} ${y}` }), h('ul', { class: 'dq-dayslist', role: 'list' }, rows));
+        // the size a month takes before it is laid out
+        month.style.setProperty('--rows', String(rows.length));
+        return month;
+      }),
+    );
+  }, () => {
+    // a day that goes while it has focus hands it to the day now in its place, else to the heading
+    const rows = el.querySelectorAll<HTMLElement>('.dq-dayrow');
+    return rows[Math.min(focusAt, rows.length - 1)] ?? el.querySelector<HTMLElement>('h1');
+  });
+  let focusAt = -1;
+  const off = st.onChange(() => {
+    focusAt = [...el.querySelectorAll('.dq-dayrow')].indexOf(document.activeElement as Element);
+    list.update();
+  });
+  const el = h('div', { class: 'dq-page dq-days' }, pageHead('Pick a day', 'Earlier days with something on your card, newest first.'), list.node);
+  return { el, title: 'Pick a day', mode: 'sub', leave: off };
+}
 
 export function diaryScreen(app: App, _route: Route, visit: Visit): ScreenOut {
   const st = app.store;
   const today = st.today();
   const s = st.state;
   const earliest = () => firstDay(s, today);
-  let day = visit.again && typeof visit.kept === 'string' && visit.kept < today && visit.kept >= earliest() ? visit.kept : today;
+  const kept = visit.kept as DiaryKept | undefined;
+  // Back to this visit comes back to the day it showed; a day chosen on Pick a day opens on that day
+  const opens = kept?.day ?? visit.handed;
+  let day = typeof opens === 'string' && opens < today && opens >= earliest() ? opens : today;
+  // a day from another year says which
+  const dayTitle = (d: string) => (d.slice(0, 4) === today.slice(0, 4) ? dayLabel(d) : `${dayLabel(d)} ${d.slice(0, 4)}`);
   const draftOf = (d: string) => {
     const e = s.diary[d];
     return { emotions: { ...e?.emotions }, urges: { ...e?.urges }, note: e?.note ?? '' };
@@ -686,7 +775,7 @@ export function diaryScreen(app: App, _route: Route, visit: Visit): ScreenOut {
     else st.save();
     written();
     app.sound('check');
-    if (day !== today) saved.textContent = st.saving ? `Saved to ${dayLabel(day)} on this device.` : NOT_SAVING;
+    if (day !== today) saved.textContent = st.saving ? `Saved to ${dayTitle(day)} on this device.` : NOT_SAVING;
     else saved.textContent = st.saving ? (first ? 'Saved on this device. +10 XP' : 'Updated on this device.') : `${NOT_SAVING}${first ? ' +10 XP' : ''}`;
     // Save tapped at the bottom of the screen brings the line under it into sight
     saved.scrollIntoView({ block: 'nearest', behavior: app.reduced() ? 'auto' : 'smooth' });
@@ -797,10 +886,15 @@ export function diaryScreen(app: App, _route: Route, visit: Visit): ScreenOut {
   const earlier = btn('Earlier day', () => openDay(addDays(day, -1)), { kind: 'link', ic: 'back' });
   const later = btn('Later day', () => openDay(addDays(day, 1)), { kind: 'link', ic: 'chev', cls: 'dq-btn--icend' });
   const toToday = btn('Today', () => openDay(today), { kind: 'link' });
+  let picking = false;
+  const pick = btn('Pick a day', () => {
+    picking = true;
+    app.go({ name: 'days' });
+  }, { kind: 'link' });
   const pastNote = p('An earlier day. Anything you add or change here stays with this day.', 'dq-small dq-daynote');
   const card = panel(
-    { title: dayLabel(day), ic: icon('diary'), cls: 'dq-today' },
-    h('div', { class: 'dq-actions dq-daynav' }, earlier, later, toToday),
+    { title: dayTitle(day), ic: icon('diary'), cls: 'dq-today' },
+    h('div', { class: 'dq-actions dq-daynav' }, earlier, later, toToday, pick),
     pastNote,
     heads.emotions,
     boxes.emotions,
@@ -834,7 +928,7 @@ export function diaryScreen(app: App, _route: Route, visit: Visit): ScreenOut {
     renderRows();
     note.input.value = draft.note;
     note.input.placeholder = typo(notePrompt());
-    title.textContent = dayLabel(d);
+    title.textContent = dayTitle(d);
     saved.textContent = '';
     usedOn.update();
     showDay();
@@ -874,7 +968,15 @@ export function diaryScreen(app: App, _route: Route, visit: Visit): ScreenOut {
     el,
     title: 'Diary card',
     mode: 'sub',
-    keep: () => day,
+    keep: (): DiaryKept => ({ day, picking }),
+    // back from Pick a day, focus is on Pick a day again; a day chosen there is read out first
+    after: () => {
+      if (kept?.picking) focusWhole(pick);
+      else if (day === visit.handed) {
+        title.tabIndex = -1;
+        focusWhole(title);
+      }
+    },
     leave: () => {
       keep();
       off();

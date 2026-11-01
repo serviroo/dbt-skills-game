@@ -1527,10 +1527,10 @@ export class Store {
     return this.add('skill', 20, { stat: MODULES[sk.module].stat, skill: id });
   }
 
-  /** Skill use codes for the diary card (UW diary card legend). */
-  skillCodes(day: string) {
+  /** Skill use codes for the diary card (UW diary card legend). `events` can be narrowed to that day's beforehand. */
+  skillCodes(day: string, events = this.state.events) {
     const out: Record<string, number | 'p'> = {};
-    for (const e of this.state.events) {
+    for (const e of events) {
       if (e.day !== day || !isSkillId(e.skill)) continue;
       if (e.k === 'skill' && out[e.skill] === undefined) out[e.skill] = 'p';
       if (e.k === 'feedback') {
