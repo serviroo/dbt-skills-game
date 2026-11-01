@@ -581,6 +581,22 @@ dq-shy::before {
   font-size: 16px;
   color: var(--t-dim);
 }
+/* a screen storage didn't answer for */
+.dq-cant {
+  padding: 26px 22px 24px;
+}
+.dq-cant-t {
+  margin: 0 0 10px;
+  font-size: 20px;
+  font-style: italic;
+  font-weight: 400;
+  line-height: 1.45;
+  color: #cfe0f2;
+  max-width: 26em;
+}
+.dq-cant .dq-actions {
+  margin-top: 20px;
+}
 .dq-lead {
   display: flex;
   flex-wrap: wrap;

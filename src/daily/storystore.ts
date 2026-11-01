@@ -188,6 +188,9 @@ export class StoryStore {
   private unreadable = false;
   /** Reads of the stored stories that got no answer; exportAll compares it before and after. */
   private readFails = 0;
+  /** A write didn't reach storage this visit, so what it wrote is held in memory only. */
+  private heldBack = false;
+  private stalled = 0;
   private lost = new WeakSet<IDBDatabase>();
   private mem = { stories: new Map<string, Story>(), chapters: new Map<string, Chapter>(), cards: new Map<string, Card[]>(), days: new Set<string>() };
   private cardImports = new Set<string>();
@@ -269,6 +272,25 @@ export class StoryStore {
     });
   }
 
+  /** Reads that got no answer so far: a screen opening compares it before and after, as exportAll does. */
+  get misses() {
+    return this.readFails;
+  }
+  /** Times storage was given up on for not answering in time: a screen opening compares it before and after. */
+  get stalls() {
+    return this.stalled;
+  }
+
+  /** Storage given up on, or that couldn't be opened, is tried again (Try again on a screen that couldn't open). */
+  reopen() {
+    if (cleared()) return;
+    // nothing is unsaved while every write reached storage
+    if (!this.heldBack) this.persistent = true;
+    if (!this.unreadable) return;
+    this.unreadable = false;
+    this.db = this.connect(true);
+  }
+
   /** One fresh connection in place of a lost one (callers that saw the same loss share it). True when there is one. */
   private async reconnect(old: IDBDatabase) {
     if (cleared() || this.unreadable) return false;
@@ -317,6 +339,7 @@ export class StoryStore {
       if (r) return r.v;
       // its transaction ends unfinished, so nothing lands after it was counted as failed, and one not started never starts
       turn.off = true;
+      this.stalled++;
       try {
         turn.t?.abort();
       } catch {
@@ -326,6 +349,7 @@ export class StoryStore {
       this.persistent = false;
       this.unreadable = true;
       if (mode === 'readonly') this.readFails++;
+      else this.heldBack = true;
       return null;
     });
   }
@@ -365,6 +389,7 @@ export class StoryStore {
       }
     }
     if (failed) this.persistent = false;
+    if (mode !== 'readonly') this.heldBack = true;
     if (mode === 'readonly' && (failed || this.unreadable)) this.readFails++;
     return null;
   }
@@ -738,8 +763,7 @@ export class StoryStore {
   }
 
   async addChapter(storyId: string, title?: string): Promise<Chapter> {
-    // storage given up for the visit still takes a page, kept in memory, on the story as it was last read
-    const cur = (await this.story(storyId)) ?? (this.unreadable ? this.lastStory.get(storyId) : undefined);
+    const cur = await this.story(storyId);
     if (!cur) throw new RangeError('That story is not on this device.');
     if (cur.chapters.length >= STORY_CAP.chapters) throw new RangeError('This story already holds as many chapters as it can.');
     const rev = uid();

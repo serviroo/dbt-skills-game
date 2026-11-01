@@ -7,8 +7,8 @@
 //                             also when that Save lands only after they left for the Safe Zone
 //   back-to-a-resumed-draft   a draft an earlier tab left, opened again, a line more and Save: back from the Safe Zone
 //                             the page holds both strokes, and Save again keeps them both. Back from a Safe Zone tapped
-//                             while the draft was still being read opens that draft, and so does Back to a page whose
-//                             read of the draft failed
+//                             while the draft was still being read opens that draft, and so does Back to a page that
+//                             couldn't open because the read of the draft failed
 //   back-to-the-same-chapter  a story opened on Chapter 1, Chapter 2 picked from the chapter list: Read, then Back to
 //                             writing, and the Safe Zone, then Back, each land on Chapter 2; the notes left open come
 //                             back as the notes, also when the Safe Zone is opened again before storage answers the
@@ -27,13 +27,14 @@
 //   a-missing-chapter-opens   a chapter in a story's list that isn't stored: the writer opens on the first chapter in
 //                             its place, and a story whose only chapter is missing opens on an empty page
 //   drawing-storage-never-answers  storage that never answers a saved drawing's read: the Safe Zone stays one tap away
-//                             while it waits, the page comes in saying drawings aren't being kept, Back works, and a
-//                             line more and Save leave the stored drawing as it was
-//   writer-storage-never-answers   the same for a chapter's read: the writer comes in on a new empty page, words typed
-//                             there are still there back from the Safe Zone, and they never reach the stored chapter.
-//                             The same when the first page of a story with none is never answered as it is made
+//                             while it waits, the page comes in saying it can't open the drawing, with nothing to draw
+//                             on and nothing written, and Try again opens the drawing once storage answers
+//   writer-storage-never-answers   the same for a chapter's read: the writer comes in saying it can't open the story,
+//                             with no page, no new chapter and nothing written, and Try again opens the chapter once
+//                             storage answers. The same when the first page of a story with none is never answered as
+//                             it is made
 //   storage-answers-too-late  a story's first page made while another connection holds its chapters: given up after a
-//                             while, the write never lands later, when the hold lets go
+//                             while, the writer can't open it, and the write never lands later, when the hold lets go
 import { drawPage, line } from './art-eraser-glow.e2e.mjs';
 import { holdStorage } from './story-reading.e2e.mjs';
 
@@ -61,7 +62,7 @@ const stall = (page, name, mode) =>
     },
     [name, mode],
   );
-/** `op` ('get' or 'delete') on `id` in the IndexedDB store `store` of the database `db` as it is on the disk, past the
+/** `op` ('get', 'count' or 'delete') on `id` in the IndexedDB store `store` of the database `db` as it is on the disk, past the
  * app's own copy in memory and its own connection. */
 const onDisk = (page, db, store, op, id) =>
   page.evaluate(
@@ -70,7 +71,7 @@ const onDisk = (page, db, store, op, id) =>
         const open = indexedDB.open(db);
         open.onerror = () => bad(open.error);
         open.onsuccess = () => {
-          const t = open.result.transaction(store, op === 'get' ? 'readonly' : 'readwrite');
+          const t = open.result.transaction(store, op === 'delete' ? 'readwrite' : 'readonly');
           const r = t.objectStore(store)[op](id);
           t.oncomplete = () => (open.result.close(), done(r.result));
           t.onerror = () => bad(t.error);
@@ -89,6 +90,14 @@ const comesIn = (h, page, sel, where, timeout = 5000) =>
     () => {},
     () => h.expect(false, `${where}: the page never came in`),
   );
+/** The screen `sel` came in shut, saying it can't open `what` right now, with nothing on it to write or draw on. */
+async function cantOpenShows(h, page, sel, what, where) {
+  const title = await page.locator(`${sel} .dq-cant-t`).textContent({ timeout: 3000 }).catch(() => null);
+  h.expect(title === `Can’t open this ${what} right now`, `${where}: the page says ${JSON.stringify(title)}, not that it can't open the ${what}`);
+  h.expect(!(await page.locator(`${sel} textarea, ${sel} canvas`).count()), `${where}: it came in with something to write or draw on`);
+}
+/** Try again on a screen that couldn't open. */
+const tryAgain = (page) => page.locator('.dq-cant').getByRole('button', { name: 'Try again', exact: true }).click();
 const routeIs = (page, name) => page.waitForFunction((n) => window.__daily?.route.name === n, name, { timeout: 10000 });
 const xp = (h, page) => h.ls(page, h.SAVE).then((s) => JSON.parse(s).events.reduce((n, e) => n + (e.xp ?? 0), 0));
 const drawings = (page) => page.evaluate(async () => (await (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).exportAll()).records.map((r) => r.strokes.length));
@@ -378,8 +387,8 @@ export const scenarios = {
       });
       await failed.page.evaluate(() => window.__daily.go({ name: 'draw', kind: 'today', draft: 'today:an-earlier-tab' }));
       await routeIs(failed.page, 'draw');
-      await drawReady(failed.page);
-      await shows(h, failed.page, 0, 'the draft whose read failed:');
+      await comesIn(h, failed.page, '.dq-draw', 'the draft whose read failed');
+      await cantOpenShows(h, failed.page, '.dq-draw', 'drawing', 'the draft whose read failed');
       await safeAndBack(failed.page, 'draw');
       await drawReady(failed.page);
       await shows(h, failed.page, 1, 'back to the draft whose read failed');
@@ -556,7 +565,7 @@ export const scenarios = {
       await page.evaluate((r) => window.__daily.go(r), { name: 'write', id: ids.story });
       await routeIs(page, 'write');
       await comesIn(h, page, '.st-write', 'a first page held by another connection', 15000);
-      await holds(h, page, 'Page, Chapter 1', 'a first page held by another connection');
+      await cantOpenShows(h, page, '.st-write', 'story', 'a first page held by another connection');
       await page.evaluate(() => window.__letGo());
       await h.sleep(1000);
       const stored = await onDisk(page, ids.db, 'stories', 'get', ids.story);
@@ -749,14 +758,19 @@ export const scenarios = {
       // the Safe Zone while it waits, then Back
       await safeAndBack(page, 'draw');
       await comesIn(h, page, '.dq-draw', 'storage that never answers', 15000);
-      const note = await page.locator('.dq-tools-msg').textContent();
-      h.expect(note.includes('keeping drawings right now'), `storage that never answers, the page says ${JSON.stringify(note)}`);
-      await line(page, [0.2, 0.6], [0.7, 0.7]);
-      await page.getByRole('button', { name: 'Save', exact: true }).click();
-      await h.sleep(500);
+      await cantOpenShows(h, page, '.dq-draw', 'drawing', 'storage that never answers');
+      await h.shot(page, 'cant-open-drawing-390');
       await page.evaluate(() => window.__answer());
       const stored = await onDisk(page, db, 'strokes', 'get', id);
-      h.expect(stored?.length === 1, `a line more and Save left the stored drawing with ${JSON.stringify(stored?.length)} strokes, not its 1`);
+      const drafts = await onDisk(page, db, 'drafts', 'count');
+      h.expect(stored?.length === 1 && drafts === 0, `while it couldn't open, the stored drawing came to ${JSON.stringify(stored?.length)} strokes and ${drafts} drafts were kept`);
+      // storage answers again: Try again opens the drawing
+      await tryAgain(page);
+      await drawReady(page);
+      await comesIn(h, page, '.dq-draw', 'Try again');
+      await shows(h, page, 1, 'Try again once storage answered:');
+      const note = await page.locator('.dq-tools-msg').textContent();
+      h.expect(!note.includes('keeping drawings'), `Try again once storage answered, the page says ${JSON.stringify(note)}`);
       await page.locator('.dq-top .dq-back').click();
       await routeIs(page, 'art');
       h.expect(!errors.length, errors.join('\n'));
@@ -784,14 +798,16 @@ export const scenarios = {
       // the Safe Zone while it waits, then Back
       await safeAndBack(page, 'write');
       await comesIn(h, page, '.st-write', 'storage that never answers', 15000);
-      h.expect(await page.locator('.st-ta').isVisible(), 'storage that never answers: the writer came in with no page');
-      await page.locator('.st-ta').fill('Words typed over nothing.');
-      await safeAndBack(page, 'write');
-      await comesIn(h, page, '.st-write', 'back to the page typed on while storage never answered');
-      h.expect((await page.locator('.st-ta').inputValue()) === 'Words typed over nothing.', `back from the Safe Zone the page typed on while storage never answered reads ${JSON.stringify(await page.locator('.st-ta').inputValue())}`);
+      await cantOpenShows(h, page, '.st-write', 'story', 'storage that never answers');
+      await h.shot(page, 'cant-open-story-390');
       await page.evaluate(() => window.__answer());
+      const story = await onDisk(page, ids.db, 'stories', 'get', ids.story);
       const stored = await onDisk(page, ids.db, 'chapters', 'get', ids.ch1);
-      h.expect(stored?.text === 'The lantern woke.', `words typed while storage never answered reached the stored chapter: ${JSON.stringify(stored?.text)}`);
+      h.expect(story?.chapters.length === 1 && stored?.text === 'The lantern woke.', `while it couldn't open, the story came to ${JSON.stringify(story?.chapters)} and its chapter to ${JSON.stringify(stored?.text)}`);
+      // storage answers again: Try again opens the chapter
+      await tryAgain(page);
+      await holds(h, page, 'Page, Chapter 1', 'Try again once storage answered');
+      h.expect((await page.locator('.st-ta').inputValue()) === 'The lantern woke.', `Try again once storage answered, the page reads ${JSON.stringify(await page.locator('.st-ta').inputValue())}`);
       await page.locator('.dq-top .dq-back').click();
       await page.waitForFunction(() => window.__daily?.route.name !== 'write');
       h.expect(!errors.length, errors.join('\n'));
@@ -803,21 +819,31 @@ export const scenarios = {
     const first = await h.open(seed(h));
     try {
       await h.reachHub(first.page);
-      const id = await first.page.evaluate(async () => {
+      const { db, id } = await first.page.evaluate(async () => {
         const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
         const { story, first } = await ss.create('No Pages Yet');
         await ss.removeChapter(story.id, first.id);
-        return story.id;
+        return { db: ss.name, id: story.id };
       });
       await stall(first.page, 'stories', 'readwrite');
       await first.page.evaluate((r) => window.__daily.go(r), { name: 'write', id });
       await routeIs(first.page, 'write');
       await comesIn(h, first.page, '.st-write', 'a first page never answered', 15000);
-      await holds(h, first.page, 'Page, Chapter 1', 'a first page never answered');
+      await cantOpenShows(h, first.page, '.st-write', 'story', 'a first page never answered');
+      await first.page.evaluate(() => window.__answer());
+      const before = await onDisk(first.page, db, 'stories', 'get', id);
+      h.expect(before?.chapters.length === 0, `while it couldn't open, the story came to ${JSON.stringify(before?.chapters)}`);
+      // storage answers again: Try again opens its first page, and what is typed there is stored
+      await tryAgain(first.page);
+      await holds(h, first.page, 'Page, Chapter 1', 'Try again on a first page');
       await first.page.locator('.st-ta').fill('The first line.');
-      await safeAndBack(first.page, 'write');
-      await comesIn(h, first.page, '.st-write', 'back to a first page never answered');
-      h.expect((await first.page.locator('.st-ta').inputValue()) === 'The first line.', `back from the Safe Zone the first page reads ${JSON.stringify(await first.page.locator('.st-ta').inputValue())}`);
+      const kept = () =>
+        first.page.evaluate(async (id) => {
+          const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+          const s = await ss.story(id);
+          return Promise.all(s.chapters.map(async (c) => (await ss.onDisk(c))?.text));
+        }, id);
+      await h.poll(first.page, kept, (t) => t.length === 1 && t[0] === 'The first line.', (t) => `after Try again the story's pages are stored as ${JSON.stringify(t)}`, { timeout: 5000 });
       h.expect(!first.errors.length, first.errors.join('\n'));
     } finally {
       await first.ctx.close();

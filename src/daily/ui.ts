@@ -165,6 +165,11 @@ export function panel(opts: { title?: string; ic?: string; cls?: string; tag?: '
   return h(opts.tag ?? 'section', { class: `dq-panel ${opts.cls ?? ''}`, 'aria-label': opts.label ?? null }, head, ...kids);
 }
 
+/** What a screen shows when storage didn't answer for what it opens on: nothing on it edits, and `again` tries once more. */
+export function cantOpen(title: string, note: string, retry: string, again: () => void) {
+  return panel({ cls: 'dq-cant' }, h('h2', { class: 'dq-cant-t', text: typo(title) }), p(note), row(btn(retry, again)));
+}
+
 export function btn(label: string, onclick: (e: Event) => void, opts: { kind?: 'primary' | 'quiet' | 'ghost' | 'link'; ic?: string; cls?: string; aria?: string } = {}) {
   return h(
     'button',

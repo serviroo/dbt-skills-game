@@ -3,7 +3,7 @@
  * and "Design a shadow ally" (the drawing becomes the art on a new Shadow card). Nothing is graded.
  */
 import { animate } from '../ui/anim';
-import { ALLY_NAMES, ART, ART_PROMPTS } from '../content/daily-lines';
+import { ALLY_NAMES, ART, ART_PROMPTS, CANT_OPEN } from '../content/daily-lines';
 import { playerName } from '../core/you';
 import type { App, Route, ScreenOut, Visit } from './app';
 import { icon } from './art';
@@ -11,7 +11,7 @@ import { artStore, extrasOf, revOf, type Draft, type DrawingMeta, type DrawingRe
 import { canvasBlob, INKS, InkPad, PAGE, renderDrawing, SIZES, TOOLS, type Paper, type Stroke, type Tool } from './ink';
 import { dayLabel } from './lines';
 import { uid } from './store';
-import { btn, chip, field, h, p, panel, radioKeys, redrawn, shareOrSave, typo } from './ui';
+import { btn, cantOpen, chip, field, h, p, panel, radioKeys, redrawn, shareOrSave, typo } from './ui';
 
 const store = (app: App) => artStore(app.store.key);
 const KEPT_APART = 'A newer copy of this drawing arrived, so this one was kept as its own page.';
@@ -828,6 +828,7 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
   let drawn!: () => void;
   const ready = new Promise<void>((done) => (drawn = done));
   void (async () => {
+    const [misses, stalls] = [as.misses, as.stalls];
     await tab.ready;
     if (left) return;
     key = own(editId);
@@ -848,9 +849,23 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
       }
     }
     const id = editId ?? draft?.editId;
+    if (id) rec = await as.get(id);
+    if (left) return;
+    // storage that stalled while it opened, or failed to read the draft or drawing it opens, leaves the page shut: there
+    // is nothing to draw on, so nothing is written over what it couldn't read. One this visit holds in memory (storage
+    // was never there to read) opens as ever
+    if (as.stalls !== stalls || (as.misses !== misses && ((from && !draft) || (id && !rec)))) {
+      promptRow.remove();
+      main.replaceWith(
+        cantOpen(CANT_OPEN.drawing, CANT_OPEN.note, CANT_OPEN.retry, () => {
+          as.reopen();
+          app.reopen();
+        }),
+      );
+      return;
+    }
     if (id) {
       recId = id;
-      rec = await as.get(id);
       if (rec) {
         const old = draft?.editId === id ? draft : null;
         bases = !old ? [revOf(rec)] : Array.isArray(old.bases) ? old.bases.filter((b): b is string => typeof b === 'string').slice(-8) : [];
@@ -863,7 +878,6 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
         renderPrompt();
       }
     }
-    if (left) return;
     if (draft) {
       if (draft.prompt !== undefined && kind === 'today') {
         prompt = draft.prompt;

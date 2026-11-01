@@ -7,6 +7,7 @@ import { cowrite } from '../cowriter/local';
 import type { CowriteReq, CowriteRes, CowriteTurn } from '../cowriter/types';
 import { CARE_KEY, READ_SIZES, type ReadSize } from '../core/stored-names';
 import { STORY_DRAWING, STORY_FIND, STORY_IMPORT, STORY_READ, STORY_START } from '../content/story-lines';
+import { CANT_OPEN } from '../content/daily-lines';
 import { write } from '../core/cleared';
 import type { App, Route, ScreenOut, Visit } from './app';
 import { icon } from './art';
@@ -18,7 +19,7 @@ import { match, spans, terms, type Span } from './storyfind';
 import { creditStory, STORY_CAP, storyStore, type Card, type CardMode, type Chapter, type Story } from './storystore';
 import { storyFromText, storyToText, type StoryText } from './storytext';
 import { keepTextSize, textSize } from './text-size';
-import { breakable, btn, h, p, segmented, shareOrSave, typo } from './ui';
+import { breakable, btn, cantOpen, h, p, segmented, shareOrSave, typo } from './ui';
 
 export const STORY = {
   title: 'Story Room',
@@ -1883,10 +1884,25 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   on(window, 'resize', grow);
 
   // ---------- start ----------
+  // storage that stalled while it opened, or failed to read what it opens on, leaves it shut: nothing on it edits, so
+  // nothing is written over what it couldn't read. A story this visit holds in memory (storage was never there to
+  // read) opens as ever
+  const shut = () => {
+    main.replaceChildren(
+      cantOpen(CANT_OPEN.story, CANT_OPEN.note, CANT_OPEN.retry, () => {
+        ss.reopen();
+        app.reopen();
+      }),
+    );
+    cw.remove();
+  };
   const init = async () => {
+    const [misses, stalls] = [ss.misses, ss.stalls];
+    const stalled = () => ss.stalls !== stalls;
     await ss.sweepLives();
     const s = await ss.story(storyId);
     if (!alive) return;
+    if (stalled() || (!s && ss.misses !== misses)) return shut();
     if (!s || s.removed) {
       main.replaceChildren(h('div', { class: 'dq-panel st-empty' }, h('p', { class: 'st-empty-t', text: STORY.gone }), h('div', { class: 'dq-actions' }, btn('Story Room', () => app.go({ name: 'stories' }, { replace: true }), { kind: 'primary' }))));
       cw.remove();
@@ -1901,12 +1917,21 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     const notes = went ? went.notes : !!r.ch && r.ch === s.notes;
     // the first page takes its number now, so a Page or Notes tap while the chapter is made or its cards are read wins
     const n = ++picks;
-    if (!pageId) pageId = (await ss.addChapter(storyId)).id;
+    if (!pageId) {
+      const made = await ss.addChapter(storyId).catch(() => null);
+      if (!alive) return;
+      if (!made) return shut();
+      pageId = made.id;
+    }
     pageMade();
     await loadCards();
     const opening = notes ? notesId : pageId;
     const landing = load(opening, n).then(async (ok) => {
       if (ok || !alive || n !== picks) return ok;
+      if (stalled() || ss.misses !== misses) {
+        pageIn();
+        return false;
+      }
       // a chapter that can't be read opens the first page in its place, and with no page to read, a new page takes
       // their words, kept apart from the ones it couldn't read
       const first = s.chapters[0];
@@ -1931,6 +1956,8 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     // in once the page it opens on is in the editor, before what follows its opening
     await pageLoaded;
     await Promise.all([refreshStory(), showPic()]);
+    if (!alive) return;
+    if (stalled() || (!cur && ss.misses !== misses)) return shut();
     inView();
     const landed = await landing;
     syncState();

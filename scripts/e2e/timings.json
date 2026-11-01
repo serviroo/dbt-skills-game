@@ -241,7 +241,7 @@
   "draw-page-zoom-rise": 10,
   "draw-page-zoom-stroke-kept": 5,
   "drawing-never-shows-empty": 6,
-  "drawing-storage-never-answers": 14,
+  "drawing-storage-never-answers": 16,
   "edit-your-lists": 8,
   "edit-your-lists-clear": 4,
   "edit-your-lists-fit": 33,
@@ -888,5 +888,5 @@
   "willing-walks": 20,
   "window-timing": 16,
   "writer-never-shows-empty": 16,
-  "writer-storage-never-answers": 24
+  "writer-storage-never-answers": 26
 }

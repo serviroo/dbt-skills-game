@@ -759,6 +759,12 @@ export class App {
     this.show(e.route, { again: true, key: e.key, at: e.place });
   }
 
+  /** Opens the visit on screen again from the start, as Back to it would (a screen's Try again). */
+  reopen() {
+    const e = this.trail[this.at];
+    this.show(this.route, { again: true, key: this.visitKey, at: e?.key === this.visitKey ? e.place : undefined });
+  }
+
   /** Marks a new place inside the visit on screen; a place already in this visit is gone back to, so loops don't stack. */
   private mark(key: string, place: Place) {
     const cur = this.trail[this.at];
