@@ -189,10 +189,7 @@ export class App {
     this.root.append(this.sky.back, this.bubbles.canvas, h('div', { class: 'dq-vignette', 'aria-hidden': 'true' }), this.sheetLayer, this.sky.shade, this.top, this.view, this.toastEl, this.scrim);
     this.winLayer = h('div', { class: 'sw-layer dq-sw-layer' });
     host.append(this.root, this.winLayer);
-    this.pins = new ResizeObserver(() => {
-      host.style.setProperty('--dq-top', `${this.top.offsetHeight}px`);
-      host.style.setProperty('--dq-foot', `${this.current?.foot?.offsetHeight ?? 0}px`);
-    });
+    this.pins = new ResizeObserver(() => this.pinned());
     // the whole box, padding too: a bar's padding changes on its own as the screen turns, zooms or the keyboard opens
     this.pins.observe(this.top, { box: 'border-box' });
     if (opts.volume) {
@@ -254,6 +251,12 @@ export class App {
 
   reduced() {
     return params.reduced;
+  }
+  /** --dq-top and --dq-foot at the pinned bars' heights now, for a screen that moves its bars and scrolls at once,
+   * before the observer (pins) would see them */
+  pinned() {
+    this.host.style.setProperty('--dq-top', `${this.top.offsetHeight}px`);
+    this.host.style.setProperty('--dq-foot', `${this.current?.foot?.offsetHeight ?? 0}px`);
   }
   /** Hands this store's Motion setting, as it is now, to everything that moves. */
   applyMotion() {
