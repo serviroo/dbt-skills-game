@@ -13,7 +13,7 @@ import { icon } from './art';
 import { momentView } from './moment';
 import { nextPlace, uid, type Item, type Person } from './store';
 import { entryList } from './entries';
-import { btn, chip, field, h, p, panel, typo, wholeWords } from './ui';
+import { btn, chip, field, focusWhole, h, p, panel, typo, wholeWords } from './ui';
 import { supportListsCopy } from './support-lists';
 import { textSize } from './text-size';
 import { breathRing, coolChoice, pmrView, type Ctx } from './widgets';
@@ -270,20 +270,23 @@ export function safeScreen(app: App, route: Route): ScreenOut {
 
   const listScreen = (at: 'reasons' | 'comfort', title: string, text: string | null, empty: string) => {
     const hint = at === 'reasons' ? SAFE.reasons.add : 'Something that helps, even a little';
-    // the list follows another open copy's changes, and a clear, as they land; "Edit the list" shows each entry's Edit
-    // and moves
+    // the list follows every change as it lands, one saved here, another open copy's or a clear, so an entry open to
+    // change keeps what is typed in it; "Edit the list" shows each entry's Edit and moves
     const list = entryList(app, { key: at, cls: 'dq-sz-list', row: 'dq-sz-entry', view: (x: Item) => [h('span', { class: 'dq-entry-t', text: typo(x.text) })], empty: () => p(empty, 'dq-text dq-sz-empty'), lost: () => addOne, say, hint, toggle: true, removable: true });
     stops.push(st.onChange(list.update), list.leave);
     const lists = supportListsCopy(app);
     stops.push(lists.dispose);
     const f = field('Add one', { placeholder: hint, hideLabel: true });
+    // saved, the new one shows in its place in the list, the row closes and focus goes back to Add one
     const add = h('div', { class: 'dq-addrow is-hidden' }, f.el, btn('Save', () => {
       const v = f.input.value.trim();
       if (!v) return f.input.focus();
       const items = st.state.lists[at];
       items.push({ id: uid(), text: v.slice(0, 200), at: st.now(), place: nextPlace(items) });
+      f.input.value = '';
+      add.classList.add('is-hidden');
       st.save();
-      show(at);
+      focusWhole(addOne);
     }, { kind: 'quiet' }));
     const addOne = btn('Add one', () => {
       add.classList.remove('is-hidden');
@@ -384,8 +387,9 @@ export function safeScreen(app: App, route: Route): ScreenOut {
       case 'comfort':
         return listScreen('comfort', SAFE.comfort.title, SAFE.comfort.text, SAFE.comfort.empty);
       case 'people': {
-        // the people follow another open copy's changes, and a clear, as they land: someone removed elsewhere can't be
-        // called from here, and focus on their Call or Text goes to Add a person
+        // the people follow every change as it lands, one saved here, another open copy's or a clear: a person open to
+        // change keeps what is typed, someone removed elsewhere can't be called from here, and focus on their Call or
+        // Text goes to Add a person
         const list = entryList(app, {
           key: 'people',
           cls: 'dq-people',
@@ -407,13 +411,17 @@ export function safeScreen(app: App, route: Route): ScreenOut {
         const ph = field('Number', { placeholder: 'Phone number', type: 'tel', inputmode: 'tel' });
         const lists = supportListsCopy(app);
         stops.push(lists.dispose);
+        // saved, the person shows in their place in the list, the fields close and focus goes back to Add a person
         const add = h('div', { class: 'dq-person-add is-hidden' }, n.el, ph.el, h('div', { class: 'dq-actions' }, btn('Save', () => {
           const name = n.input.value.trim();
           if (!name) return n.input.focus();
           const ppl = st.state.lists.people;
           ppl.push({ id: uid(), name: name.slice(0, 80), phone: ph.input.value.trim().slice(0, 40), at: st.now(), place: nextPlace(ppl) });
+          n.input.value = '';
+          ph.input.value = '';
+          add.classList.add('is-hidden');
           st.save();
-          show('people');
+          focusWhole(addPerson);
         }, { kind: 'quiet' })));
         const addPerson = btn('Add a person', () => {
           add.classList.remove('is-hidden');

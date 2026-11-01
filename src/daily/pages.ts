@@ -1088,18 +1088,17 @@ export function printScreen(app: App, _route: Route, visit: Visit): ScreenOut {
 export function comfortScreen(app: App): ScreenOut {
   const st = app.store;
   const s = st.state;
-  const rerender = () => app.go({ name: 'comfort' }, { replace: true, quiet: true });
   const removed = (text: string, restore: () => void) =>
     app.toast(`Removed "${text.length > 36 ? `${text.slice(0, 35)}…` : text}".`, {
       label: 'Undo',
       run: () => {
         restore();
         st.save();
-        if (app.route.name === 'comfort') rerender();
       },
     });
-  // what the lists show follows another open copy's changes in place, so what is being typed here stays; focus on
-  // something removed goes to the Add button below it. Each entry can be edited and moved up or down in place
+  // what the lists show follows every change, made here or in another open copy, in place, so an open edit and what is
+  // being typed stay; focus on something removed goes to the Add button below it. Each entry can be edited and moved up
+  // or down in place
   const parts: { update: () => void }[] = [];
   const status = h('p', { class: 'dq-sr', role: 'status', 'aria-live': 'polite' });
   const entries: { leave: () => void }[] = [];
@@ -1107,7 +1106,6 @@ export function comfortScreen(app: App): ScreenOut {
     h('button', { type: 'button', class: 'dq-icbtn dq-icbtn--sm', 'data-act': 'remove', 'aria-label': `Remove ${name}`, html: icon('close'), onclick: () => {
       const out = st.removeItem<Item | Person>(s.lists[key], id);
       st.save();
-      rerender();
       if (out) removed('text' in out.item ? out.item.text : out.item.name, () => st.reviveItem<Item | Person>(app.store.state.lists[key], out.item));
     } });
   const entryParts = <T extends Item | Person>(o: Omit<EntryOpts<T>, 'say' | 'cls'>) => {
@@ -1123,9 +1121,9 @@ export function comfortScreen(app: App): ScreenOut {
       const v = f.input.value.trim();
       if (!v) return f.input.focus();
       items.push({ id: uid(), text: v, at: st.now(), place: nextPlace(items) });
+      f.input.value = '';
       st.save();
       app.sound('bubble');
-      rerender();
     };
     f.input.addEventListener('keydown', (e) => (e as KeyboardEvent).key === 'Enter' && add());
     const addBtn = btn('Add', add, { kind: 'quiet', ic: 'plus' });
@@ -1143,8 +1141,9 @@ export function comfortScreen(app: App): ScreenOut {
     const name = pn.input.value.trim();
     if (!name) return pn.input.focus();
     people.push({ id: uid(), name: name.slice(0, 80), phone: pp.input.value.trim().slice(0, 40), at: st.now(), place: nextPlace(people) });
+    pn.input.value = '';
+    pp.input.value = '';
     st.save();
-    rerender();
   }, { kind: 'quiet', ic: 'plus' });
   const peopleList = entryParts<Person>({
     key: 'people',

@@ -22,7 +22,11 @@
 //                           change, or saw all but the move, can't undo them, where they are stored or after a reload
 //   edit-your-lists-clear   an entry removed in the Safe Zone, its Undo still showing, then this game's data cleared in
 //                           another tab: nothing of it stays on the page and nothing can bring it back
-//   edit-your-lists-fit     with Edit and the moves showing and an edit open, everything fits at 390 and 320 wide,
+//   edit-your-lists-keep    an entry open to change keeps what is typed in it while the rest of its screen changes: on
+//                           Comfort another entry removed, brought back with Undo, and one added to a list and to the
+//                           people; in the Safe Zone one added and another removed, focus back on the Add button that
+//                           was used, and nothing played or credited. None of the typed words is stored
+//   edit-your-lists-fit    with Edit and the moves showing and an edit open, everything fits at 390 and 320 wide,
 //                           held sideways and at 200% zoom: nothing runs off the side, every button is a tap in size,
 //                           nothing editing shows is under 16px, the field shows whole and "Talk to someone now" stays
 //                           pinned. In the Safe Zone every entry has Remove, which leaves Undo in its place, and an
@@ -523,6 +527,78 @@ export const scenarios = {
     if (!cleared || held.length || back.length) problems.push(`after a clear in another tab: cleared ${cleared}, still shown ${JSON.stringify(held)}, people after Undo ${JSON.stringify(back)}`);
     if ((await page.evaluate(() => window.__daily.route.name)) !== 'safe') problems.push('the clear took the Safe Zone away');
     await h.shot(page, 'clear-safe-zone');
+    problems.push(...errors);
+    await ctx.close();
+    h.expect(!problems.length, problems.join('\n'));
+  },
+
+  async 'edit-your-lists-keep'(h) {
+    const problems = [];
+    const { ctx, page, errors } = await open(h, { width: 390, height: 844 });
+    /** A problem unless an edit is still open with `typed` in its fields. */
+    const kept = async (typed, what) => {
+      const now = await editing(page).locator('input').evaluateAll((l) => l.map((i) => i.value));
+      return now.join('|') === typed.join('|') ? [] : [`${what}: the open edit holds ${JSON.stringify(now)}, not ${JSON.stringify(typed)}`];
+    };
+    const showing = (panel, text) => until(page, ([panel, text]) => {
+      const box = panel ? [...document.querySelectorAll('.dq-listp')].find((p) => p.querySelector('.dq-chip-t')?.textContent === panel) : document.querySelector('.dq-safezone');
+      return [...(box?.querySelectorAll('.dq-entry-t, .dq-person-n') ?? [])].some((e) => e.textContent === text);
+    }, [panel, text], { timeout: 5000 }).then(() => true, () => false);
+    // on Comfort
+    await go(page, { name: 'comfort' });
+    await typeIn(page, 'Tea', 'Tea, still typing');
+    await button(page, 'Remove Blanket').click();
+    await until(page, () => !document.querySelector('[aria-label="Remove Blanket"]'), undefined, { timeout: 5000 }).catch(() => {});
+    problems.push(...(await kept(['Tea, still typing'], 'Comfort, Blanket removed')));
+    await page.locator('.dq-toast').getByRole('button', { name: 'Undo', exact: true }).click();
+    if (!(await showing(PANEL.comfort, 'Blanket'))) problems.push('Comfort: Undo did not bring Blanket back');
+    problems.push(...(await kept(['Tea, still typing'], 'Comfort, Blanket back with Undo')));
+    const kit = page.locator('.dq-listp--comfort');
+    await kit.getByRole('textbox', { name: 'Add to Comfort kit' }).fill('Socks');
+    await kit.getByRole('button', { name: 'Add', exact: true }).click();
+    if (!(await showing(PANEL.comfort, 'Socks'))) problems.push('Comfort: Socks was not added');
+    problems.push(...(await kept(['Tea, still typing'], 'Comfort, Socks added')));
+    if (await kit.getByRole('textbox', { name: 'Add to Comfort kit' }).inputValue()) problems.push('Comfort: Add left its words in the field');
+    const add = page.locator('.dq-person-add');
+    await add.getByRole('textbox', { name: 'Name' }).fill('Juno');
+    await button(page, 'Add person').click();
+    if (!(await showing(PANEL.people, 'Juno'))) problems.push('Comfort: Juno was not added');
+    problems.push(...(await kept(['Tea, still typing'], 'Comfort, Juno added')));
+    let s = await stored(h, page);
+    if (JSON.stringify(words(s.lists.comfort)) !== JSON.stringify(['Tea', 'Blanket', 'Rain', 'Socks']) || !words(s.lists.people).includes('Juno')) problems.push(`Comfort: stored ${JSON.stringify(words(s.lists.comfort))} and ${JSON.stringify(words(s.lists.people))}`);
+    await h.shot(page, 'keep-comfort');
+
+    // in the Safe Zone, with Edit the list on
+    await safeAt(page, 'reasons');
+    await hear(page);
+    const xp = await page.evaluate(() => window.__daily.store.derived().xp);
+    await button(page, 'Edit the list').click();
+    await typeIn(page, 'Kestrel feathers', 'Kestrel feathers, half');
+    await button(page, 'Add one').click();
+    await page.getByRole('textbox', { name: 'Add one' }).fill('Moss');
+    await page.locator('.dq-addrow').getByRole('button', { name: 'Save', exact: true }).click();
+    if (!(await showing(null, 'Moss'))) problems.push('Safe Zone: Moss was not added');
+    problems.push(...(await kept(['Kestrel feathers, half'], 'Safe Zone, Moss added')));
+    problems.push(...(await focusOn(page, 'Add one', 'Safe Zone, Moss added')));
+    if (!(await button(page, 'Remove Quillfeather walks').count())) problems.push('Safe Zone: adding Moss turned Edit the list off');
+    else {
+      await button(page, 'Remove Quillfeather walks').click();
+      problems.push(...(await kept(['Kestrel feathers, half'], 'Safe Zone, Quillfeather walks removed')));
+    }
+    await safeAt(page, 'people');
+    await button(page, 'Edit the list').click();
+    await typeIn(page, 'Robin', 'Robin Vale');
+    await button(page, 'Add a person').click();
+    await add.getByRole('textbox', { name: 'Name' }).fill('Juniper');
+    await add.getByRole('button', { name: 'Save', exact: true }).click();
+    if (!(await showing(null, 'Juniper'))) problems.push('Safe Zone: Juniper was not added');
+    problems.push(...(await kept(['Robin Vale', ''], 'Safe Zone, Juniper added')));
+    problems.push(...(await focusOn(page, 'Add a person', 'Safe Zone, Juniper added')));
+    problems.push(...(await noise(page, xp)).map((n) => `Safe Zone: ${n}`));
+    s = await stored(h, page);
+    const typed = [...words(s.lists.reasons), ...words(s.lists.people)].filter((w) => /half|Vale/.test(w));
+    if (typed.length || !words(s.lists.reasons).includes('Moss') || !words(s.lists.people).includes('Juniper')) problems.push(`Safe Zone: stored ${JSON.stringify(words(s.lists.reasons))} and ${JSON.stringify(words(s.lists.people))}`);
+    await h.shot(page, 'keep-safe-zone');
     problems.push(...errors);
     await ctx.close();
     h.expect(!problems.length, problems.join('\n'));
