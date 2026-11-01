@@ -150,7 +150,9 @@ export class AudioEngine {
     const hp = C.createBiquadFilter();
     hp.type = 'highpass';
     hp.frequency.value = 26;
-    hp.Q.value = 0.6;
+    // a high-pass Q is in dB: 1/√2 (Butterworth) is flat, with no resonance to ring on for a tenth of a second after
+    // every sound that stops
+    hp.Q.value = 20 * Math.log10(Math.SQRT1_2);
     const lim = C.createDynamicsCompressor();
     lim.threshold.value = LIMIT.threshold;
     lim.knee.value = LIMIT.knee;

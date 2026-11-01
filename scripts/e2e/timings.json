@@ -724,6 +724,7 @@
   "skip-keeps-the-sound-levels": 15,
   "skip-late-in-awaken": 14,
   "skip-mid-silhouette": 5,
+  "skip-silences-every-sound": 45,
   "skip-stops-the-intro-sound": 110,
   "skip-then-restore": 18,
   "slow-gpu-settles-fast": 5,
