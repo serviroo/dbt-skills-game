@@ -39,10 +39,14 @@
 }
 
 /* wide screens: the chest fills the lower centre (its half-width is about 0.32-0.36 of the height through the
-   dolly), so the prompt stands beside it like a game interaction prompt instead of covering the emblem */
+   dolly), so the prompt stands beside it like a game interaction prompt instead of covering the emblem, never past the
+   screen's edge. A short wide screen has less room than that beside the chest, and the camera moves the chest left to
+   make it (the director's chestFrame) */
 @media (min-aspect-ratio: 7/5) {
   .ch-dock {
-    left: calc(50% + 41vh + 3vw + 60px);
+    --dock-w: 216px;
+    width: var(--dock-w);
+    left: min(calc(50% + 41vh + 3vw + 60px), calc(100% - var(--safe-right) - 16px - var(--dock-w) / 2));
     bottom: auto;
     top: 67vh;
     transform: translate(-50%, -50%);

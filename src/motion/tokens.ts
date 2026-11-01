@@ -182,6 +182,11 @@ export const GATE = {
   handheld: 0.3,
 } as const;
 
+/** The intro's camera when the screen changes shape mid-shot (a phone turned, a window resized): every shot frames for the
+ *  new shape at once, and the picture eases there from what was on screen over this long, or cuts there with reduced
+ *  motion. */
+export const REFRAME = { sec: 0.5 } as const;
+
 /** The small calm 3D scenes in the companion (src/scene/vignettes) and the renderer they share. */
 export const SCENE = {
   /** longest the flat picture stays hidden while a scene loads, so a quick load fades straight into 3D */

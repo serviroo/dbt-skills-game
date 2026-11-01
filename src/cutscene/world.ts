@@ -52,6 +52,8 @@ export interface ChestLike {
   setCharge(c: number): void;
   setOpen(p: number): void;
   update(t: number, dt?: number): void;
+  /** the closed chest's box in the group's space */
+  bounds?: THREE.Box3;
 }
 
 export interface World {
