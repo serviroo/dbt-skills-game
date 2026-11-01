@@ -77,6 +77,11 @@ on and off.
 `--cpu-throttle=4` slows each Chromium page's CPU work by four through CDP, including new tabs. The rate must be at
 least 1. The report records `cpuThrottle` and `throttleErrors`; a failure to apply it fails the run.
 
+Pages get the dev server's files from the harness, not through the browser's own network. Chromium fails every request
+still waiting for a connection whenever its machine gains or loses a network address, as a CI job starting or stopping
+a Docker network does, and a page that loses a module that way never starts. Offline still fails every request. Vite's
+live-reload socket is answered by the harness and stays silent, so no file change reloads a page mid-scenario.
+
 ### E2E scenarios
 
 Each file in `scripts/e2e/` named `<name>.e2e.mjs` exports its scenarios:
@@ -197,8 +202,8 @@ ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:<port>:127.0.0.1:<port> -R 127.0
 node scripts/e2e.mjs --ws=ws://127.0.0.1:<port>/<path> --port=5400
 ```
 
-`-L` brings the browser's port to this machine's 127.0.0.1, and `-R` lets that browser load this run's dev server at
-its own 127.0.0.1. Naming 127.0.0.1 on both ends and `ExitOnForwardFailure` stop the tunnel if either port is already
+`-L` brings the browser's port to this machine's 127.0.0.1, and `-R` lets that browser reach this run's dev server at
+its own 127.0.0.1 for the requests the harness doesn't answer itself. Naming 127.0.0.1 on both ends and `ExitOnForwardFailure` stop the tunnel if either port is already
 taken on its side. `--ws` needs `--port`, which keeps the dev server on the forwarded port; the run stops if that port
 is taken here, and before any scenario it checks that the browser reaches this run's dev server rather than another
 one. `--headed` goes to `scripts/e2e-browser.mjs`; `--software` goes to both `scripts/e2e-browser.mjs` and
