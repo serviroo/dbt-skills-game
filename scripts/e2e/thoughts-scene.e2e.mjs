@@ -10,7 +10,7 @@
 // keeps moving. With no WebGL each choice's flat picture shows and moves (and holds still with reduced motion), and the
 // skill still finishes and counts once, storing nothing new. The emotion skill's watch step keeps its tide.
 import { deviceMotion } from './device-motion.e2e.mjs';
-import { DESK, drawn, flat, inStep, keepsTime, live, looks, pair, PHONE, scenes, seed, SIDE, slowGpu, toSkill, until } from './skill-scenes.e2e.mjs';
+import { DESK, drawn, flat, inStep, keepsTime, live, looks, losesContext, moreTime, openStopped, pair, PHONE, scenes, seed, SIDE, slowGpu, toSkill, until } from './skill-scenes.e2e.mjs';
 
 const SMALL = { width: 320, height: 568 };
 /** the sizes reduced motion, a lost context and a slow GPU are checked at */
@@ -98,12 +98,8 @@ async function picture(h, pic) {
   for (const [tag, vp] of [...SIZES, ['desk', DESK]]) {
     const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
     await ctx.addInitScript(countBuffers);
-    await page.clock.install();
-    await page.reload();
-    await toThoughts(h, page, pic);
+    await openStopped(h, page, (h, page) => toThoughts(h, page, pic), `${pic} ${tag}`);
     h.expect(PICS[pic].words.test(await page.locator('.dq-skill').innerText()), `${pic} ${tag}: the watch step does not say ${PICS[pic].words}`);
-    await live(h, page, `${pic} ${tag}`);
-    await h.pauseClock(page);
     await looks(h, page, `${pic}-${tag}`, 'thoughts', vp, undefined, { stopped: true });
     h.expect((await scenes(page)).last.probe.pic === pic, `${pic} ${tag}: the scene shows ${(await scenes(page)).last.probe.pic}`);
     await countdownClear(h, page, `${pic} ${tag}`);
@@ -117,7 +113,7 @@ async function picture(h, pic) {
         most = Math.max(most, seen.length);
         h.expect(seen.length <= PICS[pic].most, `${pic}: ${seen.length} thoughts in the window at once at ${at.e.toFixed(1)} s (${at.probe.things})`);
         for (const a of seen) for (const b of seen) if (a !== b) h.expect(Math.hypot(a[1] - b[1], a[2] - b[2]) >= 0.3, `${pic}: two thoughts on top of each other at ${at.e.toFixed(1)} s (${at.probe.things})`);
-        // to the minute's last few seconds, so the countdown is still running for the freeze below
+        // to the minute's last few seconds
         if (at.e >= at.dur - 4) break;
         await page.clock.runFor(2000);
         at = (await scenes(page)).last;
@@ -131,6 +127,8 @@ async function picture(h, pic) {
       });
       h.expect(crossed.length >= 1, `${pic}: no thought came in, crossed the window steadily and went out within the minute (${said})`);
       console.log(`  ${pic}: ${crossed.length} crossed in the minute, at most ${most} in view; ${said}`);
+      // more time, so the countdown keeps running through the freeze however slowly the page draws once it comes back
+      await page.locator('.dq-timer').getByRole('button', { name: '+30 s', exact: true }).click();
       await keepsTime(h, page, 'thoughts');
       const held = await page.evaluate(() => window.__buffers);
       h.expect(held === 0, `${pic} left: ${held} GPU buffers still held`);
@@ -154,11 +152,7 @@ export const scenarios = {
   /** the clouds dim the moon while one passes it, and it comes back after */
   async 'thoughts-clouds-moon'(h) {
     const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
-    await page.clock.install();
-    await page.reload();
-    await toThoughts(h, page, 'clouds');
-    await live(h, page, 'clouds moon');
-    await h.pauseClock(page);
+    await openStopped(h, page, (h, page) => toThoughts(h, page, 'clouds'), 'clouds moon');
     const moon = [];
     let shot = false;
     for (let at = (await scenes(page)).last; at.e < at.dur - 2; ) {
@@ -200,6 +194,7 @@ export const scenarios = {
       const device = await deviceMotion(ctx, page);
       await toThoughts(h, page, pic);
       await live(h, page, `motion ${pic} ${tag}`);
+      await moreTime(page);
       await moving(h, page, `${pic} ${tag}, Full`);
       await device('reduce');
       await holdsStill(h, page, pic, `${pic} ${tag}, device set to reduce motion`);
@@ -220,28 +215,11 @@ export const scenarios = {
     for (const [k, [tag, vp]] of SIZES.entries()) {
       const pic = NAMES[k];
       const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
-      await toThoughts(h, page, pic);
-      await live(h, page, `lost ${pic} ${tag}`);
-      await page.evaluate(() => {
-        window.__lose = document.querySelector('.dq-scene canvas').getContext('webgl2').getExtension('WEBGL_lose_context');
-        window.__lose.loseContext();
+      await openStopped(h, page, (h, page) => toThoughts(h, page, pic), `lost ${pic} ${tag}`);
+      const { now } = await losesContext(h, page, `${pic} ${tag}`, `thoughts-lost-${pic}-${tag}`, async () => {
+        h.expect(await page.locator(`.dq-thoughts--${pic}`).isVisible(), `lost ${pic} ${tag}: the flat ${pic} did not come back`);
       });
-      await page.locator('.dq-timer-stage:not(.is-scene-live)').waitFor({ timeout: 5000 });
-      await h.sleep(800);
-      const a = await scenes(page);
-      await h.sleep(800);
-      const b = await scenes(page);
-      h.expect(a.live === 0 && b.frames === a.frames, `lost ${pic} ${tag}: the scene kept drawing (${a.frames} -> ${b.frames})`);
-      const shown = await flat(page);
-      h.expect(shown.length > 1 && shown.every(Boolean) && (await page.locator(`.dq-thoughts--${pic}`).isVisible()), `lost ${pic} ${tag}: the flat ${pic} did not come back (${JSON.stringify(shown)})`);
-      await h.shot(page, `thoughts-lost-${pic}-${tag}`);
-      await page.evaluate(() => window.__lose.restoreContext());
-      await live(h, page, `restored ${pic} ${tag}`);
-      await until(page, (n) => window.__scenes.frames > n, b.frames + 10);
-      const c = await pair(page);
-      h.expect(c.s.live === 1 && c.s.contexts === 1 && c.s.frames > b.frames + 10 && c.s.last.probe.pic === pic, `restored ${pic} ${tag}: ${JSON.stringify(c.s)}`);
-      inStep(h, c, `restored ${pic} ${tag}`);
-      await drawn(h, page, `restored ${pic} ${tag}`);
+      h.expect(now.s.last.probe.pic === pic, `restored ${pic} ${tag}: the scene shows ${now.s.last.probe.pic}`);
       h.expect(!errors.length, errors.join('\n'));
       await ctx.close();
     }
