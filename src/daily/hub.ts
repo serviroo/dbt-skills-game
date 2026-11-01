@@ -514,7 +514,8 @@ function menu(app: App) {
       .list()
       .then((list) => {
         if (t !== told) return;
-        storySub.textContent = list[0] ? breakable(list[0].title.trim()) || 'Untitled story' : 'Start your first story';
+        const title = list[0]?.title.trim();
+        storySub.replaceChildren(!list[0] ? 'Start your first story' : title ? breakable(title) : 'Untitled story');
         storySub.classList.toggle('is-title', !!list[0]);
       })
       .catch(() => undefined);
