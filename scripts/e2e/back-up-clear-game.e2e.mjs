@@ -1,7 +1,7 @@
 // Back up, then clear this game's data: Settings makes a Save Crystal first, then asks once. Clearing takes every key,
-// database, offline cache and worker of this game and nothing of anything else on the site; no open copy brings any of
-// it back; and the Save Crystal restores it all on a fresh device. Runs on a real production build with the offline
-// worker allowed, served under its own path next to an unrelated app.
+// database, offline cache and worker of this game and nothing of anything else on the site, and leaves only the record
+// that a clear happened; no open copy brings any of it back; and the Save Crystal restores it all on a fresh device. Runs
+// on a real production build with the offline worker allowed, served under its own path next to an unrelated app.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -14,6 +14,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const BASE = '/game/';
 const SAVE = 'dbt.lantern.v1';
 const LAB = 'dbt.lantern.lab';
+/** The record a clear leaves, so a copy that missed the clear knows it happened: an id, and nothing of the game. */
+const CLEARED = 'dbt.cleared';
 const NOISE = /WebGL|GPU stall|AudioContext|Failed to load resource/i;
 const SIZES = [
   ['phone', { width: 390, height: 844 }],
@@ -273,10 +275,12 @@ const unchanged = (h, before, after, how) => {
   if (JSON.stringify(before.workers) !== JSON.stringify(after.workers)) diff.push('workers');
   throw new Error(`${how} changed this device: ${diff.join(', ')}`);
 };
-/** Only the unrelated app's things are left: none of the game's, all of the neighbour's, values untouched. */
+/** Only the unrelated app's things and the clear record are left: none of the game's, all of the neighbour's, untouched. */
 const onlyNeighbours = (h, d, how, ss = NEIGHBOURS.ss) => {
   const got = names(d);
-  h.expect(JSON.stringify(got) === JSON.stringify({ ...NEIGHBOURS, ss }), `${how}: left on the device ${JSON.stringify(got)}, want ${JSON.stringify({ ...NEIGHBOURS, ss })}`);
+  const want = { ...NEIGHBOURS, ls: [CLEARED, ...NEIGHBOURS.ls], ss };
+  h.expect(JSON.stringify(got) === JSON.stringify(want), `${how}: left on the device ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+  h.expect(/^[a-z0-9]+\.[a-z0-9]+$/.test(d.ls[CLEARED]), `${how}: the clear record holds more than an id: ${d.ls[CLEARED]}`);
   h.expect(d.ls['other.app.key'] === 'stay' && d.idb['other-db'].kv === JSON.stringify([['k'], ['stay']]) && d.caches['other-cache'][0] === '/other/x', `${how}: a neighbour's value changed`);
 };
 /** Scrolls as the app does (under the pinned top bar) and lets the page paint. */
@@ -350,6 +354,145 @@ const content = (raw) => ({
   cards: Object.values(raw.stories.cards).flat().map((c) => `${c.mode}:${c.text}`).sort(),
   preferences: raw.preferences,
 });
+
+/**
+ * A copy that missed the clear (see clear-missed-then-new-game) comes back after a new game began in another tab, by
+ * comeBack (run in the page): it reloads into the new save and never brings its old progress, names or words into it.
+ * before readies the copy before it goes away; name tells the files apart.
+ */
+async function missedClear(h, name, comeBack, before) {
+  const srv = await host(await build(h.shared));
+  const { ctx, errors } = await context(h);
+  try {
+    const page = await ctx.newPage();
+    await seed(page, srv.origin, seedData());
+    const stale = await ctx.newPage();
+    await stale.addInitScript(() => {
+      if (!location.pathname.startsWith('/game/')) return;
+      delete window.BroadcastChannel;
+      Object.defineProperty(window, 'indexedDB', { configurable: true, get: () => undefined });
+      // while away nothing reaches the page (a headless browser can't freeze one: CDP's frozen state is a no-op there)
+      const away = (e) => window.__away && e.stopImmediatePropagation();
+      for (const t of ['storage', 'focus', 'blur', 'pageshow', 'pagehide', 'visibilitychange', 'freeze', 'resume']) window.addEventListener(t, away, true);
+    });
+    await openGame(stale, srv.origin);
+    await h.reachHub(stale);
+    const seeded = await stale.evaluate(() => ((window.__marker = 'stale'), { created: window.__daily.store.state.created, events: window.__daily.store.state.events.map((e) => e.id) }));
+    h.expect(seeded.events.includes('seed-card'), 'the stale copy did not read the seeded save: ' + JSON.stringify(seeded));
+    await before?.(stale);
+    await stale.evaluate(() => (window.__away = true));
+
+    await page.bringToFront();
+    await openGame(page, srv.origin);
+    await settings(page);
+    await backUp(h, page, `crystal-${name}`);
+    await page.getByRole('button', { name: CONFIRM }).click();
+    await finished(page);
+    onlyNeighbours(h, await device(page), 'after clearing with a copy that missed it');
+
+    // a new game in another tab writes a fresh save
+    const next = await ctx.newPage();
+    await next.goto(srv.origin + '/other/');
+    await next.evaluate(() => localStorage.setItem('dbt.app.v1', JSON.stringify({ seenCutscene: true })));
+    await openGame(next, srv.origin);
+    await h.reachHub(next);
+    await next.evaluate(() => window.__daily.store.save());
+    const fresh = JSON.parse(await next.evaluate((k) => localStorage.getItem(k), SAVE));
+    h.expect(fresh.created > seeded.created && !fresh.events.some((e) => /^seed-/.test(e.id)), 'the new game did not start a fresh save: ' + JSON.stringify({ created: fresh.created, events: fresh.events.map((e) => e.id) }));
+
+    // the stale copy comes back and is used
+    const loaded = stale.waitForEvent('load', { timeout: 15000 }).then(() => true, () => false);
+    await stale.bringToFront();
+    await stale.evaluate(comeBack).catch(() => undefined);
+    const reloaded = await loaded;
+    const now = await next.evaluate((keys) => keys.map((k) => localStorage.getItem(k)), [SAVE, 'dbt.you.v1']);
+    const after = JSON.parse(now[0]);
+    const old = after.events.filter((e) => /^seed-/.test(e.id)).map((e) => e.id);
+    h.expect(!old.length && after.created === fresh.created, `the copy that missed the clear folded its old save into the new game: ${JSON.stringify({ old, created: after.created, want: fresh.created })}`);
+    h.expect(!/Robin|Pip/.test(now[1] ?? ''), 'the copy that missed the clear brought its old names into the new game: ' + now[1]);
+    const words = await next.evaluate(() => Object.keys(localStorage).filter((k) => /before the clear/.test(localStorage.getItem(k) ?? '')));
+    h.expect(!words.length, 'the copy that missed the clear stored its old words again: ' + words.join(', '));
+    h.expect(reloaded, 'the copy that missed the clear did not reload into the new game');
+    await stale.waitForFunction(() => document.documentElement.dataset.ready === '1' && !!window.__daily, null, { timeout: 30000 });
+    const mine = await stale.evaluate(() => ({ marker: window.__marker ?? null, created: window.__daily.store.state.created, events: window.__daily.store.state.events.map((e) => e.id) }));
+    h.expect(mine.marker === null && mine.created === fresh.created && !mine.events.some((id) => /^seed-/.test(id)), 'after reloading, the copy is not on the new save: ' + JSON.stringify(mine));
+    await h.reachHub(stale);
+    await h.shot(stale, `${name}-reloaded`);
+    const last = JSON.parse(await next.evaluate((k) => localStorage.getItem(k), SAVE));
+    h.expect(!last.events.some((e) => /^seed-/.test(e.id)) && last.created === fresh.created, 'the reloaded copy brought old progress into the new game');
+    h.expect(!errors.length, errors.join('\n'));
+  } finally {
+    await ctx.close();
+    await srv.close();
+  }
+}
+
+/**
+ * Holds a second copy (mid) inside its write of a key matching the pattern `held`, which `start` (run in that page, after
+ * `prepare`) begins, through a whole clear in the first copy, then lets it go and runs `check` with both pages and what
+ * `start` returned. The held copy has no databases, so the clear can finish while it is held. name tells the files apart.
+ */
+async function clearWhileHeld(h, name, held, prepare, start, check) {
+  const srv = await host(await build(h.shared));
+  const { ctx, errors } = await context(h);
+  try {
+    const page = await ctx.newPage();
+    await seed(page, srv.origin, seedData());
+    const mid = await ctx.newPage();
+    await mid.addInitScript((pattern) => {
+      if (!location.pathname.startsWith('/game/')) return;
+      Object.defineProperty(window, 'indexedDB', { configurable: true, get: () => undefined });
+      const set = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (k, v) {
+        if (this === localStorage && window.__hold && new RegExp(pattern).test(k)) {
+          window.__hold = false;
+          debugger;
+        }
+        return set.call(this, k, v);
+      };
+    }, held);
+    await openGame(mid, srv.origin);
+    await h.reachHub(mid);
+    await mid.evaluate(() => (window.__marker = 'held up'));
+    await prepare?.(mid);
+
+    await page.bringToFront();
+    await openGame(page, srv.origin);
+    await settings(page);
+    await backUp(h, page, `crystal-${name}`);
+    const cdp = await ctx.newCDPSession(mid);
+    await cdp.send('Debugger.enable');
+    const stopped = new Promise((r) => cdp.once('Debugger.paused', r));
+    const begun = cdp.send('Runtime.evaluate', { expression: `window.__hold = true; (${start})()` });
+    await stopped;
+    await page.getByRole('button', { name: CONFIRM }).click();
+    await finished(page);
+    onlyNeighbours(h, await device(page), `after clearing with a copy held up (${name})`);
+    // what the held copy stores once let go, as it lands
+    await page.evaluate(() => {
+      window.__landed = [];
+      window.addEventListener('storage', (e) => e.newValue !== null && window.__landed.push([e.key, e.newValue]));
+    });
+    await cdp.send('Debugger.resume');
+    const late = (await begun).result?.value;
+    await cdp.detach();
+    await check({ page, mid, ctx, late, origin: srv.origin });
+    h.expect(!errors.length, errors.join('\n'));
+  } finally {
+    await ctx.close();
+    await srv.close();
+  }
+}
+
+/** What a held-up copy shows and holds, once it shows the clear or `back` says it went back into the old game (15 s at most). */
+async function heldCopy(h, mid, back) {
+  let kept = null;
+  for (const end = Date.now() + 15000; Date.now() < end; await h.sleep(250)) {
+    kept = await mid.evaluate(() => ({ shown: !!document.querySelector('.dq-cleared'), marker: window.__marker ?? null, events: window.__daily?.store.state.events.map((e) => e.id) ?? null })).catch(() => null);
+    if (kept?.shown || back(kept)) break;
+  }
+  return kept;
+}
 
 export const scenarios = {
   /** the whole path: backup, every way of saying no, a change in another tab, one confirmation, a clean device, a restore */
@@ -537,77 +680,91 @@ export const scenarios = {
    * events) comes back after a new game began in another tab: it reloads into the new save and never folds its old
    * progress or names into it
    */
-  async 'clear-missed-then-new-game'(h) {
-    const srv = await host(await build(h.shared));
-    const { ctx, errors } = await context(h);
-    try {
-      const page = await ctx.newPage();
-      await seed(page, srv.origin, seedData());
-      const stale = await ctx.newPage();
-      await stale.addInitScript(() => {
-        if (!location.pathname.startsWith('/game/')) return;
-        delete window.BroadcastChannel;
-        Object.defineProperty(window, 'indexedDB', { configurable: true, get: () => undefined });
-        // while away nothing reaches the page (a headless browser can't freeze one: CDP's frozen state is a no-op there)
-        const away = (e) => window.__away && e.stopImmediatePropagation();
-        for (const t of ['storage', 'focus', 'blur', 'pageshow', 'pagehide', 'visibilitychange', 'freeze', 'resume']) window.addEventListener(t, away, true);
-      });
-      await openGame(stale, srv.origin);
-      await h.reachHub(stale);
-      const seeded = await stale.evaluate(() => ((window.__marker = 'stale'), { created: window.__daily.store.state.created, events: window.__daily.store.state.events.map((e) => e.id) }));
-      h.expect(seeded.events.includes('seed-card'), 'the stale copy did not read the seeded save: ' + JSON.stringify(seeded));
-      await stale.evaluate(() => (window.__away = true));
+  'clear-missed-then-new-game': (h) =>
+    missedClear(h, 'missed', () => {
+      window.__away = false;
+      window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('focus'));
+      window.__daily.store.save();
+    }),
 
-      await page.bringToFront();
-      await openGame(page, srv.origin);
-      await settings(page);
-      await backUp(h, page, 'crystal-missed');
-      await page.getByRole('button', { name: CONFIRM }).click();
-      await finished(page);
-      onlyNeighbours(h, await device(page), 'after clearing with a copy that missed it');
+  /**
+   * the same copy wakes in the middle of a save, before anything else reaches it (a page held mid-save as the clear
+   * ran): that save never lands on the new game, nor folds the new game into its old one, and the page reloads into it
+   */
+  'clear-missed-then-saves-first': (h) => missedClear(h, 'missed-mid-save', () => window.__daily.store.skillEvent('wise-mind')),
 
-      // a new game in another tab writes a fresh save
+  /** the same copy wakes mid-skill and the first thing it does is keep the words being typed: they never come back */
+  'clear-missed-then-types-first': (h) =>
+    missedClear(
+      h,
+      'missed-mid-typing',
+      () => {
+        window.__typing.value += ' and a few more';
+        window.__typing.dispatchEvent(new Event('input', { bubbles: true }));
+      },
+      async (stale) => {
+        await stale.evaluate(() => window.__daily.go({ name: 'skill', id: 'abc-please', entry: 'c' }));
+        await stale.locator('.dq-step-body textarea, .dq-step-body input.dq-input').first().fill('Words typed before the clear');
+        await stale.waitForFunction(() => Object.keys(localStorage).some((k) => /before the clear/.test(localStorage.getItem(k) ?? '')));
+        await stale.evaluate(() => (window.__typing = document.activeElement));
+      },
+    ),
+
+  /**
+   * a copy held up in the middle of a save (its check done, its write not yet made) through the whole clear, then let go:
+   * its late write is cleared data. A new game opened after holds none of the old progress, and the copy shows the clear
+   */
+  'clear-while-a-copy-is-mid-save': (h) =>
+    clearWhileHeld(h, 'mid-save', `^${SAVE.replace(/\./g, '\\.')}$`, null, () => window.__daily.store.skillEvent('wise-mind').id, async ({ page, mid, ctx, late, origin }) => {
+      const landed = await page.evaluate((k) => localStorage.getItem(k), SAVE);
+      h.expect(late && landed?.includes(late), 'the held-up save never landed after the clear, so this checks nothing: ' + JSON.stringify({ late, landed: landed?.slice(0, 80) }));
+
+      // a new game opened after starts fresh, and its first save goes over the late write
       const next = await ctx.newPage();
-      await next.goto(srv.origin + '/other/');
+      await next.goto(origin + '/other/');
       await next.evaluate(() => localStorage.setItem('dbt.app.v1', JSON.stringify({ seenCutscene: true })));
-      await openGame(next, srv.origin);
+      await openGame(next, origin);
       await h.reachHub(next);
-      await next.evaluate(() => window.__daily.store.save());
-      const fresh = JSON.parse(await next.evaluate((k) => localStorage.getItem(k), SAVE));
-      h.expect(fresh.created > seeded.created && !fresh.events.some((e) => /^seed-/.test(e.id)), 'the new game did not start a fresh save: ' + JSON.stringify({ created: fresh.created, events: fresh.events.map((e) => e.id) }));
+      const fresh = await next.evaluate(() => ({ events: window.__daily.store.state.events.map((e) => e.id), name: window.__daily.store.state.settings.playerName }));
+      h.expect(!fresh.events.some((id) => /^seed-/.test(id) || id === late) && fresh.name === '', 'the new game took in progress or names from before the clear: ' + JSON.stringify(fresh));
+      const now = JSON.parse(await next.evaluate((k) => localStorage.getItem(k), SAVE));
+      h.expect(!now.events.some((e) => /^seed-/.test(e.id) || e.id === late) && now.afterClear === (await next.evaluate((k) => localStorage.getItem(k), CLEARED)), 'the late write is still the stored game: ' + JSON.stringify({ afterClear: now.afterClear, events: now.events.map((e) => e.id) }));
 
-      // the stale copy comes back from the page cache and is used: back in view, focus, and a save
-      const loaded = stale.waitForEvent('load', { timeout: 15000 }).then(() => true, () => false);
-      await stale.bringToFront();
-      await stale
-        .evaluate(() => {
-          window.__away = false;
-          window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
-          document.dispatchEvent(new Event('visibilitychange'));
-          window.dispatchEvent(new Event('focus'));
-          window.__daily.store.save();
-        })
-        .catch(() => undefined);
-      const reloaded = await loaded;
-      const now = await next.evaluate((keys) => keys.map((k) => localStorage.getItem(k)), [SAVE, 'dbt.you.v1']);
-      const after = JSON.parse(now[0]);
-      const old = after.events.filter((e) => /^seed-/.test(e.id)).map((e) => e.id);
-      h.expect(!old.length && after.created === fresh.created, `the copy that missed the clear folded its old save into the new game: ${JSON.stringify({ old, created: after.created, want: fresh.created })}`);
-      h.expect(!/Robin|Pip/.test(now[1] ?? ''), 'the copy that missed the clear brought its old names into the new game: ' + now[1]);
-      h.expect(reloaded, 'the copy that missed the clear did not reload into the new game');
-      await stale.waitForFunction(() => document.documentElement.dataset.ready === '1' && !!window.__daily, null, { timeout: 30000 });
-      const mine = await stale.evaluate(() => ({ marker: window.__marker ?? null, created: window.__daily.store.state.created, events: window.__daily.store.state.events.map((e) => e.id) }));
-      h.expect(mine.marker === null && mine.created === fresh.created && !mine.events.some((id) => /^seed-/.test(id)), 'after reloading, the copy is not on the new save: ' + JSON.stringify(mine));
-      await h.reachHub(stale);
-      await h.shot(stale, 'missed-reloaded');
-      const last = JSON.parse(await next.evaluate((k) => localStorage.getItem(k), SAVE));
-      h.expect(!last.events.some((e) => /^seed-/.test(e.id)) && last.created === fresh.created, 'the reloaded copy brought old progress into the new game');
-      h.expect(!errors.length, errors.join('\n'));
-    } finally {
-      await ctx.close();
-      await srv.close();
-    }
-  },
+      // the held-up copy shows the clear and holds nothing of the old game
+      const kept = await heldCopy(h, mid, (k) => k?.events?.some((id) => /^seed-/.test(id)));
+      h.expect(kept?.shown && kept.marker === 'held up' && !kept.events?.some((id) => /^seed-/.test(id)), 'the held-up copy did not show the clear, or went back into the old game: ' + JSON.stringify(kept));
+    }),
+
+  /**
+   * the same with a copy held up as it keeps the words typed into a skill: once it hears of the clear the late words go,
+   * so no later game finds them
+   */
+  'clear-while-a-copy-is-mid-draft': (h) =>
+    clearWhileHeld(
+      h,
+      'mid-draft',
+      '\\.skill-draft\\.',
+      async (mid) => {
+        await mid.evaluate(() => window.__daily.go({ name: 'skill', id: 'abc-please', entry: 'c' }));
+        await mid.locator('.dq-step-body textarea, .dq-step-body input.dq-input').first().fill('Words typed before the clear');
+        await mid.waitForFunction(() => Object.keys(localStorage).some((k) => /before the clear/.test(localStorage.getItem(k) ?? '')));
+        await mid.evaluate(() => (window.__typing = document.activeElement));
+      },
+      () => {
+        window.__typing.value += ' and a few more';
+        window.__typing.dispatchEvent(new Event('input', { bubbles: true }));
+      },
+      async ({ page, mid }) => {
+        const kept = await heldCopy(h, mid, () => false);
+        h.expect(kept?.shown && kept.marker === 'held up', 'the held-up copy did not show the clear: ' + JSON.stringify(kept));
+        const landed = await page.evaluate(() => window.__landed.filter(([, v]) => /and a few more/.test(v)).length);
+        h.expect(landed, 'the held-up words never landed after the clear, so this checks nothing');
+        const left = await page.evaluate(() => Object.keys(localStorage).filter((k) => /before the clear/.test(localStorage.getItem(k) ?? '')));
+        h.expect(!left.length, 'words typed before the clear are still stored: ' + left.join(', '));
+      },
+    ),
 
   /**
    * a copy frozen in the background through the clear hears none of it. Woken, it stops before the typing it had

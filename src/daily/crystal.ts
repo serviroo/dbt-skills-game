@@ -1,6 +1,6 @@
 import { parsePrefs, savePrefs, type AudioLevels, type VolumeCtrl } from '../audio/prefs';
 import { AUDIO_KEY, BESIDE } from '../core/stored-names';
-import { write } from '../core/cleared';
+import { setStored, write } from '../core/cleared';
 import { artStore, cleanRec, skippedDrafts } from './artstore';
 import { cleanChapter, cleanStory, skippedCards, storyStore, STORY_CAP, type Story } from './storystore';
 import { isSkillId, normalize, type State, type Store } from './store';
@@ -105,7 +105,7 @@ export function restoreUnread(raw: unknown, store: Store) {
           const key = kept + at;
           write(() => {
             try {
-              localStorage.setItem(key, bytes);
+              setStored(key, bytes);
             } catch {
               saved = false;
             }
@@ -189,7 +189,7 @@ export function restorePreferences(raw: unknown, store: Store, volume?: VolumeCt
       if (!object(room)) return;
       const next = { ...room };
       for (const k of ['aquarium', 'words'] as const) if (!Object.hasOwn(room, k) && typeof prefs.room[k] === 'boolean') next[k] = prefs.room[k];
-      if (JSON.stringify(next) !== JSON.stringify(room)) write(() => localStorage.setItem(`${store.key}${BESIDE.stealth}`, JSON.stringify(next)));
+      if (JSON.stringify(next) !== JSON.stringify(room)) write(() => setStored(`${store.key}${BESIDE.stealth}`, JSON.stringify(next)));
     }),
     // added only where this device has none, a size held for the visit counting as one: the length, light or size it
     // chose here stays. A size storage refuses is held for the visit, as one picked here would be, and isn't saved
@@ -197,7 +197,7 @@ export function restorePreferences(raw: unknown, store: Store, volume?: VolumeCt
       went(() => {
         const v = prefs[name];
         if (!choice(v) || (name === 'readSize' && heldTextSize(store.key) !== undefined) || localStorage.getItem(`${store.key}${end}`) !== null) return;
-        if (name !== 'readSize') write(() => localStorage.setItem(`${store.key}${end}`, v));
+        if (name !== 'readSize') write(() => setStored(`${store.key}${end}`, v));
         else return keepTextSizeFor(store.key, v);
       }),
     ),

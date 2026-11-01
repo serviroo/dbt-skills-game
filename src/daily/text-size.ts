@@ -2,7 +2,7 @@
  * The text size chosen on this device, kept beside the save under BESIDE.readSize. Settings and the Story Room's
  * reading page set it; they and the Safe Zone show it in every open copy; a Save Crystal carries it.
  */
-import { cleared, onClear, write } from '../core/cleared';
+import { cleared, onClear, setStored, write } from '../core/cleared';
 import { BESIDE, READ_SIZES, type ReadSize } from '../core/stored-names';
 import type { App } from './app';
 
@@ -50,7 +50,7 @@ export function keepTextSizeFor(saveKey: string, v: string) {
   let stored = true;
   write(() => {
     try {
-      localStorage.setItem(k, v);
+      setStored(k, v);
       held.delete(k);
     } catch {
       // storage blocked or full: the size still holds everywhere until the visit ends

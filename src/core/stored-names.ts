@@ -5,6 +5,16 @@ export const YOU_KEY = 'dbt.you.v1';
 export const AUDIO_KEY = 'dbt.audio.v1';
 export const COWRITER_KEY = 'dbt.cowriter.v1';
 export const INSTALL_HINT_KEY = 'dbt.install-hint.v1';
+/**
+ * The last time this game's data was cleared on this device, as an id no other clear has. A clear writes it and never
+ * takes it away: it is not game data, so no Save Crystal carries it (see core/cleared).
+ */
+export const CLEARED_KEY = 'dbt.cleared';
+/**
+ * The save field that says which clear the save was written after: the CLEARED_KEY id as the page that wrote it knew it
+ * (null: none). A save from before this device's latest clear is never read; one without the field counts as current.
+ */
+export const AFTER_CLEAR = 'afterClear';
 
 export const BESIDE = {
   art: '.art',

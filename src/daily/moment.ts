@@ -9,7 +9,7 @@ import { SCORE, WINDOW } from '../motion/tokens';
 import { holdAt, soon, taper } from '../audio/param';
 import { type Next } from '../content/dbt';
 import { CHECKIN } from '../content/daily-lines';
-import { cleared, write } from '../core/cleared';
+import { cleared, setStored, write } from '../core/cleared';
 import { BESIDE, MOMENT_LENGTHS, type MomentLength } from '../core/stored-names';
 import type { App, Route, ScreenOut } from './app';
 import { icon, mothSVG } from './art';
@@ -326,7 +326,7 @@ export function momentView(app: App, o: { done: () => void; then?: string; hum?:
     take(v);
     write(() => {
       try {
-        localStorage.setItem(lengthKey(st.key), v);
+        setStored(lengthKey(st.key), v);
         stored = readLength(st.key);
       } catch {
         /* stays for this visit only */

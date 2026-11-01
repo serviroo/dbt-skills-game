@@ -25,7 +25,7 @@ import { wardrobePanel } from './wardrobe';
 import { DEFAULT_COMPANION, DEFAULT_NAME, readYou } from '../core/you';
 import { BESIDE, READ_SIZES, type ReadSize } from '../core/stored-names';
 import { mayMentionTherapist } from '../core/session';
-import { canWrite, cleared, clearStatus, holdAll, onClearStatus, write } from '../core/cleared';
+import { canWrite, cleared, clearStatus, holdAll, onClearStatus, setStored, write } from '../core/cleared';
 import { siteUrl } from '../core/base';
 import { clearGame } from './clear';
 import { crystalContent, makeCrystal, readCrystal, restorePreferences, restoreUnread, type Peek } from './crystal';
@@ -54,7 +54,7 @@ function saveStealthPrefs(key: string, prefs: { aquarium: boolean; words: boolea
   const out = JSON.stringify(prefs);
   write(() => {
     try {
-      localStorage.setItem(`${key}${BESIDE.stealth}`, out);
+      setStored(`${key}${BESIDE.stealth}`, out);
       stored();
     } catch {
       /* the room still works; the look resets next visit */

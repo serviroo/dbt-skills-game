@@ -6,7 +6,7 @@
 import { canvasBlob, INKS, PAGE, renderDrawing, STROKE_MODES, type Paper, type Stroke, type StrokeMode } from './ink';
 import { connectionLost, uid, validDay } from './store';
 import { ART_DB, BESIDE, TAB_KEY } from '../core/stored-names';
-import { canWrite, cleared, goneElsewhere, mayWrite, onClear, write as writeOut } from '../core/cleared';
+import { canWrite, cleared, goneElsewhere, mayWrite, onClear, removeStored, setStored, write as writeOut } from '../core/cleared';
 
 export interface DrawingMeta {
   id: string;
@@ -593,8 +593,8 @@ export class ArtStore {
     const k = `${this.goneKey}.${id}`;
     writeOut(() => {
       try {
-        if (g) localStorage.setItem(k, JSON.stringify(g));
-        else if (!was || sameGone(readGone(localStorage.getItem(k)), was)) localStorage.removeItem(k);
+        if (g) setStored(k, JSON.stringify(g));
+        else if (!was || sameGone(readGone(localStorage.getItem(k)), was)) removeStored(k);
       } catch {
         /* storage is full or off: this tab still hides its own */
       }

@@ -10,7 +10,7 @@ import type { VolumeCtrl } from './audio/prefs';
 import { volumeButton, type VolumeButton } from './ui/volume';
 import { readYou } from './core/you';
 import { APP_KEY } from './core/stored-names';
-import { write } from './core/cleared';
+import { setStored, write } from './core/cleared';
 import { SCORE } from './motion/tokens';
 
 const dailyMods = import.meta.glob('./daily/index.ts');
@@ -33,7 +33,7 @@ function save(s: AppState) {
   const out = JSON.stringify(s);
   write(() => {
     try {
-      localStorage.setItem(APP_KEY, out);
+      setStored(APP_KEY, out);
     } catch {
       /* storage blocked: the intro still plays, it just shows again next time */
     }
