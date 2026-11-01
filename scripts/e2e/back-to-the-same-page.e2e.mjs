@@ -34,8 +34,8 @@
 //                             storage answers. The same when the first page of a story with none is never answered as
 //                             it is made
 //   reader-storage-never-answers   the same for a story opened to read, and piece-storage-never-answers for a saved
-//                             drawing opened in the Art room: they say they can't open it, never that it is gone, and
-//                             Try again opens it once storage answers
+//                             drawing opened in the Art room: they say they can't open it, never that it is gone (also
+//                             when another open copy saves meanwhile), and Try again opens it once storage answers
 //   a-late-open-changes-nothing  Try again while the drawings' database won't even open: it can't open again, and once
 //                             a later Try again opens it, the open given up on failing late leaves storage working
 //   storage-answers-too-late  a story's first page made while another connection holds its chapters: given up after a
@@ -583,8 +583,9 @@ export const scenarios = {
       await page.getByRole('button', { name: 'Save', exact: true }).click();
       await page.locator('.dq-tools-saved').waitFor();
       const id = await page.evaluate(async () => (await (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).list())[0].id);
-      await page.locator('.dq-top .dq-back').click();
-      await routeIs(page, 'art');
+      // a later visit: the drawing is only on the disk
+      await page.reload();
+      await h.reachHub(page);
       await stall(page, 'strokes');
       await page.evaluate((id) => window.__daily.go({ name: 'piece', id }), id);
       await routeIs(page, 'piece');
@@ -592,6 +593,18 @@ export const scenarios = {
       await cantOpenShows(h, page, '.dq-piece', 'drawing', 'a saved drawing while storage never answers');
       h.expect(!(await page.getByText('That page is no longer here.').count()), 'a saved drawing while storage never answers: it says the page is gone');
       await shots(h, page, 'cant-open-piece');
+      // another open copy saves a drawing meanwhile: the page still says it can't open this one, never that it's gone
+      const other = await ctx.newPage();
+      await other.goto(page.url());
+      await other.waitForFunction(() => !!window.__daily?.store);
+      await other.evaluate(async (s) => {
+        const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+        await as.put({ id: 'from-another-copy', kind: 'today', day: window.__daily.store.today(), t: 2, updated: 2, n: 1, strokes: [s] });
+      }, stroke(200, 900));
+      await other.close();
+      await h.sleep(1000);
+      await cantOpenShows(h, page, '.dq-piece', 'drawing', 'a saved drawing while storage never answers, after another copy saved');
+      h.expect(!(await page.getByText('That page is no longer here.').count()), 'a saved drawing while storage never answers: after another copy saved, it says the page is gone');
       await page.evaluate(() => window.__answer());
       await tryAgain(page);
       await page.getByRole('button', { name: 'Keep drawing', exact: true }).waitFor({ timeout: 5000 }).catch(() => {});

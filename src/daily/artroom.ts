@@ -937,6 +937,16 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
   const body = h('div', { class: 'dq-piece-body' });
   let removed = false;
   let endRename = () => {};
+  // storage that stalled, or failed to read it, says so, never that the page is gone
+  const shut = () => {
+    endRename();
+    body.replaceChildren(
+      cantOpen(CANT_OPEN.drawing, CANT_OPEN.note, CANT_OPEN.retry, () => {
+        as.reopen();
+        app.reopen();
+      }),
+    );
+  };
   const missing = () => {
     endRename();
     body.replaceChildren(p('That page is no longer here.', 'dq-text dq-empty'), h('div', { class: 'dq-actions' }, btn('Art room', () => app.go({ name: 'art' }), { kind: 'quiet' })));
@@ -949,8 +959,11 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
   // hidden while a removal's Undo lasts (from this tab or another): it shows as gone, and comes back with the Undo
   let hidden = false;
   const offShown = as.onChange(() => {
+    const [misses, stalls] = [as.misses, as.stalls];
     void as.isShown(id).then((on) => {
-      if (removed || on !== hidden) return;
+      if (removed) return;
+      if (as.stalls !== stalls || as.misses !== misses) return shut();
+      if (on !== hidden) return;
       if (on) return app.go({ name: 'piece', id }, { replace: true, quiet: true });
       hidden = true;
       missing();
@@ -962,16 +975,7 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
     const [misses, stalls] = [as.misses, as.stalls];
     let rec = await as.get(id);
     const on = !!rec && (await as.isShown(id));
-    // storage that stalled, or failed to read it, says so, never that the page is gone
-    if (!removed && (as.stalls !== stalls || ((!rec || !on) && as.misses !== misses))) {
-      body.replaceChildren(
-        cantOpen(CANT_OPEN.drawing, CANT_OPEN.note, CANT_OPEN.retry, () => {
-          as.reopen();
-          app.reopen();
-        }),
-      );
-      return;
-    }
+    if (!removed && (as.stalls !== stalls || ((!rec || !on) && as.misses !== misses))) return shut();
     if (!rec || !on || removed || hidden) {
       if (!removed) hidden = true;
       missing();
