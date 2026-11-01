@@ -10,7 +10,7 @@
 // keeps moving. With no WebGL each choice's flat picture shows and moves (and holds still with reduced motion), and the
 // skill still finishes and counts once, storing nothing new. The emotion skill's watch step keeps its tide.
 import { deviceMotion } from './device-motion.e2e.mjs';
-import { DESK, drawn, flat, inStep, keepsTime, live, looks, losesContext, moreTime, openStopped, pair, PHONE, scenes, seed, SIDE, slowGpu, toSkill, until } from './skill-scenes.e2e.mjs';
+import { DESK, drawn, flat, inStep, keepsTime, live, looks, losesContext, moreTime, openStopped, pair, PHONE, scenes, seed, SIDE, slowGpu, steps, toSkill, until } from './skill-scenes.e2e.mjs';
 
 const SMALL = { width: 320, height: 568 };
 /** the sizes reduced motion, a lost context and a slow GPU are checked at */
@@ -106,7 +106,7 @@ async function picture(h, pic) {
     if (tag === 'phone') {
       const path = new Map();
       let most = 0;
-      for (let at = (await scenes(page)).last; ; ) {
+      for await (const at of steps(h, page, pic, 2000, { run: true })) {
         const up = thoughts(at);
         for (const t of up) path.set(t[0], [...(path.get(t[0]) ?? []), { e: at.e, x: t[1], y: t[2], r: out(t) }]);
         const seen = up.filter((t) => out(t) < 1);
@@ -115,8 +115,6 @@ async function picture(h, pic) {
         for (const a of seen) for (const b of seen) if (a !== b) h.expect(Math.hypot(a[1] - b[1], a[2] - b[2]) >= 0.3, `${pic}: two thoughts on top of each other at ${at.e.toFixed(1)} s (${at.probe.things})`);
         // to the minute's last few seconds
         if (at.e >= at.dur - 4) break;
-        await page.clock.runFor(2000);
-        at = (await scenes(page)).last;
       }
       const said = [...path].map(([n, ps]) => `${n}: ${ps.map((p) => `${p.e.toFixed(0)}s ${p.x.toFixed(2)}/${p.r.toFixed(2)}`).join(' ')}`).join('; ');
       // came in from beyond the window during the minute, crossed it, never stopping or turning back, and went out again
@@ -155,14 +153,13 @@ export const scenarios = {
     await openStopped(h, page, (h, page) => toThoughts(h, page, 'clouds'), 'clouds moon');
     const moon = [];
     let shot = false;
-    for (let at = (await scenes(page)).last; at.e < at.dur - 2; ) {
+    for await (const at of steps(h, page, 'clouds moon', 2000, { run: true })) {
+      if (at.e >= at.dur - 2) break;
       moon.push(at.probe.moon);
       if (!shot && at.probe.moon < 0.5) {
         shot = true;
         await h.shot(page, 'thoughts-clouds-moon');
       }
-      await page.clock.runFor(2000);
-      at = (await scenes(page)).last;
     }
     const low = moon.indexOf(Math.min(...moon));
     h.expect(moon[low] < 0.5 && moon.slice(low).some((m) => m > 0.95), `clouds: the moon did not dim behind a cloud and come back (${moon.map((m) => m.toFixed(2)).join(' ')})`);
