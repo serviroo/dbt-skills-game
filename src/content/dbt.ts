@@ -31,7 +31,7 @@ export interface Opt {
 export type ListId = 'comfort' | 'activities' | 'reasons';
 export type Effect = 'saveSoothe' | 'saveMap';
 /** a timer's picture: `ring` is the breathing light, `count` the countdown ring alone, for a timer that isn't a breath */
-export type Visual = 'ring' | 'count' | 'drift' | 'wave' | 'tide' | 'hands' | 'cold' | 'glow';
+export type Visual = 'ring' | 'count' | 'drift' | 'wave' | 'tide' | 'hands' | 'cold' | 'glow' | 'thoughts';
 
 interface Base {
   id?: string;
@@ -149,10 +149,17 @@ const said = (a: Answers, k: string, fb = '') => {
   const v = s(a, k).trim().replace(/[\s.!?]+$/, '') || fb;
   return v.charAt(0).toUpperCase() + v.slice(1);
 };
-const THOUGHT_PICS: Record<string, string> = {
+const THOUGHT_PICS = {
   clouds: 'Each thought is a cloud. Watch it drift in, cross the sky and drift out.',
   cars: 'Each thought is a car going past. Watch it come and go. No need to get in.',
   leaves: 'Each thought sits on a leaf. Watch the stream carry it away.',
+};
+/** The pictures a player can choose for their thoughts in Spectator Mode, each with its own scene. */
+export type ThoughtPic = keyof typeof THOUGHT_PICS;
+/** the picture the player chose for their thoughts, clouds if there is none */
+const thoughtPic = (a: Answers): ThoughtPic => {
+  const pic = s(a, 'pic');
+  return Object.hasOwn(THOUGHT_PICS, pic) ? (pic as ThoughtPic) : 'clouds';
 };
 
 const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
@@ -501,10 +508,10 @@ export const SKILLS: Skill[] = [
         id: 'watch',
         kind: 'timer',
         seconds: 60,
-        visual: 'tide',
-        text: (a) => `${THOUGHT_PICS[s(a, 'pic', 'clouds')] ?? THOUGHT_PICS.clouds} If you get pulled into one, that's normal. Step back and watch again.`,
-        // the tide's sky has clouds when the words are about clouds, and only then
-        scene: (a) => ({ clouds: (THOUGHT_PICS[s(a, 'pic', 'clouds')] ?? THOUGHT_PICS.clouds) === THOUGHT_PICS.clouds }),
+        visual: 'thoughts',
+        text: (a) => `${THOUGHT_PICS[thoughtPic(a)]} If you get pulled into one, that's normal. Step back and watch again.`,
+        // the thoughts go by in the picture the words name
+        scene: thoughtPic,
       },
       { kind: 'say', text: "Thoughts are only thoughts. They aren't facts, and they aren't orders. You can notice one without doing what it says." },
       {
