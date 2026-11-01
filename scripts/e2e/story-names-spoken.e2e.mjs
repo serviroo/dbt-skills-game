@@ -2,11 +2,12 @@
 // each one unbroken word of 80 letters, its second chapter "Remembering Everything Underneath", stories "WWWWWWXWWWWWW"
 // and "Somewhere to Rest for a While", and a removed story with the long title too, on a 320x568 phone and the same
 // phone at 200% zoom. On Home, the story list with its removed stories open, a title found by the X in the middle of
-// its word, the writing page's chapter bar and the chapter list: no name, description or value in the browser's own
-// accessibility tree has a soft hyphen in it; a button holding a name is named with it whole, each name copies as typed
-// and finding it in the page finds it; and each name still breaks a word onto the next line only where a hyphen shows,
-// with none showing mid-line.
+// its word, the writing page's chapter bar and the chapter list: no name in the browser's own accessibility tree has a
+// soft hyphen in it; a button holding a name is named with it whole, each name copies as typed and finding it in the
+// page finds it; and each name still breaks a word onto the next line only where a hyphen shows, with none showing
+// mid-line.
 import { boot, settle } from './layout-fit.e2e.mjs';
+import { shyNames } from './phone-type.e2e.mjs';
 
 const PHONE = { width: 320, height: 568 };
 const LONG = 'Lanternlight'.repeat(7).slice(0, 80);
@@ -14,19 +15,6 @@ const CHAPTER = 'Remembering Everything Underneath';
 const FOUND = 'WWWWWWXWWWWWW';
 // where the player's names show, each set by breakable()
 const NAMES = '.dq-tile-story, .st-row-t, .st-removed-t, .st-chbtn-t, .st-chrow-t';
-
-/** What the browser's accessibility tree gives a screen reader with a soft hyphen in it: a name, description or value. */
-async function spokenShy(cdp) {
-  const { nodes } = await cdp.send('Accessibility.getFullAXTree');
-  const out = new Set();
-  for (const n of nodes.filter((n) => !n.ignored)) {
-    for (const k of ['name', 'description', 'value']) {
-      const v = String(n[k]?.value ?? '');
-      if (v.includes('\u00AD')) out.add(`${n.role?.value ?? 'a node'} ${k} "${v.replace(/\u00AD/g, '|')}" has a soft hyphen in it`);
-    }
-  }
-  return [...out];
-}
 
 /** The names under `scope` that break a word onto the next line with no hyphen showing there, or show one mid-line. */
 const hyphens = (page, scope) =>
@@ -106,7 +94,7 @@ function spoken(zoom) {
     await cdp.send('Accessibility.enable');
     const check = async (where, names) => {
       await settle(page);
-      const found = [...(await spokenShy(cdp)), ...(await hyphens(page, NAMES))];
+      const found = [...(await shyNames(page)), ...(await hyphens(page, NAMES))];
       for (const [selector, name] of names) found.push(...(await asTyped(page, cdp, selector, name)));
       problems.push(...found.map((f) => `${at}, ${where}: ${f}`));
     };
