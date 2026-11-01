@@ -13,14 +13,16 @@
 //            in, only the part pinched to), at least 44 px tall, its words no smaller than with the keyboard down, and
 //            takes a tap
 //   bar      Leave, Lights up and Sound show whole there with their icon or words, each at least 44 px and named, and
-//            take their taps
-//   field    the field keeps focus and shows whole there, at least 44 px wide, clear of the pinned bars and Talk, with
+//            take their taps; but held sideways with the field in Leave's row, too narrow (see field) with Lights up
+//            and Sound's 88 px there too, they may step aside, Leave staying
+//   field    the field keeps focus and shows whole there, at least 44 px wide, wide enough held sideways to show 15
+//            letters at 16 px, clear of the pinned bars and Talk, with
 //            at least one whole line of the screen's words (its heading, a line of its list or the field's label) beside or above it; but
 //            on the smaller phone with Largest in Settings or at 200% zoom, and held sideways at 200%, where Talk, the
 //            bar and the field leave too little for one, only the field; and changing one, whose own words the field
 //            holds, only the field
-//   down     as the keyboard goes away the usual screen comes back at once: Talk under the frame, the field still
-//            focused and in view
+//   down     as the keyboard goes away the usual screen comes back at once: Talk under the frame, Lights up and Sound
+//            back in the bar, whole and at least 44 px, the field still focused and in view
 import path from 'node:path';
 import { screenshot, until } from './harness.mjs';
 import { boot, settle } from './layout-fit.e2e.mjs';
@@ -156,8 +158,27 @@ const up = (page, size, { line: needLine = true } = {}) =>
       if (reach(talk, '"Talk to someone now"').height < 43.5) out.push(`"Talk to someone now" is ${Math.round(talk.getBoundingClientRect().height)} px tall, under 44 px`);
       const now = parseFloat(getComputedStyle(talk.lastElementChild).fontSize);
       if (now < size - 0.01) out.push(`"Talk to someone now" is ${now} px, smaller than its ${size} px with the keyboard down`);
+      const field = document.activeElement;
+      const typed = field?.matches('.dq-safezone input');
+      const sideways = (screen.orientation?.type ?? (Math.abs(window.orientation) === 90 ? 'landscape' : 'portrait')).startsWith('landscape');
+      // how wide the field shows what's typed, and how wide 15 letters are at 16 px
+      const letters = () => {
+        const s = getComputedStyle(field);
+        const ruler = Object.assign(document.createElement('span'), { textContent: 'n'.repeat(15) });
+        ruler.style.cssText = `position: fixed; font: 16px ${s.fontFamily}; white-space: pre; visibility: hidden; -webkit-text-size-adjust: none; text-size-adjust: none`;
+        document.body.append(ruler);
+        const shows = [field.clientWidth - parseFloat(s.paddingLeft) - parseFloat(s.paddingRight), ruler.getBoundingClientRect().width];
+        ruler.remove();
+        return shows;
+      };
+      const [leave, at] = [document.querySelector('.dq-top .dq-back').getBoundingClientRect(), field?.getBoundingClientRect()];
+      const aside = typed && sideways && at.top < leave.bottom && leave.top < at.bottom && (([room, want]) => room - 88 < want - 0.5)(letters());
       for (const [what, sel, name] of [['Leave', '.dq-top .dq-back', /^Leave$/], ['Lights up', '.dq-top .ca-sz-light', /^Lights (up|down)$/], ['Sound', '.dq-top .vol-btn', /^Sound settings$/]]) {
         const e = document.querySelector(sel);
+        if (!e.getClientRects().length) {
+          if (what === 'Leave' || !aside) out.push(`${what} isn't in the bar`);
+          continue;
+        }
         const r = reach(e, what);
         if (r.width < 43.5 || r.height < 43.5) out.push(`${what} is ${Math.round(r.width)}x${Math.round(r.height)}, under 44 px`);
         const drawn = [...e.querySelectorAll('*')].some((c) => c.getBoundingClientRect().width >= 8 && c.getBoundingClientRect().height >= 8 && c.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }));
@@ -165,10 +186,13 @@ const up = (page, size, { line: needLine = true } = {}) =>
         const said = (e.getAttribute('aria-label') ?? e.textContent).replace(/\s+/g, ' ').trim();
         if (!name.test(said)) out.push(`${what} is named "${said}"`);
       }
-      const field = document.activeElement;
-      if (!field?.matches('.dq-safezone input')) return [...out, `focus is on ${field?.tagName.toLowerCase()}.${[...(field?.classList ?? [])].join('.')}, not the field`];
+      if (!typed) return [...out, `focus is on ${field?.tagName.toLowerCase()}.${[...(field?.classList ?? [])].join('.')}, not the field`];
       const r = reach(field, 'the field');
       if (r.width < 43.5) out.push(`the field is ${Math.round(r.width)} px wide, under 44 px`);
+      if (sideways) {
+        const [room, want] = letters();
+        if (room < want - 0.5) out.push(`the field shows ${Math.round(room)} px of words, under the ${Math.round(want)} px 15 letters take at 16 px`);
+      }
       for (const [what, e] of [['the bar', document.querySelector('.dq-top')], ['"Talk to someone now"', talk]]) {
         const q = e.getBoundingClientRect();
         if (r.left < q.right - 1 && q.left < r.right - 1 && r.top < q.bottom - 1 && q.top < r.bottom - 1) out.push(`the field is under ${what} (${box(r)})`);
@@ -197,6 +221,11 @@ const down = (page) =>
     const out = [];
     const talk = document.querySelector('.dq-sz-talk');
     if (!talk.closest('.dq-sz-foot')) out.push(`"Talk to someone now" isn't back under the frame`);
+    for (const [what, sel] of [['Lights up', '.dq-top .ca-sz-light'], ['Sound', '.dq-top .vol-btn']]) {
+      const r = document.querySelector(sel)?.getBoundingClientRect();
+      if (!r?.width) out.push(`${what} isn't back in the bar`);
+      else if (r.width < 43.5 || r.height < 43.5 || r.left < -0.5 || r.right > innerWidth + 0.5) out.push(`${what} isn't whole in the bar (${[r.left, r.top, r.right, r.bottom].map(Math.round).join(', ')})`);
+    }
     const field = document.activeElement;
     if (!field?.matches('.dq-safezone input')) return [...out, `focus went to ${field?.tagName.toLowerCase()}.${[...(field?.classList ?? [])].join('.')}`];
     const r = field.getBoundingClientRect();
@@ -407,15 +436,17 @@ function beside(widened) {
  * sideways the keyboard leaves too little for one, as at 200% zoom); as the keyboard goes down, still pinched in, the
  * usual screen comes back, and stays as the pinch goes back out. Held sideways, `older`: on a phone that says how it's
  * held only as window.orientation, as Safari before 16.4 does; `strong`: with Talk stronger (see typeIn); `kb`: on the
- * bigger phone, with a keyboard that tall, so the bar leaves only just the field's height under it.
+ * bigger phone, with a keyboard that tall, so the bar leaves only just the field's height under it; `out`: pinched back
+ * out before the keyboard goes down, where Lights up and Sound come back and fade in, but "Talk to someone now", there
+ * with them, shows steady at once.
  */
-function pinched(turnedFirst, { older = false, strong = false, kb = 0 } = {}) {
+function pinched(turnedFirst, { older = false, strong = false, kb = 0, out = false } = {}) {
   return async (h) => {
     const [p, from] = turnedFirst ? [PHONES['390x844'], PHONES['844x390']] : kb ? [{ ...PHONES['844x390'], kb }, PHONES['844x390']] : [PHONES['568x320'], PHONES['568x320']];
-    const tag = turnedFirst ? 'turned-pinched' : `pinched${older ? '-older' : ''}${strong ? '-strong' : ''}${kb ? `-${(p.height - kb) / 2}px` : ''}`;
+    const tag = turnedFirst ? 'turned-pinched' : `pinched${older ? '-older' : ''}${strong ? '-strong' : ''}${kb ? `-${(p.height - kb) / 2}px` : ''}${out ? '-out' : ''}`;
     const size = turnedFirst
       ? '390x844 turned upright while typing, then pinched in to 200%'
-      : `${p.width}x${p.height} pinched in to 200%${older ? ' on an older Safari' : ''}${strong ? ' with Talk stronger' : ''}${kb ? `, ${(p.height - kb) / 2} px above the keyboard` : ''}`;
+      : `${p.width}x${p.height} pinched in to 200%${older ? ' on an older Safari' : ''}${strong ? ' with Talk stronger' : ''}${kb ? `, ${(p.height - kb) / 2} px above the keyboard` : ''}${out ? ', then back out' : ''}`;
     const problems = [];
     const { ctx, page, errors, words } = await typeIn(h, { width: from.width, height: from.height }, 'landscape', strong);
     const typing = () => page.evaluate(() => !!document.querySelector('.dq.is-typing'));
@@ -438,6 +469,20 @@ function pinched(turnedFirst, { older = false, strong = false, kb = 0 } = {}) {
     for (const f of await up(page, words, { line: turnedFirst })) problems.push(`${size}, keyboard up: ${f}`);
     const clip = await page.evaluate(() => ({ x: visualViewport.offsetLeft, y: visualViewport.offsetTop, width: visualViewport.width, height: visualViewport.height }));
     await screenshot(page, { path: path.join(h.out, `safe-zone-typing-${tag}.png`), clip });
+    if (out) {
+      await page.evaluate(() => window.__zoom(1));
+      const fading = await page.evaluate(async () => {
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const talk = document.querySelector('.dq-sz-talk');
+        const fades = [];
+        for (let e = talk; e; e = e.parentElement) if (e.getAnimations().some((a) => a.playState === 'running' && a.effect.getKeyframes().some((k) => 'opacity' in k))) fades.push(`${e.tagName.toLowerCase()}.${[...e.classList].join('.')}`);
+        return { fades, where: talk.parentElement.className, tools: !!document.querySelector('.dq-top .ca-sz-light')?.getClientRects().length };
+      });
+      if (fading.fades.length) problems.push(`${size}, keyboard up: "Talk to someone now" fades in with ${fading.fades.join(', ')} (in ${fading.where})`);
+      if (!fading.tools) problems.push(`${size}, keyboard up: Lights up isn't back`);
+      await settle(page);
+      for (const f of await up(page, words)) problems.push(`${size}, keyboard up: ${f}`);
+    }
     if (turnedFirst) await page.setViewportSize({ width: p.width, height: p.height });
     else await page.evaluate(() => window.__kb(null));
     for (const f of await down(page)) problems.push(`${size}, then down: ${f}`);
@@ -500,6 +545,7 @@ export const scenarios = Object.fromEntries([
   ['safe-zone-typing-pinched', pinched(false)],
   ['safe-zone-typing-pinched-older-safari', pinched(false, { older: true })],
   ['safe-zone-typing-pinched-strong', pinched(false, { strong: true })],
+  ['safe-zone-typing-pinched-out', pinched(false, { out: true })],
   ['safe-zone-typing-pinched-98px', pinched(false, { kb: 194 })],
   ['safe-zone-typing-turned-pinched', pinched(true)],
   ['safe-zone-typing-split', split(false)],
