@@ -11,6 +11,7 @@ import { icon } from './art';
 import { Bubbles, scratchTexture } from './bubbles';
 import { Sky } from './sky';
 import { wait } from './clock';
+import { silenceHums } from './moment';
 import type { InkPad } from './ink';
 import { dayDiff, Store, type State } from './store';
 import { h, typo } from './ui';
@@ -936,6 +937,7 @@ export class App {
     document.querySelectorAll('[data-fx]').forEach((n) => n.remove());
     this.stopBuzz();
     this.current?.silence?.();
+    silenceHums();
   }
 
   private quietScore(on: boolean) {
