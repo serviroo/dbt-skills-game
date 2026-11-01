@@ -4,8 +4,10 @@
 // text at 200% (see safe-zone-reach), on Write, the Safe Zone and its Talk page, each step of a skill, Settings with and
 // without a look tried on, Night Watch, the diary and the art room. Write is checked again with a keyboard over the
 // page, as Safari and Chrome show one (the page its full height, only the part above the keyboard showing; see
-// safe-zone-typing), where the Safe Zone button also shows whole and at least 44 px: at 200% zoom the top bar is one row
-// there, and held sideways the Safe Zone button alone at the side. And a tap on it the moment the keyboard comes up,
+// safe-zone-typing), and again with the page panned under it, as Safari pans it to the field (the top of the page hidden
+// above what shows too). There the Safe Zone button also shows whole, at least 44 px, and takes a tap, and the dock shows
+// whole unless it scrolls with the page: at 200% zoom the top bar is one row there, and held sideways the Safe Zone
+// button alone at the side. And a tap on it the moment the keyboard comes up, each way,
 // while the bar may still fade in, which takes focus from the field between press and release as a finger's does,
 // opens the Safe Zone with its top bar shown at once. A control is scrolled to the middle of what shows, and the least
 // it takes coming from the top of the page and from the bottom, as focus brings it there.
@@ -87,6 +89,9 @@ const underBars = (page) =>
         const whole = v.rt > v.l && v.b - v.t >= r.height - 1;
         const over = v.rt > v.l && v.b > v.t ? across(v.t, v.b).flatMap((y) => across(v.l, v.rt).map((x) => pinAt(c, x, y))).find(Boolean) : null;
         if (whole && !over) return;
+        // panned under a keyboard, the top of the page shows only as Safari pans back up to it: a control starting above
+        // where a scroll stops, with the page at its top, is out of the page's own reach
+        if (top > 0 && r.top < parseFloat(getComputedStyle(frame).scrollPaddingTop) && scrollers(c).every((s) => s.scrollTop <= 0)) return;
         if (r.height > (end - top) / 3 && r.height > room(c, (v.l + v.rt) / 2) + 1) {
           if (how === 'scrolled to the middle') return;
           const [edge, y, shows] = how === 'scrolled to from above' ? ['top', r.top + 2, v.t <= r.top + 1] : ['bottom', r.bottom - 2, v.b >= r.bottom - 1];
@@ -131,6 +136,27 @@ const underBars = (page) =>
     { scope: PAGE, skip: SKIP },
   );
 
+/** What keeps the pinned bars from showing whole in what shows of the screen with a keyboard up: the top bar's Safe Zone
+ * button, at least 44 px and taking a tap, and the Write dock unless it scrolls with the page. */
+const barsShown = (page) =>
+  page.evaluate(() => {
+    const out = [];
+    const [top, end] = [visualViewport.offsetTop, visualViewport.offsetTop + visualViewport.height];
+    const where = (r) => `${[r.left, r.top, r.right, r.bottom].map(Math.round).join(', ')}, showing ${Math.round(top)} to ${Math.round(end)}`;
+    const whole = (r) => r.left >= -0.5 && r.right <= innerWidth + 0.5 && r.top >= top - 0.5 && r.bottom <= end + 0.5;
+    const b = document.querySelector('.dq-top .dq-safe');
+    if (!b?.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) out.push("the Safe Zone button doesn't show");
+    else {
+      const r = b.getBoundingClientRect();
+      if (!whole(r)) out.push(`the Safe Zone button doesn't show whole (${where(r)})`);
+      else if (r.width < 43.5 || r.height < 43.5) out.push(`the Safe Zone button is ${Math.round(r.width)}x${Math.round(r.height)} px (${where(r)})`);
+      else if (!b.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2))) out.push(`the Safe Zone button doesn't take a tap (${where(r)})`);
+    }
+    const dock = document.querySelector('.st-dock');
+    if (dock && !dock.hasAttribute('data-loose') && !whole(dock.getBoundingClientRect())) out.push(`the dock doesn't show whole (${where(dock.getBoundingClientRect())})`);
+    return out;
+  });
+
 function scenario(phone, { zoom = 1, font = false } = {}) {
   return async (h) => {
     const p = PHONES[phone];
@@ -165,32 +191,39 @@ function scenario(phone, { zoom = 1, font = false } = {}) {
       if (route.name === 'write') {
         const kb = Math.round(p.kb / zoom);
         const up = { height: Math.round(p.height / zoom) - kb, top: 0 };
+        // panned half the keyboard's height to the field, so as much of the page hides above what shows as under the keyboard
+        const panned = { ...up, top: Math.round(kb / 2) };
         await page.locator('.st-ta').focus();
-        await page.evaluate((k) => window.__kb(k), up);
-        await settle(page);
-        const safe = await page.evaluate(() => {
-          const b = document.querySelector('.dq-top .dq-safe');
-          if (!b?.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return "doesn't show";
-          const r = b.getBoundingClientRect();
-          const [top, end] = [visualViewport.offsetTop, visualViewport.offsetTop + visualViewport.height];
-          const where = `${[r.left, r.top, r.right, r.bottom].map(Math.round).join(', ')} above the keyboard at ${Math.round(end)}`;
-          if (r.left < -0.5 || r.right > innerWidth + 0.5 || r.top < top - 0.5 || r.bottom > end + 0.5) return `doesn't show whole (${where})`;
-          if (r.width < 43.5 || r.height < 43.5) return `is ${Math.round(r.width)}x${Math.round(r.height)} px (${where})`;
-          return b.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)) ? null : `doesn't take a tap (${where})`;
-        });
-        if (safe) problems.push(`${size}, write, the keyboard up: the Safe Zone button ${safe}`);
-        await look('write, the keyboard up');
-        await page.evaluate(() => window.__kb(null));
-        await settle(page);
-        await page.locator('.st-ta').focus();
-        await page.evaluate((k) => window.__kb(k), up);
-        const b = await page.locator('.dq-top .dq-safe').boundingBox();
-        if (font) await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
-        else await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
-        if (!(await page.waitForFunction(() => window.__daily.route.name === 'safe', null, { timeout: 5000 }).then(() => true, () => false))) problems.push(`${size}, write, the keyboard up: a tap on the Safe Zone button left ${await page.evaluate(() => window.__daily.route.name)} open`);
-        else {
-          const shown = await page.evaluate(() => getComputedStyle(document.querySelector('.dq-top')).opacity);
-          if (+shown < 0.99) problems.push(`${size}, write, the keyboard up: the Safe Zone opened with its top bar at opacity ${shown}`);
+        for (const [k, how] of [
+          [up, 'the keyboard up'],
+          [panned, 'the page panned under the keyboard'],
+        ]) {
+          await page.evaluate((k) => window.__kb(k), k);
+          await settle(page);
+          for (const f of await barsShown(page)) problems.push(`${size}, write, ${how}: ${f}`);
+          await look(`write, ${how}`);
+        }
+        // a tap each way the keyboard comes up, back on Write for the next
+        for (const [k, how] of [
+          [up, 'the keyboard up'],
+          [panned, 'the page panned under the keyboard'],
+        ]) {
+          await page.evaluate(() => window.__kb(null));
+          if (await page.evaluate(() => window.__daily.route.name !== 'write')) {
+            await page.evaluate((r) => window.__daily.go(r), route);
+            await page.waitForFunction(() => window.__daily.route.name === 'write', null, { timeout: 10000 });
+          }
+          await settle(page);
+          await page.locator('.st-ta').focus();
+          await page.evaluate((k) => window.__kb(k), k);
+          const b = await page.locator('.dq-top .dq-safe').boundingBox();
+          if (font) await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
+          else await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
+          if (!(await page.waitForFunction(() => window.__daily.route.name === 'safe', null, { timeout: 5000 }).then(() => true, () => false))) problems.push(`${size}, write, ${how}: a tap on the Safe Zone button left ${await page.evaluate(() => window.__daily.route.name)} open`);
+          else {
+            const shown = await page.evaluate(() => getComputedStyle(document.querySelector('.dq-top')).opacity);
+            if (+shown < 0.99) problems.push(`${size}, write, ${how}: the Safe Zone opened with its top bar at opacity ${shown}`);
+          }
         }
         await page.evaluate(() => window.__kb(null));
       }

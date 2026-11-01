@@ -798,7 +798,9 @@ export class App {
   /**
    * The pinned bars at their real heights, and the foot above an on-screen keyboard: Safari and Chrome keep the page its
    * full height under the keyboard and show only the part above it (the visual viewport), so the foot pins that far up,
-   * the page gets that much more room after it to scroll its end above the keyboard, and a scroll stops above both. A
+   * the page gets that much more room after it to scroll its end above the keyboard, and a scroll stops above both. Safari
+   * panning the page to a field under the keyboard hides its top too, so the top bar pins that far down, at the top of
+   * what shows (--dq-above, daily.css), and a scroll stops under it there. A
    * foot that, with the top bar and its shade, would leave less than a third of what shows (200% zoom on a small phone,
    * the phone's text at 200% under a tall bar, the keyboard up held sideways) lets go and scrolls with the page after
    * everything else (data-loose, daily.css). Either way a control scrolled to shows whole between them. The Safe Zone
@@ -811,6 +813,8 @@ export class App {
     const above = vv ? Math.max(0, Math.round(vv.offsetTop)) : 0;
     const kb = vv ? Math.max(0, Math.round(innerHeight - (vv.height + vv.offsetTop))) : 0;
     const shown = this.root.clientHeight - above - kb;
+    // the Safe Zone moves the whole page to what shows while typing (safe.ts), its top bar with it
+    this.host.style.setProperty('--dq-above', `${out?.mode === 'safe' ? 0 : above}px`);
     this.fitBar(shown);
     // whole pixels up, so a bar a fraction taller than a rounded height never covers what a scroll stops above
     const side = this.root.dataset.bar === 'side';
@@ -827,7 +831,7 @@ export class App {
     }
     const below = foot ? kb : 0;
     const shade = parseFloat(getComputedStyle(this.root).getPropertyValue('--top-shade')) || 0;
-    const loose = shown - Math.max(0, top + shade - above) - foot < shown / 3;
+    const loose = shown - (top + shade) - foot < shown / 3;
     el.toggleAttribute('data-loose', loose);
     el.style.bottom = el.style.marginBottom = below ? `${below}px` : '';
     this.host.style.setProperty('--dq-foot', `${(loose ? 0 : foot) + below}px`);
@@ -994,6 +998,6 @@ export class App {
     this.bubbles.destroy();
     this.root.remove();
     this.winLayer.remove();
-    for (const v of ['--dq-top', '--dq-foot', '--dq-side']) this.host.style.removeProperty(v);
+    for (const v of ['--dq-top', '--dq-above', '--dq-foot', '--dq-side']) this.host.style.removeProperty(v);
   }
 }
