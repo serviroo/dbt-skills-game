@@ -12,9 +12,10 @@ const AUDIO = 'dbt.audio.v1';
 // silent: a peak below one step of 16-bit audio and RMS below -100 dBFS, as in me-92
 const SILENT_PEAK = 2 ** -15;
 const SILENT_RMS = 1e-5;
-// the speakers must be silent this soon after the tap: the two frames ahead of the clock every sound is placed at
-// (SCORE.leadSec), the click-free ramp, and a few render quanta of audio clock
-const WITHIN = 0.085;
+// the speakers must be silent this soon after the cut the tap places, which the engine places where it places every
+// sound (soon(): two frames ahead of the audio clock, or a frame past the output's latency where that is longer): the
+// click-free ramp and a few render quanta of audio clock
+const WITHIN = 0.051;
 const CUES = ['reward_chime', 'chest_burst', 'soft_chime'];
 
 const dayKey = (ms) => {
@@ -52,8 +53,10 @@ async function boot(h, opts) {
   await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile') && window.__taps.length > 0, null, { timeout: 30000 });
   await audioReady(page);
   await h.reachHub(page);
-  // the audio clock at every step into or out of the Safe Zone, and every sound the app asks for
-  await page.evaluate(() => {
+  // the audio clock at every step into or out of the Safe Zone, where a cut made then lands, and every sound the app
+  // asks for
+  await page.evaluate(async () => {
+    const { soon } = await import('/src/audio/param.ts');
     const a = window.__daily;
     window.__marks = [];
     window.__asks = [];
@@ -61,9 +64,10 @@ async function boot(h, opts) {
     a.go = (route, o) => {
       const was = a.route.name === 'safe';
       const at = window.__taps.map((t) => t.context.currentTime);
+      const cut = window.__taps.map((t) => soon(t.context));
       const t0 = performance.now();
       go(route, o);
-      if (was !== (a.route.name === 'safe')) window.__marks.push({ into: !was, at, ms: performance.now() - t0 });
+      if (was !== (a.route.name === 'safe')) window.__marks.push({ into: !was, at, cut, ms: performance.now() - t0 });
     };
     const sound = a.sound.bind(a);
     a.sound = (cue) => {
@@ -138,6 +142,9 @@ const silent = (x) => x.peak < SILENT_PEAK && x.rms < SILENT_RMS;
 // a stalled recorder must not pass for silence: every stretch judged silent has to be at least 90% read
 const covered = (x) => x.cover >= 0.9;
 const fmt = (x) => `${x.rms.toExponential(1)}/${x.peak.toExponential(1)}, ${(x.cover * 100).toFixed(0)}% read${x.unrendered ? `, ${x.unrendered} blocks never rendered` : ''}`;
+/** Where tap i must be silent from after the step `m`, and how long that is after the tap, in ms. */
+const silentFrom = (m, i = 0) => m.cut[i] + WITHIN;
+const silentMs = (m, i = 0) => ((silentFrom(m, i) - m.at[i]) * 1000).toFixed(0);
 const quietAt = (x, t) => (x.quietFrom === null ? 'never' : `${((x.quietFrom - t) * 1000).toFixed(1)} ms after the tap`);
 
 function step() {
@@ -161,8 +168,8 @@ const leave = async (page) => {
 };
 
 /**
- * Score and long cues are sounding; the tap silences the speakers within WITHIN and keeps them silent; help is on
- * screen in the same tap; their levels never move; outside, the score comes back.
+ * Score and long cues are sounding; the tap silences the speakers within WITHIN of the cut it places and keeps them
+ * silent; help is on screen in the same tap; their levels never move; outside, the score comes back.
  */
 async function entryCase(h, c, { viewport = TALL, reduced = false, tag, shots = false }) {
   const prefs = levels();
@@ -180,11 +187,11 @@ async function entryCase(h, c, { viewport = TALL, reduced = false, tag, shots = 
     await until(page, 0, tIn + 1.2 + 0.05);
     if (shots) await h.shot(page, `q5-${tag}-2-inside`);
     const pre = await hear(page, 0, tIn - 0.25, tIn);
-    const inside = await hear(page, 0, tIn + WITHIN, tIn + 1.2);
+    const inside = await hear(page, 0, silentFrom(m), tIn + 1.2);
     const start = await hear(page, 0, tIn, tIn + 1.2);
     c.ok(pre.rms > 1e-3, `${tag}: the score and cues were not audible before the tap (${fmt(pre)}), so silence proves nothing`);
     c.ok(covered(inside), `${tag}: the reads covered only ${(inside.cover * 100).toFixed(0)}% of the first second inside`);
-    c.ok(silent(inside), `${tag}: sound still reaches the speakers ${WITHIN * 1000} ms to 1.2 s after the tap (RMS/peak ${fmt(inside)}; silent from ${quietAt(start, tIn)})`);
+    c.ok(silent(inside), `${tag}: sound still reaches the speakers ${silentMs(m)} ms to 1.2 s after the tap (RMS/peak ${fmt(inside)}; silent from ${quietAt(start, tIn)})`);
     c.ok(at.route === 'safe' && at.talkOnTop && at.windows === 0, `${tag}: help was not on screen in the same tap (${at.route}, talk on top ${at.talkOnTop}, ${at.windows} windows)`);
     c.ok((await scoreGate(page)) === 0, `${tag}: the Safe Zone's score gate is ${await scoreGate(page)}, not exactly 0`);
     c.ok((await userGains(page)) === gains && at.prefs === prefs && at.volume === before.volume, `${tag}: entering changed their levels ${gains} -> ${await userGains(page)} or stored prefs`);
@@ -325,8 +332,8 @@ export const scenarios = {
 
   /**
    * Only effects are audible (Music at 0). Long cues ring, then the player steps in and out three times in quick
-   * succession. Each visit is silent past WITHIN, and after the last one nothing from before comes back: no cue
-   * envelope, no room or hall echo.
+   * succession. Each visit is silent past WITHIN of its cut, and after the last one nothing from before comes back: no
+   * cue envelope, no room or hall echo.
    */
   async 'quick-visits-bring-no-old-sound-back'(h) {
     const prefs = levels({ master: 1, music: 0, sfx: 1 });
@@ -341,17 +348,17 @@ export const scenarios = {
         const a = await enter(page);
         await h.sleep(120);
         const b = await leave(page);
-        visits.push([a.at[0], b.at[0]]);
+        visits.push([a.at[0], b.at[0], silentFrom(a), silentMs(a)]);
         await h.sleep(80);
       }
       const tOut = visits.at(-1)[1];
       await until(page, 0, tOut + 2.5 + 0.05);
       const pre = await hear(page, 0, visits[0][0] - 0.25, visits[0][0]);
       c.ok(pre.rms > 1e-3, `quick: the cues were not audible before the first tap (${fmt(pre)})`);
-      for (const [i, [a, b]] of visits.entries()) {
-        const x = await hear(page, 0, a + WITHIN, b);
-        c.ok(covered(x), `quick: the reads covered only ${(x.cover * 100).toFixed(0)}% of visit ${i + 1} past ${WITHIN * 1000} ms`);
-        c.ok(silent(x), `quick: visit ${i + 1} (${((b - a) * 1000).toFixed(0)} ms) was not silent past ${WITHIN * 1000} ms (RMS/peak ${fmt(x)})`);
+      for (const [i, [a, b, from, ms]] of visits.entries()) {
+        const x = await hear(page, 0, from, b);
+        c.ok(covered(x), `quick: the reads covered only ${(x.cover * 100).toFixed(0)}% of visit ${i + 1} past ${ms} ms`);
+        c.ok(silent(x), `quick: visit ${i + 1} (${((b - a) * 1000).toFixed(0)} ms) was not silent past ${ms} ms (RMS/peak ${fmt(x)})`);
       }
       const gaps = [];
       for (let i = 0; i < visits.length; i++) gaps.push(await hear(page, 0, visits[i][1], visits[i + 1]?.[0] ?? tOut + 2.5));
@@ -397,7 +404,10 @@ export const scenarios = {
     }
   },
 
-  /** Give me a moment's low hum (its own audio context) stops within WITHIN of the tap, not over a second-long fade. */
+  /**
+   * Give me a moment's low hum (its own audio context) stops within WITHIN of the cut the tap places, not over a
+   * second-long fade.
+   */
   async 'moment-hum-stops-at-once'(h) {
     const { ctx, page, errors, n } = await humOn(h);
     const c = step();
@@ -410,14 +420,14 @@ export const scenarios = {
       const past = await page.evaluate(([n, t]) => {
         const sr = window.__taps[n].context.sampleRate;
         return (Math.ceil((t * sr) / 128) * 128) / sr;
-      }, [n, tIn + WITHIN]);
+      }, [n, silentFrom(m, n)]);
       const pre = await hear(page, n, tIn - 0.25, tIn);
       const inside = await hear(page, n, past, end);
       const start = await hear(page, n, tIn, end);
       c.ok(pre.rms > 1e-4, `hum: the hum was not audible before the tap (${fmt(pre)})`);
-      c.ok(end <= past || (covered(inside) && silent(inside)), `hum: the hum played on until ${((end - tIn) * 1000).toFixed(0)} ms after the tap (RMS/peak past ${WITHIN * 1000} ms ${fmt(inside)}, silent from ${quietAt(start, tIn)})`);
+      c.ok(end <= past || (covered(inside) && silent(inside)), `hum: the hum played on until ${((end - tIn) * 1000).toFixed(0)} ms after the tap (RMS/peak past ${silentMs(m, n)} ms ${fmt(inside)}, silent from ${quietAt(start, tIn)})`);
       await until(page, 0, m.at[0] + 0.5 + 0.05);
-      const eng = await hear(page, 0, m.at[0] + WITHIN, m.at[0] + 0.5);
+      const eng = await hear(page, 0, silentFrom(m), m.at[0] + 0.5);
       c.ok(covered(eng) && silent(eng), `hum: the engine is not silent inside, or the reads missed it (${fmt(eng)})`);
       c.ok(!errors.length, `hum: page errors: ${errors.join(' | ')}`);
       console.log(`hum: before ${fmt(pre)} | its audio ended ${((end - tIn) * 1000).toFixed(1)} ms after the tap`);
@@ -497,14 +507,14 @@ export const scenarios = {
         await h.shot(page, `q5-race-${kind}-3-home`);
         const chimeAt = await page.evaluate(() => window.__asks.find((x) => x.cue === 'soft_chime').at);
         const pre = await hear(page, 0, chimeAt, a.at[0]);
-        const visit = await hear(page, 0, a.at[0] + WITHIN, b.at[0]);
+        const visit = await hear(page, 0, silentFrom(a), b.at[0]);
         const out = await hear(page, 0, b.at[0], b.at[0] + 2);
         const asked = await page.evaluate((t) => window.__asks.filter((x) => x.at >= t).map((x) => x.cue), a.at[0]);
         c.ok(before.windows > 0, `${kind}: no window was opening before the tap`);
         c.ok(pre.rms > 1e-3, `${kind}: the window's chime was not audible before the tap (${fmt(pre)})`);
         c.ok(inside.route === 'safe' && inside.windows === 0 && !inside.scrim && inside.fx === 0 && !inside.toast && inside.talkOnTop, `${kind}: something surfaced over the Safe Zone (${JSON.stringify({ w: inside.windows, scrim: inside.scrim, fx: inside.fx, toast: inside.toast, talk: inside.talkOnTop })})`);
-        c.ok(covered(visit), `${kind}: the reads covered only ${(visit.cover * 100).toFixed(0)}% of the visit past ${WITHIN * 1000} ms`);
-        c.ok(silent(visit), `${kind}: the visit (${((b.at[0] - a.at[0]) * 1000).toFixed(0)} ms) was not silent past ${WITHIN * 1000} ms (${fmt(visit)})`);
+        c.ok(covered(visit), `${kind}: the reads covered only ${(visit.cover * 100).toFixed(0)}% of the visit past ${silentMs(a)} ms`);
+        c.ok(silent(visit), `${kind}: the visit (${((b.at[0] - a.at[0]) * 1000).toFixed(0)} ms) was not silent past ${silentMs(a)} ms (${fmt(visit)})`);
         c.ok(asked.length === 0, `${kind}: sound was asked for after the tap: ${asked.join(', ')}`);
         c.ok(covered(out) && silent(out), `${kind}: the chime or its echo came back outside, or the reads missed it (${fmt(out)})`);
         c.ok(after.windows === 0 && after.hint === 0 && !after.scrim && after.fx === 0 && !after.toast, `${kind}: a window, toast or effect came back after leaving`);

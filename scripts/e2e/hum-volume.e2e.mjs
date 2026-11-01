@@ -17,8 +17,8 @@ const AUDIO = 'dbt.audio.v1';
 const Q = 128;
 // silent: a peak below one step of 16-bit audio, as in safe-zone-quiet
 const SILENT_PEAK = 2 ** -15;
-// the Safe Zone silences the speakers this soon after the tap, as in safe-zone-quiet
-const WITHIN = 0.085;
+// the Safe Zone silences the speakers this soon after the cut the tap places, as in safe-zone-quiet
+const WITHIN = 0.051;
 // a click: a step between two samples more than this many times the steepest the steady hum ever moves
 const CLICK = 3;
 // the slider curve the engine gives Master, Music and Effects
@@ -55,16 +55,18 @@ async function boot(h, { viewport = TALL, prefs = levels() } = {}) {
   await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile') && window.__taps.length > 0, null, { timeout: 30000 });
   await audioReady(page);
   await h.reachHub(page);
-  // the hum's audio clock at every step into or out of the Safe Zone
-  await page.evaluate(() => {
+  // the hum's audio clock at every step into or out of the Safe Zone, and where a cut made then lands
+  await page.evaluate(async () => {
+    const { soon } = await import('/src/audio/param.ts');
     const a = window.__daily;
     window.__marks = [];
     const go = a.go.bind(a);
     a.go = (route, o) => {
       const was = a.route.name;
       const at = window.__taps.map((t) => t.context.currentTime);
+      const cut = window.__taps.map((t) => soon(t.context));
       go(route, o);
-      window.__marks.push({ from: was, to: a.route.name, at });
+      window.__marks.push({ from: was, to: a.route.name, at, cut });
     };
   });
   return { ctx, page, errors };
@@ -419,9 +421,9 @@ export const scenarios = {
       await page.waitForFunction((n) => window.__taps[n].context.state === 'closed', n, { timeout: 3000 }).catch(() => {
         throw new Error('the hum kept going in the Safe Zone');
       });
-      const tap = (await page.evaluate(() => window.__marks.filter((k) => k.to === 'safe'))).at(-1).at[n];
-      const inside = await quanta(page, n, tap + WITHIN, Infinity);
-      h.expect(inside.every((q) => q[1] < SILENT_PEAK), `the hum was heard ${WITHIN * 1000} ms into the Safe Zone`);
+      const into = (await page.evaluate(() => window.__marks.filter((k) => k.to === 'safe'))).at(-1);
+      const inside = await quanta(page, n, into.cut[n] + WITHIN, Infinity);
+      h.expect(inside.every((q) => q[1] < SILENT_PEAK), `the hum was heard ${((into.cut[n] + WITHIN - into.at[n]) * 1000).toFixed(0)} ms into the Safe Zone`);
       await page.locator('header .dq-back').click({ timeout: 4000 });
       await page.waitForFunction(() => window.__daily.route.name !== 'safe', null, { timeout: 3000 });
 
