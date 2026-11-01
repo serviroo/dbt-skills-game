@@ -114,6 +114,9 @@ const held = (page) => page.evaluate(() => ({ events: window.__daily.store.state
  * and a drawing's removal, each noted with `mark` (an earlier clear, or none: a build from before the note). Noted with
  * an earlier clear, none of them is read and each goes; with no note, each is read whole.
  */
+/** Drawings removed as `mark` says, and since the clear (the browser lists keys in no set order, so several of each). */
+const MARKED_GONE = ['seed-drawing', 'seed-b', 'seed-c', 'seed-d'];
+const NOW_GONE = ['since-a', 'since-b', 'since-c', 'since-d', 'since-e', 'since-f', 'since-g', 'since-h'];
 async function besideRecords(h, mark) {
   const { open, expect, SEEN, SAVE, YOU } = h;
   const note = (o) => (mark === undefined ? o : { ...o, afterClear: mark });
@@ -121,7 +124,6 @@ async function besideRecords(h, mark) {
     you: YOU,
     draft: `${SAVE}.skill-draft.seedload.clear-sight.`,
     words: `${SAVE}.story.live.seedload.seed-page`,
-    gone: `${SAVE}.art.gone.seed-drawing`,
   };
   const { ctx, page, errors } = await open({
     'dbt.app.v1': SEEN,
@@ -130,32 +132,40 @@ async function besideRecords(h, mark) {
     [keys.you]: JSON.stringify(note({ name: 'Robin', companion: 'Pip', nameAt: t, companionAt: t })),
     [keys.draft]: JSON.stringify(note({ skill: 'clear-sight', part: '', at: 3, answers: { fact: 'Skill words' }, typed: {}, leads: {}, done: [1, 2], t })),
     [keys.words]: JSON.stringify(note({ chapter: 'seed-page', text: 'Page words', bases: [], t })),
-    [keys.gone]: JSON.stringify(note({ rev: 'r1', at: t, tab: 'closed-tab' })),
   });
+  // stored while the game is open, so one read meets them all: each removal from since is still seen however the going
+  // of one from before moves the keys after it
+  const gone = {
+    ...Object.fromEntries(MARKED_GONE.map((id) => [`${SAVE}.art.gone.${id}`, JSON.stringify(note({ rev: 'r1', at: t, tab: 'closed-tab' }))])),
+    ...Object.fromEntries(NOW_GONE.map((id) => [`${SAVE}.art.gone.${id}`, JSON.stringify({ rev: 'r1', at: Date.now(), tab: 'open-tab', afterClear: 'k2.def' })])),
+  };
   try {
     await h.reachHub(page);
-    const read = await page.evaluate(async ({ SAVE, keys }) => {
+    const read = await page.evaluate(async ({ SAVE, keys, gone }) => {
       const { readYou } = await import('/src/core/you.ts');
       const { newestDraft } = await import('/src/daily/skilldraft.ts');
       const { StoryStore } = await import('/src/daily/storystore.ts');
       const { artStore } = await import('/src/daily/artstore.ts');
       const st = window.__daily.store.state.settings;
+      const art = artStore(SAVE);
+      Object.entries(gone).forEach(([k, v]) => localStorage.setItem(k, v));
       return {
         names: [readYou()?.name ?? null, st.playerName, st.companion],
         draft: newestDraft(SAVE, 'clear-sight', '')?.draft.answers.fact ?? null,
         words: new StoryStore(`${SAVE}.story`, `${SAVE}.story.live`).lives('seed-page').map((l) => l.text),
-        gone: Object.keys(artStore(SAVE).gone()),
-        stored: Object.fromEntries(Object.entries(keys).map(([k, key]) => [k, localStorage.getItem(key)])),
+        gone: Object.keys(art.gone()),
+        stored: Object.fromEntries([...Object.values(keys), ...Object.keys(gone).filter((k) => !k.includes('.since-'))].map((k) => [k, localStorage.getItem(k)])),
         save: localStorage.getItem(SAVE),
       };
-    }, { SAVE, keys });
+    }, { SAVE, keys, gone });
     if (mark !== undefined) {
       expect(JSON.stringify(read.names) === JSON.stringify([null, '', '']) && !/Robin|Pip/.test(read.save), 'names stored before the clear were read: ' + JSON.stringify(read.names));
-      expect(read.draft === null && !read.words.length && !read.gone.includes('seed-drawing'), 'a record stored before the clear was read: ' + JSON.stringify(read));
+      expect(read.draft === null && !read.words.length && !MARKED_GONE.some((id) => read.gone.includes(id)), 'a record stored before the clear was read: ' + JSON.stringify(read));
       expect(Object.values(read.stored).every((v) => v === null), 'a record stored before the clear is still kept: ' + JSON.stringify(read.stored));
+      expect(NOW_GONE.every((id) => read.gone.includes(id)), 'a removal stored since the clear was missed: ' + JSON.stringify(read.gone));
     } else {
       expect(JSON.stringify(read.names) === JSON.stringify(['Robin', 'Robin', 'Pip']), 'names from before the note were not read whole: ' + JSON.stringify(read.names));
-      expect(read.draft === 'Skill words' && read.words[0] === 'Page words' && read.gone.includes('seed-drawing'), 'a record from before the note was not read: ' + JSON.stringify(read));
+      expect(read.draft === 'Skill words' && read.words[0] === 'Page words' && [...MARKED_GONE, ...NOW_GONE].every((id) => read.gone.includes(id)), 'a record from before the note was not read: ' + JSON.stringify(read));
     }
     expect(!errors.length, errors.join('\n'));
   } finally {

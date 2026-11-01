@@ -581,9 +581,8 @@ export class ArtStore {
     const out: Record<string, Gone> = Object.create(null);
     const at = `${this.goneKey}.`;
     try {
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (!k?.startsWith(at)) continue;
+      // the keys first: reading one from before the latest clear takes it away, which would shift the ones after it
+      for (const k of Object.keys(localStorage).filter((k) => k.startsWith(at))) {
         const g = readGone(k);
         if (g) out[k.slice(at.length)] = g;
       }
