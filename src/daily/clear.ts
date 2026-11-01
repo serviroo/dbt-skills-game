@@ -5,7 +5,7 @@
  * else the site or browser holds is touched. Every open copy stops writing first (core/cleared), so nothing comes back.
  */
 import { APP_KEY, AUDIO_KEY, BESIDE, CARE_KEY, COWRITER_KEY, INSTALL_HINT_KEY, LAB_SAVE_KEY, SAVE_KEY, SW_CACHE, TAB_KEY, YOU_KEY } from '../core/stored-names';
-import { setClearStatus } from '../core/cleared';
+import { noteClear, setClearStatus } from '../core/cleared';
 import { siteUrl } from '../core/base';
 
 const SAVES = [SAVE_KEY, LAB_SAVE_KEY];
@@ -30,8 +30,11 @@ function storedKeys(area: Storage) {
 }
 
 function dropKeys() {
-  // the save first: a copy of the app that missed every message sees it go and stops (core/cleared)
-  for (const k of storedKeys(localStorage).filter(gameKey).sort((a, b) => Number(b === SAVE_KEY) - Number(a === SAVE_KEY))) localStorage.removeItem(k);
+  // the save first, then the clear record moves: a copy of the app that missed every message sees the save go, or on
+  // its way back that the record moved, and stops (core/cleared). The record stays: it is how they know
+  localStorage.removeItem(SAVE_KEY);
+  noteClear();
+  for (const k of storedKeys(localStorage).filter(gameKey)) localStorage.removeItem(k);
   for (const k of SESSION) sessionStorage.removeItem(k);
 }
 

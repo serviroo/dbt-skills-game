@@ -12,7 +12,7 @@
 import type { App } from './app';
 import { connectionLost, uid, validDay } from './store';
 import { BESIDE, STORY_DB } from '../core/stored-names';
-import { canWrite, cleared, goneElsewhere, mayWrite, onClear, write } from '../core/cleared';
+import { canWrite, cleared, goneElsewhere, mayWrite, onClear, removeStored, setStored, write } from '../core/cleared';
 
 export type CardMode = 'continue' | 'whatif' | 'polish' | 'questions';
 export interface Story {
@@ -808,14 +808,14 @@ export class StoryStore {
         // a clear is checking its Save Crystal: the mirror is written once it lets go
         write(() => {
           try {
-            localStorage.setItem(key, out);
+            setStored(key, out);
           } catch {
             /* the chapter's own save still holds the words */
           }
         });
         return true;
       }
-      localStorage.setItem(key, out);
+      setStored(key, out);
       return true;
     } catch {
       return false;
@@ -935,7 +935,7 @@ export class StoryStore {
     try {
       if (!this.isLiveKey(key)) return;
       const l = this.readLive(key, chapterId);
-      if (l && (text === undefined || l.text === text)) write(() => localStorage.removeItem(key));
+      if (l && (text === undefined || l.text === text)) write(() => removeStored(key));
     } catch {
       /* nothing to clear */
     }

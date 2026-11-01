@@ -3,7 +3,7 @@
  * and merge across open copies); this small mirror lets the intro use them before that store loads.
  */
 import { YOU_KEY } from './stored-names';
-import { cleared, write } from './cleared';
+import { cleared, setStored, write } from './cleared';
 
 export const DEFAULT_NAME = 'Player';
 export const DEFAULT_COMPANION = 'Moth';
@@ -49,7 +49,7 @@ export function writeYou(y: You) {
   const you = (cache = { name: cleanName(y.name), companion: cleanName(y.companion), nameAt: y.nameAt, companionAt: y.companionAt });
   write(() => {
     try {
-      localStorage.setItem(YOU_KEY, JSON.stringify(you));
+      setStored(YOU_KEY, JSON.stringify(you));
     } catch {
       // storage blocked: the names hold for this visit
     }

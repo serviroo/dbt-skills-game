@@ -1,4 +1,5 @@
 import { SAVE_KEY } from './stored-names';
+import { fromBefore } from './cleared';
 
 const q = new URLSearchParams(location.search);
 const num = (k: string) => (q.has(k) ? Number(q.get(k)) : undefined);
@@ -9,7 +10,9 @@ const deviceReduced = () => q.has('reduced') || reduceQuery.matches;
 let systemReduced = deviceReduced();
 function savedMotion(): string {
   try {
-    return JSON.parse(localStorage.getItem(SAVE_KEY) ?? 'null')?.settings?.motion ?? 'system';
+    const o = JSON.parse(localStorage.getItem(SAVE_KEY) ?? 'null');
+    // a save from before this device's latest clear is cleared data: its choices are gone with it
+    return (!fromBefore(o) && o?.settings?.motion) || 'system';
   } catch {
     return 'system';
   }
