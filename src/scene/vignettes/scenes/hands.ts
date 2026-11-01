@@ -426,7 +426,7 @@ void main() {
   // the light gathered in the hollow of each palm, as in a bowl of frosted glass
   vec2 q = (vRest.xz - vec2(0.02, -0.3)) / vec2(0.12, 0.15);
   col += WARM * uI * 0.12 * exp(-dot(q, q)) * smoothstep(0.0, 0.05, vRest.y);
-  gl_FragColor = vec4(col, smoothstep(0.2, -0.08, vRest.z));
+  gl_FragColor = vec4(col, 1.0 - smoothstep(-0.08, 0.2, vRest.z));
   ${OUT_GLSL}
 }`;
 
@@ -465,12 +465,12 @@ void main() {
   gl_Position = projectionMatrix * mv;
   gl_PointSize = max(1.0, uScale * (0.005 + 0.007 * seed.z) / -mv.z);
   float d2 = dot(p - uLight, p - uLight);
-  vA = uI * (0.3 + 0.7 * seed.z) / (1.0 + d2 / 0.05) * smoothstep(0.0, 0.15, y) * smoothstep(0.8, 0.5, y);
+  vA = uI * (0.3 + 0.7 * seed.z) / (1.0 + d2 / 0.05) * smoothstep(0.0, 0.15, y) * (1.0 - smoothstep(0.5, 0.8, y));
 }`;
 const MOTE_FRAG = /* glsl */ `
 varying float vA;
 void main() {
-  float a = smoothstep(0.5, 0.05, length(gl_PointCoord - 0.5)) * vA;
+  float a = (1.0 - smoothstep(0.05, 0.5, length(gl_PointCoord - 0.5))) * vA;
   gl_FragColor = vec4(vec3(1.0, 0.72, 0.45) * 0.5 * a, 1.0);
   ${OUT_GLSL}
 }`;
