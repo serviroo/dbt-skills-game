@@ -593,13 +593,17 @@ dq-shy::before {
 .dq-actions--stack .dq-btn {
   width: 100%;
 }
+/* two choices of the same weight: side by side they are the same height, whichever wraps */
 .dq-actions--pair {
   width: 100%;
   margin-top: 0;
+  align-items: stretch;
 }
+/* side by side while each keeps 7em; on a narrower step they stack, each as wide as the step */
 .dq-actions--pair > .dq-btn {
   flex: 1 1 0;
   width: auto;
+  min-width: min(100%, 7em);
   padding-inline: 8px;
 }
 .dq-actions--pair .dq-btn-t {
@@ -751,9 +755,10 @@ dq-shy::before {
   gap: 10px;
   margin-top: 16px;
 }
+/* two columns while each keeps 6em; a narrower row has one */
 .dq-opts--grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(max(6em, calc(50% - 5px)), 1fr));
 }
 /* a phone zoomed to 200% (260 CSS pixels wide or less): one choice a row, so each word has the line */
 @media (max-width: 260px) {
@@ -959,11 +964,13 @@ textarea.dq-input {
 }
 @media (max-width: 419px) {
   .dq-listp .dq-addrow,
-  .dq-sz .dq-addrow {
+  .dq-sz .dq-addrow,
+  .dq-skill .dq-addrow {
     flex-wrap: wrap;
   }
   .dq-listp .dq-addrow .dq-field,
-  .dq-sz .dq-addrow .dq-field {
+  .dq-sz .dq-addrow .dq-field,
+  .dq-skill .dq-addrow .dq-field {
     flex-basis: 100%;
   }
 }
@@ -1941,6 +1948,10 @@ textarea.dq-input {
   display: flex;
   flex-direction: column;
 }
+/* a text box is never taller than the room under the top bar, so all of it shows at once; its words scroll inside it */
+.dq-step-body textarea.dq-input {
+  max-height: calc(100dvh - var(--dq-top, 0px) - var(--top-shade));
+}
 .dq-step-t {
   margin: 0 0 10px;
   font-size: 14px;
@@ -2015,6 +2026,15 @@ textarea.dq-input {
 }
 .dq-feedback .dq-text {
   font-size: 18px;
+}
+/* a step's controls set their words at 16 px or more, capitals and one-word labels too, at every size */
+.dq-step-body :is(.dq-btn, .dq-hold, .dq-seg-b) {
+  font-size: 16px;
+}
+/* a step's label wrapped onto a third line keeps clear of its button's edges; here only, as a Safe Zone button at the
+   largest text has no height to spare above the keyboard */
+.dq-step-body .dq-btn {
+  padding-block: 5px;
 }
 .dq-step-body .dq-btn--link {
   min-width: 44px;
@@ -2158,6 +2178,10 @@ textarea.dq-input {
   -webkit-user-select: none;
   user-select: none;
 }
+.dq-hold-ring {
+  position: absolute;
+  inset: 0;
+}
 .dq-hold-svg {
   position: absolute;
   inset: 0;
@@ -2178,6 +2202,47 @@ textarea.dq-input {
   letter-spacing: 0.02em;
   font-size: 16px;
   font-style: italic;
+}
+/* a step narrower than the ring (a phone zoomed to 200%), or a room under the top bar shorter than it (one on its side):
+   the words leave the ring to sit beside it, so the ring and its words fit whole at their sizes and a press anywhere on
+   either holds */
+@media (max-width: 260px), (max-height: 280px) {
+  .dq-hold {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px 14px;
+    width: 100%;
+    height: auto;
+    padding: 6px;
+    border-radius: 2px;
+    text-align: left;
+  }
+  .dq-hold-ring {
+    position: relative;
+    flex: none;
+    width: 64px;
+    height: 64px;
+  }
+  .dq-hold-t {
+    padding: 0;
+  }
+}
+/* on a narrow step, short or not, the words go under the ring, as beside it they'd have no width left; the ring takes
+   the room's height less the 110 px that four lines of words under it need, from 32 to 120 px */
+@media (max-width: 260px) {
+  .dq-hold {
+    flex-direction: column;
+    text-align: center;
+  }
+  .dq-hold-ring {
+    width: clamp(32px, calc(100dvh - var(--dq-top, 0px) - var(--top-shade) - 110px), 120px);
+    height: auto;
+    aspect-ratio: 1;
+  }
+  .dq-hold-t {
+    align-self: stretch;
+  }
 }
 
 .dq-counter {
