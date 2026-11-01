@@ -4,7 +4,7 @@
  * Backups carry the strokes, not images: a restore re-renders every thumbnail from them.
  */
 import { canvasBlob, INKS, PAGE, renderDrawing, STROKE_MODES, type Paper, type Stroke, type StrokeMode } from './ink';
-import { connectionLost, STORAGE_WAIT_MS, uid, validDay } from './store';
+import { connectionLost, STORAGE_WAIT_MS, uid, validDay, type TxTurn } from './store';
 import { ART_DB, BESIDE, TAB_KEY } from '../core/stored-names';
 import { canWrite, cleared, goneElsewhere, mayWrite, onClear, write as writeOut } from '../core/cleared';
 
@@ -490,9 +490,12 @@ export class ArtStore {
     if (mode === 'readonly') return this.answered(stores, mode, fn, fallback);
     // a clear checking its Save Crystal holds writes; once it clears they never happen
     if (!canWrite() && !(await mayWrite())) return fallback();
-    const job = this.answered(stores, mode, fn, fallback);
-    this.writes.add(job);
-    void job.finally(() => this.writes.delete(job));
+    const turn: TxTurn = {};
+    const job = this.answered(stores, mode, fn, fallback, turn);
+    // a clear's check waits until the write is over: its transaction ended, or given up before it started one
+    const over = Promise.race([turn.job, job.then(() => (turn.off && !turn.t ? undefined : turn.job))]);
+    this.writes.add(over);
+    void over.finally(() => this.writes.delete(over));
     return job;
   }
 
@@ -501,12 +504,21 @@ export class ArtStore {
    * database is given up for the visit, as one that couldn't be opened: nothing more is read from it, or written over
    * what it couldn't read.
    */
-  private answered<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>, fallback: () => T): Promise<T> {
+  private answered<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>, fallback: () => T, turn: TxTurn = {}): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const unanswered = new Promise<null>((done) => (timer = setTimeout(() => done(null), STORAGE_WAIT_MS)));
-    return Promise.race([this.run(stores, mode, fn, fallback).then((v) => ({ v })), unanswered]).then((r) => {
+    const job = this.run(stores, mode, fn, fallback, turn);
+    turn.job = job;
+    return Promise.race([job.then((v) => ({ v })), unanswered]).then((r) => {
       clearTimeout(timer);
       if (r) return r.v;
+      // its transaction ends unfinished, so nothing lands after it was counted as failed, and one not started never starts
+      turn.off = true;
+      try {
+        turn.t?.abort();
+      } catch {
+        /* already finished */
+      }
       this.db = Promise.resolve(null);
       this.persistent = false;
       this.unreadable = true;
@@ -515,14 +527,14 @@ export class ArtStore {
     });
   }
 
-  private async run<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>, fallback: () => T): Promise<T> {
+  private async run<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>, fallback: () => T, turn: TxTurn = {}): Promise<T> {
     let failed = false;
     for (let retry = true; ; retry = false) {
       const db = await this.db;
-      if (!db) break;
+      if (!db || turn.off) break;
       let started = false;
       try {
-        const t = db.transaction(stores, mode);
+        const t = (turn.t = db.transaction(stores, mode));
         started = true;
         const done = new Promise<void>((ok, bad) => {
           t.oncomplete = () => ok();
