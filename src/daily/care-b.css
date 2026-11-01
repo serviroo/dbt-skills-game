@@ -284,6 +284,7 @@
 }
 .dq-ease-panel {
   --pad: 22px;
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -297,9 +298,9 @@
   opacity: 0.55;
   pointer-events: none;
 }
-/* a phone zoomed to 200% (260 CSS pixels wide or less): the moth sits above the badge, at its end, clear of it as it
-   floats */
-@media (max-width: 260px) {
+/* a phone zoomed to 200%, or with its own text at 200% (the panel's words 20 characters wide or less, counted in ch,
+   which grow with the phone's own text size): the moth sits above the badge, at its end, clear of it as it floats */
+@container (max-width: 20ch) {
   .dq-ease-sea {
     position: static;
     order: -1;
