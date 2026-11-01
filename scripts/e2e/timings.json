@@ -268,6 +268,7 @@
   "glow-scene": 34,
   "glow-slow-gpu": 17,
   "glow-still": 33,
+  "glsl-check-windows-paths": 1,
   "gone-counts-a-late-leave-as-late": 2,
   "gone-ends-if-the-page-stops-once-it-left": 10,
   "gone-fails-at-its-deadline": 1,

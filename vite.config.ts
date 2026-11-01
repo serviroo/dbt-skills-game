@@ -68,6 +68,9 @@ function pwa(): Plugin {
   };
 }
 
+/** `p` with forward slashes, the form Vite gives module ids in on every platform, so Windows paths compare with them. */
+const slash = (p: string) => p.replaceAll('\\', '/');
+
 /**
  * Fails the build, and shows the error in dev, on a GLSL smoothstep with its edges the wrong way round, which some phone
  * drivers draw as a hard step or a constant (scripts/glsl-check.mjs). It reads each source file as written, before any
@@ -82,10 +85,10 @@ function glslCheck(): Plugin {
       root = c.root;
     },
     transform(code, id) {
-      const file = id.split('?')[0];
-      if (!/\.[jt]s$/.test(file) || !file.startsWith(path.join(root, 'src') + path.sep)) return;
+      const file = slash(id.split('?')[0]);
+      if (!/\.[jt]s$/.test(file) || !file.startsWith(slash(path.join(root, 'src')) + '/')) return;
       const calls = reversedSmoothsteps(code);
-      if (calls.length) this.error(reversedMessage(path.relative(root, file), calls));
+      if (calls.length) this.error(reversedMessage(path.posix.relative(slash(root), file), calls));
     },
   };
 }
