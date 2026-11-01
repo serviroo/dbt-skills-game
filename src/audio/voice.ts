@@ -1,5 +1,6 @@
 import { mulberry32, type Rng } from '../core/math';
 import { tanhCurve, type Ctx } from './dsp';
+import { silentAfter } from './param';
 
 /** Shared, engine-owned resources every voice can draw on. */
 export interface Lib {
@@ -34,8 +35,9 @@ export interface VoiceOpts {
   hall?: number;
 }
 
-/** When a voice stopped at `at` over `ramp` (see Voice.stop) has gone silent and its sources have ended. */
-export const stoppedBy = (at: number, ramp: number) => at + ramp * 1.6 + 0.02;
+/** When a voice stopped at `at` over `ramp` (see Voice.stop) has gone silent and its sources have ended: its fade to 0
+ *  has the time constant ramp / 4, and its sources end only once that is silent, about 2.6 ramps on. */
+export const stoppedBy = (at: number, ramp: number) => at + silentAfter(Math.max(0.002, ramp / 4));
 
 /**
  * One sounding thing (a cue, a bed, a music layer). Owns a stop-able output, optional reverb sends, a pan, and a
@@ -52,7 +54,8 @@ export class Voice {
   readonly rng: Rng;
   end: number;
   private sources: { n: AudioScheduledSourceNode; stop: number; span: { b: number } | null }[] = [];
-  private stopped = false;
+  /** When its stop has silenced it and its sources have ended (Infinity until then). */
+  private killAt = Infinity;
   private children: Voice[] = [];
 
   constructor(readonly lib: Lib, readonly t: number, dest: AudioNode, o: VoiceOpts = {}, seed = 1) {
@@ -248,17 +251,18 @@ export class Voice {
     return end;
   }
 
-  /** Fade this voice out from `at` over `ramp` seconds and stop its sources. */
+  /** Fade this voice out from `at` over `ramp` seconds and stop its sources. A stop is final: a later one only ever
+   *  silences it sooner (Skip during a long fade-out), never later. */
   stop(at: number, ramp = 0.03) {
-    if (this.stopped) return;
-    this.stopped = true;
+    const kill = stoppedBy(at, ramp);
+    if (kill >= this.killAt) return;
+    this.killAt = kill;
     for (const c of this.children) c.stop(at, ramp);
     const tau = Math.max(0.002, ramp / 4);
     for (const g of [this.out.gain, this.roomSend.gain, this.hallSend.gain]) {
       g.cancelScheduledValues(at);
       g.setTargetAtTime(0, at, tau);
     }
-    const kill = stoppedBy(at, ramp);
     for (const s of this.sources) {
       if (s.stop > kill) {
         try {
@@ -274,6 +278,6 @@ export class Voice {
   }
 
   get isStopped() {
-    return this.stopped;
+    return this.killAt !== Infinity;
   }
 }

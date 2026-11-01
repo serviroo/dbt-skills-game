@@ -3,10 +3,11 @@
 // changes the playing hum in step with the curve the other sliders use, live and without a click, while Music and
 // Effects leave it alone. The hum never pops or stays gone: hiding the page fades it out before it pauses, and however
 // it was paused (the page hidden, a locked phone, a call) it comes back from silence with a short fade. Mute, the Safe
-// Zone and Done still silence it. Measured on the hum's real output, render quantum by render quantum.
+// Zone and Done still silence it, also while it fades after Off or Done, and turning it off fades it all the way to
+// silence before it stops. Measured on the hum's real output, render quantum by render quantum.
 import fs from 'node:fs';
 import path from 'node:path';
-import { installAudioRecorder, audioReady, audioRecorded } from './audio-recorder.mjs';
+import { installAudioRecorder, audioReady, audioRecorded, audioEnded } from './audio-recorder.mjs';
 
 /** What each check measured, one line a check, in the run's artifacts. */
 const note = (h, name, o) => fs.appendFileSync(path.join(h.out, 'hum-volume.jsonl'), JSON.stringify({ name, ...o }) + '\n');
@@ -19,6 +20,9 @@ const Q = 128;
 const SILENT_PEAK = 2 ** -15;
 // the Safe Zone silences the speakers this soon after the tap
 const WITHIN = 0.05;
+// nothing of the hum is heard below this, in dB of full scale. Chromium lands a fade on exact
+// zero once its gain is under e^-10, which for the hum's small breath gain is about -90 dB of full scale
+const FLOOR_DBFS = -80;
 // a click: a step between two samples more than this many times the steepest the steady hum ever moves
 const CLICK = 3;
 // the slider curve the engine gives Master, Music and Effects
@@ -435,6 +439,84 @@ export const scenarios = {
       await h.sleep(500);
       const humming = await page.evaluate(() => new Set(window.__taps.map((t) => t.context).filter((c) => c !== window.__taps[0].context && c.state !== 'closed')).size);
       h.expect(!humming, `${humming} hum(s) still open after the moment ended`);
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  /** Turned off, the hum fades all the way to silence before its oscillators stop and its audio closes: no step at the end. */
+  async 'hum-off-fades-to-silence'(h) {
+    const { ctx, page, errors } = await boot(h);
+    try {
+      const n = await humOn(h, page);
+      // one beat of the hum's two close notes
+      const t0 = await clock(page, n);
+      await recorded(page, n, t0 + 1.7);
+      const steady = rms(await quanta(page, n, t0, t0 + 1.7));
+      await page.getByRole('switch', { name: 'Low hum', exact: true }).uncheck();
+      // every block of it, through the close
+      const ended = await audioEnded(page, n, 5000).catch(() => {
+        throw new Error('the hum kept going after it was turned off');
+      });
+      const off = await quanta(page, n, t0 + 1.7, ended);
+      // where it ends: the first quantum 100 dB down, or the end of the recording if it was cut off before that
+      const gone = off.findIndex((q) => q[1] < steady * 1e-5);
+      const end = gone < 0 ? off.length : gone;
+      const last = 20 * Math.log10(rms(off.slice(Math.max(0, end - 4), end)));
+      note(h, 'hum-off-fades-to-silence', { steady, last, endsAt: off[end - 1]?.[0] - t0 });
+      h.expect(steady > 1e-3, `the hum was too quiet to measure (${steady.toExponential(2)})`);
+      h.expect(end > 0 && last < FLOOR_DBFS, `the hum ends at ${last.toFixed(1)} dB of full scale, above ${FLOOR_DBFS} dB`);
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  /** A hum still fading after Off or Done answers the Safe Zone at once, and Mute, and a pause (a call) ends it. */
+  async 'fading-hum-still-answers'(h) {
+    const { ctx, page, errors } = await boot(h);
+    try {
+      const humSwitch = page.getByRole('switch', { name: 'Low hum', exact: true });
+      const intoSafe = async (n, how) => {
+        await page.locator('header .dq-safe').click({ timeout: 4000 });
+        await page.waitForFunction(() => window.__daily.route.name === 'safe', null, { timeout: 3000 });
+        const end = await audioEnded(page, n, 3000).catch(() => {
+          throw new Error(`after ${how}, the fading hum kept going in the Safe Zone`);
+        });
+        const tap = (await page.evaluate(() => window.__marks.filter((k) => k.to === 'safe'))).at(-1).at[n];
+        const inside = await quanta(page, n, tap + WITHIN, end);
+        h.expect(inside.every((q) => q[1] < SILENT_PEAK), `after ${how}, the fading hum was heard ${WITHIN * 1000} ms into the Safe Zone`);
+        await page.locator('header .dq-back').click({ timeout: 4000 });
+        await page.waitForFunction(() => window.__daily.route.name !== 'safe', null, { timeout: 3000 });
+      };
+
+      let n = await humOn(h, page);
+      await humSwitch.uncheck();
+      await intoSafe(n, 'Off');
+
+      n = await humOn(h, page);
+      await page.getByRole('button', { name: 'Done', exact: true }).click();
+      await page.waitForFunction(() => window.__daily.route.name !== 'moment', null, { timeout: 3000 });
+      await intoSafe(n, 'Done');
+
+      n = await humOn(h, page);
+      await humSwitch.uncheck();
+      const controls = await soundControls(page);
+      await controls.getByRole('button', { name: 'Mute', exact: true }).click();
+      const m = await clock(page, n);
+      const end = await audioEnded(page, n, 5000);
+      const muted = await quanta(page, n, m + 0.25, end);
+      h.expect(muted.length > 0 && muted.every((q) => q[1] < SILENT_PEAK), `muted while fading, the hum still peaks at ${Math.max(...muted.map((q) => q[1])).toExponential(2)}`);
+      await controls.getByRole('button', { name: 'Unmute', exact: true }).click();
+      await page.keyboard.press('Escape');
+
+      n = await humOn(h, page);
+      await humSwitch.uncheck();
+      await page.evaluate((n) => window.__taps[n].context.suspend(), n);
+      await page.waitForFunction((n) => window.__taps[n].context.state === 'closed', n, { timeout: 1000 }).catch(() => {
+        throw new Error('paused while fading, the hum was left open to play on when it resumes');
+      });
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();

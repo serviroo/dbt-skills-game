@@ -1091,9 +1091,11 @@ export class Music {
 
   stop(fade = 1, at = this.host.lib.ctx.currentTime) {
     for (const s of this.live) {
-      if (s.end !== Infinity) continue;
-      s.end = at;
-      s.fadeOut = fade;
+      if (s.end === Infinity) {
+        s.end = at;
+        s.fadeOut = fade;
+      }
+      // one already fading out ends no later than this
       s.voice.stop(at, fade);
     }
     this.current = null;
