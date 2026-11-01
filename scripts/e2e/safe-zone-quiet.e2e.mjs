@@ -12,8 +12,9 @@ const AUDIO = 'dbt.audio.v1';
 // silent: a peak below one step of 16-bit audio and RMS below -100 dBFS, as in me-92
 const SILENT_PEAK = 2 ** -15;
 const SILENT_RMS = 1e-5;
-// the speakers must be silent this soon after the tap: the click-free ramp, and a few render quanta of audio clock
-const WITHIN = 0.05;
+// the speakers must be silent this soon after the tap: the two frames ahead of the clock every sound is placed at
+// (SCORE.leadSec), the click-free ramp, and a few render quanta of audio clock
+const WITHIN = 0.085;
 const CUES = ['reward_chime', 'chest_burst', 'soft_chime'];
 
 const dayKey = (ms) => {

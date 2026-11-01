@@ -1,4 +1,5 @@
 import { midi } from './dsp';
+import { soon } from './param';
 import { Voice, kRate, type Lib } from './voice';
 
 export type BedName = 'gate_hum' | 'aura_bed' | 'vortex_roar' | 'ambient';
@@ -123,12 +124,12 @@ export function startBed(lib: Lib, name: BedName, dest: AudioNode, t: number, le
   def.fn(v, t, lvl);
   return {
     name,
-    level(x, ramp = 0.5, at = lib.ctx.currentTime) {
+    level(x, ramp = 0.5, at = soon(lib.ctx)) {
       if (v.isStopped) return;
       lvl.gain.cancelScheduledValues(at);
       lvl.gain.setTargetAtTime(Math.max(0, x), at, Math.max(0.003, ramp / 4));
     },
-    stop(ramp = 0.5, at = lib.ctx.currentTime) {
+    stop(ramp = 0.5, at = soon(lib.ctx)) {
       v.stop(at, ramp);
     },
     get stopped() {
@@ -211,13 +212,13 @@ export function startCharge(lib: Lib, dest: AudioNode, t: number, seed: number):
   };
   let stopped = false;
   return {
-    set(c, at = lib.ctx.currentTime) {
+    set(c, at = soon(lib.ctx)) {
       if (!stopped) apply(c, at, 0.03);
     },
-    release(at = lib.ctx.currentTime) {
+    release(at = soon(lib.ctx)) {
       if (!stopped) apply(0, at, 0.09);
     },
-    stop(at = lib.ctx.currentTime, ramp = 0.03) {
+    stop(at = soon(lib.ctx), ramp = 0.03) {
       stopped = true;
       v.stop(at, ramp);
     },

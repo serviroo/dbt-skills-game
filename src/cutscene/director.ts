@@ -290,7 +290,7 @@ export class Director {
     gate.openAt(t0 + GATE.crackSec);
     this.audio.music?.to('intro', GATE.musicFadeSec);
     this.cue(GATE.airSec, () => this.audio.play('gate_air'));
-    this.cue(GATE.crackSfxSec, () => this.audio.play('gate_crack'));
+    this.cue(GATE.crackSec, () => this.audio.play('gate_crack'));
     this.cue(GATE.swellSec, () => this.audio.play('gate_swell'));
     this.cue(GATE.humSec, () => this.audio.bed?.('gate_hum')?.level(GATE.humLevel, GATE.humFadeSec));
     await this.hold(GATE.holdSec);
@@ -447,7 +447,7 @@ export class Director {
       seq.frameAt(lt);
       aura?.setIntensity(lerp(0.45, 0.9, smoothstep(HIT + 0.6, HIT + 3, lt)) * (1 - 0.5 * smoothstep(HIT + 8, HIT + 10, lt)));
     });
-    // sound, scheduled against the same beat clock (visuals lead by one frame)
+    // sound, scheduled against the same beat clock (the engine places each sound two frames on, so visuals lead by two)
     this.cue(1.85, () => this.audio.play('whoosh', { gain: 0.6 }));
     this.cue(3.48, () => {
       this.audio.play('awaken_voice');
@@ -458,7 +458,7 @@ export class Director {
       else this.audio.duck?.(-22, 0.06);
       this.audio.bed?.('aura_bed')?.level(0.05, 0.1);
     });
-    this.cue(HIT + 1 / 30, () => {
+    this.cue(HIT, () => {
       if (!this.audio.hush) this.audio.duck?.(0, 0.03);
       this.audio.play('awaken_hit');
     });
@@ -544,7 +544,7 @@ export class Director {
     this.audio.duck?.(-18, 0.05);
     await this.hold(0.2);
     this.audio.duck?.(0, 0.02);
-    this.cue(1 / 30, () => this.audio.play('chest_burst'));
+    this.audio.play('chest_burst');
     this.track(2.4, (lt) => chest.setOpen(clamp(lt / 1.6)));
     await this.hold(0.8);
     await this.window({ kind: 'reward', title: WINDOWS.unlocked.title, html: WINDOWS.unlocked.html }, 1.8);

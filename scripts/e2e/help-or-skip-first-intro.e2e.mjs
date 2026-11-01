@@ -591,6 +591,73 @@ export const scenarios = {
     }
   },
 
+  /** Whatever plays as Skip is pressed falls silent as the check below hears it: 150 ms after the press. Rendered as a
+   *  capture renders it, every cue at its loudest moment, every bed and every part of the score is stopped as Skip stops
+   *  it (stopAll over SCORE.leaveSec, two frames after the press). A capture's engine keeps no list of the cues it
+   *  plays, so the cue is stopped as stopAll stops a live one. A fade cut short while it still sounds, or a filter that
+   *  rings on once it ends, would sound over Home */
+  async 'skip-silences-every-sound'(h) {
+    const { ctx, page, errors } = await h.open({}, '?lab=audio&mute');
+    try {
+      await page.waitForFunction(() => window.__lab === true, null, { timeout: 30000 });
+      const r = await page.evaluate(async (silent) => {
+        const { AudioEngine, CUE_NAMES, BED_NAMES, SECTIONS } = await import('/src/audio/engine.ts');
+        const { SCORE } = await import('/src/motion/tokens.ts');
+        const rate = 44100;
+        const sounds = [
+          ...CUE_NAMES.map((n) => [n, (e) => e.play(n, { at: 0 })]),
+          ...BED_NAMES.map((n) => [n, (e) => void e.bed(n, { at: 0, fadeIn: 0.3 })]),
+          ...SECTIONS.map((n) => [`the ${n} score`, (e) => void e.music.to(n, 0.3, { at: 0 })]),
+        ];
+        const render = (play, len, stopAt) => {
+          const c = new OfflineAudioContext(2, Math.ceil(len * rate), rate);
+          const e = new AudioEngine(c);
+          const cue = play(e);
+          e.music.scheduleUntil(len, 0);
+          if (stopAt !== undefined) {
+            cue?.stop(stopAt, SCORE.leaveSec);
+            e.stopAll(SCORE.leaveSec, stopAt);
+          }
+          return c.startRendering();
+        };
+        // the loudest sample from `a` on, and when it plays
+        const loudest = (buf, a) => {
+          let p = 0;
+          let at = a;
+          for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+            const d = buf.getChannelData(ch);
+            for (let i = Math.ceil(a * rate); i < d.length; i++) {
+              if (Math.abs(d[i]) > p) [p, at] = [Math.abs(d[i]), i / rate];
+            }
+          }
+          return { p, at };
+        };
+        const heard = [];
+        const quiet = [];
+        for (const [name, play] of sounds) {
+          // the loudest moment of its first 1.5 s, two frames in at least so the press comes after it starts
+          const top = loudest(await render(play, 1.5), SCORE.leadSec);
+          if (top.p < 10 * silent) {
+            quiet.push(name);
+            continue;
+          }
+          const stopAt = top.at;
+          const press = stopAt - SCORE.leadSec;
+          const after = loudest(await render(play, stopAt + 1, stopAt), press + 0.15);
+          heard.push({ name, at: +stopAt.toFixed(3), level: top.p, peak: after.p, ms: Math.round((after.at - press) * 1000) });
+        }
+        return { heard, quiet };
+      }, SILENT_PEAK);
+      const loud = r.heard.filter((s) => s.peak >= SILENT_PEAK);
+      h.expect(r.heard.length > r.quiet.length, `only ${r.heard.length} sounds were heard to stop; ${r.quiet.join(', ')} played nothing`);
+      h.expect(!loud.length, `Skip left sound over Home 150 ms after the press: ${loud.map((s) => `${s.name} stopped at ${s.at} s peaks at ${s.peak.toExponential(2)} ${s.ms} ms after the press`).join('; ')}`);
+      h.expect(!errors.length, errors.join('\n'));
+      return { sounds: r.heard.length, playedNothing: r.quiet, worst: Math.max(...r.heard.map((s) => s.peak)) };
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** Skip as a closing screen's cue plays (a reward's chime, the letter opening, the end card's shimmer with its tail of
    *  seconds), and once with the page hidden right after the press, which stands the sound still mid-fade: the speakers
    *  go silent at the press, the echo's tail too, so none of the intro plays on over Home. Music and the hum are off, so
@@ -629,6 +696,12 @@ export const scenarios = {
         await audioReady(page);
         await open(page);
         await cue(page, sound);
+        // a cue sounds two frames after it is asked for (SCORE.leadSec): the press waits until it is heard
+        await until(page, (min) => {
+          const tap = window.__taps[0];
+          const last = [...tap.q.values()].slice(-Math.round((0.2 * tap.context.sampleRate) / 128));
+          return Math.sqrt(last.reduce((s, [, ss]) => s + ss, 0) / (last.length * 128)) > min;
+        }, 10 * SILENT_RMS, { timeout: 10000, polling: 20 });
         await page.evaluate((hidden) => {
           addEventListener(
             'click',

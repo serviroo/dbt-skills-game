@@ -6,7 +6,7 @@
  */
 import { animate } from '../ui/anim';
 import { SCORE, WINDOW } from '../motion/tokens';
-import { holdAt, taper } from '../audio/param';
+import { holdAt, soon, taper } from '../audio/param';
 import { type Next } from '../content/dbt';
 import { CHECKIN } from '../content/daily-lines';
 import { cleared, write } from '../core/cleared';
@@ -127,7 +127,7 @@ function lowHum(scale: number) {
     o.start();
     return o;
   });
-  breath.gain.setTargetAtTime(0.05, ctx.currentTime, 0.8);
+  breath.gain.setTargetAtTime(0.05, soon(ctx), 0.8);
   let dead = false;
   let nap: ReturnType<typeof setTimeout> | undefined;
   const resume = () => {
@@ -148,7 +148,7 @@ function lowHum(scale: number) {
     clearTimeout(nap);
     // already paused: `paused` has set where it comes back from
     if (ctx.state !== 'running') return resume();
-    const t = ctx.currentTime;
+    const t = soon(ctx);
     holdAt(wake.gain, t);
     if (!document.hidden) return void wake.gain.setTargetAtTime(1, t, WAKE_TAU);
     // hidden: fade out, then pause like the rest of the app's sound (a phone may pause it sooner; see `paused`)
@@ -156,7 +156,7 @@ function lowHum(scale: number) {
     nap = setTimeout(() => {
       // a page shown again before this pause lands still found the hum running, so it is woken once the pause lands
       if (!dead && document.hidden && ctx.state === 'running') ctx.suspend().then(resume, () => {});
-    }, SLEEP_TAU * 6000);
+    }, (t - ctx.currentTime + SLEEP_TAU * 6) * 1000);
   };
   document.addEventListener('visibilitychange', seen);
   ctx.addEventListener('statechange', paused);
@@ -175,21 +175,22 @@ function lowHum(scale: number) {
     setScale(s: number) {
       if (dead) return;
       // the glide the engine gives Master, Music and Effects (setUser: ramp 0.08 s, tau = ramp / 4), so no click
-      vol.gain.setTargetAtTime(s, ctx.currentTime, 0.02);
+      vol.gain.setTargetAtTime(s, soon(ctx), 0.02);
       // a level moved in the speaker control wakes a paused hum like any tap: the control keeps its taps and keys
       resume();
     },
     breathe(s: number) {
       if (dead) return;
-      breath.gain.setTargetAtTime(0.035 + s * 0.03, ctx.currentTime, 0.25);
-      lp.frequency.setTargetAtTime(300 + s * 140, ctx.currentTime, 0.3);
+      const t = soon(ctx);
+      breath.gain.setTargetAtTime(0.035 + s * 0.03, t, 0.25);
+      lp.frequency.setTargetAtTime(300 + s * 140, t, 0.3);
     },
     /** A soft fade of about a second, or exact silence `ramp` seconds from now (the Safe Zone opening). */
     stop(ramp?: number) {
       if (dead) return;
       dead = true;
       unlisten();
-      const t = ctx.currentTime;
+      const t = soon(ctx);
       if (ramp !== undefined) {
         holdAt(breath.gain, t);
         breath.gain.linearRampToValueAtTime(0, t + ramp);

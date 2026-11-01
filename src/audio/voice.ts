@@ -26,12 +26,23 @@ export function kRate(...ps: AudioParam[]) {
   }
 }
 
+/** One AudioParam's timed automation, in its voice's time (see Voice.at). */
+export interface Timed {
+  setValueAtTime(v: number, t: number): void;
+  linearRampToValueAtTime(v: number, t: number): void;
+  exponentialRampToValueAtTime(v: number, t: number): void;
+  setTargetAtTime(v: number, t: number, tau: number): void;
+  cancelScheduledValues(t: number): void;
+}
+
 export interface VoiceOpts {
   gain?: number;
   pan?: number;
   detune?: number;
   room?: number;
   hall?: number;
+  /** Start and set nothing until open(): the times it is given until then count from its opening. */
+  held?: boolean;
 }
 
 /** When a voice stopped at `at` over `ramp` (see Voice.stop) has gone silent and its sources have ended. */
@@ -50,15 +61,24 @@ export class Voice {
   readonly hallSend: GainNode;
   readonly cents: number;
   readonly rng: Rng;
+  /** When it starts (context time); open() sets a held voice's. */
+  t: number;
   end: number;
   private sources: { n: AudioScheduledSourceNode; stop: number; span: { b: number } | null }[] = [];
-  private stopped = false;
+  /** While held, what it was given to start and set, each placed by open(at) `at` later. */
+  private held: ((at: number) => void)[] | null;
+  /** When its stop() has silenced it and its sources have ended (Infinity until then): a stop is final, and nothing it
+   *  is given later, such as a held part opened after it, sounds past it. */
+  private killAt = Infinity;
   private children: Voice[] = [];
+  private parts: Voice[] = [];
 
-  constructor(readonly lib: Lib, readonly t: number, dest: AudioNode, o: VoiceOpts = {}, seed = 1) {
+  constructor(readonly lib: Lib, t: number, dest: AudioNode, o: VoiceOpts = {}, seed = 1) {
     const ctx = lib.ctx;
     this.ctx = ctx;
+    this.t = t;
     this.end = t;
+    this.held = o.held ? [] : null;
     this.cents = o.detune ?? 0;
     this.rng = mulberry32(seed);
     this.out = ctx.createGain();
@@ -84,9 +104,41 @@ export class Voice {
 
   /** A sub-voice feeding this one, stopped with it (or on its own). */
   child(dest: AudioNode = this.wet, seed = 7) {
-    const c = new Voice(this.lib, this.t, dest, {}, seed);
+    const c = new Voice(this.lib, this.t, dest, { held: !!this.held }, seed);
+    c.killAt = this.killAt;
     this.children.push(c);
     return c;
+  }
+
+  /** A held sub-voice that starts on its own open(), stopped with this one. */
+  part(dest: AudioNode = this.wet, seed = 7) {
+    const c = new Voice(this.lib, this.t, dest, { held: true }, seed);
+    c.killAt = this.killAt;
+    this.parts.push(c);
+    return c;
+  }
+
+  /** Starts and sets what this held voice and its children were given, `at` later; from then on times are the clock's. */
+  open(at: number) {
+    const held = this.held ?? [];
+    this.held = null;
+    this.t = at;
+    this.end = Math.min(at, this.killAt);
+    for (const c of this.children) c.open(at);
+    for (const f of held) f(at);
+  }
+
+  /** `p`'s timed automation, in this voice's time: set at once, or kept while the voice is held and set by open(). */
+  at(p: AudioParam): Timed {
+    const held = this.held;
+    if (!held) return p;
+    return {
+      setValueAtTime: (v, t) => void held.push((d) => p.setValueAtTime(v, t + d)),
+      linearRampToValueAtTime: (v, t) => void held.push((d) => p.linearRampToValueAtTime(v, t + d)),
+      exponentialRampToValueAtTime: (v, t) => void held.push((d) => p.exponentialRampToValueAtTime(v, t + d)),
+      setTargetAtTime: (v, t, tau) => void held.push((d) => p.setTargetAtTime(v, t + d, tau)),
+      cancelScheduledValues: (t) => void held.push((d) => p.cancelScheduledValues(t + d)),
+    };
   }
 
   sends(room: number, hall: number) {
@@ -94,8 +146,15 @@ export class Voice {
     this.hallSend.gain.value = hall;
   }
 
-  private reg<T extends AudioScheduledSourceNode>(n: T, t0: number, t1: number) {
-    n.start(t0);
+  private reg<T extends AudioScheduledSourceNode>(n: T, t0: number, t1: number, offset = 0) {
+    if (this.held) {
+      this.held.push((d) => this.reg(n, t0 + d, t1 + d, offset));
+      return n;
+    }
+    if (t0 >= this.killAt) return n;
+    t1 = Math.min(t1, this.killAt);
+    if (n instanceof AudioBufferSourceNode) n.start(t0, offset);
+    else n.start(t0);
     n.stop(t1);
     this.sources.push({ n, stop: t1, span: this.lib.track(t0, t1) });
     if (t1 > this.end) this.end = t1;
@@ -119,12 +178,7 @@ export class Voice {
     s.loop = true;
     s.playbackRate.value = rate;
     s.connect(dest);
-    const off = this.rng() * (b.duration - 0.1);
-    s.start(t0, off);
-    s.stop(t1);
-    this.sources.push({ n: s, stop: t1, span: this.lib.track(t0, t1) });
-    if (t1 > this.end) this.end = t1;
-    return s;
+    return this.reg(s, t0, t1, this.rng() * (b.duration - 0.1));
   }
 
   /** Loop a buffer from t0 to t1 (start offset 0, so renders stay deterministic). */
@@ -182,7 +236,8 @@ export class Voice {
   }
 
   /** Linear attack to peak, optional hold, exponential decay (tau). Returns when it is ~-70 dB. */
-  perc(p: AudioParam, t: number, peak: number, a: number, tau: number, hold = 0) {
+  perc(param: AudioParam, t: number, peak: number, a: number, tau: number, hold = 0) {
+    const p = this.at(param);
     p.setValueAtTime(0, t);
     p.linearRampToValueAtTime(peak, t + a);
     if (hold > 0) p.setValueAtTime(peak, t + a + hold);
@@ -191,7 +246,8 @@ export class Voice {
   }
 
   /** Exponential (linear-in-dB) move between two levels. */
-  ramp(p: AudioParam, t: number, from: number, to: number, dur: number) {
+  ramp(param: AudioParam, t: number, from: number, to: number, dur: number) {
+    const p = this.at(param);
     p.setValueAtTime(Math.max(from, 1e-5), t);
     p.exponentialRampToValueAtTime(Math.max(to, 1e-5), t + dur);
   }
@@ -235,8 +291,9 @@ export class Voice {
       const fmHz = o.f * o.ratio;
       const dev = this.gain(0, car.frequency);
       const k = Math.pow(2, this.cents / 1200);
-      dev.gain.setValueAtTime(o.index * fmHz * k, o.t);
-      dev.gain.setTargetAtTime((o.idxEnd ?? 0) * fmHz * k, o.t + a, o.idxTau ?? o.tau * 0.5);
+      const idx = this.at(dev.gain);
+      idx.setValueAtTime(o.index * fmHz * k, o.t);
+      idx.setTargetAtTime((o.idxEnd ?? 0) * fmHz * k, o.t + a, o.idxTau ?? o.tau * 0.5);
       this.osc('sine', fmHz, o.t, end, dev);
     }
     if (o.vib) this.lfo(o.vib[0], o.vib[1] * o.f, car.frequency, o.t, end);
@@ -250,15 +307,15 @@ export class Voice {
 
   /** Fade this voice out from `at` over `ramp` seconds and stop its sources. */
   stop(at: number, ramp = 0.03) {
-    if (this.stopped) return;
-    this.stopped = true;
-    for (const c of this.children) c.stop(at, ramp);
+    if (this.killAt !== Infinity) return;
+    const kill = stoppedBy(at, ramp);
+    this.killAt = kill;
+    for (const c of [...this.children, ...this.parts]) c.stop(at, ramp);
     const tau = Math.max(0.002, ramp / 4);
     for (const g of [this.out.gain, this.roomSend.gain, this.hallSend.gain]) {
       g.cancelScheduledValues(at);
       g.setTargetAtTime(0, at, tau);
     }
-    const kill = stoppedBy(at, ramp);
     for (const s of this.sources) {
       if (s.stop > kill) {
         try {
@@ -274,6 +331,6 @@ export class Voice {
   }
 
   get isStopped() {
-    return this.stopped;
+    return this.killAt !== Infinity;
   }
 }
