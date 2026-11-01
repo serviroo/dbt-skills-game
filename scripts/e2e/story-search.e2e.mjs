@@ -270,6 +270,9 @@ export const scenarios = {
         const { waitHeld, release, drain } = await holdStorage(page, ['chapter']);
         await page.locator('.st-found-row', { hasText: c.row }).click();
         await routeIs(page, 'write');
+        // the name of the chapter the Page tab goes to (Winter, either way) comes in with the page around it
+        await waitHeld(`chapter ${ids.winter}`);
+        await release(`chapter ${ids.winter}`);
         await waitHeld(`chapter ${opened}`);
         await page.getByRole('radio', { name: `Show: ${c.tap}` }).click();
         await waitHeld(`chapter ${tapped}`);
