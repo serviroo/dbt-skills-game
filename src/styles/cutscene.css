@@ -42,7 +42,7 @@
   bottom: calc(18% + var(--safe-bottom));
   text-align: center;
   font-weight: 400;
-  font-size: clamp(14px, 3.6vw, 17px);
+  font-size: clamp(16px, 4.1vw, 17px);
   letter-spacing: 0.32em;
   padding-left: 0.32em;
   color: rgba(214, 236, 255, 0.82);
@@ -54,7 +54,7 @@
   right: 0;
   bottom: calc(12% + var(--safe-bottom));
   text-align: center;
-  font-size: 13px;
+  font-size: 16px;
   letter-spacing: 0.08em;
   color: #75849b;
 }
@@ -260,7 +260,7 @@
   align-items: center;
   gap: 12px;
   font-weight: 500;
-  font-size: clamp(14px, 3.6vw, 17px);
+  font-size: clamp(16px, 4.1vw, 17px);
   letter-spacing: 0.22em;
   padding-left: 0.22em;
   color: #fff3d6;
@@ -280,11 +280,6 @@
   grid-auto-rows: 1fr;
   gap: clamp(10px, 2vw, 22px);
   perspective: 900px;
-}
-@media (max-width: 720px) {
-  .rw-grid {
-    grid-template-columns: repeat(2, minmax(0, 168px));
-  }
 }
 .rw-card {
   --rc: #c9a45c;
@@ -355,7 +350,7 @@
   margin-top: 4px;
 }
 .rw-card .ds {
-  font-size: clamp(12.5px, 3.2vw, 13.5px);
+  font-size: 16px;
   line-height: 1.4;
   color: rgba(196, 221, 243, 0.86);
   margin-top: 8px;
@@ -373,17 +368,51 @@
   transform: translateX(-100%);
   pointer-events: none;
 }
-/* small phones and phones held sideways: shorter cards, so all four and Read the note fit under the Safe Zone and Skip */
-@media (max-width: 720px) and (max-height: 640px), (max-width: 340px), (max-height: 480px) and (min-width: 721px) {
-  .rw {
-    gap: 10px;
+/* on a phone the cards are a list, each emblem beside its words, one card a row upright and two held sideways, so the
+   words read at body size; taller than the screen, the list scrolls under the Safe Zone and Skip */
+@media (max-width: 720px), (max-height: 480px) {
+  .rw-grid {
+    grid-template-columns: minmax(0, 440px);
   }
   .rw-card {
     aspect-ratio: auto;
-    padding: 12px 8% 14px;
+    grid-template-columns: 60px minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    align-content: center;
+    column-gap: 16px;
+    justify-items: start;
+    padding: 14px 16px 16px 14px;
+    text-align: left;
   }
   .rw-card .em {
-    width: 36%;
+    grid-row: 1 / span 2;
+    width: 60px;
+    align-self: center;
+  }
+  .rw-card .nm {
+    margin-top: 0;
+    font-size: 20px;
+  }
+}
+@media (max-height: 480px) and (min-width: 721px) {
+  .rw-grid {
+    grid-template-columns: repeat(2, minmax(0, 400px));
+  }
+}
+@media (max-width: 720px) and (max-height: 640px), (max-height: 480px) {
+  .rw {
+    gap: 10px;
+  }
+}
+/* a phone zoomed to 200% (260 CSS pixels wide or less): the emblem above the words, so they have the card's width */
+@media (max-width: 260px) {
+  .rw-card {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    text-align: center;
+  }
+  .rw-card .em {
+    grid-row: auto;
   }
 }
 .rw-actions {
@@ -544,7 +573,7 @@
 .ec-line {
   position: relative;
   margin-top: clamp(4px, 1.5vw, 12px);
-  font-size: clamp(15px, 3.9vw, 18px);
+  font-size: clamp(16px, 4.1vw, 18px);
   letter-spacing: 0.06em;
   color: rgba(196, 221, 243, 0.86);
   text-align: center;
@@ -623,7 +652,7 @@
   box-shadow: 0 0 0 1px rgba(79, 184, 255, 0.45), 0 0 14px rgba(79, 184, 255, 0.25);
 }
 .sw .np-hint {
-  font-size: 0.78em;
+  font-size: max(16px, 0.78em);
   color: rgba(191, 233, 255, 0.55);
 }
 /* short screens (a phone on its side): no hint, and the two fields side by side where there's room for both, so the

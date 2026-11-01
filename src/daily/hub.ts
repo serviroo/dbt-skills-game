@@ -5,7 +5,7 @@ import { CHECKIN, QUEST, RANKS } from '../content/daily-lines';
 import type { App, ScreenOut } from './app';
 import { cardArtSVG, catSVG, crystalSVG, glyph, icon, mothSVG } from './art';
 import { wait } from './clock';
-import { breakable, btn, chip, h, holdView, md, panel, redrawn, segmented, typo } from './ui';
+import { breakable, btn, chip, h, holdView, longName, md, panel, redrawn, segmented, typo } from './ui';
 import { artStore } from './artstore';
 import { storyStore } from './storystore';
 import { cardOf, refill, todayPrompt, thumbImg } from './artroom';
@@ -44,7 +44,7 @@ export function skillCard(id: string, opts: { label?: string; special?: 'comfort
     { class: `dq-cardface dq-cardface--front dq-mod-${sk.module}` },
     h('div', { class: 'dq-cf-top' }, h('span', { class: 'dq-cf-mod', html: `${glyph(sk.module)}<span>${m.name}</span>` }), h('span', { class: 'dq-cf-min', text: sk.minutes })),
     h('div', { class: 'dq-cf-art', html: sk.art ? loadoutArt(sk.art) : cardArtSVG(sk.module) }),
-    h('div', { class: 'dq-cf-name', text: typo(sk.sl) }),
+    h('div', { class: `dq-cf-name ${longName(sk.sl) ? 'is-long' : ''}`, text: typo(sk.sl) }),
     h('div', { class: 'dq-cf-real', text: typo(opts.label ? `${sk.real} · ${opts.label}` : sk.real) }),
     opts.small ? null : h('p', { class: 'dq-cf-blurb', text: typo(sk.card) }),
     h('div', { class: 'dq-cf-stat', text: `${m.statName} +1` }),

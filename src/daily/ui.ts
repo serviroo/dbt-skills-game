@@ -47,16 +47,25 @@ function softBreaks(s: string) {
   const width = (c: string) => (/[MWmwÆŒæœ]/.test(c) ? 1.5 : /[fijlrtIJ]/.test(c) ? 0.5 : 1);
   const at = new Set<number>();
   for (const m of s.matchAll(/\p{L}+/gu)) {
-    const cs = [...m[0]];
-    if (cs.reduce((n, c) => n + width(c), 0) < 7.5) continue;
-    let k = m.index;
-    cs.forEach((c, j) => {
-      k += c.length;
-      if (j >= 1 && j <= cs.length - 4) at.add(k);
-    });
+    if ([...m[0]].reduce((n, c) => n + width(c), 0) >= 7.5) for (const k of breaksIn(m[0], m.index)) at.add(k);
   }
   return at;
 }
+
+/** The offsets a run of letters `run`, at `start` in its text, may break before: 2 letters kept before a break, 3 after. */
+function breaksIn(run: string, start: number) {
+  const cs = [...run];
+  const at: number[] = [];
+  let k = start;
+  cs.forEach((c, j) => {
+    k += c.length;
+    if (j >= 1 && j <= cs.length - 4) at.push(k);
+  });
+  return at;
+}
+
+/** A name past the one to three words Bodoni Moda sets (DESIGN.md), so set in Jost: `is-long` on its element. */
+export const longName = (s: string) => s.trim().split(/\s+/).length > 3;
 
 /** `s` from `from` to `to`, with the soft hyphens its whole breaks there (so a highlighted part keeps them). */
 export function breakable(s: string, from = 0, to = s.length) {
@@ -64,6 +73,68 @@ export function breakable(s: string, from = 0, to = s.length) {
   let out = '';
   for (let k = from; k < to; k++) out += `${at.has(k) ? '\u00AD' : ''}${s[k]}`;
   return out;
+}
+
+// never inside words only a screen reader hears, an address (where a hyphen would read as part of it) or a field
+const KEEP_OUT = '.dq-sr, .dq-a, dq-words, svg, textarea, select, option, [contenteditable]';
+
+/** An element of the words wholeWords sets (dq-words, dq-word and dq-shy in daily.css): no other rule's selector meets it. */
+function piece(tag: string, ...kids: (Node | string)[]) {
+  const e = document.createElement(tag);
+  e.append(...kids.filter((k) => k !== ''));
+  return e;
+}
+
+/** A soft hyphen drawn by CSS, kept out of what a screen reader hears, so a button's name reads as written. */
+function shy() {
+  const e = piece('dq-shy');
+  e.setAttribute('aria-hidden', 'true');
+  return e;
+}
+
+/** The words of each text in `node` set as dq-words, each word that can break whole in it, with its breaks. */
+function setWhole(node: Node) {
+  const texts: Text[] = [];
+  if (node instanceof Text) texts.push(node);
+  else for (let w = document.createTreeWalker(node, NodeFilter.SHOW_TEXT), t = w.nextNode(); t; t = w.nextNode()) texts.push(t as Text);
+  for (const t of texts) {
+    if (!t.parentElement || t.parentElement.closest(KEEP_OUT)) continue;
+    const parts: (string | Node)[] = [];
+    let from = 0;
+    // a word, or a number its no-break spaces hold together
+    for (const m of t.data.matchAll(/\S+(?:\u00A0\S+)*/g)) {
+      // it breaks at a soft hyphen in a run of letters, or after a no-break space
+      const breaks = new Map<number, () => Node>();
+      for (const r of m[0].matchAll(/\p{L}+/gu)) for (const k of breaksIn(r[0], r.index)) breaks.set(k, shy);
+      for (const r of m[0].matchAll(/\u00A0/g)) breaks.set(r.index + 1, () => h('wbr'));
+      if (!breaks.size) continue;
+      const at = [...breaks.keys()].sort((x, y) => x - y);
+      const word = piece('dq-word', m[0].slice(0, at[0]));
+      at.forEach((k, i) => word.append(breaks.get(k)!(), m[0].slice(k, at[i + 1])));
+      parts.push(t.data.slice(from, m.index), word);
+      from = m.index + m[0].length;
+    }
+    // one element for the whole text, as the text was one box in its parent, a flex row's too
+    if (parts.length) t.replaceWith(piece('dq-words', ...parts, t.data.slice(from)));
+  }
+}
+
+/**
+ * Keeps the words in `root` whole, now and as they change: a word moves to the next line whole, and only one wider than
+ * its line breaks, with a hyphen, where breakable() would break a name (a number its no-break spaces hold together breaks
+ * after one of them). The soft hyphens are drawn by CSS and hidden from a screen reader, so the words read, copy and
+ * search as written. Returns the stop.
+ */
+export function wholeWords(root: HTMLElement) {
+  setWhole(root);
+  const mo = new MutationObserver((recs) => {
+    for (const r of recs) {
+      if (r.type === 'characterData') setWhole(r.target);
+      else r.addedNodes.forEach(setWhole);
+    }
+  });
+  mo.observe(root, { subtree: true, childList: true, characterData: true });
+  return () => mo.disconnect();
 }
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

@@ -5,7 +5,7 @@ import type { App, Place, Route, ScreenOut, Visit } from './app';
 import { glyph, icon } from './art';
 import { isSkillId, uid } from './store';
 import { dropDraft, keepDraft, newestDraft, stepLayout, worthKeeping, type SkillDraft } from './skilldraft';
-import { btn, chip, copyText, field, h, md, p, panel, redrawn, segmented, typo } from './ui';
+import { btn, chip, copyText, field, h, longName, md, p, panel, redrawn, segmented, typo, wholeWords } from './ui';
 import { breathRing, coolChoice, counter, holdButton, loadoutArt, pmrView, timerView, type Ctx } from './widgets';
 
 const tx = (t: Txt | undefined, a: Answers) => (t === undefined ? '' : typeof t === 'function' ? t(a) : t);
@@ -75,6 +75,7 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const body = h('div', { class: 'dq-step-body' });
   const box = panel({ cls: `dq-stepbox dq-mod-${sk.module}` }, chipHead, body);
   const el = h('div', { class: 'dq-skill' }, h('h1', { class: 'dq-sr', text: `${sk.sl}: ${sk.real}` }), box);
+  const unwhole = wholeWords(el);
   let lead = '';
   let idx = -1;
   /** the step's fields as drawn, so what was typed in them comes back with the step */
@@ -211,7 +212,7 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
           h(
             'div',
             { class: 'dq-intro' },
-            h('div', { class: 'dq-intro-name', 'data-focus': '', text: typo(sk.sl) }),
+            h('div', { class: `dq-intro-name ${longName(sk.sl) ? 'is-long' : ''}`, 'data-focus': '', text: typo(sk.sl) }),
             h('div', { class: 'dq-intro-real', text: typo(sk.real) }),
             h('div', { class: 'dq-intro-meta' }, h('span', { text: mod.name }), h('span', { text: sk.minutes }), h('span', { text: `${mod.statName} +1` })),
           ),
@@ -620,7 +621,7 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
     if (quiet) after.classList.remove('is-hidden');
     else if (fed) answered(fed);
     swap(
-      h('div', { class: 'dq-intro dq-intro--end' }, h('div', { class: 'dq-intro-name', 'data-focus': '', text: typo(sk.sl) }), h('div', { class: 'dq-intro-real', text: typo(sk.real) })),
+      h('div', { class: 'dq-intro dq-intro--end' }, h('div', { class: `dq-intro-name ${longName(sk.sl) ? 'is-long' : ''}`, 'data-focus': '', text: typo(sk.sl) }), h('div', { class: 'dq-intro-real', text: typo(sk.real) })),
       quiet ? h('p', { class: 'dq-text ca-quietend', text: typo(sk.loadout ? 'Not this time is a real answer. The move stays in your loadout.' : 'Not this time is a real answer. It keeps for another day.') }) : h('p', { class: 'dq-gain' }, h('span', { text: `${mod.statName} +1` }), h('span', { text: '+20 XP' })),
       quiet ? null : ask,
       reply,
@@ -634,6 +635,7 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
     mode: 'skill',
     bubbles: [1.6, 0.6],
     leave: () => {
+      unwhole();
       clear();
       persist();
     },

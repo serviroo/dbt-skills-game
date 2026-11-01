@@ -186,11 +186,15 @@ export const scenarios = {
                 a.scrollIntoView({ block: 'center', behavior: 'instant' });
                 const r = box(a);
                 const lands = [0.2, 0.5, 0.8].every((f) => a.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height * f)));
-                const words = a.querySelector('span:last-child')?.firstChild;
-                const from = words?.textContent.search(/\d/) ?? -1;
+                // the label's words from its first digit on, in whichever of its text nodes that is (a long word is set whole
+                // in an element of its own, wholeWords in ui.ts)
+                const words = a.querySelector('span:last-child');
+                const walk = words && document.createTreeWalker(words, NodeFilter.SHOW_TEXT);
+                let digit = null;
+                for (let t = walk?.nextNode(); t && !digit; t = walk.nextNode()) if (t.data.search(/\d/) >= 0) digit = [t, t.data.search(/\d/)];
                 const range = document.createRange();
-                if (from >= 0) { range.setStart(words, from); range.setEnd(words, words.textContent.length); }
-                const numberLines = from >= 0 ? new Set([...range.getClientRects()].map((q) => Math.round(q.top))).size : 0;
+                if (digit) { range.setStart(...digit); range.setEnd(words, words.childNodes.length); }
+                const numberLines = digit ? new Set([...range.getClientRects()].filter((q) => q.width).map((q) => Math.round(q.top))).size : 0;
                 const note = document.getElementById(a.getAttribute('aria-describedby') ?? '');
                 const under = [...el.querySelectorAll('.dq-res-note')].filter((n) => { const q = box(n); return q.top >= r.bottom - 1 && q.top - r.bottom <= 16 && q.left < r.right && q.right > r.left; }).map((n) => n.textContent);
                 return { label: a.textContent, ...r, lands, numberLines, describedBy: a.getAttribute('aria-describedby'), under, note: note ? { ...box(note), font: parseFloat(getComputedStyle(note).fontSize), visible: getComputedStyle(note).visibility !== 'hidden' && note.offsetHeight > 0 } : null };

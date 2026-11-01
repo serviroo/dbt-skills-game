@@ -12,7 +12,7 @@ import type { App, Route, ScreenOut } from './app';
 import { icon } from './art';
 import { momentView } from './moment';
 import { uid } from './store';
-import { btn, chip, field, h, p, panel, redrawn, typo } from './ui';
+import { btn, chip, field, h, p, panel, redrawn, typo, wholeWords } from './ui';
 import { supportListsCopy } from './support-lists';
 import { textSize } from './text-size';
 import { breathRing, coolChoice, pmrView, type Ctx } from './widgets';
@@ -107,6 +107,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   // each step's heading is said politely as it shows
   const live = h('p', { class: 'dq-sr', role: 'status', 'aria-live': 'polite' });
   const el = h('div', { class: 'dq-safezone', 'data-size': textSize(app) }, top, foot, box, live);
+  const unwhole = wholeWords(el);
   const say = (t: string) => {
     live.textContent = '';
     const id = setTimeout(() => (live.textContent = t), 100);
@@ -433,7 +434,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
         const action = (line: CrisisLine, l: CrisisLine['links'][number], noteId?: string) => {
           const web = l.href.startsWith('https:');
           const href = web ? l.href : l.href.startsWith('sms:') ? smsHref(l.href.slice(4), l.body) : telHref(l.href.slice(4));
-          return h('a', { class: 'dq-btn dq-btn--quiet dq-res-a', href, target: web ? '_blank' : null, rel: web ? 'noopener noreferrer' : null, 'aria-label': `${l.label}, ${line.name}`, 'aria-describedby': noteId, html: `<span class="dq-btn-ic">${icon(l.href.startsWith('tel:') ? 'phone' : 'text')}</span><span>${l.label}</span>` });
+          return h('a', { class: 'dq-btn dq-btn--quiet dq-res-a', href, target: web ? '_blank' : null, rel: web ? 'noopener noreferrer' : null, 'aria-label': `${l.label}, ${line.name}`, 'aria-describedby': noteId, html: `<span class="dq-btn-ic">${icon(l.href.startsWith('tel:') ? 'phone' : 'text')}</span><span class="dq-btn-t">${l.label}</span>` });
         };
         const noted = (line: CrisisLine) =>
           line.links.map((l) => {
@@ -514,6 +515,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     mode: 'safe',
     bubbles: [0, 0],
     leave: () => {
+      unwhole();
       clear();
       offShown();
       unfit();
