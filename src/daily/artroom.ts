@@ -5,7 +5,7 @@
 import { animate } from '../ui/anim';
 import { ALLY_NAMES, ART, ART_PROMPTS } from '../content/daily-lines';
 import { playerName } from '../core/you';
-import type { App, Route, ScreenOut } from './app';
+import type { App, Route, ScreenOut, Visit } from './app';
 import { icon } from './art';
 import { artStore, extrasOf, revOf, type Draft, type DrawingMeta, type DrawingRec } from './artstore';
 import { canvasBlob, INKS, InkPad, PAGE, renderDrawing, SIZES, TOOLS, type Paper, type Stroke, type Tool } from './ink';
@@ -285,16 +285,25 @@ function entryArt(kind: Paper) {
 }
 
 // ---------------- Drawing page ----------------
-export function drawScreen(app: App, route: Route): ScreenOut {
+/** What a visit to the drawing page keeps for Back and Forward: the drawing it holds and the draft its strokes go to. */
+interface DrawKept {
+  readonly id: string | null;
+  readonly key: string;
+}
+export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const r = route as Extract<Route, { name: 'draw' }>;
+  // Back or Forward to this visit, from the Safe Zone too, opens what it held: the page saved on it (a copy kept apart
+  // included), as Keep drawing would, and the strokes drawn since
+  const was = visit.again ? (visit.kept as DrawKept | undefined) : undefined;
+  const editId = was?.id ?? r.id;
   const kind: Paper = r.kind === 'ally' ? 'ally' : 'today';
   const as = store(app);
   const tab = as.claimTab();
   const own = (id?: string | null) => (id ? `edit:${id}:${tab.id}` : `${kind}:${tab.id}`);
-  let key = own(r.id);
+  let key = own(editId);
   let saving = false;
   let storing = false;
-  let recId = r.id ?? null;
+  let recId = editId ?? null;
   let rec: DrawingRec | null = null;
   let bases: string[] | undefined;
   let promptRoll = 0;
@@ -811,24 +820,26 @@ export function drawScreen(app: App, route: Route): ScreenOut {
   void (async () => {
     await tab.ready;
     if (left) return;
-    key = own(r.id);
+    key = own(editId);
     let draft: Draft | null = null;
-    if (r.draft) {
-      draft = await as.getDraft(r.draft);
+    // the draft it opened from, or coming back, the one its strokes went to: the first is in that one by now
+    const from = was ? was.key : r.draft;
+    if (from) {
+      draft = await as.getDraft(from);
       if (draft?.key.endsWith(`:${tab.id}`)) key = draft.key;
     }
     if (!draft) draft = await as.getDraft(key);
-    if (!draft && !r.draft) {
+    if (!draft && !from) {
       // this tab's other draft of the same page (a page first saved from a fresh screen), else one an earlier session
       // left; a younger draft may belong to a tab that is still open, so it only waits in the Art room
-      const same = (await as.drafts()).filter((d) => (r.id ? d.editId === r.id : d.kind === kind && !d.editId));
+      const same = (await as.drafts()).filter((d) => (editId ? d.editId === editId : d.kind === kind && !d.editId));
       const found = same.find((d) => d.key.endsWith(`:${tab.id}`)) ?? same.find((d) => !(Date.now() - d.t < ORPHAN_MS));
       if (found) {
         draft = found;
         if (found.key.endsWith(`:${tab.id}`)) key = found.key;
       }
     }
-    const id = r.id ?? draft?.editId;
+    const id = editId ?? draft?.editId;
     if (id) {
       recId = id;
       rec = await as.get(id);
@@ -865,6 +876,15 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     title: kind === 'ally' ? ART.allyTitle : ART.todayTitle,
     mode: 'sub',
     bubbles: [0, 0],
+    // read as the visit comes back, so a save that lands after they leave (as a copy kept apart too) is what opens
+    keep: (): DrawKept => ({
+      get id() {
+        return recId;
+      },
+      get key() {
+        return key;
+      },
+    }),
     after: () => {
       app.sheetLayer.append(sheet, riseEl);
       ro.observe(main);

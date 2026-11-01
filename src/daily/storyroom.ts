@@ -547,6 +547,8 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const r = route as Extract<Route, { name: 'write' }>;
   // a search result opening this page hands over its words; Back or Forward to it brings none, so the page is as they left it
   const found = r.find && typeof visit.handed === 'string' ? { q: visit.handed, at: r.find.at } : null;
+  // Back or Forward to this visit, from reading too, opens the chapter, or the notes, it was on as they left
+  const went = visit.again ? (visit.kept as { ch: string; notes: boolean } | undefined) : undefined;
   const ss = store(app);
   const storyId = r.id;
   const offs: (() => void)[] = [];
@@ -1314,8 +1316,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const openRead = async () => {
     await flushAll();
     if (!alive) return;
-    // back from reading lands on the chapter they were on
-    r.ch = pageId || undefined;
     app.go({ name: 'read', id: storyId, ch: pageId || undefined });
   };
   const download = async () => {
@@ -1894,14 +1894,15 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     story = s;
     notesId = s.notes;
     titleIn.value = s.title;
-    pageId = r.ch && s.chapters.includes(r.ch) ? r.ch : s.chapters[0] ?? '';
+    const ch = went?.ch || r.ch;
+    pageId = ch && s.chapters.includes(ch) ? ch : s.chapters[0] ?? '';
     // the first page takes its number now, so a Page or Notes tap while the chapter is made or its cards are read wins
     const n = ++picks;
     if (!pageId) pageId = (await ss.addChapter(storyId)).id;
     pageMade();
     await loadCards();
-    // search can open the notes; the Page tab then goes to the first chapter
-    const landed = await load(r.ch && r.ch === s.notes ? notesId : pageId, n);
+    // search can open the notes; the Page tab then goes to the first chapter, or the one this visit was on
+    const landed = await load((went ? went.notes : r.ch && r.ch === s.notes) ? notesId : pageId, n);
     await refreshStory();
     syncState();
     syncModes();
@@ -1941,6 +1942,17 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     mode: 'sub',
     bubbles: [0.9, 0.45],
     foot: dock,
+    // left before anything opened (storage slow to answer), it keeps what the visit was to open. The chapter is read as
+    // the visit comes back, so a save that lands as a copy after they leave is the chapter that opens
+    keep: () =>
+      shown
+        ? {
+            get ch() {
+              return pageId;
+            },
+            notes: tab === 'notes',
+          }
+        : went,
     leave: () => {
       commit();
       pinLive();
