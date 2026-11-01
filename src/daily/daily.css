@@ -42,6 +42,11 @@
   scrollbar-width: thin;
   scrollbar-color: rgba(125, 150, 197, 0.35) transparent;
 }
+/* a bar pinned over the bottom of the page that would leave it too little room lets go (app.ts) and scrolls with the
+   page, after everything else */
+.dq [data-loose] {
+  position: static;
+}
 /* ---------- sky (src/daily/sky.ts) ----------
    A picture per mood, stacked with night at the bottom: night is what every screen shows, and Home fades its mood's
    picture in over it. Tall pictures for portrait screens, wide ones for landscape, each anchored at the top, where the
@@ -359,6 +364,39 @@
   .dq:not([data-screen='safe']) .dq-back span:last-child {
     display: none;
   }
+}
+/* typing with too little room under the bar (app.ts, a phone at 200% zoom with its keyboard up): the bar is one row of
+   the back control and the Safe Zone button, each whole and a tap in size. Its other buttons step aside, and so does the
+   Safe Zone's icon, as icons do on a short Safe Zone, its words wrapping before they ever run past the screen */
+.dq[data-bar] .dq-top {
+  flex-wrap: nowrap;
+  padding-inline: max(8px, var(--safe-left)) max(8px, var(--safe-right));
+}
+.dq[data-bar] .dq-top-end > :not(.dq-safe),
+.dq[data-bar] .dq-safe-ic {
+  display: none;
+}
+.dq[data-bar] .dq-safe {
+  flex-shrink: 1;
+  white-space: normal;
+  text-align: center;
+}
+/* held sideways, where even one row leaves no room, the Safe Zone button pins alone at the side and the page takes the
+   whole height in the width beside it (--dq-side, the bar's width); the back control steps aside too */
+.dq[data-bar='side'] {
+  --top-shade: 0px;
+}
+.dq[data-bar='side'] .dq-top {
+  position: fixed;
+  top: 0;
+  right: 0;
+  margin: 0;
+}
+.dq[data-bar='side'] .dq-top > :first-child {
+  display: none;
+}
+.dq[data-bar='side'] .dq-view {
+  padding-right: var(--dq-side, 0px);
 }
 .dq-icbtn {
   width: 44px;

@@ -634,6 +634,8 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   cwBtn.setAttribute('aria-expanded', 'false');
   cwBtn.setAttribute('aria-controls', 'st-cw');
   const dock = h('div', { class: 'st-dock' }, h('div', { class: 'st-dock-in' }, undoB, redoB, stateEl, cwBtn));
+  /** Where the page shows down to: above the dock and any keyboard under it, where a scroll stops (app.ts). */
+  const pageEnd = () => app.root.getBoundingClientRect().bottom - (parseFloat(getComputedStyle(app.root).scrollPaddingBottom) || 0);
 
   // ---- co-writer ----
   let mode: CardMode = 'continue';
@@ -1635,7 +1637,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     const cs = getComputedStyle(ta);
     const line = ta.getBoundingClientRect().top + (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.lineHeight) || 32);
     // whole pixels, so the line ends above the dock rather than a fraction under it
-    const dy = Math.min(Math.ceil(line - dock.getBoundingClientRect().top), Math.floor(startBox.getBoundingClientRect().top - top));
+    const dy = Math.min(Math.ceil(line - pageEnd()), Math.floor(startBox.getBoundingClientRect().top - top));
     if (dy > 0) box.scrollBy({ top: dy });
   };
   const closeStart = () => {
@@ -1867,13 +1869,11 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     }
   };
 
-  // ---------- on-screen keyboard (iPhone): keep the dock and the sheet above it ----------
+  // ---------- on-screen keyboard (iPhone): keep the sheet above it (the app keeps the dock above it) ----------
   const vv = window.visualViewport;
   const kb = () => {
     if (!vv) return;
-    const inset = Math.max(0, Math.round(innerHeight - (vv.height + vv.offsetTop)));
-    el.style.setProperty('--st-kb', `${inset}px`);
-    dock.style.transform = inset > 0 ? `translateY(${-inset}px)` : '';
+    el.style.setProperty('--st-kb', `${Math.max(0, Math.round(innerHeight - (vv.height + vv.offsetTop)))}px`);
   };
   if (vv) {
     on(vv, 'resize', kb);
@@ -1928,7 +1928,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     if (!m) return;
     const box = app.root;
     const top = box.getBoundingClientRect().top + (parseFloat(getComputedStyle(box).scrollPaddingTop) || 0);
-    const room = dock.getBoundingClientRect().top - top;
+    const room = pageEnd() - top;
     box.scrollBy({ top: m.getBoundingClientRect().top - (top + room / 3) });
   };
   renderCards(false);

@@ -254,9 +254,6 @@
 }
 
 /* ---------- writing view ---------- */
-.dq[data-screen='write'] {
-  scroll-padding-bottom: 96px;
-}
 .dq[data-screen='write'] .dq-view {
   padding-bottom: calc(var(--safe-bottom) + 8px);
 }
@@ -510,8 +507,6 @@
   padding: 0 0 var(--safe-bottom);
   font: 400 19px/1.2 var(--font-display);
   background: #060e1b;
-  transition: transform 0.12s linear;
-  will-change: transform;
   container: st-dock / inline-size;
 }
 .st-dock-in {
