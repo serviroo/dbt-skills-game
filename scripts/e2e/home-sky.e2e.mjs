@@ -252,7 +252,7 @@ async function sweep(h, page) {
   const rows = [];
   for (let y = 0; ; y = Math.min(y + 80, max)) {
     await page.evaluate((top) => document.querySelector('.dq').scrollTo({ top, behavior: 'instant' }), y);
-    await h.sleep(100);
+    // laid out at once; contrast() waits for the frame that paints it before it reads any pixel
     for (const r of await contrast(page)) rows.push({ ...r, y });
     if (y >= max) return rows;
   }
