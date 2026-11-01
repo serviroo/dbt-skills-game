@@ -376,6 +376,53 @@ export const scenarios = {
   },
 
   /**
+   * A stop is final. Rendered as a capture renders the intro, the reward's cut stops AWAKEN before AWAKEN reaches its
+   * hit, so the roar, held until the hit opens it, opens after its stop: none of it, nor any note AWAKEN places then,
+   * is scheduled past the moment the stop has silenced it.
+   */
+  async 'a-part-stopped-before-it-opens-places-nothing-past-its-stop'(h) {
+    const { ctx, page, errors } = await h.open({}, '?lab=audio&mute');
+    try {
+      await page.waitForFunction(() => window.__lab === true, null, { timeout: 30000 });
+      const r = await page.evaluate(async () => {
+        const { renderOffline } = await import('/src/audio/engine.ts');
+        const { stoppedBy } = await import('/src/audio/voice.ts');
+        const placed = new Map();
+        const S = AudioScheduledSourceNode.prototype;
+        const start = S.start;
+        const stop = S.stop;
+        S.start = function (t, ...a) {
+          placed.set(this, { start: t, stop: Infinity });
+          return start.call(this, t, ...a);
+        };
+        S.stop = function (t) {
+          const p = placed.get(this);
+          if (p) p.stop = t;
+          return stop.call(this, t);
+        };
+        const [hit, cut, fadeOut] = [1, 1.5, 0.04];
+        try {
+          await renderOffline([{ t: 0.1, cue: 'music', opts: { section: 'awaken', fade: 0.3, hitAt: hit } }, { t: cut, cue: 'music', opts: { section: 'reward', fade: 3.5, fadeOut } }], 2.5, 48000);
+        } finally {
+          S.start = start;
+          S.stop = stop;
+        }
+        const silent = stoppedBy(cut, fadeOut);
+        // what AWAKEN started once its stop was asked for: the roar at the hit and the notes after it, before the cut
+        const late = [...placed.values()].filter((p) => p.start >= hit && p.start < cut);
+        return { silent, late: late.length, past: late.filter((p) => p.stop > silent + 1e-9).map((p) => +p.stop.toFixed(3)) };
+      });
+      note(h, 'stopped-part', { ...r, past: r.past.length, longest: r.past.length ? Math.max(...r.past) : null });
+      h.expect(r.late > 0, 'AWAKEN placed nothing between its hit and its stop, so the stop was not tested');
+      h.expect(!r.past.length, `${r.past.length} of the ${r.late} sources AWAKEN placed after its stop was asked for run past it (${r.silent.toFixed(3)} s), up to ${Math.max(...r.past)} s`);
+      h.expect(!errors.length, errors.join('\n'));
+      return { placedAfterStop: r.late };
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  /**
    * The score is scheduled up to 0.7 s ahead. A stall longer than that, across one of the calm score's chord changes,
    * leaves the change behind the clock: it is dropped, so nothing is placed in the past, and the score plays on.
    */

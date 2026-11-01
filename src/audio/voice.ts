@@ -67,7 +67,9 @@ export class Voice {
   private sources: { n: AudioScheduledSourceNode; stop: number; span: { b: number } | null }[] = [];
   /** While held, what it was given to start and set, each placed by open(at) `at` later. */
   private held: ((at: number) => void)[] | null;
-  private stopped = false;
+  /** When its stop() has silenced it and its sources have ended (Infinity until then): a stop is final, and nothing it
+   *  is given later, such as a held part opened after it, sounds past it. */
+  private killAt = Infinity;
   private children: Voice[] = [];
   private parts: Voice[] = [];
 
@@ -103,6 +105,7 @@ export class Voice {
   /** A sub-voice feeding this one, stopped with it (or on its own). */
   child(dest: AudioNode = this.wet, seed = 7) {
     const c = new Voice(this.lib, this.t, dest, { held: !!this.held }, seed);
+    c.killAt = this.killAt;
     this.children.push(c);
     return c;
   }
@@ -110,6 +113,7 @@ export class Voice {
   /** A held sub-voice that starts on its own open(), stopped with this one. */
   part(dest: AudioNode = this.wet, seed = 7) {
     const c = new Voice(this.lib, this.t, dest, { held: true }, seed);
+    c.killAt = this.killAt;
     this.parts.push(c);
     return c;
   }
@@ -118,7 +122,8 @@ export class Voice {
   open(at: number) {
     const held = this.held ?? [];
     this.held = null;
-    this.t = this.end = at;
+    this.t = at;
+    this.end = Math.min(at, this.killAt);
     for (const c of this.children) c.open(at);
     for (const f of held) f(at);
   }
@@ -146,6 +151,8 @@ export class Voice {
       this.held.push((d) => this.reg(n, t0 + d, t1 + d, offset));
       return n;
     }
+    if (t0 >= this.killAt) return n;
+    t1 = Math.min(t1, this.killAt);
     if (n instanceof AudioBufferSourceNode) n.start(t0, offset);
     else n.start(t0);
     n.stop(t1);
@@ -300,15 +307,15 @@ export class Voice {
 
   /** Fade this voice out from `at` over `ramp` seconds and stop its sources. */
   stop(at: number, ramp = 0.03) {
-    if (this.stopped) return;
-    this.stopped = true;
+    if (this.killAt !== Infinity) return;
+    const kill = stoppedBy(at, ramp);
+    this.killAt = kill;
     for (const c of [...this.children, ...this.parts]) c.stop(at, ramp);
     const tau = Math.max(0.002, ramp / 4);
     for (const g of [this.out.gain, this.roomSend.gain, this.hallSend.gain]) {
       g.cancelScheduledValues(at);
       g.setTargetAtTime(0, at, tau);
     }
-    const kill = stoppedBy(at, ramp);
     for (const s of this.sources) {
       if (s.stop > kill) {
         try {
@@ -324,6 +331,6 @@ export class Voice {
   }
 
   get isStopped() {
-    return this.stopped;
+    return this.killAt !== Infinity;
   }
 }
