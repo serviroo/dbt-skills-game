@@ -130,8 +130,15 @@ export const SCORE = {
  */
 export const BREATH = { inSec: 4, outSec: 6, settleSec: 2.4 } as const;
 
-/** The clouds over the tide (src/scene/vignettes/scenes/tide.ts): each crosses in crossSec, the next spaceSec behind */
-export const CLOUDS = { crossSec: 32, spaceSec: 13 } as const;
+/**
+ * Spectator Mode's thoughts going by (src/scene/vignettes/scenes/thoughts.ts and its flat picture), for each picture: each
+ * thought takes crossSec from coming in to going out, the next spaceSec behind it
+ */
+export const THOUGHTS = {
+  clouds: { crossSec: 32, spaceSec: 13 },
+  cars: { crossSec: 16, spaceSec: 11 },
+  leaves: { crossSec: 20, spaceSec: 8 },
+} as const;
 
 /** Home's sky (src/daily/sky.ts): a slow drift when the hour turns while Home is open, a short fade in and out */
 export const SKY = {
