@@ -77,7 +77,7 @@ void main() {
   col += uColor * 0.008 * (0.7 + 0.3 * uBreath) * exp(-r * 3.0);
   col += vec3(0.022, 0.006, 0.060) * 0.05 * smoothstep(0.35, 0.95, noise2(p * 1.4 + 4.0)) * smoothstep(0.4, 1.0, r);
   vec2 g = floor(p * 26.0);
-  float s = step(0.985, hash2(g)) * smoothstep(0.32, 0.0, length(fract(p * 26.0) - 0.5 - 0.3 * (hash22(g) - 0.5)));
+  float s = step(0.985, hash2(g)) * (1.0 - smoothstep(0.0, 0.32, length(fract(p * 26.0) - 0.5 - 0.3 * (hash22(g) - 0.5))));
   col += vec3(0.4, 0.5, 0.7) * s * 0.05 * (0.3 + 0.7 * hash2(g + 1.7));
   col += (hash2(gl_FragCoord.xy) - 0.5) * 0.0008;
   gl_FragColor = vec4(col, 1.0);
@@ -100,13 +100,13 @@ void main() {
   gl_Position = projectionMatrix * mv;
   gl_PointSize = max(1.0, uScale * (0.012 + 0.016 * seed.w) / -mv.z);
   // lit by the light: bright near it, faint further out
-  vA = (0.35 + 0.65 * seed.w) * (0.6 + 0.4 * uBreath) * (0.12 + 0.88 / (1.0 + r * r / 0.06)) * smoothstep(1.15, 0.8, r);
+  vA = (0.35 + 0.65 * seed.w) * (0.6 + 0.4 * uBreath) * (0.12 + 0.88 / (1.0 + r * r / 0.06)) * (1.0 - smoothstep(0.8, 1.15, r));
 }`;
 const MOTE_FRAG = /* glsl */ `
 uniform vec3 uColor;
 varying float vA;
 void main() {
-  float a = smoothstep(0.5, 0.0, length(gl_PointCoord - 0.5)) * vA;
+  float a = (1.0 - smoothstep(0.0, 0.5, length(gl_PointCoord - 0.5))) * vA;
   gl_FragColor = vec4(mix(uColor, vec3(1.0), 0.45) * 0.55 * a, 1.0);
   ${OUT_GLSL}
 }`;

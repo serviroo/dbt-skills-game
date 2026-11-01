@@ -216,7 +216,7 @@ void main() {
     n.y = nq.y;
   }
   // tail and neck: a slow living sway
-  float tail = smoothstep(-0.6, -3.7, p.z);
+  float tail = 1.0 - smoothstep(-3.7, -0.6, p.z);
   p.x += sin(uTime * 2.1 - p.z * 1.3) * 0.07 * tail;
   p.y += sin(uTime * 1.6 - p.z * 1.1) * 0.035 * tail;
   float neck = smoothstep(0.9, 2.8, p.z);

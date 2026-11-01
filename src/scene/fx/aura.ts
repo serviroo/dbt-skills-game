@@ -122,7 +122,7 @@ export function createAura(o: AuraOpts): Aura {
     fragmentBody: /* glsl */ `
       float x = vUv.x, y = vUv.y;
       float core = exp(-x * x * 5.0);
-      float along = smoothstep(-1.0, 0.7, y) * smoothstep(1.0, 0.82, y);
+      float along = smoothstep(-1.0, 0.7, y) * (1.0 - smoothstep(0.82, 1.0, y));
       gl_FragColor = vec4(vColor * core * along * vAlpha * uGain, 0.0);
     `,
   });

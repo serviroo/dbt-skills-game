@@ -260,7 +260,7 @@ void main() {
 const MOTE_FRAG = /* glsl */ `
 varying vec3 vLit;
 void main() {
-  float a = smoothstep(0.5, 0.05, length(gl_PointCoord - 0.5));
+  float a = 1.0 - smoothstep(0.05, 0.5, length(gl_PointCoord - 0.5));
   gl_FragColor = vec4(vLit * a, 1.0);
   ${OUT_GLSL}
 }`;

@@ -131,7 +131,7 @@ function dress(mat: THREE.MeshStandardMaterial, u: Record<string, THREE.IUniform
           float facing = 0.35 + 0.65 * clamp(dot(normalize(normal.xy + vec2(0.0001)), side) * 0.5 + 0.5, 0.0, 1.0);
           vec3 rc = mix(uRimColor, uRimColor2, smoothstep(0.6, 1.9, vWorldPosH.y));
           totalEmissiveRadiance += rc * fres * facing * uRimStrength * 0.16;
-          float edge = smoothstep(uDissolve + 0.06, uDissolve, dn) * step(0.001, uDissolve);
+          float edge = (1.0 - smoothstep(uDissolve, uDissolve + 0.06, dn)) * step(0.001, uDissolve);
           totalEmissiveRadiance += uRimColor * edge * 3.0;
         }`,
       );

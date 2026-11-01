@@ -129,7 +129,7 @@ function moon() {
           col *= 1.0 - smoothstep(0.93, 1.0, r) * 0.5;
         }
         float halo = exp(-max(r - 1.0, 0.0) * 1.6) * 0.16 + exp(-max(r - 1.0, 0.0) * 0.45) * 0.05;
-        col += vec3(0.42, 0.62, 1.0) * halo * smoothstep(5.0, 3.6, r);
+        col += vec3(0.42, 0.62, 1.0) * halo * (1.0 - smoothstep(3.6, 5.0, r));
         gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
