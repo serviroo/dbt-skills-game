@@ -41,6 +41,8 @@
 //   a-dropped-connection-gives-up  the drawings' connection drops as a saved drawing opens and the one opened in its
 //                             place never answers, or never even opens: that one is given up (later reads answer at
 //                             once), and one Try again opens the drawing once storage answers
+//   a-cut-off-write-holds-nothing  a draft's write loses its connection after it started, and the open in its place never
+//                             answers: once that open is given up the write is over, so Clear game's check isn't held
 //   storage-answers-too-late  a story's first page made while another connection holds its chapters: given up after a
 //                             while, the writer can't open it, and the write never lands later, when the hold lets go
 import { drawPage, line } from './art-eraser-glow.e2e.mjs';
@@ -725,6 +727,41 @@ export const scenarios = {
       } finally {
         await ctx.close();
       }
+    }
+  },
+
+  async 'a-cut-off-write-holds-nothing'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await drawPage(h, page);
+      // the next draft written loses its connection once its transaction has started, and the open in its place never
+      // answers
+      await page.evaluate(async () => {
+        const db = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).name;
+        const put = IDBObjectStore.prototype.put;
+        IDBObjectStore.prototype.put = function (...a) {
+          if (this.name !== 'drafts') return put.apply(this, a);
+          IDBObjectStore.prototype.put = put;
+          throw new DOMException('The connection was lost.', 'UnknownError');
+        };
+        const open = IDBFactory.prototype.open;
+        IDBFactory.prototype.open = function (...a) {
+          if (a[0] !== db) return open.apply(this, a);
+          IDBFactory.prototype.open = open;
+          return { onupgradeneeded: null, onsuccess: null, onerror: null, onblocked: null, result: undefined, error: null };
+        };
+      });
+      await line(page, [0.2, 0.3], [0.7, 0.4]);
+      // past the wait for storage, the check Clear game makes first gets through
+      await h.sleep(12000);
+      const check = await page.evaluate(async () => {
+        const c = await import('/src/core/cleared.ts');
+        return Promise.race([c.holdAll().then((held) => (held.release(), 'through')), new Promise((done) => setTimeout(() => done('held'), 5000))]);
+      });
+      h.expect(check === 'through', 'a write cut off from storage held the check Clear game makes first');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
     }
   },
 

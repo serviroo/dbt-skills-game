@@ -286,6 +286,8 @@ export class ArtStore {
   private stalled = 0;
   /** Opens of the database so far; one that isn't the latest when it answers changes nothing. */
   private opens = 0;
+  /** Ends the open under way with no database, so nothing waiting on an open given up on waits for ever. */
+  private dropOpen = () => {};
   private lost = new WeakSet<IDBDatabase>();
   get readFailed() {
     return this.readFails > 0;
@@ -393,6 +395,7 @@ export class ArtStore {
     const db = this.db;
     this.db = Promise.resolve(null);
     this.opens++;
+    this.dropOpen();
     void db.then((d) => d?.close());
     try {
       this.channel?.close();
@@ -445,6 +448,7 @@ export class ArtStore {
   private connect(again: boolean): Promise<IDBDatabase | null> {
     const turn = ++this.opens;
     return new Promise((resolve) => {
+      this.dropOpen = () => resolve(null);
       try {
         if (typeof indexedDB === 'undefined') throw new Error('no idb');
         // this game's data is being cleared: opening would make the database again
@@ -563,6 +567,7 @@ export class ArtStore {
       if (at && this.db === at) {
         this.stalled++;
         this.opens++;
+        this.dropOpen();
         this.db = Promise.resolve(null);
         void at.then((d) => d?.close());
         this.persistent = false;
