@@ -185,7 +185,7 @@ async function bareBreaks(page, scope, sideways = true) {
 
 const sessions = new WeakMap();
 /** The names a screen reader hears with a soft hyphen in them, read from the browser's own accessibility tree. */
-async function shyNames(page) {
+export async function shyNames(page) {
   if (!sessions.has(page)) sessions.set(page, await page.context().newCDPSession(page));
   const { nodes } = await sessions.get(page).send('Accessibility.getFullAXTree');
   const named = new Set(nodes.map((n) => n.name?.value ?? '').filter((v) => v.includes('\u00AD')));

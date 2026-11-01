@@ -67,18 +67,30 @@ function breaksIn(run: string, start: number) {
 /** A name past the one to three words Bodoni Moda sets (DESIGN.md), so set in Jost: `is-long` on its element. */
 export const longName = (s: string) => s.trim().split(/\s+/).length > 3;
 
-/** `s` from `from` to `to`, with the soft hyphens its whole breaks there (so a highlighted part keeps them). */
+/**
+ * `s` from `from` to `to`, with the soft hyphens its whole breaks there (so a highlighted part keeps them). They are
+ * shy() marks, not characters, so the name reads, copies and finds as typed.
+ */
 export function breakable(s: string, from = 0, to = s.length) {
-  const at = softBreaks(s);
-  let out = '';
-  for (let k = from; k < to; k++) out += `${at.has(k) ? '\u00AD' : ''}${s[k]}`;
+  const out = document.createDocumentFragment();
+  let i = from;
+  for (const k of softBreaks(s)) {
+    if (k < from || k >= to) continue;
+    out.append(s.slice(i, k), shy());
+    i = k;
+  }
+  out.append(s.slice(i, to));
+  out.normalize();
   return out;
 }
 
 // never inside words only a screen reader hears, an address (where a hyphen would read as part of it) or a field
 const KEEP_OUT = '.dq-sr, .dq-a, dq-words, svg, textarea, select, option, [contenteditable]';
 
-/** An element of the words wholeWords sets (dq-words, dq-word and dq-shy in daily.css): no other rule's selector meets it. */
+/**
+ * An element of the words wholeWords and breakable() set (dq-words, dq-word and dq-shy in daily.css): no other rule's
+ * selector meets it.
+ */
 function piece(tag: string, ...kids: (Node | string)[]) {
   const e = document.createElement(tag);
   e.append(...kids.filter((k) => k !== ''));

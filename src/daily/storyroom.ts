@@ -115,15 +115,15 @@ function drawingFig(app: App, m: DrawingMeta) {
   return fig;
 }
 /** The player's text as text nodes, with each span in a mark: nothing in it is ever read as markup. */
-const marked = (text: string, at: Span[], place?: Span, shown = (from: number, to: number) => text.slice(from, to)) => {
+const marked = (text: string, at: Span[], place?: Span, shown = (from: number, to: number): Node => document.createTextNode(text.slice(from, to))) => {
   const out: Node[] = [];
   let i = 0;
   for (const [a, b] of at) {
-    if (a > i) out.push(document.createTextNode(shown(i, a)));
-    out.push(h('mark', { class: `st-mark${place && place[0] === a ? ' is-place' : ''}`, text: shown(a, b) }));
+    if (a > i) out.push(shown(i, a));
+    out.push(h('mark', { class: `st-mark${place && place[0] === a ? ' is-place' : ''}` }, shown(a, b)));
     i = b;
   }
-  if (i < text.length) out.push(document.createTextNode(shown(i, text.length)));
+  if (i < text.length) out.push(shown(i, text.length));
   return out;
 };
 const SEARCH_IC = '<svg class="dq-ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="5.5"/><path d="M14.6 14.6l4.6 4.6"/></svg>';
@@ -307,7 +307,7 @@ export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut 
           h(
             'button',
             { type: 'button', class: 'dq-panel st-row', onclick: () => app.go({ name: 'write', id: s.id }) },
-            h('span', { class: `st-row-t ${s.title.trim() ? '' : 'is-untitled'}`, text: breakable(shownTitle(s.title)) }),
+            h('span', { class: `st-row-t ${s.title.trim() ? '' : 'is-untitled'}` }, breakable(shownTitle(s.title))),
             h('span', { class: 'st-row-m', text: storyMeta(app, s) }),
             h('span', { class: 'st-row-go', 'aria-hidden': 'true', html: icon('chev') }),
           ),
@@ -323,7 +323,7 @@ export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut 
         h(
           'li',
           { class: 'st-removed-row' },
-          h('span', { class: `st-removed-t ${s.title.trim() ? '' : 'is-untitled'}`, text: breakable(shownTitle(s.title)) }),
+          h('span', { class: `st-removed-t ${s.title.trim() ? '' : 'is-untitled'}` }, breakable(shownTitle(s.title))),
           h(
             'span',
             { class: 'st-removed-acts' },
@@ -889,7 +889,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     notesId = s.notes;
     const pc = pageId ? await ss.chapter(pageId) : null;
     const idx = s.chapters.indexOf(pageId);
-    chLabel.textContent = pc ? breakable(pc.title) : '';
+    chLabel.replaceChildren(pc ? breakable(pc.title) : '');
     chBtn.setAttribute('aria-label', pc ? `Chapter: ${pc.title}${idx >= 0 ? `, ${idx + 1} of ${s.chapters.length}` : ''}. Open the chapter list.` : 'Open the chapter list');
   };
   const saveStoryFresh = async (patch: { title?: string; chapters?: string[] }) => {
@@ -1068,7 +1068,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
             'button',
             { type: 'button', class: 'st-chrow-b', 'aria-current': isCur ? 'true' : null, onclick: async () => (closeSheet(), await openPage(c.id)) },
             h('span', { class: 'st-chrow-n', text: String(i + 1).padStart(2, '0') }),
-            h('span', { class: 'st-chrow-t', text: breakable(c.title) }),
+            h('span', { class: 'st-chrow-t' }, breakable(c.title)),
           );
           const rename = () => {
             const inp = h('input', { class: 'dq-input st-rename', type: 'text', maxlength: 80, 'aria-label': `New name for ${c.title}`, autocomplete: 'off', autocapitalize: 'sentences', enterkeyhint: 'done' });
