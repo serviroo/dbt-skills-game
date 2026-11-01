@@ -4454,6 +4454,47 @@ textarea.dq-input {
   align-self: center;
   margin: 0 max(12px, var(--safe-right)) 0 0;
 }
+/* too little under the bar for the field (is-one-row, safe.ts: held sideways pinched in or at 200% zoom), the bar, the
+   field and Talk share one row: Leave, Lights up and Sound together at the start, the page in the middle scrolled to
+   the field, and Talk's words wrapped in a column at the end, a stronger Talk as narrow. The frame steps aside for the
+   room, the field's own border framing it */
+.dq.is-typing.is-sideways.is-one-row {
+  grid-template-columns: auto minmax(0, 1fr) min-content;
+  grid-template-rows: minmax(0, 1fr);
+}
+.dq.is-typing.is-one-row > .dq-top {
+  grid-area: 1 / 1;
+  gap: 0;
+  padding: 0 0 0 max(4px, var(--safe-left));
+}
+.dq.is-typing.is-one-row .dq-top-end {
+  gap: 0;
+}
+.dq.is-typing.is-one-row > .dq-view {
+  grid-area: 1 / 2;
+  padding-inline: 4px;
+}
+.dq.is-typing.is-one-row .dq-sz {
+  --pad: 0px;
+  background: none;
+  border: 0;
+}
+.dq.is-typing.is-one-row .dq-sz::before,
+.dq.is-typing.is-one-row .dq-sz::after {
+  display: none;
+}
+.dq.is-typing.is-one-row .dq-sz .dq-input {
+  padding-inline: 8px;
+}
+/* and so does an entry being changed */
+.dq.is-typing.is-one-row :is(.dq-sz-entry, .dq-person).is-editing {
+  padding-inline: 0;
+}
+.dq.is-typing.is-one-row > .dq-sz-talk {
+  grid-area: 1 / 3;
+  padding-inline: 6px;
+  margin: 0 max(4px, var(--safe-right)) 0 0;
+}
 .dq-cardbtn .dq-cf-stat {
   display: none;
 }

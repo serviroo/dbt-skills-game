@@ -174,17 +174,27 @@ export function safeScreen(app: App, route: Route): ScreenOut {
    * Talk goes back under the frame, or while typing into the top bar's row between Leave and Lights up, where its words
    * fit on one line held sideways, else just after the bar: a row of its own upright, a column at the side held
    * sideways. Held sideways is by the part that shows: 540px wide or more, or the phone held that way, pinched in or
-   * at 200% zoom too, where it's narrower but still too short for a row (is-sideways, daily.css). Focus on it stays.
+   * at 200% zoom too, where it's narrower but still too short for a row (is-sideways, daily.css). Held sideways with
+   * the box the field being typed in scrolls in, inside the frame, too short for it to show whole, the bar, the field
+   * and Talk's column share one row (is-one-row, daily.css). Focus on it stays.
    */
   const pin = () => {
     const had = document.activeElement === talkLink;
     const side = typing && !!vv && (vv.width >= 540 || held() === 'landscape');
     app.root.classList.toggle('is-sideways', side);
+    app.root.classList.remove('is-one-row');
     if (!typing) foot.append(talkLink);
     else {
       if (side) lightBtn.before(talkLink);
       const words = talkLink.lastElementChild!;
       if (!side || words.getBoundingClientRect().height > 1.5 * parseFloat(getComputedStyle(words).lineHeight)) el.parentElement!.before(talkLink);
+      const field = typedIn();
+      let port = field?.parentElement;
+      while (port && getComputedStyle(port).overflowY === 'visible') port = port.parentElement;
+      if (side && field && port && port.clientHeight < field.getBoundingClientRect().height) {
+        el.parentElement!.before(talkLink);
+        app.root.classList.add('is-one-row');
+      }
     }
     if (had) talkLink.focus({ preventScroll: true });
   };
