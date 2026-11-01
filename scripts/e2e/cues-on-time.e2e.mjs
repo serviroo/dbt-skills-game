@@ -141,8 +141,10 @@ export const scenarios = {
         await stalls;
         return window.__plays.slice(from).map((p) => ({ ...p, rate }));
       }, [CUES, per, rate]);
-      const plays = await run(1, 2);
+      // the check sets the page's CPU rate itself, full speed first, whatever rate the run slows every page by
       const cdp = await ctx.newCDPSession(page);
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+      const plays = await run(1, 2);
       for (const rate of RATES) {
         await cdp.send('Emulation.setCPUThrottlingRate', { rate });
         plays.push(...(await run(rate, PER)));
@@ -164,28 +166,38 @@ export const scenarios = {
         const { AudioEngine, renderOffline } = await import('/src/audio/engine.ts');
         const rec = window.__taps[tap];
         const sr = rec.context.sampleRate;
-        // well past the start of an offline render, where the limiter has settled
-        const T0 = 0.25;
-        const refs = {};
-        for (const cue of cues) {
-          const end = new AudioEngine(new OfflineAudioContext(2, sr, sr)).play(cue, { at: 0 }).end;
-          const buf = await renderOffline([{ t: T0, cue }], T0 + 3.5, sr, { volume: window.__dbtVolume.gains().master, user: { master: 1, music: 0, sfx: 1, muted: false } });
-          const [l, r] = [buf.getChannelData(0), buf.getChannelData(1)];
-          const from = Math.round(T0 * sr);
-          const cum = new Float64Array(l.length - from + 1);
-          // the recorder hears the speakers' mix down to one channel
-          for (let i = from; i < l.length; i++) cum[i - from + 1] = cum[i - from] + (0.5 * (l[i] + r[i])) ** 2;
-          refs[cue] = { end, cum };
+        const length = Object.fromEntries(cues.map((cue) => [cue, new AudioEngine(new OfflineAudioContext(2, sr, sr)).play(cue, { at: 0 }).end]));
+        const frame = plays.map((p) => (p.end - length[p.cue]) * sr);
+        // well past the start of an offline render, where the limiter has settled, on a quantum's first frame
+        const from0 = Math.ceil((0.25 * sr) / Q) * Q;
+        // Chromium renders a cue's FM voices differently by where in a quantum they start, so each play is matched against
+        // a render of its cue started at the same point of a quantum as the engine put it
+        const refs = new Map();
+        const cums = [];
+        for (const [i, p] of plays.entries()) {
+          const into = frame[i] - Q * Math.floor(frame[i] / Q);
+          const key = `${p.cue} ${into.toFixed(3)}`;
+          if (!refs.has(key)) {
+            const T0 = (from0 + into) / sr;
+            const buf = await renderOffline([{ t: T0, cue: p.cue }], T0 + 3.5, sr, { volume: window.__dbtVolume.gains().master, user: { master: 1, music: 0, sfx: 1, muted: false } });
+            const [l, r] = [buf.getChannelData(0), buf.getChannelData(1)];
+            const from = Math.round(T0 * sr);
+            const cum = new Float64Array(l.length - from + 1);
+            // the recorder hears the speakers' mix down to one channel
+            for (let f = from; f < l.length; f++) cum[f - from + 1] = cum[f - from] + (0.5 * (l[f] + r[f])) ** 2;
+            refs.set(key, cum);
+          }
+          cums.push(refs.get(key));
         }
-        const starts = plays.map((p) => Math.round((p.end - refs[p.cue].end) * sr));
+        const starts = frame.map(Math.round);
         const energy = (j, k) => {
-          const { cum } = refs[plays[j].cue];
+          const cum = cums[j];
           const at = (f) => cum[Math.max(0, Math.min(cum.length - 1, f - starts[j]))];
           return at((k + 1) * Q) - at(k * Q);
         };
         return plays.map((p, i) => {
           const k0 = Math.floor(starts[i] / Q);
-          const total = refs[p.cue].cum.at(-1);
+          const total = cums[i].at(-1);
           const blocks = [];
           for (let k = k0, own = 0; own < PARTS.at(-1) * total; k++) {
             let others = 0;
@@ -327,7 +339,10 @@ export const scenarios = {
   /**
    * In the intro the gate's crack, the hit and the chest's burst are asked for on the frame their picture lands (the crack
    * 0.1 s after the air before it, the hit 0.75 s after the hush, the burst with the duck that lifts for it) and sound
-   * two frames later, the lead every sound gets: visuals lead their sound by 1 or 2 frames, not 4.
+   * two frames later, the lead every sound gets: visuals lead their sound by 1 or 2 frames, not 4. A picture lands on the
+   * first frame at or past its time on the beat clock, which on a slow device can be a long frame later, so each sound is
+   * checked against that time (asked for at it, on the first frame at or past it), not against the frame the sound before
+   * it was asked on.
    */
   async 'the-crack-hit-and-burst-sound-two-frames-after-their-pictures'(h) {
     const result = {};
@@ -337,12 +352,37 @@ export const scenarios = {
         await page.locator('.title-screen').waitFor({ timeout: 60000 });
         await page.evaluate(async () => {
           const { AudioEngine } = await import('/src/audio/engine.ts');
+          const { Director } = await import('/src/cutscene/director.ts');
+          const { uiNow } = await import('/src/ui/anim.ts');
           window.__asked = [];
+          // the stage times of the frame before this one and of this one (a frame the stage held its clock on shows nothing new)
+          let frames = [-Infinity, -Infinity];
+          const watch = () => {
+            if (!window.__stage) return requestAnimationFrame(watch);
+            window.__stage.onUpdate((t) => {
+              if (t !== frames[1]) frames = [frames[1], t];
+            });
+          };
+          watch();
+          // what a beat cue asks for is due at the cue's time on the beat clock; anything else when it is asked
+          let due;
+          const cue = Director.prototype.cue;
+          Director.prototype.cue = function (sec, fn) {
+            const at = uiNow() + sec;
+            return cue.call(this, sec, () => {
+              due = at;
+              try {
+                fn();
+              } finally {
+                due = undefined;
+              }
+            });
+          };
           for (const m of ['play', 'hush', 'duck']) {
             const f = AudioEngine.prototype[m];
             AudioEngine.prototype[m] = function (...a) {
               const r = f.apply(this, a);
-              window.__asked.push({ what: m === 'play' ? a[0] : m, picture: window.__stage.time, done: this.ctx.currentTime, end: r?.end });
+              window.__asked.push({ what: m === 'play' ? a[0] : m, picture: window.__stage.time, before: frames[0], due: due ?? window.__stage.time, done: this.ctx.currentTime, end: r?.end });
               return r;
             };
           }
@@ -355,17 +395,19 @@ export const scenarios = {
         }
         await page.waitForFunction((cue) => window.__asked.some((c) => c.what === cue), cue, { timeout: 60000 });
         if (beat === 'chest') await page.keyboard.up(' ');
-        const r = await page.evaluate(async ([cue, from]) => {
+        const r = await page.evaluate(async ([cue, from, after]) => {
           const { AudioEngine } = await import('/src/audio/engine.ts');
           const hit = window.__asked.find((c) => c.what === cue);
           const ref = window.__asked.filter((c) => c.what === from && c.picture <= hit.picture).at(-1);
           const len = new AudioEngine(new OfflineAudioContext(2, 48000, 48000)).play(cue, { at: 0 }).end;
-          return { asked: hit.picture - ref.picture, lead: hit.end - len - hit.done };
-        }, [cue, from]);
-        const late = r.asked - after;
-        result[cue] = { askedLateMs: +(late * 1000).toFixed(1), leadMs: +(r.lead * 1000).toFixed(1) };
+          return { picture: ref.due + after, due: hit.due, at: hit.picture, before: hit.before, lead: hit.end - len - hit.done };
+        }, [cue, from, after]);
+        const late = r.due - r.picture;
+        result[cue] = { askedLateMs: +(late * 1000).toFixed(1), frameLateMs: +((r.at - r.due) * 1000).toFixed(1), frameMs: +((r.at - r.before) * 1000).toFixed(1), leadMs: +(r.lead * 1000).toFixed(1) };
         note(h, 'gap', { cue, ...result[cue] });
-        h.expect(late < 1 / 120, `${cue} was asked for ${(late * 1000).toFixed(1)} ms after its picture, not on its frame`);
+        h.expect(Math.abs(late) < 1e-6, `${cue} was asked for ${(late * 1000).toFixed(1)} ms after its picture on the beat clock`);
+        // a frame within rounding of its time may show it or leave it to the next frame, as the picture does
+        h.expect(r.at >= r.due - 1e-6 && r.before < r.due + 1e-6, `${cue} was asked for on a frame ${((r.at - r.due) * 1000).toFixed(1)} ms past its time, not the first one at or past it`);
         h.expect(r.lead > 0 && r.lead <= LEAD + 1e-4, `${cue} sounds ${(r.lead * 1000).toFixed(1)} ms past the clock once it was asked for`);
         h.expect(!errors.length, errors.join('\n'));
       } finally {
