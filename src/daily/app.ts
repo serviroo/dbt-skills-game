@@ -805,8 +805,10 @@ export class App {
    * the phone's text at 200% under a tall bar, the keyboard up held sideways) lets go and scrolls with the page after
    * everything else (data-loose, daily.css). Either way a control scrolled to shows whole between them. The Safe Zone
    * lays itself out around "Talk to someone now" and the keyboard (safe.ts), so its foot always stays pinned.
+   * A screen that moves its bars and scrolls at once (the Safe Zone as typing starts or stops) calls this before the
+   * scroll, ahead of the observer (pins).
    */
-  private pin() {
+  pin() {
     const out = this.current;
     // what shows: the page panned down hides the top of the screen, and a keyboard over the page the bottom
     const vv = window.visualViewport;

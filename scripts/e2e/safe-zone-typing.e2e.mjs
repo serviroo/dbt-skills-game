@@ -435,7 +435,7 @@ function beside(widened) {
  * the field show whole in the part that shows and take their taps, with a line of words beside the field upright (held
  * sideways the keyboard leaves too little for one, as at 200% zoom); as the keyboard goes down, still pinched in, the
  * usual screen comes back, and stays as the pinch goes back out. Held sideways, `older`: on a phone that says how it's
- * held only as window.orientation, as Safari before 16.4 does; `strong`: with Talk stronger (see typeIn); `kb`: on the
+ * held only as window.orientation and doesn't know overflow: clip, as Safari before 16 does; `strong`: with Talk stronger (see typeIn); `kb`: on the
  * bigger phone, with a keyboard that tall, so the bar leaves only just the field's height under it; `out`: pinched back
  * out before the keyboard goes down, where Lights up and Sound come back and fade in, but "Talk to someone now", there
  * with them, shows steady at once.
@@ -450,11 +450,14 @@ function pinched(turnedFirst, { older = false, strong = false, kb = 0, out = fal
     const problems = [];
     const { ctx, page, errors, words } = await typeIn(h, { width: from.width, height: from.height }, 'landscape', strong);
     const typing = () => page.evaluate(() => !!document.querySelector('.dq.is-typing'));
-    if (older)
+    if (older) {
       await page.evaluate(() => {
         Object.defineProperty(screen, 'orientation', { configurable: true, get: () => undefined });
         Object.defineProperty(window, 'orientation', { configurable: true, get: () => 90 });
       });
+      // overflow: hidden where clip isn't known
+      await page.addStyleTag({ content: '.dq.is-typing { overflow: hidden !important; }' });
+    }
     if (turnedFirst) {
       await page.setViewportSize({ width: from.width, height: from.height - from.kb });
       await settle(page);
