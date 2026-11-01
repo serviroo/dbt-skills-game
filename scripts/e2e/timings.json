@@ -1,4 +1,5 @@
 {
+  "a-missing-chapter-opens": 2,
   "a11y-names-art": 3,
   "a11y-names-diary": 2,
   "a11y-names-draw": 3,
@@ -87,6 +88,12 @@
   "back-closes-first": 17,
   "back-forward": 11,
   "back-keeps-steps": 8,
+  "back-to-a-chapter-kept-apart": 2,
+  "back-to-a-copy-kept-apart": 6,
+  "back-to-a-resumed-draft": 5,
+  "back-to-a-saved-drawing": 10,
+  "back-to-notes-kept-apart": 2,
+  "back-to-the-same-chapter": 8,
   "bad-mirror": 17,
   "beliefs-leave": 11,
   "beliefs-own-words": 16,
@@ -227,6 +234,8 @@
   "draw-page-zoom-note-room": 8,
   "draw-page-zoom-rise": 10,
   "draw-page-zoom-stroke-kept": 5,
+  "drawing-never-shows-empty": 6,
+  "drawing-storage-never-answers": 14,
   "edit-your-lists": 8,
   "edit-your-lists-clear": 4,
   "edit-your-lists-fit": 33,
@@ -739,6 +748,7 @@
   "stealth-look-follows-tabs": 7,
   "stealth-words-breathe-with-glow": 13,
   "stopwatch-leaves-out-a-freeze": 4,
+  "storage-answers-too-late": 12,
   "story-bring-in-every-chapter": 3,
   "story-bring-in-exact": 3,
   "story-bring-in-files": 3,
@@ -838,5 +848,7 @@
   "wave-scene": 56,
   "willing-sizes": 95,
   "willing-walks": 20,
-  "window-timing": 16
+  "window-timing": 16,
+  "writer-never-shows-empty": 16,
+  "writer-storage-never-answers": 24
 }

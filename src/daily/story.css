@@ -340,6 +340,10 @@
   min-width: 0;
   overflow-wrap: break-word;
 }
+/* a first page still being made has no name yet; its line is kept for it */
+.st-chbtn-t:empty::before {
+  content: '\00a0';
+}
 .st-chbtn-ic {
   display: grid;
   flex: none;
