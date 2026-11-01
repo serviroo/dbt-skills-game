@@ -404,6 +404,17 @@
     gap: 10px;
   }
 }
+/* a phone zoomed to 200% (260 CSS pixels wide or less): the emblem above the words, so they have the card's width */
+@media (max-width: 260px) {
+  .rw-card {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    text-align: center;
+  }
+  .rw-card .em {
+    grid-row: auto;
+  }
+}
 .rw-actions {
   display: flex;
   gap: 12px;

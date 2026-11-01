@@ -7,12 +7,13 @@
 // or written in capitals, except what stays small on purpose (KEPT). Bodoni Moda sets only a display moment of one to
 // three words, and in the Story Room the player's own words ("Jost for the Lantern, Bodoni Moda for theirs",
 // story.css): the reading page sets their story in it and the Lantern's words around it in Jost. The rewards also held
-// sideways (844x390): each card's words at 16 px inside it, every card and Read the note in reach by scrolling. In the
-// skills' windows and the Safe Zone, at both phones' own size and at 200% zoom (there with the Talk list of every
-// country at the regular and largest text size too): no word breaks onto the next line without a hyphen, typed ones in
-// a field neither (an address in the Talk list breaks where it must, as a hyphen would read as part of it), and nothing
-// scrolls sideways (at 200% a walked step's controls aside, which no-sideways-overflow checks). Every walk reaches its
-// skill's end, each move showing another step.
+// sideways (844x390) and at 200% zoom on both phones: each card's words at 16 px inside it, every card and Read the
+// note in reach by scrolling. In the skills' windows and the Safe Zone, at both phones' own size and at 200% zoom
+// (there with the Talk list of every country at the regular and largest text size too): no word breaks onto the next
+// line without a hyphen, typed ones in a field neither (an address in the Talk list breaks where it must, as a hyphen
+// would read as part of it), and nothing scrolls sideways (at 200% a walked step's controls aside, which
+// no-sideways-overflow checks). Every walk reaches its skill's end, each move showing another step. At the phones' own
+// size no name a screen reader hears there has a soft hyphen in it.
 import { boot, settle } from './layout-fit.e2e.mjs';
 import { cutShort } from './safe-zone-reach.e2e.mjs';
 import { until } from './harness.mjs';
@@ -182,6 +183,15 @@ async function bareBreaks(page, scope, sideways = true) {
   return out;
 }
 
+const sessions = new WeakMap();
+/** The names a screen reader hears with a soft hyphen in them, read from the browser's own accessibility tree. */
+async function shyNames(page) {
+  if (!sessions.has(page)) sessions.set(page, await page.context().newCDPSession(page));
+  const { nodes } = await sessions.get(page).send('Accessibility.getFullAXTree');
+  const named = new Set(nodes.map((n) => n.name?.value ?? '').filter((v) => v.includes('\u00AD')));
+  return [...named].map((v) => `"${v.replace(/\u00AD/g, '|')}" is said with a soft hyphen in it`);
+}
+
 /** Every companion screen, the walked skills and the Safe Zone on one phone; a first visit's screens; the intro. */
 function sizes(phone) {
   return async (h) => {
@@ -191,7 +201,7 @@ function sizes(phone) {
     const { ctx, page, errors } = await boot(h, phone);
     for (const [where, route] of SCREENS) {
       await go(page, route);
-      note(where, [...(await look(page)), ...(route.name === 'safe' ? await bareBreaks(page, SAFE) : [])]);
+      note(where, [...(await look(page)), ...(route.name === 'safe' ? [...(await bareBreaks(page, SAFE)), ...(await shyNames(page))] : [])]);
       await h.shot(page, `phone-type-${size}-${where.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`);
     }
     // the reading page sets the player's story in Bodoni Moda and the Lantern's words around it in Jost
@@ -243,9 +253,9 @@ function sizes(phone) {
     });
     for (const id of await page.evaluate(async () => (await import('/src/content/dbt.ts')).SKILLS.map((s) => s.id))) {
       await go(page, { name: 'skill', id }, drawn);
-      note(`${id} as it opens`, [...(await look(page)), ...(await bareBreaks(page, SKILL))]);
+      note(`${id} as it opens`, [...(await look(page)), ...(await bareBreaks(page, SKILL)), ...(await shyNames(page))]);
     }
-    await walkAll(h, page, async (where) => note(where, [...(await look(page)), ...(await bareBreaks(page, SKILL))]));
+    await walkAll(h, page, async (where) => note(where, [...(await look(page)), ...(await bareBreaks(page, SKILL)), ...(await shyNames(page))]));
     h.expect(!errors.length, `${size}: ${errors.join(' | ')}`);
     await ctx.close();
 
@@ -442,6 +452,15 @@ export const scenarios = {
     const problems = [];
     const { ctx } = await rewards(h, SIDEWAYS, problems);
     await ctx.close();
+    h.expect(!problems.length, `${problems.length} problems:\n${problems.join('\n')}`);
+  },
+  // both phones at 200% zoom, the page laid out at half their size
+  'phone-type-rewards-200': async (h) => {
+    const problems = [];
+    for (const p of PHONES) {
+      const { ctx } = await rewards(h, { width: p.width / 2, height: p.height / 2 }, problems);
+      await ctx.close();
+    }
     h.expect(!problems.length, `${problems.length} problems:\n${problems.join('\n')}`);
   },
   ...Object.fromEntries(PHONES.flatMap((p) => [[`phone-type-${p.width}x${p.height}-200-skills`, zoomed(p, skills)], [`phone-type-${p.width}x${p.height}-200-safe-zone`, zoomed(p, safeZone)]])),

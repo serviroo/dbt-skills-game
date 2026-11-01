@@ -85,6 +85,13 @@ function piece(tag: string, ...kids: (Node | string)[]) {
   return e;
 }
 
+/** A soft hyphen drawn by CSS, kept out of what a screen reader hears, so a button's name reads as written. */
+function shy() {
+  const e = piece('dq-shy');
+  e.setAttribute('aria-hidden', 'true');
+  return e;
+}
+
 /** The words of each text in `node` set as dq-words, each word that can break whole in it, with its breaks. */
 function setWhole(node: Node) {
   const texts: Text[] = [];
@@ -98,7 +105,7 @@ function setWhole(node: Node) {
     for (const m of t.data.matchAll(/\S+(?:\u00A0\S+)*/g)) {
       // it breaks at a soft hyphen in a run of letters, or after a no-break space
       const breaks = new Map<number, () => Node>();
-      for (const r of m[0].matchAll(/\p{L}+/gu)) for (const k of breaksIn(r[0], r.index)) breaks.set(k, () => piece('dq-shy'));
+      for (const r of m[0].matchAll(/\p{L}+/gu)) for (const k of breaksIn(r[0], r.index)) breaks.set(k, shy);
       for (const r of m[0].matchAll(/\u00A0/g)) breaks.set(r.index + 1, () => h('wbr'));
       if (!breaks.size) continue;
       const at = [...breaks.keys()].sort((x, y) => x - y);
@@ -115,7 +122,8 @@ function setWhole(node: Node) {
 /**
  * Keeps the words in `root` whole, now and as they change: a word moves to the next line whole, and only one wider than
  * its line breaks, with a hyphen, where breakable() would break a name (a number its no-break spaces hold together breaks
- * after one of them). The soft hyphens are drawn by CSS, so the words read, copy and search as written. Returns the stop.
+ * after one of them). The soft hyphens are drawn by CSS and hidden from a screen reader, so the words read, copy and
+ * search as written. Returns the stop.
  */
 export function wholeWords(root: HTMLElement) {
   setWhole(root);
