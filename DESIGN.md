@@ -159,6 +159,15 @@ never plays, credits or shows anything: a removal in the Safe Zone leaves Undo i
 - A hold ends when focus or the key leaves it, and never finishes later on its own.
 - Focus never lands on nothing or out of sight: when the control it is on goes away or scrolls off (Start on a
   countdown, a preview opening below), it moves to what takes its place.
+- Nothing scrolled to or focused sits under a pinned bar: it stops clear of the top bar and of a bar pinned at the
+  bottom (the Write dock, the try-on bar) at their real heights, at any size and zoom. Where a bottom bar and the top
+  bar would leave the page less than a third of the screen (200% zoom on a small phone), the bottom bar scrolls with
+  the page after everything else instead. "Talk to someone now" always stays pinned. Typing where the top bar would
+  leave too little room under it (200% zoom with the keyboard up), the bar is one row of the back control and the Safe
+  Zone button, its other buttons stepping aside; held sideways, where even that leaves no room, the Safe Zone button
+  sits alone at the side and the page takes the height beside it. With the page panned to a field under the keyboard,
+  its top hidden above what shows, the top bar pins at the top of what shows, as a bar at the bottom rides above the
+  keyboard.
 - The Safe Zone starts each screen at the top with "Talk to someone now" one Tab away, and Tab reaches every control
   in reading order. It says each step politely to a screen reader, and a countdown as it starts and ends, never each
   second. Its words follow Text size in Settings, and it fits at 200% zoom on a 320 px phone at any text size, and

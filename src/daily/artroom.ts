@@ -758,11 +758,13 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     }
     // the room the note after a save covers from its foot wherever it lies over the page, and folded the tray too
     // (--room-*): the page's, or where that can't show a tool whole (a short screen zoomed in), from just below the top
-    // bar (--dq-top) down over the tools from Undo on, so the Tools button stays in reach to close the tray
+    // bar (--dq-above and --dq-top, where it pins and its height) down over the tools from Undo on, so the Tools button
+    // stays in reach to close the tray
     const t = tools.getBoundingClientRect();
     const f = fit.getBoundingClientRect();
     const u = undoB.getBoundingClientRect();
-    const bar = parseFloat(getComputedStyle(el).getPropertyValue('--dq-top')) || f.top;
+    const cs = getComputedStyle(el);
+    const bar = (parseFloat(cs.getPropertyValue('--dq-above')) || 0) + parseFloat(cs.getPropertyValue('--dq-top')) || f.top;
     const r = folded && f.height < TRAY_ROOM ? new DOMRect(u.left, bar, t.right - u.left, t.bottom - bar) : f;
     tools.style.setProperty('--room-x', `${r.left - t.left - tools.clientLeft}px`);
     tools.style.setProperty('--room-b', `${t.top + tools.clientTop + tools.clientHeight - r.bottom}px`);

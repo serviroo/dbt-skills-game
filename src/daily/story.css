@@ -254,9 +254,6 @@
 }
 
 /* ---------- writing view ---------- */
-.dq[data-screen='write'] {
-  scroll-padding-bottom: 96px;
-}
 .dq[data-screen='write'] .dq-view {
   padding-bottom: calc(var(--safe-bottom) + 8px);
 }
@@ -510,8 +507,6 @@
   padding: 0 0 var(--safe-bottom);
   font: 400 19px/1.2 var(--font-display);
   background: #060e1b;
-  transition: transform 0.12s linear;
-  will-change: transform;
   container: st-dock / inline-size;
 }
 .st-dock-in {
@@ -942,10 +937,10 @@
     gap: 36px;
     max-width: 1240px;
   }
-  /* pinned 14px under the top bar, at its real height (app.ts), and 20px clear of the bottom */
+  /* pinned 14px under the top bar, at its real height and where it pins (app.ts), and 20px clear of the bottom */
   .st-cw {
     position: sticky;
-    top: calc(var(--dq-top, 56px) + 14px);
+    top: calc(var(--dq-above, 0px) + var(--dq-top, 56px) + 14px);
     max-height: calc(100vh - var(--dq-top, 56px) - 34px);
     max-height: calc(100dvh - var(--dq-top, 56px) - 34px);
     margin-top: 6px;

@@ -2,7 +2,7 @@ import { companionName, playerName } from '../core/you';
 import { onMotion, params, releaseMotion, setMotion } from '../core/params';
 import { cleared, onClear } from '../core/cleared';
 import { animate } from '../ui/anim';
-import { BUZZ, BUZZ_GAP, SKY, WINDOW } from '../motion/tokens';
+import { BUZZ, BUZZ_GAP, CALM, css, SKY, WINDOW } from '../motion/tokens';
 import { DISMISSED, dismissWindows, LanternWindow, windowSounds, type WindowSpec } from '../ui/lantern-window';
 import { revealRank } from '../ui/rank-reveal';
 import { isHeavy, MODULE_ORDER, MODULES, type Next, type StatId } from '../content/dbt';
@@ -65,7 +65,11 @@ export interface ScreenOut {
   mode: 'hub' | 'sub' | 'skill' | 'safe';
   bubbles?: [number, number];
   tools?: HTMLElement[];
-  /** a bar the screen pins over the bottom of the page, which a scroll or focus then stops above */
+  /**
+   * a bar the screen pins over the bottom of the page, riding above an on-screen keyboard, which a scroll or focus then
+   * stops above. Where it would leave the page less than a third of what shows under the top bar, it lets go and scrolls
+   * with the page instead; the Safe Zone's always stays pinned.
+   */
   foot?: HTMLElement;
   leave?: () => void;
   after?: () => void;
@@ -97,6 +101,8 @@ const isEntry = (s: unknown): s is Entry => !!s && typeof s === 'object' && (s a
 /** Rooms a move goes back to when they are already behind the player, so moving around never grows history. */
 const ROOMS = new Set<Route['name']>(['library', 'art', 'stories', 'shadows', 'settings', 'diary', 'comfort', 'lines', 'safe', 'rest']);
 const same = (a: Route, b: Route) => JSON.stringify(a) === JSON.stringify(b);
+/** A field that takes typing, which brings up a phone's keyboard. */
+const TYPED = 'textarea, input:not([type=button], [type=checkbox], [type=color], [type=file], [type=radio], [type=range], [type=reset], [type=submit]), [contenteditable]:not([contenteditable=false])';
 /** What is still to play of a vibration pattern `ms` after it began, opening with a pulse (0 ms between pulses); [] once it is over. */
 const buzzLeft = (pattern: readonly number[], ms: number) => {
   let end = 0;
@@ -139,8 +145,11 @@ export class App {
   private toastEl: HTMLElement;
   private sky: Sky;
   /** keeps --dq-top and --dq-foot at the pinned bars' real heights (scroll-padding in daily.css), on the host so the
-   * window layer beside the page reads them too */
+   * window layer beside the page reads them too, and lets the foot go where it would leave the page too little room */
   private pins: ResizeObserver;
+  /** the visit and what shows that the top bar was last fit to (fitBar), and its fade into that */
+  private barFor = { visit: '', key: '' };
+  private barFade: Animation | null = null;
   route: Route = { name: 'hub' };
   /** The companion's history entries from Home at 0, forward ones included; `at` is the one the player is on. */
   private trail: Entry[] = [HOME];
@@ -189,12 +198,23 @@ export class App {
     this.root.append(this.sky.back, this.bubbles.canvas, h('div', { class: 'dq-vignette', 'aria-hidden': 'true' }), this.sheetLayer, this.sky.shade, this.top, this.view, this.toastEl, this.scrim);
     this.winLayer = h('div', { class: 'sw-layer dq-sw-layer' });
     host.append(this.root, this.winLayer);
-    this.pins = new ResizeObserver(() => {
-      host.style.setProperty('--dq-top', `${this.top.offsetHeight}px`);
-      host.style.setProperty('--dq-foot', `${this.current?.foot?.offsetHeight ?? 0}px`);
-    });
+    this.pins = new ResizeObserver(() => this.pin());
     // the whole box, padding too: a bar's padding changes on its own as the screen turns, zooms or the keyboard opens
     this.pins.observe(this.top, { box: 'border-box' });
+    // and the screen, whose height decides whether the foot stays pinned, an on-screen keyboard over the page and typing
+    this.pins.observe(this.root);
+    const fit = () => this.pin();
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', fit);
+    vv?.addEventListener('scroll', fit);
+    this.root.addEventListener('focusin', fit);
+    this.root.addEventListener('focusout', fit);
+    this.offs.push(() => {
+      vv?.removeEventListener('resize', fit);
+      vv?.removeEventListener('scroll', fit);
+      this.root.removeEventListener('focusin', fit);
+      this.root.removeEventListener('focusout', fit);
+    });
     if (opts.volume) {
       // first launch with the speaker: an earlier Sound off carries over as mute
       if (opts.volume.fresh && this.store.state.settings.sound === false) opts.volume.set({ muted: true });
@@ -775,6 +795,81 @@ export class App {
     if (this.at === s.i) this.travel(s.i - 1);
   }
 
+  /**
+   * The pinned bars at their real heights, and the foot above an on-screen keyboard: Safari and Chrome keep the page its
+   * full height under the keyboard and show only the part above it (the visual viewport), so the foot pins that far up,
+   * the page gets that much more room after it to scroll its end above the keyboard, and a scroll stops above both. Safari
+   * panning the page to a field under the keyboard hides its top too, so the top bar pins that far down, at the top of
+   * what shows (--dq-above, daily.css), and a scroll stops under it there. A
+   * foot that, with the top bar and its shade, would leave less than a third of what shows (200% zoom on a small phone,
+   * the phone's text at 200% under a tall bar, the keyboard up held sideways) lets go and scrolls with the page after
+   * everything else (data-loose, daily.css). Either way a control scrolled to shows whole between them. The Safe Zone
+   * lays itself out around "Talk to someone now" and the keyboard (safe.ts), so its foot always stays pinned.
+   */
+  private pin() {
+    const out = this.current;
+    // what shows: the page panned down hides the top of the screen, and a keyboard over the page the bottom
+    const vv = window.visualViewport;
+    const above = vv ? Math.max(0, Math.round(vv.offsetTop)) : 0;
+    const kb = vv ? Math.max(0, Math.round(innerHeight - (vv.height + vv.offsetTop))) : 0;
+    const shown = this.root.clientHeight - above - kb;
+    // the Safe Zone moves the whole page to what shows while typing (safe.ts), its top bar with it
+    this.host.style.setProperty('--dq-above', `${out?.mode === 'safe' ? 0 : above}px`);
+    this.fitBar(shown);
+    // whole pixels up, so a bar a fraction taller than a rounded height never covers what a scroll stops above
+    const side = this.root.dataset.bar === 'side';
+    const bar = this.top.getBoundingClientRect();
+    const top = side ? 0 : Math.ceil(bar.height);
+    this.host.style.setProperty('--dq-top', `${top}px`);
+    if (side) this.host.style.setProperty('--dq-side', `${Math.ceil(bar.width)}px`);
+    else this.host.style.removeProperty('--dq-side');
+    const el = out?.foot;
+    const foot = el ? Math.ceil(el.getBoundingClientRect().height) : 0;
+    if (!el || out.mode === 'safe') {
+      this.host.style.setProperty('--dq-foot', `${foot}px`);
+      return;
+    }
+    const below = foot ? kb : 0;
+    const shade = parseFloat(getComputedStyle(this.root).getPropertyValue('--top-shade')) || 0;
+    const loose = shown - (top + shade) - foot < shown / 3;
+    el.toggleAttribute('data-loose', loose);
+    el.style.bottom = el.style.marginBottom = below ? `${below}px` : '';
+    this.host.style.setProperty('--dq-foot', `${(loose ? 0 : foot) + below}px`);
+  }
+
+  /**
+   * The top bar while a field in the page takes typing and the bar would leave less than a third of what shows under it
+   * (a phone at 200% zoom with its keyboard up): one row of Back and the Safe Zone button, both whole, the bar's other
+   * buttons stepping aside, or held sideways, where even one row leaves no room, the Safe Zone button alone at the side
+   * with the page beside it (data-bar, daily.css). It stays so until the room grows (the keyboard going), not as focus
+   * leaves the field, so a tap on the bar, which takes focus between press and release, lands where it was aimed. A
+   * change in place fades in, as the companion does; a new screen, the Safe Zone above all, shows at once. The Safe Zone
+   * lays out its own bar while typing (safe.ts).
+   */
+  private fitBar(shown: number) {
+    const f = document.activeElement;
+    const typing = !!f && this.view.contains(f) && f.matches(TYPED);
+    const key = `${typing} ${shown} ${this.root.clientWidth}`;
+    const moved = this.visitKey !== this.barFor.visit;
+    if (!moved && key === this.barFor.key) return;
+    this.barFor = { visit: this.visitKey, key };
+    if (moved) this.barFade?.cancel();
+    const was = this.root.dataset.bar ?? '';
+    const put = (bar: string) => (bar ? (this.root.dataset.bar = bar) : delete this.root.dataset.bar);
+    // the room each way of laying out the bar leaves under it, tried as it lays out
+    const roomy = (bar: string) => {
+      put(bar);
+      const shade = parseFloat(getComputedStyle(this.root).getPropertyValue('--top-shade')) || 0;
+      return shown - this.top.getBoundingClientRect().height - shade >= shown / 3;
+    };
+    const fit = this.current?.mode !== 'safe' && (typing || !!was);
+    const bar = !fit || roomy('') ? '' : roomy('row') ? 'row' : 'side';
+    put(bar);
+    if (bar === was || moved) return;
+    this.barFade?.cancel();
+    this.barFade = animate(this.top, [{ opacity: 0 }, { opacity: 1 }], { duration: this.reduced() ? WINDOW.reducedFadeMs : CALM.fadeMs, easing: css(CALM.ease) });
+  }
+
   /** Draws a screen. Every way in (a tap, Back, Forward, the Lantern button) comes through here. */
   private show(route: Route, v: { again: boolean; key: string; at?: Place; hand?: unknown }, o: { quiet?: boolean } = {}) {
     // Back, Forward and the Lantern button after clearing land on Settings too; only the Safe Zone opens as ever
@@ -796,7 +891,6 @@ export class App {
     if (wasSafe && !safe) this.turnDay();
     const out = this.screens[route.name](this, route, { again: v.again, kept: v.again ? this.kept.get(key) : undefined, handed: v.again ? undefined : v.hand, at: v.at, mark: (p) => this.mark(key, p) });
     this.current = out;
-    this.host.style.setProperty('--dq-foot', '0px');
     if (out.foot) this.pins.observe(out.foot, { box: 'border-box' });
     this.root.dataset.mode = out.mode;
     this.root.dataset.screen = route.name;
@@ -804,6 +898,7 @@ export class App {
     this.sky.set(route.name === 'hub', safe ? 0 : SKY.fadeMs);
     this.renderTop(out);
     this.view.replaceChildren(out.el);
+    this.pin();
     this.root.scrollTop = 0;
     const [dens, bright] = out.bubbles ?? [3, 0.8];
     if (dens !== this.bubbles.density || bright !== this.bubbles.brightness) this.bubbles.set(dens, bright);
@@ -903,6 +998,6 @@ export class App {
     this.bubbles.destroy();
     this.root.remove();
     this.winLayer.remove();
-    for (const v of ['--dq-top', '--dq-foot']) this.host.style.removeProperty(v);
+    for (const v of ['--dq-top', '--dq-above', '--dq-foot', '--dq-side']) this.host.style.removeProperty(v);
   }
 }
