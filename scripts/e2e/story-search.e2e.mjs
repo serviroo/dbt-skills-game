@@ -3,7 +3,7 @@
 // the match marked, opens that chapter at that place with the place marked, comes back to the same search, works
 // offline, stores nothing and never runs the player's text as markup. The Safe Zone stays one tap away. The search
 // lives in memory with its visit: the browser's history, address and saved session never hold a word of it.
-import { holdStorage, shownIn } from './story-reading.e2e.mjs';
+import { holdStorage, letIn, opening, shownIn } from './story-reading.e2e.mjs';
 
 const day = () => {
   const d = new Date(Date.now() - 6 * 3600000);
@@ -245,8 +245,9 @@ export const scenarios = {
     }
   },
 
-  /** a result opening its chapter gives way to a Page or Notes tap made while it opened, however slowly storage
-   *  answers: the tapped side shows, with nothing marked, selected or said about the search on it */
+  /** a result opening its chapter gives way to a Page or Notes tap made while it settled, however slowly storage
+   *  answers: the tapped side shows, with nothing marked, selected or said about the search on it. Before its chapter
+   *  is in, the writer is out of reach */
   async 'story-search-open-overtaken'(h) {
     const cases = [
       { row: 'Winter', tap: 'Notes', box: 'Notes for this story', text: NOTES },
@@ -267,18 +268,17 @@ export const scenarios = {
         const opened = c.row === 'Winter' ? ids.winter : ids.notes;
         const tapped = c.row === 'Winter' ? ids.notes : ids.winter;
         // from here every chapter read waits until the test lets it through
-        const { waitHeld, release, drain } = await holdStorage(page, ['chapter']);
+        const { waitHeld, release, drain } = await holdStorage(page, ['chapter', 'onDisk']);
         await page.locator('.st-found-row', { hasText: c.row }).click();
         await routeIs(page, 'write');
-        // the name of the chapter the Page tab goes to (Winter, either way) comes in with the page around it
-        await waitHeld(`chapter ${ids.winter}`);
-        await release(`chapter ${ids.winter}`);
         await waitHeld(`chapter ${opened}`);
+        h.expect(await opening(page), `${at}: the writer came in before its chapter`);
+        // in with the chapter the result asked for, which is still settling as they tap
+        await letIn(page, 'onDisk');
+        await waitHeld(`onDisk ${opened}`);
         await page.getByRole('radio', { name: `Show: ${c.tap}` }).click();
         await waitHeld(`chapter ${tapped}`);
-        // the tapped side reaches the editor first, then the chapter the result asked for answers
         await release(`chapter ${tapped}`);
-        await release(`chapter ${opened}`);
         await drain();
         await h.sleep(200);
         await drain();
