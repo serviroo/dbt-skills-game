@@ -20,18 +20,20 @@
 //               down), none of the frame's words or controls show under "Talk to someone now", as the screen opens or
 //               scrolled to either end. At 200% zoom or with the keyboard up the page scrolls under it, and reach and
 //               audit check that each control still scrolls clear of it
-//   keyboard    while a list item or a person is typed, the on-screen keyboard takes the bottom of the screen (the page
-//               gets the height above it, as a phone that resizes for the keyboard gives it): the field and its Save
-//               show whole and take a tap, and the rest still passes reach. Held sideways at 200% zoom the keyboard
-//               leaves under 100 px, less than "Talk to someone now" and the field need together, so typing is checked
-//               upright there (a phone that keeps the page's full height under its keyboard is the check without it;
-//               safe-zone-typing checks both kinds of keyboard, held either way, where Talk pins at the top)
+//   keyboard    while a list item or a person is typed, or an entry changed, the on-screen keyboard takes the bottom of
+//               the screen, each way a phone does it: the page gets the height above it (a phone that resizes for the
+//               keyboard), or keeps its height and only the part above the keyboard shows (a keyboard over the page, as
+//               an iPhone's is, see overlay). The field and its Save show whole in that part and take a tap, and the
+//               rest still passes reach there. Held sideways at 200% zoom the keyboard leaves under 100 px, less than
+//               "Talk to someone now" and the field need together, so typing is checked upright there (safe-zone-typing
+//               checks both kinds of keyboard, held either way, where Talk pins at the top)
 // And on every other screen with a top bar, at 200%, the Safe Zone button stays one tap away: it and the rest of the bar
 // show whole and take their taps, with the Sound panel open too, and Give me a moment's Done shows whole once scrolled
 // to; Home and Settings also fit whole, with no text on top of other text.
 import { gone } from './harness.mjs';
 import { audit, boot, PAGE, SCREENS, settle, SKIP } from './layout-fit.e2e.mjs';
 import { listed } from './me-92-safe-zone-clean.e2e.mjs';
+import { overlay } from './safe-zone-typing.e2e.mjs';
 
 // a phone and about how tall its keyboard is with the suggestion bar, held each way
 const PHONES = {
@@ -47,16 +49,18 @@ const PHONES = {
  * view. `sound`: only the open Sound panel's own controls and the button that closes it, and the bar it opens below.
  * `controls`: only these.
  */
-const unreachable = (page, { typing = false, sound = false, controls = null } = {}) =>
+export const unreachable = (page, { typing = false, sound = false, controls = null } = {}) =>
   page.evaluate(async ({ typing, sound, controls: only }) => {
     const out = [];
     const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     const name = (e) => `"${(e.getAttribute('aria-label') || e.textContent || e.value || e.tagName).replace(/\s+/g, ' ').trim().slice(0, 32)}"`;
     const box = (r) => `${[r.left, r.top, r.right, r.bottom].map(Math.round).join(', ')} in ${innerWidth}x${innerHeight}`;
-    // the part that shows: inside the window and inside every box around it that clips
+    // the part that shows: inside the window, above a keyboard over the page (the whole window without one), and inside
+    // every box around it that clips
+    const vv = visualViewport;
     const whole = (e) => {
       const r = e.getBoundingClientRect();
-      let [l, t, rt, b] = [Math.max(r.left, 0), Math.max(r.top, 0), Math.min(r.right, innerWidth), Math.min(r.bottom, innerHeight)];
+      let [l, t, rt, b] = [Math.max(r.left, 0), Math.max(r.top, vv.offsetTop), Math.min(r.right, innerWidth), Math.min(r.bottom, vv.offsetTop + vv.height)];
       for (let p = e.parentElement; p; p = p.parentElement) {
         const cs = getComputedStyle(p);
         if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
@@ -194,6 +198,9 @@ function walk(phone, zoom, { font = false } = {}) {
       await page.setViewportSize({ width: viewport.width, height: Math.round((p.height - p.kb) / zoom) });
       await look(page, `${label} with the keyboard up`, { typing: true });
       await page.setViewportSize(viewport);
+      await page.evaluate((k) => window.__kb(k), { height: Math.round((p.height - p.kb) / zoom), top: Math.round(p.kb / zoom / 4) });
+      await look(page, `${label} with the keyboard over the page`, { typing: true });
+      await page.evaluate(() => window.__kb(null));
     };
     const tap = (page, name) => page.locator('.dq-sz-body').getByRole('button', { name, exact: true }).last().evaluate((b) => b.click());
     const at = (page, title) => page.locator('.dq-sz-t', { hasText: title }).first().waitFor({ timeout: 10000 });
@@ -268,6 +275,7 @@ function walk(phone, zoom, { font = false } = {}) {
     const open = async (edit) => {
       const o = await boot(h, viewport, font ? { edit, device: { isMobile: true, hasTouch: true } } : { edit });
       if (font) await scaleText(o.page);
+      if (typing) await o.page.evaluate(overlay);
       await o.page.locator('header .dq-safe').click();
       await o.page.locator('.dq-sz-t').first().waitFor({ timeout: 10000 });
       return o;

@@ -1088,12 +1088,16 @@ export function printScreen(app: App, _route: Route, visit: Visit): ScreenOut {
 export function comfortScreen(app: App): ScreenOut {
   const st = app.store;
   const s = st.state;
-  const removed = (text: string, restore: () => void) =>
+  // Undo pressed from the keys: its toast goes, so focus goes to the entry it brought back, on its Remove, in view
+  const removed = (text: string, id: string, restore: () => void) =>
     app.toast(`Removed "${text.length > 36 ? `${text.slice(0, 35)}…` : text}".`, {
       label: 'Undo',
       run: () => {
+        const keyed = !!document.activeElement?.matches('.dq-toast-btn:focus-visible');
         restore();
         st.save();
+        const to = keyed ? el.querySelector<HTMLElement>(`[data-item="${CSS.escape(id)}"] [data-act="remove"]`) : null;
+        if (to) focusWhole(to);
       },
     });
   // what the lists show follows every change, made here or in another open copy, in place, so an open edit and what is
@@ -1106,7 +1110,7 @@ export function comfortScreen(app: App): ScreenOut {
     h('button', { type: 'button', class: 'dq-icbtn dq-icbtn--sm', 'data-act': 'remove', 'aria-label': `Remove ${name}`, html: icon('close'), onclick: () => {
       const out = st.removeItem<Item | Person>(s.lists[key], id);
       st.save();
-      if (out) removed('text' in out.item ? out.item.text : out.item.name, () => st.reviveItem<Item | Person>(app.store.state.lists[key], out.item));
+      if (out) removed('text' in out.item ? out.item.text : out.item.name, id, () => st.reviveItem<Item | Person>(app.store.state.lists[key], out.item));
     } });
   const entryParts = <T extends Item | Person>(o: Omit<EntryOpts<T>, 'say' | 'cls'>) => {
     const list = entryList<T>(app, { ...o, cls: 'dq-items', say: (t) => (status.textContent = t) });

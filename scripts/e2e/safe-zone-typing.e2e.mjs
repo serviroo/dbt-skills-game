@@ -45,7 +45,7 @@ const SCREENS = [
  * it changes. And the page without focus while `window.__away` says so, as when the phone takes it to put the page
  * beside another app, since Chromium here gives every page focus.
  */
-const overlay = (heldAs) => {
+export const overlay = (heldAs) => {
   let held = heldAs ?? (innerWidth > innerHeight ? 'landscape' : 'portrait');
   Object.defineProperty(screen, 'orientation', { configurable: true, get: () => ({ type: `${held}-primary`, angle: held === 'portrait' ? 0 : 90 }) });
   window.__held = (h) => {

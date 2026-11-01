@@ -218,6 +218,9 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     if (!up) moved.clear();
     const short = height < rest && vv.height < fits;
     const on = (covered || short) && (typing || !!field);
+    // typing, the Safe Zone has only the part above the keyboard, whichever kind it is (.dq.is-typing): its short-room
+    // rule reads that, not the page's height, which a keyboard over the page leaves as it was
+    el.classList.toggle('is-short', on && vv.height <= 230);
     if (on) {
       app.root.style.setProperty('--vv-top', `${vv.offsetTop}px`);
       app.root.style.setProperty('--vv-h', `${vv.height}px`);

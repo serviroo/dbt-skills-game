@@ -25,17 +25,22 @@
 //   edit-your-lists-keep    an entry open to change keeps what is typed in it while the rest of its screen changes: on
 //                           Comfort another entry removed, brought back with Undo, and one added to a list and to the
 //                           people; in the Safe Zone one added and another removed, focus back on the Add button that
-//                           was used, and nothing played or credited. None of the typed words is stored
+//                           was used, and nothing played or credited. None of the typed words is stored. Undo pressed
+//                           from the keys on Comfort puts focus on the entry it brought back, on its Remove, in view
 //   edit-your-lists-fit    with Edit and the moves showing and an edit open, everything fits at 390 and 320 wide,
 //                           held sideways and at 200% zoom: nothing runs off the side, every button is a tap in size,
 //                           nothing editing shows is under 16px, the field shows whole and "Talk to someone now" stays
 //                           pinned. In the Safe Zone every entry has Remove, which leaves Undo in its place, and an
-//                           entry moved to the top by key keeps the whole ring of its dimmed Move up in view
+//                           entry moved to the top by key keeps the whole ring of its dimmed Move up in view. Held
+//                           sideways with the phone's text at 200%, an entry being changed with either kind of keyboard
+//                           up (resizing the page, or over it), every Safe Zone control shows whole above the keyboard
 import fs from 'node:fs';
 import path from 'node:path';
 import { until } from './harness.mjs';
 import { nameOf, whole } from './safe-zone-access.e2e.mjs';
+import { scaleText, unreachable } from './safe-zone-reach.e2e.mjs';
 import { clearGame } from './safe-zone-tabs.e2e.mjs';
+import { overlay } from './safe-zone-typing.e2e.mjs';
 
 const T = Date.now() - 86400e3;
 const LISTS = {
@@ -564,6 +569,14 @@ export const scenarios = {
     await button(page, 'Add person').click();
     if (!(await showing(PANEL.people, 'Juno'))) problems.push('Comfort: Juno was not added');
     problems.push(...(await kept(['Tea, still typing'], 'Comfort, Juno added')));
+    // Undo from the keys: its toast goes, and focus goes to the entry it brought back, on its Remove, in view
+    await button(page, 'Remove Socks').focus();
+    await page.keyboard.press('Enter');
+    for (let i = 0; i < 80 && !(await page.evaluate(() => !!document.activeElement?.matches('.dq-toast-btn'))); i++) await page.keyboard.press('Tab');
+    await page.keyboard.press('Enter');
+    if (!(await showing(PANEL.comfort, 'Socks'))) problems.push('Comfort: Undo from the keys did not bring Socks back');
+    problems.push(...(await focusOn(page, 'Remove Socks', 'Comfort, Socks back with Undo from the keys')));
+    problems.push(...(await kept(['Tea, still typing'], 'Comfort, Socks back with Undo from the keys')));
     let s = await stored(h, page);
     if (JSON.stringify(words(s.lists.comfort)) !== JSON.stringify(['Tea', 'Blanket', 'Rain', 'Socks']) || !words(s.lists.people).includes('Juno')) problems.push(`Comfort: stored ${JSON.stringify(words(s.lists.comfort))} and ${JSON.stringify(words(s.lists.people))}`);
     await h.shot(page, 'keep-comfort');
@@ -677,6 +690,33 @@ export const scenarios = {
       if (!f.field || !f.seen) problems.push(`${tag} Comfort editing: the field is not seen whole`);
       await shot('comfort-editing');
       problems.push(...errors.map((e) => `${tag}: ${e}`));
+      await ctx.close();
+    }
+    // held sideways with its text at 200%, an entry being changed with each kind of keyboard up: every Safe Zone
+    // control, Done editing among them, shows whole in the part above the keyboard once scrolled to
+    {
+      const [view, kb] = [{ width: 568, height: 320 }, 194];
+      const { ctx, page, errors } = await h.open(seedOf(h), '?mute', view, undefined, { isMobile: true, hasTouch: true });
+      await h.reachHub(page);
+      await scaleText(page);
+      await page.evaluate(overlay);
+      for (const at of ['reasons', 'people']) {
+        await safeAt(page, at);
+        await button(page, 'Edit the list').click();
+        await button(page, at === 'people' ? 'Edit Sam' : 'Edit Lanternfish facts').click();
+        for (const kind of ['resize', 'over']) {
+          const state = `568x320 with its text at 200%, Safe Zone ${at}, an entry open, the keyboard ${kind === 'resize' ? 'resizing the page' : 'over the page'}`;
+          if (kind === 'resize') await page.setViewportSize({ width: view.width, height: view.height - kb });
+          else await page.evaluate((k) => window.__kb(k), { height: view.height - kb, top: Math.round(kb / 4) });
+          if (!(await until(page, () => !!document.querySelector('.dq.is-typing'), undefined, { timeout: 5000 }).then(() => true, () => false))) problems.push(`${state}: the Safe Zone is not laid out for typing`);
+          problems.push(...(await unreachable(page, { typing: true })).map((f) => `${state}: ${f}`));
+          await h.shot(page, `fit-568x320-text-200-${at}-editing-${kind}`);
+          if (kind === 'resize') await page.setViewportSize(view);
+          else await page.evaluate(() => window.__kb(null));
+        }
+        await page.keyboard.press('Escape');
+      }
+      problems.push(...errors.map((e) => `568x320 with its text at 200%: ${e}`));
       await ctx.close();
     }
     h.expect(!problems.length, problems.join('\n'));
