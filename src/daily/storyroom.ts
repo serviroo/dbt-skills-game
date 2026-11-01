@@ -1980,10 +1980,13 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     keep: () =>
       shown
         ? {
+            // notes typed over a change made elsewhere land as a page of their own: that page is what comes back
             get ch() {
-              return pageId;
+              return tab === 'notes' && cur?.kind === 'page' ? cur.id : pageId;
             },
-            notes: tab === 'notes',
+            get notes() {
+              return tab === 'notes' && cur?.kind !== 'page';
+            },
           }
         : went,
     leave: () => {

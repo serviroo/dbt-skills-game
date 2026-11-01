@@ -15,6 +15,8 @@
 //                             way back, with the Page tab still going to Chapter 2
 //   back-to-a-chapter-kept-apart  words typed over a chapter another open copy changed, the Safe Zone tapped while they
 //                             are still saving: they land as a kept copy, and Back opens that copy with those words
+//   back-to-notes-kept-apart  the same for the notes: words typed over notes another open copy changed land as a page of
+//                             their own, and Back from the Safe Zone opens that page with them
 //   writer-never-shows-empty  at 320 px with storage slow to answer, every frame of the writer coming in (the Story
 //                             Room list, a search result, the chapter list, Back to writing, the notes back from the Safe
 //                             Zone, Forward) shows the story's title and the page it opens on, never "Untitled story",
@@ -30,6 +32,8 @@
 //   writer-storage-never-answers   the same for a chapter's read: the writer comes in on a new empty page, words typed
 //                             there are still there back from the Safe Zone, and they never reach the stored chapter.
 //                             The same when the first page of a story with none is never answered as it is made
+//   storage-answers-too-late  a story's first page made while another connection holds its chapters: given up after a
+//                             while, the write never lands later, when the hold lets go
 import { drawPage, line } from './art-eraser-glow.e2e.mjs';
 import { holdStorage } from './story-reading.e2e.mjs';
 
@@ -470,6 +474,93 @@ export const scenarios = {
       await page.goBack();
       await routeIs(page, 'write');
       await h.poll(page, () => page.locator('.st-ta').inputValue(), (v) => v === 'My newest words.', (v) => `back from the Safe Zone the page reads ${JSON.stringify(v)}, not the copy kept with the words typed`, { timeout: 5000 });
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'back-to-notes-kept-apart'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await h.reachHub(page);
+      const ids = await page.evaluate(async () => {
+        const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+        const { story } = await ss.create('The Long Night');
+        const n = await ss.chapter(story.notes);
+        await ss.saveChapter({ ...n, text: 'Mira keeps the map.' }, [n.rev]);
+        return { story: story.id, notes: story.notes };
+      });
+      await page.evaluate((r) => window.__daily.go(r), { name: 'write', id: ids.story, ch: ids.notes });
+      await holds(h, page, 'Notes for this story', 'the notes');
+      await page.evaluate(async (id) => {
+        const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+        const c = await ss.chapter(id);
+        await ss.saveChapter({ ...c, text: 'The other open copy.' }, [c.rev]);
+      }, ids.notes);
+      const held = await holdStorage(page, ['saveChapter']);
+      await page.locator('.st-ta').fill('My newest notes.');
+      await page.locator('.dq-top .dq-safe').click();
+      await routeIs(page, 'safe');
+      await held.drain();
+      await page.evaluate(async () => {
+        const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+        ss.saveChapter = ss.__real.saveChapter;
+      });
+      const texts = () =>
+        page.evaluate(async (id) => {
+          const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+          const s = await ss.story(id);
+          return Promise.all([s.notes, ...s.chapters].map(async (c) => (await ss.chapter(c))?.text));
+        }, ids.story);
+      await h.poll(page, texts, (t) => t.includes('My newest notes.') && t[0] === 'The other open copy.', (t) => `the notes and chapters saved are ${JSON.stringify(t)}`, { timeout: 8000 });
+      await page.goBack();
+      await routeIs(page, 'write');
+      await comesIn(h, page, '.st-write', 'back to notes kept apart');
+      await h.poll(page, () => page.locator('.st-ta').inputValue(), (v) => v === 'My newest notes.', (v) => `back from the Safe Zone the page reads ${JSON.stringify(v)}, not the copy kept with the notes typed`, { timeout: 5000 });
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'storage-answers-too-late'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await h.reachHub(page);
+      const ids = await page.evaluate(async () => {
+        const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+        const { story, first } = await ss.create('No Pages Yet');
+        await ss.removeChapter(story.id, first.id);
+        return { db: ss.name, story: story.id };
+      });
+      // another connection keeps a write on the chapters going until window.__letGo()
+      await page.evaluate(
+        (db) =>
+          new Promise((held) => {
+            const open = indexedDB.open(db);
+            open.onsuccess = () => {
+              const store = open.result.transaction('chapters', 'readwrite').objectStore('chapters');
+              let on = true;
+              window.__letGo = () => (on = false);
+              const spin = () => {
+                if (on) store.get('held').onsuccess = spin;
+                else open.result.close();
+              };
+              spin();
+              held();
+            };
+          }),
+        ids.db,
+      );
+      await page.evaluate((r) => window.__daily.go(r), { name: 'write', id: ids.story });
+      await routeIs(page, 'write');
+      await comesIn(h, page, '.st-write', 'a first page held by another connection', 15000);
+      await holds(h, page, 'Page, Chapter 1', 'a first page held by another connection');
+      await page.evaluate(() => window.__letGo());
+      await h.sleep(1000);
+      const stored = await onDisk(page, ids.db, 'stories', 'get', ids.story);
+      h.expect(stored?.chapters.length === 0, `the first page given up on landed later: the stored story lists ${JSON.stringify(stored?.chapters)}`);
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();
