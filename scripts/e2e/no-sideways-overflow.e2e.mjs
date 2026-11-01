@@ -1,18 +1,19 @@
-// At 200% no companion screen is wider than the phone, so a sideways scroll can never push the Safe Zone button off
-// the edge (DESIGN.md principle 6). A phone at 320x568, 390x844, 568x320 and 844x390, one scenario each at 200% zoom
-// (the page laid out at half the size, as browser zoom does) and one with the phone's own text at 200% (each word
-// twice its size in a page as wide as before, see scaleText), opens every screen on a returning save with everything
-// unlocked and its drawings named with a long word, Settings with a look tried on in the Wardrobe too: on each, the
-// page is exactly as wide as the screen, nothing scrolls sideways inside the companion, nothing reaches past the
-// screen's edge, no box that clips its words (a card's edge) cuts one at its side, a word kept whole breaks only where
-// its hyphen shows, and the Safe Zone button is in reach (whole inside the screen and every box that clips it, and
-// taking taps at its corners). Outside a skill's window and the Safe Zone, no row or card squeezes a word, so none
-// breaks onto the next line without a hyphen; no Night Watch card cuts its words or sets them smaller than its own
-// sizes (at the phone's own size too), and A quiet minute's moth stays clear of its badge. The same holds inside every
-// watcher's card in the Night Watch camp, and inside the sheets opened from the drawing page and the story editor,
-// checked as they open at the phone's own size and once it zooms to 200% (with the phone's text at 200%, there alone);
-// each sits below the top bar, its close button at least 44 px and in reach the same way. A failure names the widest
-// boxes, or the words, that reach past the edge, and the words that break or are cut.
+// At 200% no companion screen is wider than the phone, so a sideways scroll can never push the Safe Zone button off the
+// edge (DESIGN.md principle 6). A phone at 320x568, 390x844, 568x320 and 844x390, one scenario each at 200% zoom (the
+// page laid out at half the size, as browser zoom does) and one with the phone's own text at 200% (each word twice its
+// size in a page as wide as before, see scaleText), opens every screen on a returning save with everything unlocked and
+// its drawings named with a long word, Settings with a look tried on in the Wardrobe too: on each, the page is exactly
+// as wide as the screen, nothing scrolls sideways inside the companion, nothing reaches past the screen's edge, no box
+// that clips its words (a card's edge) cuts one at its side, a word kept whole breaks only where a hyphen shows in the
+// screen's pixels, the diary's week (its own sideways scroller) is a named stop for the keyboard with a whole focus
+// ring, and the Safe Zone button is in reach (whole inside the screen and every box that clips it, and taking taps at
+// its corners). Outside a skill's window and the Safe Zone, no row or card squeezes a word, so none breaks onto the
+// next line without a hyphen; no Night Watch card cuts its words or sets them smaller than its own sizes (at the
+// phone's own size too), and A quiet minute's moth stays clear of its badge. The same holds inside every watcher's card
+// in the Night Watch camp, and inside the sheets opened from the drawing page and the story editor, checked as they
+// open at the phone's own size and once it zooms to 200% (with the phone's text at 200%, there alone); each sits below
+// the top bar, its close button at least 44 px and in reach the same way. A failure names the widest boxes, or the
+// words, that reach past the edge, and the words that break or are cut.
 import { fullSave, seedStores } from './me-91-final-save-ids.e2e.mjs';
 import { cutShort, scaleText } from './safe-zone-reach.e2e.mjs';
 
@@ -122,19 +123,6 @@ const width = (page, sheet = null) =>
       const left = at.getBoundingClientRect().left + at.clientLeft;
       if (r.width && (r.left < left - 0.5 || r.right > left + at.clientWidth + 0.5)) sides.push(`"${n.textContent.trim().slice(0, 24)}" in ${label(p)}, cut by ${label(at)}`);
     }
-    // a word kept whole (wholeWords in ui.ts) that breaks at a soft hyphen draws the hyphen there, which gives it a width
-    const bare = [...document.querySelectorAll('dq-shy')]
-      .filter((s) => {
-        if (!s.parentElement.checkVisibility() || unseen(s.parentElement)) return false;
-        const [before, after] = [s.previousSibling, s.nextSibling].map((t) => {
-          const range = document.createRange();
-          range.selectNodeContents(t);
-          return [...range.getClientRects()];
-        });
-        const [a, b] = [before.at(-1), after[0]];
-        return !!a && !!b && b.top > a.top + a.height / 2 && s.getBoundingClientRect().width < 0.5;
-      })
-      .map((s) => `"${s.previousSibling.textContent}|${s.nextSibling.textContent}" in "${s.parentElement.textContent.slice(0, 24)}"`);
     const box = sheet && document.querySelector(sheet);
     const inner = box ? [box, ...box.querySelectorAll('*')].filter((e) => getComputedStyle(e).overflowX !== 'visible' && e.scrollWidth > e.clientWidth + 1 && e.checkVisibility() && !e.closest('.dq-sr')).map((e) => `${label(e)} ${e.scrollWidth - e.clientWidth} px wider than it shows`) : [];
     const bar = document.querySelector('.dq-top').getBoundingClientRect().bottom;
@@ -149,7 +137,6 @@ const width = (page, sheet = null) =>
       vw: innerWidth,
       past: past.slice(0, 6),
       sides,
-      bare: bare.slice(0, 6),
       inner,
       under: !!box && box.getBoundingClientRect().top < bar - 0.5,
       cut,
@@ -157,6 +144,120 @@ const width = (page, sheet = null) =>
       moth: !!moth && [...document.querySelectorAll('.dq-ease-panel > .dq-chip > *')].some((c) => meets(c.getBoundingClientRect(), moth)),
     };
   }, sheet);
+
+/**
+ * The words kept whole (wholeWords in ui.ts) in `scope` that break at a soft hyphen with no hyphen to see there. Each
+ * break is scrolled into view and shot twice, with its mark and with the mark made clear, and `pixels` (a blank page)
+ * counts what changed: a hyphen draws a stroke of at least 3% of its letters' size by a quarter of it (Bodoni Moda's
+ * hairline is near 1% thick), so a mark too thin to see, one a box clips at its edge or one never drawn counts.
+ */
+async function hyphens(page, pixels, scope = 'body') {
+  const count = await page.evaluate((scope) => {
+    const unseen = (e) => !!e.closest('.dq-sr') || getComputedStyle(e).clipPath === 'inset(50%)';
+    const lines = (t) => {
+      const range = document.createRange();
+      range.selectNodeContents(t);
+      return [...range.getClientRects()];
+    };
+    const marks = [...document.querySelectorAll(`${scope} dq-shy`)].filter((s) => {
+      if (!s.parentElement.checkVisibility() || unseen(s.parentElement)) return false;
+      const [a, b] = [lines(s.previousSibling).at(-1), lines(s.nextSibling)[0]];
+      return !!a && !!b && b.top > a.top + a.height / 2;
+    });
+    // every box that scrolling a mark into view may move, put back as it was afterwards
+    const scrollers = new Set([document.scrollingElement]);
+    for (const s of marks) for (let p = s.parentElement; p; p = p.parentElement) if (p.scrollHeight > p.clientHeight || p.scrollWidth > p.clientWidth) scrollers.add(p);
+    window.__marks = { marks, was: [...scrollers].map((e) => [e, e.scrollTop, e.scrollLeft]) };
+    return marks.length;
+  }, scope);
+  const out = [];
+  const shown = (i, clear) =>
+    page.evaluate(
+      async ([i, clear]) => {
+        window.__marks.marks[i].style.color = clear ? 'transparent' : '';
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      },
+      [i, clear],
+    );
+  for (let i = 0; i < count && out.length < 6; i++) {
+    // the mark's box and the room its stroke may reach past it, inside the screen
+    const at = await page.evaluate(async (i) => {
+      const s = window.__marks.marks[i];
+      s.scrollIntoView({ block: 'center', behavior: 'instant' });
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const r = s.getBoundingClientRect();
+      const size = parseFloat(getComputedStyle(s).fontSize);
+      const [x, y] = [Math.max(r.left - size / 2, 0), Math.max(r.top, 0)];
+      return { x, y, width: Math.min(r.right + size, innerWidth) - x, height: Math.min(r.bottom, innerHeight) - y, size, word: `${s.previousSibling.textContent}|${s.nextSibling.textContent}` };
+    }, i);
+    let ink = 0;
+    if (at.width >= 1 && at.height >= 1) {
+      const clip = { x: at.x, y: at.y, width: at.width, height: at.height };
+      const marked = (await page.screenshot({ clip })).toString('base64');
+      await shown(i, true);
+      const clear = (await page.screenshot({ clip })).toString('base64');
+      await shown(i, false);
+      ink = await pixels.evaluate(changed, [marked, clear]);
+    }
+    if (ink < at.size * at.size * 0.03 * 0.25) out.push(`"${at.word}" at ${at.size}px`);
+  }
+  await page.evaluate(() => {
+    for (const [e, top, left] of window.__marks.was) e.scrollTo(left, top);
+    delete window.__marks;
+  });
+  return out;
+}
+
+/** The area, in square CSS pixels, where two PNG shots of the same box differ. */
+async function changed(pngs) {
+  const [a, b] = await Promise.all(
+    pngs.map(async (png) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${png}`;
+      await img.decode();
+      const g = new OffscreenCanvas(img.width, img.height).getContext('2d');
+      g.drawImage(img, 0, 0);
+      return g.getImageData(0, 0, img.width, img.height).data;
+    }),
+  );
+  let n = 0;
+  for (let k = 0; k < a.length; k += 4) if (Math.max(Math.abs(a[k] - b[k]), Math.abs(a[k + 1] - b[k + 1]), Math.abs(a[k + 2] - b[k + 2])) > 40) n++;
+  return n / devicePixelRatio ** 2;
+}
+
+/**
+ * Why the diary's week, which scrolls sideways inside its panel on a narrow screen, is out of a keyboard's reach, or ''
+ * if it isn't: a region named Past seven days that Tab lands on from the control before it, showing a focus ring of at
+ * least 2 px that no box around it cuts.
+ */
+async function weekReach(page) {
+  if ((await page.getByRole('region', { name: 'Past seven days', exact: true }).count()) !== 1) return 'is not a region named Past seven days';
+  const before = await page.evaluate(() => {
+    const stops = [...document.querySelectorAll('a[href], button, input, select, textarea, [tabindex]')].filter((e) => e.tabIndex >= 0 && !e.disabled && e.checkVisibility());
+    const at = stops.indexOf(document.querySelector('.dq-week'));
+    if (at > 0) stops[at - 1].focus();
+    return at > 0;
+  });
+  if (!before) return 'is no stop for the keyboard';
+  await page.keyboard.press('Tab');
+  return page.evaluate(() => {
+    const e = document.activeElement;
+    if (!e?.matches('.dq-week')) return `is skipped: Tab lands on ${e?.tagName.toLowerCase()}.${[...(e?.classList ?? [])].join('.')}`;
+    const cs = getComputedStyle(e);
+    const ring = parseFloat(cs.outlineWidth);
+    if (!e.matches(':focus-visible') || cs.outlineStyle === 'none' || ring < 2) return `shows no focus ring (${cs.outlineStyle} ${cs.outlineWidth})`;
+    e.scrollIntoView({ block: 'center', behavior: 'instant' });
+    const r = e.getBoundingClientRect();
+    const out = ring + parseFloat(cs.outlineOffset);
+    for (let p = e.parentElement; p && p !== document.body; p = p.parentElement) {
+      const ps = getComputedStyle(p);
+      const q = p.getBoundingClientRect();
+      // a box that scrolls up and down (the page) brings the ring's top and bottom into view; nothing may cut its sides
+      if ((ps.overflowX !== 'visible' && (r.left - out < q.left - 0.5 || r.right + out > q.right + 0.5)) || (/hidden|clip/.test(ps.overflowY) && (r.top - out < q.top - 0.5 || r.bottom + out > q.bottom + 0.5))) return `has its focus ring cut by ${p.tagName.toLowerCase()}.${[...p.classList].join('.')} (${[r.left - out, r.right + out, r.top - out, r.bottom + out].map(Math.round)} in ${[q.left, q.right, q.top, q.bottom].map(Math.round)})`;
+    }
+    return '';
+  });
+}
 
 /**
  * Why the control `sel` names is out of reach, or '' if it isn't: it is at least 44 px each way, its whole box is on
@@ -207,6 +308,8 @@ function sweep(phone, { font = false } = {}) {
     const save = fullSave(now);
     const you = JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: save.created, companionAt: save.created });
     const { ctx, page, errors } = await h.open({ [h.SAVE]: JSON.stringify(save), [h.YOU]: you, 'dbt.app.v1': h.SEEN }, '?mute', zoomed, undefined, font ? { isMobile: true, hasTouch: true } : {});
+    // a blank page that reads the screen's pixels
+    const pixels = await ctx.newPage();
     try {
       await h.reachHub(page);
       await seedStores(page, h.SAVE, now);
@@ -227,7 +330,8 @@ function sweep(phone, { font = false } = {}) {
         if (w.dq > 0) bad.push(`the companion scrolls ${w.dq} px sideways`);
         if (w.past.length) bad.push('something reaches past the edge');
         if (w.sides.length) bad.push(`words cut at the side: ${w.sides.join(', ')}`);
-        if (w.bare.length) bad.push(`words broken with no hyphen drawn: ${w.bare.join(', ')}`);
+        const marks = await hyphens(page, pixels, sheet ?? 'body');
+        if (marks.length) bad.push(`words broken with no hyphen to see: ${marks.join(', ')}`);
         const safe = await reach(page, '.dq-top .dq-safe', { below: false, optional: true });
         if (safe) bad.push(`the Safe Zone button is out of reach: ${safe}`);
         if (w.inner.length) bad.push(`inside the sheet: ${w.inner.join(', ')}`);
@@ -250,6 +354,10 @@ function sweep(phone, { font = false } = {}) {
           await page.locator('.dq-step-body .dq-actions .dq-btn--primary').first().click();
         }
         await check(where, { words: route.name !== 'skill' && route.name !== 'safe' });
+        if (route.name === 'diary') {
+          const week = await weekReach(page);
+          if (week) failed.push(`${size} Diary: the week that scrolls sideways ${week}`);
+        }
       }
       // Night Watch at the phone's own size, where its cards keep their words whole at their own sizes too
       if (!font) {

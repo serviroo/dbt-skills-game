@@ -780,7 +780,8 @@ export function diaryScreen(app: App, _route: Route, visit: Visit): ScreenOut {
     // Save tapped at the bottom of the screen brings the line under it into sight
     saved.scrollIntoView({ block: 'nearest', behavior: app.reduced() ? 'auto' : 'smooth' });
   };
-  const week = h('div', { class: 'dq-week' });
+  // the week scrolls sideways where the screen is narrow: a stop of its own for the keyboard, named for a screen reader
+  const week = h('div', { class: 'dq-week', tabindex: '0', role: 'region', 'aria-label': 'Past seven days' });
   const renderWeek = () => {
     const days = Array.from({ length: 7 }, (_, i) => addDays(today, i - 6));
     const rows = [...rowsFor(s, 'emotions', days).map((r) => [r, 'emotions'] as const), ...rowsFor(s, 'urges', days).map((r) => [r, 'urges'] as const)];

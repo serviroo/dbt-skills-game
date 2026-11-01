@@ -533,6 +533,12 @@ dq-word {
 .dq-skill dq-word {
   width: auto;
 }
+/* the hyphen drawn in Jost, set so it never makes its line taller: Bodoni Moda's hyphen is a hairline that hangs past
+   the word, where it can't be seen */
+dq-shy {
+  font-family: var(--font-ui);
+  line-height: 0;
+}
 dq-shy::before {
   content: '\AD';
 }
