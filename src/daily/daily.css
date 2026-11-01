@@ -2725,6 +2725,11 @@ textarea.dq-input {
   .dq[data-screen='safe'] .dq-sz-foot.is-top {
     top: 0;
   }
+  /* a button's words already say what it does, so its icon steps aside and its words keep one line where they fit: two
+     lines at 16 px, with the phone's text at 200%, are taller than the room above the keyboard */
+  .dq-sz .dq-btn-ic {
+    display: none;
+  }
 }
 /* Copy your lists: the preview reads like the lists, wraps on a phone and stays selectable */
 .dq-lists-row {

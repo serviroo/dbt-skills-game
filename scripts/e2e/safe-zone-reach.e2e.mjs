@@ -4,7 +4,8 @@
 // does), and with the phone's own text at 200% (each word twice its size in a page as wide as before, see scaleText).
 // Each phone walks the Safe Zone twice, "Talk to someone now" under the frame and then, after "I might not be
 // safe", above it, through Give me a moment (its ring whole too), cool air counting down, every STOP line, each list with
-// "Add one" and "Copy your lists" open, Talk for three countries (many lines, notes under the buttons, none), the empty
+// "Add one" and "Copy your lists" open, then "Edit the list" on, an entry open to change and one removed with Undo in its
+// place, Talk for three countries (many lines, notes under the buttons, none), the empty
 // lists, and the Sound panel opened from the top bar (there only its own controls, the bar's buttons and where it sits
 // are checked, since it covers part of the page while open). In each state:
 //   audit       layout-fit's checks: nothing scrolls sideways or is cut off at the side, every button, link and field
@@ -111,7 +112,7 @@ const unreachable = (page, { typing = false, sound = false, controls = null } = 
     if (typing) {
       const field = document.activeElement;
       if (!field?.matches('.dq-safezone input')) return [...out, `focus is on ${field?.tagName.toLowerCase()}, not the field being typed in`];
-      const save = [...field.closest('.dq-addrow, .dq-person-add').querySelectorAll('button')].find((b) => b.textContent.trim() === 'Save');
+      const save = [...field.closest('.dq-addrow, .dq-person-add, .dq-entry-edit').querySelectorAll('button')].find((b) => b.textContent.trim() === 'Save');
       for (const e of [field, save]) {
         to(e, 'nearest');
         await frame();
@@ -205,6 +206,21 @@ function walk(phone, zoom, { font = false } = {}) {
       await tap(page, 'Copy your lists');
       await page.locator('.dq-lists-copy:not(.is-hidden)').waitFor();
       await look(page, `${label}, ${add} and Copy your lists open`);
+      // a list with entries: Edit the list on, an entry's words open to change (typed with the keyboard up), and Undo in
+      // the place of one removed
+      if (!(await page.locator('.dq-sz-body .dq-entry-flip').isVisible())) return;
+      await tap(page, 'Edit the list');
+      await look(page, `${label}, Edit the list on`);
+      await page.locator('.dq-sz-body .dq-entry-tools [aria-label^="Edit "]').first().evaluate((b) => b.click());
+      await page.locator('.dq-sz-body .dq-entry-edit').waitFor();
+      await look(page, `${label}, an entry open to change`);
+      if (typing) await keyboard(page, `${label}, an entry open to change`);
+      await tap(page, 'Cancel');
+      await page.locator('.dq-sz-body .dq-entry-tools [aria-label^="Remove "]').first().evaluate((b) => b.click());
+      await page.locator('.dq-sz-body .dq-entry-gone').waitFor();
+      await look(page, `${label}, one removed`);
+      await page.locator('.dq-sz-body .dq-entry-gone .dq-btn').evaluate((b) => b.click());
+      await tap(page, 'Done editing');
     };
     // from breathing to the last screen, the way the player goes
     const onward = async (page, top) => {
