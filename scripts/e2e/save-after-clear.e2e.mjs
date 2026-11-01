@@ -10,8 +10,13 @@
 //   late-save-while-away      a save from before a clear lands while an open copy is away and hears nothing: back in
 //                             view, that copy writes its game back over it, so a reload straight after keeps everything
 //   late-same-names           a copy held up as it stores its names again, unchanged, through a whole clear in another
-//                             tab: once it hears of the clear the names go again, and a new game's own write stays
+//                             tab: the new game never takes them into its save, once the copy hears of the clear the
+//                             names go again, and the new game's own write stays
 //   late-story-words          the same with a copy held up as it mirrors a chapter's words beside the save
+//   records-from-before-a-clear  names, skill answers, story words and a drawing's removal stored beside the save carry
+//                             the same note: ones noted with an earlier clear are never read, and go
+//   records-without-the-note  the same records from a build before the note, on a device that has cleared, are read
+//                             whole
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -81,10 +86,11 @@ async function heldThroughClear(h, ctx, page, pattern, start, own) {
   await next.goto(h.server.url + '/?mute');
   await next.waitForFunction(() => !!window.__daily?.store, null, { timeout: 30000 });
   const ownKey = await next.evaluate(own);
-  await clearer.evaluate((p) => {
-    window.__landed = [];
-    window.addEventListener('storage', (e) => e.newValue !== null && new RegExp(p).test(e.key) && window.__landed.push(e.key));
-  }, pattern);
+  for (const p of [clearer, next])
+    await p.evaluate((p) => {
+      window.__landed = [];
+      window.addEventListener('storage', (e) => e.newValue !== null && new RegExp(p).test(e.key) && window.__landed.push(e.key));
+    }, pattern);
   let reloaded = false;
   page.once('load', () => (reloaded = true));
   await cdp.send('Debugger.resume');
@@ -94,12 +100,68 @@ async function heldThroughClear(h, ctx, page, pattern, start, own) {
   for (const end = Date.now() + 15000; !shown && Date.now() < end; await h.sleep(200))
     shown = reloaded ? 'reloaded' : ((await page.evaluate(async () => (await import('/src/core/cleared.ts')).cleared()).catch(() => false)) && 'cleared');
   const [late] = await clearer.evaluate(() => window.__landed);
-  const [lateNow, ownNow] = await next.evaluate(([a, b]) => [a ? localStorage.getItem(a) : null, localStorage.getItem(b)], [late, ownKey]);
-  return { landed: !!late, shown, late: lateNow, own: ownNow };
+  // the new game's own listeners for the late write ran before its test listener heard it
+  if (late) await next.waitForFunction(() => window.__landed.length > 0, null, { timeout: 5000 }).catch(() => undefined);
+  const [lateNow, ownNow, save] = await next.evaluate(([a, b, s]) => [a ? localStorage.getItem(a) : null, localStorage.getItem(b), localStorage.getItem(s)], [late, ownKey, h.SAVE]);
+  return { landed: !!late, shown, late: lateNow, own: ownNow, save };
 }
 
 const stored = (page, key) => page.evaluate((k) => JSON.parse(localStorage.getItem(k) ?? 'null'), key);
 const held = (page) => page.evaluate(() => ({ events: window.__daily.store.state.events.map((e) => e.id), name: window.__daily.store.state.settings.playerName, motion: window.__daily.store.state.settings.motion, reduced: window.__daily.reduced() }));
+
+/**
+ * A device that cleared (k2.def) holding a save from since, and beside it the names, a skill's answers, a chapter's words
+ * and a drawing's removal, each noted with `mark` (an earlier clear, or none: a build from before the note). Noted with
+ * an earlier clear, none of them is read and each goes; with no note, each is read whole.
+ */
+async function besideRecords(h, mark) {
+  const { open, expect, SEEN, SAVE, YOU } = h;
+  const note = (o) => (mark === undefined ? o : { ...o, afterClear: mark });
+  const keys = {
+    you: YOU,
+    draft: `${SAVE}.skill-draft.seedload.clear-sight.`,
+    words: `${SAVE}.story.live.seedload.seed-page`,
+    gone: `${SAVE}.art.gone.seed-drawing`,
+  };
+  const { ctx, page, errors } = await open({
+    'dbt.app.v1': SEEN,
+    [CLEARED]: 'k2.def',
+    [SAVE]: JSON.stringify({ v: 1, created: t, events: OLD.events, afterClear: 'k2.def' }),
+    [keys.you]: JSON.stringify(note({ name: 'Robin', companion: 'Pip', nameAt: t, companionAt: t })),
+    [keys.draft]: JSON.stringify(note({ skill: 'clear-sight', part: '', at: 3, answers: { fact: 'Skill words' }, typed: {}, leads: {}, done: [1, 2], t })),
+    [keys.words]: JSON.stringify(note({ chapter: 'seed-page', text: 'Page words', bases: [], t })),
+    [keys.gone]: JSON.stringify(note({ rev: 'r1', at: t, tab: 'closed-tab' })),
+  });
+  try {
+    await h.reachHub(page);
+    const read = await page.evaluate(async ({ SAVE, keys }) => {
+      const { readYou } = await import('/src/core/you.ts');
+      const { newestDraft } = await import('/src/daily/skilldraft.ts');
+      const { StoryStore } = await import('/src/daily/storystore.ts');
+      const { artStore } = await import('/src/daily/artstore.ts');
+      const st = window.__daily.store.state.settings;
+      return {
+        names: [readYou()?.name ?? null, st.playerName, st.companion],
+        draft: newestDraft(SAVE, 'clear-sight', '')?.draft.answers.fact ?? null,
+        words: new StoryStore(`${SAVE}.story`, `${SAVE}.story.live`).lives('seed-page').map((l) => l.text),
+        gone: Object.keys(artStore(SAVE).gone()),
+        stored: Object.fromEntries(Object.entries(keys).map(([k, key]) => [k, localStorage.getItem(key)])),
+        save: localStorage.getItem(SAVE),
+      };
+    }, { SAVE, keys });
+    if (mark !== undefined) {
+      expect(JSON.stringify(read.names) === JSON.stringify([null, '', '']) && !/Robin|Pip/.test(read.save), 'names stored before the clear were read: ' + JSON.stringify(read.names));
+      expect(read.draft === null && !read.words.length && !read.gone.includes('seed-drawing'), 'a record stored before the clear was read: ' + JSON.stringify(read));
+      expect(Object.values(read.stored).every((v) => v === null), 'a record stored before the clear is still kept: ' + JSON.stringify(read.stored));
+    } else {
+      expect(JSON.stringify(read.names) === JSON.stringify(['Robin', 'Robin', 'Pip']), 'names from before the note were not read whole: ' + JSON.stringify(read.names));
+      expect(read.draft === 'Skill words' && read.words[0] === 'Page words' && read.gone.includes('seed-drawing'), 'a record from before the note was not read: ' + JSON.stringify(read));
+    }
+    expect(!errors.length, errors.join('\n'));
+  } finally {
+    await ctx.close();
+  }
+}
 
 export const scenarios = {
   async 'old-save-never-cleared'(h) {
@@ -197,6 +259,7 @@ export const scenarios = {
         return 'dbt.lantern.v1.moment-length';
       });
       expect(r.landed, 'the held-up names never landed after the clear, so this checks nothing');
+      expect(!/Robin|Pip/.test(r.save ?? ''), 'the new game took the names stored late into its save: ' + r.save);
       expect(r.shown && r.late === null, 'names stored again, unchanged, by a copy held up through the clear are still there: ' + JSON.stringify(r));
       expect(r.own === '3', 'the new game lost what it stored: ' + JSON.stringify(r));
       expect(!errors.length, errors.join('\n'));
@@ -227,6 +290,9 @@ export const scenarios = {
       await ctx.close();
     }
   },
+
+  'records-from-before-a-clear': (h) => besideRecords(h, 'k1.abc'),
+  'records-without-the-note': (h) => besideRecords(h, undefined),
 
   async 'crystal-leaves-clear-out'(h) {
     const { open, expect, SEEN, SAVE } = h;

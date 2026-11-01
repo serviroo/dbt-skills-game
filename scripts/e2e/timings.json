@@ -522,6 +522,8 @@
   "radio-keys": 40,
   "rank-marker-stays-on-tap": 3,
   "recording-across-pauses-has-no-hole": 11,
+  "records-from-before-a-clear": 4,
+  "records-without-the-note": 4,
   "reduced-motion-art": 14,
   "reduced-motion-diary": 19,
   "reduced-motion-draw": 14,
