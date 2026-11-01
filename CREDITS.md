@@ -55,5 +55,7 @@ or outside assets went into them.
   particles), built from three.js primitives and shaders.
 - All 2D art: icons, the moth, the Night Watch cards, the pebble, the moonflower, the flourish and the app icons and
   splash screens (`scripts/icons.mjs`).
+- The open hands in Willing Hands and Radical Acceptance: a stylised hand modelled in code as a smooth shape round its
+  bones, meshed when the scene first opens and posed joint by joint (`src/scene/vignettes/scenes/hands.ts`).
 - All sound and music, synthesised live with Web Audio (`src/audio/`). There are no sample files.
 - All writing.
