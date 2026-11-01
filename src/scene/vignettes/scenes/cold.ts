@@ -68,8 +68,11 @@ function lastGust(t: number) {
   while (k >= 0 && gustOf(k).at > t) k--;
   return k;
 }
-/** reduced motion shows the water settled again after the second breath, the moon round on it, the last of the mist fading */
-const STILL_T = gustOf(1).at + 7.5;
+/**
+ * reduced motion shows the water settled again after the second breath, its mist just gone, the moon round on it: the
+ * mist's wisps come from noise that differs from one GPU to the next, and on some a fading wisp lies over the moon
+ */
+const STILL_T = gustOf(1).at + MIST_AT + MIST_LIFE + 0.1;
 
 const smooth = (a: number, b: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));

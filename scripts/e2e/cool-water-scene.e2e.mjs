@@ -10,7 +10,7 @@
 // and the Safe Zone's cool choice never has a 3D scene.
 import sharp from 'sharp';
 import { screenshot } from './harness.mjs';
-import { after, DESK, drawn, flat, inStep, keepsTime, live, looks, moonOf, pair, PHONE, sceneShot, scenes, seed, showsStopped, SIDE, slowGpu, toSkill, until } from './skill-scenes.e2e.mjs';
+import { after, DESK, drawn, flat, inStep, keepsTime, live, looks, losesContext, moonOf, openStopped, pair, PHONE, sceneShot, scenes, seed, showsStopped, SIDE, slowGpu, toSkill, until } from './skill-scenes.e2e.mjs';
 
 const SMALL = { width: 320, height: 568 };
 /** the sizes reduced motion, a lost context and a slow GPU are checked at */
@@ -161,8 +161,9 @@ export const scenarios = {
   },
 
   /**
-   * reduced motion holds one still frame with the moon on the water, from the device's setting or from Motion set in another open copy while the
-   * water moves, and the scene follows at once; Full moves it again in step with the countdown
+   * reduced motion holds one still frame with the moon round on the water and no mist up, from the device's setting or
+   * from Motion set in another open copy while the water moves, and the scene follows at once; Full moves it again in
+   * step with the countdown
    */
   async 'cool-water-still'(h) {
     for (const [tag, vp] of SIZES) {
@@ -178,6 +179,8 @@ export const scenarios = {
         await h.sleep(2000);
         const b = await scenes(page);
         h.expect(a.last.kind === 'cold' && a.last.still && b.frames === a.frames && b.frames <= 3, `reduced motion ${tag}: not one still frame (${a.frames} -> ${b.frames}, ${JSON.stringify(a.last)})`);
+        // mist is drawn from noise that differs between GPUs, so none may be up where the moon must show round on all
+        h.expect(b.last.probe.mist === 0, `reduced motion ${tag}: mist is up over the water (${b.last.probe.mist})`);
         await moonShows(h, page, `still ${tag}`);
         await h.shot(page, `cool-still-${tag}`);
         h.expect(!errors.length, errors.join('\n'));
@@ -214,29 +217,13 @@ export const scenarios = {
   async 'cool-water-context-loss'(h) {
     for (const [tag, vp] of SIZES) {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
-      await toCool(h, page);
-      await live(h, page, `lost ${tag}`);
-      await pick(page, 'Cool air');
-      await page.evaluate(() => {
-        window.__lose = document.querySelector('.dq-scene canvas').getContext('webgl2').getExtension('WEBGL_lose_context');
-        window.__lose.loseContext();
-      });
-      await page.locator('.dq-timer-stage:not(.is-scene-live)').waitFor({ timeout: 5000 });
-      await h.sleep(800);
-      const a = await scenes(page);
-      await h.sleep(800);
-      const b = await scenes(page);
-      h.expect(a.live === 0 && b.frames === a.frames, `lost ${tag}: the scene kept drawing (${a.frames} -> ${b.frames})`);
-      const shown = await flat(page);
-      h.expect(shown.length > 1 && shown.every(Boolean), `lost ${tag}: the flat bowl did not come back (${JSON.stringify(shown)})`);
-      await h.shot(page, `cool-lost-${tag}`);
-      await page.evaluate(() => window.__lose.restoreContext());
-      await live(h, page, `restored ${tag}`);
-      await until(page, (n) => window.__scenes.frames > n, b.frames + 10);
-      const c = await pair(page);
-      h.expect(c.s.live === 1 && c.s.contexts === 1 && c.s.frames > b.frames + 10, `restored ${tag}: ${JSON.stringify(c.s)}`);
-      inStep(h, c, `restored ${tag}`);
-      await drawn(h, page, `restored ${tag}`);
+      // the choice's 30 s outlast the check
+      const reach = async (h, page) => {
+        await toCool(h, page);
+        await pick(page, 'Cool air');
+      };
+      await openStopped(h, page, reach, `lost ${tag}`);
+      await losesContext(h, page, tag, `cool-lost-${tag}`);
       h.expect(!errors.length, errors.join('\n'));
       await ctx.close();
     }
