@@ -140,6 +140,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   // the screen takes only the part above the keyboard and "Talk to someone now" pins at its top with Leave, Lights up
   // and Sound (daily.css), until the keyboard goes away
   const vv = window.visualViewport;
+  const vvProps = ['--vv-top', '--vv-left', '--vv-w', '--vv-h'];
   const wide = window.matchMedia('(min-width: 540px)');
   let typing = false;
   // the tallest the visual viewport has been at each width it has had while typing: the room there with the keyboard
@@ -158,7 +159,8 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   // the screen was held then
   const moved = new Map<number, { low: number; room: number }>();
   let up = false;
-  const held = () => screen.orientation?.type.split('-')[0];
+  // Safari before 16.4 says how the phone is held only as window.orientation
+  const held = () => screen.orientation?.type.split('-')[0] ?? (Math.abs(window.orientation) === 90 ? 'landscape' : 'portrait');
   let last = vv ? Math.round(vv.width * vv.scale) : 0;
   let lastHeld = held();
   if (vv) tallest.set(last, vv.height * vv.scale);
@@ -171,15 +173,18 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   /**
    * Talk goes back under the frame, or while typing into the top bar's row between Leave and Lights up, where its words
    * fit on one line held sideways, else just after the bar: a row of its own upright, a column at the side held
-   * sideways. Focus on it stays.
+   * sideways. Held sideways is by the part that shows: 540px wide or more, or the phone held that way, pinched in or
+   * at 200% zoom too, where it's narrower but still too short for a row (is-sideways, daily.css). Focus on it stays.
    */
   const pin = () => {
     const had = document.activeElement === talkLink;
+    const side = typing && !!vv && (vv.width >= 540 || held() === 'landscape');
+    app.root.classList.toggle('is-sideways', side);
     if (!typing) foot.append(talkLink);
     else {
-      if (wide.matches) lightBtn.before(talkLink);
+      if (side) lightBtn.before(talkLink);
       const words = talkLink.lastElementChild!;
-      if (!wide.matches || words.getBoundingClientRect().height > 1.5 * parseFloat(getComputedStyle(words).lineHeight)) el.parentElement!.before(talkLink);
+      if (!side || words.getBoundingClientRect().height > 1.5 * parseFloat(getComputedStyle(words).lineHeight)) el.parentElement!.before(talkLink);
     }
     if (had) talkLink.focus({ preventScroll: true });
   };
@@ -223,6 +228,8 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     el.classList.toggle('is-short', on && vv.height <= 230);
     if (on) {
       app.root.style.setProperty('--vv-top', `${vv.offsetTop}px`);
+      app.root.style.setProperty('--vv-left', `${vv.offsetLeft}px`);
+      app.root.style.setProperty('--vv-w', `${vv.width}px`);
       app.root.style.setProperty('--vv-h', `${vv.height}px`);
     }
     if (on === typing) {
@@ -231,7 +238,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     }
     typing = on;
     app.root.classList.toggle('is-typing', on);
-    if (!on) for (const v of ['--vv-top', '--vv-h']) app.root.style.removeProperty(v);
+    if (!on) for (const v of vvProps) app.root.style.removeProperty(v);
     pin();
     typedIn()?.scrollIntoView({ block: 'nearest' });
   };
@@ -244,7 +251,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     typing = false;
     pin();
     app.root.classList.remove('is-typing');
-    for (const v of ['--vv-top', '--vv-h']) app.root.style.removeProperty(v);
+    for (const v of vvProps) app.root.style.removeProperty(v);
   };
 
   const nextOf = (at: At) => FLOW[Math.min(FLOW.length - 1, FLOW.indexOf(at) + 1)];
