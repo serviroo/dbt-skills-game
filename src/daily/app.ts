@@ -26,6 +26,7 @@ export type Route =
   | { name: 'shadows' }
   | { name: 'library' }
   | { name: 'diary' }
+  | { name: 'print' }
   | { name: 'comfort' }
   | { name: 'settings' }
   | { name: 'art' }

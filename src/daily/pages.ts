@@ -21,7 +21,7 @@ import { fishSVG, lurkCatSVG, seaweedSVG, sharkFinSVG, sharkTailSVG } from './ar
 import { Slime } from './bubbles';
 import { inventorySection, rosterSection, brambleNap } from './roster';
 import { wardrobePanel } from './wardrobe';
-import { DEFAULT_COMPANION, DEFAULT_NAME } from '../core/you';
+import { DEFAULT_COMPANION, DEFAULT_NAME, readYou } from '../core/you';
 import { BESIDE, READ_SIZES, type ReadSize } from '../core/stored-names';
 import { mayMentionTherapist } from '../core/session';
 import { canWrite, cleared, clearStatus, holdAll, onClearStatus, write } from '../core/cleared';
@@ -510,6 +510,10 @@ const rowsFor = (s: State, kind: 'emotions' | 'urges', days: string[]) => {
   for (const d of days) for (const [k, v] of Object.entries(s.diary[d]?.[kind] ?? {})) if (v !== null && !out.includes(k)) out.push(k);
   return out;
 };
+// how far back the diary opens: a week, or to the day the save or its diary began if that is earlier
+const firstDay = (s: State, today: string) => [addDays(today, -6), dayKey(s.created), ...Object.keys(s.diary)].reduce((a, b) => (b < a ? b : a));
+/** A skill's use on a day, as the diary card words it. */
+const useWord = (code: number | 'p') => (code === 5 ? 'helped' : code === 4 ? "didn't help this time" : 'practised');
 const NOT_SAVING = "Kept for this visit. This device isn't saving right now.";
 
 /** Plain-text diary card, laid out like the UW DBT diary card, trimmed to what the player enters. */
@@ -561,8 +565,7 @@ export function diaryScreen(app: App, _route: Route, visit: Visit): ScreenOut {
   const st = app.store;
   const today = st.today();
   const s = st.state;
-  // how far back Earlier day goes: a week, or to the day the save or its diary began if that is earlier
-  const earliest = () => [addDays(today, -6), dayKey(s.created), ...Object.keys(s.diary)].reduce((a, b) => (b < a ? b : a));
+  const earliest = () => firstDay(s, today);
   let day = visit.again && typeof visit.kept === 'string' && visit.kept < today && visit.kept >= earliest() ? visit.kept : today;
   const draftOf = (d: string) => {
     const e = s.diary[d];
@@ -663,7 +666,7 @@ export function diaryScreen(app: App, _route: Route, visit: Visit): ScreenOut {
     skillsHead.textContent = day === today ? 'Skills today' : 'Skills that day';
     skillsHead.classList.toggle('is-hidden', !used.length && day !== today);
     return used.length
-      ? h('ul', { class: 'dq-skillsused' }, used.map((id) => h('li', { 'data-item': id }, h('span', { text: typo(`${SKILL[id].sl} (${SKILL[id].real})`) }), h('span', { class: 'dq-code', text: codes[id] === 5 ? 'helped' : codes[id] === 4 ? "didn't help this time" : 'practised' }))))
+      ? h('ul', { class: 'dq-skillsused' }, used.map((id) => h('li', { 'data-item': id }, h('span', { text: typo(`${SKILL[id].sl} (${SKILL[id].real})`) }), h('span', { class: 'dq-code', text: useWord(codes[id]) }))))
       : day === today ? p('None yet today. That is fine.', 'dq-small') : null;
   }, () => null);
   const notePrompt = () => (day === today ? 'A note for today (optional)' : 'A note for this day (optional)');
@@ -745,6 +748,7 @@ export function diaryScreen(app: App, _route: Route, visit: Visit): ScreenOut {
         const r = await shareOrSave(refresh(), `diary-card-${today}.txt`, 'text/plain');
         status.textContent = r === 'saved' ? 'Saved as a text file.' : r === 'shared' ? 'Shared.' : '';
       }, { kind: 'quiet', ic: 'export' }),
+      btn('Print a week', () => app.go({ name: 'print' }), { kind: 'quiet', ic: 'print' }),
       status,
     ),
   );
@@ -877,6 +881,104 @@ export function diaryScreen(app: App, _route: Route, visit: Visit): ScreenOut {
       document.removeEventListener('visibilitychange', onHide);
     },
   };
+}
+
+// ---------------- Print a week ----------------
+/** "25 Oct to 31 Oct 2026", with both years when the week crosses into a new one. */
+const span = (from: string, to: string) => {
+  const a = dayParts(from), b = dayParts(to);
+  return `${a.d} ${a.mon}${a.y === b.y ? '' : ` ${a.y}`} to ${b.d} ${b.mon} ${b.y}`;
+};
+
+/** A week of the diary card as one clean page: only what was entered, the same on screen and on paper. */
+function weekPaper(st: Store, days: string[]) {
+  const s = st.state;
+  const groups = (['emotions', 'urges'] as const).map((kind) => ({ kind, rows: rowsFor(s, kind, days) })).filter((g) => g.rows.length);
+  const table = h(
+    'table',
+    { class: 'dq-paper-table' },
+    h('thead', {}, h('tr', {}, h('td', {}), days.map((d) => h('th', { scope: 'col' }, h('span', { text: dayParts(d).dow }), h('span', { text: String(dayParts(d).d) }))))),
+    groups.map(({ kind, rows }) =>
+      h(
+        'tbody',
+        {},
+        h('tr', {}, h('th', { scope: 'rowgroup', colspan: days.length + 1, class: 'dq-paper-group', text: kind === 'emotions' ? 'Feelings, 0 to 5' : 'Urges, 0 to 5' })),
+        rows.map((r) =>
+          h(
+            'tr',
+            {},
+            h('th', { scope: 'row', text: r }),
+            days.map((d) => {
+              const v = s.diary[d]?.[kind][r];
+              return h('td', { text: v === undefined || v === null ? '' : String(v) });
+            }),
+          ),
+        ),
+      ),
+    ),
+  );
+  const perDay = days.map((d) => {
+    const codes = st.skillCodes(d);
+    const used = Object.keys(codes).filter(isSkillId).map((id) => `${SKILL[id].real} (${useWord(codes[id])})`);
+    const note = s.diary[d]?.note;
+    return h('li', {}, h('span', { class: 'dq-paper-day', text: dayLabel(d) }), used.length ? h('p', { text: typo(`Skills: ${used.join(', ')}`) }) : null, note ? h('p', { text: `Note: ${note}` }) : null);
+  });
+  return [
+    h('h2', { class: 'dq-paper-t', text: 'DBT diary card' }),
+    readYou()?.name ? h('p', { class: 'dq-paper-meta', text: typo('Name: {name}') }) : null,
+    h('p', { class: 'dq-paper-meta', text: span(days[0], days[days.length - 1]) }),
+    groups.length ? h('div', { class: 'dq-paper-scroll', role: 'region', tabindex: '0', 'aria-label': 'Ratings, day by day' }, table) : null,
+    h('h3', { class: 'dq-paper-h', text: 'Skills and notes' }),
+    h('ol', { class: 'dq-paper-days' }, perDay),
+    h('p', { class: 'dq-paper-key', text: 'Ratings run from 0 to 5. A blank was not rated, which is not the same as 0.' }),
+  ];
+}
+
+export function printScreen(app: App, _route: Route, visit: Visit): ScreenOut {
+  const st = app.store;
+  const s = st.state;
+  // the week ends on this day: today's week first, and Back to this visit comes back to the week it showed. Today is read
+  // again each time, so a day that turns with the page open (counted as the app comes back into view) is in reach of
+  // Later week and This week, and the page stays on the week it shows
+  const opened = st.today();
+  let end = visit.again && typeof visit.kept === 'string' && visit.kept <= opened && visit.kept >= firstDay(s, opened) ? visit.kept : opened;
+  const week = () => Array.from({ length: 7 }, (_, i) => addDays(end, i - 6));
+  // drawn again only when what it shows changes, so a change in another open copy keeps the player's place in it; one
+  // that takes the ratings away hands their focus to Print
+  const paper = redrawn(() => panel({ tag: 'section', cls: 'dq-paper', label: 'The page that prints' }, weekPaper(st, week())), () => el.querySelector<HTMLElement>('.dq-paper-scroll') ?? printBtn);
+  const earlier = btn('Earlier week', () => openWeek(addDays(end, -7)), { kind: 'link', ic: 'back' });
+  const later = btn('Later week', () => {
+    const next = addDays(end, 7), today = st.today();
+    openWeek(next < today ? next : today);
+  }, { kind: 'link', ic: 'chev', cls: 'dq-btn--icend' });
+  const thisWeek = btn('This week', () => openWeek(st.today()), { kind: 'link' });
+  const printBtn = btn('Print or save as PDF', () => window.print(), { kind: 'primary', ic: 'print' });
+  const picker = panel(
+    { title: span(addDays(end, -6), end), ic: icon('diary'), cls: 'dq-printweek' },
+    h('div', { class: 'dq-actions dq-daynav' }, earlier, later, thisWeek),
+    p('It only leaves this device if you print it or send the file.', 'dq-text'),
+    h('div', { class: 'dq-actions' }, printBtn),
+  );
+  const title = picker.querySelector<HTMLElement>('.dq-chip-t')!;
+  title.setAttribute('aria-live', 'polite');
+  const showWeek = () => {
+    const today = st.today();
+    const was = document.activeElement;
+    paper.update();
+    earlier.classList.toggle('is-hidden', addDays(end, -6) <= firstDay(s, today));
+    for (const e of [later, thisWeek]) e.classList.toggle('is-hidden', end === today);
+    // focus on a button the new week hides moves to the one beside it, or to Print when no week button is left
+    if (was instanceof HTMLElement && was.classList.contains('is-hidden')) ([earlier, later].find((e) => !e.classList.contains('is-hidden')) ?? printBtn).focus({ preventScroll: true });
+  };
+  const openWeek = (d: string) => {
+    end = d;
+    title.textContent = span(addDays(end, -6), end);
+    showWeek();
+  };
+  showWeek();
+  const off = st.onChange(showWeek);
+  const el = h('div', { class: 'dq-page dq-print' }, pageHead('Print a week', "A clean page of one week's diary card, with only what you entered."), picker, paper.node);
+  return { el, title: 'Print a week', mode: 'sub', keep: () => end, leave: () => off() };
 }
 
 // ---------------- Comfort inventory ----------------
