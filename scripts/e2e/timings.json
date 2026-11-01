@@ -265,7 +265,7 @@
   "glow-every-step": 30,
   "glow-no-webgl": 13,
   "glow-read-again": 16,
-  "glow-scene": 34,
+  "glow-scene": 56,
   "glow-slow-gpu": 17,
   "glow-still": 33,
   "glsl-check-windows-paths": 1,

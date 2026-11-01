@@ -9,12 +9,14 @@
 // step; a slow GPU gets fewer pixels and keeps moving. With no WebGL the flat Lantern shows, its light pulses and its
 // mist drifts, and the skill still finishes and counts.
 import sharp from 'sharp';
-import { countdownContrast, DESK, drawn, flat, home, inStep, keepsTime, live, looks, pair, PHONE, sceneShot, scenes, seed, SIDE, slowGpu, toSkill, until } from './skill-scenes.e2e.mjs';
+import { countdownContrast, DESK, drawn, flat, home, inStep, keepsTime, live, looks, losesContext, moreTime, openStopped, pair, PHONE, sceneShot, scenes, seed, SIDE, slowGpu, toSkill, until } from './skill-scenes.e2e.mjs';
 import { screenshot } from './harness.mjs';
 
 const SMALL = { width: 320, height: 568 };
 /** the sizes reduced motion, a lost context and a slow GPU are checked at */
 const SIZES = [['phone', PHONE], ['small', SMALL], ['side', SIDE]];
+/** one swell of the light, in seconds (SWELL in src/scene/vignettes/scenes/glow.ts): dimmest at its start */
+const SWELL = 10;
 
 /**
  * Home, then a glow timer (Body scan's feet, which runs at once, by default): through the skill's intro and Begin, or
@@ -169,25 +171,23 @@ export const scenarios = {
   async 'glow-scene'(h) {
     for (const [tag, vp] of [...SIZES, ['desk', DESK]]) {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
-      await page.clock.install();
-      await page.reload();
-      await toGlow(h, page);
-      await live(h, page, `glow ${tag}`);
-      await h.pauseClock(page);
+      await openStopped(h, page, toGlow, `glow ${tag}`);
+      // more time, so the countdown outlasts the swells watched, the look at the light's brightest and the freeze
+      for (let i = 0; i < 2; i++) await page.locator('.dq-timer').getByRole('button', { name: /^\+\d+ s$/ }).click();
       await looks(h, page, tag, 'glow', vp, undefined, { stopped: true });
       if (tag !== 'side' && tag !== 'desk') {
-        // two swells' worth, from wherever the light is now
-        const seen = await swellOver(page, 12000);
+        // two and a half swells: two whole tops with the rise to each and the fall from it, wherever the light starts
+        const seen = await swellOver(page, 2.5 * SWELL * 1000);
         const sw = swellsIn(seen);
         const said = `glow ${tag}: ${JSON.stringify(sw)}, ${seen.map((s) => `${s.e.toFixed(1)}s ${s.b}`).join(' ')}`;
-        h.expect(sw.peaks.length >= 1, `${said}: the light never swelled`);
+        h.expect(sw.peaks.length >= 2, `${said}: the light did not swell twice`);
         h.expect(sw.peaks.every((e, i) => !i || e - sw.peaks[i - 1] >= 4), `${said}: it swells more than once every 4 s`);
         h.expect(sw.range >= 3 && sw.jump <= sw.range * 0.3, `${said}: the swell is not a slow, visible change`);
         console.log(`  swell ${said}`);
       }
       // at its brightest: half a swell on from its dimmest
       const e = (await scenes(page)).last.e;
-      await page.clock.runFor(Math.round(((5 - (e % 10) + 10) % 10) * 1000) + 100);
+      await page.clock.runFor(Math.round(((SWELL / 2 - (e % SWELL) + SWELL) % SWELL) * 1000) + 100);
       const s = await scenes(page);
       const l = lightOf(await sceneShot(page), s.last.probe);
       softLight(h, l, `glow ${tag} at ${s.last.e.toFixed(1)} s`);
@@ -205,14 +205,10 @@ export const scenarios = {
   async 'glow-read-again'(h) {
     for (const [tag, vp] of SIZES) {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
-      await page.clock.install();
-      await page.reload();
-      await toReadAgain(h, page);
-      await live(h, page, `read again ${tag}`);
-      await h.pauseClock(page);
+      await openStopped(h, page, toReadAgain, `read again ${tag}`);
       await drawn(h, page, `read again ${tag}`);
       const e = (await scenes(page)).last.e;
-      await page.clock.runFor(Math.round(((5 - (e % 10) + 10) % 10) * 1000) + 100);
+      await page.clock.runFor(Math.round(((SWELL / 2 - (e % SWELL) + SWELL) % SWELL) * 1000) + 100);
       const big = page.locator('.dq-timer-big');
       const seen = await big.evaluate((el) => {
         const r = el.getBoundingClientRect();
@@ -274,6 +270,7 @@ export const scenarios = {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
       await toGlow(h, page);
       await live(h, page, `motion ${tag}`);
+      await moreTime(page);
       const set = await otherCopy(h, ctx, page, errors);
       const moving = async (where) => {
         const from = await scenes(page);
@@ -290,6 +287,8 @@ export const scenarios = {
       await h.frames(page, 60);
       const b = await scenes(page);
       h.expect(a.last.still && b.frames === a.frames, `motion ${tag}, Reduced in another copy: not one still frame (${a.frames} -> ${b.frames})`);
+      // more time keeps the countdown running for Full to move it again
+      await page.locator('.dq-timer').getByRole('button', { name: /^\+\d+ s$/ }).click();
       await set('Full');
       await moving(`motion ${tag}, Full again`);
       h.expect(!errors.length, errors.join('\n'));
@@ -301,28 +300,8 @@ export const scenarios = {
   async 'glow-context-loss'(h) {
     for (const [tag, vp] of SIZES) {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
-      await toGlow(h, page);
-      await live(h, page, `lost ${tag}`);
-      await page.evaluate(() => {
-        window.__lose = document.querySelector('.dq-scene canvas').getContext('webgl2').getExtension('WEBGL_lose_context');
-        window.__lose.loseContext();
-      });
-      await page.locator('.dq-timer-stage:not(.is-scene-live)').waitFor({ timeout: 5000 });
-      await h.sleep(800);
-      const a = await scenes(page);
-      await h.sleep(800);
-      const b = await scenes(page);
-      h.expect(a.live === 0 && b.frames === a.frames, `lost ${tag}: the scene kept drawing (${a.frames} -> ${b.frames})`);
-      const shown = await flat(page);
-      h.expect(shown.length > 1 && shown.every(Boolean), `lost ${tag}: the flat Lantern did not come back (${JSON.stringify(shown)})`);
-      await h.shot(page, `glow-lost-${tag}`);
-      await page.evaluate(() => window.__lose.restoreContext());
-      await live(h, page, `restored ${tag}`);
-      await until(page, (n) => window.__scenes.frames > n, b.frames + 10);
-      const c = await pair(page);
-      h.expect(c.s.live === 1 && c.s.contexts === 1 && c.s.frames > b.frames + 10, `restored ${tag}: ${JSON.stringify(c.s)}`);
-      inStep(h, c, `restored ${tag}`);
-      await drawn(h, page, `restored ${tag}`);
+      await openStopped(h, page, toGlow, `lost ${tag}`);
+      await losesContext(h, page, tag, `glow-lost-${tag}`);
       h.expect(!errors.length, errors.join('\n'));
       await ctx.close();
     }
