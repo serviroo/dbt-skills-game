@@ -192,12 +192,16 @@ export class Stage {
   resize() {
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
-    this.width = w;
-    this.height = h;
-    this.renderer.setPixelRatio(this.dpr);
-    this.renderer.setSize(w, h, false);
-    this.composer.setSize(w, h, false);
-    this.camera.aspect = w / h;
+    // a screen with no area (a window sized to nothing) has no shape to frame for: the stage keeps its last size, and the
+    // camera that size's aspect, until it has one again
+    if (w > 0 && h > 0) {
+      this.width = w;
+      this.height = h;
+      this.renderer.setPixelRatio(this.dpr);
+      this.renderer.setSize(w, h, false);
+      this.composer.setSize(w, h, false);
+    }
+    this.camera.aspect = this.width / this.height;
     this.camera.updateProjectionMatrix();
   }
 

@@ -143,8 +143,8 @@ export async function buildWorld(stage: Stage): Promise<World> {
     scene.add(aura.group);
     aura.setIntensity(0);
   }
-  const awakenMod = await opt<{ buildAwaken: (scene: THREE.Scene, jw: Character) => AwakenLike; shake?: AwakenLike['shake'] }>(awakenMods);
-  const awaken = awakenMod?.buildAwaken ? awakenMod.buildAwaken(scene, jw) : null;
+  const awakenMod = await opt<{ buildAwaken: (stage: Stage, jw: Character) => AwakenLike; shake?: AwakenLike['shake'] }>(awakenMods);
+  const awaken = awakenMod?.buildAwaken ? awakenMod.buildAwaken(stage, jw) : null;
   if (awaken && !awaken.group.parent) scene.add(awaken.group);
   if (awaken) awaken.group.visible = false;
   const chestMod = await opt<{ buildChest: (...a: unknown[]) => ChestLike }>(chestMods);

@@ -5,7 +5,8 @@
 // buttons can be reached whole, and the Safe Zone, Skip and Sound buttons stay on screen and off every word. Turning the
 // phone mid-shot (the gate, the silhouette, AWAKEN, the chest while it is held, and the name prompt while typing) frames
 // the same moment for the new shape, easing there or cutting there with reduced motion (also when it comes on mid-way),
-// without restarting the beat, skipping ahead or losing typed names. A first visit then walks the whole intro, title to end card, with long names.
+// without restarting the beat, skipping ahead or losing typed names. Sized to nothing and back mid-shot, the picture
+// keeps finite numbers and comes back as it was. A first visit then walks the whole intro, title to end card, with long names.
 import { until } from './harness.mjs';
 import { isSettled, windowCut } from './me-92-safe-zone-clean.e2e.mjs';
 
@@ -57,8 +58,16 @@ const watch = (page) =>
           const q = ps.map((p) => p.clone().project(cam)).map((p) => [(p.x + 1) / 2, (1 - p.y) / 2]);
           return q.length ? [Math.min(...q.map((p) => p[0])), Math.min(...q.map((p) => p[1])), Math.max(...q.map((p) => p[0])), Math.max(...q.map((p) => p[1]))] : null;
         };
-        const f = { lt: s.time - t0, w: innerWidth, h: innerHeight, still: still.matches };
-        const [hero, gate, chest] = ['hero', 'gate', 'chest'].map(named);
+        const f = { lt: s.time - t0, w: innerWidth, h: innerHeight, still: still.matches, aspect: cam.aspect };
+        const [hero, gate, chest, awaken] = ['hero', 'gate', 'chest', 'awaken'].map(named);
+        // the shape AWAKEN's smoke is drawn for
+        if (awaken?.visible) awaken.traverse((o) => o.material?.uniforms?.uAspect && (f.smokeAspect = o.material.uniforms.uAspect.value));
+        // the slit as this frame draws it, from its own uniforms (the gate notes its width before the director sets it)
+        let glow = null;
+        gate?.traverse((o) => o.material?.uniforms?.uWidth && (glow = o.material.uniforms));
+        f.slitWidth = glow?.uWidth.value;
+        // every number the frame is drawn from
+        f.finite = [...cam.position.toArray(), ...cam.quaternion.toArray(), cam.fov, cam.aspect, ...cam.projectionMatrix.elements, f.slitWidth ?? 0].every(Number.isFinite);
         if (hero?.visible) {
           hero.updateMatrixWorld(true);
           const bones = (n) => {
@@ -70,9 +79,6 @@ const watch = (page) =>
           hero.traverse((o) => o.isSprite && eyes.push(o.getWorldPosition(new V3())));
           Object.assign(f, { eyes: box(eyes), handR: box(bones('hand_r')), handL: box(bones('hand_l')) });
         }
-        // the slit as this frame draws it, from its own uniforms (the gate notes its width before the director sets it)
-        let glow = null;
-        gate?.traverse((o) => o.material?.uniforms?.uWidth && (glow = o.material.uniforms));
         const hw = gate?.visible && glow ? 0.5 * glow.uWidth.value * glow.uOpen.value : 0;
         if (hw) {
           const c = gate.getWorldPosition(new V3());
@@ -157,13 +163,14 @@ const SHOTS = {
   ],
 };
 
-/** Every frame of the beat against its shots; frames still easing to a new shape after the screen turned don't count. */
+/** Every frame of the beat against its shots; frames still easing to a new shape after the screen turned, and frames on a
+ *  screen with no area, don't count. */
 async function framing(page, shots) {
   const frames = await page.evaluate(() => window.__frames);
   const turns = frames.filter((f, i) => i && (f.w !== frames[i - 1].w || f.h !== frames[i - 1].h)).map((f) => f.lt);
   const bad = [];
   for (const s of shots) {
-    const seen = frames.filter((f) => f.lt >= s.from && f.lt <= s.to && (s.when?.(f) ?? true) && !turns.some((t) => f.lt >= t && f.lt < t + SETTLE));
+    const seen = frames.filter((f) => f.w && f.h && f.lt >= s.from && f.lt <= s.to && (s.when?.(f) ?? true) && !turns.some((t) => f.lt >= t && f.lt < t + SETTLE));
     if (!seen.length) bad.push(`${s.what}: no frame drawn`);
     for (const f of seen) {
       const why = s.check(f);
@@ -283,6 +290,39 @@ async function holdChest(page, turns = []) {
   await page.mouse.up();
   await page.locator('.chest-hold').waitFor({ state: 'detached', timeout: 15000 });
 }
+
+/**
+ * The page sized to nothing and back once `ready`: every frame is drawn from finite numbers (the camera, and the gate's
+ * slit) for the shape it had (AWAKEN's smoke too), and the picture comes back framed as it was, its aspect, the slit's
+ * width and the chest where they were.
+ */
+const noArea = (shot, viewport, ready) => async (h) => {
+  const { page, errors } = await beat(h, viewport, shot);
+  await ready(page);
+  const from = await page.evaluate(() => window.__frames.length);
+  await page.setViewportSize({ width: 0, height: 0 });
+  const empty = await page.evaluate(() => [innerWidth, innerHeight]);
+  h.expect(!empty[0] && !empty[1], `the page kept a size of ${empty.join('x')}`);
+  await page.waitForTimeout(500);
+  await page.setViewportSize(viewport);
+  await until(page, (w) => window.__frames.at(-1).w === w, viewport.width, { timeout: 15000, polling: 16 });
+  const last = await page.evaluate(() => window.__frames.at(-1).lt);
+  await reach(page, last + 0.3);
+  const frames = (await page.evaluate(() => window.__frames)).slice(from - 1);
+  const was = frames[0], back = frames.find((f, i) => i && f.w === viewport.width);
+  const bad = [];
+  const nan = frames.find((f) => !f.finite);
+  if (nan) bad.push(`at ${nan.lt.toFixed(2)} s on ${nan.w}x${nan.h} the camera or the gate had a number that isn't finite`);
+  if (!frames.some((f) => !f.w)) bad.push('no frame was drawn while the page had no area');
+  if (back.aspect !== was.aspect) bad.push(`the camera came back at aspect ${back.aspect}, not ${was.aspect}`);
+  if (back.slitWidth !== was.slitWidth) bad.push(`the slit came back ${back.slitWidth} wide, not ${was.slitWidth}`);
+  if (was.chest && back.chest.some((v, i) => Math.abs(v - was.chest[i]) > 0.02)) bad.push(`the chest came back at ${where(back.chest)}, not ${where(was.chest)}`);
+  const smoke = frames.find((f) => f.smokeAspect !== undefined && f.smokeAspect !== f.aspect);
+  if (smoke) bad.push(`at ${smoke.lt.toFixed(2)} s on ${smoke.w}x${smoke.h} AWAKEN's smoke was drawn for aspect ${smoke.smokeAspect}, the camera for ${smoke.aspect}`);
+  bad.push(...(await framing(page, SHOTS[shot].filter((s) => s.from < frames.at(-1).lt))).bad);
+  h.expect(!bad.length, bad.join('\n'));
+  h.expect(!errors.length, errors.join('\n'));
+};
 
 /** The four cards, the note and the end card: each reachable, nothing under the ways. */
 async function closing(h, page, tag) {
@@ -415,6 +455,18 @@ export const scenarios = {
     h.expect(!errors.length, errors.join('\n'));
   },
 
+  /** Sized to nothing as the gate opens. */
+  'frame-intro-no-area-gate': noArea('gate', PHONE, (page) => reach(page, 3.4)),
+
+  /** Sized to nothing as AWAKEN's smoke bursts. */
+  'frame-intro-no-area-awaken': noArea('awaken', SIDE, (page) => reach(page, 6.2)),
+
+  /** Sized to nothing while the chest waits under its prompt. */
+  'frame-intro-no-area-chest': noArea('chest', SHORT_SIDE, async (page) => {
+    await page.locator('.chest-hold .ch-chip').waitFor({ timeout: 60000 });
+    await page.waitForFunction(isSettled, '.chest-hold', { polling: 'raf', timeout: 15000 });
+  }),
+
   /** Reduced motion comes on while the slit eases to a turned phone's width: it cuts there on the next frame. */
   async 'frame-intro-turn-gate-motion-off'(h) {
     const { page, errors } = await beat(h, PHONE, 'gate');
@@ -427,7 +479,8 @@ export const scenarios = {
     const share = (f) => f.slit[2] - f.slit[0];
     const turned = frames[0], cut = frames.find((f) => f.still);
     h.expect(share(turned) < 0.12 && cut && cut.lt - turned.lt < 0.5, `reduced motion didn't come on while the slit eased (turned at ${turned.lt.toFixed(2)} s, ${(share(turned) * 100).toFixed(1)} %; reduced at ${cut?.lt.toFixed(2)} s)`);
-    const off = frames.filter((f) => f.still).find((f) => share(f) < 0.12 || share(f) > 0.2);
+    // the page hears of the change by the frame after the one that first matches it
+    const off = frames.filter((f) => f.still).slice(1).find((f) => share(f) < 0.12 || share(f) > 0.2);
     h.expect(!off, off && `at ${off.lt.toFixed(2)} s, with reduced motion on, the slit was still easing (${(share(off) * 100).toFixed(1)} % of the width)`);
     h.expect(!errors.length, errors.join('\n'));
   },
