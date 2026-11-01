@@ -269,6 +269,11 @@
   flex-direction: column;
   min-width: 0;
 }
+/* the page and its drawing wait, their place kept, for the chapter it opens on, rather than show empty first */
+.st-main.is-opening .st-pic-b,
+.st-main.is-opening .st-frame {
+  visibility: hidden;
+}
 .st-title {
   width: 100%;
   margin: 6px 0 4px;
@@ -339,6 +344,10 @@
 .st-chbtn-t {
   min-width: 0;
   overflow-wrap: break-word;
+}
+/* a first page still being made has no name yet; its line is kept for it */
+.st-chbtn-t:empty::before {
+  content: '\00a0';
 }
 .st-chbtn-ic {
   display: grid;

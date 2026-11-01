@@ -89,7 +89,7 @@
   "back-keeps-steps": 8,
   "back-to-a-chapter-kept-apart": 2,
   "back-to-a-copy-kept-apart": 6,
-  "back-to-a-resumed-draft": 2,
+  "back-to-a-resumed-draft": 3,
   "back-to-a-saved-drawing": 10,
   "back-to-the-same-chapter": 8,
   "bad-mirror": 17,
@@ -232,6 +232,7 @@
   "draw-page-zoom-note-room": 8,
   "draw-page-zoom-rise": 10,
   "draw-page-zoom-stroke-kept": 5,
+  "drawing-never-shows-empty": 6,
   "edit-your-lists": 8,
   "edit-your-lists-clear": 4,
   "edit-your-lists-fit": 33,
@@ -843,5 +844,6 @@
   "wave-scene": 56,
   "willing-sizes": 95,
   "willing-walks": 20,
-  "window-timing": 16
+  "window-timing": 16,
+  "writer-never-shows-empty": 16
 }

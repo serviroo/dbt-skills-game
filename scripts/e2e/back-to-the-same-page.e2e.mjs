@@ -6,13 +6,21 @@
 //                             one as its own page, and the Safe Zone, then Back, opens that page, not the other copy's,
 //                             also when that Save lands only after they left for the Safe Zone
 //   back-to-a-resumed-draft   a draft an earlier tab left, opened again, a line more and Save: back from the Safe Zone
-//                             the page holds both strokes, and Save again keeps them both
+//                             the page holds both strokes, and Save again keeps them both. Back from a Safe Zone tapped
+//                             while the draft was still being read opens that draft
 //   back-to-the-same-chapter  a story opened on Chapter 1, Chapter 2 picked from the chapter list: Read, then Back to
 //                             writing, and the Safe Zone, then Back, each land on Chapter 2; the notes left open come
 //                             back as the notes, also when the Safe Zone is opened again before storage answers the
 //                             way back, with the Page tab still going to Chapter 2
 //   back-to-a-chapter-kept-apart  words typed over a chapter another open copy changed, the Safe Zone tapped while they
 //                             are still saving: they land as a kept copy, and Back opens that copy with those words
+//   writer-never-shows-empty  at 320 px with storage slow to answer, every frame of the writer coming in (the Story
+//                             Room list, a search result, the chapter list, Back to writing, the notes back from the Safe
+//                             Zone, Forward) shows the story's title and the page it opens on, never "Untitled story",
+//                             an empty page or the other tab first, and nothing on it moves as the page comes in, a long
+//                             chapter name included
+//   drawing-never-shows-empty the same for a saved drawing: back from the Safe Zone, Forward, and Keep drawing show its
+//                             strokes from the first frame, never an empty page first
 import { drawPage, line } from './art-eraser-glow.e2e.mjs';
 import { holdStorage } from './story-reading.e2e.mjs';
 
@@ -42,8 +50,11 @@ const drawReady = (page) =>
   page.waitForFunction(() => window.__daily?.ink && !document.querySelector('.dq-ink-stage')?.inert && !document.querySelector('.dq-draw')?.getAnimations().some((a) => a.playState === 'running'), null, { timeout: 10000 });
 /** Waits for the drawing page to show `n` strokes. */
 const shows = (h, page, n, where) => h.poll(page, () => page.evaluate(() => window.__daily.ink.strokes.length), (k) => k === n, (k) => `${where} the page shows ${k} strokes, not the saved drawing's ${n}`, { timeout: 5000 });
-/** Waits for the writer to hold `name` (its field's label). */
-const holds = (h, page, name, where) => h.poll(page, () => page.locator('.st-ta').getAttribute('aria-label'), (l) => l === name, (l) => `${where} opened ${l}, not ${name}`, { timeout: 5000 });
+/** Waits for the writer to hold `name` (its field's label) and show it. */
+async function holds(h, page, name, where) {
+  await h.poll(page, () => page.locator('.st-ta').getAttribute('aria-label'), (l) => l === name, (l) => `${where} opened ${l}, not ${name}`, { timeout: 5000 });
+  await page.locator('.st-ta').waitFor({ timeout: 5000 });
+}
 /** Keep drawing on a saved drawing, one line more, while another open copy saves three strokes over it. */
 async function keepDrawingOverAnother(h, page) {
   await h.reachHub(page);
@@ -83,6 +94,79 @@ async function chapterChangedElsewhere(h, page) {
     await ss.saveChapter({ ...c, text: 'The other open copy.' }, [c.rev]);
   }, ids.ch1);
   return ids;
+}
+/** Every read of `kinds` from the story or art store answers `ms` later, as on a slow phone. */
+const slowStorage = (page, store, kinds, ms) =>
+  page.evaluate(
+    async ([store, kinds, ms]) => {
+      const s = store === 'story' ? (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key) : (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+      for (const k of kinds) {
+        const real = s[k];
+        s[k] = function (...a) {
+          return new Promise((go) => setTimeout(go, ms)).then(() => real.apply(this, a));
+        };
+      }
+    },
+    [store, kinds, ms],
+  );
+/** Checks every frame the browser paints from now on: the writer or the drawing page, once any of it shows, shows what `framesShow` asks for. */
+async function watchFrames(page) {
+  await page.evaluate(() => {
+    const f = (window.__frames = { want: null, seen: 0, bad: [] });
+    const shows = (el) => {
+      if (!el?.isConnected || getComputedStyle(el).visibility === 'hidden') return false;
+      for (let n = el; n; n = n.parentElement) if (Number(getComputedStyle(n).opacity) === 0) return false;
+      return true;
+    };
+    const tick = () => {
+      const w = f.want;
+      const at = window.__daily?.route.name;
+      if (w?.screen === 'write' && at === 'write' && shows(document.querySelector('.st-write'))) {
+        f.seen++;
+        const title = document.querySelector('.st-write .st-title');
+        const ta = document.querySelector('.st-write .st-ta');
+        const label = document.querySelector('.st-write .st-chbtn-t');
+        const side = document.querySelector('.st-write .st-seg [aria-checked="true"]')?.textContent;
+        const text = shows(ta) ? ta.value : null;
+        // where what `still` names (the title, the chapter row, Page and Notes, the page) sits on it, from the first frame it
+        // shows
+        const write = document.querySelector('.st-write').getBoundingClientRect();
+        const box = (sel, ...edges) => {
+          const r = document.querySelector(`.st-write ${sel}`).getBoundingClientRect();
+          return edges.map((k) => Math.round(r[k] - (k === 'top' ? write.top : k === 'left' ? write.left : 0))).join(',');
+        };
+        const keys = { '.st-title': ['top', 'height'], '.st-bar': ['top', 'height'], '.st-seg': ['top', 'left'], '.st-frame': ['top'] };
+        const layout = w.still.map((s) => box(s, ...keys[s])).join(' ');
+        const moved = f.page === document.querySelector('.st-write') && layout !== f.layout;
+        f.page = document.querySelector('.st-write');
+        f.layout = layout;
+        const wrong = [
+          title.value !== w.title && `the title "${title.value || title.placeholder}"`,
+          text !== null && !w.texts.includes(text) && `the page "${text || ta.placeholder}"`,
+          !w.sides.includes(side) && `the ${side} tab`,
+          shows(label) && !label.textContent && 'no chapter name',
+          moved && `${w.still.join(', ')} moving as it came in`,
+        ].filter(Boolean);
+        if (wrong.length) f.bad.push(wrong.join(', '));
+      }
+      if (w?.screen === 'draw' && at === 'draw' && shows(document.querySelector('.dq-draw'))) {
+        f.seen++;
+        const n = window.__daily.ink?.strokes.length;
+        if (n !== w.strokes) f.bad.push(`${n} strokes`);
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+}
+/** Runs `step` with every frame checked against `want`, then fails on any frame that showed something else. */
+async function framesShow(h, page, want, where, step) {
+  await page.evaluate((w) => Object.assign(window.__frames, { want: w, seen: 0, bad: [], page: null }), want);
+  await step();
+  await h.frames(page, 3);
+  const f = await page.evaluate(() => ({ seen: window.__frames.seen, bad: [...new Set(window.__frames.bad)] }));
+  h.expect(f.seen > 0, `${where}: no frame of the page was seen`);
+  h.expect(!f.bad.length, `${where}: a frame showed ${f.bad.join('; ')}`);
 }
 
 export const scenarios = {
@@ -189,6 +273,33 @@ export const scenarios = {
     } finally {
       await ctx.close();
     }
+
+    // the Safe Zone tapped while the draft is still being read: Back opens that draft
+    const early = await h.open(seed(h));
+    try {
+      await h.reachHub(early.page);
+      await early.page.evaluate(async (s) => {
+        const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+        await as.putDraft({ key: 'today:an-earlier-tab', kind: 'today', strokes: [s], t: Date.now() - 3600e3 });
+        const getDraft = as.getDraft;
+        as.getDraft = function (...a) {
+          as.getDraft = getDraft;
+          return new Promise((go) => (window.__letDraft = go)).then(() => getDraft.apply(this, a));
+        };
+      }, stroke(200, 500));
+      await early.page.evaluate(() => window.__daily.go({ name: 'draw', kind: 'today', draft: 'today:an-earlier-tab' }));
+      await early.page.waitForFunction(() => !!window.__letDraft);
+      await early.page.locator('.dq-top .dq-safe').click();
+      await routeIs(early.page, 'safe');
+      await early.page.evaluate(() => window.__letDraft());
+      await early.page.goBack();
+      await routeIs(early.page, 'draw');
+      await drawReady(early.page);
+      await shows(h, early.page, 1, 'back from the Safe Zone tapped while the draft opened');
+      h.expect(!early.errors.length, early.errors.join('\n'));
+    } finally {
+      await early.ctx.close();
+    }
   },
 
   async 'back-to-the-same-chapter'(h) {
@@ -276,6 +387,122 @@ export const scenarios = {
       await page.goBack();
       await routeIs(page, 'write');
       await h.poll(page, () => page.locator('.st-ta').inputValue(), (v) => v === 'My newest words.', (v) => `back from the Safe Zone the page reads ${JSON.stringify(v)}, not the copy kept with the words typed`, { timeout: 5000 });
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'writer-never-shows-empty'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute', { width: 320, height: 568 });
+    try {
+      await h.reachHub(page);
+      const [one, two, notes] = ['The lantern woke.', 'The river ran bright.', 'Mira keeps the map.'];
+      // long enough to take three lines of the chapter row at 320 px
+      const LONG = 'Where the river ran bright under the old stone bridge';
+      await page.evaluate(
+        async ([one, two, notes, LONG]) => {
+          const { storyStore } = await import('/src/daily/storystore.ts');
+          const ss = storyStore(window.__daily.store.key);
+          const { story, first } = await ss.create('The Long Night');
+          await ss.saveChapter({ ...first, text: one }, [first.rev]);
+          const next = await ss.addChapter(story.id);
+          await ss.saveChapter({ ...next, title: LONG, text: two }, [next.rev]);
+          const n = await ss.chapter(story.notes);
+          await ss.saveChapter({ ...n, text: notes }, [n.rev]);
+        },
+        [one, two, notes, LONG],
+      );
+      const ROW = ['.st-title', '.st-bar', '.st-seg'];
+      const want = (texts, sides = ['Page'], still = [...ROW, '.st-frame']) => ({ screen: 'write', title: 'The Long Night', texts, sides, still });
+      const lantern = async () => {
+        await page.locator('.dq-top .dq-back').click();
+        await routeIs(page, 'stories');
+      };
+      await watchFrames(page);
+      await page.evaluate(() => window.__daily.go({ name: 'stories' }));
+      await routeIs(page, 'stories');
+      await slowStorage(page, 'story', ['story', 'chapter', 'cards'], 250);
+
+      await framesShow(h, page, want([one]), 'the Story Room list', async () => {
+        await page.locator('.st-row', { hasText: 'The Long Night' }).click();
+        await holds(h, page, 'Page, Chapter 1', 'the Story Room list');
+      });
+      await framesShow(h, page, want([one, two], ['Page'], []), 'the chapter list', async () => {
+        await page.locator('.st-chbtn').click();
+        await page.locator('.st-sheet .st-chrow-b').filter({ hasText: LONG }).click();
+        await holds(h, page, `Page, ${LONG}`, 'the chapter list');
+      });
+      await framesShow(h, page, want([two]), 'Back to writing', async () => {
+        await page.getByRole('button', { name: 'More', exact: true }).click();
+        await page.getByRole('menuitem', { name: 'Read', exact: true }).click();
+        await routeIs(page, 'read');
+        await page.getByRole('button', { name: 'Back to writing' }).click();
+        await routeIs(page, 'write');
+        await holds(h, page, `Page, ${LONG}`, 'Back to writing');
+      });
+      await page.getByRole('radio', { name: 'Show: Notes' }).click();
+      await holds(h, page, 'Notes for this story', 'the Notes tab');
+      await framesShow(h, page, want([notes], ['Notes']), 'the notes back from the Safe Zone', async () => {
+        await safeAndBack(page, 'write');
+        await holds(h, page, 'Notes for this story', 'the notes back from the Safe Zone');
+      });
+      await h.shot(page, 'writer-notes-back-from-the-safe-zone-320');
+      await lantern();
+      await framesShow(h, page, want([notes], ['Notes']), 'Forward', async () => {
+        await page.goForward();
+        await routeIs(page, 'write');
+        await holds(h, page, 'Notes for this story', 'Forward');
+      });
+      await lantern();
+      // the note that the search is marked comes in above the page once it is open, so only the row above it holds still
+      await framesShow(h, page, want([two], ['Page'], ROW), 'a search result', async () => {
+        await page.getByRole('searchbox', { name: 'Search your stories and notes' }).fill('river');
+        await page.locator('.st-found-row', { hasText: LONG }).click();
+        await routeIs(page, 'write');
+        await holds(h, page, `Page, ${LONG}`, 'a search result');
+      });
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'drawing-never-shows-empty'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute', { width: 320, height: 568 });
+    try {
+      await drawPage(h, page);
+      await line(page, [0.2, 0.3], [0.7, 0.4]);
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      await page.locator('.dq-tools-saved').waitFor();
+      const artRoom = async () => {
+        await page.locator('.dq-top .dq-back').click();
+        await routeIs(page, 'art');
+      };
+      const opened = async (where) => {
+        await routeIs(page, 'draw');
+        await drawReady(page);
+        await shows(h, page, 1, where);
+      };
+      await watchFrames(page);
+      await slowStorage(page, 'art', ['get', 'getDraft', 'drafts'], 250);
+      const want = { screen: 'draw', strokes: 1 };
+
+      await framesShow(h, page, want, 'back from the Safe Zone', async () => {
+        await safeAndBack(page, 'draw');
+        await opened('back from the Safe Zone');
+      });
+      await artRoom();
+      await framesShow(h, page, want, 'Forward', async () => {
+        await page.goForward();
+        await opened('Forward');
+      });
+      await artRoom();
+      await framesShow(h, page, want, 'Keep drawing', async () => {
+        await page.locator('[data-piece]').first().click();
+        await page.getByRole('button', { name: 'Keep drawing', exact: true }).click();
+        await opened('Keep drawing');
+      });
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();

@@ -312,6 +312,8 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
   let draftTimer = 0;
   let left = false;
   let loading = true;
+  // what the visit opens on is on the page
+  let opened = false;
   const offs: (() => void)[] = [];
 
   const msg = h('div', { class: 'dq-tools-msg', 'aria-live': 'polite' });
@@ -817,6 +819,8 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     }
   }));
 
+  let drawn!: () => void;
+  const ready = new Promise<void>((done) => (drawn = done));
   void (async () => {
     await tab.ready;
     if (left) return;
@@ -866,25 +870,32 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
       flushDraft();
     } else if (rec) pad.load(rec.strokes);
     loading = false;
+    opened = true;
     pad.el.inert = false;
     if (pad.strokes.length) hint.classList.add('is-gone');
     if (!as.persistent) say(p(ART.noStore, 'dq-small'));
-  })();
+  })().finally(drawn);
 
   return {
     el,
     title: kind === 'ally' ? ART.allyTitle : ART.todayTitle,
     mode: 'sub',
     bubbles: [0, 0],
-    // read as the visit comes back, so a save that lands after they leave (as a copy kept apart too) is what opens
-    keep: (): DrawKept => ({
-      get id() {
-        return recId;
-      },
-      get key() {
-        return key;
-      },
-    }),
+    // it comes in holding the drawing and its prompt, never an empty page first
+    ready,
+    // left before anything opened (storage slow to answer), it keeps what the visit was to open. Read as the visit comes
+    // back, so a save that lands after they leave (as a copy kept apart too) is what opens
+    keep: (): DrawKept | undefined =>
+      opened
+        ? {
+            get id() {
+              return recId;
+            },
+            get key() {
+              return key;
+            },
+          }
+        : was,
     after: () => {
       app.sheetLayer.append(sheet, riseEl);
       ro.observe(main);

@@ -207,12 +207,16 @@ export const scenarios = {
         const ss = storyStore(window.__daily.store.key);
         const { story, first } = await ss.create('Slow Night');
         await ss.putCards(first.id, [{ id: 'slow-card', mode: 'continue', text: 'The kettle began to hum.', t: Date.now() }]);
-        // the page's chapter read waits until the test lets it through, as a slow IndexedDB open would
+        // the page's chapter read waits until the test lets it through, as a slow IndexedDB open would; the read for the
+        // chapter's name, which the page comes in with, goes first
         const real = ss.chapter;
         let go;
         const gate = new Promise((done) => (go = done));
         ss.chapter = async function (...a) {
-          await gate;
+          ss.chapter = async function (...b) {
+            await gate;
+            return real.apply(this, b);
+          };
           return real.apply(this, a);
         };
         window.__letPageIn = () => {
@@ -225,7 +229,9 @@ export const scenarios = {
       const ask = page.getByRole('button', { name: 'Need a starting point?' });
       await ask.waitFor();
       await h.sleep(300);
-      h.expect((await page.getByRole('textbox', { name: 'Your page' }).count()) === 1, 'the page loaded before the test let it');
+      // the page waits out of sight for its chapter
+      h.expect((await page.getByRole('textbox', { name: 'Your page', includeHidden: true }).count()) === 1, 'the page loaded before the test let it');
+      h.expect(!(await page.locator('.st-ta').isVisible()), 'the page showed empty while its chapter was on its way');
 
       // taps while loading
       await ask.click({ force: true, timeout: 3000 }).catch(() => {});
@@ -435,6 +441,9 @@ export const scenarios = {
       });
       const { waitHeld, release, drain } = await holdStorage(page, ['chapter', 'cards']);
       await page.evaluate((r) => window.__daily.go(r), { name: 'write', id });
+      // the chapter's name comes in with the page around it; then the page opens, its cards first
+      await waitHeld(`chapter ${first}`);
+      await release(`chapter ${first}`);
       await waitHeld(`cards ${first}`);
       await page.getByRole('radio', { name: 'Show: Notes' }).click();
       await waitHeld(`chapter ${notes}`);
