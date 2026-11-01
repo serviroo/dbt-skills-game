@@ -38,6 +38,9 @@
 //                             when another open copy saves meanwhile), and Try again opens it once storage answers
 //   a-late-open-changes-nothing  Try again while the drawings' database won't even open: it can't open again, and once
 //                             a later Try again opens it, the open given up on failing late leaves storage working
+//   a-dropped-connection-gives-up  the drawings' connection drops as a saved drawing opens and the one opened in its
+//                             place never answers: that one is given up (later reads answer at once), and Try again opens
+//                             the drawing once storage answers
 //   storage-answers-too-late  a story's first page made while another connection holds its chapters: given up after a
 //                             while, the writer can't open it, and the write never lands later, when the hold lets go
 import { drawPage, line } from './art-eraser-glow.e2e.mjs';
@@ -593,7 +596,9 @@ export const scenarios = {
       await cantOpenShows(h, page, '.dq-piece', 'drawing', 'a saved drawing while storage never answers');
       h.expect(!(await page.getByText('That page is no longer here.').count()), 'a saved drawing while storage never answers: it says the page is gone');
       await shots(h, page, 'cant-open-piece');
-      // another open copy saves a drawing meanwhile: the page still says it can't open this one, never that it's gone
+      // another open copy saves a drawing meanwhile: the page still says it can't open this one, never that it's gone,
+      // and Try again keeps the focus it had
+      await page.locator('.dq-cant').getByRole('button', { name: 'Try again', exact: true }).focus();
       const other = await ctx.newPage();
       await other.goto(page.url());
       await other.waitForFunction(() => !!window.__daily?.store);
@@ -605,6 +610,7 @@ export const scenarios = {
       await h.sleep(1000);
       await cantOpenShows(h, page, '.dq-piece', 'drawing', 'a saved drawing while storage never answers, after another copy saved');
       h.expect(!(await page.getByText('That page is no longer here.').count()), 'a saved drawing while storage never answers: after another copy saved, it says the page is gone');
+      h.expect(await page.evaluate(() => document.activeElement?.textContent === 'Try again'), 'a saved drawing while storage never answers: after another copy saved, Try again lost its focus');
       await page.evaluate(() => window.__answer());
       await tryAgain(page);
       await page.getByRole('button', { name: 'Keep drawing', exact: true }).waitFor({ timeout: 5000 }).catch(() => {});
@@ -659,6 +665,48 @@ export const scenarios = {
         return { persistent: as.persistent, read: rec?.strokes.length, missed: as.misses !== misses };
       }, id);
       h.expect(after.persistent && after.read === 1 && !after.missed, `the open given up on, failing late, left storage as ${JSON.stringify(after)}`);
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'a-dropped-connection-gives-up'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await drawPage(h, page);
+      await line(page, [0.2, 0.3], [0.7, 0.4]);
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      await page.locator('.dq-tools-saved').waitFor();
+      const id = await page.evaluate(async () => (await (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).list())[0].id);
+      // a later visit: the drawing is only on the disk
+      await page.reload();
+      await h.reachHub(page);
+      // the next read of the strokes finds the connection dropped, and every one after that never answers
+      await page.evaluate(() => {
+        const transaction = IDBDatabase.prototype.transaction;
+        IDBDatabase.prototype.transaction = function (stores, ...rest) {
+          if (![].concat(stores).includes('strokes')) return transaction.call(this, stores, ...rest);
+          IDBDatabase.prototype.transaction = transaction;
+          throw new DOMException('The connection was lost.', 'InvalidStateError');
+        };
+      });
+      await stall(page, 'strokes');
+      await page.evaluate((id) => window.__daily.go({ name: 'draw', kind: 'today', id }), id);
+      await routeIs(page, 'draw');
+      await comesIn(h, page, '.dq-draw', 'a dropped connection', 15000);
+      await cantOpenShows(h, page, '.dq-draw', 'drawing', 'a dropped connection');
+      const took = await page.evaluate(async (id) => {
+        const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+        const t = performance.now();
+        await as.get(id);
+        return performance.now() - t;
+      }, id);
+      h.expect(took < 2000, `the connection opened after the drop was never given up: a read waited ${Math.round(took)} ms`);
+      await page.evaluate(() => window.__answer());
+      await tryAgain(page);
+      await drawReady(page);
+      await shows(h, page, 1, 'Try again after a dropped connection:');
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();

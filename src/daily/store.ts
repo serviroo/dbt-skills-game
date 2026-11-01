@@ -246,9 +246,13 @@ export const uid = () => `${Date.now().toString(36)}${(uidN++).toString(36)}${Ma
  * for the visit, as one that couldn't be opened, so a screen opening on it comes in rather than wait for ever.
  */
 export const STORAGE_WAIT_MS = 10e3;
-/** One transaction's turn: the run, the transaction it started, and whether it was given up (then it starts none). */
+/**
+ * One transaction's turn: the run, the database it waited on last (a lost connection is opened again), the transaction
+ * it started, and whether it was given up (then it starts none).
+ */
 export interface TxTurn {
   job?: Promise<unknown>;
+  db?: Promise<IDBDatabase | null>;
   t?: IDBTransaction;
   off?: boolean;
 }

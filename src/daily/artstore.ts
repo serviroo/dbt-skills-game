@@ -544,7 +544,6 @@ export class ArtStore {
   private answered<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>, fallback: () => T, turn: TxTurn = {}): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const unanswered = new Promise<null>((done) => (timer = setTimeout(() => done(null), STORAGE_WAIT_MS)));
-    const at = this.db;
     const job = this.run(stores, mode, fn, fallback, turn);
     turn.job = job;
     return Promise.race([job.then((v) => ({ v })), unanswered]).then((r) => {
@@ -560,7 +559,8 @@ export class ArtStore {
       if (mode === 'readonly') this.readFails++;
       else this.heldBack = true;
       // the database it waited on is given up and closed, once: a connection opened since (Try again) stays
-      if (this.db === at) {
+      const at = turn.db;
+      if (at && this.db === at) {
         this.stalled++;
         this.opens++;
         this.db = Promise.resolve(null);
@@ -575,7 +575,8 @@ export class ArtStore {
   private async run<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>, fallback: () => T, turn: TxTurn = {}): Promise<T> {
     let failed = false;
     for (let retry = true; ; retry = false) {
-      const db = await this.db;
+      turn.db = this.db;
+      const db = await turn.db;
       if (!db || turn.off) break;
       let started = false;
       try {

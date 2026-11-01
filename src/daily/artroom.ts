@@ -937,8 +937,11 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
   const body = h('div', { class: 'dq-piece-body' });
   let removed = false;
   let endRename = () => {};
-  // storage that stalled, or failed to read it, says so, never that the page is gone
+  // storage that stalled, or failed to read it, says so, never that the page is gone; once, so focus on Try again stays
+  let closed = false;
   const shut = () => {
+    if (closed) return;
+    closed = true;
     endRename();
     body.replaceChildren(
       cantOpen(CANT_OPEN.drawing, CANT_OPEN.note, CANT_OPEN.retry, () => {
