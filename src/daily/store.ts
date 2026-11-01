@@ -8,7 +8,7 @@ import { DAILY_GIFTS, WARDEN_XP, RANK_XP, RANKS, STAT_BASE, TODAY_LINES, type Da
 import { ACCENT_IDS, CARD_BACK_IDS, PLATE_IDS, SHADOW_IDS, THEME_IDS, TITLE_IDS, type AccentId, type CardBackId, type PlateId, type ShadowId, type ThemeId, type TitleId } from '../content/roster-lines';
 import { cleanName, readYou, writeYou } from '../core/you';
 import { AFTER_CLEAR, APP_ID, BESIDE, SAVE_KEY, YOU_KEY } from '../core/stored-names';
-import { canWrite, cleared, clearedSince, clearSeen, fromBefore, goneElsewhere, onClear, onWritten, sawStored, setStored, write } from '../core/cleared';
+import { canWrite, cleared, clearedSince, clearSeen, fromBefore, goneElsewhere, marked, onClear, onWritten, sawStored, setStored, write } from '../core/cleared';
 
 /**
  * The save version this build writes. A save from a newer build is read too and keeps its higher number: this build
@@ -1302,7 +1302,7 @@ export class Store {
         }
         // after folding in the other copy, so a name this copy hadn't seen yet is never written back as current
         this.mirrorYou();
-        const out = JSON.stringify({ ...stored(this.state), [AFTER_CLEAR]: clearSeen() });
+        const out = JSON.stringify(marked(stored(this.state)));
         localStorage.setItem(this.key, out);
         this.took(out);
         this.keptBase = { v: this.state.v, keys: keptKeys(this.state) };

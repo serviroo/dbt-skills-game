@@ -168,13 +168,31 @@ export function setClearStatus(s: ClearStatus) {
 export const clearSeen = () => knownClear ?? null;
 
 /**
- * True when a stored save (parsed) was written before this device's latest clear: by a copy that was still writing as
- * the clear ran, or held up mid-save until after it. It is cleared data, so it is never read, folded in or kept.
+ * A save, or a record another copy reads beside it (the names, skill answers, story words, a drawing's removal), with
+ * the note of which clear this page writes it after (see fromBefore).
+ */
+export const marked = <T extends object>(o: T) => ({ ...o, [AFTER_CLEAR]: clearSeen() });
+
+/**
+ * True when a stored save or record (parsed) was written before this device's latest clear: by a copy that was still
+ * writing as the clear ran, or held up mid-write until after it. It is cleared data, so it is never read, folded in or
+ * kept. One without the note (from a build before it) counts as current.
  */
 export function fromBefore(o: unknown) {
   if (!o || typeof o !== 'object' || !Object.prototype.hasOwnProperty.call(o, AFTER_CLEAR)) return false;
   const now = storedAt(CLEARED_KEY);
   return now !== undefined && (o as Record<string, unknown>)[AFTER_CLEAR] !== now;
+}
+
+/** Takes away a record beside the save (raw, under k) that fromBefore found, unless something else was stored there since. */
+export function dropBefore(k: string, raw: string) {
+  write(() => {
+    try {
+      if (localStorage.getItem(k) === raw) removeStored(k);
+    } catch {
+      /* storage can't be changed: the next clear takes it */
+    }
+  });
 }
 
 /** Whether a stored save (raw) is the game on this device now: neither gone nor written before the latest clear. */

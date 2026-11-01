@@ -1,5 +1,5 @@
 import { SKILL, type Answers, type Step } from '../content/dbt';
-import { cleared, removeStored, setStored, write } from '../core/cleared';
+import { cleared, dropBefore, fromBefore, marked, removeStored, setStored, write } from '../core/cleared';
 import { BESIDE } from '../core/stored-names';
 import { isSkillId, uid } from './store';
 
@@ -75,6 +75,8 @@ function slots(save: string): Slot[] {
     if (raw === null) continue;
     let value: unknown;
     try { value = JSON.parse(raw); } catch { continue; }
+    // answers stored before this device's latest clear (by a copy held up as it stored them) are cleared data
+    if (fromBefore(value)) { dropBefore(key, raw); continue; }
     const end = key.slice(prefix(save).length).split('.');
     const draft = readDraft(value);
     if (!draft || end.length !== 3 || draft.skill !== end[1] || draft.part !== end[2]) continue;
@@ -108,7 +110,7 @@ export function keepDraft(save: string, draft: SkillDraft, changed: boolean) {
       const own = all.find((s) => s.key === key);
       if (!changed && own && own.draft.t > copy.t && !sameWords(own.draft, copy)) return;
       copy.t = changed ? Math.max(Date.now(), copy.t + 1, ...all.map((s) => s.draft.t + 1)) : Math.max(copy.t, own?.draft.t ?? 0);
-      const raw = JSON.stringify(copy);
+      const raw = JSON.stringify(marked(copy));
       setStored(key, raw);
       if (localStorage.getItem(key) !== raw) return;
       for (const s of all) if (s.key !== key && s.draft.t <= copy.t && sameWords(s.draft, copy)) remove(s);
@@ -151,7 +153,7 @@ export function restoreSkillDrafts(save: string, raw: unknown) {
       try {
         if (slots(save).some((s) => sameWords(s.draft, draft))) return;
         const key = `${prefix(save)}imp~${uid()}.${draft.skill}.${draft.part}`;
-        const out = JSON.stringify(draft);
+        const out = JSON.stringify(marked(draft));
         setStored(key, out);
         if (localStorage.getItem(key) !== out) saved = false;
       } catch { saved = false; }

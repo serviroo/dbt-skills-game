@@ -3,7 +3,7 @@
  * and merge across open copies); this small mirror lets the intro use them before that store loads.
  */
 import { YOU_KEY } from './stored-names';
-import { cleared, setStored, write } from './cleared';
+import { cleared, dropBefore, fromBefore, marked, setStored, write } from './cleared';
 
 export const DEFAULT_NAME = 'Player';
 export const DEFAULT_COMPANION = 'Moth';
@@ -33,7 +33,10 @@ export function readYou(): You | null {
   if (cache !== undefined) return cache;
   cache = null;
   try {
-    const raw = JSON.parse(localStorage.getItem(YOU_KEY) ?? 'null') as Partial<You> | null;
+    const stored = localStorage.getItem(YOU_KEY);
+    const raw = JSON.parse(stored ?? 'null') as Partial<You> | null;
+    // stored before this device's latest clear (by a copy held up as it stored them): cleared names, never read or kept
+    if (stored !== null && fromBefore(raw)) return dropBefore(YOU_KEY, stored), cache;
     // a timestamp from the future (beyond a day of clock skew) could never be overtaken by a later choice
     const ok = (t: unknown): t is number => typeof t === 'number' && Number.isFinite(t) && t >= 0 && t <= Date.now() + 864e5;
     if (raw && typeof raw === 'object' && typeof raw.name === 'string' && typeof raw.companion === 'string' && ok(raw.nameAt) && ok(raw.companionAt))
@@ -49,7 +52,7 @@ export function writeYou(y: You) {
   const you = (cache = { name: cleanName(y.name), companion: cleanName(y.companion), nameAt: y.nameAt, companionAt: y.companionAt });
   write(() => {
     try {
-      setStored(YOU_KEY, JSON.stringify(you));
+      setStored(YOU_KEY, JSON.stringify(marked(you)));
     } catch {
       // storage blocked: the names hold for this visit
     }

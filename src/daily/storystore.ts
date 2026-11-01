@@ -12,7 +12,7 @@
 import type { App } from './app';
 import { connectionLost, uid, validDay } from './store';
 import { BESIDE, STORY_DB } from '../core/stored-names';
-import { canWrite, cleared, goneElsewhere, mayWrite, onClear, removeStored, setStored, write } from '../core/cleared';
+import { canWrite, cleared, dropBefore, fromBefore, goneElsewhere, marked, mayWrite, onClear, removeStored, setStored, write } from '../core/cleared';
 
 export type CardMode = 'continue' | 'whatif' | 'polish' | 'questions';
 export interface Story {
@@ -803,7 +803,7 @@ export class StoryStore {
       const bases = (Array.isArray(l.bases) ? l.bases : []).filter(validId).slice(-64);
       const key = this.myLive(l.chapter);
       if (localStorage.getItem(key) === null && this.liveKeys().length >= LIVE_CAP) return false;
-      const out = JSON.stringify({ chapter: l.chapter, text: l.text, bases, t: fin(l.t) ? l.t : Date.now() });
+      const out = JSON.stringify(marked({ chapter: l.chapter, text: l.text, bases, t: fin(l.t) ? l.t : Date.now() }));
       if (!canWrite()) {
         // a clear is checking its Save Crystal: the mirror is written once it lets go
         write(() => {
@@ -843,6 +843,8 @@ export class StoryStore {
       const raw = localStorage.getItem(key);
       if (!raw) return null;
       const x: unknown = JSON.parse(raw);
+      // words mirrored before this device's latest clear (by a copy held up as it mirrored them) are cleared data
+      if (fromBefore(x)) return dropBefore(key, raw), null;
       if (!isObj(x) || !validId(x.chapter) || (chapterId !== undefined && x.chapter !== chapterId) || typeof x.text !== 'string') return null;
       return { chapter: x.chapter, text: x.text.slice(0, STORY_CAP.text), bases: (Array.isArray(x.bases) ? x.bases : []).filter(validId), t: fin(x.t) ? x.t : 0 };
     } catch {

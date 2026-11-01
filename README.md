@@ -56,8 +56,8 @@ Everything is saved in your browser (localStorage and IndexedDB) on your own dev
 tracking and no third-party requests. Clearing site data or uninstalling removes it, so keep a Save Crystal if you
 care about your progress. Settings > Your data can also back you up and then clear this game's data from the device:
 its saves, drawings, stories, offline files and offline worker, and nothing else. It leaves one small note that a clear
-happened (no game data), and each save notes which clear it came after, so a tab left open elsewhere can't bring
-anything back.
+happened (no game data). Each save, and the names, unfinished answers and words kept beside it, notes which clear it
+came after, so a tab left open elsewhere can't bring anything back.
 
 ## Running it
 

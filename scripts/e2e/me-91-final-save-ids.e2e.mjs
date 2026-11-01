@@ -26,6 +26,10 @@ function paths(o, at = '', out = new Set()) {
   return out;
 }
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+/** Save fields that stay on this device, each with why: a Save Crystal carries every other one. */
+const DEVICE_ONLY = {
+  afterClear: 'which clear of this device the save came after: another device has clears of its own, and a restore takes its note',
+};
 
 export function fullSave(now) {
   const today = dayOf(now);
@@ -279,8 +283,10 @@ export const scenarios = {
     await storedNamesOk(a.page, SAVE, expect);
     expect(x.app === ids['save-crystal-app'][0], 'Save Crystal app id: ' + x.app);
     const have = paths(x);
-    const lost = [...ids['save-field'], ...ids['crystal-field']].filter((p) => !have.has(p));
+    const lost = [...ids['save-field'], ...ids['crystal-field']].filter((p) => !have.has(p) && !Object.hasOwn(DEVICE_ONLY, p));
     expect(!lost.length, `fields missing from the Save Crystal: ${lost.join(', ')}`);
+    const carried = Object.keys(DEVICE_ONLY).filter((p) => have.has(p));
+    expect(!carried.length, `this device's own fields went into the Save Crystal: ${carried.join(', ')}`);
     const cx = content(x);
     for (const d of seeded.drawings) expect(same(cx.art[d.meta.id]?.strokes, d.strokes) && cx.art[d.meta.id]?.name === d.meta.name, `drawing ${d.meta.id} not in the Save Crystal intact`);
     for (const c of seeded.story.chapters) expect(cx.chapters[c.id]?.text === c.text, `chapter ${c.id} not in the Save Crystal intact`);
