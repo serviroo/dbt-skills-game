@@ -1,8 +1,9 @@
 // The build's check for a GLSL smoothstep with its edges the wrong way round (vite.config.ts) reads every file under
-// src whatever separator its path uses, so a build on Windows stops on one too.
+// src whatever separator its path uses, so a build on Windows stops on one too. It knows edges that share a width too.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfigFromFile } from 'vite';
+import { reversedSmoothsteps } from '../glsl-check.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const reversed = 'export const glsl = `float a = smoothstep(0.6, 0.2, d);`;\n';
@@ -33,5 +34,24 @@ export const scenarios = {
     }
     expect(run('C:\\Users\\sam\\dbt', 'C:/Users/sam/dbt/scripts/x.ts') === null, 'the check read a file outside src');
     expect(run('C:\\Users\\sam\\dbt', 'C:/Users/sam/dbt/src/scene/x.ts', reversed.replace('0.6, 0.2', '0.2, 0.6')) === null, 'the check stopped a smoothstep the right way round');
+  },
+
+  /** a width that is not a constant, added to the first edge or taken from the second, puts them the wrong way round */
+  async 'glsl-check-shared-width'({ expect }) {
+    for (const [edges, wrong] of [
+      ['outR(y) + pen, outR(y) - pen', true],
+      ['top + pen, top', true],
+      ['top, top - pen', true],
+      ['a + w * 2.0, a - w * 2.0', true],
+      ['outR(y) - pen, outR(y) + pen', false],
+      ['top, top + pen', false],
+      ['a + w, b - w', false],
+      ['a + w, a - u', false],
+      ['x * -w, x', false],
+      ['a * 1e-3, a', false],
+    ]) {
+      const found = reversedSmoothsteps(`export const glsl = \`float a = smoothstep(${edges}, d);\`;\n`).length === 1;
+      expect(found === wrong, `smoothstep(${edges}, d): ${wrong ? 'let through' : 'stopped'}`);
+    }
   },
 };
