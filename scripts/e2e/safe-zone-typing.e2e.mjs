@@ -1,6 +1,7 @@
 // Typing in the Safe Zone with the phone's keyboard up: "Talk to someone now", Leave, Lights up and Sound stay on
 // screen and take a tap, and the field being typed in shows whole with a line of the screen's words, on every Safe Zone
-// screen with a field (the things that are yours, the comfort kit, and a person's name and number). Each phone is
+// screen with a field (the things that are yours, the comfort kit, and a person's name and number), adding one or
+// changing one already there. Each phone is
 // checked held sideways, where the keyboard leaves 126 or 190 px, and upright, at normal text, with the phone's own
 // text at 200% (see scaleText), and with that and Largest in Settings too; at 200% zoom; with Largest picked in
 // another open copy while typing; turned while typing (see turned); and pinched in (see pinched). The keyboard takes
@@ -13,10 +14,11 @@
 //            takes a tap
 //   bar      Leave, Lights up and Sound show whole there with their icon or words, each at least 44 px and named, and
 //            take their taps
-//   field    the field keeps focus and shows whole there, clear of the pinned bars, with at least one whole line of
-//            the screen's words (its heading, a line of its list or the field's label) beside or above it; but on the
-//            smaller phone with Largest in Settings or at 200% zoom, where Talk and the field leave too little for one;
-//            and held sideways at 200%, where the keyboard leaves too little for Talk and a field, only its focus
+//   field    the field keeps focus and shows whole there, at least 44 px wide, clear of the pinned bars and Talk, with
+//            at least one whole line of the screen's words (its heading, a line of its list or the field's label) beside or above it; but
+//            on the smaller phone with Largest in Settings or at 200% zoom, and held sideways at 200%, where Talk, the
+//            bar and the field leave too little for one, only the field; and changing one, whose own words the field
+//            holds, only the field
 //   down     as the keyboard goes away the usual screen comes back at once: Talk under the frame, the field still
 //            focused and in view
 import path from 'node:path';
@@ -108,12 +110,11 @@ export const overlay = (heldAs) => {
 
 /**
  * What fails `talk`, `bar` and `field` (see the top) with the keyboard up, `size` being Talk's words with it down;
- * `line`: the line of words beside the field too; `field`: `field` at all, not where the keyboard leaves too little for
- * Talk and a field (held sideways at 200%), though it keeps focus there.
+ * `line`: the line of words beside the field too.
  */
-const up = (page, size, { line: needLine = true, field: needField = true } = {}) =>
+const up = (page, size, { line: needLine = true } = {}) =>
   page.evaluate(
-    ({ size, needLine, needField }) => {
+    ({ size, needLine }) => {
       const out = [];
       const vv = visualViewport;
       const [left, top, right, bottom] = [vv.offsetLeft, vv.offsetTop, vv.offsetLeft + vv.width, vv.offsetTop + vv.height];
@@ -166,8 +167,12 @@ const up = (page, size, { line: needLine = true, field: needField = true } = {})
       }
       const field = document.activeElement;
       if (!field?.matches('.dq-safezone input')) return [...out, `focus is on ${field?.tagName.toLowerCase()}.${[...(field?.classList ?? [])].join('.')}, not the field`];
-      if (!needField) return out;
-      reach(field, 'the field');
+      const r = reach(field, 'the field');
+      if (r.width < 43.5) out.push(`the field is ${Math.round(r.width)} px wide, under 44 px`);
+      for (const [what, e] of [['the bar', document.querySelector('.dq-top')], ['"Talk to someone now"', talk]]) {
+        const q = e.getBoundingClientRect();
+        if (r.left < q.right - 1 && q.left < r.right - 1 && r.top < q.bottom - 1 && q.top < r.bottom - 1) out.push(`the field is under ${what} (${box(r)})`);
+      }
       // a whole line of the screen's own words that nothing covers: not a button's, a link's or one kept for a screen
       // reader
       const texts = document.createTreeWalker(document.querySelector('.dq-sz-body'), NodeFilter.SHOW_TEXT);
@@ -182,7 +187,7 @@ const up = (page, size, { line: needLine = true, field: needField = true } = {})
       if (!line) out.push(`no whole line of the screen's words shows with the field (${box(field.getBoundingClientRect())})`);
       return out;
     },
-    { size, needLine, needField },
+    { size, needLine },
   );
 
 /** What fails `down` (see the top), two frames after the keyboard goes away. */
@@ -211,9 +216,8 @@ function typing(phone, { zoom = 1, font = false, largest = false, elsewhere = fa
     const tag = `${phone}${zoom > 1 ? '-200' : ''}${font ? '-text-200' : ''}${largest ? '-largest' : ''}`;
     const size = `${phone}${zoom > 1 ? ' at 200%' : ''}${font ? ' with its text at 200%' : ''}${largest ? ' and Largest in Settings' : ''}`;
     const [width, height, kb] = [p.width, p.height, p.kb].map((n) => Math.round(n / zoom));
-    // the line of words beside the field, and held sideways at 200% the field (see the top)
-    const line = !(['568x320', '320x568'].includes(phone) && (largest || zoom > 1));
-    const field = !(p.width > p.height && zoom > 1);
+    // the line of words beside the field (see the top)
+    const line = !(['568x320', '320x568'].includes(phone) && (largest || zoom > 1)) && !(p.width > p.height && zoom > 1);
     const problems = [];
     const now = Date.now();
     const filled = (save) => {
@@ -257,21 +261,33 @@ function typing(phone, { zoom = 1, font = false, largest = false, elsewhere = fa
       await page.evaluate((a) => window.__daily.go({ name: 'safe', at: a }), at);
       await page.locator('.dq-sz-t', { hasText: title }).first().waitFor({ timeout: 10000 });
       await page.locator('.dq-sz-body').getByRole('button', { name: add, exact: true }).last().evaluate((b) => b.click());
-      for (const label of fields) {
-        await page.locator('.dq-sz-body').getByLabel(label, { exact: true }).focus();
+      // each field a new one is typed in, then each of the first entry's, changed
+      const changing = async (i) => {
+        if (!(await page.locator('li.is-editing').count())) {
+          await page.locator('.dq-sz-body').getByRole('button', { name: 'Edit the list', exact: true }).evaluate((b) => b.click());
+          await page.locator('.dq-sz-body li [data-act="edit"]').first().evaluate((b) => b.click());
+        }
+        await page.locator('li.is-editing input').nth(i).focus();
+      };
+      const each = [
+        ...fields.map((label) => [fields.length > 1 ? label : '', () => page.locator('.dq-sz-body').getByLabel(label, { exact: true }).focus()]),
+        ...fields.map((label, i) => [`changing${fields.length > 1 ? ` ${label}` : ''}`, () => changing(i)]),
+      ];
+      for (const [name, focus] of each) {
+        await focus();
         await settle(page);
         const words = await page.evaluate(() => parseFloat(getComputedStyle(document.querySelector('.dq-sz-talk').lastElementChild).fontSize));
         for (const kind of ['resize', 'over']) {
-          const state = `${size}, ${at}${fields.length > 1 ? `, ${label}` : ''}, keyboard ${kind === 'resize' ? 'resizing the page' : 'over the page'}`;
+          const state = `${size}, ${at}${name ? `, ${name}` : ''}, keyboard ${kind === 'resize' ? 'resizing the page' : 'over the page'}`;
           await raise(kind);
-          for (const f of await up(page, words, { line, field })) problems.push(`${state}: ${f}`);
+          for (const f of await up(page, words, { line: line && !name.startsWith('changing') })) problems.push(`${state}: ${f}`);
           if (other) {
             await pick('Largest', 'largest');
             for (const f of await up(page, words, { line: false })) problems.push(`${state}, Largest picked in another tab: ${f}`);
             await pick('Regular', 'regular');
           }
           const clip = await page.evaluate(() => ({ x: 0, y: visualViewport.offsetTop, width: innerWidth, height: visualViewport.height }));
-          await screenshot(page, { path: path.join(h.out, `safe-zone-typing-${tag}-${at}${fields.length > 1 ? `-${label.toLowerCase()}` : ''}-${kind}${other ? '-elsewhere' : ''}.png`), clip });
+          await screenshot(page, { path: path.join(h.out, `safe-zone-typing-${tag}-${at}${name ? `-${name.toLowerCase().replace(/ /g, '-')}` : ''}-${kind}${other ? '-elsewhere' : ''}.png`), clip });
           await lower(kind);
           for (const f of await down(page)) problems.push(`${state}, then down: ${f}`);
           await settle(page);
@@ -286,13 +302,18 @@ function typing(phone, { zoom = 1, font = false, largest = false, elsewhere = fa
 
 /**
  * A phone at `viewport`, held as `held` is, typing on the Safe Zone's things that are yours, and the size of Talk's
- * words there.
+ * words there. `strong`: come there by way of "I might not be safe" and the steps after it, so Talk shows stronger.
  */
-async function typeIn(h, viewport, held) {
+async function typeIn(h, viewport, held, strong = false) {
   const { ctx, page, errors } = await boot(h, viewport);
   await page.evaluate(overlay, held);
   await page.locator('header .dq-safe').click();
-  await page.evaluate(() => window.__daily.go({ name: 'safe', at: 'reasons' }));
+  if (strong) {
+    const tap = (name) => page.getByRole('button', { name, exact: true }).first().evaluate((b) => b.click());
+    for (const name of ['I might not be safe', 'Back to breathing', 'Next', 'Next', 'Next', 'About the same']) await tap(name);
+    while (await page.locator('.dq-sz-body').getByRole('button', { name: 'Next line', exact: true }).count()) await tap('Next line');
+    await tap('Next');
+  } else await page.evaluate(() => window.__daily.go({ name: 'safe', at: 'reasons' }));
   await page.locator('.dq-sz-t', { hasText: 'Things that are yours' }).first().waitFor({ timeout: 10000 });
   await page.locator('.dq-sz-body').getByRole('button', { name: 'Add one', exact: true }).last().evaluate((b) => b.click());
   await page.locator('.dq-sz-body').getByLabel('Add one', { exact: true }).focus();
@@ -308,8 +329,8 @@ async function typeIn(h, viewport, held) {
  * resizes the page, turned with its keyboard up, shows a height it hasn't had with the keyboard down, and the keyboard
  * stays up through the turn, coming up a strip taller first and then settling: turned from the bigger phone, where the
  * usual screen fits above it upright, and from the smaller, where it doesn't. At 200% zoom held sideways the keyboard
- * leaves under 100 px, too little for Talk and a field, so there the field isn't checked, and upright the list stays
- * where the turns left it, so a line of words beside the field is only checked at 100%.
+ * leaves under 100 px, too little for a line of words beside Talk, the bar and the field, and upright the list stays
+ * where the turns left it, so that line is only checked at 100%.
  */
 function turned(phone, zoom = 1) {
   return async (h) => {
@@ -334,11 +355,11 @@ function turned(phone, zoom = 1) {
       await to(upright, kind, true);
       for (const f of await up(page, words, { line: zoom === 1 })) problems.push(`${state('upright')}: ${f}`);
       await to(sideways, kind, true, Math.round(16 / zoom));
-      for (const f of await up(page, words, { field: zoom === 1 })) problems.push(`${state('turned sideways')}: ${f}`);
+      for (const f of await up(page, words, { line: zoom === 1 })) problems.push(`${state('turned sideways')}: ${f}`);
       await to(sideways, kind, false);
       for (const f of await down(page)) problems.push(`${state('turned sideways, then down')}: ${f}`);
       await to(sideways, kind, true);
-      for (const f of await up(page, words, { field: zoom === 1 })) problems.push(`${state('sideways, up again')}: ${f}`);
+      for (const f of await up(page, words, { line: zoom === 1 })) problems.push(`${state('sideways, up again')}: ${f}`);
       await to(sideways, kind, false);
       await to(upright, kind, false);
       for (const f of await down(page)) problems.push(`${state('turned back upright')}: ${f}`);
@@ -381,18 +402,22 @@ function beside(widened) {
 /**
  * Pinching in to 200% while typing: the smaller phone held sideways with its keyboard over the page, as Safari has it,
  * and the bigger phone turned upright from sideways with a keyboard that resizes the page, where the usual screen fits
- * above the keyboard until the pinch. Pinched in with the keyboard up, "Talk to someone now", Leave, Lights up and Sound
- * show whole in the part that shows and take their taps, with the field too upright (held sideways the keyboard leaves
- * too little for Talk and a field, as at 200% zoom); as the keyboard goes down, still pinched in, the usual screen comes
- * back, and stays as the pinch goes back out. `older`: held sideways on a phone that says how it's held only as
- * window.orientation, as Safari before 16.4 does.
+ * above the keyboard until the pinch. Pinched in with the keyboard up, "Talk to someone now", Leave, Lights up, Sound and
+ * the field show whole in the part that shows and take their taps, with a line of words beside the field upright (held
+ * sideways the keyboard leaves too little for one, as at 200% zoom); as the keyboard goes down, still pinched in, the
+ * usual screen comes back, and stays as the pinch goes back out. Held sideways, `older`: on a phone that says how it's
+ * held only as window.orientation, as Safari before 16.4 does; `strong`: with Talk stronger (see typeIn); `kb`: on the
+ * bigger phone, with a keyboard that tall, so the bar leaves only just the field's height under it.
  */
-function pinched(turnedFirst, older = false) {
+function pinched(turnedFirst, { older = false, strong = false, kb = 0 } = {}) {
   return async (h) => {
-    const [p, from] = turnedFirst ? [PHONES['390x844'], PHONES['844x390']] : [PHONES['568x320'], PHONES['568x320']];
-    const size = turnedFirst ? '390x844 turned upright while typing, then pinched in to 200%' : `568x320 pinched in to 200%${older ? ' on an older Safari' : ''}`;
+    const [p, from] = turnedFirst ? [PHONES['390x844'], PHONES['844x390']] : kb ? [{ ...PHONES['844x390'], kb }, PHONES['844x390']] : [PHONES['568x320'], PHONES['568x320']];
+    const tag = turnedFirst ? 'turned-pinched' : `pinched${older ? '-older' : ''}${strong ? '-strong' : ''}${kb ? `-${(p.height - kb) / 2}px` : ''}`;
+    const size = turnedFirst
+      ? '390x844 turned upright while typing, then pinched in to 200%'
+      : `${p.width}x${p.height} pinched in to 200%${older ? ' on an older Safari' : ''}${strong ? ' with Talk stronger' : ''}${kb ? `, ${(p.height - kb) / 2} px above the keyboard` : ''}`;
     const problems = [];
-    const { ctx, page, errors, words } = await typeIn(h, { width: from.width, height: from.height }, 'landscape');
+    const { ctx, page, errors, words } = await typeIn(h, { width: from.width, height: from.height }, 'landscape', strong);
     const typing = () => page.evaluate(() => !!document.querySelector('.dq.is-typing'));
     if (older)
       await page.evaluate(() => {
@@ -410,9 +435,9 @@ function pinched(turnedFirst, older = false) {
     await page.evaluate(() => document.activeElement?.scrollIntoView({ block: 'nearest', behavior: 'instant' }));
     await settle(page);
     if (!(await typing())) problems.push(`${size}, keyboard up: the typing layout isn't on`);
-    for (const f of await up(page, words, { field: turnedFirst })) problems.push(`${size}, keyboard up: ${f}`);
+    for (const f of await up(page, words, { line: turnedFirst })) problems.push(`${size}, keyboard up: ${f}`);
     const clip = await page.evaluate(() => ({ x: visualViewport.offsetLeft, y: visualViewport.offsetTop, width: visualViewport.width, height: visualViewport.height }));
-    await screenshot(page, { path: path.join(h.out, `safe-zone-typing-${turnedFirst ? 'turned-' : ''}pinched${older ? '-older' : ''}.png`), clip });
+    await screenshot(page, { path: path.join(h.out, `safe-zone-typing-${tag}.png`), clip });
     if (turnedFirst) await page.setViewportSize({ width: p.width, height: p.height });
     else await page.evaluate(() => window.__kb(null));
     for (const f of await down(page)) problems.push(`${size}, then down: ${f}`);
@@ -473,7 +498,9 @@ export const scenarios = Object.fromEntries([
   ['safe-zone-typing-widened', beside(true)],
   ['safe-zone-typing-narrowed', beside(false)],
   ['safe-zone-typing-pinched', pinched(false)],
-  ['safe-zone-typing-pinched-older-safari', pinched(false, true)],
+  ['safe-zone-typing-pinched-older-safari', pinched(false, { older: true })],
+  ['safe-zone-typing-pinched-strong', pinched(false, { strong: true })],
+  ['safe-zone-typing-pinched-98px', pinched(false, { kb: 194 })],
   ['safe-zone-typing-turned-pinched', pinched(true)],
   ['safe-zone-typing-split', split(false)],
   ['safe-zone-typing-split-while-typing', split(true)],
