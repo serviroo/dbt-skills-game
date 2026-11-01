@@ -4277,17 +4277,19 @@ textarea.dq-input {
   }
 }
 /* typing with the keyboard up (safe.ts): the screen is the part above the keyboard, whether the keyboard covers the
-   page or the phone gives the page only that height. Leave and Lights up show as their icons, still named, beside
-   Sound at the top, each a tap in size, and "Talk to someone now" pins with them in its words at the player's size:
-   held sideways in their row, between Leave and Lights up, where its words fit on one line there, else in a column of
-   its own at the side; upright in a row of its own just under them, wrapping its words there. The words, the list and
-   its field scroll below, the field kept in view. The frame's name and the bar's shade step aside for the room */
+   page or the phone gives the page only that height, and pinched in only the part pinched to. Leave and Lights up show
+   as their icons, still named, beside Sound at the top, each a tap in size, and "Talk to someone now" pins with them in
+   its words at the player's size: held sideways (is-sideways, safe.ts) in their row, between Leave and Lights up, where
+   its words fit on one line there, else in a column of its own at the side; upright in a row of its own just under
+   them, wrapping its words there. The words, the list and its field scroll below, the field kept in view; the screen
+   itself never scrolls, so bringing the field into view can't take the bar up out of it. The frame's name and the
+   bar's shade step aside for the room */
 .dq.is-typing {
   --top-shade: 0px;
-  top: var(--vv-top);
-  bottom: auto;
+  inset: var(--vv-top) auto auto var(--vv-left);
+  width: var(--vv-w);
   height: var(--vv-h);
-  overflow: hidden;
+  overflow: clip;
   display: flex;
   flex-direction: column;
 }
@@ -4397,60 +4399,60 @@ textarea.dq-input {
   padding-block: 4px;
   line-height: 1.25;
 }
-@media (min-width: 540px) {
-  /* Talk in the bar's row: the heading and its words sit beside the list and its field, each column scrolling on its
-     own, so the field shows with the heading beside it */
-  .dq.is-typing:has(.dq-top .dq-sz-talk) .dq-sz {
-    display: grid;
-    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-    grid-template-rows: minmax(0, 1fr);
-    column-gap: var(--pad);
-  }
-  .dq.is-typing:has(.dq-top .dq-sz-talk) .dq-sz-body {
-    display: contents;
-    overflow: visible;
-  }
-  .dq.is-typing:has(.dq-top .dq-sz-talk) :is(.dq-sz-lead, .dq-sz-main) {
-    position: relative;
-    display: block;
-    grid-row: 1;
-    min-height: 0;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(125, 150, 197, 0.35) transparent;
-  }
-  .dq.is-typing:has(.dq-top .dq-sz-talk) .dq-sz-lead {
-    grid-column: 1;
-    margin: 0 calc(-0.5 * var(--pad)) 0 calc(-1 * var(--pad));
-    padding: 4px calc(0.5 * var(--pad)) var(--pad) var(--pad);
-  }
-  .dq.is-typing:has(.dq-top .dq-sz-talk) .dq-sz-main {
-    grid-column: 2;
-    margin: 0 calc(-1 * var(--pad)) 0 calc(-0.5 * var(--pad));
-    padding: 4px var(--pad) var(--pad) calc(0.5 * var(--pad));
-  }
-  .dq.is-typing:has(.dq-top .dq-sz-talk) .dq-sz-main > :first-child {
-    margin-top: 0;
-  }
-  /* Talk's words too big for the bar's row: Talk takes a column at the side as tall as the screen, as wide as its
-     words need up to three fifths of it, beside the bar and the page under it */
-  .dq.is-typing:has(> .dq-sz-talk) {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(auto, 60%);
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-  .dq.is-typing > .dq-top {
-    grid-area: 1 / 1;
-  }
-  .dq.is-typing > .dq-view {
-    grid-area: 2 / 1;
-  }
-  .dq.is-typing > .dq-sz-talk {
-    grid-area: 1 / 2 / 3 / 3;
-    align-self: center;
-    margin: 0 max(12px, var(--safe-right)) 0 0;
-  }
+/* held sideways (is-sideways, safe.ts), Talk in the bar's row: the heading and its words sit beside the list and its field,
+   each column scrolling on its own, so the field shows with the heading beside it */
+.dq.is-typing.is-sideways:has(.dq-top .dq-sz-talk) .dq-sz {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  grid-template-rows: minmax(0, 1fr);
+  column-gap: var(--pad);
+}
+.dq.is-typing.is-sideways:has(.dq-top .dq-sz-talk) .dq-sz-body {
+  display: contents;
+  overflow: visible;
+}
+.dq.is-typing.is-sideways:has(.dq-top .dq-sz-talk) :is(.dq-sz-lead, .dq-sz-main) {
+  position: relative;
+  display: block;
+  grid-row: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(125, 150, 197, 0.35) transparent;
+}
+.dq.is-typing.is-sideways:has(.dq-top .dq-sz-talk) .dq-sz-lead {
+  grid-column: 1;
+  margin: 0 calc(-0.5 * var(--pad)) 0 calc(-1 * var(--pad));
+  padding: 4px calc(0.5 * var(--pad)) var(--pad) var(--pad);
+}
+.dq.is-typing.is-sideways:has(.dq-top .dq-sz-talk) .dq-sz-main {
+  grid-column: 2;
+  margin: 0 calc(-1 * var(--pad)) 0 calc(-0.5 * var(--pad));
+  padding: 4px var(--pad) var(--pad) calc(0.5 * var(--pad));
+}
+.dq.is-typing.is-sideways:has(.dq-top .dq-sz-talk) .dq-sz-main > :first-child {
+  margin-top: 0;
+}
+/* Talk's words too big for the bar's row: Talk takes a column at the side as tall as the screen, as wide as its
+   words need up to three fifths of it, beside the bar and the page under it, and never so wide the bar's buttons
+   don't fit beside it (pinched in or at 200% zoom). The page's own words wrap to whatever width is left */
+.dq.is-typing.is-sideways:has(> .dq-sz-talk) {
+  display: grid;
+  grid-template-columns: minmax(min-content, 1fr) minmax(auto, 60%);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.dq.is-typing.is-sideways > .dq-top {
+  grid-area: 1 / 1;
+}
+.dq.is-typing.is-sideways > .dq-view {
+  grid-area: 2 / 1;
+  contain: inline-size;
+}
+.dq.is-typing.is-sideways > .dq-sz-talk {
+  grid-area: 1 / 2 / 3 / 3;
+  align-self: center;
+  margin: 0 max(12px, var(--safe-right)) 0 0;
 }
 .dq-cardbtn .dq-cf-stat {
   display: none;

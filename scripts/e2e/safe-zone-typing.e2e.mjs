@@ -2,19 +2,21 @@
 // screen and take a tap, and the field being typed in shows whole with a line of the screen's words, on every Safe Zone
 // screen with a field (the things that are yours, the comfort kit, and a person's name and number). Each phone is
 // checked held sideways, where the keyboard leaves 126 or 190 px, and upright, at normal text, with the phone's own
-// text at 200% (see scaleText), and with that and Largest in Settings too; upright at 200% zoom; with Largest picked
-// in another open copy while typing; and turned while typing (see turned). The keyboard takes the bottom of the screen
-// two ways: a phone that gives the page only the height above it, and one that keeps the page its full height and
-// shows only the part above it, as Safari and Chrome do. Chromium shows no keyboard here, so that phone's part is
-// reported to the page the way a phone reports it, as its visual viewport, panned down a little, as a phone pans to the
-// field. In each state:
-//   talk     "Talk to someone now", in those words, shows whole in the part above the keyboard, at least 44 px tall,
-//            its words no smaller than with the keyboard down, and takes a tap
+// text at 200% (see scaleText), and with that and Largest in Settings too; at 200% zoom; with Largest picked in
+// another open copy while typing; turned while typing (see turned); and pinched in (see pinched). The keyboard takes
+// the bottom of the screen two ways: a phone that gives the page only the height above it, and one that keeps the page
+// its full height and shows only the part above it, as Safari and Chrome do. Chromium shows no keyboard here, so that
+// phone's part is reported to the page the way a phone reports it, as its visual viewport, panned down a little, as a
+// phone pans to the field. In each state:
+//   talk     "Talk to someone now", in those words, shows whole in the part of the screen above the keyboard (pinched
+//            in, only the part pinched to), at least 44 px tall, its words no smaller than with the keyboard down, and
+//            takes a tap
 //   bar      Leave, Lights up and Sound show whole there with their icon or words, each at least 44 px and named, and
 //            take their taps
 //   field    the field keeps focus and shows whole there, clear of the pinned bars, with at least one whole line of
 //            the screen's words (its heading, a line of its list or the field's label) beside or above it; but on the
-//            smaller phone with Largest in Settings or at 200% zoom, where Talk and the field leave too little for one
+//            smaller phone with Largest in Settings or at 200% zoom, where Talk and the field leave too little for one;
+//            and held sideways at 200%, where the keyboard leaves too little for Talk and a field, only its focus
 //   down     as the keyboard goes away the usual screen comes back at once: Talk under the frame, the field still
 //            focused and in view
 import path from 'node:path';
@@ -106,18 +108,20 @@ export const overlay = (heldAs) => {
 
 /**
  * What fails `talk`, `bar` and `field` (see the top) with the keyboard up, `size` being Talk's words with it down;
- * `line`: the line of words beside the field too.
+ * `line`: the line of words beside the field too; `field`: `field` at all, not where the keyboard leaves too little for
+ * Talk and a field (held sideways at 200%), though it keeps focus there.
  */
-const up = (page, size, { line: needLine = true } = {}) =>
+const up = (page, size, { line: needLine = true, field: needField = true } = {}) =>
   page.evaluate(
-    ({ size, needLine }) => {
+    ({ size, needLine, needField }) => {
       const out = [];
       const vv = visualViewport;
-      const [top, bottom] = [vv.offsetTop, vv.offsetTop + vv.height];
-      const box = (r) => `${[r.left, r.top, r.right, r.bottom].map(Math.round).join(', ')} with ${Math.round(top)} to ${Math.round(bottom)} showing`;
-      // the part of `r` that shows: above the keyboard, inside the screen and inside every box around `e` that clips
+      const [left, top, right, bottom] = [vv.offsetLeft, vv.offsetTop, vv.offsetLeft + vv.width, vv.offsetTop + vv.height];
+      const box = (r) => `${[r.left, r.top, r.right, r.bottom].map(Math.round).join(', ')} with ${[left, top, right, bottom].map(Math.round).join(', ')} showing`;
+      // the part of `r` that shows: in the part of the screen above the keyboard and inside every box around `e` that
+      // clips
       const shown = (e, r = e.getBoundingClientRect()) => {
-        let [l, t, rt, b] = [Math.max(r.left, 0), Math.max(r.top, top), Math.min(r.right, innerWidth), Math.min(r.bottom, bottom)];
+        let [l, t, rt, b] = [Math.max(r.left, left), Math.max(r.top, top), Math.min(r.right, right), Math.min(r.bottom, bottom)];
         for (let p = e.parentElement; p; p = p.parentElement) {
           const cs = getComputedStyle(p);
           if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
@@ -162,6 +166,7 @@ const up = (page, size, { line: needLine = true } = {}) =>
       }
       const field = document.activeElement;
       if (!field?.matches('.dq-safezone input')) return [...out, `focus is on ${field?.tagName.toLowerCase()}.${[...(field?.classList ?? [])].join('.')}, not the field`];
+      if (!needField) return out;
       reach(field, 'the field');
       // a whole line of the screen's own words that nothing covers: not a button's, a link's or one kept for a screen
       // reader
@@ -177,7 +182,7 @@ const up = (page, size, { line: needLine = true } = {}) =>
       if (!line) out.push(`no whole line of the screen's words shows with the field (${box(field.getBoundingClientRect())})`);
       return out;
     },
-    { size, needLine },
+    { size, needLine, needField },
   );
 
 /** What fails `down` (see the top), two frames after the keyboard goes away. */
@@ -206,8 +211,9 @@ function typing(phone, { zoom = 1, font = false, largest = false, elsewhere = fa
     const tag = `${phone}${zoom > 1 ? '-200' : ''}${font ? '-text-200' : ''}${largest ? '-largest' : ''}`;
     const size = `${phone}${zoom > 1 ? ' at 200%' : ''}${font ? ' with its text at 200%' : ''}${largest ? ' and Largest in Settings' : ''}`;
     const [width, height, kb] = [p.width, p.height, p.kb].map((n) => Math.round(n / zoom));
-    // the line of words beside the field (see the top)
+    // the line of words beside the field, and held sideways at 200% the field (see the top)
     const line = !(['568x320', '320x568'].includes(phone) && (largest || zoom > 1));
+    const field = !(p.width > p.height && zoom > 1);
     const problems = [];
     const now = Date.now();
     const filled = (save) => {
@@ -258,7 +264,7 @@ function typing(phone, { zoom = 1, font = false, largest = false, elsewhere = fa
         for (const kind of ['resize', 'over']) {
           const state = `${size}, ${at}${fields.length > 1 ? `, ${label}` : ''}, keyboard ${kind === 'resize' ? 'resizing the page' : 'over the page'}`;
           await raise(kind);
-          for (const f of await up(page, words, { line })) problems.push(`${state}: ${f}`);
+          for (const f of await up(page, words, { line, field })) problems.push(`${state}: ${f}`);
           if (other) {
             await pick('Largest', 'largest');
             for (const f of await up(page, words, { line: false })) problems.push(`${state}, Largest picked in another tab: ${f}`);
@@ -302,7 +308,8 @@ async function typeIn(h, viewport, held) {
  * resizes the page, turned with its keyboard up, shows a height it hasn't had with the keyboard down, and the keyboard
  * stays up through the turn, coming up a strip taller first and then settling: turned from the bigger phone, where the
  * usual screen fits above it upright, and from the smaller, where it doesn't. At 200% zoom held sideways the keyboard
- * leaves under 100 px, too little for Talk and a field, so there only the keyboard going down is checked.
+ * leaves under 100 px, too little for Talk and a field, so there the field isn't checked, and upright the list stays
+ * where the turns left it, so a line of words beside the field is only checked at 100%.
  */
 function turned(phone, zoom = 1) {
   return async (h) => {
@@ -325,16 +332,14 @@ function turned(phone, zoom = 1) {
     for (const kind of ['resize', 'over']) {
       const state = (what) => `${size}, keyboard ${kind === 'resize' ? 'resizing the page' : 'over the page'}, ${what}`;
       await to(upright, kind, true);
-      if (zoom === 1) for (const f of await up(page, words)) problems.push(`${state('upright')}: ${f}`);
+      for (const f of await up(page, words, { line: zoom === 1 })) problems.push(`${state('upright')}: ${f}`);
       await to(sideways, kind, true, Math.round(16 / zoom));
-      if (zoom === 1) for (const f of await up(page, words)) problems.push(`${state('turned sideways')}: ${f}`);
+      for (const f of await up(page, words, { field: zoom === 1 })) problems.push(`${state('turned sideways')}: ${f}`);
       await to(sideways, kind, false);
       for (const f of await down(page)) problems.push(`${state('turned sideways, then down')}: ${f}`);
-      if (zoom === 1) {
-        await to(sideways, kind, true);
-        for (const f of await up(page, words)) problems.push(`${state('sideways, up again')}: ${f}`);
-        await to(sideways, kind, false);
-      }
+      await to(sideways, kind, true);
+      for (const f of await up(page, words, { field: zoom === 1 })) problems.push(`${state('sideways, up again')}: ${f}`);
+      await to(sideways, kind, false);
       await to(upright, kind, false);
       for (const f of await down(page)) problems.push(`${state('turned back upright')}: ${f}`);
     }
@@ -376,16 +381,24 @@ function beside(widened) {
 /**
  * Pinching in to 200% while typing: the smaller phone held sideways with its keyboard over the page, as Safari has it,
  * and the bigger phone turned upright from sideways with a keyboard that resizes the page, where the usual screen fits
- * above the keyboard until the pinch. Pinched in with the keyboard up the typing layout is on, and as the keyboard goes
- * down, still pinched in, the usual screen comes back, and stays as the pinch goes back out.
+ * above the keyboard until the pinch. Pinched in with the keyboard up, "Talk to someone now", Leave, Lights up and Sound
+ * show whole in the part that shows and take their taps, with the field too upright (held sideways the keyboard leaves
+ * too little for Talk and a field, as at 200% zoom); as the keyboard goes down, still pinched in, the usual screen comes
+ * back, and stays as the pinch goes back out. `older`: held sideways on a phone that says how it's held only as
+ * window.orientation, as Safari before 16.4 does.
  */
-function pinched(turnedFirst) {
+function pinched(turnedFirst, older = false) {
   return async (h) => {
     const [p, from] = turnedFirst ? [PHONES['390x844'], PHONES['844x390']] : [PHONES['568x320'], PHONES['568x320']];
-    const size = turnedFirst ? '390x844 turned upright while typing, then pinched in to 200%' : '568x320 pinched in to 200%';
+    const size = turnedFirst ? '390x844 turned upright while typing, then pinched in to 200%' : `568x320 pinched in to 200%${older ? ' on an older Safari' : ''}`;
     const problems = [];
-    const { ctx, page, errors } = await typeIn(h, { width: from.width, height: from.height }, 'landscape');
+    const { ctx, page, errors, words } = await typeIn(h, { width: from.width, height: from.height }, 'landscape');
     const typing = () => page.evaluate(() => !!document.querySelector('.dq.is-typing'));
+    if (older)
+      await page.evaluate(() => {
+        Object.defineProperty(screen, 'orientation', { configurable: true, get: () => undefined });
+        Object.defineProperty(window, 'orientation', { configurable: true, get: () => 90 });
+      });
     if (turnedFirst) {
       await page.setViewportSize({ width: from.width, height: from.height - from.kb });
       await settle(page);
@@ -394,8 +407,12 @@ function pinched(turnedFirst) {
     } else await page.evaluate((k) => window.__kb(k), { height: p.height - p.kb, top: Math.round(p.kb / 4) });
     await settle(page);
     await page.evaluate(() => window.__zoom(2));
+    await page.evaluate(() => document.activeElement?.scrollIntoView({ block: 'nearest', behavior: 'instant' }));
     await settle(page);
     if (!(await typing())) problems.push(`${size}, keyboard up: the typing layout isn't on`);
+    for (const f of await up(page, words, { field: turnedFirst })) problems.push(`${size}, keyboard up: ${f}`);
+    const clip = await page.evaluate(() => ({ x: visualViewport.offsetLeft, y: visualViewport.offsetTop, width: visualViewport.width, height: visualViewport.height }));
+    await screenshot(page, { path: path.join(h.out, `safe-zone-typing-${turnedFirst ? 'turned-' : ''}pinched${older ? '-older' : ''}.png`), clip });
     if (turnedFirst) await page.setViewportSize({ width: p.width, height: p.height });
     else await page.evaluate(() => window.__kb(null));
     for (const f of await down(page)) problems.push(`${size}, then down: ${f}`);
@@ -448,8 +465,7 @@ export const scenarios = Object.fromEntries([
     [`safe-zone-typing-${phone}-text-200`, typing(phone, { font: true })],
     [`safe-zone-typing-${phone}-text-200-largest`, typing(phone, { font: true, largest: true })],
   ]),
-  // at 200% zoom upright: held sideways the keyboard leaves under 100 px, too little for Talk and a field
-  ...['390x844', '320x568'].map((phone) => [`safe-zone-typing-${phone}-200`, typing(phone, { zoom: 2 })]),
+  ...Object.keys(PHONES).map((phone) => [`safe-zone-typing-${phone}-200`, typing(phone, { zoom: 2 })]),
   ['safe-zone-typing-568x320-text-200-size-elsewhere', typing('568x320', { font: true, elsewhere: true })],
   ['safe-zone-typing-turned', turned('390x844')],
   ['safe-zone-typing-turned-200', turned('390x844', 2)],
@@ -457,6 +473,7 @@ export const scenarios = Object.fromEntries([
   ['safe-zone-typing-widened', beside(true)],
   ['safe-zone-typing-narrowed', beside(false)],
   ['safe-zone-typing-pinched', pinched(false)],
+  ['safe-zone-typing-pinched-older-safari', pinched(false, true)],
   ['safe-zone-typing-turned-pinched', pinched(true)],
   ['safe-zone-typing-split', split(false)],
   ['safe-zone-typing-split-while-typing', split(true)],
