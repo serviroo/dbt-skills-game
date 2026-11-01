@@ -86,6 +86,8 @@ async function asTyped(page, cdp, selector, name) {
     getSelection().removeAllRanges();
     getSelection().addRange(r);
   }, selector);
+  // emptied first, so a copy that copies nothing can't pass on the last copy's text
+  await page.evaluate(() => navigator.clipboard.writeText(''));
   await page.keyboard.press('ControlOrMeta+C');
   const text = await page.evaluate(() => navigator.clipboard.readText());
   if (text !== name) out.push(`copying ${selector} gives "${text.replace(/\u00AD/g, '|')}"`);
