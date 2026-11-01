@@ -13,7 +13,7 @@ import {
   CONVERGE_GLSL, SPARKS_GLSL,
 } from './fx';
 import { chestSounds } from './sounds';
-export { holdToCharge } from './hold';
+export { holdToCharge, promptRect } from './hold';
 
 /** Timing (seconds). setReveal(p) and setOpen(p) take p in 0..1 over `reveal` and `open`. */
 export const CHEST_TIMING = {
@@ -50,6 +50,8 @@ export interface Chest {
   update(t: number): void;
   /** world position of the opening, for the director (letter rising from the light, camera targets) */
   openingWorld(target?: THREE.Vector3): THREE.Vector3;
+  /** the closed chest's box in the group's space, for framing it */
+  bounds: THREE.Box3;
   stats(): { drawCalls: number; triangles: number; particles: number };
   dispose(): void;
 }
@@ -561,6 +563,7 @@ export function buildChest(arg: Stage | ChestOpts = {}): Chest {
 
   const chest: Chest = {
     group,
+    bounds: new THREE.Box3(new THREE.Vector3(-LID_W / 2, 0, -LID_D / 2), new THREE.Vector3(LID_W / 2, DIM.lidY + DIM.lipH + DIM.domeH, LID_D / 2)),
     setReveal(p) {
       const prev = state.reveal;
       state.reveal = clamp(p);

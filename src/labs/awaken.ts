@@ -33,7 +33,7 @@ export async function lab(stage: Stage) {
   stage.scene.add(jw.group);
   jw.eyes.setGlow(1);
 
-  const awaken = buildAwaken(stage.scene, jw, { word: true });
+  const awaken = buildAwaken(stage, jw, { word: true });
   const cam = new THREE.PerspectiveCamera(35, 1, 0.05, 300);
   stage.setCamera(cam);
   stage.grade.u('flashColor').value = awaken.FLASH_COLOR;
