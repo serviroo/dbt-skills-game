@@ -633,8 +633,7 @@ dq-shy::before {
   justify-content: center;
   gap: 9px;
   min-height: 46px;
-  /* a label wrapped onto a third line keeps clear of the edges */
-  padding: 5px 20px;
+  padding: 0 20px;
   font: 500 14px/1.2 var(--font-ui);
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -700,7 +699,7 @@ dq-shy::before {
 }
 .dq-btn--link {
   min-height: 44px;
-  padding: 2px 4px;
+  padding: 0 4px;
   border-color: transparent;
   background: none;
   text-transform: none;
@@ -742,7 +741,7 @@ dq-shy::before {
     --pad: 12px;
   }
   .dq-btn {
-    padding-inline: 10px;
+    padding: 0 10px;
     letter-spacing: 0.06em;
   }
   .dq-btn-ic {
@@ -2031,6 +2030,11 @@ textarea.dq-input {
 /* a step's controls set their words at 16 px or more, capitals and one-word labels too, at every size */
 .dq-step-body :is(.dq-btn, .dq-hold, .dq-seg-b) {
   font-size: 16px;
+}
+/* a step's label wrapped onto a third line keeps clear of its button's edges; here only, as a Safe Zone button at the
+   largest text has no height to spare above the keyboard */
+.dq-step-body .dq-btn {
+  padding-block: 5px;
 }
 .dq-step-body .dq-btn--link {
   min-width: 44px;
