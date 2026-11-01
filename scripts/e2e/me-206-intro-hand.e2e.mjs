@@ -199,7 +199,7 @@ export const scenarios = {
       const from = await read();
       await new Promise((s) => setTimeout(s, 3000));
       held = { from, to: await read() };
-      await r.continue();
+      await r.fallback();
     });
     const reach = async (slow) => {
       const { page, errors } = await h.open({}, '?shot=awaken&capture&mute&dpr=1&nopost', { width: 390, height: 844 }, slow ? delay : undefined);

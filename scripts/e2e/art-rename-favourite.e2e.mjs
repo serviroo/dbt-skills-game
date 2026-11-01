@@ -185,7 +185,7 @@ export const scenarios = {
       await ctx.route('**/src/daily/index.ts*', async (route) => {
         await ctx.clock.pauseAt((await route.request().frame().evaluate(() => Date.now())) + 1000);
         paused = true;
-        await route.continue();
+        await route.fallback();
       });
     });
     try {

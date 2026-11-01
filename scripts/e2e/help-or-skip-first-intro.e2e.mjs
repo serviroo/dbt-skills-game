@@ -499,7 +499,7 @@ export const scenarios = {
       let release;
       const held = new Promise((r) => (release = r));
       const { ctx, page, errors } = await visit(h, STAGES.names.query, PHONE, {
-        prepare: (c) => c.route(url, async (r) => (load.endsWith('failed') ? r.abort('failed') : held.then(() => r.continue()))),
+        prepare: (c) => c.route(url, async (r) => (load.endsWith('failed') ? r.abort('failed') : held.then(() => r.fallback()))),
       });
       const tag = `${way} with ${load}`;
       try {
@@ -534,7 +534,7 @@ export const scenarios = {
     const { ctx, page, errors } = await visit(h, '?shot=windows', PHONE, {
       prepare: async (c) => {
         await installAudioRecorder(c);
-        await c.route('**/src/daily/index.ts*', (r) => held.then(() => r.continue()));
+        await c.route('**/src/daily/index.ts*', (r) => held.then(() => r.fallback()));
       },
     });
     try {
