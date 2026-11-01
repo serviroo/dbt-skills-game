@@ -855,6 +855,8 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     // is nothing to draw on, so nothing is written over what it couldn't read. One this visit holds in memory (storage
     // was never there to read) opens as ever
     if (as.stalls !== stalls || (as.misses !== misses && ((from && !draft) || (id && !rec)))) {
+      // nothing left to lay out as the screen changes size
+      ro.disconnect();
       promptRow.remove();
       main.replaceWith(
         cantOpen(CANT_OPEN.drawing, CANT_OPEN.note, CANT_OPEN.retry, () => {
@@ -957,8 +959,19 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
   let offChange = () => {};
   const el = h('div', { class: 'dq-page dq-piece' }, h('h1', { class: 'dq-sr', 'data-focus': '', text: 'Your page' }), body);
   void (async () => {
+    const [misses, stalls] = [as.misses, as.stalls];
     let rec = await as.get(id);
     const on = !!rec && (await as.isShown(id));
+    // storage that stalled, or failed to read it, says so, never that the page is gone
+    if (!removed && (as.stalls !== stalls || ((!rec || !on) && as.misses !== misses))) {
+      body.replaceChildren(
+        cantOpen(CANT_OPEN.drawing, CANT_OPEN.note, CANT_OPEN.retry, () => {
+          as.reopen();
+          app.reopen();
+        }),
+      );
+      return;
+    }
     if (!rec || !on || removed || hidden) {
       if (!removed) hidden = true;
       missing();

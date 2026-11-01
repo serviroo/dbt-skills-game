@@ -33,6 +33,11 @@
 //                             with no page, no new chapter and nothing written, and Try again opens the chapter once
 //                             storage answers. The same when the first page of a story with none is never answered as
 //                             it is made
+//   reader-storage-never-answers   the same for a story opened to read, and piece-storage-never-answers for a saved
+//                             drawing opened in the Art room: they say they can't open it, never that it is gone, and
+//                             Try again opens it once storage answers
+//   a-late-open-changes-nothing  Try again while the drawings' database won't even open: it can't open again, and once
+//                             a later Try again opens it, the open given up on failing late leaves storage working
 //   storage-answers-too-late  a story's first page made while another connection holds its chapters: given up after a
 //                             while, the writer can't open it, and the write never lands later, when the hold lets go
 import { drawPage, line } from './art-eraser-glow.e2e.mjs';
@@ -95,6 +100,16 @@ async function cantOpenShows(h, page, sel, what, where) {
   const title = await page.locator(`${sel} .dq-cant-t`).textContent({ timeout: 3000 }).catch(() => null);
   h.expect(title === `Can’t open this ${what} right now`, `${where}: the page says ${JSON.stringify(title)}, not that it can't open the ${what}`);
   h.expect(!(await page.locator(`${sel} textarea, ${sel} canvas`).count()), `${where}: it came in with something to write or draw on`);
+}
+/** The screen as it is at 390 px wide, then at 320. */
+async function shots(h, page, name) {
+  await h.shot(page, `${name}-390`);
+  const was = page.viewportSize();
+  await page.setViewportSize({ width: 320, height: 568 });
+  await h.frames(page, 3);
+  await h.shot(page, `${name}-320`);
+  await page.setViewportSize(was);
+  await h.frames(page, 3);
 }
 /** Try again on a screen that couldn't open. */
 const tryAgain = (page) => page.locator('.dq-cant').getByRole('button', { name: 'Try again', exact: true }).click();
@@ -533,6 +548,110 @@ export const scenarios = {
     }
   },
 
+  async 'reader-storage-never-answers'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await h.reachHub(page);
+      const id = await page.evaluate(async () => {
+        const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+        const { story, first } = await ss.create('The Long Night');
+        await ss.saveChapter({ ...first, text: 'The lantern woke.' }, [first.rev]);
+        return story.id;
+      });
+      await stall(page, 'stories', 'readonly');
+      await page.evaluate((id) => window.__daily.go({ name: 'read', id }), id);
+      await routeIs(page, 'read');
+      await page.locator('.st-reader .dq-cant-t').waitFor({ timeout: 15000 }).catch(() => {});
+      await cantOpenShows(h, page, '.st-reader', 'story', 'reading while storage never answers');
+      h.expect(!(await page.getByText('isn’t on this device any more').count()), 'reading while storage never answers: it says the story is gone');
+      await shots(h, page, 'cant-open-reading');
+      await page.evaluate(() => window.__answer());
+      await tryAgain(page);
+      await page.locator('.st-read-text', { hasText: 'The lantern woke.' }).waitFor({ timeout: 5000 }).catch(() => {});
+      h.expect(await page.locator('.st-read-text', { hasText: 'The lantern woke.' }).isVisible(), 'Try again once storage answered did not open the story to read');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'piece-storage-never-answers'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await drawPage(h, page);
+      await line(page, [0.2, 0.3], [0.7, 0.4]);
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      await page.locator('.dq-tools-saved').waitFor();
+      const id = await page.evaluate(async () => (await (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).list())[0].id);
+      await page.locator('.dq-top .dq-back').click();
+      await routeIs(page, 'art');
+      await stall(page, 'strokes');
+      await page.evaluate((id) => window.__daily.go({ name: 'piece', id }), id);
+      await routeIs(page, 'piece');
+      await page.locator('.dq-piece .dq-cant-t').waitFor({ timeout: 15000 }).catch(() => {});
+      await cantOpenShows(h, page, '.dq-piece', 'drawing', 'a saved drawing while storage never answers');
+      h.expect(!(await page.getByText('That page is no longer here.').count()), 'a saved drawing while storage never answers: it says the page is gone');
+      await shots(h, page, 'cant-open-piece');
+      await page.evaluate(() => window.__answer());
+      await tryAgain(page);
+      await page.getByRole('button', { name: 'Keep drawing', exact: true }).waitFor({ timeout: 5000 }).catch(() => {});
+      h.expect(await page.getByRole('button', { name: 'Keep drawing', exact: true }).isVisible(), 'Try again once storage answered did not open the saved drawing');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'a-late-open-changes-nothing'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await drawPage(h, page);
+      await line(page, [0.2, 0.3], [0.7, 0.4]);
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      await page.locator('.dq-tools-saved').waitFor();
+      const { db, id } = await page.evaluate(async () => {
+        const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+        return { db: as.name, id: (await as.list())[0].id };
+      });
+      await page.locator('.dq-top .dq-back').click();
+      await routeIs(page, 'art');
+      await stall(page, 'strokes');
+      await page.evaluate((id) => window.__daily.go({ name: 'draw', kind: 'today', id }), id);
+      await comesIn(h, page, '.dq-draw', 'storage that never answers', 15000);
+      await page.evaluate(() => window.__answer());
+      // the next open of the drawings never answers, until the test fails it
+      await page.evaluate((db) => {
+        const open = IDBFactory.prototype.open;
+        IDBFactory.prototype.open = function (...a) {
+          if (a[0] !== db) return open.apply(this, a);
+          IDBFactory.prototype.open = open;
+          const req = { onupgradeneeded: null, onsuccess: null, onerror: null, onblocked: null, result: undefined, error: new DOMException('The disk could not be read.', 'NotReadableError') };
+          window.__failOpen = () => req.onerror?.(new Event('error'));
+          return req;
+        };
+      }, db);
+      await tryAgain(page);
+      await page.waitForFunction(() => !!window.__failOpen);
+      await comesIn(h, page, '.dq-draw', 'Try again while the database never opens', 15000);
+      await cantOpenShows(h, page, '.dq-draw', 'drawing', 'Try again while the database never opens');
+      await tryAgain(page);
+      await drawReady(page);
+      await shows(h, page, 1, 'Try again once the database opens:');
+      // the open given up on fails now: storage still works
+      await page.evaluate(() => window.__failOpen());
+      const after = await page.evaluate(async (id) => {
+        const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+        const misses = as.misses;
+        const rec = await as.get(id);
+        return { persistent: as.persistent, read: rec?.strokes.length, missed: as.misses !== misses };
+      }, id);
+      h.expect(after.persistent && after.read === 1 && !after.missed, `the open given up on, failing late, left storage as ${JSON.stringify(after)}`);
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   async 'storage-answers-too-late'(h) {
     const { ctx, page, errors } = await h.open(seed(h));
     try {
@@ -759,7 +878,7 @@ export const scenarios = {
       await safeAndBack(page, 'draw');
       await comesIn(h, page, '.dq-draw', 'storage that never answers', 15000);
       await cantOpenShows(h, page, '.dq-draw', 'drawing', 'storage that never answers');
-      await h.shot(page, 'cant-open-drawing-390');
+      await shots(h, page, 'cant-open-drawing');
       await page.evaluate(() => window.__answer());
       const stored = await onDisk(page, db, 'strokes', 'get', id);
       const drafts = await onDisk(page, db, 'drafts', 'count');
@@ -799,7 +918,7 @@ export const scenarios = {
       await safeAndBack(page, 'write');
       await comesIn(h, page, '.st-write', 'storage that never answers', 15000);
       await cantOpenShows(h, page, '.st-write', 'story', 'storage that never answers');
-      await h.shot(page, 'cant-open-story-390');
+      await shots(h, page, 'cant-open-story');
       await page.evaluate(() => window.__answer());
       const story = await onDisk(page, ids.db, 'stories', 'get', ids.story);
       const stored = await onDisk(page, ids.db, 'chapters', 'get', ids.ch1);

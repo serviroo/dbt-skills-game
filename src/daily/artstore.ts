@@ -284,6 +284,8 @@ export class ArtStore {
   /** A write didn't reach storage this visit, so what it wrote is held in memory only. */
   private heldBack = false;
   private stalled = 0;
+  /** Opens of the database so far; one that isn't the latest when it answers changes nothing. */
+  private opens = 0;
   private lost = new WeakSet<IDBDatabase>();
   get readFailed() {
     return this.readFails > 0;
@@ -390,6 +392,7 @@ export class ArtStore {
     if (typeof window !== 'undefined') window.removeEventListener('storage', this.onStorage);
     const db = this.db;
     this.db = Promise.resolve(null);
+    this.opens++;
     void db.then((d) => d?.close());
     try {
       this.channel?.close();
@@ -440,6 +443,7 @@ export class ArtStore {
 
   /** Opens the database; a lost connection on open gets one more try (`again`). Null when there is none to use. */
   private connect(again: boolean): Promise<IDBDatabase | null> {
+    const turn = ++this.opens;
     return new Promise((resolve) => {
       try {
         if (typeof indexedDB === 'undefined') throw new Error('no idb');
@@ -452,6 +456,11 @@ export class ArtStore {
         };
         open.onsuccess = () => {
           const db = open.result;
+          // an open given up on or replaced while it waited closes what it got and changes nothing
+          if (turn !== this.opens) {
+            db.close();
+            return resolve(null);
+          }
           db.onversionchange = (e) => {
             db.close();
             // deleted: another copy cleared this game's data
@@ -460,6 +469,7 @@ export class ArtStore {
           resolve(db);
         };
         const fail = (retry: boolean) => {
+          if (turn !== this.opens) return resolve(null);
           if (again && retry) return resolve(this.connect(false));
           this.persistent = false;
           this.unreadable = true;
@@ -542,6 +552,7 @@ export class ArtStore {
       // its transaction ends unfinished, so nothing lands after it was counted as failed, and one not started never starts
       turn.off = true;
       this.stalled++;
+      this.opens++;
       try {
         turn.t?.abort();
       } catch {

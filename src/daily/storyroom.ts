@@ -2098,9 +2098,22 @@ export function readScreen(app: App, route: Route): ScreenOut {
 
   let titled!: () => void;
   const ready = new Promise<void>((done) => (titled = done));
+  // storage that stalled, or failed to read the story, says so, never that the story is gone
+  const shut = () => {
+    title.textContent = STORY.title;
+    tools.remove();
+    page.replaceWith(
+      cantOpen(CANT_OPEN.story, CANT_OPEN.note, CANT_OPEN.retry, () => {
+        ss.reopen();
+        app.reopen();
+      }),
+    );
+  };
   const init = async () => {
+    const [misses, stalls] = [ss.misses, ss.stalls];
     const s = await ss.story(r.id);
     if (!alive) return;
+    if (ss.stalls !== stalls || (!s && ss.misses !== misses)) return shut();
     if (!s || s.removed) {
       title.textContent = STORY.title;
       titled();
@@ -2113,6 +2126,7 @@ export function readScreen(app: App, route: Route): ScreenOut {
     // what this copy holds but couldn't store yet reads as it is in the editor
     const chs = await Promise.all(s.chapters.map(async (id) => ss.unsaved(id) ?? (await ss.chapter(id))));
     if (!alive) return;
+    if (ss.stalls !== stalls || (chs.some((c) => !c) && ss.misses !== misses)) return shut();
     const shown = chs.flatMap((c, i) =>
       c && c.text.trim()
         ? [{ i, id: c.id, sec: h('section', { class: 'st-read-ch', 'data-id': c.id }, h('h2', { class: 'st-read-ch-h', text: c.title.trim() || `Chapter ${i + 1}` }), h('div', { class: 'st-read-text', text: c.text.trimEnd() })) }]

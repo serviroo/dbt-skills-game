@@ -1,4 +1,5 @@
 {
+  "a-late-open-changes-nothing": 24,
   "a-missing-chapter-opens": 2,
   "a-part-stopped-before-it-opens-places-nothing-past-its-stop": 1,
   "a11y-names-art": 3,
@@ -504,6 +505,7 @@
   "phone-type-390x844-200-skills": 70,
   "phone-type-rewards-200": 14,
   "phone-type-rewards-sideways": 8,
+  "piece-storage-never-answers": 15,
   "pinned-bars-320x568": 23,
   "pinned-bars-320x568-200": 22,
   "pinned-bars-320x568-text-200": 23,
@@ -539,6 +541,7 @@
   "quiet-minute-follows-device-motion": 4,
   "radio-keys": 40,
   "rank-marker-stays-on-tap": 3,
+  "reader-storage-never-answers": 15,
   "recording-across-pauses-has-no-hole": 11,
   "records-from-before-a-clear": 4,
   "records-without-the-note": 4,
