@@ -118,6 +118,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
   let wiped = cleared();
   const offShown = st.onChange(() => {
     el.dataset.size = textSize(app);
+    refit();
     if (!wiped && cleared()) {
       wiped = true;
       for (const f of el.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input.dq-input, textarea.dq-input')) f.value = '';
@@ -131,6 +132,116 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     applyLight();
   });
 
+  // while a field here has focus and the keyboard covers part of the page (Safari and Chrome keep the page its full
+  // height under it, so the visual viewport shows less than the page), or takes room from it and leaves too little for
+  // the screen to be one screen tall (under 300px held sideways, 540px wide or more, else 361px, as daily.css has it),
+  // the screen takes only the part above the keyboard and "Talk to someone now" pins at its top with Leave, Lights up
+  // and Sound (daily.css), until the keyboard goes away
+  const vv = window.visualViewport;
+  const wide = window.matchMedia('(min-width: 540px)');
+  let typing = false;
+  // the tallest the visual viewport has been at each width it has had while typing: the room there with the keyboard
+  // down, since a keyboard only ever takes height. Resized with nothing typed in (see typedIn), there's no keyboard, so
+  // its height is the room, taller or shorter (another app put above or below it, a toolbar coming or going). Both as
+  // it shows on the screen, in the page's px unpinched, so pinching in or out changes neither
+  const tallest = new Map<number, number>();
+  // widths first had with the keyboard up (the phone turned, or the window resized beside another app, while typing;
+  // either leaves it up), each with the least height it has had there and the room it should have there: turned, the
+  // screen's sides swap, so that's the width turned from and its room, less the width turned to; resized, the screen's
+  // height stays, and with it the room. The keyboard counts as up there, the room not yet seen, until the page is
+  // halfway from the least to that room; short of that it's the keyboard settling after the move, a little taller or
+  // shorter. That holds where the usual screen fits above the keyboard too, since pinching in can still leave too
+  // little. Moved on again before the keyboard goes down, the room carries over.
+  // `up`: the keyboard was up as of the last fit; `last`, `lastHeld`: the last width the visual viewport had and how
+  // the screen was held then
+  const moved = new Map<number, { low: number; room: number }>();
+  let up = false;
+  const held = () => screen.orientation?.type.split('-')[0];
+  let last = vv ? Math.round(vv.width * vv.scale) : 0;
+  let lastHeld = held();
+  if (vv) tallest.set(last, vv.height * vv.scale);
+  // the field being typed in: one here with focus while the page has it too, since the keyboard goes when the page
+  // loses it (the phone putting the page beside another app, say), though the field keeps focus
+  const typedIn = () => {
+    const f = document.activeElement;
+    return document.hasFocus() && f?.matches('input.dq-input, textarea.dq-input') && el.contains(f) ? f : null;
+  };
+  /**
+   * Talk goes back under the frame, or while typing into the top bar's row between Leave and Lights up, where its words
+   * fit on one line held sideways, else just after the bar: a row of its own upright, a column at the side held
+   * sideways. Focus on it stays.
+   */
+  const pin = () => {
+    const had = document.activeElement === talkLink;
+    if (!typing) foot.append(talkLink);
+    else {
+      if (wide.matches) lightBtn.before(talkLink);
+      const words = talkLink.lastElementChild!;
+      if (!wide.matches || words.getBoundingClientRect().height > 1.5 * parseFloat(getComputedStyle(words).lineHeight)) el.parentElement!.before(talkLink);
+    }
+    if (had) talkLink.focus({ preventScroll: true });
+  };
+  // while typing, anything that changes Talk's size (the room above the keyboard, the screen turning, the text size
+  // chosen in another open copy, a new screen) can move it, and the field stays in view, though not as the phone pans
+  // to it
+  const refit = () => {
+    if (!typing) return;
+    pin();
+    typedIn()?.scrollIntoView({ block: 'nearest' });
+  };
+  const fit = (e: Event) => {
+    if (!vv) return;
+    const field = typedIn();
+    // as it shows on the screen (see tallest)
+    const width = Math.round(vv.width * vv.scale);
+    const height = vv.height * vv.scale;
+    const fits = wide.matches ? 300 : 361;
+    const now = held();
+    const room = (tallest.get(last) ?? moved.get(last)?.room ?? Infinity) + (now !== lastHeld ? last - width : 0);
+    const t = moved.get(width) ?? (up && field && !tallest.has(width) ? { low: height, room } : null);
+    if (!field && e.type === 'resize') {
+      moved.delete(width);
+      tallest.set(width, height);
+    } else if (t) {
+      t.low = Math.min(t.low, height);
+      if (height >= (t.low + t.room) / 2) moved.delete(width);
+      else moved.set(width, t);
+    }
+    if (width !== last) [last, lastHeld] = [width, now];
+    const rest = moved.has(width) ? Infinity : Math.max(tallest.get(width) ?? 0, height);
+    if (rest !== Infinity) tallest.set(width, rest);
+    const covered = Math.round(height) < document.documentElement.clientHeight;
+    up = covered || height < rest;
+    // down, the widths moved to with it up are only the room it left there
+    if (!up) moved.clear();
+    const short = height < rest && vv.height < fits;
+    const on = (covered || short) && (typing || !!field);
+    if (on) {
+      app.root.style.setProperty('--vv-top', `${vv.offsetTop}px`);
+      app.root.style.setProperty('--vv-h', `${vv.height}px`);
+    }
+    if (on === typing) {
+      if (e.type === 'resize') refit();
+      return;
+    }
+    typing = on;
+    app.root.classList.toggle('is-typing', on);
+    if (!on) for (const v of ['--vv-top', '--vv-h']) app.root.style.removeProperty(v);
+    pin();
+    typedIn()?.scrollIntoView({ block: 'nearest' });
+  };
+  vv?.addEventListener('resize', fit);
+  vv?.addEventListener('scroll', fit);
+  el.addEventListener('focusin', fit);
+  const unfit = () => {
+    vv?.removeEventListener('resize', fit);
+    vv?.removeEventListener('scroll', fit);
+    typing = false;
+    pin();
+    app.root.classList.remove('is-typing');
+    for (const v of ['--vv-top', '--vv-h']) app.root.style.removeProperty(v);
+  };
+
   const nextOf = (at: At) => FLOW[Math.min(FLOW.length - 1, FLOW.indexOf(at) + 1)];
   const clear = () => stops.splice(0).forEach((f) => f());
   /** `lead` is the screen's heading and words, `kids` what the player does; a phone held sideways shows them side by side. */
@@ -140,6 +251,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     talkLink.classList.toggle('is-hidden', at === 'talk');
     foot.classList.toggle('is-talk', at === 'talk');
     talkLink.classList.toggle('is-strong', (higher || danger) && at !== 'talk');
+    refit();
     // once it's higher, or they might not be safe, "Talk to someone now" moves above the screen for the rest of the visit
     if (higher || danger) foot.classList.add('is-top');
     // upright the body fades in; held sideways the body is display: contents, so its two halves fade instead
@@ -404,6 +516,7 @@ export function safeScreen(app: App, route: Route): ScreenOut {
     leave: () => {
       clear();
       offShown();
+      unfit();
       app.root.classList.remove('ca-szlit');
     },
     after: () => show((r.at as At) ?? 'start'),
