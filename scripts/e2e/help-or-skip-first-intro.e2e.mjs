@@ -48,11 +48,23 @@ async function visit(h, query, viewport = PHONE, { seed = {}, prepare } = {}) {
   await page.evaluate(async () => {
     window.__cues = [];
     const { AudioEngine } = await import('/src/audio/engine.ts');
+    const { soon } = await import('/src/audio/param.ts');
     const play = AudioEngine.prototype.play;
     AudioEngine.prototype.play = function (cue, ...args) {
       window.__cues.push({ cue, at: performance.now() });
       return play.call(this, cue, ...args);
     };
+    // the cut the press makes in its own click (once a scenario notes __pressAt): where on the audio clock it is placed
+    // (soon(), unless it is given a time), and soon() as it is made
+    for (const [name, i] of [['quiet', 2], ['stopAll', 1]]) {
+      const f = AudioEngine.prototype[name];
+      AudioEngine.prototype[name] = function (...a) {
+        const t = soon(this.ctx);
+        a[i] ??= t;
+        if (window.__pressAt !== undefined && window.event?.type === 'click') window.__cut ??= { at: a[i], soon: t };
+        return f.apply(this, a);
+      };
+    }
   });
   return opened;
 }
@@ -399,6 +411,14 @@ const heard = (page, from, to) =>
     [from, to],
   );
 
+/** Where the press's cut lands on the audio clock: made in the press itself, where the engine places every sound
+ *  (soon(): two frames ahead of the clock, or a frame past the output's latency where that is longer), not later. */
+function cutAt(h, at, cut, tag) {
+  h.expect(cut, `${tag}: the press made no cut in its own click`);
+  h.expect(cut.at >= at && cut.at <= cut.soon, `${tag}: the press's cut was placed ${((cut.at - at) * 1000).toFixed(1)} ms after it, past where the engine places every sound (${((cut.soon - at) * 1000).toFixed(1)} ms)`);
+  return cut.at;
+}
+
 /** No WebGL on this device: getContext gives none, as on a browser with graphics turned off. */
 const noWebGL = (ctx) =>
   ctx.addInitScript(() => {
@@ -479,7 +499,7 @@ export const scenarios = {
       let release;
       const held = new Promise((r) => (release = r));
       const { ctx, page, errors } = await visit(h, STAGES.names.query, PHONE, {
-        prepare: (c) => c.route(url, async (r) => (load.endsWith('failed') ? r.abort('failed') : held.then(() => r.continue()))),
+        prepare: (c) => c.route(url, async (r) => (load.endsWith('failed') ? r.abort('failed') : held.then(() => r.fallback()))),
       });
       const tag = `${way} with ${load}`;
       try {
@@ -514,7 +534,7 @@ export const scenarios = {
     const { ctx, page, errors } = await visit(h, '?shot=windows', PHONE, {
       prepare: async (c) => {
         await installAudioRecorder(c);
-        await c.route('**/src/daily/index.ts*', (r) => held.then(() => r.continue()));
+        await c.route('**/src/daily/index.ts*', (r) => held.then(() => r.fallback()));
       },
     });
     try {
@@ -524,10 +544,12 @@ export const scenarios = {
       await page.evaluate(() => addEventListener('click', (e) => e.target.closest?.('.ui-safe') && (window.__pressAt ??= window.__taps[0].context.currentTime), true));
       await page.locator('.ui-safe').click();
       const at = await page.evaluate(() => window.__pressAt);
+      const cut = cutAt(h, at, await page.evaluate(() => window.__cut), 'the Safe Zone');
       // two and a half seconds of the companion still on its way
       await audioRecorded(page, 0, at + 2.5);
       const before = await heard(page, at - 0.5, at);
-      const after = await heard(page, at + 0.05, at + 2.5);
+      // past the 15 ms ramp to silence (SCORE.safeOutSec) from where the engine placed it, with room for a last sample
+      const after = await heard(page, cut + 0.017, at + 2.5);
       release();
       h.expect(before.rms > 1e-3, `the intro was not audible before the press (RMS ${before.rms}), so silence proves nothing`);
       h.expect(after.read >= 0.9, `the recorder read only ${Math.round(after.read * 100)}% of the time after the press`);
@@ -696,12 +718,6 @@ export const scenarios = {
         await audioReady(page);
         await open(page);
         await cue(page, sound);
-        // a cue sounds two frames after it is asked for (SCORE.leadSec): the press waits until it is heard
-        await until(page, (min) => {
-          const tap = window.__taps[0];
-          const last = [...tap.q.values()].slice(-Math.round((0.2 * tap.context.sampleRate) / 128));
-          return Math.sqrt(last.reduce((s, [, ss]) => s + ss, 0) / (last.length * 128)) > min;
-        }, 10 * SILENT_RMS, { timeout: 10000, polling: 20 });
         await page.evaluate((hidden) => {
           addEventListener(
             'click',
@@ -713,17 +729,31 @@ export const scenarios = {
             true,
           );
         }, !!hidden);
-        await tap(page, '.ui-skip');
+        // Skip is pressed in the page the moment the recorder shows the cue sounding: the 0.2 s up to the audio clock,
+        // as far as it has heard them, ten times over silence. A press from outside lands whenever the page next runs,
+        // which on a page held for a second or two is after the cue has died away
+        await until(page, (min) => {
+          const tap = window.__taps[0];
+          const q = 128 / tap.context.sampleRate;
+          const now = tap.context.currentTime;
+          let ss = 0;
+          for (const [k, [, s]] of tap.q) if (k * q >= now - 0.2 && (k + 1) * q <= now) ss += s;
+          if (Math.sqrt((ss * q) / (0.2 * 128)) <= min) return false;
+          document.querySelector('.ui-skip').click();
+          return true;
+        }, 10 * SILENT_RMS, { timeout: 10000, polling: 20 });
         if (hidden) {
           // hidden for longer than the fade at the press lasts, then back
           await h.sleep(600);
           await page.evaluate(() => window.__hide(false));
         }
         const at = await page.evaluate(() => window.__pressAt);
+        const cut = cutAt(h, at, await page.evaluate(() => window.__cut), tag);
         await audioRecorded(page, 0, at + 2);
-        // past the 40 ms cut (SCORE.leaveSec), with room for its last few samples
+        // past the 40 ms cut (SCORE.leaveSec) from where the engine placed it, and its sources' end (stoppedBy), with
+        // room for its last few samples
         const before = await heard(page, at - 0.2, at);
-        const after = await heard(page, at + 0.15, at + 2);
+        const after = await heard(page, cut + 0.117, at + 2);
         // the cue sounding as the press lands, ten times over silence (the letter's opening swells in from soft)
         h.expect(before.rms > 10 * SILENT_RMS, `${tag}: the intro was not audible at the press (RMS ${before.rms}), so silence proves nothing`);
         h.expect(after.read >= 0.9, `${tag}: the recorder read only ${Math.round(after.read * 100)}% of the time after the press`);

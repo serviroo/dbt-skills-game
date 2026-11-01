@@ -202,7 +202,7 @@ export const holdDaily = (h, held) => (ctx) =>
     let ms;
     while ((ms = performance.now() - t) < 9000) await h.sleep(9000 - ms);
     held.push(ms);
-    await r.continue().catch(() => {});
+    await r.fallback().catch(() => {});
   });
 
 async function welcomed(h, page, run, where) {

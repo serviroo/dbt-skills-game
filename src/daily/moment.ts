@@ -129,7 +129,14 @@ function lowHum(scale: number) {
   });
   breath.gain.setTargetAtTime(0.05, soon(ctx), 0.8);
   let dead = false;
-  let nap: ReturnType<typeof setTimeout> | undefined;
+  // a silent source ending where the fade out as the page hides does: the pause comes when it ends
+  let nap: ConstantSourceNode | undefined;
+  const noNap = () => {
+    if (!nap) return;
+    nap.onended = null;
+    nap.disconnect();
+    nap = undefined;
+  };
   const resume = () => {
     if (!dead && !document.hidden && ctx.state !== 'running') ctx.resume().catch(() => {});
   };
@@ -145,7 +152,7 @@ function lowHum(scale: number) {
   };
   const seen = () => {
     if (dead) return;
-    clearTimeout(nap);
+    noNap();
     // already paused: `paused` has set where it comes back from
     if (ctx.state !== 'running') return resume();
     const t = soon(ctx);
@@ -153,10 +160,18 @@ function lowHum(scale: number) {
     if (!document.hidden) return void wake.gain.setTargetAtTime(1, t, WAKE_TAU);
     // hidden: fade out, then pause like the rest of the app's sound (a phone may pause it sooner; see `paused`)
     wake.gain.setTargetAtTime(0, t, SLEEP_TAU);
-    nap = setTimeout(() => {
+    // timed on the audio clock, not by a timer: that clock moves in whole buffers and lags on a busy device, and a pause
+    // landing before the fade is done cuts the hum off where it can still be heard
+    nap = ctx.createConstantSource();
+    nap.offset.value = 0;
+    nap.connect(ctx.destination);
+    nap.onended = () => {
+      noNap();
       // a page shown again before this pause lands still found the hum running, so it is woken once the pause lands
       if (!dead && document.hidden && ctx.state === 'running') ctx.suspend().then(resume, () => {});
-    }, (t - ctx.currentTime + SLEEP_TAU * 6) * 1000);
+    };
+    nap.start();
+    nap.stop(t + SLEEP_TAU * 6);
   };
   document.addEventListener('visibilitychange', seen);
   ctx.addEventListener('statechange', paused);
@@ -165,7 +180,7 @@ function lowHum(scale: number) {
   window.addEventListener('click', resume);
   window.addEventListener('keydown', resume);
   const unlisten = () => {
-    clearTimeout(nap);
+    noNap();
     document.removeEventListener('visibilitychange', seen);
     ctx.removeEventListener('statechange', paused);
     window.removeEventListener('click', resume);
