@@ -6,8 +6,8 @@
 // everything on leaving. Radical Acceptance's open hands, Willing Hands' think-of-it and Willingness's open hands show
 // it too. At 390, 320 and 844x390: reduced motion (the device's, or Motion set in another open copy mid-scene) holds one
 // still frame of open hands and Full moves them again in step; a lost context hands back to the flat drawing and a
-// restored one picks up in step; a slow GPU gets fewer pixels and keeps moving. With no WebGL the flat drawing shows and
-// Willing Hands still counts.
+// restored one picks up in step, the hands opening on from where they were; a slow GPU gets fewer pixels and keeps
+// moving. With no WebGL the flat drawing shows and Willing Hands still counts.
 import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
@@ -208,31 +208,44 @@ export const scenarios = {
     }
   },
 
-  /** a lost WebGL context hands back to the flat drawing and the scene stops; restored, it draws again in step */
+  /**
+   * a lost WebGL context hands back to the flat drawing and the scene stops; restored, it shows again in step and the
+   * hands open on from where they were. The page clock stops while the GPU builds the scene, which took CI's software
+   * GPU most of the step's 20 s, and more time keeps the countdown running while the restored scene is watched: a scene
+   * draws nothing more once its countdown is done.
+   */
   async 'hands-context-loss'(h) {
     for (const [tag, vp] of SIZES) {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
-      await toHands(h, page);
-      await live(h, page, `lost ${tag}`);
+      await page.clock.install();
+      await page.reload();
+      await toSkill(h, page, 'willing-hands', 'hands');
+      await page.locator('.dq-timer-svg--hands').waitFor({ timeout: 10000 });
+      await h.pauseClock(page);
+      await page.locator('.dq-timer-stage').scrollIntoViewIfNeeded();
+      await showsStopped(h, page, `lost ${tag}`);
+      const was = await after(h, page, 2000);
       await page.evaluate(() => {
         window.__lose = document.querySelector('.dq-scene canvas').getContext('webgl2').getExtension('WEBGL_lose_context');
         window.__lose.loseContext();
       });
       await page.locator('.dq-timer-stage:not(.is-scene-live)').waitFor({ timeout: 5000 });
-      await h.sleep(800);
       const a = await scenes(page);
-      await h.sleep(800);
+      await page.clock.runFor(1600);
       const b = await scenes(page);
       h.expect(a.live === 0 && b.frames === a.frames, `lost ${tag}: the scene kept drawing (${a.frames} -> ${b.frames})`);
-      const shown = await flat(page);
-      h.expect(shown.length === 2 && shown.every(Boolean), `lost ${tag}: the flat drawing did not come back (${JSON.stringify(shown)})`);
+      // the flat drawing fades back in on the browser's own time, whatever the page clock does
+      await h.poll(page, () => flat(page), (s) => s.length === 2 && s.every(Boolean), (s) => `lost ${tag}: the flat drawing did not come back (${JSON.stringify(s)})`, { timeout: 3000, polling: 50 });
       await h.shot(page, `hands-lost-${tag}`);
       await page.evaluate(() => window.__lose.restoreContext());
-      await live(h, page, `restored ${tag}`);
-      await until(page, (n) => window.__scenes.frames > n, b.frames + 10);
+      await showsStopped(h, page, `restored ${tag}`);
+      inStep(h, await pair(page), `restored ${tag}, shown`);
+      await page.locator('.dq-timer').getByRole('button', { name: '+15 s', exact: true }).click();
+      await page.clock.runFor(1000);
       const c = await pair(page);
       h.expect(c.s.live === 1 && c.s.contexts === 1 && c.s.frames > b.frames + 10, `restored ${tag}: ${JSON.stringify(c.s)}`);
       inStep(h, c, `restored ${tag}`);
+      h.expect(c.s.last.probe.curl < was.probe.curl, `restored ${tag}: the fingers curled back (${was.probe.curl.toFixed(4)} before the loss, ${c.s.last.probe.curl.toFixed(4)} after)`);
       await drawn(h, page, `restored ${tag}`);
       h.expect(!errors.length, errors.join('\n'));
       await ctx.close();
