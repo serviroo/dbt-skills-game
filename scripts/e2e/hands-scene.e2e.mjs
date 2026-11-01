@@ -2,12 +2,15 @@
 // Hands' hands step shows the scene live and drawn over its hidden flat picture, both hands whole inside the round
 // window (every joint inside its clear middle, nothing lit on its fading rim) and the countdown readable (3:1) under
 // them; from the start of the countdown to Done the fingers only loosen, never curling back, and end less curled than
-// they began. On a phone the scene keeps the countdown's time through a freeze, stays open with more time and frees
+// they began. Every picture these checks measure or save of the live scene shows the hands in the light. On a phone the scene keeps the countdown's time through a freeze, stays open with more time and frees
 // everything on leaving. Radical Acceptance's open hands, Willing Hands' think-of-it and Willingness's open hands show
 // it too. At 390, 320 and 844x390: reduced motion (the device's, or Motion set in another open copy mid-scene) holds one
 // still frame of open hands and Full moves them again in step; a lost context hands back to the flat drawing and a
 // restored one picks up in step; a slow GPU gets fewer pixels and keeps moving. With no WebGL the flat drawing shows and
 // Willing Hands still counts.
+import fs from 'node:fs';
+import path from 'node:path';
+import sharp from 'sharp';
 import { after, countdownContrast, DESK, drawn, flat, inStep, keepsTime, live, looks, pair, PHONE, sceneShot, scenes, seed, showsStopped, SIDE, slowGpu, toSkill, until } from './skill-scenes.e2e.mjs';
 
 const SMALL = { width: 320, height: 568 };
@@ -24,11 +27,21 @@ async function toHands(h, page, id = 'willing-hands', entry = 'hands') {
 }
 
 /**
- * How bright the window shows where its mask starts fading the scene out (from 84% to 92% of its radius), as the 99th
- * percentile of its brightness with the countdown hidden: about 10 over the dark, and 50 or more once a hand reaches
- * out there and is cut off.
+ * Pixels lit warm by the light, in raw pixels: the light itself and the palms it lights. About 500 or more where the
+ * hands show in their window at phone size; none in a window shot blank, or showing its flat picture.
  */
-async function rimLight(page) {
+function warmIn(data, channels) {
+  let n = 0;
+  for (let i = 0; i < data.length; i += channels) if (data[i] > 170 && data[i] > data[i + 2] + 40) n++;
+  return n;
+}
+
+/**
+ * The window shot with the countdown hidden: how warm it is (see warmIn), and how bright it shows where its mask starts
+ * fading the scene out (from 84% to 92% of its radius), as the 99th percentile of its brightness there: about 10 over
+ * the dark, and 50 or more once a hand reaches out there and is cut off.
+ */
+async function windowLight(page) {
   const { data, info } = await sceneShot(page);
   const { width: w, height: ht, channels: c } = info;
   const ls = [];
@@ -41,18 +54,28 @@ async function rimLight(page) {
     }
   }
   ls.sort((a, b) => a - b);
-  return Math.round(ls[Math.floor(ls.length * 0.99)]);
+  return { warm: warmIn(data, c), rim: Math.round(ls[Math.floor(ls.length * 0.99)]) };
+}
+
+/** A shot of the whole page shows the hands in their window: what is saved is what the player sees. */
+async function showsHands(h, page, png, where) {
+  const [box, dpr] = [await page.locator('.dq-scene').boundingBox(), await page.evaluate(() => devicePixelRatio)];
+  const { data, info } = await sharp(png).extract({ left: Math.round(box.x * dpr), top: Math.round(box.y * dpr), width: Math.round(box.width * dpr), height: Math.round(box.height * dpr) }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const warm = warmIn(data, info.channels);
+  h.expect(warm >= 100, `${where}: the saved picture shows no hands in the light (${warm} warm pixels in the window)`);
 }
 
 /** Both hands whole inside the window as drawn now, and the countdown readable under them. */
 async function inFrame(h, page, where) {
   const { probe } = (await scenes(page)).last;
   h.expect(probe.reach <= CLEAR, `${where}: the hands reach ${probe.reach.toFixed(3)} of the window's radius, past ${CLEAR}`);
-  const rim = await rimLight(page);
+  const { warm, rim } = await windowLight(page);
+  // a window shot blank would pass the rim's check without showing anything
+  h.expect(warm >= 100, `${where}: the window shows no hands in the light (${warm} warm pixels)`);
   h.expect(rim <= 30, `${where}: something lit reaches the window's fading rim (brightness ${rim})`);
   const contrast = await countdownContrast(page);
   h.expect(contrast >= 3, `${where}: the countdown has ${contrast.toFixed(2)}:1 against the hands`);
-  return `reach ${probe.reach.toFixed(3)}, rim ${rim}, countdown ${contrast.toFixed(1)}:1`;
+  return `reach ${probe.reach.toFixed(3)}, warm ${warm}, rim ${rim}, countdown ${contrast.toFixed(1)}:1`;
 }
 
 /** Motion as another open copy of the game sets it on its own Settings screen, with this copy kept in view. */
@@ -83,6 +106,7 @@ export const scenarios = {
       await page.locator('.dq-timer-stage').scrollIntoViewIfNeeded();
       await showsStopped(h, page, `hands ${tag}`);
       await looks(h, page, tag, 'hands', vp, undefined, { stopped: true });
+      await showsHands(h, page, fs.readFileSync(path.join(h.out, `hands-${tag}.png`)), `hands ${tag}, saved`);
       const seen = [await after(h, page, 0)];
       const said = [`${seen[0].e.toFixed(0)}s ${await inFrame(h, page, `hands ${tag} at the start`)}`];
       // two seconds at a time: a jump that long reads as a pause, not as a slow device
@@ -94,7 +118,7 @@ export const scenarios = {
       const curls = seen.map((s) => +s.probe.curl.toFixed(4));
       h.expect(curls.every((c, i) => !i || c <= curls[i - 1]), `hands ${tag}: the fingers curled back at some point: ${curls.join(', ')}`);
       h.expect(curls[curls.length - 1] < curls[0] - 0.25, `hands ${tag}: the fingers end about as curled as they began: ${curls.join(', ')}`);
-      await h.shot(page, `hands-${tag}-done`);
+      await showsHands(h, page, await h.shot(page, `hands-${tag}-done`), `hands ${tag} at Done, saved`);
       console.log(`  hands ${tag}: curl ${curls.join(' > ')}; ${said.join('; ')}`);
       if (tag === 'phone') {
         // more time after Done carries on from the open hands: nothing closes again
@@ -126,6 +150,7 @@ export const scenarios = {
         await page.locator('.dq-timer').getByRole('button', { name: start, exact: true }).click();
       }
       await looks(h, page, `${id}-${entry}`, 'hands', PHONE);
+      await showsHands(h, page, fs.readFileSync(path.join(h.out, `hands-${id}-${entry}.png`)), `${id} ${entry}, saved`);
       h.expect(!errors.length, errors.join('\n'));
       await ctx.close();
     }
@@ -151,7 +176,7 @@ export const scenarios = {
         h.expect(a.last.probe.curl < 0.2, `reduced motion ${tag}: the still hands are not open (curl ${a.last.probe.curl})`);
         await drawn(h, page, `still ${tag}`);
         console.log(`  still ${tag}: ${await inFrame(h, page, `still ${tag}`)}`);
-        await h.shot(page, `hands-still-${tag}`);
+        await showsHands(h, page, await h.shot(page, `hands-still-${tag}`), `reduced motion ${tag}, saved`);
         h.expect(!errors.length, errors.join('\n'));
         await ctx.close();
       }

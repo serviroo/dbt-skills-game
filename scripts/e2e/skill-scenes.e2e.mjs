@@ -468,13 +468,18 @@ const lum = (r, g, b) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
 const luma = (d, i) => 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
 const raw = (png) => sharp(png).removeAlpha().raw().toBuffer({ resolveWithObject: true });
 
-/** The countdown's contrast (WCAG) with the lightest of what is behind it: the 98th percentile, its figures hidden. */
+/**
+ * The countdown's contrast (WCAG) with the lightest of what is behind it: the 98th percentile, its figures hidden. The
+ * whole view is shot and cut down here: a shot clipped to the figures leaves the next shot of the page without its 3D
+ * scene about half the time, though the scene is still on screen.
+ */
 export async function countdownContrast(page) {
   const num = page.locator('.dq-timer-num');
-  const [box, color] = [await num.boundingBox(), await num.evaluate((e) => getComputedStyle(e).color)];
+  const [box, color, dpr] = [await num.boundingBox(), await num.evaluate((e) => getComputedStyle(e).color), await page.evaluate(() => devicePixelRatio)];
   await num.evaluate((e) => (e.style.visibility = 'hidden'));
-  const { data, info } = await raw(await screenshot(page, { clip: box }));
+  const png = await screenshot(page);
   await num.evaluate((e) => (e.style.visibility = ''));
+  const { data, info } = await sharp(png).extract({ left: Math.round(box.x * dpr), top: Math.round(box.y * dpr), width: Math.round(box.width * dpr), height: Math.round(box.height * dpr) }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
   const ls = [];
   for (let i = 0; i < data.length; i += info.channels) ls.push(lum(data[i], data[i + 1], data[i + 2]));
   ls.sort((a, b) => a - b);
