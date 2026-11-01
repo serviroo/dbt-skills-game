@@ -1,5 +1,5 @@
 {
-  "a-dropped-connection-gives-up": 16,
+  "a-dropped-connection-gives-up": 30,
   "a-late-open-changes-nothing": 24,
   "a-missing-chapter-opens": 2,
   "a-part-stopped-before-it-opens-places-nothing-past-its-stop": 1,

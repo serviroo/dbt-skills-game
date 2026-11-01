@@ -39,8 +39,8 @@
 //   a-late-open-changes-nothing  Try again while the drawings' database won't even open: it can't open again, and once
 //                             a later Try again opens it, the open given up on failing late leaves storage working
 //   a-dropped-connection-gives-up  the drawings' connection drops as a saved drawing opens and the one opened in its
-//                             place never answers: that one is given up (later reads answer at once), and Try again opens
-//                             the drawing once storage answers
+//                             place never answers, or never even opens: that one is given up (later reads answer at
+//                             once), and one Try again opens the drawing once storage answers
 //   storage-answers-too-late  a story's first page made while another connection holds its chapters: given up after a
 //                             while, the writer can't open it, and the write never lands later, when the hold lets go
 import { drawPage, line } from './art-eraser-glow.e2e.mjs';
@@ -672,44 +672,59 @@ export const scenarios = {
   },
 
   async 'a-dropped-connection-gives-up'(h) {
-    const { ctx, page, errors } = await h.open(seed(h));
-    try {
-      await drawPage(h, page);
-      await line(page, [0.2, 0.3], [0.7, 0.4]);
-      await page.getByRole('button', { name: 'Save', exact: true }).click();
-      await page.locator('.dq-tools-saved').waitFor();
-      const id = await page.evaluate(async () => (await (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).list())[0].id);
-      // a later visit: the drawing is only on the disk
-      await page.reload();
-      await h.reachHub(page);
-      // the next read of the strokes finds the connection dropped, and every one after that never answers
-      await page.evaluate(() => {
-        const transaction = IDBDatabase.prototype.transaction;
-        IDBDatabase.prototype.transaction = function (stores, ...rest) {
-          if (![].concat(stores).includes('strokes')) return transaction.call(this, stores, ...rest);
-          IDBDatabase.prototype.transaction = transaction;
-          throw new DOMException('The connection was lost.', 'InvalidStateError');
-        };
-      });
-      await stall(page, 'strokes');
-      await page.evaluate((id) => window.__daily.go({ name: 'draw', kind: 'today', id }), id);
-      await routeIs(page, 'draw');
-      await comesIn(h, page, '.dq-draw', 'a dropped connection', 15000);
-      await cantOpenShows(h, page, '.dq-draw', 'drawing', 'a dropped connection');
-      const took = await page.evaluate(async (id) => {
-        const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
-        const t = performance.now();
-        await as.get(id);
-        return performance.now() - t;
-      }, id);
-      h.expect(took < 2000, `the connection opened after the drop was never given up: a read waited ${Math.round(took)} ms`);
-      await page.evaluate(() => window.__answer());
-      await tryAgain(page);
-      await drawReady(page);
-      await shows(h, page, 1, 'Try again after a dropped connection:');
-      h.expect(!errors.length, errors.join('\n'));
-    } finally {
-      await ctx.close();
+    for (const opens of [true, false]) {
+      const at = opens ? 'a dropped connection' : 'a dropped connection whose new open never answers';
+      const { ctx, page, errors } = await h.open(seed(h));
+      try {
+        await drawPage(h, page);
+        await line(page, [0.2, 0.3], [0.7, 0.4]);
+        await page.getByRole('button', { name: 'Save', exact: true }).click();
+        await page.locator('.dq-tools-saved').waitFor();
+        const id = await page.evaluate(async () => (await (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).list())[0].id);
+        // a later visit: the drawing is only on the disk
+        await page.reload();
+        await h.reachHub(page);
+        // the next read of the strokes finds the connection dropped; then the one opened in its place never answers its
+        // reads, or never even opens
+        await page.evaluate(() => {
+          const transaction = IDBDatabase.prototype.transaction;
+          IDBDatabase.prototype.transaction = function (stores, ...rest) {
+            if (![].concat(stores).includes('strokes')) return transaction.call(this, stores, ...rest);
+            IDBDatabase.prototype.transaction = transaction;
+            throw new DOMException('The connection was lost.', 'InvalidStateError');
+          };
+        });
+        if (opens) await stall(page, 'strokes');
+        else
+          await page.evaluate(async () => {
+            const db = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).name;
+            const open = IDBFactory.prototype.open;
+            window.__answer = () => {};
+            IDBFactory.prototype.open = function (...a) {
+              if (a[0] !== db) return open.apply(this, a);
+              IDBFactory.prototype.open = open;
+              return { onupgradeneeded: null, onsuccess: null, onerror: null, onblocked: null, result: undefined, error: null };
+            };
+          });
+        await page.evaluate((id) => window.__daily.go({ name: 'draw', kind: 'today', id }), id);
+        await routeIs(page, 'draw');
+        await comesIn(h, page, '.dq-draw', at, 15000);
+        await cantOpenShows(h, page, '.dq-draw', 'drawing', at);
+        const took = await page.evaluate(async (id) => {
+          const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+          const t = performance.now();
+          await as.get(id);
+          return performance.now() - t;
+        }, id);
+        h.expect(took < 2000, `${at}: what it waited on was never given up: a read waited ${Math.round(took)} ms`);
+        await page.evaluate(() => window.__answer());
+        await tryAgain(page);
+        await drawReady(page);
+        await shows(h, page, 1, `Try again after ${at}:`);
+        h.expect(!errors.length, errors.join('\n'));
+      } finally {
+        await ctx.close();
+      }
     }
   },
 

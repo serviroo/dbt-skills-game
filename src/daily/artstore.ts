@@ -593,7 +593,11 @@ export class ArtStore {
         return v;
       } catch (e) {
         failed = true;
-        if (retry && connectionLost(e) && (await this.reconnect(db)) && (!started || mode === 'readonly')) continue;
+        if (!retry || !connectionLost(e)) break;
+        const back = this.reconnect(db);
+        // the open it now waits on is the one a stall gives up
+        turn.db = this.db;
+        if ((await back) && (!started || mode === 'readonly')) continue;
         break;
       }
     }
