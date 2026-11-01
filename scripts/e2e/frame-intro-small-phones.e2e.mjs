@@ -7,7 +7,7 @@
 // the same moment for the new shape, easing there or cutting there with reduced motion (also when it comes on mid-way),
 // without restarting the beat, skipping ahead or losing typed names. Sized to nothing and back mid-shot, the picture
 // keeps finite numbers and comes back as it was. A first visit then walks the whole intro, title to end card, with long names.
-import { until } from './harness.mjs';
+import { poll, until } from './harness.mjs';
 import { isSettled, windowCut } from './me-92-safe-zone-clean.e2e.mjs';
 
 const PHONE = { width: 390, height: 844 };
@@ -102,15 +102,49 @@ async function beat(h, viewport, shot, { query = '', seed = LONG_NAMES } = {}) {
   await page.locator('.title-screen').waitFor({ timeout: 60000 });
   await watch(page);
   await page.locator('.title-screen').click();
+  await playing(page);
   return { page, errors };
 }
 
+/** Waits for the scene to load and start playing, the page's own work. */
+const playing = (page) => page.locator('.lb').first().waitFor({ state: 'attached', timeout: 60000 });
+
+/** The intro drawing no frame for this long of the page running means it stopped. */
+const STALL = 15000;
+
+/**
+ * Waits for check(arg), run in the page, to come true within `sec` more of the scene's clock. That clock moves a tenth of
+ * a second a frame at most, so on a slow renderer each moment of the intro comes later in the page's time than on a
+ * phone, but never later on its own clock: the wait counts the scene's clock, and fails sooner only when no frame comes
+ * for STALL ms of the page running. `what` is what is waited for, for the failure.
+ */
+async function onBeat(page, check, arg, sec, what) {
+  // the frames the renderer really drew: the clock runs on without them once the WebGL context is lost
+  const read = async () => {
+    const [time, drawn] = await page.evaluate(() => [window.__stage.time, window.__stage.renderer.info.render.frame]);
+    return { time, drawn, done: await page.evaluate(check, arg) };
+  };
+  let r = await read();
+  const by = r.time + sec;
+  while (!r.done) {
+    if (r.time > by) throw new Error(`waited ${sec} s of the scene's clock for ${what}`);
+    const { drawn } = r;
+    r = await poll(page, read, (n) => n.done || n.drawn !== drawn, `the intro drew no frame for ${STALL / 1000} s of the page running, waiting for ${what}`, { timeout: STALL, polling: 50 });
+  }
+}
+
+/** Waits for `sel` to be on the page within `sec` more of the scene's clock. */
+const appears = (page, sel, sec) => onBeat(page, (sel) => !!document.querySelector(sel), sel, sec, sel);
+
+/** The beat's clock now. */
+const clock = (page) => page.evaluate(() => window.__frames.at(-1)?.lt ?? 0);
+
 /** Waits for the beat's clock to reach `sec`. */
-const reach = (page, sec, timeout = 60000) => until(page, (s) => (window.__frames.at(-1)?.lt ?? -1) >= s, sec, { timeout, polling: 50 });
+const reach = (page, sec) => onBeat(page, (s) => (window.__frames.at(-1)?.lt ?? -1) >= s, sec, Infinity, `the beat's clock to reach ${sec} s`);
 
 /** Turns the phone to `viewport`; returns the beat's clock as it turned. */
 async function turn(page, viewport) {
-  const at = await page.evaluate(() => window.__frames.at(-1)?.lt ?? 0);
+  const at = await clock(page);
   await page.setViewportSize(viewport);
   return at;
 }
@@ -258,8 +292,10 @@ const promptOn = (page) =>
     }),
   );
 
-/** A Lantern window once its words are typed: nothing of it cut, and the ways clear of it. */
-async function windowFits(h, page, tag) {
+/** A Lantern window, opening within `sec` of the scene's clock, once its words are typed: nothing of it cut, and the ways
+ *  clear of it. */
+async function windowFits(h, page, tag, sec = 2) {
+  await appears(page, '.sw', sec);
   await page.waitForFunction(() => document.querySelector('.sw .sw-next')?.getAnimations().length > 0 || document.querySelector('.sw .sw-btn'), null, { polling: 'raf', timeout: 60000 });
   await page.waitForFunction(isSettled, '.sw', { polling: 'raf', timeout: 15000 });
   await h.shot(page, tag);
@@ -282,11 +318,11 @@ async function holdChest(page, turns = []) {
   await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
   await page.mouse.down();
   for (const v of turns) {
-    await page.waitForTimeout(400);
+    await reach(page, (await clock(page)) + 0.4);
     await turn(page, v);
   }
   // a full charge waits for the release
-  await page.locator('.chest-hold.is-full').waitFor({ timeout: 15000 });
+  await appears(page, '.chest-hold.is-full', 2.5);
   await page.mouse.up();
   await page.locator('.chest-hold').waitFor({ state: 'detached', timeout: 15000 });
 }
@@ -303,7 +339,7 @@ const noArea = (shot, viewport, ready) => async (h) => {
   await page.setViewportSize({ width: 0, height: 0 });
   const empty = await page.evaluate(() => [innerWidth, innerHeight]);
   h.expect(!empty[0] && !empty[1], `the page kept a size of ${empty.join('x')}`);
-  await page.waitForTimeout(500);
+  await onBeat(page, () => !window.__frames.at(-1).w, null, 0.5, 'a frame drawn with no area');
   await page.setViewportSize(viewport);
   await until(page, (w) => window.__frames.at(-1).w === w, viewport.width, { timeout: 15000, polling: 16 });
   const last = await page.evaluate(() => window.__frames.at(-1).lt);
@@ -313,7 +349,6 @@ const noArea = (shot, viewport, ready) => async (h) => {
   const bad = [];
   const nan = frames.find((f) => !f.finite);
   if (nan) bad.push(`at ${nan.lt.toFixed(2)} s on ${nan.w}x${nan.h} the camera or the gate had a number that isn't finite`);
-  if (!frames.some((f) => !f.w)) bad.push('no frame was drawn while the page had no area');
   if (back.aspect !== was.aspect) bad.push(`the camera came back at aspect ${back.aspect}, not ${was.aspect}`);
   if (back.slitWidth !== was.slitWidth) bad.push(`the slit came back ${back.slitWidth} wide, not ${was.slitWidth}`);
   if (was.chest && back.chest.some((v, i) => Math.abs(v - was.chest[i]) > 0.02)) bad.push(`the chest came back at ${where(back.chest)}, not ${where(was.chest)}`);
@@ -399,7 +434,7 @@ function sized(viewport) {
     /** The chest under its hold prompt, held open, and its reward window. */
     async [`frame-intro-chest-${tag}`](h) {
       const { page, errors } = await beat(h, viewport, 'chest');
-      await page.locator('.chest-hold .ch-chip').waitFor({ timeout: 60000 });
+      await appears(page, '.chest-hold .ch-chip', 3);
       await page.waitForFunction(isSettled, '.chest-hold', { polling: 'raf', timeout: 15000 });
       await h.shot(page, `${tag}-chest`);
       const ways = [...(await waysClear(page)), ...(await promptOn(page))];
@@ -428,7 +463,7 @@ export const scenarios = {
     const t1 = await turn(page, SIDE);
     await reach(page, 5.2);
     await turn(page, PHONE);
-    await page.locator('.sw').waitFor({ timeout: 30000 });
+    await appears(page, '.sw', 3);
     const { frames, bad } = await framing(page, SHOTS.gate);
     const share = (f) => f.slit[2] - f.slit[0];
     // with motion, the first frame on the new shape is the picture as it was, and the slit eases from there
@@ -463,7 +498,7 @@ export const scenarios = {
 
   /** Sized to nothing while the chest waits under its prompt. */
   'frame-intro-no-area-chest': noArea('chest', SHORT_SIDE, async (page) => {
-    await page.locator('.chest-hold .ch-chip').waitFor({ timeout: 60000 });
+    await appears(page, '.chest-hold .ch-chip', 3);
     await page.waitForFunction(isSettled, '.chest-hold', { polling: 'raf', timeout: 15000 });
   }),
 
@@ -510,7 +545,7 @@ export const scenarios = {
     await turn(page, SIDE);
     await reach(page, 10.4);
     await turn(page, SMALL);
-    await page.locator('.sw').waitFor({ timeout: 30000 });
+    await appears(page, '.sw', 5.5);
     const { frames, bad } = await framing(page, SHOTS.awaken);
     bad.push(steady(frames));
     const opened = frames.at(-1).lt;
@@ -524,10 +559,9 @@ export const scenarios = {
    *  the prompt on each shape. */
   async 'frame-intro-turn-chest'(h) {
     const { page, errors } = await beat(h, PHONE, 'chest');
-    await page.locator('.chest-hold .ch-chip').waitFor({ timeout: 60000 });
+    await appears(page, '.chest-hold .ch-chip', 3);
     await page.evaluate(() => (window.__prompt = document.querySelector('.chest-hold')));
-    await turn(page, SHORT_SIDE);
-    await page.waitForTimeout(SETTLE * 1000);
+    await reach(page, (await turn(page, SHORT_SIDE)) + SETTLE);
     await h.shot(page, 'turn-chest-waiting');
     const on = await promptOn(page);
     const same = await page.evaluate(() => window.__prompt === document.querySelector('.chest-hold') && !document.querySelector('.sw'));
@@ -566,16 +600,17 @@ export const scenarios = {
     await page.locator('#np-comp').pressSequentially(NAMES.companion.slice(12));
     await page.keyboard.press('Enter');
     await page.waitForFunction((w) => !w.isConnected, prompt, { timeout: 15000 });
-    await page.locator('.sw').waitFor({ timeout: 60000 });
+    await playing(page);
+    await appears(page, '.sw', 9);
     for (const n of [1, 2, 3]) {
       await windowFits(h, page, `first-visit-window-${n}`);
       await onward(page);
     }
-    await page.locator('.awaken-word').waitFor({ timeout: 60000 });
+    await appears(page, '.awaken-word', 19);
     bad.push(...(await waysClear(page)));
-    await windowFits(h, page, 'first-visit-army');
+    await windowFits(h, page, 'first-visit-army', 13);
     await onward(page);
-    await page.locator('.chest-hold .ch-chip').waitFor({ timeout: 60000 });
+    await appears(page, '.chest-hold .ch-chip', 3);
     bad.push(...(await waysClear(page)), ...(await promptOn(page)));
     await holdChest(page);
     await windowFits(h, page, 'first-visit-chest-reward');
