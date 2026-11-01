@@ -675,8 +675,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     cardsEl,
   );
 
-  // the page and its drawing show once the chapter it opens on is in
-  const main = h('div', { class: 'st-main is-opening' }, titleIn, h('div', { class: 'st-bar' }, chBtn, seg, moreWrap), note, start, frame, dock);
+  const main = h('div', { class: 'st-main' }, titleIn, h('div', { class: 'st-bar' }, chBtn, seg, moreWrap), note, start, frame, dock);
   const el = h('div', { class: 'st-write' }, h('h1', { class: 'dq-sr', 'data-focus': '', text: 'Your story' }), main, cw);
 
   // ---------- save state ----------
@@ -884,7 +883,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   };
 
   // ---------- story, chapters ----------
-  const syncSeg = (on = tab) => segBtns.forEach((b, i) => b.setAttribute('aria-checked', String((i === 0 ? 'page' : 'notes') === on)));
+  const syncSeg = () => segBtns.forEach((b, i) => b.setAttribute('aria-checked', String((i === 0 ? 'page' : 'notes') === tab)));
   const refreshStory = async () => {
     const s = await ss.story(storyId);
     if (!s) return;
@@ -1899,21 +1898,28 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     pageId = ch && s.chapters.includes(ch) ? ch : s.chapters[0] ?? '';
     // search can open the notes; the Page tab then goes to the first chapter, or the one this visit was on
     const notes = went ? went.notes : !!r.ch && r.ch === s.notes;
-    // it comes in on the side it opens on, with its chapter's name, so the chapter coming in changes nothing around it
-    syncSeg(notes ? 'notes' : 'page');
-    start.classList.toggle('is-hidden', notes);
-    if (pageId) await refreshStory();
     // the first page takes its number now, so a Page or Notes tap while the chapter is made or its cards are read wins
     const n = ++picks;
-    titled();
     if (!pageId) pageId = (await ss.addChapter(storyId)).id;
     pageMade();
     await loadCards();
-    const landing = load(notes ? notesId : pageId, n);
-    // shown as soon as a chapter is in the editor (this one, or one a tap opened first), before what follows its opening
+    const opening = notes ? notesId : pageId;
+    const landing = load(opening, n).then(async (ok) => {
+      if (ok || !alive || n !== picks) return ok;
+      // a chapter that can't be read opens the first page in its place; with no page to read, the page is left empty
+      const first = s.chapters[0];
+      if (first && first !== opening) {
+        pageId = first;
+        await loadCards();
+        if (await load(first, n)) return false;
+      }
+      if (alive && n === picks) pageIn();
+      return false;
+    });
+    // in once the page it opens on is in the editor, before what follows its opening
     await pageLoaded;
     await Promise.all([refreshStory(), showPic()]);
-    main.classList.remove('is-opening');
+    inView();
     const landed = await landing;
     syncState();
     syncModes();
@@ -1945,9 +1951,9 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   };
   renderCards(false);
   syncModes();
-  let titled!: () => void;
-  const ready = new Promise<void>((done) => (titled = done));
-  void init().finally(titled);
+  let inView!: () => void;
+  const ready = new Promise<void>((done) => (inView = done));
+  void init().finally(inView);
 
   return {
     el,
@@ -1955,7 +1961,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     mode: 'sub',
     bubbles: [0.9, 0.45],
     foot: dock,
-    // it comes in holding the story's title and its chapter's name, never "Untitled story" first
+    // it comes in holding the story's title and the page it opens on, never "Untitled story" or an empty page first
     ready,
     // left before anything opened (storage slow to answer), it keeps what the visit was to open. The chapter is read as
     // the visit comes back, so a save that lands as a copy after they leave is the chapter that opens

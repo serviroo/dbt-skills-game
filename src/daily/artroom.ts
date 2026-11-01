@@ -285,10 +285,10 @@ function entryArt(kind: Paper) {
 }
 
 // ---------------- Drawing page ----------------
-/** What a visit to the drawing page keeps for Back and Forward: the drawing it holds and the draft its strokes go to. */
+/** What a visit to the drawing page keeps for Back and Forward: the drawing it holds and the draft its strokes are in. */
 interface DrawKept {
   readonly id: string | null;
-  readonly key: string;
+  readonly key: string | undefined;
 }
 export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const r = route as Extract<Route, { name: 'draw' }>;
@@ -301,6 +301,10 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const tab = as.claimTab();
   const own = (id?: string | null) => (id ? `edit:${id}:${tab.id}` : `${kind}:${tab.id}`);
   let key = own(editId);
+  // the page and draft it opens from, or coming back, the ones its strokes were in; they stay there until this page's own
+  // draft or a save holds them, so a page left before they were read, or after a read that failed, still points at them
+  const from = was ? was.key : r.draft;
+  let mine = false;
   let saving = false;
   let storing = false;
   let recId = editId ?? null;
@@ -312,8 +316,6 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
   let draftTimer = 0;
   let left = false;
   let loading = true;
-  // what the visit opens on is on the page
-  let opened = false;
   const offs: (() => void)[] = [];
 
   const msg = h('div', { class: 'dq-tools-msg', 'aria-live': 'polite' });
@@ -330,6 +332,7 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     draftTimer = 0;
     if (!dirty) return;
     if (!key.endsWith(`:${tab.id}`)) key = own(recId);
+    mine = true;
     if (!pad.strokes.length && !recId) return void as.dropDraft(key);
     void as.putDraft({ key, kind, editId: recId ?? undefined, bases: recId ? bases : undefined, prompt, strokes: pad.strokes, t: Date.now() });
   };
@@ -517,6 +520,7 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     const saved: DrawingRec = { ...next, ...res.labels, id: res.id, updated: res.updated };
     rec = saved;
     recId = res.id;
+    mine = true;
     const failed = res.stored === 'failed';
     bases = failed && res.id === id ? [...(bases ?? []), res.rev].slice(-8) : [res.rev];
     const copied = res.id !== id;
@@ -826,8 +830,6 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     if (left) return;
     key = own(editId);
     let draft: Draft | null = null;
-    // the draft it opened from, or coming back, the one its strokes went to: the first is in that one by now
-    const from = was ? was.key : r.draft;
     if (from) {
       draft = await as.getDraft(from);
       if (draft?.key.endsWith(`:${tab.id}`)) key = draft.key;
@@ -870,7 +872,6 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
       flushDraft();
     } else if (rec) pad.load(rec.strokes);
     loading = false;
-    opened = true;
     pad.el.inert = false;
     if (pad.strokes.length) hint.classList.add('is-gone');
     if (!as.persistent) say(p(ART.noStore, 'dq-small'));
@@ -883,19 +884,15 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     bubbles: [0, 0],
     // it comes in holding the drawing and its prompt, never an empty page first
     ready,
-    // left before anything opened (storage slow to answer), it keeps what the visit was to open. Read as the visit comes
-    // back, so a save that lands after they leave (as a copy kept apart too) is what opens
-    keep: (): DrawKept | undefined =>
-      opened
-        ? {
-            get id() {
-              return recId;
-            },
-            get key() {
-              return key;
-            },
-          }
-        : was,
+    // read as the visit comes back, so a save that lands after they leave (as a copy kept apart too) is what opens
+    keep: (): DrawKept => ({
+      get id() {
+        return mine ? recId : (editId ?? null);
+      },
+      get key() {
+        return mine ? key : from;
+      },
+    }),
     after: () => {
       app.sheetLayer.append(sheet, riseEl);
       ro.observe(main);

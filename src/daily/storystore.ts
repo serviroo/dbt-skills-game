@@ -10,7 +10,7 @@
  * (persistent = false); exports read both.
  */
 import type { App } from './app';
-import { connectionLost, uid, validDay } from './store';
+import { connectionLost, READ_WAIT_MS, uid, validDay } from './store';
 import { BESIDE, STORY_DB } from '../core/stored-names';
 import { canWrite, cleared, goneElsewhere, mayWrite, onClear, write } from '../core/cleared';
 
@@ -271,7 +271,7 @@ export class StoryStore {
 
   /** One fresh connection in place of a lost one (callers that saw the same loss share it). True when there is one. */
   private async reconnect(old: IDBDatabase) {
-    if (cleared()) return false;
+    if (cleared() || this.unreadable) return false;
     if (!this.lost.has(old)) {
       this.lost.add(old);
       try {
@@ -290,13 +290,31 @@ export class StoryStore {
    * A read that still gets no answer counts in readFails.
    */
   private async tx<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>): Promise<{ v: T } | null> {
-    if (mode === 'readonly') return this.run(stores, mode, fn);
+    if (mode === 'readonly') return this.read(stores, fn);
     // a clear checking its Save Crystal holds writes; once it clears they never happen
     if (!canWrite() && !(await mayWrite())) return null;
     const job = this.run(stores, mode, fn);
     this.writes.add(job);
     void job.finally(() => this.writes.delete(job));
     return job;
+  }
+
+  /**
+   * A read storage leaves unanswered past READ_WAIT_MS gets no answer, and the database is given up for the visit, as
+   * one that couldn't be opened: nothing more is read from it, or written over what it couldn't read.
+   */
+  private read<T>(stores: string[], fn: (t: IDBTransaction) => Promise<T>): Promise<{ v: T } | null> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unanswered = new Promise<null>((done) => (timer = setTimeout(() => done(null), READ_WAIT_MS)));
+    return Promise.race([this.run(stores, 'readonly', fn).then((v) => ({ v })), unanswered]).then((r) => {
+      clearTimeout(timer);
+      if (r) return r.v;
+      this.db = Promise.resolve(null);
+      this.persistent = false;
+      this.unreadable = true;
+      this.readFails++;
+      return null;
+    });
   }
 
   private async run<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>): Promise<{ v: T } | null> {

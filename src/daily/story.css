@@ -269,11 +269,6 @@
   flex-direction: column;
   min-width: 0;
 }
-/* the page and its drawing wait, their place kept, for the chapter it opens on, rather than show empty first */
-.st-main.is-opening .st-pic-b,
-.st-main.is-opening .st-frame {
-  visibility: hidden;
-}
 .st-title {
   width: 100%;
   margin: 6px 0 4px;
