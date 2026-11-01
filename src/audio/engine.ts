@@ -113,6 +113,9 @@ export class AudioEngine {
   private volume: GainNode;
   readonly limiter: DynamicsCompressorNode;
   private beds = new Map<BedName, BedHandle>();
+  /** Voices stopped and still fading (beds, the charge hum, cues, the hush), until their sources end: a later stopAll, such
+   *  as Skip just after a reset, still silences them sooner. */
+  private fading = new Set<Voice>();
   private active = new Set<Voice>();
   private mlevel: GainNode;
   private mlp: BiquadFilterNode;
@@ -256,7 +259,9 @@ export class AudioEngine {
           if (name !== 'reward' && name !== 'end' && name !== 'calm') return;
           for (const n of ['gate_hum', 'aura_bed'] as BedName[]) {
             const b = this.beds.get(n);
-            if (b && !b.stopped) b.stop(2.5, at);
+            if (!b) continue;
+            if (!b.stopped) b.stop(2.5, at);
+            this.letGo(b.voice);
             this.beds.delete(n);
           }
         },
@@ -456,6 +461,7 @@ export class AudioEngine {
       if (o.level !== undefined) cur.level(o.level, o.fadeIn ?? 0.5, at);
       return cur;
     }
+    if (cur) this.letGo(cur.voice);
     const h = startBed(this.lib, name, this.bedBus, at, o.level ?? 1, o.fadeIn ?? 0.5, this.nextSeed());
     this.beds.set(name, h);
     return h;
@@ -494,8 +500,10 @@ export class AudioEngine {
         h.release(at);
         self.toFocus(dB(-2), now(at), 0.15);
       },
+      voice: h.voice,
       stop(at?: number, ramp?: number) {
         h.stop(at, ramp);
+        self.letGo(h.voice);
         self.charge = null;
         self.toFocus(1, now(at) + 0.3, 0.5);
       },
@@ -610,15 +618,23 @@ export class AudioEngine {
     this.duckG.gain.setTargetAtTime(dB(db), at, Math.max(0.003, ramp / 4));
   }
 
+  /** Keeps a stopped voice in reach of a later stop until its sources have ended; those that have are let go. */
+  private letGo(v: Voice) {
+    for (const f of this.fading) if (f.end <= this.ctx.currentTime) this.fading.delete(f);
+    this.fading.add(v);
+  }
+
   /** Stop every cue still sounding, the beds, charge and score, and the echo's tail with them (e.g. on replay or leaving
    *  the cutscene): what plays next starts in an empty echo. Under the Safe Zone's quiet the echo is closed already, and
    *  leaving the quiet brings the empty one (see quiet). */
   stopAll(fade = 0.4, at = this.ctx.currentTime) {
-    for (const v of this.active) v.stop(at, fade);
-    this.active.clear();
-    for (const b of this.beds.values()) b.stop(fade, at);
-    this.beds.clear();
     this.charge?.stop(at, fade);
+    for (const v of [...this.active, ...[...this.beds.values()].map((b) => b.voice), ...this.fading]) {
+      v.stop(at, fade);
+      this.letGo(v);
+    }
+    this.active.clear();
+    this.beds.clear();
     this.music.stop(fade, at);
     if (this.isQuiet) return;
     // what plays from here on gets an empty echo with sends of its own at once. What was stopped keeps the old one, whose
@@ -660,7 +676,10 @@ export class AudioEngine {
     set(this.yieldG.gain, 1);
     this.lifted = false;
     for (const g of [this.hushBeds.gain, this.hushMusic.gain, this.hushHall.gain, this.hushRoom.gain]) set(g, 1);
-    this.hushV?.stop(at, fade);
+    if (this.hushV) {
+      this.hushV.stop(at, fade);
+      this.letGo(this.hushV);
+    }
     this.hushV = null;
   }
 
@@ -698,7 +717,9 @@ export class AudioEngine {
         case 'bed_stop': {
           const name = loopName as BedName;
           if (e.cue === 'bed_stop') {
-            this.beds.get(name)?.stop(o.fade ?? 0.5, at);
+            const b = this.beds.get(name);
+            b?.stop(o.fade ?? 0.5, at);
+            if (b) this.letGo(b.voice);
             this.beds.delete(name);
             break;
           }

@@ -112,6 +112,8 @@ export interface BedHandle {
   level(v: number, rampSec?: number, at?: number): void;
   stop(rampSec?: number, at?: number): void;
   readonly stopped: boolean;
+  /** What sounds it, for the engine to reach while it fades. */
+  readonly voice: Voice;
 }
 
 export function startBed(lib: Lib, name: BedName, dest: AudioNode, t: number, level: number, fadeIn: number, seed: number): BedHandle {
@@ -134,6 +136,7 @@ export function startBed(lib: Lib, name: BedName, dest: AudioNode, t: number, le
     get stopped() {
       return v.isStopped;
     },
+    voice: v,
   };
 }
 
@@ -141,6 +144,7 @@ export interface ChargeHandle {
   set(c: number, at?: number): void;
   release(at?: number): void;
   stop(at?: number, ramp?: number): void;
+  readonly voice: Voice;
 }
 
 /**
@@ -221,5 +225,6 @@ export function startCharge(lib: Lib, dest: AudioNode, t: number, seed: number):
       stopped = true;
       v.stop(at, ramp);
     },
+    voice: v,
   };
 }
