@@ -154,17 +154,60 @@ export function breathRing(ctx: Ctx, opts: { inhale: number; exhale: number; rou
   };
 }
 
-function palm(x: number, flip: boolean) {
-  const g = sv('g', { transform: `translate(${x} 0) scale(${flip ? -1 : 1} 1)` });
+/**
+ * A right hand's four fingers, palm up and seen from a little above its wrist, from the little finger: where each leaves
+ * the palm (from the wrist), its angle from straight up (+ toward the thumb), its length as seen and half its width
+ * there; then the thumb, from its knuckle.
+ */
+const FINGERS = [[-10.2, -24.2, -0.39, 17.9, 3], [-3.6, -26.9, -0.16, 23.1, 3.5], [3.7, -28.1, 0.04, 24.9, 3.7], [11.1, -27.2, 0.22, 22.9, 3.55]];
+const THUMB = [18.6, -12.8, 0.8, 16, 3.8];
+
+/**
+ * One open hand, palm up and loose, as one line from the wrist round every finger and the thumb and back; `pool` fills
+ * the warm light pooled in its palm.
+ */
+function openHand(x: number, flip: boolean, pool: string) {
+  const n = (v: number) => +v.toFixed(1);
+  /** a finger's two sides at its base, and the line up one side, round its tip and down the other */
+  const digit = ([bx, by, a, len, w]: number[]) => {
+    const [ux, uy, nx, ny, wt] = [Math.sin(a), -Math.cos(a), Math.cos(a), Math.sin(a), w * 0.72];
+    const [tx, ty] = [bx + ux * len, by + uy * len];
+    return {
+      from: [n(bx - nx * w), n(by - ny * w)],
+      to: [n(bx + nx * w), n(by + ny * w)],
+      line: `L${n(tx - nx * wt)} ${n(ty - ny * wt)}A${n(wt)} ${n(wt)} 0 0 1 ${n(tx + nx * wt)} ${n(ty + ny * wt)}`,
+    };
+  };
+  let d = 'M-11 6C-18 -4 -17 -17 ';
+  let last: number[] | null = null;
+  for (const f of FINGERS.map(digit)) {
+    // the web between two fingers dips a little toward the palm
+    d += last ? `Q${n((last[0] + f.from[0]) / 2)} ${n(Math.max(last[1], f.from[1]) + 2)} ${f.from.join(' ')}` : f.from.join(' ');
+    d += `${f.line}L${f.to.join(' ')}`;
+    last = f.to;
+  }
+  const t = digit(THUMB);
+  d += `C${n(last![0] + 0.9)} ${n(last![1] + 6)} ${n(t.from[0] - 1.1)} ${n(t.from[1] - 5)} ${t.from.join(' ')}${t.line}L${t.to.join(' ')}`;
+  // the ball of the thumb rounds down into the wrist
+  d += `C${n(t.to[0] + 0.3)} ${n(t.to[1] + 8.6)} ${n(t.to[0] - 4.7)} ${n(t.to[1] + 16.6)} 11 6`;
+  const g = sv('g', { transform: `translate(${x} 132) scale(${flip ? -1 : 1} 1)` });
   g.append(
-    sv('path', {
-      d: 'M-18 112C-20 98 -16 84 -10 80L-10 60Q-10 55 -6 55Q-2 55 -2 60L-2 76L-1 52Q-1 47 3 47Q7 47 7 52L7 76L9 55Q9 50 13 50Q17 50 17 55L16 79L20 66Q21 62 25 63Q28 64 27 68L22 92C20 104 14 112 4 114Z',
-      fill: 'rgba(79,184,255,.08)',
-      stroke: 'rgba(170,225,255,.7)',
-      'stroke-width': 1.3,
-      'stroke-linejoin': 'round',
-    }),
+    sv('ellipse', { cx: 3, cy: -13, rx: 11, ry: 7, fill: pool, opacity: 0.55 }),
+    sv('path', { d, fill: 'rgba(79,184,255,.08)', stroke: 'rgba(170,225,255,.7)', 'stroke-width': 1.3, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }),
+    sv('path', { d: 'M11 -19Q3 -11 5 1', fill: 'none', stroke: 'rgba(170,225,255,.3)', 'stroke-width': 1, 'stroke-linecap': 'round' }),
   );
+  return g;
+}
+
+/** Two open hands side by side, palms up, with a small warm light resting just above them: the hands' flat picture. */
+function willingHands(svg: SVGSVGElement) {
+  const id = `dqh${++gid}`;
+  const grad = sv('radialGradient', { id, cx: '50%', cy: '50%', r: '50%' });
+  grad.append(sv('stop', { offset: '0', 'stop-color': '#ffe2bd', 'stop-opacity': '0.75' }), sv('stop', { offset: '0.35', 'stop-color': '#ffcf9a', 'stop-opacity': '0.24' }), sv('stop', { offset: '1', 'stop-color': '#ffcf9a', 'stop-opacity': '0' }));
+  svg.querySelector('defs')!.append(grad);
+  const light = `url(#${id})`;
+  const g = sv('g', { class: 'dq-scene-flat' });
+  g.append(openHand(121, false, light), openHand(79, true, light), sv('circle', { cx: 100, cy: 100, r: 20, fill: light }), sv('circle', { cx: 100, cy: 100, r: 2.8, fill: '#fff3e2' }));
   return g;
 }
 
@@ -245,9 +288,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; in
     sea.append(parts.wave2, parts.wave, parts.board);
     svg.append(sea);
   } else if (visual === 'hands') {
-    const g = sv('g', { transform: 'translate(0 -8)' });
-    g.append(palm(78, true), palm(122, false));
-    svg.append(g);
+    svg.append(willingHands(svg));
   } else if (visual === 'cold') {
     svg.append(frost());
   }

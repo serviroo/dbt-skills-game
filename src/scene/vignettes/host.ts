@@ -27,6 +27,7 @@ const SCENES = {
   wave: () => import('./scenes/wave'),
   ring: () => import('./scenes/ring'),
   tide: () => import('./scenes/tide'),
+  hands: () => import('./scenes/hands'),
 } satisfies Record<string, () => Promise<{ build: BuildScene }>>;
 
 export type SceneKind = keyof typeof SCENES;

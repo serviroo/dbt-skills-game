@@ -18,16 +18,16 @@ import { gone, screenshot, until as pageUntil } from './harness.mjs';
 const WAIT_MS = Number(/\bwaitMs:\s*(\d+)/.exec(fs.readFileSync(new URL('../../src/motion/tokens.ts', import.meta.url), 'utf8'))?.[1]);
 if (!(WAIT_MS > 0)) throw new Error('SCENE.waitMs is missing from src/motion/tokens.ts');
 
-const PHONE = { width: 390, height: 844 };
-const SIDE = { width: 844, height: 390 };
-const DESK = { width: 1440, height: 900 };
+export const PHONE = { width: 390, height: 844 };
+export const SIDE = { width: 844, height: 390 };
+export const DESK = { width: 1440, height: 900 };
 /** the four sizes every new scene is checked at */
 const VIEWS = [['phone', PHONE], ['small', { width: 320, height: 568 }], ['side', SIDE], ['desk', { width: 1280, height: 800 }]];
 
-const seed = (h) => ({ 'dbt.app.v1': h.SEEN });
-const scenes = (page) => page.evaluate(() => (window.__scenes ? JSON.parse(JSON.stringify(window.__scenes)) : null));
+export const seed = (h) => ({ 'dbt.app.v1': h.SEEN });
+export const scenes = (page) => page.evaluate(() => (window.__scenes ? JSON.parse(JSON.stringify(window.__scenes)) : null));
 /** the scene's last beat and the countdown on screen, read in the same moment */
-const pair = (page) => page.evaluate(() => ({ s: window.__scenes ? JSON.parse(JSON.stringify(window.__scenes)) : null, num: document.querySelector('.dq-timer-num')?.textContent ?? '' }));
+export const pair = (page) => page.evaluate(() => ({ s: window.__scenes ? JSON.parse(JSON.stringify(window.__scenes)) : null, num: document.querySelector('.dq-timer-num')?.textContent ?? '' }));
 const wiseRuns = async (h, page) => JSON.parse((await h.ls(page, h.SAVE)) ?? '{"events":[]}').events.filter((e) => e.k === 'skill' && e.skill === 'wise-mind').length;
 
 /** Taps through any window the companion opens on arrival, then waits for Home. */
@@ -88,7 +88,7 @@ const hide = (page, on) =>
   }, on);
 
 /** Home, then a skill's intro and Begin, which goes to its first step, or straight to step `entry` when given. */
-async function toSkill(h, page, id, entry) {
+export async function toSkill(h, page, id, entry) {
   // the first-visit welcome opens a moment after Home appears, so a tap it covers goes back Home and tries again
   for (let i = 0; ; i++) {
     if (i) await page.evaluate(() => window.__daily.go({ name: 'hub' }));
@@ -115,7 +115,7 @@ async function toStep(h, page, id, entry, { pause = false } = {}) {
 }
 
 /** The scene is on screen: its first frame is drawn, which took CI's software GPU about 16 s in some runs. */
-async function live(h, page, where, stage = '.dq-timer-stage') {
+export async function live(h, page, where, stage = '.dq-timer-stage') {
   await page.locator(`${stage}.is-scene-live`).waitFor({ timeout: 30000 }).catch(async () => {
     await h.shot(page, `fail-${where}`);
     throw new Error(`${where}: the 3D scene never came on screen`);
@@ -137,7 +137,7 @@ async function moreTime(page) {
  * Waits up to 30 s of the page running for `test` in the page, so a busy GPU holding frames back only slows this down. On
  * a timeout the check that follows says what is missing.
  */
-async function until(page, test, arg) {
+export async function until(page, test, arg) {
   await pageUntil(page, test, arg, { timeout: 30000 }).catch((e) => {
     if (e.name !== 'TimeoutError') throw e;
   });
@@ -159,7 +159,7 @@ async function pixels(page) {
   return { mean: +mean.toFixed(1), sd: +Math.sqrt(Math.max(0, sq / n - mean * mean)).toFixed(1), max: Math.round(max) };
 }
 
-async function drawn(h, page, where) {
+export async function drawn(h, page, where) {
   // a scene fades in over its flat picture once it shows, so it is judged once fully in (the page clock may be stopped,
   // so this looks from here rather than from the page)
   await h.poll(page, () => page.locator('.dq-scene').evaluate((e) => Number(getComputedStyle(e).opacity)), (o) => o >= 0.99, `${where}: the scene never finished fading in`, { timeout: 5000, polling: 50 });
@@ -180,7 +180,7 @@ const countWaits = () => {
   }).observe(document, { subtree: true, attributes: true, attributeFilter: ['class'], attributeOldValue: true });
   Object.defineProperty(window, '__waits', { get: () => window.__ended + document.querySelectorAll('.is-scene-wait').length });
 };
-async function flat(page) {
+export async function flat(page) {
   return page.$$eval('.dq-scene-flat', (els) => els.map((e) => { const s = getComputedStyle(e); return s.visibility !== 'hidden' && Number(s.opacity) > 0.5; }));
 }
 
@@ -212,7 +212,7 @@ async function flatBack(h, page, where) {
 }
 
 /** The countdown shows whole seconds left, rounded up; the scene draws at most 30 times a second, so it may trail a frame. */
-function inStep(h, { s, num }, where) {
+export function inStep(h, { s, num }, where) {
   const b = s?.last;
   h.expect(b && !b.still, `${where}: no moving frame has been drawn`);
   if (num === 'Done') return h.expect(b.done && b.e >= b.dur - 0.05, `${where}: the countdown is done but the scene is at ${b.e.toFixed(2)} of ${b.dur} s`);
@@ -292,14 +292,16 @@ async function oneSlowFrame(h, hz) {
 }
 
 /**
- * A GPU that copes with a small canvas but not a big one (here a draw costs 1 ms for every 1000 pixels over 60000): the
- * scene draws fewer pixels within a few frames and keeps moving smoothly instead of a frame every half second. It is
- * counted in frames the scene drew, not in time, since a slow GPU can hold frames back for seconds. `late`: the first
- * frame takes until the countdown is nearly over, as CI's software GPU did in the runs where this drew no frames.
+ * A GPU that copes with a small canvas but not a big one (by default a draw costs 1 ms for every 1000 pixels over 60000;
+ * `cost` is [pixels free, pixels per ms]): the scene draws fewer pixels within a few frames and keeps moving smoothly
+ * instead of a frame every half second. It is counted in frames the scene drew, not in time, since a slow GPU can hold
+ * frames back for seconds. `late`: the first frame takes until the countdown is nearly over, as CI's software GPU did in
+ * the runs where this drew no frames. `reach` goes to the scene's step and starts its countdown, which `more` presses of
+ * more time stretch past the measuring; `tag` names its screenshot.
  */
-async function slowGpu(h, late) {
-  const { ctx, page, errors } = await h.open(seed(h), '?mute', DESK);
-  await ctx.addInitScript((late) => {
+export async function slowGpu(h, { late = false, vp = DESK, reach = toStone, more = 2, cost = [60000, 1000], tag = late ? 'slow-gpu-late-desk' : 'slow-gpu-desk' } = {}) {
+  const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
+  await ctx.addInitScript(([late, [free, perMs]]) => {
     window.__gpuMs = 0;
     // frames whose added work went over the scene's 30 fps budget
     window.__overBudget = 0;
@@ -311,7 +313,7 @@ async function slowGpu(h, late) {
         const r = draw.apply(this, args);
         // only the scene's own canvas is slow; the rest of the page draws as usual
         if (!this.canvas.closest?.('.dq-scene')) return r;
-        const ms = Math.max(0, this.drawingBufferWidth * this.drawingBufferHeight - 60000) / 1000;
+        const ms = Math.max(0, this.drawingBufferWidth * this.drawingBufferHeight - free) / perMs;
         window.__gpuMs += ms;
         // a frame's draws all come before the scene counts that frame
         if (window.__scenes.frames !== frame) (frame = window.__scenes.frames), (work = 0);
@@ -336,15 +338,14 @@ async function slowGpu(h, late) {
       if (f === first && pname === this.SYNC_STATUS && Number(document.querySelector('.dq-timer-num')?.textContent) > 3) return this.UNSIGNALED;
       return get.call(this, f, pname);
     };
-  }, late);
+  }, [late, cost]);
   await page.reload();
-  await toStone(h, page);
+  await reach(h, page);
   // held that long, the first frame outlasts live()'s wait
   if (late) await page.waitForFunction(() => !(Number(document.querySelector('.dq-timer-num')?.textContent) > 3), null, { timeout: 30000 });
   await live(h, page, 'slow');
-  // 30 s more, so the countdown outlasts the measuring however late the scene came on screen
-  await moreTime(page);
-  await moreTime(page);
+  // more time, so the countdown outlasts the measuring however late the scene came on screen
+  for (let i = 0; i < more; i++) await moreTime(page);
   const full = await page.evaluate(() => Math.min(window.devicePixelRatio, 2));
   const read = () => page.evaluate(() => ({ ...window.__scenes, gpuMs: window.__gpuMs, overBudget: window.__overBudget }));
   // only sustained slowness keeps a ratio for the visit; a slow first frame lowers it for now, then it comes back
@@ -367,14 +368,14 @@ async function slowGpu(h, late) {
   h.expect(b.dpr < full, `slow GPU: the scene still draws at the full pixel ratio ${b.dpr}`);
   inStep(h, await pair(page), 'slow');
   await drawn(h, page, 'slow');
-  await h.shot(page, late ? 'slow-gpu-late-desk' : 'slow-gpu-desk');
+  await h.shot(page, tag);
   console.log(`  slow GPU${late ? ', late first frame' : ''}: ${a.overBudget} frames over budget, then pixel ratio ${b.dpr}, ${frames} frames in ${secs.toFixed(1)} s, ${ms.toFixed(1)} ms per frame`);
   h.expect(!errors.length, errors.join('\n'));
   await ctx.close();
 }
 
 /** A live scene of this kind, drawn, alone in its window, over its hidden flat picture and inside its stage and the screen. */
-async function looks(h, page, tag, kind, vp, stage = '.dq-timer-stage', { stopped = false } = {}) {
+export async function looks(h, page, tag, kind, vp, stage = '.dq-timer-stage', { stopped = false } = {}) {
   // it keeps drawing; how fast is checked on the real clock (scene-live, scene-slow-gpu). On a stopped page clock the
   // clock is run half a second instead, so the scene's own time moves only that much however slowly the page draws.
   const s0 = await scenes(page);
@@ -394,7 +395,7 @@ async function looks(h, page, tag, kind, vp, stage = '.dq-timer-stage', { stoppe
 }
 
 /** The scene's probe after jumping the page clock forward `ms` and letting a few frames draw. */
-async function after(h, page, ms) {
+export async function after(h, page, ms) {
   // the page clock is stopped: the jump runs the next animation frame once, which draws the scene at the new moment
   if (ms > 0) await page.clock.fastForward(Math.round(ms));
   return (await scenes(page)).last;
@@ -405,7 +406,7 @@ async function after(h, page, ms) {
  * on animation frames, so the clock is stepped a frame at a time until then. The scene's time then starts from where it
  * first shows, however long the GPU took, and moves only when a check moves it.
  */
-async function showsStopped(h, page, where, stage = '.dq-timer-stage') {
+export async function showsStopped(h, page, where, stage = '.dq-timer-stage') {
   const live = async () => (await page.locator(`${stage}.is-scene-live`).count()) > 0 || (await page.clock.runFor(16), false);
   await h.poll(page, live, Boolean, `${where}: the 3D scene never came on screen`, { timeout: 30000, polling: 0 }).catch(async (e) => {
     await h.shot(page, `fail-${where.replace(/\W+/g, '-')}`);
@@ -424,7 +425,7 @@ async function comesBack(page, b) {
 }
 
 /** The page freezes and comes back: the scene picks up in step with the countdown. Then leaving frees it. */
-async function keepsTime(h, page, kind) {
+export async function keepsTime(h, page, kind) {
   await h.pauseClock(page);
   await h.sleep(1200);
   const b = await pair(page);
@@ -468,7 +469,7 @@ const luma = (d, i) => 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
 const raw = (png) => sharp(png).removeAlpha().raw().toBuffer({ resolveWithObject: true });
 
 /** The countdown's contrast (WCAG) with the lightest of what is behind it: the 98th percentile, its figures hidden. */
-async function countdownContrast(page) {
+export async function countdownContrast(page) {
   const num = page.locator('.dq-timer-num');
   const [box, color] = [await num.boundingBox(), await num.evaluate((e) => getComputedStyle(e).color)];
   await num.evaluate((e) => (e.style.visibility = 'hidden'));
@@ -483,7 +484,7 @@ async function countdownContrast(page) {
 }
 
 /** Shoots the scene window with the countdown hidden. */
-async function sceneShot(page) {
+export async function sceneShot(page) {
   await page.addStyleTag({ content: '.dq-timer-center{visibility:hidden!important}' });
   const png = await screenshot(page.locator('.dq-scene'));
   await page.evaluate(() => document.querySelectorAll('style').forEach((s) => s.textContent.includes('dq-timer-center{visibility') && s.remove()));
@@ -509,15 +510,16 @@ function lightOf({ data, info }) {
 }
 
 /**
- * The wave's moon as shown: the brightest thing in the sky (the top third of the window) and everything joined to it within 85%
- * of its brightness (the disc), where it sits (shares of the window), how round it shows, and the light round it: the
- * mean just outside the disc (1.5 radii) against the sky further out (5 radii, above it), inside the window's soft edge.
+ * The moon as shown: the brightest thing in `rows` of the window (shares of its height: the wave's sky by default, the
+ * bowl's water for its reflection) and everything joined to it within 85% of its brightness (the disc), where it sits
+ * (shares of the window), how round it shows, and the light round it: the mean just outside the disc (1.5 radii) against
+ * what is further out (5 radii, above it), inside the window's soft edge.
  */
-function moonOf({ data, info }) {
+export function moonOf({ data, info }, rows = [0, 0.32]) {
   const { width: W, height: H, channels: c } = info;
   const L = (x, y) => luma(data, (y * W + x) * c);
   let max = 0, mx = 0, my = 0;
-  for (let y = 0; y < H * 0.32; y++) for (let x = 0; x < W; x++) if (L(x, y) > max) (max = L(x, y)), (mx = x), (my = y);
+  for (let y = Math.floor(H * rows[0]); y < H * rows[1]; y++) for (let x = 0; x < W; x++) if (L(x, y) > max) (max = L(x, y)), (mx = x), (my = y);
   const seen = new Uint8Array(W * H);
   const todo = [[mx, my]];
   let [x0, x1, y0, y1] = [mx, mx, my, my];
@@ -836,10 +838,10 @@ export const scenarios = {
   },
 
   async 'scene-slow-gpu'(h) {
-    await slowGpu(h, false);
+    await slowGpu(h);
   },
   async 'scene-slow-gpu-late-start'(h) {
-    await slowGpu(h, true);
+    await slowGpu(h, { late: true });
   },
 
   /**
