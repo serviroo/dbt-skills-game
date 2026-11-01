@@ -943,6 +943,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
       } else keep.push(l);
     }
     cur = { id: c.id, kind: c.kind, title: c.title, bases };
+    ta.readOnly = false;
     pageIn();
     startBtn.disabled = false;
     tab = c.kind === 'notes' ? 'notes' : 'page';
@@ -1906,14 +1907,25 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     const opening = notes ? notesId : pageId;
     const landing = load(opening, n).then(async (ok) => {
       if (ok || !alive || n !== picks) return ok;
-      // a chapter that can't be read opens the first page in its place; with no page to read, the page is left empty
+      // a chapter that can't be read opens the first page in its place, and with no page to read, a new page takes
+      // their words, kept apart from the ones it couldn't read
       const first = s.chapters[0];
       if (first && first !== opening) {
         pageId = first;
         await loadCards();
         if (await load(first, n)) return false;
       }
-      if (alive && n === picks) pageIn();
+      const made = alive && n === picks ? await ss.addChapter(storyId).catch(() => null) : null;
+      if (made && alive && n === picks) {
+        pageId = made.id;
+        await loadCards();
+        if (await load(made.id, n)) return false;
+      }
+      // not even that: the page stays shut rather than take words it can't keep
+      if (alive && n === picks) {
+        ta.readOnly = true;
+        pageIn();
+      }
       return false;
     });
     // in once the page it opens on is in the editor, before what follows its opening

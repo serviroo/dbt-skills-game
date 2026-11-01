@@ -10,7 +10,7 @@
  * (persistent = false); exports read both.
  */
 import type { App } from './app';
-import { connectionLost, READ_WAIT_MS, uid, validDay } from './store';
+import { connectionLost, STORAGE_WAIT_MS, uid, validDay } from './store';
 import { BESIDE, STORY_DB } from '../core/stored-names';
 import { canWrite, cleared, goneElsewhere, mayWrite, onClear, write } from '../core/cleared';
 
@@ -290,29 +290,30 @@ export class StoryStore {
    * A read that still gets no answer counts in readFails.
    */
   private async tx<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>): Promise<{ v: T } | null> {
-    if (mode === 'readonly') return this.read(stores, fn);
+    if (mode === 'readonly') return this.answered(stores, mode, fn);
     // a clear checking its Save Crystal holds writes; once it clears they never happen
     if (!canWrite() && !(await mayWrite())) return null;
-    const job = this.run(stores, mode, fn);
+    const job = this.answered(stores, mode, fn);
     this.writes.add(job);
     void job.finally(() => this.writes.delete(job));
     return job;
   }
 
   /**
-   * A read storage leaves unanswered past READ_WAIT_MS gets no answer, and the database is given up for the visit, as
-   * one that couldn't be opened: nothing more is read from it, or written over what it couldn't read.
+   * Runs fn in one transaction, as run. One storage leaves unanswered past STORAGE_WAIT_MS counts as failed, and the
+   * database is given up for the visit, as one that couldn't be opened: nothing more is read from it, or written over
+   * what it couldn't read.
    */
-  private read<T>(stores: string[], fn: (t: IDBTransaction) => Promise<T>): Promise<{ v: T } | null> {
+  private answered<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>): Promise<{ v: T } | null> {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const unanswered = new Promise<null>((done) => (timer = setTimeout(() => done(null), READ_WAIT_MS)));
-    return Promise.race([this.run(stores, 'readonly', fn).then((v) => ({ v })), unanswered]).then((r) => {
+    const unanswered = new Promise<null>((done) => (timer = setTimeout(() => done(null), STORAGE_WAIT_MS)));
+    return Promise.race([this.run(stores, mode, fn).then((v) => ({ v })), unanswered]).then((r) => {
       clearTimeout(timer);
       if (r) return r.v;
       this.db = Promise.resolve(null);
       this.persistent = false;
       this.unreadable = true;
-      this.readFails++;
+      if (mode === 'readonly') this.readFails++;
       return null;
     });
   }
@@ -725,7 +726,8 @@ export class StoryStore {
   }
 
   async addChapter(storyId: string, title?: string): Promise<Chapter> {
-    const cur = await this.story(storyId);
+    // storage given up for the visit still takes a page, kept in memory, on the story as it was last read
+    const cur = (await this.story(storyId)) ?? (this.unreadable ? this.lastStory.get(storyId) : undefined);
     if (!cur) throw new RangeError('That story is not on this device.');
     if (cur.chapters.length >= STORY_CAP.chapters) throw new RangeError('This story already holds as many chapters as it can.');
     const rev = uid();

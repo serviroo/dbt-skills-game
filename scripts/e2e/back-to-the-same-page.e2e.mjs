@@ -27,8 +27,9 @@
 //   drawing-storage-never-answers  storage that never answers a saved drawing's read: the Safe Zone stays one tap away
 //                             while it waits, the page comes in saying drawings aren't being kept, Back works, and a
 //                             line more and Save leave the stored drawing as it was
-//   writer-storage-never-answers   the same for a chapter's read: the writer comes in on an empty page, and words typed
-//                             there never reach the stored chapter
+//   writer-storage-never-answers   the same for a chapter's read: the writer comes in on a new empty page, words typed
+//                             there are still there back from the Safe Zone, and they never reach the stored chapter.
+//                             The same when the first page of a story with none is never answered as it is made
 import { drawPage, line } from './art-eraser-glow.e2e.mjs';
 import { holdStorage } from './story-reading.e2e.mjs';
 
@@ -43,15 +44,19 @@ const seed = (h) => ({
 });
 const KEPT_APART = 'A newer copy of this drawing arrived, so this one was kept as its own page.';
 const stroke = (x, y) => ({ i: 1, w: 25, p: [x, y, x + 300, y + 80, x + 520, y + 20] });
-/** Every read of the IndexedDB store `name` from now on never answers, as a stalled disk; window.__answer() undoes it. */
-const stall = (page, name) =>
-  page.evaluate((name) => {
-    const get = IDBObjectStore.prototype.get;
-    window.__answer = () => (IDBObjectStore.prototype.get = get);
-    IDBObjectStore.prototype.get = function (...a) {
-      return this.name === name ? {} : get.apply(this, a);
-    };
-  }, name);
+/** Every read of the IndexedDB store `name` from now on (in a `mode` transaction only, when given) never answers, as a
+ * stalled disk; window.__answer() undoes it. */
+const stall = (page, name, mode) =>
+  page.evaluate(
+    ([name, mode]) => {
+      const get = IDBObjectStore.prototype.get;
+      window.__answer = () => (IDBObjectStore.prototype.get = get);
+      IDBObjectStore.prototype.get = function (...a) {
+        return this.name === name && (!mode || this.transaction.mode === mode) ? {} : get.apply(this, a);
+      };
+    },
+    [name, mode],
+  );
 /** `op` ('get' or 'delete') on `id` in the IndexedDB store `store` of the database `db` as it is on the disk, past the
  * app's own copy in memory and its own connection. */
 const onDisk = (page, db, store, op, id) =>
@@ -614,6 +619,17 @@ export const scenarios = {
       await comesIn(h, page, '.st-write', 'its only chapter missing');
       h.expect(await page.locator('.st-ta').isVisible(), 'its only chapter missing, the writer came in with no page');
       h.expect((await page.locator('.st-ta').inputValue()) === '', `its only chapter missing, the page reads ${JSON.stringify(await page.locator('.st-ta').inputValue())}`);
+      // a new page, so the words typed there are kept
+      await page.locator('.st-ta').fill('A new beginning.');
+      await safeAndBack(page, 'write');
+      await comesIn(h, page, '.st-write', 'back to the page made for a missing chapter');
+      h.expect((await page.locator('.st-ta').inputValue()) === 'A new beginning.', `back from the Safe Zone the page made for a missing chapter reads ${JSON.stringify(await page.locator('.st-ta').inputValue())}`);
+      const kept = await page.evaluate(async (id) => {
+        const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+        const s = await ss.story(id);
+        return Promise.all(s.chapters.map(async (c) => (await ss.onDisk(c))?.text));
+      }, ids.lone);
+      h.expect(kept.includes('A new beginning.'), `the words typed on the page made for a missing chapter were stored as ${JSON.stringify(kept)}`);
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();
@@ -679,7 +695,9 @@ export const scenarios = {
       await comesIn(h, page, '.st-write', 'storage that never answers', 15000);
       h.expect(await page.locator('.st-ta').isVisible(), 'storage that never answers: the writer came in with no page');
       await page.locator('.st-ta').fill('Words typed over nothing.');
-      await h.sleep(1500);
+      await safeAndBack(page, 'write');
+      await comesIn(h, page, '.st-write', 'back to the page typed on while storage never answered');
+      h.expect((await page.locator('.st-ta').inputValue()) === 'Words typed over nothing.', `back from the Safe Zone the page typed on while storage never answered reads ${JSON.stringify(await page.locator('.st-ta').inputValue())}`);
       await page.evaluate(() => window.__answer());
       const stored = await onDisk(page, ids.db, 'chapters', 'get', ids.ch1);
       h.expect(stored?.text === 'The lantern woke.', `words typed while storage never answered reached the stored chapter: ${JSON.stringify(stored?.text)}`);
@@ -688,6 +706,30 @@ export const scenarios = {
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();
+    }
+
+    // a story with no pages makes its first one on opening, and storage never answers that write
+    const first = await h.open(seed(h));
+    try {
+      await h.reachHub(first.page);
+      const id = await first.page.evaluate(async () => {
+        const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+        const { story, first } = await ss.create('No Pages Yet');
+        await ss.removeChapter(story.id, first.id);
+        return story.id;
+      });
+      await stall(first.page, 'stories', 'readwrite');
+      await first.page.evaluate((r) => window.__daily.go(r), { name: 'write', id });
+      await routeIs(first.page, 'write');
+      await comesIn(h, first.page, '.st-write', 'a first page never answered', 15000);
+      await holds(h, first.page, 'Page, Chapter 1', 'a first page never answered');
+      await first.page.locator('.st-ta').fill('The first line.');
+      await safeAndBack(first.page, 'write');
+      await comesIn(h, first.page, '.st-write', 'back to a first page never answered');
+      h.expect((await first.page.locator('.st-ta').inputValue()) === 'The first line.', `back from the Safe Zone the first page reads ${JSON.stringify(await first.page.locator('.st-ta').inputValue())}`);
+      h.expect(!first.errors.length, first.errors.join('\n'));
+    } finally {
+      await first.ctx.close();
     }
   },
 };

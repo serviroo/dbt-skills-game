@@ -242,10 +242,10 @@ let uidN = 0;
 export const uid = () => `${Date.now().toString(36)}${(uidN++).toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 
 /**
- * How long storage may leave a read of the drawings or stories unanswered. Past it that database is given up for the
- * visit, as one that couldn't be opened, so a screen opening on it comes in rather than wait for ever.
+ * How long storage may leave a read or write of the drawings or stories unanswered. Past it that database is given up
+ * for the visit, as one that couldn't be opened, so a screen opening on it comes in rather than wait for ever.
  */
-export const READ_WAIT_MS = 10e3;
+export const STORAGE_WAIT_MS = 10e3;
 
 /** How a dropped IndexedDB connection shows (WebKit: "Connection to Indexed Database server lost"; closed: InvalidStateError). */
 export const connectionLost = (e: unknown) => {

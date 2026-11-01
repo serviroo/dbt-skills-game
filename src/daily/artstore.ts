@@ -4,7 +4,7 @@
  * Backups carry the strokes, not images: a restore re-renders every thumbnail from them.
  */
 import { canvasBlob, INKS, PAGE, renderDrawing, STROKE_MODES, type Paper, type Stroke, type StrokeMode } from './ink';
-import { connectionLost, READ_WAIT_MS, uid, validDay } from './store';
+import { connectionLost, STORAGE_WAIT_MS, uid, validDay } from './store';
 import { ART_DB, BESIDE, TAB_KEY } from '../core/stored-names';
 import { canWrite, cleared, goneElsewhere, mayWrite, onClear, write as writeOut } from '../core/cleared';
 
@@ -487,29 +487,30 @@ export class ArtStore {
    * the fresh one, and so does a write that never started. A read that still gets no answer counts in readFails.
    */
   private async tx<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>, fallback: () => T): Promise<T> {
-    if (mode === 'readonly') return this.read(stores, fn, fallback);
+    if (mode === 'readonly') return this.answered(stores, mode, fn, fallback);
     // a clear checking its Save Crystal holds writes; once it clears they never happen
     if (!canWrite() && !(await mayWrite())) return fallback();
-    const job = this.run(stores, mode, fn, fallback);
+    const job = this.answered(stores, mode, fn, fallback);
     this.writes.add(job);
     void job.finally(() => this.writes.delete(job));
     return job;
   }
 
   /**
-   * A read storage leaves unanswered past READ_WAIT_MS gets no answer, and the database is given up for the visit, as
-   * one that couldn't be opened: nothing more is read from it, or written over what it couldn't read.
+   * Runs fn in one transaction, as run. One storage leaves unanswered past STORAGE_WAIT_MS counts as failed, and the
+   * database is given up for the visit, as one that couldn't be opened: nothing more is read from it, or written over
+   * what it couldn't read.
    */
-  private read<T>(stores: string[], fn: (t: IDBTransaction) => Promise<T>, fallback: () => T): Promise<T> {
+  private answered<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>, fallback: () => T): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const unanswered = new Promise<null>((done) => (timer = setTimeout(() => done(null), READ_WAIT_MS)));
-    return Promise.race([this.run(stores, 'readonly', fn, fallback).then((v) => ({ v })), unanswered]).then((r) => {
+    const unanswered = new Promise<null>((done) => (timer = setTimeout(() => done(null), STORAGE_WAIT_MS)));
+    return Promise.race([this.run(stores, mode, fn, fallback).then((v) => ({ v })), unanswered]).then((r) => {
       clearTimeout(timer);
       if (r) return r.v;
       this.db = Promise.resolve(null);
       this.persistent = false;
       this.unreadable = true;
-      this.readFails++;
+      if (mode === 'readonly') this.readFails++;
       return fallback();
     });
   }
