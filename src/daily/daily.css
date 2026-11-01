@@ -2072,6 +2072,10 @@ textarea.dq-input {
 .dq-timer-svg path {
   filter: drop-shadow(0 0 4px rgba(79, 184, 255, 0.55));
 }
+/* Spectator Mode's flat picture glows only where its lights are: the moon and the headlights, each with its own halo */
+.dq-timer-svg .dq-thoughts path {
+  filter: none;
+}
 .dq-ring-center,
 .dq-timer-center {
   position: absolute;
@@ -2103,15 +2107,18 @@ textarea.dq-input {
   font-variant-numeric: tabular-nums;
 }
 .dq-timer-svg--drift ~ .dq-timer-center,
-.dq-timer-svg--tide ~ .dq-timer-center {
+.dq-timer-svg--tide ~ .dq-timer-center,
+.dq-timer-svg--thoughts ~ .dq-timer-center {
   inset: auto 0 -36px;
 }
 .dq-timer-stage:has(.dq-timer-svg--drift),
-.dq-timer-stage:has(.dq-timer-svg--tide) {
+.dq-timer-stage:has(.dq-timer-svg--tide),
+.dq-timer-stage:has(.dq-timer-svg--thoughts) {
   margin-bottom: 36px;
 }
 .dq-timer-svg--drift ~ .dq-timer-center .dq-timer-num,
 .dq-timer-svg--tide ~ .dq-timer-center .dq-timer-num,
+.dq-timer-svg--thoughts ~ .dq-timer-center .dq-timer-num,
 .dq-timer-svg--hands ~ .dq-timer-center .dq-timer-num,
 .dq-timer-svg--cold ~ .dq-timer-center .dq-timer-num,
 .dq-timer-stage.is-wide .dq-timer-num {

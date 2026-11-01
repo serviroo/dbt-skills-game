@@ -2,7 +2,8 @@
  * Guided-practice widgets. Every visual is a pure function of elapsed time from clock.onFrame, so they pause,
  * seek and capture cleanly. Reduced motion keeps the pacing (numbers, words, fades) and drops movement.
  */
-import { COOL, type Skill, type Visual } from '../content/dbt';
+import { COOL, type Skill, type ThoughtPic, type Visual } from '../content/dbt';
+import { THOUGHTS } from '../motion/tokens';
 import { hasScene, mountScene, playerAccent, type Beat } from '../scene/vignettes/host';
 import { onFrame, now, backInSight } from './clock';
 import { btn, h, p, typo } from './ui';
@@ -232,6 +233,78 @@ function frost() {
   return g;
 }
 
+/**
+ * Spectator Mode's flat picture: the thoughts going by in the picture the player chose, at its scene's pace. Clouds cross
+ * past the moon above the hills, pairs of headlights follow the road below the hill, or leaves float down the stream;
+ * each comes in on the left and goes out on the right of the round window. `pose` moves them to e seconds in.
+ */
+function thoughtsPicture(pic: ThoughtPic) {
+  const pace = THOUGHTS[pic];
+  const clip = `dqc${++gid}`;
+  const cp = sv('clipPath', { id: clip });
+  cp.append(sv('circle', { cx: 100, cy: 100, r: 70 }));
+  const g = sv('g', { 'clip-path': `url(#${clip})`, class: `dq-scene-flat dq-thoughts dq-thoughts--${pic}`, fill: 'none', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
+  const line = (d: string, o: number, w = 1.2) => sv('path', { d, stroke: `rgba(170,215,255,${o})`, 'stroke-width': w });
+  const moon = (x: number, y: number) => [sv('circle', { cx: x, cy: y, r: 15, fill: 'rgba(230,241,255,.07)' }), sv('circle', { cx: x, cy: y, r: 6.5, fill: 'rgba(230,241,255,.85)' })];
+  const things: SVGElement[] = [];
+  let put: (el: SVGElement, u: number, n: number, e: number) => void;
+  if (pic === 'clouds') {
+    g.append(...moon(130, 68), sv('path', { d: 'M28 142Q52 128 76 136T124 131T174 138V180H28Z', fill: 'rgba(7,8,15,.6)', stroke: 'rgba(170,215,255,.4)', 'stroke-width': 1.2 }), line('M28 156Q64 145 98 152T174 150', 0.25, 1));
+    for (let i = 0; i < Math.ceil(pace.crossSec / pace.spaceSec); i++) {
+      things.push(sv('path', { d: 'M-24 7C-31 7 -31 -2 -23 -2C-23 -11 -11 -13 -6 -6C-2 -15 11 -15 13 -5C20 -9 28 -3 24 7Z', fill: 'rgba(14,24,40,.92)', stroke: 'rgba(200,235,255,.75)', 'stroke-width': 1.4 }));
+    }
+    // every third one crosses at the moon's height
+    put = (el, u, n) => el.setAttribute('transform', `translate(${(4 + 192 * u).toFixed(2)} ${[70, 104, 87][((n % 3) + 3) % 3]})`);
+  } else if (pic === 'cars') {
+    g.append(...moon(70, 66), line('M28 96Q60 86 92 93T150 88T174 94', 0.32), line('M20 110Q90 108 136 114T172 150T188 176', 0.5, 1.4), line('M24 122Q92 120 128 128T158 160T170 180', 0.5, 1.4));
+    g.append(sv('path', { d: 'M22 116Q91 114 132 121T165 155T179 178', stroke: 'rgba(170,215,255,.3)', 'stroke-width': 1, 'stroke-dasharray': '3 5' }));
+    g.append(sv('path', { d: 'M24 172Q100 160 176 174V190H24Z', fill: 'rgba(7,8,15,.7)', stroke: 'rgba(170,215,255,.35)', 'stroke-width': 1.2 }));
+    for (let i = 0; i < Math.ceil(pace.crossSec / pace.spaceSec); i++) {
+      const car = sv('g');
+      for (const x of [-1, 1]) car.append(sv('circle', { cx: x, cy: 0, r: 5, fill: 'rgba(230,241,255,.14)' }), sv('circle', { cx: x, cy: 0, r: 1.9, fill: '#e6f1ff' }));
+      things.push(car);
+    }
+    // along the road's middle, a cubic from beyond the left edge round to beyond the bottom right; the lamps part as it turns towards you
+    put = (el, u) => {
+      const v = 1 - u;
+      const x = v * v * v * 4 + 3 * v * v * u * 110 + 3 * v * u * u * 158 + u * u * u * 186;
+      const y = v * v * v * 116 + 3 * v * v * u * 115 + 3 * v * u * u * 124 + u * u * u * 184;
+      const apart = 1.5 + 4 * u * u;
+      el.setAttribute('transform', `translate(${x.toFixed(2)} ${y.toFixed(2)})`);
+      el.querySelectorAll('circle').forEach((c, k) => c.setAttribute('cx', ((k < 2 ? -1 : 1) * apart).toFixed(2)));
+    };
+  } else {
+    g.append(sv('path', { d: 'M28 58H172V66Q132 72 100 66T28 68Z', fill: 'rgba(7,8,15,.6)' }), line('M28 68Q64 62 100 66T172 66', 0.45, 1.3), line('M28 140Q70 134 104 139T172 136', 0.45, 1.3));
+    g.append(sv('path', { d: 'M28 140Q70 134 104 139T172 136V176H28Z', fill: 'rgba(7,8,15,.55)' }));
+    // the moon's path on the water
+    g.append(sv('path', { d: 'M104 78h8M100 90h14M106 101h7M98 112h16M104 124h9', stroke: 'rgba(230,241,255,.5)', 'stroke-width': 1.4 }));
+    for (let i = 0; i < Math.ceil(pace.crossSec / pace.spaceSec); i++) {
+      const leaf = sv('g');
+      leaf.append(sv('path', { d: 'M-9 0C-5 -6 5 -6 10 0C5 6 -5 6 -9 0Z', fill: 'rgba(137,180,220,.14)', stroke: 'rgba(200,235,255,.82)', 'stroke-width': 1.3 }), sv('path', { d: 'M-12 1L10 0', stroke: 'rgba(200,235,255,.6)', 'stroke-width': 0.9 }));
+      things.push(leaf);
+    }
+    put = (el, u, n, e) => {
+      const y = [102, 88, 120, 95, 112][((n % 5) + 5) % 5] + 3 * Math.sin(u * 4.1 + n);
+      el.setAttribute('transform', `translate(${(6 + 188 * u).toFixed(2)} ${y.toFixed(2)}) rotate(${((n * 67 + e * 6 * (n % 2 ? 1 : -1)) % 360).toFixed(1)})`);
+    };
+  }
+  g.append(...things);
+  return {
+    els: [cp, g],
+    /** e seconds in, thought 0 starts partway across, so one is always on its way; reduced motion holds that moment */
+    pose(e: number, still: boolean) {
+      const shift = (still ? 0 : e) + 0.45 * pace.crossSec;
+      const last = Math.floor(shift / pace.spaceSec);
+      things.forEach((el, i) => {
+        const n = last - i;
+        const u = (shift - n * pace.spaceSec) / pace.crossSec;
+        el.setAttribute('visibility', u < 1 ? 'visible' : 'hidden');
+        if (u < 1) put(el, u, n, still ? 0 : e);
+      });
+    },
+  };
+}
+
 /** A length of time as it is said: "30 seconds", "1 minute", "1 minute 30 seconds". */
 function spoken(s: number) {
   const m = Math.floor(s / 60);
@@ -253,7 +326,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; in
   const svg = sv('svg', { viewBox: wide ? '0 0 320 160' : '0 0 200 200', class: `dq-timer-svg dq-timer-svg--${visual}`, 'aria-hidden': 'true' }) as SVGSVGElement;
   const parts: Record<string, SVGElement> = {};
   if (!wide) {
-    const gradId = ringBase(svg, visual !== 'drift' && visual !== 'tide');
+    const gradId = ringBase(svg, visual !== 'drift' && visual !== 'tide' && visual !== 'thoughts');
     parts.orb = sv('circle', { cx: 100, cy: 100, r: 60, fill: `url(#${gradId})` });
     if (hasScene(visual)) parts.orb.classList.add('dq-scene-flat');
     svg.append(parts.orb);
@@ -292,6 +365,8 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; in
   } else if (visual === 'cold') {
     svg.append(frost());
   }
+  const thoughts = visual === 'thoughts' ? thoughtsPicture(opts.input as ThoughtPic) : null;
+  if (thoughts) svg.append(...thoughts.els);
   const num = h('div', { class: 'dq-timer-num' });
   const big = opts.big ? h('p', { class: 'dq-timer-big', text: typo(opts.big) }) : null;
   const stageEl = h('div', { class: `dq-timer-stage ${wide ? 'is-wide' : ''}` }, svg, h('div', { class: 'dq-timer-center' }, num));
@@ -355,6 +430,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; in
       parts.stone.setAttribute('transform', `rotate(${(still ? 0 : Math.sin(e * 0.7) * 14 * (1 - p)).toFixed(2)} 100 ${(48 + k * 98).toFixed(2)})`);
       parts.rays.setAttribute('transform', `translate(${still ? 0 : (Math.sin(e * 0.3) * 6).toFixed(2)} 0)`);
     }
+    thoughts?.pose(e, still);
     if (parts.tide) {
       const kids = Array.from(parts.tide.children);
       kids.forEach((c, i) => {

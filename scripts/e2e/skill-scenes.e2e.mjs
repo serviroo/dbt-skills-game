@@ -8,7 +8,8 @@
 // the water comes in and goes out), keeps to its timer's clock, stops on leaving, holds still with reduced motion (and
 // as the device's own setting changes while it is up) and leaves its flat picture with no WebGL. The breathing light is
 // a small hot core in a halo gone by half its ring, with the countdown readable (3:1) under it all breath long; the
-// wave's moon is a light that shows whole at every size.
+// wave's moon is a light that shows whole at every size. The drifting thoughts' checks (thoughts-scene.e2e.mjs) use the helpers
+// exported here.
 import fs from 'node:fs';
 import sharp from 'sharp';
 import { deviceMotion } from './device-motion.e2e.mjs';
@@ -31,7 +32,7 @@ export const pair = (page) => page.evaluate(() => ({ s: window.__scenes ? JSON.p
 const wiseRuns = async (h, page) => JSON.parse((await h.ls(page, h.SAVE)) ?? '{"events":[]}').events.filter((e) => e.k === 'skill' && e.skill === 'wise-mind').length;
 
 /** Taps through any window the companion opens on arrival, then waits for Home. */
-async function home(h, page) {
+export async function home(h, page) {
   let clear = 0;
   for (let i = 0; i < 80; i++) {
     const win = page.locator('.dq-sw').first();
@@ -216,7 +217,9 @@ export function inStep(h, { s, num }, where) {
   const b = s?.last;
   h.expect(b && !b.still, `${where}: no moving frame has been drawn`);
   if (num === 'Done') return h.expect(b.done && b.e >= b.dur - 0.05, `${where}: the countdown is done but the scene is at ${b.e.toFixed(2)} of ${b.dur} s`);
-  const left = Number(num);
+  // a minute or more shows as m:ss
+  const [m, sec] = num.includes(':') ? num.split(':').map(Number) : [0, Number(num)];
+  const left = m * 60 + sec;
   const sceneLeft = b.dur - b.e;
   h.expect(!b.done && sceneLeft > left - 1 - 0.1 && sceneLeft <= left + 0.1, `${where}: the scene is at ${b.e.toFixed(2)} of ${b.dur} s but the countdown says ${num}`);
 }
@@ -412,6 +415,54 @@ export async function showsStopped(h, page, where, stage = '.dq-timer-stage') {
     await h.shot(page, `fail-${where.replace(/\W+/g, '-')}`);
     throw e;
   });
+}
+
+/**
+ * Reloads with the page clock installed, goes to a scene's step with `reach`, stops the clock there and waits until the
+ * scene shows (see showsStopped). However long the GPU takes to build it, the countdown has moved on only by the frames
+ * the clock was stepped while it looked, a few seconds at most.
+ */
+export async function openStopped(h, page, reach, where) {
+  await page.clock.install();
+  await page.reload();
+  await reach(h, page);
+  await h.pauseClock(page);
+  await showsStopped(h, page, where);
+}
+
+/**
+ * On a scene shown by openStopped: a lost WebGL context hands back to the flat picture and the scene stops; restored, it
+ * shows again in step, and then keeps drawing in step. The page clock stays stopped while the GPU rebuilds the scene,
+ * which took CI's software GPU most of a step, so the check takes the countdown only about 10 s on however slow the GPU;
+ * a step shorter than that left needs more time first, since a scene draws nothing more once its countdown is done.
+ * `shot` names the picture of the flat one, and `whileLost` checks more while it shows. Returns the last beat drawn before
+ * the loss and the scene and countdown after the restore.
+ */
+export async function losesContext(h, page, where, shot, whileLost = async () => {}) {
+  const was = await after(h, page, 2000);
+  const parts = (await flat(page)).length;
+  await page.evaluate(() => {
+    window.__lose = document.querySelector('.dq-scene canvas').getContext('webgl2').getExtension('WEBGL_lose_context');
+    window.__lose.loseContext();
+  });
+  await page.locator('.dq-timer-stage:not(.is-scene-live)').waitFor({ timeout: 5000 });
+  const a = await scenes(page);
+  await page.clock.runFor(1600);
+  const b = await scenes(page);
+  h.expect(a.live === 0 && b.frames === a.frames, `lost ${where}: the scene kept drawing (${a.frames} -> ${b.frames})`);
+  // the flat picture fades back in on the browser's own time, whatever the page clock does
+  await h.poll(page, () => flat(page), (s) => parts && s.length === parts && s.every(Boolean), (s) => `lost ${where}: the flat picture did not come back (${JSON.stringify(s)})`, { timeout: 3000, polling: 50 });
+  await whileLost();
+  await h.shot(page, shot);
+  await page.evaluate(() => window.__lose.restoreContext());
+  await showsStopped(h, page, `restored ${where}`);
+  inStep(h, await pair(page), `restored ${where}, shown`);
+  await page.clock.runFor(1000);
+  const now = await pair(page);
+  h.expect(now.s.live === 1 && now.s.contexts === 1 && now.s.frames > b.frames + 10, `restored ${where}: ${JSON.stringify(now.s)}`);
+  inStep(h, now, `restored ${where}`);
+  await drawn(h, page, `restored ${where}`);
+  return { was, now };
 }
 
 /**
@@ -1248,96 +1299,12 @@ export const scenarios = {
   },
 
   /**
-   * the clouds over the tide on Spectator Mode's watch step, when the player's thoughts are clouds: one drifts in from the
-   * left, crosses the middle of the sky and drifts out on the right; the moon dims while one passes it and comes back
-   * after; with reduced motion one cloud stands still in the middle of the sky. With cars or leaves, and on the emotion
-   * skill's watch step, the sky stays clear
-   */
-  async 'tide-clouds'(h) {
-    const clouds = (last) => last.probe.clouds.split(' ').filter(Boolean).map((c) => c.split(':').map(Number));
-    /** twenty seconds of the tide on a stopped clock: no cloud comes up and the moon never dims */
-    const clear = async (page, where) => {
-      await showsStopped(h, page, where);
-      const seen = [];
-      for (let at = await after(h, page, 0); seen.length < 10; at = await after(h, page, 2000)) seen.push(at.probe);
-      h.expect(seen.every((p) => p.clouds === '' && p.moon === 1), `${where}: clouds over the tide (${seen.map((p) => p.clouds || '-').join(' | ')})`);
-    };
-    for (const [pick, words] of [['Cars on a quiet road', /car going past/], ['Leaves on a stream', /sits on a leaf/]]) {
-      const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
-      await page.clock.install();
-      await page.reload();
-      await toSkill(h, page, 'mindful-thoughts');
-      await tap(page, pick);
-      await tap(page, 'Ready');
-      await page.locator('.dq-timer-stage').waitFor({ timeout: 10000 });
-      await h.pauseClock(page);
-      await page.locator('.dq-timer-stage').scrollIntoViewIfNeeded();
-      h.expect(words.test(await page.locator('.dq-skill').innerText()), `${pick}: the watch step does not say ${words}`);
-      await clear(page, `tide with ${pick}`);
-      h.expect(!errors.length, errors.join('\n'));
-      await ctx.close();
-    }
-    {
-      // emotions as waves, which the tide already is
-      const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
-      await page.clock.install();
-      await page.reload();
-      await toStep(h, page, 'current-emotion', 'watch', { pause: true });
-      await clear(page, 'tide for an emotion');
-      h.expect(!errors.length, errors.join('\n'));
-      await ctx.close();
-    }
-    {
-      const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
-      await page.clock.install();
-      await page.reload();
-      await toStep(h, page, 'mindful-thoughts', 'watch', { pause: true });
-      await showsStopped(h, page, 'tide clouds');
-      // two seconds at a time through most of the minute, each cloud's place across the frame and the moon's light
-      const path = new Map();
-      const moon = [];
-      let shot = false;
-      for (let at = await after(h, page, 0); at.e < at.dur - 3; at = await after(h, page, 2000)) {
-        for (const [n, x] of clouds(at)) path.set(n, [...(path.get(n) ?? []), x]);
-        moon.push(at.probe.moon);
-        if (!shot && at.probe.moon < 0.5) {
-          shot = true;
-          await h.shot(page, 'tide-clouds-moon-phone');
-        }
-      }
-      const crossed = [...path].filter(([, xs]) => xs[0] < -1 && xs.some((x) => Math.abs(x) < 0.25) && xs[xs.length - 1] > 1 && xs.every((x, i) => !i || x > xs[i - 1]));
-      const where = [...path].map(([n, xs]) => `${n}: ${xs.map((x) => x.toFixed(2)).join(' ')}`).join('; ');
-      h.expect(crossed.length > 0, `tide clouds: no cloud drifted in, crossed the sky and drifted out (${where})`);
-      const low = moon.indexOf(Math.min(...moon));
-      h.expect(moon[low] < 0.5 && moon.slice(low).some((m) => m > 0.95), `tide clouds: the moon did not dim behind a cloud and come back (${moon.map((m) => m.toFixed(2)).join(' ')})`);
-      console.log(`  tide clouds: ${crossed.length} crossed; moon ${moon.map((m) => m.toFixed(2)).join(' ')}`);
-      h.expect(!errors.length, errors.join('\n'));
-      await ctx.close();
-    }
-    {
-      const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
-      await page.emulateMedia({ reducedMotion: 'reduce' });
-      await page.reload();
-      await toStep(h, page, 'mindful-thoughts', 'watch');
-      await live(h, page, 'tide clouds still');
-      const a = (await scenes(page)).last;
-      await h.frames(page, 60);
-      const b = (await scenes(page)).last;
-      h.expect(a.still && clouds(a).some(([, x]) => Math.abs(x) < 0.35) && b.probe.clouds === a.probe.clouds, `tide clouds, reduced motion: no cloud standing still mid-sky (${a.probe.clouds} -> ${b.probe.clouds})`);
-      await h.shot(page, 'tide-clouds-still-phone');
-      h.expect(!errors.length, errors.join('\n'));
-      await ctx.close();
-    }
-  },
-
-  /**
-   * the device's reduce-motion turned on while a scene is up, with Motion on Auto: the wave, the light, the tide with and
-   * without its clouds and Give me a moment's light each settle on one still frame (the clouds with one mid-sky), and
-   * move again once it is turned off
+   * the device's reduce-motion turned on while a scene is up, with Motion on Auto: the wave, the light, the tide and Give
+   * me a moment's light each settle on one still frame, and move again once it is turned off
    */
   async 'scenes-follow-device-motion'(h) {
-    for (const k of [...KINDS, { kind: 'tide', id: 'mindful-thoughts', entry: 'watch', clouds: true }, { kind: 'ring', moment: true }]) {
-      const name = k.moment ? 'moment' : k.clouds ? 'tide with clouds' : k.kind;
+    for (const k of [...KINDS, { kind: 'ring', moment: true }]) {
+      const name = k.moment ? 'moment' : k.kind;
       const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
       const device = await deviceMotion(ctx, page);
       if (k.moment) {
@@ -1363,10 +1330,6 @@ export const scenarios = {
       await h.frames(page, 60);
       const d = await scenes(page);
       h.expect(c.last.still && d.frames === c.frames, `${name}, device set to reduce motion: not one still frame (${c.frames} -> ${d.frames}, still ${c.last.still})`);
-      if (k.clouds) {
-        const mid = c.last.probe.clouds.split(' ').filter(Boolean).some((x) => Math.abs(Number(x.split(':')[1])) < 0.35);
-        h.expect(mid, `${name}, device set to reduce motion: no cloud standing mid-sky (${c.last.probe.clouds})`);
-      }
       await device('no-preference');
       await moving('device back to motion');
       h.expect(!errors.length, errors.join('\n'));

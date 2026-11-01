@@ -28,10 +28,11 @@ const STEP = 1 / SCENE.fps;
 const BUDGET = (1000 / SCENE.fps) * SCENE.budget;
 const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[xs.length >> 1];
 
-/** Frees every geometry, material and texture under `root`. */
+/** Frees every geometry, material and texture under `root`, and each instanced mesh's own buffers of where its copies are. */
 function disposeTree(root: THREE.Object3D) {
   root.traverse((o) => {
     const m = o as THREE.Mesh;
+    if (o instanceof THREE.InstancedMesh) o.dispose();
     m.geometry?.dispose();
     for (const mat of m.material ? ([] as THREE.Material[]).concat(m.material) : []) {
       for (const v of Object.values(mat as unknown as Record<string, unknown>)) if (v instanceof THREE.Texture) v.dispose();
