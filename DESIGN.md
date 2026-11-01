@@ -139,7 +139,10 @@ whole time:
 4. The player's reasons, people (call or text buttons) and comfort kit, each with a kind empty state.
 5. Crisis lines for the player's region, with the local emergency number first when they say they might not be safe.
 
-Every step is skippable. The lists are set up only when the player chooses to, and stay editable in Settings.
+Every step is skippable. The lists are set up only when the player chooses to, and stay theirs to change: on Comfort,
+and in the Safe Zone after "Edit the list", each entry's words (a person's name and number) can be fixed in place, moved
+up or down, the order kept everywhere the list shows, and removed. The list stays calm until they ask, and changing it
+never plays, credits or shows anything: a removal in the Safe Zone leaves Undo in the entry's place, not a toast.
 
 ## Accessibility checklist
 

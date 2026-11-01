@@ -3,7 +3,7 @@ import { LOADOUT_COPY, MODULES, SKILL, type Answers, type Go, type Opt, type Ste
 import { SKILL_END } from '../content/daily-lines';
 import type { App, Place, Route, ScreenOut, Visit } from './app';
 import { glyph, icon } from './art';
-import { isSkillId, uid } from './store';
+import { isSkillId, nextPlace, uid } from './store';
 import { dropDraft, keepDraft, newestDraft, stepLayout, worthKeeping, type SkillDraft } from './skilldraft';
 import { btn, chip, copyText, field, h, longName, md, p, panel, redrawn, segmented, typo, wholeWords } from './ui';
 import { breathRing, coolChoice, counter, holdButton, loadoutArt, pmrView, timerView, type Ctx } from './widgets';
@@ -465,7 +465,7 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
             // Back brings the typed text back: Add and pick again picks the one saved, as the comfort list does
             const list = app.store.state.lists[s.list];
             if (!list.some((x) => x.text === v)) {
-              list.push({ id: uid(), text: v, at: app.store.now() });
+              list.push({ id: uid(), text: v, at: app.store.now(), place: nextPlace(list) });
               app.store.save();
             }
             pick(v);
@@ -568,7 +568,7 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
           const st = app.store;
           if (s.effect === 'saveSoothe') {
             const v = String(answers.soothe ?? '').trim();
-            if (v && !st.state.lists.comfort.some((c) => c.text === v)) st.state.lists.comfort.push({ id: uid(), text: v, at: st.now() });
+            if (v && !st.state.lists.comfort.some((c) => c.text === v)) st.state.lists.comfort.push({ id: uid(), text: v, at: st.now(), place: nextPlace(st.state.lists.comfort) });
           } else if (s.effect === 'saveMap') {
             const g = (k: string) => String(answers[k] ?? '').slice(0, 2000);
             const m = { urge: g('urge'), p1: g('p1'), c1: g('c1'), p2: g('p2'), c2: g('c2'), choice: g('mapChoice') };

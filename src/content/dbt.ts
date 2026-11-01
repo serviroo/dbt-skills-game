@@ -2115,3 +2115,23 @@ export const LISTS_COPY = {
   heads: { reasons: 'Things that are yours', comfort: 'Comfort kit', activities: 'Go-to activities', people: 'People' },
 };
 
+/** Changing what is in your own lists and their order, on Comfort and in the Safe Zone. */
+export const ENTRY_COPY = {
+  editList: 'Edit the list',
+  doneList: 'Done editing',
+  edit: (it: string) => `Edit ${it}`,
+  up: (it: string) => `Move ${it} up`,
+  down: (it: string) => `Move ${it} down`,
+  moved: (it: string, n: number, of: number) => `${it}, now ${n} of ${of}`,
+  remove: (it: string) => `Remove ${it}`,
+  removed: (it: string) => `Removed “${it}”.`,
+  undo: 'Undo',
+  undoFor: (it: string) => `Undo, bring back ${it}`,
+  words: 'Words',
+  name: 'Name',
+  number: 'Number',
+  numberHint: 'Phone number',
+  save: 'Save',
+  cancel: 'Cancel',
+};
+

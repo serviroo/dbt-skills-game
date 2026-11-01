@@ -12,7 +12,8 @@ import { regionPicker, telHref, smsHref } from './safe';
 import { allyCard, allyName, cardOf, favFirst, focusBack, refill } from './artroom';
 import { artStore } from './artstore';
 import { storyStore } from './storystore';
-import { addDays, cleanName, dayKey, fieldKey, fieldTimes, isSkillId, ROW_CAP, uid, type DiaryEntry, type Ev, type State, type Store } from './store';
+import { addDays, cleanName, dayKey, fieldKey, fieldTimes, isSkillId, nextPlace, ROW_CAP, uid, type DiaryEntry, type Ev, type Item, type Person, type State, type Store } from './store';
+import { entryList, type EntryOpts } from './entries';
 import { btn, copyText, field, focusWhole, h, md, p, panel, place, quotes, redrawn, scrollerOf, segmented, shareOrSave, toggle, typo } from './ui';
 import type { KeepStatus } from '../pwa/register';
 import { volumeSliders } from '../ui/volume';
@@ -1087,47 +1088,53 @@ export function printScreen(app: App, _route: Route, visit: Visit): ScreenOut {
 export function comfortScreen(app: App): ScreenOut {
   const st = app.store;
   const s = st.state;
-  const rerender = () => app.go({ name: 'comfort' }, { replace: true, quiet: true });
-  const removed = (text: string, restore: () => void) =>
+  // Undo pressed from the keys: its toast goes, so focus goes to the entry it brought back, on its Remove, in view
+  const removed = (text: string, id: string, restore: () => void) =>
     app.toast(`Removed "${text.length > 36 ? `${text.slice(0, 35)}…` : text}".`, {
       label: 'Undo',
       run: () => {
+        const keyed = !!document.activeElement?.matches('.dq-toast-btn:focus-visible');
         restore();
         st.save();
-        if (app.route.name === 'comfort') rerender();
+        const to = keyed ? el.querySelector<HTMLElement>(`[data-item="${CSS.escape(id)}"] [data-act="remove"]`) : null;
+        if (to) focusWhole(to);
       },
     });
-  // what the lists show follows another open copy's changes in place, so what is being typed here stays; focus on
-  // something removed goes to the Add button below it
-  const parts: ReturnType<typeof redrawn>[] = [];
+  // what the lists show follows every change, made here or in another open copy, in place, so an open edit and what is
+  // being typed stay; focus on something removed goes to the Add button below it. Each entry can be edited and moved up
+  // or down in place
+  const parts: { update: () => void }[] = [];
+  const status = h('p', { class: 'dq-sr', role: 'status', 'aria-live': 'polite' });
+  const entries: { leave: () => void }[] = [];
+  const remove = (key: 'comfort' | 'activities' | 'reasons' | 'people', id: string, name: string) =>
+    h('button', { type: 'button', class: 'dq-icbtn dq-icbtn--sm', 'data-act': 'remove', 'aria-label': `Remove ${name}`, html: icon('close'), onclick: () => {
+      const out = st.removeItem<Item | Person>(s.lists[key], id);
+      st.save();
+      if (out) removed('text' in out.item ? out.item.text : out.item.name, id, () => st.reviveItem<Item | Person>(app.store.state.lists[key], out.item));
+    } });
+  const entryParts = <T extends Item | Person>(o: Omit<EntryOpts<T>, 'say' | 'cls'>) => {
+    const list = entryList<T>(app, { ...o, cls: 'dq-items', say: (t) => (status.textContent = t) });
+    parts.push(list);
+    entries.push(list);
+    return list.node;
+  };
   const listPanel = (key: 'comfort' | 'activities' | 'reasons', title: string, hint: string, ph: string, ic: string) => {
     const items = s.lists[key];
     const f = field(`Add to ${title}`, { placeholder: ph, hideLabel: true, max: 200 });
     const add = () => {
       const v = f.input.value.trim();
       if (!v) return f.input.focus();
-      items.push({ id: uid(), text: v, at: st.now() });
+      items.push({ id: uid(), text: v, at: st.now(), place: nextPlace(items) });
+      f.input.value = '';
       st.save();
       app.sound('bubble');
-      rerender();
     };
     f.input.addEventListener('keydown', (e) => (e as KeyboardEvent).key === 'Enter' && add());
     const addBtn = btn('Add', add, { kind: 'quiet', ic: 'plus' });
-    const list = redrawn(() =>
-      items.length
-        ? h('ul', { class: 'dq-items' }, items.map((it) => h('li', { class: 'dq-item', 'data-item': it.id }, h('span', { text: typo(it.text) }), h('button', { type: 'button', class: 'dq-icbtn dq-icbtn--sm', 'aria-label': `Remove ${it.text}`, html: icon('close'), onclick: () => {
-            const out = st.removeItem(items, it.id);
-            st.save();
-            rerender();
-            if (out) removed(out.item.text, () => st.reviveItem(app.store.state.lists[key], out.item, out.index));
-          } }))))
-        : null,
-    () => addBtn);
-    parts.push(list);
     return panel(
       { title, ic: icon(ic), cls: `dq-listp dq-listp--${key}` },
       p(hint, 'dq-small'),
-      list.node,
+      entryParts<Item>({ key, row: 'dq-item', view: (it) => [h('span', { class: 'dq-entry-t', text: typo(it.text) })], end: (it) => remove(key, it.id, it.text), lost: () => addBtn, hint: ph }),
       h('div', { class: 'dq-addrow' }, f.el, addBtn),
     );
   };
@@ -1137,25 +1144,22 @@ export function comfortScreen(app: App): ScreenOut {
   const addPerson = btn('Add person', () => {
     const name = pn.input.value.trim();
     if (!name) return pn.input.focus();
-    people.push({ id: uid(), name: name.slice(0, 80), phone: pp.input.value.trim().slice(0, 40), at: st.now() });
+    people.push({ id: uid(), name: name.slice(0, 80), phone: pp.input.value.trim().slice(0, 40), at: st.now(), place: nextPlace(people) });
+    pn.input.value = '';
+    pp.input.value = '';
     st.save();
-    rerender();
   }, { kind: 'quiet', ic: 'plus' });
-  const peopleList = redrawn(() =>
-    people.length
-      ? h('ul', { class: 'dq-items' }, people.map((x) => h('li', { class: 'dq-item dq-item--person', 'data-item': x.id }, h('span', { class: 'dq-person-n', text: x.name }), x.phone ? h('span', { class: 'dq-person-acts' }, h('a', { class: 'dq-btn dq-btn--quiet dq-btn--sm', href: telHref(x.phone), html: `<span class="dq-btn-ic">${icon('phone')}</span><span>Call</span>` }), h('a', { class: 'dq-btn dq-btn--quiet dq-btn--sm', href: smsHref(x.phone.replace(/[^\d+]/g, '')), html: `<span class="dq-btn-ic">${icon('text')}</span><span>Text</span>` })) : null, h('button', { type: 'button', class: 'dq-icbtn dq-icbtn--sm', 'aria-label': `Remove ${x.name}`, html: icon('close'), onclick: () => {
-          const out = st.removeItem(people, x.id);
-          st.save();
-          rerender();
-          if (out) removed(out.item.name, () => st.reviveItem(app.store.state.lists.people, out.item, out.index));
-        } }))))
-      : null,
-  () => addPerson);
-  parts.push(peopleList);
+  const peopleList = entryParts<Person>({
+    key: 'people',
+    row: 'dq-item dq-item--person',
+    view: (x) => [h('span', { class: 'dq-person-n', text: x.name }), x.phone ? h('span', { class: 'dq-person-acts' }, h('a', { class: 'dq-btn dq-btn--quiet dq-btn--sm', href: telHref(x.phone), html: `<span class="dq-btn-ic">${icon('phone')}</span><span>Call</span>` }), h('a', { class: 'dq-btn dq-btn--quiet dq-btn--sm', href: smsHref(x.phone.replace(/[^\d+]/g, '')), html: `<span class="dq-btn-ic">${icon('text')}</span><span>Text</span>` })) : null],
+    end: (x) => remove('people', x.id, x.name),
+    lost: () => addPerson,
+  });
   const peoplePanel = panel(
     { title: 'People', ic: icon('phone'), cls: 'dq-listp' },
     p('People you could call or text. A professional too, if you have one. Added only by you.', 'dq-small'),
-    peopleList.node,
+    peopleList,
     h('div', { class: 'dq-person-add' }, pn.el, pp.el, h('div', { class: 'dq-actions' }, addPerson)),
   );
   const maps = s.maps;
@@ -1201,6 +1205,7 @@ export function comfortScreen(app: App): ScreenOut {
       peoplePanel,
       mapsPanel.node,
     ),
+    status,
   );
   const off = st.onChange(() => parts.forEach((x) => x.update()));
   return {
@@ -1210,6 +1215,7 @@ export function comfortScreen(app: App): ScreenOut {
     leave: () => {
       lists.dispose();
       off();
+      entries.forEach((x) => x.leave());
     },
   };
 }

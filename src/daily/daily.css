@@ -2725,6 +2725,15 @@ textarea.dq-input {
   .dq[data-screen='safe'] .dq-sz-foot.is-top {
     top: 0;
   }
+  .dq-sz .dq-btn-ic {
+    display: none;
+  }
+}
+/* a short Safe Zone, the screen under 230px tall (above) or, typing, the part a keyboard over the page leaves (is-short,
+   safe.ts): a button's words already say what it does, so its icon steps aside and its words keep one line where they
+   fit, as two lines at 16 px with the phone's text at 200% are taller than the room above the keyboard */
+.dq-safezone.is-short .dq-btn-ic {
+  display: none;
 }
 /* Copy your lists: the preview reads like the lists, wraps on a phone and stays selectable */
 .dq-lists-row {
@@ -3441,6 +3450,72 @@ textarea.dq-input {
 .dq-item--map {
   display: block;
   padding: 2px 14px 10px;
+}
+/* an entry of the player's own lists (entries.ts): its Edit, Move up, Move down and Remove sit together at the end of
+   its row, beside its words where they fit and under them where they don't, a tap in size each; the one that can't go
+   further is dimmed and keeps focus. Edited, the row is its words in a field (a person's name and number), Save and
+   Cancel under them; removed in the Safe Zone, it says so in its place, with Undo */
+.dq-entry-t {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.dq-entry-tools {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-inline-start: auto;
+}
+/* the icon dims, never the focus ring around it */
+.dq-entry-tools [aria-disabled='true'] {
+  cursor: default;
+}
+.dq-entry-tools [aria-disabled='true'] .dq-ic {
+  opacity: 0.35;
+}
+/* a focused control comes into view with its ring, 2px wide and 3px out (.dq :focus-visible), however it got focus */
+.dq-entry-tools .dq-icbtn,
+.dq-entry-edit :is(.dq-input, .dq-btn),
+.dq-entry-gone .dq-btn,
+.dq-entry-flip {
+  scroll-margin: 5px;
+}
+/* what editing shows is never under 16px: in the Safe Zone at the player's text size */
+.dq .dq-entry-edit :is(.dq-label, .dq-btn),
+.dq .dq-entry-gone .dq-btn,
+.dq .dq-btn.dq-entry-flip {
+  font-size: calc(16px * var(--text-scale, 1));
+}
+.dq-item:has(> .dq-entry-tools) {
+  flex-wrap: wrap;
+  column-gap: 4px;
+}
+/* 6px above and below the buttons holds their ring inside the row, so a column that scrolls never cuts it at its top */
+.dq-sz-list :is(.dq-sz-entry:has(> .dq-entry-tools), .dq-entry-gone) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 8px;
+  padding-block: 6px;
+  padding-inline-end: 6px;
+}
+.dq-entry-gone .dq-entry-t {
+  color: var(--t-dim);
+}
+.dq-item.is-editing,
+.dq-sz-list .dq-sz-entry.is-editing,
+.dq-person.is-editing {
+  display: block;
+  padding: 10px 12px 12px;
+}
+.dq-entry-edit .dq-field:first-child {
+  margin-top: 0;
+}
+.dq-entry-edit .dq-field + .dq-field {
+  margin-top: 10px;
+}
+.dq-entry-edit .dq-actions {
+  margin-top: 10px;
 }
 .dq-listp .dq-small {
   margin-bottom: 4px !important;

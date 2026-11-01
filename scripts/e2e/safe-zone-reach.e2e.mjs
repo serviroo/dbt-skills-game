@@ -4,7 +4,8 @@
 // does), and with the phone's own text at 200% (each word twice its size in a page as wide as before, see scaleText).
 // Each phone walks the Safe Zone twice, "Talk to someone now" under the frame and then, after "I might not be
 // safe", above it, through Give me a moment (its ring whole too), cool air counting down, every STOP line, each list with
-// "Add one" and "Copy your lists" open, Talk for three countries (many lines, notes under the buttons, none), the empty
+// "Add one" and "Copy your lists" open, then "Edit the list" on, an entry open to change and one removed with Undo in its
+// place, Talk for three countries (many lines, notes under the buttons, none), the empty
 // lists, and the Sound panel opened from the top bar (there only its own controls, the bar's buttons and where it sits
 // are checked, since it covers part of the page while open). In each state:
 //   audit       layout-fit's checks: nothing scrolls sideways or is cut off at the side, every button, link and field
@@ -19,18 +20,20 @@
 //               down), none of the frame's words or controls show under "Talk to someone now", as the screen opens or
 //               scrolled to either end. At 200% zoom or with the keyboard up the page scrolls under it, and reach and
 //               audit check that each control still scrolls clear of it
-//   keyboard    while a list item or a person is typed, the on-screen keyboard takes the bottom of the screen (the page
-//               gets the height above it, as a phone that resizes for the keyboard gives it): the field and its Save
-//               show whole and take a tap, and the rest still passes reach. Held sideways at 200% zoom the keyboard
-//               leaves under 100 px, less than "Talk to someone now" and the field need together, so typing is checked
-//               upright there (a phone that keeps the page's full height under its keyboard is the check without it;
-//               safe-zone-typing checks both kinds of keyboard, held either way, where Talk pins at the top)
+//   keyboard    while a list item or a person is typed, or an entry changed, the on-screen keyboard takes the bottom of
+//               the screen, each way a phone does it: the page gets the height above it (a phone that resizes for the
+//               keyboard), or keeps its height and only the part above the keyboard shows (a keyboard over the page, as
+//               an iPhone's is, see overlay). The field and its Save show whole in that part and take a tap, and the
+//               rest still passes reach there. Held sideways at 200% zoom the keyboard leaves under 100 px, less than
+//               "Talk to someone now" and the field need together, so typing is checked upright there (safe-zone-typing
+//               checks both kinds of keyboard, held either way, where Talk pins at the top)
 // And on every other screen with a top bar, at 200%, the Safe Zone button stays one tap away: it and the rest of the bar
 // show whole and take their taps, with the Sound panel open too, and Give me a moment's Done shows whole once scrolled
 // to; Home and Settings also fit whole, with no text on top of other text.
 import { gone } from './harness.mjs';
 import { audit, boot, PAGE, SCREENS, settle, SKIP } from './layout-fit.e2e.mjs';
 import { listed } from './me-92-safe-zone-clean.e2e.mjs';
+import { overlay } from './safe-zone-typing.e2e.mjs';
 
 // a phone and about how tall its keyboard is with the suggestion bar, held each way
 const PHONES = {
@@ -46,16 +49,18 @@ const PHONES = {
  * view. `sound`: only the open Sound panel's own controls and the button that closes it, and the bar it opens below.
  * `controls`: only these.
  */
-const unreachable = (page, { typing = false, sound = false, controls = null } = {}) =>
+export const unreachable = (page, { typing = false, sound = false, controls = null } = {}) =>
   page.evaluate(async ({ typing, sound, controls: only }) => {
     const out = [];
     const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     const name = (e) => `"${(e.getAttribute('aria-label') || e.textContent || e.value || e.tagName).replace(/\s+/g, ' ').trim().slice(0, 32)}"`;
     const box = (r) => `${[r.left, r.top, r.right, r.bottom].map(Math.round).join(', ')} in ${innerWidth}x${innerHeight}`;
-    // the part that shows: inside the window and inside every box around it that clips
+    // the part that shows: inside the window, above a keyboard over the page (the whole window without one), and inside
+    // every box around it that clips
+    const vv = visualViewport;
     const whole = (e) => {
       const r = e.getBoundingClientRect();
-      let [l, t, rt, b] = [Math.max(r.left, 0), Math.max(r.top, 0), Math.min(r.right, innerWidth), Math.min(r.bottom, innerHeight)];
+      let [l, t, rt, b] = [Math.max(r.left, 0), Math.max(r.top, vv.offsetTop), Math.min(r.right, innerWidth), Math.min(r.bottom, vv.offsetTop + vv.height)];
       for (let p = e.parentElement; p; p = p.parentElement) {
         const cs = getComputedStyle(p);
         if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
@@ -111,7 +116,7 @@ const unreachable = (page, { typing = false, sound = false, controls = null } = 
     if (typing) {
       const field = document.activeElement;
       if (!field?.matches('.dq-safezone input')) return [...out, `focus is on ${field?.tagName.toLowerCase()}, not the field being typed in`];
-      const save = [...field.closest('.dq-addrow, .dq-person-add').querySelectorAll('button')].find((b) => b.textContent.trim() === 'Save');
+      const save = [...field.closest('.dq-addrow, .dq-person-add, .dq-entry-edit').querySelectorAll('button')].find((b) => b.textContent.trim() === 'Save');
       for (const e of [field, save]) {
         to(e, 'nearest');
         await frame();
@@ -193,6 +198,9 @@ function walk(phone, zoom, { font = false } = {}) {
       await page.setViewportSize({ width: viewport.width, height: Math.round((p.height - p.kb) / zoom) });
       await look(page, `${label} with the keyboard up`, { typing: true });
       await page.setViewportSize(viewport);
+      await page.evaluate((k) => window.__kb(k), { height: Math.round((p.height - p.kb) / zoom), top: Math.round(p.kb / zoom / 4) });
+      await look(page, `${label} with the keyboard over the page`, { typing: true });
+      await page.evaluate(() => window.__kb(null));
     };
     const tap = (page, name) => page.locator('.dq-sz-body').getByRole('button', { name, exact: true }).last().evaluate((b) => b.click());
     const at = (page, title) => page.locator('.dq-sz-t', { hasText: title }).first().waitFor({ timeout: 10000 });
@@ -205,6 +213,21 @@ function walk(phone, zoom, { font = false } = {}) {
       await tap(page, 'Copy your lists');
       await page.locator('.dq-lists-copy:not(.is-hidden)').waitFor();
       await look(page, `${label}, ${add} and Copy your lists open`);
+      // a list with entries: Edit the list on, an entry's words open to change (typed with the keyboard up), and Undo in
+      // the place of one removed
+      if (!(await page.locator('.dq-sz-body .dq-entry-flip').isVisible())) return;
+      await tap(page, 'Edit the list');
+      await look(page, `${label}, Edit the list on`);
+      await page.locator('.dq-sz-body .dq-entry-tools [aria-label^="Edit "]').first().evaluate((b) => b.click());
+      await page.locator('.dq-sz-body .dq-entry-edit').waitFor();
+      await look(page, `${label}, an entry open to change`);
+      if (typing) await keyboard(page, `${label}, an entry open to change`);
+      await tap(page, 'Cancel');
+      await page.locator('.dq-sz-body .dq-entry-tools [aria-label^="Remove "]').first().evaluate((b) => b.click());
+      await page.locator('.dq-sz-body .dq-entry-gone').waitFor();
+      await look(page, `${label}, one removed`);
+      await page.locator('.dq-sz-body .dq-entry-gone .dq-btn').evaluate((b) => b.click());
+      await tap(page, 'Done editing');
     };
     // from breathing to the last screen, the way the player goes
     const onward = async (page, top) => {
@@ -252,6 +275,7 @@ function walk(phone, zoom, { font = false } = {}) {
     const open = async (edit) => {
       const o = await boot(h, viewport, font ? { edit, device: { isMobile: true, hasTouch: true } } : { edit });
       if (font) await scaleText(o.page);
+      if (typing) await o.page.evaluate(overlay);
       await o.page.locator('header .dq-safe').click();
       await o.page.locator('.dq-sz-t').first().waitFor({ timeout: 10000 });
       return o;

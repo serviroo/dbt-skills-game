@@ -40,14 +40,20 @@ export interface Ev {
 export interface Item {
   id: string;
   text: string;
-  /** When it was added or brought back; a removal newer than this hides it in every copy. */
+  /** When it was added, changed or brought back; a removal newer than this hides it in every copy. */
   at?: number;
+  /** Where it sits in its list, lowest first (see byPlace). */
+  place: number;
+  /** When the player last moved it: the copy that moved it last gives its place, whatever else changed meanwhile. */
+  placeAt?: number;
 }
 export interface Person {
   id: string;
   name: string;
   phone: string;
   at?: number;
+  place: number;
+  placeAt?: number;
 }
 export interface SavedMap {
   id: string;
@@ -272,10 +278,31 @@ const asStored = <T>(rec: T): T => {
   const t = rec && typeof rec === 'object' ? AS_STORED.get(rec as object) : undefined;
   return (t && t.read === JSON.stringify(rec) ? t.raw : rec) as T;
 };
+/**
+ * Sets fields on a record (undefined takes one away). A record kept as stored takes them in its stored form too, so
+ * everything else a newer build stored on it, past this build's limits included, is still what gets written.
+ */
+function alter(rec: object, fields: Record<string, unknown>) {
+  const was = AS_STORED.get(rec);
+  const raw = was && isObj(was.raw) && was.read === JSON.stringify(rec) ? was.raw : undefined;
+  for (const o of raw ? [rec, raw] : [rec])
+    for (const [k, v] of Object.entries(fields)) {
+      if (v === undefined) delete (o as Record<string, unknown>)[k];
+      else putOwn(o, k, v);
+    }
+  if (raw) was!.read = JSON.stringify(rec);
+}
+/** A copy of a record to change, kept as stored as the record is (see alter), so the record itself stays as it was. */
+function copied<T extends object>(rec: T): T {
+  const c = { ...rec };
+  const was = AS_STORED.get(rec);
+  if (was) AS_STORED.set(c, { raw: isObj(was.raw) ? { ...was.raw } : was.raw, read: was.read });
+  return c;
+}
 const EV_KEYS = ['id', 't', 'day', 'k', 'xp', 'stat', 'skill', 'data'];
 const ENTRY_KEYS = ['day', 'emotions', 'urges', 'note', 'updatedAt', 'ft'];
-const ITEM_KEYS = ['id', 'text', 'at'];
-const PERSON_KEYS = ['id', 'name', 'phone', 'at'];
+const ITEM_KEYS = ['id', 'text', 'at', 'place', 'placeAt'];
+const PERSON_KEYS = ['id', 'name', 'phone', 'at', 'place', 'placeAt'];
 const MAP_KEYS = ['id', 't', 'urge', 'p1', 'c1', 'p2', 'c2', 'choice', 'at'];
 const LINE_KEYS = ['day', 'id', 'tag', 'text', 't'];
 const PIN_KEYS = ['pinned', 'at'];
@@ -306,11 +333,18 @@ function stored(s: State) {
   const profileAt: Record<string, unknown> = { ...k?.profileAt };
   for (const [key, t] of Object.entries(s.setAt)) if (typeof t === 'number') putOwn((PROFILE_SET_KEYS as string[]).includes(key) ? profileAt : setAt, key, t);
   const back = <T>(l: T[], extra?: unknown[]) => (extra?.length ? [...l.map(asStored), ...extra] : l.map(asStored));
+  // a list's places are written for every record or none: one written without a place beside others with one would
+  // load after them all (see normalize), so a record kept as stored without one takes the place it has here
+  const placed = (l: (Item | Person)[]) => {
+    const out: unknown[] = l.map(asStored);
+    if (!out.some((x) => isObj(x) && num(x.place) !== null)) return out;
+    return out.map((x, i) => (isObj(x) && num(x.place) === null ? { ...x, place: l[i].place } : x));
+  };
   return {
     ...s,
     events: back(s.events, k?.events),
     diary: { ...k?.days, ...Object.fromEntries(Object.entries(s.diary).map(([d, e]) => [d, asStored(e)])) },
-    lists: { ...Object.fromEntries(LIST_KEYS.map((key) => [key, back<Item | Person>(s.lists[key], k?.dropped[key])])), ...k?.lists },
+    lists: { ...Object.fromEntries(LIST_KEYS.map((key) => [key, [...placed(s.lists[key]), ...(k?.dropped[key] ?? [])]])), ...k?.lists },
     maps: back(s.maps, k?.dropped.maps),
     lines: back(s.lines, k?.dropped.lines),
     skillPins: { ...k?.pins, ...Object.fromEntries(Object.entries(s.skillPins).map(([id, p]) => [id, asStored(p)])) },
@@ -548,6 +582,32 @@ function unionInto<T extends { id: string; at?: number }>(mine: T[], theirs: T[]
     const m = mine[i];
     if (atOf(x) > atOf(m) || (atOf(x) === atOf(m) && flat(x) > flat(m))) mine[i] = x;
   }
+}
+/** A list in its order: by place, and on the same place (two copies each adding one) by id, which nothing changes. */
+const byPlace = (a: Item | Person, b: Item | Person) => a.place - b.place || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+/** Where an item added to the end of `list` goes. */
+export const nextPlace = (list: (Item | Person)[]) => (list.length ? list[list.length - 1].place + 1 : 0);
+/**
+ * As unionInto, each item's place then coming from the copy that moved it last (on the same time, the lower place), so
+ * a move in one copy and a change to the same item in another both stay; the list ends up in order of place.
+ */
+function unionList<T extends Item | Person>(mine: T[], theirs: T[]) {
+  const spot = new Map<string, { place: number; placeAt?: number }>();
+  for (const x of [...mine, ...theirs]) {
+    const s = spot.get(x.id);
+    const xa = x.placeAt ?? 0, sa = s?.placeAt ?? 0;
+    if (!s || xa > sa || (xa === sa && x.place < s.place)) spot.set(x.id, { place: x.place, placeAt: x.placeAt });
+  }
+  unionInto(mine, theirs);
+  const incoming = new Set(theirs);
+  for (let i = 0; i < mine.length; i++) {
+    const s = spot.get(mine[i].id)!;
+    if (mine[i].place === s.place && mine[i].placeAt === s.placeAt) continue;
+    // one taken from the other copy changes as a copy: that copy is what this one is checked against after (holdsMoreThan)
+    if (incoming.has(mine[i])) mine[i] = copied(mine[i]);
+    alter(mine[i], s);
+  }
+  mine.sort(byPlace);
 }
 /** Drops (in place) what a removal at least as new as its add hides. */
 function prune<T extends { id: string; at?: number }>(list: T[], gone: Record<string, number>) {
@@ -806,12 +866,28 @@ export function normalize(raw: unknown): State | null {
     }
     return firstById(out);
   };
-  const item = (i: Record<string, unknown>): Item => withAt({ id: str(i.id, 40) || uid(), text: str(i.text, 200) }, i, ITEM_KEYS);
+  /**
+   * Each record's place in list `l` and when it was moved, as stored. One stored without a place (a save from before
+   * places, or an older build's add) goes after every stored place, in the order stored.
+   */
+  const placer = (l: unknown) => {
+    let next = (Array.isArray(l) ? l : []).reduce<number>((top, i) => Math.max(top, (isObj(i) ? num(i.place) : null) ?? -1), -1) + 1;
+    return (i: Record<string, unknown>) => {
+      const place = num(i.place) ?? next++;
+      const at = num(i.placeAt);
+      return at === null ? { place } : { place, placeAt: at };
+    };
+  };
+  const items = (l: unknown, key: 'comfort' | 'activities' | 'reasons') => {
+    const placed = placer(l);
+    return listOf(l, (i): Item => withAt({ id: str(i.id, 40) || uid(), text: str(i.text, 200), ...placed(i) }, i, ITEM_KEYS), (i) => !!i.text, key).sort(byPlace);
+  };
   if (isObj(raw.lists)) {
-    base.lists.comfort = listOf(raw.lists.comfort, item, (i) => !!i.text, 'comfort');
-    base.lists.activities = listOf(raw.lists.activities, item, (i) => !!i.text, 'activities');
-    base.lists.reasons = listOf(raw.lists.reasons, item, (i) => !!i.text, 'reasons');
-    base.lists.people = listOf(raw.lists.people, (p) => withAt({ id: str(p.id, 40) || uid(), name: str(p.name, 80), phone: str(p.phone, 40) }, p, PERSON_KEYS), (p) => !!p.name, 'people');
+    base.lists.comfort = items(raw.lists.comfort, 'comfort');
+    base.lists.activities = items(raw.lists.activities, 'activities');
+    base.lists.reasons = items(raw.lists.reasons, 'reasons');
+    const placed = placer(raw.lists.people);
+    base.lists.people = listOf(raw.lists.people, (p): Person => withAt({ id: str(p.id, 40) || uid(), name: str(p.name, 80), phone: str(p.phone, 40), ...placed(p) }, p, PERSON_KEYS), (p) => !!p.name, 'people').sort(byPlace);
     // a list a newer build added: kept as stored, never shown here
     for (const [k, l] of restOf(raw.lists, LIST_KEYS)) putOwn(kept(base).lists, k, l);
   }
@@ -1306,7 +1382,7 @@ export class Store {
     for (const [id, t] of Object.entries(other.gone)) if (t > goneAt(gone, id)) setOwn(gone, id, t);
     this.state.gone = Object.keys(gone).length > GONE_CAP ? capGone(Object.entries(gone)) : gone;
     for (const k of LIST_KEYS) {
-      unionInto<Item | Person>(this.state.lists[k], other.lists[k]);
+      unionList<Item | Person>(this.state.lists[k], other.lists[k]);
       adoptRest<Item | Person>(this.state.lists[k], other.lists[k], (x) => x.id, k === 'people' ? PERSON_KEYS : ITEM_KEYS, true, undefined, (m, t) => atOf(m) === atOf(t));
       prune<Item | Person>(this.state.lists[k], this.state.gone);
     }
@@ -1402,10 +1478,43 @@ export class Store {
     return { item, index };
   }
 
-  /** Undo: puts the item back, newer than its tombstone, so it comes back in every open copy too. */
-  reviveItem<T extends { id: string; at?: number }>(list: T[], item: T, index: number) {
+  /** Undo: puts the item back in its place, newer than its tombstone, so it comes back in every open copy too. */
+  reviveItem<T extends Item | Person>(list: T[], item: T) {
     if (list.some((x) => x.id === item.id)) return;
-    list.splice(Math.min(index, list.length), 0, { ...item, at: Math.max(this.now(), goneAt(this.state.gone, item.id) + 1) });
+    alter(item, { at: Math.max(this.now(), goneAt(this.state.gone, item.id) + 1) });
+    list.push(item);
+    list.sort(byPlace);
+  }
+
+  /**
+   * Changes a list item's words, or a person's name and number, and saves. It counts as newer than the item's add, so
+   * every open copy takes it. False when the item is gone (removed in another open copy).
+   */
+  changeItem(list: (Item | Person)[], id: string, change: Pick<Item, 'text'> | Pick<Person, 'name' | 'phone'>) {
+    this.sync();
+    const x = list.find((i) => i.id === id);
+    if (!x) return false;
+    // only what changed: a newer build's field past this build's limits stays as stored unless the player changed it
+    const changed = Object.entries(change).filter(([k, v]) => (x as unknown as Record<string, unknown>)[k] !== v);
+    alter(x, { ...Object.fromEntries(changed), at: Math.max(this.now(), atOf(x) + 1) });
+    this.save();
+    return true;
+  }
+
+  /**
+   * Moves a list item or person one place up (-1) or down (1) and saves. Each place that changes is stamped now, so every
+   * open copy takes the new order, and a change made to an item in another copy meanwhile stays too.
+   */
+  moveItem<T extends Item | Person>(list: T[], id: string, by: -1 | 1) {
+    this.sync();
+    const from = list.findIndex((x) => x.id === id);
+    const to = from + by;
+    if (from < 0 || to < 0 || to >= list.length) return false;
+    list.splice(to, 0, ...list.splice(from, 1));
+    const now = this.now();
+    list.forEach((x, i) => x.place !== i && alter(x, { place: i, placeAt: Math.max(now, (x.placeAt ?? 0) + 1) }));
+    this.save();
+    return true;
   }
 
   /** The only way progress changes. xp is clamped to >= 0. */
@@ -1567,16 +1676,26 @@ export class Store {
     adoptRest(this.state.maps, other.maps, (m) => m.id, MAP_KEYS, newer);
     adoptRest(this.state.lines, other.lines, (l) => `${l.day}\n${l.id}\n${l.t}`, LINE_KEYS, newer);
     this.state.v = Math.max(this.state.v, other.v);
-    const bring = <T extends { id: string; at?: number }>(mine: T[], theirs: T[]) => {
+    const bring = <T extends { id: string; at?: number }>(mine: T[], theirs: T[], fit?: (x: T) => void) => {
       const seen = new Set(mine.map((x) => x.id));
       for (const x of theirs) {
         if (seen.has(x.id)) continue;
         seen.add(x.id);
         const g = goneAt(this.state.gone, x.id);
-        mine.push(g >= atOf(x) ? { ...x, at: Math.max(this.now(), g + 1) } : x);
+        if (g >= atOf(x)) alter(x, { at: Math.max(this.now(), g + 1) });
+        fit?.(x);
+        mine.push(x);
       }
     };
-    for (const k of LIST_KEYS) bring<Item | Person>(this.state.lists[k], other.lists[k]);
+    // what the file adds goes after this device's own entries, in the file's order, at the file's places where they fit;
+    // a place moved to fit counts as a move made now, so a copy that still holds the old place never undoes it
+    for (const k of LIST_KEYS) {
+      const mine: (Item | Person)[] = this.state.lists[k];
+      const have = new Set(mine.map((x) => x.id));
+      const low = other.lists[k].reduce((m, x) => (have.has(x.id) ? m : Math.min(m, x.place)), Infinity);
+      const shift = Math.max(0, nextPlace(mine) - low);
+      bring(mine, other.lists[k], shift ? (x) => alter(x, { place: x.place + shift, placeAt: Math.max(this.now(), (x.placeAt ?? 0) + 1) }) : undefined);
+    }
     bring(this.state.maps, other.maps);
     adoptRaw(this.state, other, { newer, now: this.now() });
     const rowsOf = (kind: 'emotions' | 'urges', named: string[]) => {

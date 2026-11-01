@@ -45,10 +45,10 @@ function seedState(kind: string, now: number): State {
       s.flags.giftDay = d;
       s.flags.greetDay = d;
     }
-    s.lists.comfort = [{ id: 'c1', text: 'Oversized hoodie' }, { id: 'c2', text: 'Lo-fi rain playlist' }, { id: 'c3', text: 'A hot shower' }];
-    s.lists.activities = [{ id: 'a1', text: 'A cosy game run' }, { id: 'a2', text: 'One episode of something comfy' }, { id: 'a3', text: 'Draw for ten minutes' }];
-    s.lists.reasons = [{ id: 'r1', text: 'The next season of the show' }, { id: 'r2', text: 'Mornings with nowhere to be' }];
-    s.lists.people = [{ id: 'p1', name: 'A friend', phone: '+1 555 0100' }];
+    s.lists.comfort = [{ id: 'c1', text: 'Oversized hoodie', place: 0 }, { id: 'c2', text: 'Lo-fi rain playlist', place: 1 }, { id: 'c3', text: 'A hot shower', place: 2 }];
+    s.lists.activities = [{ id: 'a1', text: 'A cosy game run', place: 0 }, { id: 'a2', text: 'One episode of something comfy', place: 1 }, { id: 'a3', text: 'Draw for ten minutes', place: 2 }];
+    s.lists.reasons = [{ id: 'r1', text: 'The next season of the show', place: 0 }, { id: 'r2', text: 'Mornings with nowhere to be', place: 1 }];
+    s.lists.people = [{ id: 'p1', name: 'A friend', phone: '+1 555 0100', place: 0 }];
     const picks = [TODAY_LINES.mid[0], TODAY_LINES.low[1], TODAY_LINES.up[5], TODAY_LINES.mid[9], TODAY_LINES.low[13], TODAY_LINES.up[2]];
     picks.forEach((l, k) => {
       const d = addDays(today, -(1 + k * 2));

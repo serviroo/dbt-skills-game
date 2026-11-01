@@ -667,7 +667,7 @@ async function safeZone(h, page, problems, tag, act = true) {
       await main.getByRole('button', { name: 'Add one' }).click();
       await main.getByRole('textbox', { name: 'Add one' }).fill('The sea at night');
       await main.getByRole('button', { name: 'Save', exact: true }).click();
-      await main.getByText('The sea at night').waitFor({ timeout: 5000 });
+      await main.locator('.dq-sz-list').getByText('The sea at night').waitFor({ timeout: 5000 });
     }
     if (at === 'people') {
       const tel = await main.locator('a[href^="tel:"]').evaluateAll((as) => as.map((a) => a.getAttribute('href')));
