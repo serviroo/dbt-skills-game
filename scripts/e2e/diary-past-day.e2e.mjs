@@ -85,7 +85,7 @@ export const scenarios = {
     try {
       await openDiary(h, page);
       let c = await card(page);
-      h.expect(c.title === label(today) && JSON.stringify(c.days) === JSON.stringify(['Earlier day']), `today's card: ${JSON.stringify(c)}`);
+      h.expect(c.title === label(today) && JSON.stringify(c.days) === JSON.stringify(['Earlier day', 'Pick a day']), `today's card: ${JSON.stringify(c)}`);
       h.expect(c.rated.includes('Joy: 4') && (await noteBox(page).inputValue()) === 'Tea with a friend.', `today's card does not show today: ${JSON.stringify(c)}`);
       await h.shot(page, 'diary-past-day-today-390');
       const before = await progress(page);
@@ -99,7 +99,7 @@ export const scenarios = {
       h.expect((await focused(page)) === 'Earlier day', `focus after Earlier day is on ${await focused(page)}`);
       h.expect((await page.locator('.dq-today .dq-chip-t').getAttribute('aria-live')) === 'polite', 'the day it opens is not read out');
       c = await card(page);
-      h.expect(JSON.stringify(c.days) === JSON.stringify(['Earlier day', 'Later day', 'Today']), `the day buttons on an earlier day: ${JSON.stringify(c.days)}`);
+      h.expect(JSON.stringify(c.days) === JSON.stringify(['Earlier day', 'Later day', 'Today', 'Pick a day']), `the day buttons on an earlier day: ${JSON.stringify(c.days)}`);
       for (const r of ['Sadness: 3', 'Restless: 2', `${URGE}: 1`]) h.expect(c.rated.includes(r), `yesterday's card does not show ${r}: ${JSON.stringify(c.rated)}`);
       h.expect(c.rows.includes('Restless') && !c.rated.includes('Joy: 4'), `yesterday's rows: ${JSON.stringify(c)}`);
       h.expect(/Still Center/.test(c.skills ?? '') && /Skills that day/i.test(c.text), `yesterday's skills: ${c.skills}`);
@@ -109,10 +109,8 @@ export const scenarios = {
       await h.shot(page, 'diary-past-day-open-390');
 
       // a rating and the note, still by keyboard, then Save
-      await page.keyboard.press('Tab');
-      await page.keyboard.press('Tab');
-      await page.keyboard.press('Tab');
-      h.expect((await focused(page)) === '3' && (await page.evaluate(() => document.activeElement.getAttribute('aria-label'))) === 'Sadness: 3', `three Tabs on is ${await focused(page)}`);
+      for (let i = 0; i < 4; i++) await page.keyboard.press('Tab');
+      h.expect((await focused(page)) === '3' && (await page.evaluate(() => document.activeElement.getAttribute('aria-label'))) === 'Sadness: 3', `four Tabs on is ${await focused(page)}`);
       await page.keyboard.press('ArrowRight');
       for (let i = 0; i < 12 && !(await noteBox(page).evaluate((e) => e === document.activeElement)); i++) await page.keyboard.press('Tab');
       await page.keyboard.press('End');

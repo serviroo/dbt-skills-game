@@ -3197,6 +3197,78 @@ textarea.dq-input {
 .dq-btn--icend {
   flex-direction: row-reverse;
 }
+/* Pick a day: the earlier days with something on the card, a month at a time. A month out of sight is laid out only
+   as it scrolls near, so a year or more of days opens at once */
+.dq-daysmonth {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto calc(46px + var(--rows) * 70px);
+}
+.dq-days-none {
+  margin: 0 2px;
+}
+.dq-daysmonth-h {
+  margin: 14px 2px 8px;
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--t-title);
+}
+.dq-dayslist {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid;
+  border-color: var(--hl) var(--hs) var(--hs) var(--hl);
+  background: linear-gradient(180deg, var(--plate-a), var(--plate-b));
+}
+.dq-dayslist li + li {
+  border-top: 1px solid rgba(62, 100, 133, 0.3);
+}
+.dq-dayrow {
+  display: grid;
+  grid-template-columns: 1fr 18px;
+  column-gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 64px;
+  padding: 10px 14px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  transition: background 0.18s;
+}
+.dq-dayrow:hover {
+  background: rgba(79, 184, 255, 0.07);
+}
+/* the ring inside the row: a month clips whatever reaches past its edges */
+.dq-dayrow:focus-visible {
+  outline-offset: -3px;
+}
+.dq-dayrow-d {
+  font-size: 18px;
+  font-weight: 500;
+  color: #e6f3ff;
+}
+.dq-dayrow-w {
+  grid-column: 1;
+  font-size: 16px;
+  color: var(--t-dim);
+}
+.dq-dayrow-d,
+.dq-dayrow-w {
+  overflow-wrap: anywhere;
+}
+.dq-dayrow-c {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  width: 18px;
+  height: 18px;
+  color: var(--t-dim);
+}
 .dq-week {
   overflow-x: auto;
   margin-top: 10px;
