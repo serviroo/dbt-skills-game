@@ -4,6 +4,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { writeServiceWorker } from './scripts/sw-build.mjs';
 import { CSP, headersFile, imagesMatchStamp, splashLinkTags } from './scripts/pwa-spec.mjs';
+import { reversedMessage, reversedSmoothsteps } from './scripts/glsl-check.mjs';
 
 function basePath(): string {
   const raw = process.env.BASE_PATH?.trim();
@@ -67,9 +68,34 @@ function pwa(): Plugin {
   };
 }
 
+/** `p` with forward slashes, the form Vite gives module ids in on every platform, so Windows paths compare with them. */
+const slash = (p: string) => p.replaceAll('\\', '/');
+
+/**
+ * Fails the build, and shows the error in dev, on a GLSL smoothstep with its edges the wrong way round, which some phone
+ * drivers draw as a hard step or a constant (scripts/glsl-check.mjs). It reads each source file as written, before any
+ * other step changes it.
+ */
+function glslCheck(): Plugin {
+  let root = process.cwd();
+  return {
+    name: 'lantern-glsl-check',
+    enforce: 'pre',
+    configResolved(c) {
+      root = c.root;
+    },
+    transform(code, id) {
+      const file = slash(id.split('?')[0]);
+      if (!/\.[jt]s$/.test(file) || !file.startsWith(slash(path.join(root, 'src')) + '/')) return;
+      const calls = reversedSmoothsteps(code);
+      if (calls.length) this.error(reversedMessage(path.posix.relative(slash(root), file), calls));
+    },
+  };
+}
+
 export default defineConfig({
   base: basePath(),
-  plugins: [pwa()],
+  plugins: [glslCheck(), pwa()],
   server: { host: '0.0.0.0', port: 5173, strictPort: true },
   preview: { host: '0.0.0.0', port: 4173, strictPort: true },
   build: { target: 'es2022', assetsInlineLimit: 0, sourcemap: false, chunkSizeWarningLimit: 2000 },

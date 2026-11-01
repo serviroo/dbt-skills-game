@@ -131,9 +131,9 @@ void main() {
   float grain = 0.93 + 0.1 * noise2(p * 18.0) * near + 0.1 * noise2(p * 2.6);
   vec3 dry = vec3(0.50, 0.46, 0.39) * grain;
   // wet where the last two washes reached, drying slowly after each turned; always wet down by the sea
-  float wet = mix(0.4, 1.0, exp(-max(uWash.w, 0.0) / 5.0)) * smoothstep(top + 0.02, top - 0.3, p.y);
-  wet = max(wet, mix(0.4, 1.0, exp(-uPrev.y / 5.0)) * smoothstep(topPrev + 0.02, topPrev - 0.3, p.y));
-  wet = max(wet, smoothstep(LOW + 0.6, LOW - 0.2, p.y));
+  float wet = mix(0.4, 1.0, exp(-max(uWash.w, 0.0) / 5.0)) * (1.0 - smoothstep(top - 0.3, top + 0.02, p.y));
+  wet = max(wet, mix(0.4, 1.0, exp(-uPrev.y / 5.0)) * (1.0 - smoothstep(topPrev - 0.3, topPrev + 0.02, p.y)));
+  wet = max(wet, 1.0 - smoothstep(LOW - 0.2, LOW + 0.6, p.y));
   vec3 alb = mix(dry, vec3(0.20, 0.19, 0.17) * grain, wet);
   float ndl = max(dot(n, uMoon), 0.0);
   vec3 col = alb * (MOONLIGHT * (0.14 + 0.6 * ndl) * 0.55 * mix(0.75, 1.0, uLit) + vec3(0.006, 0.009, 0.016));
@@ -144,8 +144,8 @@ void main() {
   col += wet * ((skyDome(R, uMoon, t, 0.0) + moonHalo(R, uMoon) * 0.3 * uLit) * fres * 0.6 + MOON * (pow(md, 260.0) * 0.22 + pow(md, 36.0) * 0.012) * uLit);
 
   // water: the thin sheet of the wash on the sand, and the sea beyond
-  float under = smoothstep(now + 0.015, now - 0.015, p.y);
-  float sea = smoothstep(SEA + 0.15, SEA - 0.4, p.y);
+  float under = 1.0 - smoothstep(now - 0.015, now + 0.015, p.y);
+  float sea = 1.0 - smoothstep(SEA - 0.4, SEA + 0.15, p.y);
   float water = max(under, sea);
   if (water > 0.0) {
     float depth = clamp((now - p.y) * 0.35, 0.0, 1.0);

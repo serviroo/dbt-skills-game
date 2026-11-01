@@ -154,7 +154,7 @@ void main() {
   vec2 rel = p - uBoard.xy;
   vec2 local = vec2(dot(rel, vec2(uBoard.z, -uBoard.w)), dot(rel, vec2(uBoard.w, uBoard.z)));
   float ell = length(local / vec2(0.5, 0.16));
-  foam += smoothstep(0.92, 1.1, ell) * smoothstep(1.8, 1.1, ell) * (0.45 + 0.55 * noise2(local * 16.0 + t * 0.4));
+  foam += smoothstep(0.92, 1.1, ell) * (1.0 - smoothstep(1.1, 1.8, ell)) * (0.45 + 0.55 * noise2(local * 16.0 + t * 0.4));
   foam = clamp(foam, 0.0, 1.0) * (1.0 - smoothstep(9.0, 28.0, dist));
   col = mix(col, MOONLIGHT * 0.06 * (0.6 + 0.4 * max(N.y, 0.0)) + uLampCol * pool * 0.5, foam * 0.5);
 
@@ -190,7 +190,7 @@ void main() {
   vec3 u = normalize(cross(uMoon, vec3(0.0, 1.0, 0.0)));
   vec2 q = vec2(dot(d, u), dot(d, cross(u, uMoon))) / MOON_R;
   float r = length(q);
-  float disc = smoothstep(1.0, 1.0 - max(fwidth(r), 1e-3) * 1.2, r);
+  float disc = 1.0 - smoothstep(1.0 - max(fwidth(r), 1e-3) * 1.2, 1.0, r);
   float seas = smoothstep(0.42, 0.78, fbm2(q * 1.7 + vec2(4.0, 1.3)));
   float limb = 0.7 + 0.3 * sqrt(max(0.0, 1.0 - r * r));
   vec3 col = skyDome(d, uMoon, uTime, 1.0) + moonHalo(d, uMoon);

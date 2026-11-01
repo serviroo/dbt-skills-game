@@ -138,7 +138,7 @@ export function buildDungeonEnv(opts: { gate?: Gate; pillars?: boolean; seed?: n
           vec2 dl = vec2(rel.x / (min(uGateW, 1.0) * 1.1 + 0.55), rel.y / 3.4);
           float lit = exp(-dot(dl, dl)) + 0.12 * exp(-dot(dl, dl) * 0.05);
           float low = smoothstep(0.0, 1.4, vW.y) * (1.0 - 0.5 * smoothstep(0.0, uGateH * 1.1, vW.y));
-          float edge = smoothstep(0.0, 0.18, vUv.x) * smoothstep(1.0, 0.82, vUv.x) * smoothstep(0.0, 0.12, vUv.y) * smoothstep(1.0, 0.75, vUv.y);
+          float edge = smoothstep(0.0, 0.18, vUv.x) * (1.0 - smoothstep(0.82, 1.0, vUv.x)) * smoothstep(0.0, 0.12, vUv.y) * (1.0 - smoothstep(0.75, 1.0, vUv.y));
           vec3 col = uGateCol * haze * lit * uGateI * uStrength * low * edge * uFade;
           gl_FragColor = vec4(col, 1.0);
         }`,

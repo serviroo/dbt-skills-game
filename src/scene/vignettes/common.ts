@@ -161,12 +161,12 @@ void main() {
   vec4 mv = modelViewMatrix * vec4(p, 1.0);
   gl_Position = projectionMatrix * mv;
   gl_PointSize = max(1.0, uScale * (0.012 + 0.014 * seed.x) / -mv.z);
-  vA = sunAt(p.y).g * smoothstep(0.0, 0.35, y) * smoothstep(uHeight, uHeight - 0.5, y) * (0.3 + 0.7 * seed.w) * exp(-max(0.0, -mv.z - 4.0) * 0.25);
+  vA = sunAt(p.y).g * smoothstep(0.0, 0.35, y) * (1.0 - smoothstep(uHeight - 0.5, uHeight, y)) * (0.3 + 0.7 * seed.w) * exp(-max(0.0, -mv.z - 4.0) * 0.25);
 }`;
 const MOTE_FRAG = /* glsl */ `
 varying float vA;
 void main() {
-  float a = smoothstep(0.5, 0.05, length(gl_PointCoord - 0.5)) * vA;
+  float a = (1.0 - smoothstep(0.05, 0.5, length(gl_PointCoord - 0.5))) * vA;
   gl_FragColor = vec4(vec3(0.20, 0.32, 0.40) * a, 1.0);
   ${OUT_GLSL}
 }`;
@@ -226,7 +226,7 @@ vec3 moonDisc(vec3 d, vec3 m) {
   vec2 q = vec2(dot(d, u), dot(d, v)) / MOON_R;
   float r = length(q);
   float edge = max(fwidth(r), 1e-3) * 1.2;
-  float disc = smoothstep(1.0, 1.0 - edge, r) * step(0.0, dot(d, m));
+  float disc = (1.0 - smoothstep(1.0 - edge, 1.0, r)) * step(0.0, dot(d, m));
   float seas = smoothstep(0.42, 0.78, fbm2(q * 1.7 + vec2(4.0, 1.3)));
   float limb = 0.72 + 0.28 * sqrt(max(0.0, 1.0 - r * r));
   return MOON * 1.45 * (1.0 - 0.24 * seas) * limb * disc;
@@ -257,7 +257,7 @@ vec3 skyDome(vec3 d, vec3 m, float t, float stars) {
     vec3 at = g + 0.5 + 0.5 * (vec3(hash1(dot(g, vec3(1.0, 57.0, 113.0))), hash1(dot(g, vec3(7.0, 31.0, 91.0))), hash1(dot(g, vec3(13.0, 17.0, 71.0)))) - 0.5);
     float off = length(at - d * dot(at, d));
     float px = length(fwidth(p)) * 0.6;
-    float s = smoothstep(px * 1.4, px * 0.2, off) * step(0.962, hash1(dot(g, vec3(3.0, 101.0, 29.0))));
+    float s = (1.0 - smoothstep(px * 0.2, px * 1.4, off)) * step(0.962, hash1(dot(g, vec3(3.0, 101.0, 29.0))));
     s *= (0.25 + 0.75 * hash1(dot(g, vec3(11.0, 5.0, 61.0)))) * smoothstep(0.03, 0.25, h) * smoothstep(0.1, 0.45, acos(clamp(dot(d, m), -1.0, 1.0)));
     col += vec3(0.50, 0.60, 0.80) * s * 0.4 * stars;
     // a thin high cloud, lit at its edges on the moon's side

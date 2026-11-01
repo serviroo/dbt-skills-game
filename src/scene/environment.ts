@@ -31,7 +31,7 @@ export function buildVoid() {
       void main() {
         vec3 d = normalize(vDir);
         vec3 c = mix(uMid, uTop, smoothstep(0.0, 0.8, d.y));
-        c = mix(c, uBottom, smoothstep(0.0, -0.5, d.y));
+        c = mix(c, uBottom, 1.0 - smoothstep(-0.5, 0.0, d.y));
         float g = pow(max(dot(d, uGlowDir), 0.0), 6.0);
         float n = fbm3(d * 3.0 + vec3(0.0, 0.0, uTime * 0.03));
         c += uGlowColor * g * uGlow * (0.7 + 0.6 * n);

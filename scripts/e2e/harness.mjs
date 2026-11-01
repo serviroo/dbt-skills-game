@@ -8,7 +8,8 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { loadConfigFromFile, parseAst } from 'vite';
 import { glArgs, checkRenderer } from '../gl.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -705,6 +706,42 @@ function pageState() {
     origin: performance.timeOrigin,
     trail: trail?.ev ?? null,
   };
+}
+
+// A partial copy of the repo takes its modules from nodeImports() and viteConfigFiles(), so it still runs when one of
+// them loads a new module.
+
+/** Copies `files`, paths in `from`, into `dir`. */
+export function copyFiles(dir, files, from = root) {
+  for (const f of files) {
+    fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
+    fs.copyFileSync(path.join(from, f), path.join(dir, f));
+  }
+}
+
+/** The script `file` in `from` and every module its relative imports load in Node, all the way down, as paths in `from`. */
+export function nodeImports(file, from = root) {
+  const found = new Set();
+  const walk = (f) => {
+    if (found.has(f)) return;
+    found.add(f);
+    if (!/\.[mc]?[jt]s$/.test(f)) return;
+    const at = path.join(from, f);
+    const visit = (node) => {
+      if (!node || typeof node !== 'object') return;
+      if (/^(Import(Declaration|Expression)|Export(Named|All)Declaration)$/.test(node.type) && /^\.\.?\//.test(node.source?.value ?? '')) walk(path.relative(from, fileURLToPath(new URL(node.source.value, pathToFileURL(at)))));
+      for (const v of Object.values(node)) visit(v);
+    };
+    visit(parseAst(fs.readFileSync(at, 'utf8'), { lang: /ts$/.test(f) ? 'ts' : 'js' }));
+  };
+  walk(file);
+  return [...found];
+}
+
+/** vite.config.ts in `from` and every local file Vite builds it from, which Vite resolves its own way, as paths in `from`. */
+export async function viteConfigFiles(from = root) {
+  const { dependencies } = await loadConfigFromFile({ command: 'build', mode: 'production' }, path.join(from, 'vite.config.ts'), from, 'silent');
+  return dependencies.map((f) => path.relative(from, f));
 }
 
 /** How every e2e browser starts. A running browser takes no new flags, so scripts/e2e-browser.mjs starts a --ws one with these. */

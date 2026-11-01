@@ -129,7 +129,7 @@ export function interiorLight() {
         float core = exp(-dot(vUv * vec2(1.0, 1.3), vUv * vec2(1.0, 1.3)) * 2.4);
         float n = fbm3(vec3(vUv * 2.6, uTime * 0.35));
         float caus = smoothstep(0.45, 0.75, n);
-        float edge = smoothstep(1.0, 0.7, max(abs(vUv.x), abs(vUv.y)));
+        float edge = 1.0 - smoothstep(0.7, 1.0, max(abs(vUv.x), abs(vUv.y)));
         vec3 c = mix(G_WARM * 0.8, vec3(2.8, 1.4, 0.12), core) + G_WARM * caus * 0.7;
         c *= mix(0.35, 1.0, edge);
         gl_FragColor = vec4(c * uLevel, 1.0);
@@ -795,7 +795,7 @@ export function lightFeather(length = 0.3) {
           float barb = 0.62 + 0.38 * bc * bc;
           // one split in each vane
           float sp = d > 0.0 ? 0.58 : 0.44;
-          float gap = smoothstep(0.012, 0.0, abs(s - sp - ad * 0.42)) * smoothstep(0.08, 0.22, ad / max(w, 1e-3));
+          float gap = (1.0 - smoothstep(0.0, 0.012, abs(s - sp - ad * 0.42))) * smoothstep(0.08, 0.22, ad / max(w, 1e-3));
           float vane = inV * barb * (1.0 - gap) * mix(1.0, 0.5, smoothstep(0.0, 1.0, ad / max(w, 1e-3)));
           float rd = d / 0.03;
           float rach = exp(-rd * rd) * step(0.02, s) * (1.0 - smoothstep(0.93, 1.0, s));
@@ -803,7 +803,7 @@ export function lightFeather(length = 0.3) {
           float halo = (exp(-edge * 7.0) * 0.22 + exp(-edge * 2.6) * 0.1) * smoothstep(0.1, 0.25, s) * (1.0 - smoothstep(0.95, 1.08, s));
           // crimson light: deep red vanes that brighten toward a hot shaft and glow at the fringe. Premultiplied, so it
           // partly covers what is behind it and stays crimson over the warm column haze instead of washing to pink.
-          float lum = smoothstep(1.0, 0.0, ad / max(w, 1e-3));
+          float lum = 1.0 - smoothstep(0.0, 1.0, ad / max(w, 1e-3));
           vec3 c = vec3(0.5, 0.004, 0.022) * vane * (0.9 + 1.4 * lum * lum) + vec3(0.32, 0.0, 0.012) * halo + vec3(1.15, 0.16, 0.13) * rach;
           float fade = 1.0 - smoothstep(0.8, 1.0, max(abs(vUv.x), abs(vUv.y)));
           float cover = clamp(inV * 0.62 + rach * 0.4 + halo * 0.6, 0.0, 0.8) * fade;

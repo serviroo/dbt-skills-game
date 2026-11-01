@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { copyFiles, nodeImports } from './harness.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const SNAP = path.join(root, 'scripts/stored-ids.json');
@@ -413,10 +414,8 @@ export const scenarios = {
     expect(empty.code === 1 && empty.text.includes('Invalid stored-id snapshot'), 'guard accepted an empty snapshot');
 
     const scratch = path.join(out, 'guard-source');
-    fs.mkdirSync(path.join(scratch, 'scripts'), { recursive: true });
     fs.cpSync(path.join(root, 'src'), path.join(scratch, 'src'), { recursive: true });
-    for (const file of ['check-stored-ids.mjs', 'stored-ids.json']) fs.copyFileSync(path.join(root, 'scripts', file), path.join(scratch, 'scripts', file));
-    fs.copyFileSync(path.join(root, 'package.json'), path.join(scratch, 'package.json'));
+    copyFiles(scratch, ['package.json', 'scripts/stored-ids.json', ...nodeImports('scripts/check-stored-ids.mjs')]);
     fs.symlinkSync(path.join(root, 'node_modules'), path.join(scratch, 'node_modules'), 'dir');
     const sourceRun = async (label, code, match) => {
       let actual = 0, output;

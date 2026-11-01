@@ -141,7 +141,7 @@ void main() {
   float up = smoothstep(0.1, 0.85, ng.y);
   vec3 col = albedo * (amb * ao + SUN * sun * wrap * 0.9 * ao);
   // the sand below throws a little light back up onto the underside
-  col += albedo * ${SAND} * SUN * sunAt(-1.0) * 0.3 * smoothstep(0.25, -0.9, ng.y) * mix(0.35, 1.0, exp(-uLift * 0.8)) * ao;
+  col += albedo * ${SAND} * SUN * sunAt(-1.0) * 0.3 * (1.0 - smoothstep(-0.9, 0.25, ng.y)) * mix(0.35, 1.0, exp(-uLift * 0.8)) * ao;
   col += albedo * SUN * sun * up * (c.x * 0.45 + c.y * 0.1);
   // wet sheen: a soft highlight as broad as the baked roughness, a little stronger at grazing angles, only where light
   // from above can reach (never on the shaded underside)
@@ -183,7 +183,7 @@ void main() {
 const PUFF_FRAG = /* glsl */ `
 varying float vA;
 void main() {
-  float a = smoothstep(0.5, 0.0, length(gl_PointCoord - 0.5)) * vA;
+  float a = (1.0 - smoothstep(0.0, 0.5, length(gl_PointCoord - 0.5))) * vA;
   gl_FragColor = vec4(vec3(0.17, 0.21, 0.23), a);
   ${OUT_GLSL}
 }`;

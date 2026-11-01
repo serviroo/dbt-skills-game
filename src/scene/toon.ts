@@ -382,9 +382,9 @@ void main() {
   float hemi = N.y * 0.5 + 0.5;
   col += mix(uAmbBottom, uAmbTop, hemi) * 0.35;
   #ifdef GROUND_MUL
-  col += uGroundGlow * uGroundGlowStrength * GROUND_MUL * smoothstep(0.2, -0.8, N.y) * (1.0 - smoothstep(0.0, 1.6, vPosW.y));
+  col += uGroundGlow * uGroundGlowStrength * GROUND_MUL * (1.0 - smoothstep(-0.8, 0.2, N.y)) * (1.0 - smoothstep(0.0, 1.6, vPosW.y));
   #else
-  col += uGroundGlow * uGroundGlowStrength * smoothstep(0.2, -0.8, N.y) * (1.0 - smoothstep(0.0, 1.6, vPosW.y));
+  col += uGroundGlow * uGroundGlowStrength * (1.0 - smoothstep(-0.8, 0.2, N.y)) * (1.0 - smoothstep(0.0, 1.6, vPosW.y));
   #endif
 
   #ifdef HAIR
@@ -465,7 +465,9 @@ void main() {
   #ifdef HEM
   float hem = vHem;
   #else
-  float hem = smoothstep(uHemStart, 1.0, vFlutter);
+  // below 1 the hem fades in from hemStart to the cloth's free edge (flutter 1); at 1 or above (the default, 2) every
+  // vertex is already past where it starts, so the whole surface takes it
+  float hem = uHemStart < 1.0 ? smoothstep(uHemStart, 1.0, vFlutter) : 1.0 - smoothstep(1.0, max(uHemStart, 1.001), vFlutter);
   #endif
   col = mix(col, uHemColor, hem * 0.6);
   col += uHemColor * uHemGlow * pow(hem, 3.0);

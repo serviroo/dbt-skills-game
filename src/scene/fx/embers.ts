@@ -99,7 +99,7 @@ export function createEmbers(o: EmberOpts = {}): Emitter {
     fragmentBody: o.dark
       ? /* glsl */ `
       float d = length(vUv);
-      float a = smoothstep(1.0, 0.45, d) * vAlpha;
+      float a = (1.0 - smoothstep(0.45, 1.0, d)) * vAlpha;
       gl_FragColor = vec4(vColor * a, a);`
       : /* glsl */ `
       float d2 = dot(vUv, vUv);

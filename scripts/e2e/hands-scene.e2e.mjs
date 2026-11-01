@@ -11,7 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
-import { after, countdownContrast, DESK, drawn, flat, inStep, keepsTime, live, looks, moreTime, pair, PHONE, sceneShot, scenes, seed, showsStopped, SIDE, slowGpu, toSkill, until } from './skill-scenes.e2e.mjs';
+import { after, countdownContrast, DESK, drawn, flat, inStep, keepsTime, live, looks, losesContext, moreTime, openStopped, pair, PHONE, sceneShot, scenes, seed, SIDE, slowGpu, toSkill, until } from './skill-scenes.e2e.mjs';
 
 const SMALL = { width: 320, height: 568 };
 /** the sizes reduced motion, a lost context and a slow GPU are checked at */
@@ -98,13 +98,7 @@ export const scenarios = {
   async 'hands-scene'(h) {
     for (const [tag, vp] of [...SIZES, ['desk', DESK]]) {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
-      await page.clock.install();
-      await page.reload();
-      await toSkill(h, page, 'willing-hands', 'hands');
-      await page.locator('.dq-timer-svg--hands').waitFor({ timeout: 10000 });
-      await h.pauseClock(page);
-      await page.locator('.dq-timer-stage').scrollIntoViewIfNeeded();
-      await showsStopped(h, page, `hands ${tag}`);
+      await openStopped(h, page, toHands, `hands ${tag}`);
       await looks(h, page, tag, 'hands', vp, undefined, { stopped: true });
       await showsHands(h, page, fs.readFileSync(path.join(h.out, `hands-${tag}.png`)), `hands ${tag}, saved`);
       const seen = [await after(h, page, 0)];
@@ -211,45 +205,15 @@ export const scenarios = {
     }
   },
 
-  /**
-   * a lost WebGL context hands back to the flat drawing and the scene stops; restored, it shows again in step and the
-   * hands open on from where they were. The page clock stops while the GPU builds the scene, which took CI's software
-   * GPU most of the step's 20 s, and more time keeps the countdown running while the restored scene is watched: a scene
-   * draws nothing more once its countdown is done.
-   */
+  /** a lost WebGL context hands back to the flat drawing; restored, the scene shows again in step and the hands open on */
   async 'hands-context-loss'(h) {
     for (const [tag, vp] of SIZES) {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
-      await page.clock.install();
-      await page.reload();
-      await toSkill(h, page, 'willing-hands', 'hands');
-      await page.locator('.dq-timer-svg--hands').waitFor({ timeout: 10000 });
-      await h.pauseClock(page);
-      await page.locator('.dq-timer-stage').scrollIntoViewIfNeeded();
-      await showsStopped(h, page, `lost ${tag}`);
-      const was = await after(h, page, 2000);
-      await page.evaluate(() => {
-        window.__lose = document.querySelector('.dq-scene canvas').getContext('webgl2').getExtension('WEBGL_lose_context');
-        window.__lose.loseContext();
-      });
-      await page.locator('.dq-timer-stage:not(.is-scene-live)').waitFor({ timeout: 5000 });
-      const a = await scenes(page);
-      await page.clock.runFor(1600);
-      const b = await scenes(page);
-      h.expect(a.live === 0 && b.frames === a.frames, `lost ${tag}: the scene kept drawing (${a.frames} -> ${b.frames})`);
-      // the flat drawing fades back in on the browser's own time, whatever the page clock does
-      await h.poll(page, () => flat(page), (s) => s.length === 2 && s.every(Boolean), (s) => `lost ${tag}: the flat drawing did not come back (${JSON.stringify(s)})`, { timeout: 3000, polling: 50 });
-      await h.shot(page, `hands-lost-${tag}`);
-      await page.evaluate(() => window.__lose.restoreContext());
-      await showsStopped(h, page, `restored ${tag}`);
-      inStep(h, await pair(page), `restored ${tag}, shown`);
+      await openStopped(h, page, toHands, `lost ${tag}`);
+      // the step's 20 s may not outlast the check
       await page.locator('.dq-timer').getByRole('button', { name: '+15 s', exact: true }).click();
-      await page.clock.runFor(1000);
-      const c = await pair(page);
-      h.expect(c.s.live === 1 && c.s.contexts === 1 && c.s.frames > b.frames + 10, `restored ${tag}: ${JSON.stringify(c.s)}`);
-      inStep(h, c, `restored ${tag}`);
-      h.expect(c.s.last.probe.curl < was.probe.curl, `restored ${tag}: the fingers curled back (${was.probe.curl.toFixed(4)} before the loss, ${c.s.last.probe.curl.toFixed(4)} after)`);
-      await drawn(h, page, `restored ${tag}`);
+      const { was, now } = await losesContext(h, page, tag, `hands-lost-${tag}`);
+      h.expect(now.s.last.probe.curl < was.probe.curl, `restored ${tag}: the fingers curled back (${was.probe.curl.toFixed(4)} before the loss, ${now.s.last.probe.curl.toFixed(4)} after)`);
       h.expect(!errors.length, errors.join('\n'));
       await ctx.close();
     }

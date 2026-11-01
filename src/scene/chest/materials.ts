@@ -147,8 +147,8 @@ void main() {
   skyC = mix(skyC, G_LIGHT, smoothstep(0.45, 0.68, h));
   // thin dark band just above the horizon: the classic chrome line
   skyC *= 1.0 - 0.6 * (smoothstep(0.0, 0.025, h) * (1.0 - smoothstep(0.05, 0.1, h)));
-  vec3 gndC = mix(G_BRONZE, G_DEEP, smoothstep(-0.04, -0.4, h));
-  gndC = mix(gndC, G_BRONZE * 1.4, smoothstep(-0.7, -0.95, h));
+  vec3 gndC = mix(G_BRONZE, G_DEEP, 1.0 - smoothstep(-0.4, -0.04, h));
+  gndC = mix(gndC, G_BRONZE * 1.4, 1.0 - smoothstep(-0.95, -0.7, h));
   vec3 env = mix(gndC, skyC, sky);
 
   // toon key ramp: two hard steps
