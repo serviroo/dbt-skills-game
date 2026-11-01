@@ -465,12 +465,13 @@ function lowPiano(v: Voice, t: number, m: number, peak: number, dest: AudioNode)
   const parts: [number, number, number, number][] = [[1, 0.7, 2.4, -0.7], [1, 0.6, 2.2, 0.8], [2.003, 0.42, 1.3, 0], [3.009, 0.26, 0.8, 0], [4.02, 0.16, 0.45, 0], [5.04, 0.09, 0.28, 0], [6.07, 0.05, 0.18, 0]];
   for (const [r, a, tau, det] of parts) {
     const g = v.gain(0, dest);
-    g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(peak * a, t + 0.003);
-    g.gain.setTargetAtTime(0, t + 0.003, tau);
+    const p = v.at(g.gain);
+    p.setValueAtTime(0, t);
+    p.linearRampToValueAtTime(peak * a, t + 0.003);
+    p.setTargetAtTime(0, t + 0.003, tau);
     // past -26 dB the partial is buried under the reverb: fade it in 0.2 s and free the oscillator
     const fe = t + 0.003 + tau * 3;
-    g.gain.setTargetAtTime(0, fe, 0.05);
+    p.setTargetAtTime(0, fe, 0.05);
     const o = v.osc('sine', f * r, t, fe + 0.4, g);
     if (det) o.detune.value = v.cents + det;
   }
@@ -483,7 +484,7 @@ function lowPiano(v: Voice, t: number, m: number, peak: number, dest: AudioNode)
 function revSwell(v: Voice, t0: number, t1: number, peak: number, dest: AudioNode, hp = 3000) {
   const g = v.gain(0, v.filt('highpass', hp, 0.6, dest));
   v.ramp(g.gain, t0, peak * 0.01, peak, t1 - t0);
-  g.gain.setTargetAtTime(0, t1, 0.01);
+  v.at(g.gain).setTargetAtTime(0, t1, 0.01);
   v.noise('white', t0, t1 + 0.12, g);
 }
 
@@ -491,7 +492,7 @@ function revSwell(v: Voice, t0: number, t1: number, peak: number, dest: AudioNod
 function timpRoll(v: Voice, t0: number, t1: number, peak: number, dest: AudioNode) {
   const g = v.gain(0, dest);
   v.ramp(g.gain, t0, peak * 0.03, peak, t1 - t0);
-  g.gain.setTargetAtTime(0, t1, 0.012);
+  v.at(g.gain).setTargetAtTime(0, t1, 0.012);
   const am = v.gain(0.55, g);
   v.lfo(15, 0.45, am.gain, t0, t1 + 0.1);
   v.osc('sine', midi(38), t0, t1 + 0.1, am);
@@ -501,9 +502,10 @@ function timpRoll(v: Voice, t0: number, t1: number, peak: number, dest: AudioNod
 /** Cymbal crash: broadband air with a long decay. */
 function crash(v: Voice, t: number, peak: number, dest: AudioNode) {
   const g = v.gain(0, v.filt('highpass', 3600, 0.6, dest));
-  g.gain.setValueAtTime(0, t);
-  g.gain.linearRampToValueAtTime(peak, t + 0.002);
-  g.gain.setTargetAtTime(0, t + 0.002, 0.75);
+  const p = v.at(g.gain);
+  p.setValueAtTime(0, t);
+  p.linearRampToValueAtTime(peak, t + 0.002);
+  p.setTargetAtTime(0, t + 0.002, 0.75);
   v.noise('white', t, t + 4.6, g);
   const s = v.gain(0, v.filt('bandpass', 7000, 0.6, dest));
   v.perc(s.gain, t, peak * 0.6, 0.002, 0.25);

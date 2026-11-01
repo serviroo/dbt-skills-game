@@ -1,5 +1,6 @@
 import { mulberry32, type Rng } from '../core/math';
 import { tanhCurve, type Ctx } from './dsp';
+import { silentAfter } from './param';
 
 /** Shared, engine-owned resources every voice can draw on. */
 export interface Lib {
@@ -35,6 +36,25 @@ export interface Timed {
   cancelScheduledValues(t: number): void;
 }
 
+/** A source a voice started, and the gains its sound passes through on its way out of the voice. */
+interface Source {
+  n: AudioScheduledSourceNode;
+  stop: number;
+  /** The stop it was given. */
+  asked: number;
+  span: { b: number } | null;
+  gains: GainNode[];
+  voice: Voice;
+}
+
+/** The node each node a voice makes feeds, and the gain each of its gains' params belongs to: a source's way out. */
+const feeds = new WeakMap<AudioNode, AudioNode>();
+const gainOf = new WeakMap<AudioParam, GainNode>();
+/** When a gain's automation, from its latest point on, leaves it silent for good (Infinity while it doesn't). */
+const silentFrom = new WeakMap<GainNode, { last: number; at: number }>();
+/** The sources still playing whose sound passes through each gain. */
+const through = new WeakMap<GainNode, Source[]>();
+
 export interface VoiceOpts {
   gain?: number;
   pan?: number;
@@ -64,7 +84,7 @@ export class Voice {
   /** When it starts (context time); open() sets a held voice's. */
   t: number;
   end: number;
-  private sources: { n: AudioScheduledSourceNode; stop: number; span: { b: number } | null }[] = [];
+  private sources: Source[] = [];
   /** While held, what it was given to start and set, each placed by open(at) `at` later. */
   private held: ((at: number) => void)[] | null;
   /** When its stop() has silenced it and its sources have ended (Infinity until then): a stop is final, and nothing it
@@ -128,16 +148,59 @@ export class Voice {
     for (const f of held) f(at);
   }
 
-  /** `p`'s timed automation, in this voice's time: set at once, or kept while the voice is held and set by open(). */
+  /** `p`'s timed automation, in this voice's time: set at once, or kept while the voice is held and set by open(). On a
+   *  gain the voice made, the sources that gain carries play on until it has fallen silent. */
   at(p: AudioParam): Timed {
+    const g = gainOf.get(p);
+    const now = g ? this.envelope(p, g) : p;
     const held = this.held;
-    if (!held) return p;
+    if (!held) return now;
     return {
-      setValueAtTime: (v, t) => void held.push((d) => p.setValueAtTime(v, t + d)),
-      linearRampToValueAtTime: (v, t) => void held.push((d) => p.linearRampToValueAtTime(v, t + d)),
-      exponentialRampToValueAtTime: (v, t) => void held.push((d) => p.exponentialRampToValueAtTime(v, t + d)),
-      setTargetAtTime: (v, t, tau) => void held.push((d) => p.setTargetAtTime(v, t + d, tau)),
-      cancelScheduledValues: (t) => void held.push((d) => p.cancelScheduledValues(t + d)),
+      setValueAtTime: (v, t) => void held.push((d) => now.setValueAtTime(v, t + d)),
+      linearRampToValueAtTime: (v, t) => void held.push((d) => now.linearRampToValueAtTime(v, t + d)),
+      exponentialRampToValueAtTime: (v, t) => void held.push((d) => now.exponentialRampToValueAtTime(v, t + d)),
+      setTargetAtTime: (v, t, tau) => void held.push((d) => now.setTargetAtTime(v, t + d, tau)),
+      cancelScheduledValues: (t) => void held.push((d) => now.cancelScheduledValues(t + d)),
+    };
+  }
+
+  /** Sets `p`, the param of gain `g`, noting when its latest point leaves `g` silent for good, and keeps the sources `g`
+   *  carries playing until then. */
+  private envelope(p: AudioParam, g: GainNode): Timed {
+    const carried = () => {
+      for (const s of through.get(g) ?? []) s.voice.extend(s);
+    };
+    const note = (t: number, at: number) => {
+      const e = silentFrom.get(g);
+      if (e && t < e.last) return;
+      silentFrom.set(g, { last: t, at });
+      carried();
+    };
+    return {
+      setValueAtTime: (v, t) => {
+        p.setValueAtTime(v, t);
+        note(t, v ? Infinity : t);
+      },
+      linearRampToValueAtTime: (v, t) => {
+        p.linearRampToValueAtTime(v, t);
+        note(t, v ? Infinity : t);
+      },
+      exponentialRampToValueAtTime: (v, t) => {
+        p.exponentialRampToValueAtTime(v, t);
+        note(t, Infinity);
+      },
+      setTargetAtTime: (v, t, tau) => {
+        p.setTargetAtTime(v, t, tau);
+        note(t, v ? Infinity : t + silentAfter(tau));
+      },
+      cancelScheduledValues: (t) => {
+        p.cancelScheduledValues(t);
+        // its latest point is gone, and with it what was known of how it ends
+        if (t <= (silentFrom.get(g)?.last ?? -Infinity)) {
+          silentFrom.delete(g);
+          carried();
+        }
+      },
     };
   }
 
@@ -146,19 +209,48 @@ export class Voice {
     this.hallSend.gain.value = hall;
   }
 
-  private reg<T extends AudioScheduledSourceNode>(n: T, t0: number, t1: number, offset = 0) {
+  /** Starts a source that feeds `into`, and stops it at `t1`, or once a gain on its way out has fallen silent. */
+  private reg<T extends AudioScheduledSourceNode>(n: T, t0: number, t1: number, into: AudioNode, offset = 0) {
     if (this.held) {
-      this.held.push((d) => this.reg(n, t0 + d, t1 + d, offset));
+      this.held.push((d) => this.reg(n, t0 + d, t1 + d, into, offset));
       return n;
     }
     if (t0 >= this.killAt) return n;
-    t1 = Math.min(t1, this.killAt);
     if (n instanceof AudioBufferSourceNode) n.start(t0, offset);
     else n.start(t0);
-    n.stop(t1);
-    this.sources.push({ n, stop: t1, span: this.lib.track(t0, t1) });
-    if (t1 > this.end) this.end = t1;
+    const gains: GainNode[] = [];
+    for (let x: AudioNode | undefined = into; x; x = feeds.get(x)) if (x instanceof GainNode) gains.push(x);
+    const s: Source = { n, stop: t1, asked: t1, span: null, gains, voice: this };
+    s.stop = this.until(s);
+    n.stop(s.stop);
+    s.span = this.lib.track(t0, s.stop);
+    this.sources.push(s);
+    const now = this.ctx.currentTime;
+    for (const g of gains) through.set(g, [...(through.get(g) ?? []).filter((o) => o.stop > now), s]);
+    if (s.stop > this.end) this.end = s.stop;
     return n;
+  }
+
+  /** When a source stops: when it was asked to, or once the first gain on its way out falls silent if that is later
+   *  (one silent gain silences the whole way out), and never past this voice's own stop. */
+  private until(s: Source) {
+    const silent = Math.min(...s.gains.map((g) => silentFrom.get(g)?.at ?? Infinity));
+    return Math.min(silent === Infinity ? s.asked : Math.max(s.asked, silent), this.killAt);
+  }
+
+  /** Moves a source's stop later, if a gain on its way out now falls silent after it. */
+  private extend(s: Source) {
+    const stop = this.until(s);
+    if (stop <= s.stop) return;
+    try {
+      s.n.stop(stop);
+    } catch {
+      /* already stopped */
+      return;
+    }
+    s.stop = stop;
+    if (s.span) s.span.b = stop;
+    if (stop > this.end) this.end = stop;
   }
 
   osc(type: OscillatorType | PeriodicWave, freq: number, t0: number, t1: number, dest: AudioNode, input = 0) {
@@ -168,7 +260,7 @@ export class Voice {
     o.frequency.value = freq;
     if (this.cents) o.detune.value = this.cents;
     o.connect(dest, 0, input);
-    return this.reg(o, t0, t1);
+    return this.reg(o, t0, t1, dest);
   }
 
   noise(color: 'white' | 'pink' | 'brown', t0: number, t1: number, dest: AudioNode, rate = 1) {
@@ -178,7 +270,7 @@ export class Voice {
     s.loop = true;
     s.playbackRate.value = rate;
     s.connect(dest);
-    return this.reg(s, t0, t1, this.rng() * (b.duration - 0.1));
+    return this.reg(s, t0, t1, dest, this.rng() * (b.duration - 0.1));
   }
 
   /** Loop a buffer from t0 to t1 (start offset 0, so renders stay deterministic). */
@@ -187,7 +279,7 @@ export class Voice {
     s.buffer = b;
     s.loop = true;
     s.connect(dest);
-    return this.reg(s, t0, t1);
+    return this.reg(s, t0, t1, dest);
   }
 
   buffer(b: AudioBuffer, t0: number, dest: AudioNode, rate = 1) {
@@ -195,14 +287,17 @@ export class Voice {
     s.buffer = b;
     s.playbackRate.value = rate;
     s.connect(dest);
-    return this.reg(s, t0, t0 + b.duration / rate + 0.01);
+    return this.reg(s, t0, t0 + b.duration / rate + 0.01, dest);
   }
 
   gain(v: number, dest: AudioNode | AudioParam) {
     const g = this.ctx.createGain();
     g.gain.value = v;
+    gainOf.set(g.gain, g);
     if (dest instanceof AudioParam) g.connect(dest);
     else g.connect(dest);
+    const next = dest instanceof AudioParam ? gainOf.get(dest) : dest;
+    if (next) feeds.set(g, next);
     return g;
   }
 
@@ -215,6 +310,7 @@ export class Voice {
     if (this.cents) b.detune.value = this.cents;
     kRate(b.frequency, b.Q, b.gain, b.detune);
     b.connect(dest);
+    feeds.set(b, dest);
     return b;
   }
 
@@ -223,6 +319,7 @@ export class Voice {
     w.curve = tanhCurve(drive) as Float32Array<ArrayBuffer>;
     w.oversample = oversample;
     w.connect(dest);
+    feeds.set(w, dest);
     return w;
   }
 
@@ -232,17 +329,18 @@ export class Voice {
     n.pan.value = p;
     kRate(n.pan);
     n.connect(dest);
+    feeds.set(n, dest);
     return n;
   }
 
-  /** Linear attack to peak, optional hold, exponential decay (tau). Returns when it is ~-70 dB. */
+  /** Linear attack to peak, optional hold, exponential decay (tau). Returns when it has fallen silent. */
   perc(param: AudioParam, t: number, peak: number, a: number, tau: number, hold = 0) {
     const p = this.at(param);
     p.setValueAtTime(0, t);
     p.linearRampToValueAtTime(peak, t + a);
     if (hold > 0) p.setValueAtTime(peak, t + a + hold);
     p.setTargetAtTime(0, t + a + hold, tau);
-    return t + a + hold + tau * 8;
+    return t + a + hold + silentAfter(tau);
   }
 
   /** Exponential (linear-in-dB) move between two levels. */
@@ -257,11 +355,13 @@ export class Voice {
     const g = this.ctx.createGain();
     g.gain.value = depth;
     g.connect(p);
+    const next = gainOf.get(p);
+    if (next) feeds.set(g, next);
     const o = this.ctx.createOscillator();
     o.type = type;
     o.frequency.value = rate;
     o.connect(g);
-    return this.reg(o, t0, t1);
+    return this.reg(o, t0, t1, g);
   }
 
   /**
