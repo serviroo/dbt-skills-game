@@ -4454,6 +4454,17 @@ textarea.dq-input {
   align-self: center;
   margin: 0 max(12px, var(--safe-right)) 0 0;
 }
+/* held sideways, a field too narrow to show what's typed (is-narrow, safe.ts) takes more of the width: the frame, the
+   field and an entry being changed give up most of their sides */
+.dq.is-typing.is-narrow .dq-sz {
+  --pad: 8px;
+}
+.dq.is-typing.is-narrow .dq-sz .dq-input {
+  padding-inline: 8px;
+}
+.dq.is-typing.is-narrow :is(.dq-sz-entry, .dq-person).is-editing {
+  padding-inline: 0;
+}
 /* too little under the bar for the field (is-one-row, safe.ts: held sideways pinched in or at 200% zoom), the bar, the
    field and Talk share one row: Leave, Lights up and Sound together at the start, the page in the middle scrolled to
    the field, and Talk's words wrapped in a column at the end, a stronger Talk as narrow. The frame steps aside for the
@@ -4483,12 +4494,10 @@ textarea.dq-input {
 .dq.is-typing.is-one-row .dq-sz::after {
   display: none;
 }
-.dq.is-typing.is-one-row .dq-sz .dq-input {
-  padding-inline: 8px;
-}
-/* and so does an entry being changed */
-.dq.is-typing.is-one-row :is(.dq-sz-entry, .dq-person).is-editing {
-  padding-inline: 0;
+/* in that row, a field too narrow to show what's typed (is-narrow, safe.ts): Lights up and Sound step aside until the
+   keyboard goes down, and the field takes their room */
+.dq.is-typing.is-one-row.is-narrow .dq-top-end {
+  display: none;
 }
 .dq.is-typing.is-one-row > .dq-sz-talk {
   grid-area: 1 / 3;
