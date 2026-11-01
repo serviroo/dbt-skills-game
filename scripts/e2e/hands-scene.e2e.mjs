@@ -11,7 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
-import { after, countdownContrast, DESK, drawn, flat, inStep, keepsTime, live, looks, pair, PHONE, sceneShot, scenes, seed, showsStopped, SIDE, slowGpu, toSkill, until } from './skill-scenes.e2e.mjs';
+import { after, countdownContrast, DESK, drawn, flat, inStep, keepsTime, live, looks, moreTime, pair, PHONE, sceneShot, scenes, seed, showsStopped, SIDE, slowGpu, toSkill, until } from './skill-scenes.e2e.mjs';
 
 const SMALL = { width: 320, height: 568 };
 /** the sizes reduced motion, a lost context and a slow GPU are checked at */
@@ -109,8 +109,10 @@ export const scenarios = {
       await showsHands(h, page, fs.readFileSync(path.join(h.out, `hands-${tag}.png`)), `hands ${tag}, saved`);
       const seen = [await after(h, page, 0)];
       const said = [`${seen[0].e.toFixed(0)}s ${await inFrame(h, page, `hands ${tag} at the start`)}`];
-      // two seconds at a time: a jump that long reads as a pause, not as a slow device
-      while (!seen[seen.length - 1].done) {
+      // two seconds at a time: a jump that long reads as a pause, not as a slow device. Once the page has run the step's
+      // whole length its countdown is over, so the scene is at Done by then.
+      for (let ran = 0; !seen[seen.length - 1].done; ran += 2) {
+        h.expect(ran < seen[0].dur, `hands ${tag}: not at Done ${ran} s on, past the step's ${seen[0].dur} s (${JSON.stringify(seen[seen.length - 1])})`);
         const at = await after(h, page, 2000);
         seen.push(at);
         said.push(`${at.e.toFixed(0)}s ${await inFrame(h, page, `hands ${tag} at ${at.e.toFixed(1)} s`)}`);
@@ -148,7 +150,7 @@ export const scenarios = {
         const before = await scenes(page);
         h.expect(before.last.kind === 'hands' && !before.last.done && before.last.e === 0, `${id} ${entry}: before Start the scene is ${JSON.stringify(before.last)}`);
         await page.locator('.dq-timer').getByRole('button', { name: start, exact: true }).click();
-      }
+      } else await moreTime(page);
       await looks(h, page, `${id}-${entry}`, 'hands', PHONE);
       await showsHands(h, page, fs.readFileSync(path.join(h.out, `hands-${id}-${entry}.png`)), `${id} ${entry}, saved`);
       h.expect(!errors.length, errors.join('\n'));
@@ -183,6 +185,7 @@ export const scenarios = {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
       await toHands(h, page);
       await live(h, page, `motion ${tag}`);
+      await moreTime(page);
       const set = await otherCopy(h, ctx, page, errors);
       const moving = async (where) => {
         const from = await scenes(page);

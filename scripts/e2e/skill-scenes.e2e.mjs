@@ -127,7 +127,7 @@ export async function live(h, page, where, stage = '.dq-timer-stage') {
  * draws only while its countdown runs, and that first frame can take most of it. Done once the scene has drawn a frame
  * with the new length.
  */
-async function moreTime(page) {
+export async function moreTime(page) {
   const dur = (await scenes(page)).last.dur;
   await page.locator('.dq-timer').getByRole('button', { name: /^\+\d+ s$/ }).click();
   await page.waitForFunction((dur) => window.__scenes?.last.dur > dur, dur, { timeout: 15000 });
