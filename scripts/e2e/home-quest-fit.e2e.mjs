@@ -61,7 +61,7 @@ const moves = (page) =>
     return [...window.__fitSeen].map((a) => ({ on: a.effect.target.className, ms: a.effect.getComputedTiming().activeDuration, moves: MOVES.filter((p) => a.effect.getKeyframes().some((f) => p in f && f[p] !== 'none')) }));
   }, MOVES);
 
-const faces = (page) =>
+export const faces = (page) =>
   page.evaluate(async () => {
     const { skillCard } = await import('/src/daily/hub.ts');
     const { foilDay, foilLayer } = await import('/src/daily/wave2.ts');

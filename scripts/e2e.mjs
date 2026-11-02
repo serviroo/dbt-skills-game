@@ -55,6 +55,7 @@ function twice(node, found = []) {
 const all = [];
 const fileOf = new Map();
 const serial = new Set();
+const quarantined = new Map();
 const files = fs.readdirSync(dir).filter((f) => f.endsWith('.e2e.mjs')).sort();
 // a name a scenario uses but never defines would stop it only once a browser got there
 const missing = undefinedNames(files.map((f) => path.join(dir, f)));
@@ -74,9 +75,16 @@ for (const f of files) {
     fileOf.set(name, file);
     all.push({ name, file, run, i: all.length });
   }
+  for (const [name, why] of Object.entries(mod.quarantined ?? {})) {
+    if (!Object.hasOwn(scenarios, name)) throw new Error(`${f} quarantines "${name}", which is not one of its scenarios`);
+    quarantined.set(name, why);
+  }
 }
 if (flags.file && !all.some((s) => s.file === flags.file)) throw new Error(`no scenario file scripts/e2e/${flags.file}.e2e.mjs`);
 if (flags.scenario && !fileOf.has(flags.scenario)) throw new Error('no scenario ' + flags.scenario);
+
+const runnable = all.filter((s) => s.name === flags.scenario || !quarantined.has(s.name));
+const held = all.filter((s) => !runnable.includes(s) && (!flags.file || s.file === flags.file));
 
 const timings = fs.existsSync(path.join(dir, 'timings.json')) ? JSON.parse(fs.readFileSync(path.join(dir, 'timings.json'), 'utf8')) : {};
 const weight = (s) => (Number.isFinite(timings[s.name]) ? timings[s.name] : 15);
@@ -103,14 +111,15 @@ if (flags.shard) {
   if (!m || +m[1] < 1 || +m[1] > +m[2]) throw new Error(`--shard needs <i>/<n> with 1 <= i <= n, got ${flags.shard}`);
   const load = Array(+m[2]).fill(0);
   part = new Set();
-  for (const unit of unitsOf(all)) {
+  for (const unit of unitsOf(runnable)) {
     const k = load.indexOf(Math.min(...load));
     load[k] += unit.weight;
     if (k + 1 === +m[1]) for (const s of unit.scenarios) part.add(s.name);
   }
 }
-const matched = all.filter((s) => (!flags.file || s.file === flags.file) && (!flags.scenario || s.name === flags.scenario));
+const matched = runnable.filter((s) => (!flags.file || s.file === flags.file) && (!flags.scenario || s.name === flags.scenario));
 if (!matched.length) throw new Error(`scenario ${flags.scenario} is not in ${flags.file}.e2e.mjs`);
+for (const s of held) console.log(`quarantined ${s.name}: ${quarantined.get(s.name)}`);
 const pick = matched.filter((s) => !part || part.has(s.name));
 if (!pick.length) {
   console.log(`shard ${flags.shard} has no scenarios`);
@@ -130,7 +139,7 @@ let failed = 0;
 try {
   h = await startHarness(flags);
   const lanes = [h, ...(await Promise.all(Array.from({ length: Math.min(jobs, units.length) - 1 }, () => h.more())))];
-  report = { url: h.server.url, browser: flags.ws ? 'remote ' + flags.ws : 'local', jobs: lanes.length, scenarios: [], renderer: h.renderer, cpuThrottle: Number(flags['cpu-throttle'] ?? 1), throttleErrors: h.throttleErrors, zone: h.zone };
+  report = { url: h.server.url, browser: flags.ws ? 'remote ' + flags.ws : 'local', jobs: lanes.length, scenarios: [], quarantined: held.map((s) => s.name), renderer: h.renderer, cpuThrottle: Number(flags['cpu-throttle'] ?? 1), throttleErrors: h.throttleErrors, zone: h.zone };
   await Promise.all(lanes.map(async (lane) => {
     for (let unit; !interrupted && (unit = units.shift()); ) {
       for (const { name, file, run, i } of unit.scenarios) {
