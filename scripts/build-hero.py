@@ -10,9 +10,9 @@ metalness, and a tangent-space normal map.
 The skeleton and the idle, walk, reach and hold clips come from the rig GLB (by default the current
 public/models/hero.glb, which carries them from Quaternius's CC0 Universal Animation Library; see CREDITS.md). Its meshes
 are dropped. The figure is modelled in the pose it stands in, the first frame of the idle clip, so cloth that hangs over
-the arms is shaped for arms at rest by the sides; build-hero.mjs makes that frame the skeleton's rest pose. Pieces that
-don't hang from the arms (head, hood, coat, legs) are drawn in the rig's own rest pose and carried into that frame by
-their skin weights.
+the arms is shaped for arms at rest by the sides; build-hero.mjs binds the meshes in that frame and leaves the skeleton's
+rest pose as it is. Pieces that don't hang from the arms (head, hood, coat, legs) are drawn in the rig's own rest pose and
+carried into that frame by their skin weights.
 
 Coordinates in this file are the page's: x right (the figure's left), y up, z towards the camera, feet on y = 0, metres.
 
@@ -31,7 +31,7 @@ from mathutils import Euler, Vector
 from mathutils.bvhtree import BVHTree
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from blender_kit import TAU, B, Mat, V, apply_mods, hexrgb, interp, loft, path_secs, ridge, smooth_path, start  # noqa: E402
+from blender_kit import TAU, B, Mat, V, apply_mods, hexrgb, interp, loft, path_secs, ridge, ring, smooth_path, start  # noqa: E402
 
 ARGV = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 OUT = os.path.abspath(ARGV[0] if ARGV and not ARGV[0].startswith('--') else '.')
@@ -436,7 +436,7 @@ def hood_and_mantle():
             a = math.pi - math.pi * i / NA
             top = math.sin(a) ** 6
             # a soft point at the back of the crown, falling back and a little down
-            prof.append((rx * math.cos(a), yc + (yt - yc) * math.sin(a) + 0.055 * peak * top, -0.075 * peak * top))
+            prof.append((rx * math.cos(a), yc + (yt - yc) * math.sin(a) + 0.028 * peak * top, -0.06 * peak * top))
         prof += [(x, y, 0.0) for x, y in reversed(side)]
         rows.append([V(x, y, z + dz) for x, y, dz in prof])
     # gentle creases along the hood, deepest at the sides and fading to the rim
@@ -460,8 +460,9 @@ def hood_and_mantle():
     verts = [p for row in rows for p in row]
     faces = [(i * n + j, i * n + j + 1, (i + 1) * n + j + 1, (i + 1) * n + j) for i in range(R - 1) for j in range(n - 1)]
     add('hood', verts, faces, 'hood', hood_w, role='cloth', solid=0.011, sub=1, center=(0, 1.665, -0.05))
-    rim = [rows[0][j] + V(0, 0, 0.004) for j in range(n)]
-    tube('hood-rim', rim, 0.011, 'hood', hood_w, n=8, steps=2, uv=1.2)
+    # the opening's edge folded back on itself: a flat hem sunk into the edge, deeper than it is wide
+    rim = [rows[0][j] + V(0, 0, -0.003) for j in range(n)]
+    tube('hood-rim', rim, 0.0085, 'hood', hood_w, n=10, steps=2, aspect=1.9, uv=1.2)
 
     # the mantle: from the hood's lower edge (closed across the chin) out over the shoulders to its hem. It is drawn in the
     # idle's first frame, where it hangs over arms at rest, starting from where the hood's edge is carried in that frame.
@@ -481,9 +482,10 @@ def hood_and_mantle():
         for c in collar:
             a = math.atan2(c.z - cz, c.x)
             side = abs(math.cos(a))
-            hem = V(math.cos(a) * 0.25, 1.305 - 0.025 * side, cz + math.sin(a) * 0.235)
+            # the hem starts outside the hanging sleeves and the shoulders round out, so little has to be pushed clear
+            hem = V(math.cos(a) * 0.32, 1.305 - 0.025 * side, cz + math.sin(a) * 0.235)
             out = V(math.cos(a), 0, math.sin(a))
-            p = c.lerp(hem, 1 - (1 - t) ** 1.5) + out * (0.02 * math.sin(math.pi * t))
+            p = c.lerp(hem, 1 - (1 - t) ** 1.5) + out * ((0.018 + 0.025 * side) * math.sin(math.pi * t))
             p += out * (0.004 + 0.016 * t ** 1.2) * math.sin(12 * a + 0.7)
             if k == K - 1:
                 p += V(0, 0.01 * math.sin(7 * a + 1.3) + 0.004 * math.sin(23 * a), 0)
@@ -525,7 +527,7 @@ def clearance(p):
     """how far p must move out to clear the body and the sleeves in the idle's first frame, and which way"""
     best = Vector((0, 0, 0))
     for s in ('l', 'r'):
-        for a, b, r in ((JP[f'upperarm_{s}'], JP[f'lowerarm_{s}'], 0.092), (JP[f'clavicle_{s}'].lerp(JP[f'upperarm_{s}'], 0.6), JP[f'upperarm_{s}'], 0.094)):
+        for a, b, r in ((JP[f'upperarm_{s}'], JP[f'lowerarm_{s}'], 0.09), (JP[f'clavicle_{s}'].lerp(JP[f'upperarm_{s}'], 0.7), JP[f'upperarm_{s}'], 0.088)):
             ab = b - a
             t = max(0.0, min(1.0, (p - a).dot(ab) / ab.length_squared))
             q = a + ab * t
@@ -549,18 +551,18 @@ def clearance(p):
 
 
 def clear(rows):
-    """moves a cloth grid (closed rows) off the body and sleeves, spreading each move to its neighbours so it stays smooth"""
+    """
+    moves a cloth grid (closed rows) off the body and sleeves in small steps, each spread over its neighbours, so the cloth
+    stays smooth: a last unsmoothed push raised spikes on the mantle's hem over the shoulders
+    """
     K, M = len(rows), len(rows[0])
-    for _ in range(3):
+    for _ in range(8):
         moves = [[clearance(p) for p in row] for row in rows]
-        for _ in range(6):
+        for _ in range(10):
             moves = [[(moves[k][j] * 2 + moves[k][(j - 1) % M] + moves[k][(j + 1) % M] + moves[max(0, k - 1)][j] + moves[min(K - 1, k + 1)][j]) / 6 for j in range(M)] for k in range(K)]
         for k in range(1, K):
             for j in range(M):
-                rows[k][j] = rows[k][j] + moves[k][j] * 1.6
-    for k in range(1, K):
-        for j in range(M):
-            rows[k][j] = rows[k][j] + clearance(rows[k][j])
+                rows[k][j] = rows[k][j] + moves[k][j] * 1.5
 
 
 def coat():
@@ -619,9 +621,9 @@ def sleeves():
     for s in ('l', 'r'):
         cl, sh, el, wr = (JP[f'{k}_{s}'] for k in ('clavicle', 'upperarm', 'lowerarm', 'hand'))
         fd = (wr - el).normalized()
-        pts = [cl.lerp(sh, 0.45) + V(0, 0.012, 0), sh, sh.lerp(el, 0.5), el, el.lerp(wr, 0.45), wr - fd * 0.026]
+        pts = [cl.lerp(sh, 0.7), sh, sh.lerp(el, 0.5), el, el.lerp(wr, 0.45), wr - fd * 0.026]
         bones = ['spine_03', f'clavicle_{s}', f'upperarm_{s}', f'lowerarm_{s}']
-        tube(f'sleeve-{s}', pts, [0.08, 0.075, 0.068, 0.062, 0.058, 0.056], 'coat', bones, n=16, steps=2, sub=1, caps=False, posed=True)
+        tube(f'sleeve-{s}', pts, [0.07, 0.074, 0.068, 0.062, 0.058, 0.056], 'coat', bones, n=16, steps=2, sub=1, caps=False, posed=True)
         cuff = [dict(c=wr - fd * d, t=fd, rx=r, rz=r) for d, r in ((0.075, 0.057), (0.042, 0.059), (0.014, 0.061))]
         v, f, rings = loft(cuff, 18)
         add(f'cuff-{s}', v, f, 'coat', [f'lowerarm_{s}'], solid=0.006, center=wr - fd * 0.06, posed=True)
@@ -638,9 +640,12 @@ def hands():
         wv = (wv - d * wv.dot(d)).normalized()
         pn = d.cross(wv) * x
         fd = (h - JP[fb('lowerarm')]).normalized()
-        cuff = [dict(c=h - fd * dist, t=fd, f=pn, rx=r, rz=r * 0.85) for dist, r in ((0.075, 0.042), (0.035, 0.037), (0.0, 0.031))]
-        v, f, _ = loft(cuff, 14)
-        add(f'glove-cuff-{s}', v, f, 'glove', [fb('lowerarm'), fb('hand')], solid=0.004, center=h - fd * 0.04, uv=2.6, posed=True)
+        # a leather gauntlet that flares into the coat's cuff, with a stitched band where it narrows to the wrist
+        cuff = [dict(c=h - fd * dist, t=fd, f=pn, rx=r, rz=r * 0.88) for dist, r in ((0.07, 0.05), (0.035, 0.05), (0.012, 0.044), (-0.008, 0.034))]
+        v, f, rings = loft(cuff, 16)
+        add(f'glove-cuff-{s}', v, f, 'glove', [fb('lowerarm'), fb('hand')], solid=0.004, center=h - fd * 0.03, uv=2.6, posed=True)
+        band = ring(h - fd * 0.012, fd, pn, 0.0455, 0.0455 * 0.88, 16)[0]
+        tube(f'glove-seam-{s}', band, 0.0032, 'leather', [fb('lowerarm'), fb('hand')], n=5, closed=True, uv=2.6, posed=True)
         palm = [dict(c=h + d * a + wv * wo + pn * no, t=d, f=pn, rx=hw, rz=ht) for a, hw, ht, wo, no in
                 # a narrow wrist, the full heel of the hand on the palm side, then flatter to the knuckles
                 ((-0.02, 0.027, 0.02, -0.001, 0.0), (0.01, 0.035, 0.022, -0.002, 0.002), (0.035, 0.044, 0.025, -0.003, 0.006),
@@ -649,17 +654,28 @@ def hands():
         v, f, _ = loft(palm, 16, cap0=True, cap1=True)
         pb = [fb('lowerarm'), fb('hand')] + [fb(f'{k}_01') for k in FINGERS]
         add(f'palm-{s}', v, f, 'glove', pb, sub=1, center=h + d * 0.05, uv=2.6, posed=True)
+        knuckles = []
         for k, size in (('index', 1.0), ('middle', 1.03), ('ring', 0.98), ('pinky', 0.88)):
-            chain = [JP[fb(f'{k}_0{i}')] for i in (1, 2, 3)] + [JP[fb(f'{k}_04_leaf')]]
-            dk = (chain[1] - chain[0]).normalized()
-            pts = [chain[0] - dk * 0.016] + chain[:-1] + [chain[-1] - (chain[-1] - chain[-2]).normalized() * 0.003]
-            radii = [r * size for r in (0.0136, 0.013, 0.0122, 0.0112, 0.0098)]
-            tube(f'{k}-{s}', pts, radii, 'glove', ('chain', [fb('hand')] + [fb(f'{k}_0{i}') for i in (1, 2, 3)]), n=8, aspect=0.9, front=pn, sub=1, uv=2.6, posed=True)
-        chain = [JP[fb(f'thumb_0{i}')] for i in (1, 2, 3)] + [JP[fb('thumb_04_leaf')]]
-        pts = [chain[0].lerp(h, 0.35)] + chain[:-1] + [chain[-1] - (chain[-1] - chain[-2]).normalized() * 0.003]
-        tube(f'thumb-{s}', pts, [0.0165, 0.0145, 0.0131, 0.0119, 0.0102], 'glove', ('chain', [fb('hand')] + [fb(f'thumb_0{i}') for i in (1, 2, 3)]), n=8, sub=1, uv=2.6, posed=True)
+            c0, c1, c2, tip = [JP[fb(f'{k}_0{i}')] for i in (1, 2, 3)] + [JP[fb(f'{k}_04_leaf')]]
+            dk = (c1 - c0).normalized()
+            dt = (tip - c2).normalized()
+            knuckles.append(c0 - pn * 0.0085 - dk * 0.003)
+            # each joint a little narrower than the pads either side of it, flatter than round, tapering to the tip
+            pts = [c0 - dk * 0.016, c0, c0.lerp(c1, 0.5), c1, c1.lerp(c2, 0.5), c2, c2.lerp(tip, 0.45), tip - dt * 0.004, tip + dt * 0.001]
+            radii = [r * size for r in (0.0138, 0.0138, 0.0131, 0.0119, 0.0124, 0.0111, 0.0113, 0.0097, 0.0062)]
+            bones = [fb('hand'), fb(f'{k}_01'), fb(f'{k}_01'), fb(f'{k}_02'), fb(f'{k}_02'), fb(f'{k}_03'), fb(f'{k}_03'), fb(f'{k}_03')]
+            tube(f'{k}-{s}', pts, radii, 'glove', ('chain', bones), n=8, aspect=0.82, front=pn, sub=1, uv=2.6, posed=True)
+        # the ridge of knuckles across the back of the hand
+        ends = [knuckles[0] + (knuckles[0] - knuckles[1]) * 0.35] + knuckles + [knuckles[-1] + (knuckles[-1] - knuckles[-2]) * 0.35]
+        tube(f'knuckles-{s}', ends, [0.006, 0.0088, 0.0092, 0.009, 0.0082, 0.0055], 'glove', [fb('hand')] + [fb(f'{k}_01') for k in ('index', 'middle', 'ring', 'pinky')],
+             n=10, steps=3, aspect=0.7, front=pn, sub=1, uv=2.6, posed=True)
+        t1, t2, t3, tip = [JP[fb(f'thumb_0{i}')] for i in (1, 2, 3)] + [JP[fb('thumb_04_leaf')]]
+        dt = (tip - t3).normalized()
+        pts = [t1.lerp(h, 0.35), t1, t1.lerp(t2, 0.5), t2, t2.lerp(t3, 0.5), t3, t3.lerp(tip, 0.45), tip - dt * 0.004, tip + dt * 0.001]
+        bones = [fb('hand'), fb('thumb_01'), fb('thumb_01'), fb('thumb_02'), fb('thumb_02'), fb('thumb_03'), fb('thumb_03'), fb('thumb_03')]
+        tube(f'thumb-{s}', pts, [0.0165, 0.0155, 0.0146, 0.0132, 0.0135, 0.0121, 0.0119, 0.0102, 0.0066], 'glove', ('chain', bones), n=8, aspect=0.86, front=pn, sub=1, uv=2.6, posed=True)
         # the ball of the thumb, joining it to the palm
-        tube(f'thenar-{s}', [h.lerp(chain[0], 0.25) + d * 0.02, chain[0].lerp(chain[1], 0.4)], [0.019, 0.0145], 'glove',
+        tube(f'thenar-{s}', [h.lerp(t1, 0.25) + d * 0.02, t1.lerp(t2, 0.4)], [0.019, 0.0145], 'glove',
              [fb('hand'), fb('thumb_01'), fb('thumb_02')], n=10, aspect=0.75, front=pn, sub=1, uv=2.6, posed=True)
 
 
