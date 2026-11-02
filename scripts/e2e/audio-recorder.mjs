@@ -138,3 +138,52 @@ export async function audioEnded(page, i, timeout = 15000) {
     throw new Error(`audio tap ${i} has no finished recording of a closed context: ${JSON.stringify(state)}`, { cause });
   }
 }
+
+/**
+ * Where a step into the Safe Zone places its cut on each tap's audio clock: window.__cutsIn(step) runs step() and gives,
+ * per tap, the `at` the engine's quiet() uses or, on a clock of its own (the moment hum), its first stop() there less
+ * SCORE.safeOutSec, the ramp it stops over; null where it placed none. Each also keeps the time it placed and the latest
+ * it may place: soon() as it is placed, plus that ramp for a stop, the same sum the hum makes, so rounding can't pass it.
+ */
+export async function watchCuts(page) {
+  await page.evaluate(async () => {
+    const { AudioEngine } = await import('/src/audio/engine.ts');
+    const { soon } = await import('/src/audio/param.ts');
+    const { SCORE } = await import('/src/motion/tokens.ts');
+    let cuts = null;
+    const quiet = AudioEngine.prototype.quiet;
+    AudioEngine.prototype.quiet = function (on, sec, at) {
+      const t = soon(this.ctx);
+      at ??= t;
+      if (on) cuts?.set(this.ctx, { at, placed: at, latest: t });
+      return quiet.call(this, on, sec, at);
+    };
+    const stop = AudioScheduledSourceNode.prototype.stop;
+    AudioScheduledSourceNode.prototype.stop = function (...s) {
+      if (s[0] !== undefined && cuts && !cuts.has(this.context)) {
+        cuts.set(this.context, { at: s[0] - SCORE.safeOutSec, placed: s[0], latest: soon(this.context) + SCORE.safeOutSec });
+      }
+      return stop.apply(this, s);
+    };
+    window.__cutsIn = (step) => {
+      cuts = new Map();
+      try {
+        step();
+        return window.__taps.map((t) => cuts.get(t.context) ?? null);
+      } finally {
+        cuts = null;
+      }
+    };
+  });
+}
+
+/**
+ * Where the step `m` (the audio clocks as it began, `m.at`, and its cuts from window.__cutsIn, `m.cut`) placed its cut on
+ * tap i's clock: in the step itself, where the engine places every sound, not later.
+ */
+export function cutOf(m, i = 0) {
+  const cut = m.cut[i];
+  if (!cut) throw new Error(`the step placed no cut on tap ${i}`);
+  if (!(cut.at >= m.at[i] && cut.placed <= cut.latest)) throw new Error(`the cut on tap ${i} was placed ${((cut.at - m.at[i]) * 1000).toFixed(1)} ms after the tap, ${((cut.placed - cut.latest) * 1000).toFixed(3)} ms past where the engine places every sound`);
+  return cut.at;
+}

@@ -207,11 +207,11 @@ node scripts/e2e.mjs --ws=ws://127.0.0.1:<port>/<path> --port=5400
 ```
 
 `-L` brings the browser's port to this machine's 127.0.0.1, and `-R` lets that browser reach this run's dev server at
-its own 127.0.0.1 for the requests the harness doesn't answer itself. Naming 127.0.0.1 on both ends and `ExitOnForwardFailure` stop the tunnel if either port is already
-taken on its side. `--ws` needs `--port`, which keeps the dev server on the forwarded port; the run stops if that port
-is taken here, and before any scenario it checks that the browser reaches this run's dev server rather than another
-one. `--headed` goes to `scripts/e2e-browser.mjs`; `--software` goes to both `scripts/e2e-browser.mjs` and
-`scripts/e2e.mjs`.
+its own 127.0.0.1 for the requests the harness doesn't answer itself. Naming 127.0.0.1 on both ends and
+`ExitOnForwardFailure` stop the tunnel if either port is already taken on its side. `--ws` needs `--port`, which keeps
+the dev server on the forwarded port; the run stops if that port is taken here, and before any scenario it checks that
+the browser reaches this run's dev server rather than another one. `--headed` goes to `scripts/e2e-browser.mjs`;
+`--software` goes to both `scripts/e2e-browser.mjs` and `scripts/e2e.mjs`.
 
 ### Skill check
 

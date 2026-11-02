@@ -6,7 +6,7 @@
 // Zone and Done still silence it. Measured on the hum's real output, render quantum by render quantum.
 import fs from 'node:fs';
 import path from 'node:path';
-import { installAudioRecorder, audioReady, audioRecorded } from './audio-recorder.mjs';
+import { installAudioRecorder, audioReady, audioRecorded, watchCuts, cutOf } from './audio-recorder.mjs';
 
 /** What each check measured, one line a check, in the run's artifacts. */
 const note = (h, name, o) => fs.appendFileSync(path.join(h.out, 'hum-volume.jsonl'), JSON.stringify({ name, ...o }) + '\n');
@@ -55,17 +55,16 @@ async function boot(h, { viewport = TALL, prefs = levels() } = {}) {
   await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile') && window.__taps.length > 0, null, { timeout: 30000 });
   await audioReady(page);
   await h.reachHub(page);
-  // the hum's audio clock at every step into or out of the Safe Zone, and where a cut made then lands
-  await page.evaluate(async () => {
-    const { soon } = await import('/src/audio/param.ts');
+  // the hum's audio clock at every step into or out of the Safe Zone, and where on each clock the step placed its cut
+  await watchCuts(page);
+  await page.evaluate(() => {
     const a = window.__daily;
     window.__marks = [];
     const go = a.go.bind(a);
     a.go = (route, o) => {
       const was = a.route.name;
       const at = window.__taps.map((t) => t.context.currentTime);
-      const cut = window.__taps.map((t) => soon(t.context));
-      go(route, o);
+      const cut = window.__cutsIn(() => go(route, o));
       window.__marks.push({ from: was, to: a.route.name, at, cut });
     };
   });
@@ -422,8 +421,9 @@ export const scenarios = {
         throw new Error('the hum kept going in the Safe Zone');
       });
       const into = (await page.evaluate(() => window.__marks.filter((k) => k.to === 'safe'))).at(-1);
-      const inside = await quanta(page, n, into.cut[n] + WITHIN, Infinity);
-      h.expect(inside.every((q) => q[1] < SILENT_PEAK), `the hum was heard ${((into.cut[n] + WITHIN - into.at[n]) * 1000).toFixed(0)} ms into the Safe Zone`);
+      const from = cutOf(into, n) + WITHIN;
+      const inside = await quanta(page, n, from, Infinity);
+      h.expect(inside.every((q) => q[1] < SILENT_PEAK), `the hum was heard ${((from - into.at[n]) * 1000).toFixed(0)} ms into the Safe Zone`);
       await page.locator('header .dq-back').click({ timeout: 4000 });
       await page.waitForFunction(() => window.__daily.route.name !== 'safe', null, { timeout: 3000 });
 

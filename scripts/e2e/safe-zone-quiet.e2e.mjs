@@ -2,7 +2,7 @@
 // in Give me a moment) is silent at the speakers within a click-free moment of it, a quick visit never brings an old
 // cue or echo back, their levels and mute never change, and a gift or rank cut short by the tap is kept. Measured on
 // the real post-mix output, render quantum by render quantum, against the audio clock at the moment of the tap.
-import { installAudioRecorder, audioReady, audioRecorded, audioEnded } from './audio-recorder.mjs';
+import { installAudioRecorder, audioReady, audioRecorded, audioEnded, watchCuts, cutOf } from './audio-recorder.mjs';
 
 const TALL = { width: 390, height: 844 };
 const SMALL = { width: 320, height: 568 };
@@ -53,10 +53,10 @@ async function boot(h, opts) {
   await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile') && window.__taps.length > 0, null, { timeout: 30000 });
   await audioReady(page);
   await h.reachHub(page);
-  // the audio clock at every step into or out of the Safe Zone, where a cut made then lands, and every sound the app
-  // asks for
-  await page.evaluate(async () => {
-    const { soon } = await import('/src/audio/param.ts');
+  // the audio clock at every step into or out of the Safe Zone, where on each clock the step placed its cut, and every
+  // sound the app asks for
+  await watchCuts(page);
+  await page.evaluate(() => {
     const a = window.__daily;
     window.__marks = [];
     window.__asks = [];
@@ -64,9 +64,8 @@ async function boot(h, opts) {
     a.go = (route, o) => {
       const was = a.route.name === 'safe';
       const at = window.__taps.map((t) => t.context.currentTime);
-      const cut = window.__taps.map((t) => soon(t.context));
       const t0 = performance.now();
-      go(route, o);
+      const cut = window.__cutsIn(() => go(route, o));
       if (was !== (a.route.name === 'safe')) window.__marks.push({ into: !was, at, cut, ms: performance.now() - t0 });
     };
     const sound = a.sound.bind(a);
@@ -143,7 +142,7 @@ const silent = (x) => x.peak < SILENT_PEAK && x.rms < SILENT_RMS;
 const covered = (x) => x.cover >= 0.9;
 const fmt = (x) => `${x.rms.toExponential(1)}/${x.peak.toExponential(1)}, ${(x.cover * 100).toFixed(0)}% read${x.unrendered ? `, ${x.unrendered} blocks never rendered` : ''}`;
 /** Where tap i must be silent from after the step `m`, and how long that is after the tap, in ms. */
-const silentFrom = (m, i = 0) => m.cut[i] + WITHIN;
+const silentFrom = (m, i = 0) => cutOf(m, i) + WITHIN;
 const silentMs = (m, i = 0) => ((silentFrom(m, i) - m.at[i]) * 1000).toFixed(0);
 const quietAt = (x, t) => (x.quietFrom === null ? 'never' : `${((x.quietFrom - t) * 1000).toFixed(1)} ms after the tap`);
 
@@ -346,7 +345,9 @@ export const scenarios = {
       const visits = [];
       for (let i = 0; i < 3; i++) {
         const a = await enter(page);
-        await h.sleep(120);
+        // out again once 40 ms past where it must be silent have played, however far ahead the output's latency puts
+        // the cut
+        await until(page, 0, silentFrom(a) + 0.04);
         const b = await leave(page);
         visits.push([a.at[0], b.at[0], silentFrom(a), silentMs(a)]);
         await h.sleep(80);

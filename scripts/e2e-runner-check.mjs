@@ -7,7 +7,6 @@ import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { holdDaily } from './e2e/first-actions.e2e.mjs';
 import { runIconChild } from './e2e/icons.e2e.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -117,20 +116,12 @@ try {
     return true;
   });
   results.push({ label: 'icon-child-failures', cases: 4 });
-  // a sleep that ends early, here at half its time, still holds the companion module 9 s by the clock that measures it
-  const held = [];
-  const loaded = [];
-  let hold;
-  holdDaily({ sleep: (ms) => new Promise((r) => setTimeout(r, ms / 2)) }, held)({ route: (_, fn) => (hold = fn) });
-  const t = performance.now();
-  await hold({ continue: async () => loaded.push(performance.now() - t) });
-  assert(held.length === 1 && held[0] >= 9000 && loaded[0] >= 9000, `the companion module was held ${JSON.stringify(held)} ms and loaded after ${JSON.stringify(loaded)} ms`);
-  results.push({ label: 'companion-hold', held: held[0] });
   fs.writeFileSync(fixture, `
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { checkRenderer } from '../gl.mjs';
+import { holdDaily } from './first-actions.e2e.mjs';
 const state = ${JSON.stringify(state)};
 function record(h) {
   const children = execFileSync('ps', ['-axo', 'pid=,ppid=,comm='], { encoding: 'utf8' }).trim().split(String.fromCharCode(10)).map((line) => line.trim().split(/\\s+/)).filter((fields) => Number(fields[1]) === process.pid && path.basename(fields[2]) !== 'ps').map((fields) => Number(fields[0]));
@@ -223,6 +214,19 @@ export const scenarios = {
       });
       return { audio: await heard };
     },
+    async '${name}-companion-hold'(h) {
+      record(h);
+      // a sleep that ends early, here at half its time, still holds the companion module 9 s by the clock that
+      // measures it, and the held request then loads through the harness's own route
+      const held = [];
+      let asked;
+      const { page } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', undefined, (ctx) => {
+        ctx.on('request', (r) => new URL(r.url()).pathname === '/src/daily/index.ts' && (asked ??= performance.now()));
+        return holdDaily({ sleep: (ms) => h.sleep(ms / 2) }, held)(ctx);
+      });
+      await page.waitForFunction(() => !!window.__daily, null, { timeout: 30000 });
+      return { held, loaded: performance.now() - asked };
+    },
   };`);
   const reportError = await run('report-write-error', [`--scenario=${name}-report-error`]);
   assert.notEqual(reportError.code, 0);
@@ -231,6 +235,10 @@ export const scenarios = {
   assert.notEqual(throttle.code, 0);
   assert.match(throttle.log, /CPU throttle 4: popup throttle refused/);
   assert.deepEqual(throttle.report.throttleErrors, ['CPU throttle 4: popup throttle refused']);
+  const hold = await run('companion-hold', [`--scenario=${name}-companion-hold`]);
+  assert.equal(hold.code, 0, hold.log);
+  const { held, loaded } = hold.report.scenarios[0].result;
+  assert(held.length === 1 && held[0] >= 9000 && loaded >= 9000, `the companion module was held ${JSON.stringify(held)} ms and loaded after ${loaded} ms`);
   // a browser started for --ws listens on 127.0.0.1 only and has a local run's flags (with this check's --software
   // choice), the run keeps its dev server on the --port a tunnel forwards, and a run that expects the other renderer says
   // where that browser's flags are set
