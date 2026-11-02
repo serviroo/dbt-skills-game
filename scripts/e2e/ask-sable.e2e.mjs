@@ -20,6 +20,7 @@ const WEEK = [
   ['radical-acceptance', 7, 'Yes'],
   ['radical-acceptance', 12, 'A little'],
 ];
+const NARROW = [...WEEK, ['dear-man', 5]];
 const OLDER = [
   ['radical-acceptance', 8, 'Yes'],
   ['wise-mind', 20],
@@ -73,6 +74,18 @@ async function ask(page, within = '.w2-roster-row .w2-sh--sable') {
   }));
 }
 
+const unseen = (page, within, frame) =>
+  page.locator(`${within} .w2-sable-say`).evaluate((say, frame) => {
+    const bad = [];
+    if (document.activeElement !== say) bad.push(`focus is on ${document.activeElement?.className || document.activeElement?.tagName}, not Sable's answer`);
+    const r = say.getBoundingClientRect();
+    const bar = document.querySelector('.dq-top').getBoundingClientRect().bottom;
+    const f = frame && say.closest(frame).getBoundingClientRect();
+    const box = { top: Math.max(bar, f ? f.top : 0), bottom: Math.min(innerHeight, f ? f.bottom : innerHeight) };
+    if (r.top < box.top - 1 || r.top > box.bottom - 24) bad.push(`Sable's answer starts at ${Math.round(r.top)} px, outside the ${Math.round(box.top)} to ${Math.round(box.bottom)} px in view`);
+    return bad;
+  }, frame);
+
 const offPanel = (page, within) =>
   page.locator(within).evaluate((panel) => {
     const bad = [];
@@ -99,8 +112,10 @@ const offPanel = (page, within) =>
         const range = document.createRange();
         range.setStart(n, w.index);
         range.setEnd(n, w.index + w[0].length);
-        const lines = new Set([...range.getClientRects()].filter((q) => q.width > 0).map((q) => Math.round(q.top)));
+        const rects = [...range.getClientRects()].filter((q) => q.width > 0);
+        const lines = new Set(rects.map((q) => Math.round(q.top)));
         if (lines.size > 1) bad.push(`"${w[0]}" breaks across ${lines.size} lines`);
+        if (rects.some((q) => q.left < left - 0.5 || q.right > right + 0.5)) bad.push(`"${w[0]}" runs past the panel`);
       }
     }
     return bad;
@@ -182,15 +197,17 @@ export const scenarios = {
     for (const phone of [{ width: 390, height: 844 }, { width: 320, height: 568 }]) {
       for (const zoom of [1, 2]) {
         const size = `${phone.width}x${phone.height} at ${zoom * 100}%`;
-        const { ctx, page, errors } = await openWatch(h, WEEK, { width: phone.width / zoom, height: phone.height / zoom }, { reducedMotion: 'reduce' });
+        const { ctx, page, errors } = await openWatch(h, NARROW, { width: phone.width / zoom, height: phone.height / zoom }, { reducedMotion: 'reduce' });
         try {
           const row = '.w2-roster-row .w2-sh--sable';
           await page.locator(row).scrollIntoViewIfNeeded();
           await h.shot(page, `ask-sable-${phone.width}-${zoom * 100}-before`);
           await ask(page, row);
           await page.waitForFunction((sel) => getComputedStyle(document.querySelector(sel)).opacity === '1', `${row} .w2-sable-say`, { timeout: 10000 });
-          await page.locator(`${row} .w2-sable-say`).scrollIntoViewIfNeeded();
+          failed.push(...(await unseen(page, row)).map((b) => `${size}, in the row: ${b}`));
           await h.shot(page, `ask-sable-${phone.width}-${zoom * 100}`);
+          const voice = await page.locator(`${row} .w2-sable-log li[data-skill="dear-man"] .w2-sable-n`).textContent();
+          if (voice !== 'Commander’s Voice') failed.push(`${size}: Commander's Voice reads "${voice}"`);
           failed.push(...(await offPanel(page, row)).map((b) => `${size}, in the row: ${b}`));
           h.expect(await page.locator('.dq-safe').isVisible(), `${size}: the Safe Zone is not one tap away beside Sable`);
           await page.locator('.w2-camp').scrollIntoViewIfNeeded();
@@ -199,6 +216,7 @@ export const scenarios = {
           const card = '.w2-camp-card .w2-sh--sable';
           await page.locator(card).waitFor({ timeout: 10000 });
           await ask(page, card);
+          failed.push(...(await unseen(page, card, '.w2-camp-card')).map((b) => `${size}, in Sable's card: ${b}`));
           await h.shot(page, `ask-sable-${phone.width}-${zoom * 100}-card`);
           failed.push(...(await offPanel(page, card)).map((b) => `${size}, in Sable's card: ${b}`));
           if (errors.length) failed.push(`${size}: ${errors.join(' | ')}`);

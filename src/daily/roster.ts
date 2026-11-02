@@ -14,7 +14,7 @@ import { INVENTORY, ROSTER, ROSTER_COPY, SABLE_ASK, type ShadowDef, type ShadowI
 import { CALM, css, WINDOW } from '../motion/tokens';
 import type { App } from './app';
 import { addDays, cleanName, helped, isSkillId, type Store } from './store';
-import { btn, focusWhole, h, holdView, seen, typo } from './ui';
+import { btn, focusWhole, h, holdView, seen, typo, wholeWords } from './ui';
 
 let svgN = 0;
 
@@ -193,12 +193,15 @@ function sableSays(st: Store) {
 }
 
 function askSable(app: App) {
-  const say = h('div', { class: 'w2-sable-say', 'aria-live': 'polite' });
+  const say = h('div', { class: 'w2-sable-say', tabindex: -1 });
   const ask = btn(
     SABLE_ASK.ask,
     () => {
       say.replaceChildren(...sableSays(app.store));
+      wholeWords(say)();
       animate(say, [{ opacity: 0 }, { opacity: 1 }], { duration: app.reduced() ? WINDOW.reducedFadeMs : CALM.fadeMs, easing: css(CALM.ease) });
+      say.focus({ preventScroll: true });
+      say.scrollIntoView({ block: 'nearest', behavior: app.reduced() ? 'auto' : 'smooth' });
     },
     { kind: 'quiet', cls: 'w2-sable-ask' },
   );
