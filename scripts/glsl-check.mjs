@@ -148,15 +148,18 @@ function offset(expr) {
 }
 
 /**
- * An edge as a part it may share with the other edge, a sign and a width that is not a constant, added or taken away
- * last: `outR(y) - pen` is ['outR(y)', -1, 'pen'] and `top` is ['top', 0, '']. A width added to one edge or taken from
- * the other is a half-width or a softness, above zero, so `top + pen, top - pen` or `top, top - pen` is the wrong way
- * round whatever `top` and `pen` are worth. Null for an edge with a `${}` in it, or one whose last term is a constant
- * (see offset).
+ * The ways to read an edge as a part it may share with the other edge, a sign and a width that is not a constant:
+ * itself with no width (`top` is ['top', 0, '']), and, when a width is added or taken away last, the rest and that
+ * width (`outR(y) - pen` is also ['outR(y)', -1, 'pen']). Both are kept so `a + b + pen` meets `a + b` whole. A width
+ * added to one edge or taken from the other is a half-width or a softness, above zero, so `top + pen, top - pen` or
+ * `top, top - pen` is the wrong way round whatever `top` and `pen` are worth. A width with a minus in it, as in
+ * `top + (-abs(pen) - 1.0)`, may be below zero, so it is not read as one. None for an edge with a `${}` in it, and no
+ * width when the last term is a constant (see offset).
  */
-function width(expr) {
+function widths(expr) {
   const e = expr.trim();
-  if (e.includes('\0')) return null;
+  if (e.includes('\0')) return [];
+  const whole = [e.replace(/\s+/g, ''), 0, ''];
   let depth = 0;
   for (let i = e.length - 1; i > 0; i--) {
     const c = e[i];
@@ -167,10 +170,12 @@ function width(expr) {
       // a sign, as in `x * -pen`, or the exponent of `1e-3`, is not where a width is added
       if (!/[\w.)\]]$/.test(part) || /(^|[^\w.])[\d.]+[eE]$/.test(part)) continue;
       const by = e.slice(i + 1).replace(/\s+/g, '');
-      return constant(by) === null ? [part.replace(/\s+/g, ''), c === '-' ? -1 : 1, by] : null;
+      // the minus of an exponent, as in `max(fw, 1e-3)`, does not make a width negative
+      if (constant(by) !== null || by.replace(/(^|[^\w.])([\d.]+[eE])-/g, '$1$2').includes('-')) return [whole];
+      return [whole, [part.replace(/\s+/g, ''), c === '-' ? -1 : 1, by]];
     }
   }
-  return [e.replace(/\s+/g, ''), 0, ''];
+  return [whole];
 }
 
 /** Every GLSL smoothstep call in `source`: its line, its text and whether its edges are known to be the wrong way round. */
@@ -181,10 +186,10 @@ export function smoothsteps(source) {
       const a = args(text, m.index + m[0].length - 1);
       if (!a || a.list.length !== 3) continue;
       const [e0, e1] = a.list.slice(0, 2).map(offset);
-      const [w0, w1] = a.list.slice(0, 2).map(width);
+      const [w0, w1] = a.list.slice(0, 2).map(widths);
       const reversed =
         (!!e0 && !!e1 && e0[0] === e1[0] && e0[1] >= e1[1]) ||
-        (!!w0 && !!w1 && w0[0] === w1[0] && w0[1] > w1[1] && (w0[2] === w1[2] || !w0[2] || !w1[2]));
+        w0.some((v) => w1.some((u) => v[0] === u[0] && v[1] > u[1] && (v[2] === u[2] || !v[2] || !u[2])));
       calls.push({ line: source.slice(0, at[m.index]).split('\n').length, call: text.slice(m.index, a.end + 1).replace(/\0/g, '${}'), reversed });
     }
   }

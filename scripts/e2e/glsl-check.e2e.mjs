@@ -49,6 +49,14 @@ export const scenarios = {
       ['a + w, a - u', false],
       ['x * -w, x', false],
       ['a * 1e-3, a', false],
+      ['a + b + pen, a + b', true],
+      ['a - b, a - b - pen', true],
+      ['top - 0.3 + pen, top - 0.3', true],
+      ['hw - max(soft, 1e-3), hw', false],
+      ['hw, hw - max(soft, 1e-3)', true],
+      ['top + (-abs(pen) - 1.0), top', false],
+      ['top, top - (pen - 1.0)', false],
+      ['top - pen, top + -pen', false],
     ]) {
       const found = reversedSmoothsteps(`export const glsl = \`float a = smoothstep(${edges}, d);\`;\n`).length === 1;
       expect(found === wrong, `smoothstep(${edges}, d): ${wrong ? 'let through' : 'stopped'}`);
