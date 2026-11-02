@@ -182,7 +182,11 @@ export function foilLayer(app: App, front: HTMLElement, day: string) {
   if (!foilDay(day)) return null;
   const layer = h('span', { class: 'w2-foil', 'aria-hidden': 'true' });
   front.classList.add('is-foil');
-  front.append(layer, h('span', { class: 'w2-foil-tag', text: 'Foil' }));
+  const tag = () => h('span', { class: 'w2-foil-tag', text: 'Foil' });
+  front.append(layer);
+  // one shows, by the card's size (wave2.css)
+  front.querySelector('.dq-cf-foot')!.prepend(tag());
+  front.querySelector('.dq-cf-min')!.before(tag());
   return {
     play() {
       if (app.reduced()) return;
