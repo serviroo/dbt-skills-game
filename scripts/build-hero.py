@@ -31,7 +31,7 @@ from mathutils import Euler, Vector
 from mathutils.bvhtree import BVHTree
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from blender_kit import TAU, B, Mat, V, apply_mods, hexrgb, interp, loft, path_secs, ridge, ring, smooth_path, start  # noqa: E402
+from blender_kit import TAU, B, Mat, V, apply_mods, hexrgb, interp, loft, path_secs, ridge, smooth_path, start  # noqa: E402
 
 ARGV = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 OUT = os.path.abspath(ARGV[0] if ARGV and not ARGV[0].startswith('--') else '.')
@@ -174,7 +174,7 @@ def mat(name):
             'trousers': (0x181c29, 0.85, 0.0, 'weave', 0.0, 0.3, 200),
             'stitch': (0x2b3753, 0.8, 0.0, 'weave', 0.0, 0.2, 260),
             'leather': (0x2b2a31, 0.6, 0.0, 'leather', 0.35, 0.35, 70),
-            'glove': (0x4a4a5c, 0.5, 0.0, 'leather', 0.3, 0.3, 120),
+            'glove': (0x66647a, 0.55, 0.0, 'leather', 0.5, 0.3, 120),
             'boot': (0x232229, 0.62, 0.0, 'leather', 0.45, 0.4, 60),
             'iron': (0x353b49, 0.48, 0.85, 'hammer', 0.5, 0.35, 60),
             'glass': (0x0e1a2c, 0.12, 0.0, 'smooth', 0.0, 0.0, 10),
@@ -571,6 +571,9 @@ def clear(rows):
         for k in range(1, K):
             for j in range(M):
                 rows[k][j] = rows[k][j] + moves[k][j] * 1.5
+        # each row eases towards the rows above and below it, so the drape from the collar to the hem bends smoothly
+        # where it turns down over the shoulder rather than in a corner that stood up from the outline
+        rows[1:K - 1] = [[rows[k][j] * 0.5 + (rows[k - 1][j] + rows[k + 1][j]) * 0.25 for j in range(M)] for k in range(1, K - 1)]
 
 
 def coat():
@@ -625,121 +628,206 @@ def coat():
 
 
 def sleeves():
-    """drawn along the arms as they hang in the idle's first frame"""
+    """drawn along the arms as they hang in the idle's first frame, each ending inside its glove's cuff"""
     for s in ('l', 'r'):
         cl, sh, el, wr = (JP[f'{k}_{s}'] for k in ('clavicle', 'upperarm', 'lowerarm', 'hand'))
         fd = (wr - el).normalized()
-        pts = [cl.lerp(sh, 0.7), sh, sh.lerp(el, 0.5), el, el.lerp(wr, 0.45), wr - fd * 0.026]
+        pts = [cl.lerp(sh, 0.7), sh, sh.lerp(el, 0.5), el, el.lerp(wr, 0.45), wr - fd * 0.04]
         bones = ['spine_03', f'clavicle_{s}', f'upperarm_{s}', f'lowerarm_{s}']
-        tube(f'sleeve-{s}', pts, [0.07, 0.074, 0.068, 0.062, 0.058, 0.056], 'coat', bones, n=16, steps=2, sub=1, caps=False, posed=True)
-        cuff = [dict(c=wr - fd * d, t=fd, rx=r, rz=r) for d, r in ((0.075, 0.057), (0.042, 0.059), (0.014, 0.061))]
-        v, f, rings = loft(cuff, 18)
-        add(f'cuff-{s}', v, f, 'coat', [f'lowerarm_{s}'], solid=0.006, center=wr - fd * 0.06, posed=True)
-        tube(f'cuff-piping-{s}', [v[i] for i in rings[-1]] + [v[rings[-1][0]]], 0.004, 'stitch', [f'lowerarm_{s}'], n=5, caps=False, posed=True)
+        tube(f'sleeve-{s}', pts, [0.07, 0.074, 0.068, 0.062, 0.054, 0.049], 'coat', bones, n=16, steps=2, sub=1, caps=False, posed=True)
+
+
+# the order of a finger's ring, matching the corner of the palm it grows from: from the little finger's side over the
+# back of the hand to the index side, then back under the palm (degrees, 90 is the back of the hand)
+FINGER_RING = [135, 90, 45, 0, -45, -90, -135, 180]
 
 
 def hands():
-    """gloved hands, drawn on the idle's first frame in each hand's own frame: along it, across it and out of the palm"""
+    """
+    Gloved hands, each one closed surface: a palm with a ridge of knuckles, four fingers of three segments, a thumb of two
+    rooted in the ball of the thumb, and a cuff that flares over the end of the sleeve. Each is drawn open in the rig's
+    rest pose, where the fingers lie straight along their bones, with a ring at every joint shared by the bones either
+    side of it, so the finger bones close it into the idle's fist and open it again for the reach.
+    """
     for s, x in (('l', 1), ('r', -1)):
         fb = lambda name: f'{name}_{s}'
-        h = JP[fb('hand')]
-        d = (JP[fb('middle_01')] - h).normalized()
-        wv = JP[fb('index_01')] - JP[fb('pinky_01')]
+        h = J[fb('hand')]
+        d = (J[fb('middle_01')] - h).normalized()
+        wv = J[fb('index_01')] - J[fb('pinky_01')]
         wv = (wv - d * wv.dot(d)).normalized()
-        pn = d.cross(wv) * x
-        fd = (h - JP[fb('lowerarm')]).normalized()
-        # a leather gauntlet that flares into the coat's cuff, with a stitched band where it narrows to the wrist
-        cuff = [dict(c=h - fd * dist, t=fd, f=pn, rx=r, rz=r * 0.88) for dist, r in ((0.07, 0.05), (0.035, 0.05), (0.012, 0.044), (-0.008, 0.034))]
-        v, f, rings = loft(cuff, 16)
-        add(f'glove-cuff-{s}', v, f, 'glove', [fb('lowerarm'), fb('hand')], solid=0.004, center=h - fd * 0.03, uv=2.6, posed=True)
-        band = ring(h - fd * 0.012, fd, pn, 0.0455, 0.0455 * 0.88, 16)[0]
-        tube(f'glove-seam-{s}', band, 0.0032, 'leather', [fb('lowerarm'), fb('hand')], n=5, closed=True, uv=2.6, posed=True)
-        palm = [dict(c=h + d * a + wv * wo + pn * no, t=d, f=pn, rx=hw, rz=ht) for a, hw, ht, wo, no in
-                # a narrow wrist, the full heel of the hand on the palm side, then flatter to the knuckles
-                ((-0.02, 0.027, 0.02, -0.001, 0.0), (0.01, 0.035, 0.022, -0.002, 0.002), (0.035, 0.044, 0.025, -0.003, 0.006),
-                 (0.07, 0.05, 0.021, -0.004, 0.0075), (0.1, 0.053, 0.019, -0.005, 0.009), (0.12, 0.052, 0.018, -0.005, 0.0105),
-                 # on under the first joints, so the curled fingers close against it
-                 (0.138, 0.048, 0.016, -0.005, 0.0125), (0.152, 0.04, 0.012, -0.005, 0.0135))]
-        v, f, _ = loft(palm, 16, cap0=True, cap1=True)
-        pb = [fb('lowerarm'), fb('hand')] + [fb(f'{k}_01') for k in FINGERS]
-        palm_o = add(f'palm-{s}', v, f, 'glove', pb, sub=1, center=h + d * 0.05, uv=2.6, posed=True)
-        knuckles = []
-        for k, size in (('index', 1.0), ('middle', 1.03), ('ring', 0.98), ('pinky', 0.88)):
-            c0, c1, c2, tip = [JP[fb(f'{k}_0{i}')] for i in (1, 2, 3)] + [JP[fb(f'{k}_04_leaf')]]
-            dk = (c1 - c0).normalized()
-            dt = (tip - c2).normalized()
-            knuckles.append(c0 - pn * 0.011 - dk * 0.002)
-            # a steady taper from the knuckle to a rounded tip
-            pts = [c0 - dk * 0.016, c0, c0.lerp(c1, 0.5), c1, c1.lerp(c2, 0.5), c2, c2.lerp(tip, 0.45), tip - dt * 0.004, tip + dt * 0.001]
-            # full enough that neighbours touch, so a closed hand reads as one mass under the outline
-            radii = [r * size * 1.3 for r in (0.0138, 0.0137, 0.0134, 0.013, 0.0126, 0.0121, 0.0115, 0.0102, 0.0066)]
-            bones = [fb('hand'), fb(f'{k}_01'), fb(f'{k}_01'), fb(f'{k}_02'), fb(f'{k}_02'), fb(f'{k}_03'), fb(f'{k}_03'), fb(f'{k}_03')]
-            tube(f'{k}-{s}', pts, radii, 'glove', ('chain', bones), n=10, aspect=0.8, front=pn, sub=1, uv=2.6, posed=True)
-        # the ridge of knuckles across the back of the hand
-        ends = [knuckles[0] + (knuckles[0] - knuckles[1]) * 0.35] + knuckles + [knuckles[-1] + (knuckles[-1] - knuckles[-2]) * 0.35]
-        knuckles_o = tube(f'knuckles-{s}', ends, [0.008, 0.0118, 0.0122, 0.012, 0.011, 0.0072], 'glove', [fb('hand')] + [fb(f'{k}_01') for k in ('index', 'middle', 'ring', 'pinky')],
-             n=10, steps=3, aspect=0.8, front=pn, sub=1, uv=2.6, posed=True)
-        t1, t2, t3, tip = [JP[fb(f'thumb_0{i}')] for i in (1, 2, 3)] + [JP[fb('thumb_04_leaf')]]
-        # the tip turns in over the index finger, so the thumb lies across the fist rather than standing off it
-        tip = tip.lerp(JP[fb('index_02')].lerp(JP[fb('index_03')], 0.5), 0.35)
-        dt = (tip - t3).normalized()
-        pts = [t1.lerp(h, 0.35), t1, t1.lerp(t2, 0.5), t2, t2.lerp(t3, 0.5), t3, t3.lerp(tip, 0.45), tip - dt * 0.004, tip + dt * 0.001]
-        bones = [fb('hand'), fb('thumb_01'), fb('thumb_01'), fb('thumb_02'), fb('thumb_02'), fb('thumb_03'), fb('thumb_03'), fb('thumb_03')]
-        tube(f'thumb-{s}', pts, [r * 1.12 for r in (0.0165, 0.0158, 0.015, 0.0143, 0.0136, 0.0128, 0.0119, 0.0102, 0.0066)], 'glove', ('chain', bones), n=10, steps=3, aspect=0.8, front=pn, sub=1, uv=2.6, posed=True)
-        # the ball of the thumb, joining it to the palm
-        thenar_o = tube(f'thenar-{s}', [h.lerp(t1, 0.25) + d * 0.02, t1.lerp(t2, 0.4)], [0.019, 0.0145], 'glove',
-                        [fb('hand'), fb('thumb_01'), fb('thumb_02')], n=10, aspect=0.75, front=pn, sub=1, uv=2.6, posed=True)
-        # the palm, the knuckles and the ball of the thumb are one piece of leather; the fingers stay their own, rooted in
-        # it, because a fist melted whole welds the curled fingertips to the palm and tears open when the hand opens
-        fuse(f'hand-{s}', [palm_o, knuckles_o, thenar_o])
+        back = d.cross(wv) * -x
+        at = lambda a, u, v: h + d * a + wv * u + back * v
+        verts, ws, faces = [], [], []
 
+        def vert(p, w):
+            verts.append(p)
+            ws.append(w)
+            return len(verts) - 1
 
-def fuse(name, pieces, voxel=0.002, tris=1600):
-    """
-    Melts pieces into one closed surface, so they draw one outline rather than one each. Each new vertex takes the skin
-    weights of the nearest old ones.
-    """
-    from mathutils.kdtree import KDTree
-    src = []
-    for o in pieces:
-        names = {g.index: g.name for g in o.vertex_groups}
-        for v in o.data.vertices:
-            src.append((o.matrix_world @ v.co, {names[g.group]: g.weight for g in v.groups}))
-    tree = KDTree(len(src))
-    for i, (co, _) in enumerate(src):
-        tree.insert(co, i)
-    tree.balance()
-    PARTS[:] = [x for x in PARTS if x[0] not in pieces]
-    with bpy.context.temp_override(active_object=pieces[0], selected_editable_objects=pieces, object=pieces[0]):
-        bpy.ops.object.join()
-    o = pieces[0]
-    o.name = o.data.name = f'wanderer-{name}'
-    o.vertex_groups.clear()
-    md = o.modifiers.new('melt', 'REMESH')
-    md.mode = 'VOXEL'
-    md.voxel_size = voxel
-    md = o.modifiers.new('soften', 'SMOOTH')
-    md.factor = 0.5
-    md.iterations = 4
-    apply_mods(o)
-    md = o.modifiers.new('slim', 'DECIMATE')
-    md.ratio = min(1.0, tris / max(1, sum(len(p.vertices) - 2 for p in o.data.polygons)))
-    apply_mods(o)
-    for p in o.data.polygons:
-        p.use_smooth = True
-    groups = {}
-    for v in o.data.vertices:
-        ws = {}
-        near_ = tree.find_n(o.matrix_world @ v.co, 6)
-        for co, i, dist in near_:
-            k = 1.0 / (dist + 0.001) ** 2
-            for b, x in src[i][1].items():
-                ws[b] = ws.get(b, 0.0) + x * k
-        for b, x in top4(ws).items():
-            if b not in groups:
-                groups[b] = o.vertex_groups.new(name=b)
-            groups[b].add([v.index], x, 'REPLACE')
-    PARTS.append((o, 'body', 2.6))
+        def quads(r0, r1, skip=()):
+            n = len(r0)
+            faces.extend((r0[j], r0[(j + 1) % n], r1[(j + 1) % n], r1[j]) for j in range(n) if j not in skip)
+
+        # where each finger leaves the palm, little finger first: across the hand, along it and up from the bone
+        names = ('pinky', 'ring', 'middle', 'index')
+        base = [(J[fb(f'{k}_01')] - h) for k in names]
+        across = [p.dot(wv) for p in base]
+        along = [p.dot(d) for p in base]
+        level = sum(p.dot(back) for p in base) / 4
+        # nine columns over the knuckles: one down each finger's middle, one between each pair and one at each edge
+        cols = [across[0] - 0.009]
+        for k in range(4):
+            cols.append(across[k])
+            cols.append((across[k] + across[k + 1]) / 2 if k < 3 else across[3] + 0.01)
+        knuckle_a = [along[0] - 0.017]
+        for k in range(4):
+            knuckle_a.append(along[k] - 0.013)
+            knuckle_a.append((along[k] + along[k + 1]) / 2 - 0.013 if k < 3 else along[3] - 0.017)
+        mid = (cols[0] + cols[-1]) / 2
+        half = (cols[-1] - cols[0]) / 2
+
+        def palm_ring(a, scale, tb, tp, oy, w, knuckles=False):
+            """at a (one distance along the hand per column): the top row from the little finger to the index, the index
+            side, the palm's row back and the little finger's side"""
+            ox = mid * scale
+            top, bot = [], []
+            for c in range(9):
+                u = (cols[c] - mid) / half
+                y = ox + (cols[c] - mid) * scale
+                # the knuckles stand up across the back; the heel of the hand fills out under the little finger
+                bump = (0.006 if c % 2 else -0.004 if 0 < c < 8 else 0.0) if knuckles else 0.0
+                heel = 0.0 if knuckles else 0.003 * smoothstep(0.3, 0.9, -u)
+                top.append(vert(at(a[c], y, oy + tb * (1 - 0.45 * u * u) + bump), w(c)))
+                bot.append(vert(at(a[c], y, oy - (tp + heel) * (1 - 0.4 * u * u)), w(c)))
+            side = lambda c, o: vert(at(a[c], ox + (cols[c] - mid) * scale + o * 0.0045, oy - 0.002), w(c))
+            return top + [side(8, 1)] + bot[::-1] + [side(0, -1)]
+
+        def round_ring(a, rx, ry, w):
+            fd = (h - J[fb('lowerarm')]).normalized()
+            ax = (wv - fd * wv.dot(fd)).normalized()
+            up = fd.cross(ax) * -x
+            phis = [math.pi - (c + 1) * math.pi / 10 for c in range(9)]
+            phis = phis + [0.0] + [-p for p in phis[::-1]] + [math.pi]
+            return [vert(h + fd * a + ax * (rx * math.cos(p)) + up * (ry * math.sin(p)), w) for p in phis]
+
+        hand_w = lambda c: {fb('hand'): 1.0}
+        # the cuff: from deep inside, up its inner wall, over a rolled lip and down its flare to the wrist
+        rings = [round_ring(-0.046, 0.0535, 0.0535, {fb('lowerarm'): 1.0}),
+                 round_ring(-0.074, 0.0545, 0.0545, {fb('lowerarm'): 1.0}),
+                 round_ring(-0.081, 0.0585, 0.0585, {fb('lowerarm'): 1.0}),
+                 round_ring(-0.076, 0.0625, 0.0625, {fb('lowerarm'): 1.0}),
+                 round_ring(-0.052, 0.056, 0.055, {fb('lowerarm'): 1.0}),
+                 round_ring(-0.032, 0.045, 0.041, {fb('lowerarm'): 0.7, fb('hand'): 0.3}),
+                 palm_ring([-0.014] * 9, 0.62, 0.017, 0.017, -0.001, lambda c: {fb('lowerarm'): 0.3, fb('hand'): 0.7})]
+        # the palm, the ball of the thumb swelling under the index side of its first three rings
+        thenar = lambda c: {fb('hand'): 0.75, fb('thumb_01'): 0.25} if c >= 6 else {fb('hand'): 1.0}
+        for a, scale, tb, tp, oy in ((0.006, 0.78, 0.017, 0.019, -0.002), (0.03, 0.9, 0.017, 0.021, -0.003), (0.054, 0.97, 0.016, 0.023, -0.004)):
+            rings.append(palm_ring([a] * 9, scale, tb, tp, oy, thenar))
+        rings.append(palm_ring([0.054 + 0.55 * (k - 0.054) for k in knuckle_a], 1.0, 0.015, 0.021, (level - 0.004) * 0.6, hand_w))
+        rings.append(palm_ring(knuckle_a, 1.0, 0.012, 0.016, level, hand_w, knuckles=True))
+        faces.append(tuple(rings[0]))
+        P0 = 7  # the first palm ring
+        for i in range(len(rings) - 1):
+            # the patch the thumb grows from: the palm's two quads in from the index edge
+            quads(rings[i], rings[i + 1], skip=(10, 11) if i in (P0, P0 + 1) else ())
+        knuck = rings[-1]
+        top = knuck[:9]
+        bot = knuck[10:19][::-1]
+        m = {0: knuck[19], 8: knuck[9]}
+        for c in (2, 4, 6):
+            m[c] = vert(at(knuckle_a[c] - 0.006, cols[c], level), {fb('hand'): 1.0})
+
+        def frame(t, up):
+            a = (wv - t * wv.dot(t)).normalized()
+            u = (up - t * up.dot(t) - a * up.dot(a)).normalized()
+            return a, u
+
+        def finger(chain, root, aspect, end, crease):
+            """a ring of FINGER_RING angles at each station (point, axis, radius, weights, knuckle height) from root to a capped tip"""
+            prev = root
+            for c, t, r, w, knuckle in chain:
+                a, u = frame(t, back)
+                ring_ = []
+                for deg in FINGER_RING:
+                    th = math.radians(deg)
+                    k = 1.1 if knuckle else 1.0
+                    off = 0.0
+                    if deg in (135, 90, 45):
+                        off = knuckle * (1.0 if deg == 90 else 0.6)
+                    if knuckle and deg == -90:
+                        off = -crease
+                    ring_.append(vert(c + a * (r * k * math.cos(th)) + u * (r * k * aspect * math.sin(th) + off), w))
+                quads(prev, ring_)
+                prev = ring_
+            c, t, w = end
+            tip = vert(c, w)
+            for j in (7, 1, 3, 5):
+                faces.append((tip, prev[j], prev[(j + 1) % 8], prev[(j + 2) % 8]))
+
+        for k, (name, size) in enumerate(zip(names, (0.86, 0.97, 1.03, 1.0))):
+            c0, c1, c2 = (J[fb(f'{name}_0{i}')] for i in (1, 2, 3))
+            leaf = J[fb(f'{name}_04_leaf')]
+            b1, b2, b3 = (fb(f'{name}_0{i}') for i in (1, 2, 3))
+            t = (leaf - c0).normalized()
+            r = [x * size for x in (0.0108, 0.0104, 0.01, 0.0097, 0.0093, 0.0089, 0.0078)]
+            chain = [(c0, t, r[0], {fb('hand'): 0.5, b1: 0.5}, 0.0055),
+                     (c0.lerp(c1, 0.5), t, r[1], {b1: 1.0}, 0.0),
+                     (c1, t, r[2], {b1: 0.5, b2: 0.5}, 0.0055),
+                     (c1.lerp(c2, 0.5), t, r[3], {b2: 1.0}, 0.0),
+                     (c2, t, r[4], {b2: 0.5, b3: 0.5}, 0.003),
+                     (c2.lerp(leaf, 0.45), t, r[5], {b3: 1.0}, 0.0),
+                     (leaf - t * 0.004, t, r[6], {b3: 1.0}, 0.0)]
+            root = [top[2 * k], top[2 * k + 1], top[2 * k + 2], m[2 * k + 2], bot[2 * k + 2], bot[2 * k + 1], bot[2 * k], m[2 * k]]
+            finger(chain, root, 1.05, (leaf + t * 0.003, t, {b3: 1.0}), 0.002)
+
+        # the thumb grows from the palm beside the index edge, its ring turned to match the patch's order
+        r1, r2, r3 = rings[P0], rings[P0 + 1], rings[P0 + 2]
+        root = [r1[10], r1[11], r1[12], r2[12], r3[12], r3[11], r3[10], r2[10]]
+        t1, t2 = J[fb('thumb_01')], J[fb('thumb_02')]
+        tt = (J[fb('thumb_04_leaf')] - t1).normalized()
+        e1 = (back * -1 - tt * (back * -1).dot(tt)).normalized()
+        e2 = tt.cross(e1)
+        ca = t1.lerp(t2, 0.5) - back * 0.006
+        ang = [math.atan2((verts[i] - ca).dot(e2), (verts[i] - ca).dot(e1)) for i in root]
+        steps = [(ang[(j + 1) % 8] - ang[j] + math.pi) % TAU - math.pi for j in range(8)]
+        sign = 1 if sum(steps) > 0 else -1
+        phi0 = math.atan2(sum(math.sin(a - sign * j * math.pi / 4) for j, a in enumerate(ang)), sum(math.cos(a - sign * j * math.pi / 4) for j, a in enumerate(ang)))
+        b1, b2, b3 = fb('thumb_01'), fb('thumb_02'), fb('thumb_03')
+        # in the idle's fist the thumb runs straight down the front of the fist and rests along the side of the index
+        # finger's middle segment: each ring is drawn where the fist wants it and carried back into the rest pose by its
+        # own bone
+        across_idle = (JP[fb('index_01')] - JP[fb('pinky_01')]).normalized()
+        middle = JP[fb('index_02')].lerp(JP[fb('index_03')], 0.5)
+        root_idle = JP[fb('thumb_02')].lerp(middle, 0.25)
+        rest_on = middle + across_idle * 0.021
+        unpose = lambda q, bone: P(DELTA[bone].inverted() @ B(q))
+        # the ball of the thumb fills the space between the thumb and the curled index finger
+        stations = [(unpose(JP[fb('thumb_01')].lerp(JP[fb('thumb_02')], 0.55).lerp(middle, 0.2), b1), 0.025, {fb('hand'): 0.35, b1: 0.65}, False)]
+        for f, r, w, joint, bone in ((0.0, 0.017, {b1: 0.5, b2: 0.5}, True, b2),
+                                     (0.28, 0.0158, {b2: 1.0}, False, b2),
+                                     (0.5, 0.0148, {b2: 0.5, b3: 0.5}, True, b3),
+                                     (0.72, 0.0138, {b3: 1.0}, False, b3),
+                                     (0.86, 0.0118, {b3: 1.0}, False, b3)):
+            stations.append((unpose(root_idle.lerp(rest_on, f), bone), r, w, joint))
+        end = unpose(rest_on, b3)
+        prev = root
+        for i, (c, r, w, joint) in enumerate(stations):
+            ax = ((stations[i + 1][0] if i + 1 < len(stations) else end) - (stations[i - 1][0] if i else t1)).normalized()
+            f1 = (back * -1 - ax * (back * -1).dot(ax)).normalized()
+            f2 = ax.cross(f1)
+            k = 1.1 if joint else 1.0
+            ring_ = [vert(c + f1 * (r * k * 0.88 * math.cos(phi0 + sign * j * math.pi / 4)) + f2 * (r * k * math.sin(phi0 + sign * j * math.pi / 4)), w) for j in range(8)]
+            quads(prev, ring_)
+            prev = ring_
+        tt = (end - stations[-1][0]).normalized()
+        tip = vert(end + tt * 0.003, {b3: 1.0})
+        for j in (7, 1, 3, 5):
+            faces.append((tip, prev[j], prev[(j + 1) % 8], prev[(j + 2) % 8]))
+
+        # the corner's middle vertex lies under the thumb's root: only vertices on a face are kept
+        used = sorted({i for f in faces for i in f})
+        keep = {i: n for n, i in enumerate(used)}
+        add(f'glove-{s}', [verts[i] for i in used], [tuple(keep[i] for i in f) for f in faces], 'glove', [ws[i] for i in used], sub=1, uv=2.6)
 
 
 def legs():
