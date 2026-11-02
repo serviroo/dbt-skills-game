@@ -143,15 +143,15 @@ export async function runApp(stage: Stage | null, makeStage: () => Stage | null)
 
 /**
  * The intro, with the Safe Zone and Skip on every screen of it. However it ends (watched to the end card, skipped, or
- * left for help, even while a load is pending or the graphics fail), it ends here: it counts as seen, and the companion
- * opens next. True when the player left it for the Safe Zone.
+ * left for help, even while a load is pending or the graphics fail; a replay by Back too), it ends here: it counts as
+ * seen, and the companion opens next. True when the player left it for the Safe Zone.
  */
 async function intro(stage: Stage | null, audio: AppAudio | null, state: AppState): Promise<boolean> {
   mountCutsceneVolume(audio);
   const left = new AbortController();
   let offWays = () => {};
   const way = new Promise<Way>((resolve) => {
-    offWays = introWays((w) => {
+    const take = (w: Way) => {
       // the sound goes first, before anything else of the intro, however long the rest takes on a slow phone. Help is
       // silent from the press on, while the companion loads too, as the Safe Zone is: its gate closes under every sound
       // and echo at once. Skip lets what plays fade. Either way none of the intro sounds on after it: every cue still
@@ -160,17 +160,37 @@ async function intro(stage: Stage | null, audio: AppAudio | null, state: AppStat
       audio?.engine?.stopAll(w === 'safe' ? SCORE.safeOutSec : SCORE.leaveSec);
       left.abort();
       resolve(w);
-    });
+    };
+    const offButtons = introWays(take);
+    // Back from a replay ends it as Skip does, back on the screen it was played from
+    const back = () => take('skip');
+    if (params.cutscene) window.addEventListener('popstate', back);
+    offWays = () => {
+      offButtons();
+      window.removeEventListener('popstate', back);
+    };
   });
   const end = await Promise.race([stage ? playIntro(stage, audio, left.signal) : playWithoutStage(audio, left.signal), way]);
   offWays();
   state.seenCutscene = true;
   save(state);
   if (end === 'replay') {
-    location.search = '?cutscene=1';
+    // the end card's Replay plays it again on the entry it stands on
+    history.replaceState(history.state, '', address(true));
+    location.reload();
     await new Promise(() => undefined);
   }
+  // the replay is over: the address is the one it was played from again, so a reload or a restored tab opens the
+  // companion
+  if (params.cutscene) history.replaceState(history.state, '', address(false));
   return end === 'safe';
+}
+
+/** This page's address with the replay flag on or off, the rest of it as it was. */
+function address(replay: boolean) {
+  const q = location.search.slice(1).split('&').filter((p) => p && p.split('=')[0] !== 'cutscene');
+  if (replay) q.push('cutscene=1');
+  return location.pathname + (q.length ? `?${q.join('&')}` : '') + location.hash;
 }
 
 /** The speaker on every cutscene beat, from the title screen to the end card (none without Web Audio or in captures). */
@@ -243,10 +263,12 @@ async function enterDaily(stage: Stage | null, audio: AppAudio | null, state: Ap
   const m = (await dailyMods[k]().catch(offerReload)) as { mountDaily:(r: HTMLElement, o: unknown) => { unmount(): void; settled: Promise<void>; route(): string } };
   const daily = m.mountDaily(root, {
     help,
-    onReplay: () => {
+    replayed: params.cutscene,
+    onReplay: (entry: unknown) => {
       state.seenCutscene = true;
       save(state);
-      location.search = '?cutscene=1';
+      history.pushState(entry, '', address(true));
+      location.reload();
     },
     sound: audio
       ? {

@@ -98,6 +98,8 @@ interface Entry {
   sheet?: true;
 }
 const HOME: Entry = { dq: 1, i: 0, key: 'home', route: { name: 'hub' } };
+/** Handed to the screen the intro was replayed from as it opens again after the intro (see start). */
+export const REPLAYED = Symbol('replayed');
 const isEntry = (s: unknown): s is Entry => !!s && typeof s === 'object' && (s as Entry).dq === 1 && Number.isInteger((s as Entry).i) && !!(s as Entry).route;
 /** Rooms a move goes back to when they are already behind the player, so moving around never grows history. */
 const ROOMS = new Set<Route['name']>(['library', 'art', 'stories', 'shadows', 'settings', 'diary', 'comfort', 'lines', 'safe', 'rest']);
@@ -115,9 +117,15 @@ const buzzLeft = (pattern: readonly number[], ms: number) => {
 };
 
 export interface DailyOpts {
-  onReplay(): void;
+  /**
+   * Replay cutscene: the intro plays again on `entry`, the history state of a new entry over the screen it was asked
+   * from, so Back from the intro lands on that screen.
+   */
+  onReplay(entry: unknown): void;
   /** The player asked for help in the intro: the companion opens on the Safe Zone, with Home's entry behind it. */
   help?: boolean;
+  /** The intro was replayed: the companion opens again on the screen it was replayed from, with Home's entry behind it. */
+  replayed?: boolean;
   sound?: { play(cue: string): void; setMuted?(muted: boolean): void; quiet?(on: boolean): void };
   /** Their levels (the speaker control). When present it owns mute; the old Sound switch goes away. */
   volume?: VolumeCtrl;
@@ -370,16 +378,20 @@ export class App {
       this.lastDay = this.store.today();
     }
     // Home is always the companion's first history entry. Opened again on a later one (a reload, the intro replayed),
-    // it goes back to that first entry: the page opens on Home and nothing is credited again.
+    // it goes back to that first entry: the page opens on Home and nothing is credited again. Back from a replay (see
+    // replay), it goes back to the entry after Home, the screen the replay was asked from, and opens that again
     const s: unknown = history.state;
-    if (isEntry(s) && s.i > 0) {
+    const from = !help && this.opts.replayed && isEntry(s) && s.i > 0 && this.known(s.route) ? s.route : null;
+    const to = from ? 1 : 0;
+    if (isEntry(s) && s.i > to) {
       this.travelling = true;
       try {
-        history.go(-s.i);
+        history.go(to - s.i);
       } catch {
         this.travelling = false;
       }
     }
+    if (from) return this.show(from, { again: false, key: this.write('replace', { dq: 1, i: 1, key: this.newKey(), route: from }).key, hand: REPLAYED });
     this.write('replace', HOME);
     if (help) return this.show({ name: 'safe' }, { again: false, key: this.write('push', { dq: 1, i: 1, key: this.newKey(), route: { name: 'safe' } }).key });
     this.greeting = true;
@@ -946,6 +958,17 @@ export class App {
     } catch {
       /* sound is optional */
     }
+  }
+
+  /**
+   * Replay cutscene, asked from this screen: history becomes Home, this screen, then the replay over it, all written in
+   * the tap. The page that plays it adds no entry of its own, as one added before the player touches a page makes the
+   * browser's Back skip the entry before it. Back from the replay, or its end, opens this screen again (see start).
+   */
+  replay() {
+    this.travel(0);
+    const e = this.write('push', { dq: 1, i: 1, key: this.newKey(), route: this.route });
+    this.later(() => this.opts.onReplay({ ...e, i: 2, sheet: true }));
   }
 
   /** The Lantern button, a moment's Done, a removed story: back to where the player was before this visit. */

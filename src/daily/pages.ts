@@ -5,7 +5,7 @@ import { LABEL_SECONDS, LIBRARY_COPY, NEEDS, TIMES, TOPICS } from '../content/sk
 import { CRISIS_CHECKED } from '../content/crisis-lines';
 import { LETTER, REWARDS } from '../content/intro';
 import { ABOUT, CLEAR_COPY, CRYSTAL_COPY, KEEP_COPY, PEEK_COPY } from '../content/daily-lines';
-import type { App, Route, ScreenOut, Visit } from './app';
+import { REPLAYED, type App, type Route, type ScreenOut, type Visit } from './app';
 import { fishSVG, glyph, icon, lurkCatSVG, mothSVG, seaweedSVG, sharkFinSVG, sharkTailSVG } from './art';
 import { skillCard } from './hub';
 import { regionPicker, telHref, smsHref } from './safe';
@@ -1344,7 +1344,7 @@ function welcomeNote(app: App) {
   return app.window({ kind: 'notification', title: LETTER.title, html: `${note}<p class="sys">${LETTER.signoff}</p>${gifts}`, tapToContinue: true }, true);
 }
 
-export function settingsScreen(app: App): ScreenOut {
+export function settingsScreen(app: App, _route: Route, visit: Visit): ScreenOut {
   if (cleared()) return clearedScreen();
   const st = app.store;
   const s = st.state;
@@ -1353,6 +1353,7 @@ export function settingsScreen(app: App): ScreenOut {
   const notSaving = p("This device isn't saving right now (storage may be full or private browsing). Your progress is safe for this visit; a Save Crystal keeps a copy.", `dq-small${st.saving ? ' is-hidden' : ''}`);
   const keeps = browserKeeps();
   const restoreBtn = btn('Restore', () => file.click(), { kind: 'quiet', ic: 'import' });
+  const replayBtn = btn('Replay cutscene', () => app.replay(), { kind: 'quiet', ic: 'replay' });
   /** Each choice as it is now: brought back by a Save Crystal, or made in another open copy. */
   const showChoices = () => {
     app.root.querySelectorAll('.dq-settings [aria-label="Motion"] [role="radio"]').forEach((b, i) => b.setAttribute('aria-checked', String(['system', 'reduce', 'full'][i] === s.settings.motion)));
@@ -1736,7 +1737,7 @@ export function settingsScreen(app: App): ScreenOut {
       panel(
         { title: 'Intro', ic: icon('replay') },
         p('The cutscene, the shadows and the chest. As many times as you like.', 'dq-text'),
-        h('div', { class: 'dq-actions' }, btn('Replay cutscene', () => app.opts.onReplay(), { kind: 'quiet', ic: 'replay' }), btn(LETTER.title, () => void welcomeNote(app), { kind: 'quiet', ic: 'book' })),
+        h('div', { class: 'dq-actions' }, replayBtn, btn(LETTER.title, () => void welcomeNote(app), { kind: 'quiet', ic: 'book' })),
       ),
       panel(
         { title: 'Your data', ic: icon('export') },
@@ -1776,6 +1777,8 @@ export function settingsScreen(app: App): ScreenOut {
     title: 'Settings',
     mode: 'sub',
     foot: robe.bar,
+    // back from the intro replayed here, on the button that played it
+    after: () => visit.handed === REPLAYED && focusWhole(replayBtn),
     leave: () => {
       robe.leave();
       offSaving();
