@@ -403,16 +403,35 @@
   box-shadow: inset 0 0 0 1px rgba(200, 225, 255, 0.28), 0 0 22px -6px rgba(164, 128, 238, 0.45);
 }
 .w2-foil-tag {
-  position: absolute;
-  bottom: 16px;
-  left: 18px;
+  position: relative;
   z-index: 5;
+  margin-top: 14px;
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.2em;
   text-transform: uppercase;
   color: #e7dcff;
   text-shadow: 0 0 8px rgba(164, 128, 238, 0.6);
+}
+/* the tag rides beside the stat; a card too small to show the stat (daily.css) has no room to spare below its words, so
+   there it takes the module name's place in the top row, and the time wraps right under it where the row is too short */
+.dq-cf-top > .w2-foil-tag {
+  display: none;
+  margin-top: 0;
+}
+@container (max-width: 235px) {
+  .dq-card .dq-cf-top > .w2-foil-tag {
+    display: block;
+  }
+  .dq-card .dq-cf-foot > .w2-foil-tag {
+    display: none;
+  }
+  .dq-card .is-foil .dq-cf-top {
+    row-gap: 0;
+  }
+  .dq-card .is-foil .dq-cf-mod {
+    flex-grow: 0;
+  }
 }
 .dq.is-still .w2-foil {
   opacity: 0.55;

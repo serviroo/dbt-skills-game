@@ -28,6 +28,7 @@ export function skillCard(id: string, opts: { label?: string; special?: 'comfort
       h('div', { class: 'dq-cf-name', text: 'Comfort' }),
       h('div', { class: 'dq-cf-real', text: 'Add one thing that helps' }),
       h('p', { class: 'dq-cf-blurb', text: typo('A song, a hoodie, a show, a person. It shows up in the Safe Zone when you need it.') }),
+      h('div', { class: 'dq-cf-foot' }),
     );
   if (opts.special === 'free')
     return h(
@@ -38,6 +39,7 @@ export function skillCard(id: string, opts: { label?: string; special?: 'comfort
       h('div', { class: 'dq-cf-name', text: 'Free choice' }),
       h('div', { class: 'dq-cf-real', text: 'Any skill, or none' }),
       h('p', { class: 'dq-cf-blurb', text: typo("Every skill you've met is in your collection. Pick whichever fits today.") }),
+      h('div', { class: 'dq-cf-foot' }),
     );
   return h(
     'div',
@@ -47,7 +49,7 @@ export function skillCard(id: string, opts: { label?: string; special?: 'comfort
     h('div', { class: `dq-cf-name ${longName(sk.sl) ? 'is-long' : ''}`, text: typo(sk.sl) }),
     h('div', { class: 'dq-cf-real', text: typo(opts.label ? `${sk.real} · ${opts.label}` : sk.real) }),
     opts.small ? null : h('p', { class: 'dq-cf-blurb', text: typo(sk.card) }),
-    h('div', { class: 'dq-cf-stat', text: `${m.statName} +1` }),
+    h('div', { class: 'dq-cf-foot' }, h('div', { class: 'dq-cf-stat', text: `${m.statName} +1` })),
   );
 }
 

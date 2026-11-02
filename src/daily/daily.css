@@ -1649,9 +1649,17 @@ textarea.dq-input {
   line-height: 1.45;
   color: #b4cce4;
 }
+/* the card's last row: the stat on the right, and a foil card's tag on the left, each with its own room, so neither ever
+   sits on the words above (each brings its own top margin, so a row with nothing showing takes no room) */
+.dq-cf-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 12px;
+}
 .dq-cf-stat {
   margin-top: 14px;
-  align-self: flex-end;
+  margin-left: auto;
   font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.16em;
