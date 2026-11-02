@@ -508,6 +508,7 @@
   "night-watch-arrivals-unfocused": [15, 12],
   "night-watch-cards": [44, 37],
   "night-watch-follows-tabs": [18, 20],
+  "no-note-starts-after-a-sooner-stop": [4],
   "no-sideways-overflow-320x568": [33, 50],
   "no-sideways-overflow-390x844": [51, 56],
   "no-sideways-overflow-568x320": [40, 39],

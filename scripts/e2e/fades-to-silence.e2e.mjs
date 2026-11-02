@@ -124,4 +124,54 @@ export const scenarios = {
     return Object.fromEntries(got.map((g) => [`${g.name} ${g.sr}`, { atStop: db(g.atStop), after: db(g.after), twin: db(g.apart) }]));
   },
 
+  /** Skip, or a replay's reset, before a score change already placed ahead: the section's notes are placed only up to
+   *  that sooner stop, so none starts in its fade (a render placing the score on as it plays matches one that stopped
+   *  placing it there) */
+  async 'no-note-starts-after-a-sooner-stop'({ open, expect }) {
+    const { ctx, page, errors } = await open({}, '?lab=audio&mute');
+    await page.waitForFunction(() => window.__lab === true, null, { timeout: 30000 });
+    const got = await page.evaluate(async () => {
+      const { AudioEngine } = await import('/src/audio/engine.ts');
+      const { stoppedBy } = await import('/src/audio/voice.ts');
+      const { SCORE } = await import('/src/motion/tokens.ts');
+      const sr = 48000;
+      const [T0, AT, AHEAD] = [0.02, 2, 1.5];
+      const render = async (stop, fade, late) => {
+        const len = stoppedBy(AT, fade) + 0.2;
+        const c = new OfflineAudioContext(4, Math.ceil(len * sr), sr);
+        const eng = new AudioEngine(c);
+        const probe = c.createChannelMerger(4);
+        probe.connect(c.destination);
+        eng.testInput('music').connect(probe, 0, 2);
+        eng.music.to('windows', 0.5, { at: T0 });
+        eng.music.scheduleUntil(AT);
+        // the change into the next section, placed ahead, then Skip or the reset sooner (both stop everything)
+        eng.music.stop(2, AT + AHEAD);
+        eng[stop](fade, AT);
+        // the score goes on being placed as the game plays
+        if (late) eng.music.scheduleUntil(len);
+        return (await c.startRendering()).getChannelData(2);
+      };
+      const out = [];
+      for (const [name, stop, fade] of [['Skip', 'stopAll', SCORE.leaveSec], ['a replay\'s reset', 'reset', 0.3]]) {
+        const [placed, held] = await Promise.all([render(stop, fade, true), render(stop, fade, false)]);
+        let diff = 0;
+        let level = 0;
+        const from = Math.floor(AT * sr);
+        for (let i = from; i < placed.length; i++) diff += (placed[i] - held[i]) ** 2;
+        for (let i = Math.floor((AT - 1) * sr); i < from; i++) level += held[i] ** 2;
+        const dB = (x) => (x > 0 ? 20 * Math.log10(x) : -Infinity);
+        out.push({ name, level: Math.sqrt(level / sr), apart: dB(Math.sqrt(diff / (placed.length - from)) / Math.sqrt(level / sr)) });
+      }
+      return out;
+    });
+    for (const g of got) {
+      expect(g.level > 1e-4, `${g.name}: the score is too quiet to measure (${g.level.toExponential(2)})`);
+      expect(g.apart < TWIN_DB, `${g.name}: notes placed after it sound in its fade, at ${g.apart.toFixed(1)} dB of the score`);
+    }
+    expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+    return Object.fromEntries(got.map((g) => [g.name, Number.isFinite(g.apart) ? +g.apart.toFixed(1) : 'silent']));
+  },
+
 };
