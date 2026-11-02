@@ -6,7 +6,7 @@
 // Zone and Done still silence it. Measured on the hum's real output, render quantum by render quantum.
 import fs from 'node:fs';
 import path from 'node:path';
-import { installAudioRecorder, audioReady, audioRecorded } from './audio-recorder.mjs';
+import { installAudioRecorder, audioReady, audioRecorded, watchCuts, cutOf } from './audio-recorder.mjs';
 
 /** What each check measured, one line a check, in the run's artifacts. */
 const note = (h, name, o) => fs.appendFileSync(path.join(h.out, 'hum-volume.jsonl'), JSON.stringify({ name, ...o }) + '\n');
@@ -17,8 +17,8 @@ const AUDIO = 'dbt.audio.v1';
 const Q = 128;
 // silent: a peak below one step of 16-bit audio, as in safe-zone-quiet
 const SILENT_PEAK = 2 ** -15;
-// the Safe Zone silences the speakers this soon after the tap, as in safe-zone-quiet
-const WITHIN = 0.085;
+// the Safe Zone silences the speakers this soon after the cut the tap places, as in safe-zone-quiet
+const WITHIN = 0.051;
 // a click: a step between two samples more than this many times the steepest the steady hum ever moves
 const CLICK = 3;
 // the slider curve the engine gives Master, Music and Effects
@@ -55,7 +55,8 @@ async function boot(h, { viewport = TALL, prefs = levels() } = {}) {
   await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile') && window.__taps.length > 0, null, { timeout: 30000 });
   await audioReady(page);
   await h.reachHub(page);
-  // the hum's audio clock at every step into or out of the Safe Zone
+  // the hum's audio clock at every step into or out of the Safe Zone, and where on each clock the step placed its cut
+  await watchCuts(page);
   await page.evaluate(() => {
     const a = window.__daily;
     window.__marks = [];
@@ -63,8 +64,8 @@ async function boot(h, { viewport = TALL, prefs = levels() } = {}) {
     a.go = (route, o) => {
       const was = a.route.name;
       const at = window.__taps.map((t) => t.context.currentTime);
-      go(route, o);
-      window.__marks.push({ from: was, to: a.route.name, at });
+      const cut = window.__cutsIn(() => go(route, o));
+      window.__marks.push({ from: was, to: a.route.name, at, cut });
     };
   });
   return { ctx, page, errors };
@@ -419,9 +420,10 @@ export const scenarios = {
       await page.waitForFunction((n) => window.__taps[n].context.state === 'closed', n, { timeout: 3000 }).catch(() => {
         throw new Error('the hum kept going in the Safe Zone');
       });
-      const tap = (await page.evaluate(() => window.__marks.filter((k) => k.to === 'safe'))).at(-1).at[n];
-      const inside = await quanta(page, n, tap + WITHIN, Infinity);
-      h.expect(inside.every((q) => q[1] < SILENT_PEAK), `the hum was heard ${WITHIN * 1000} ms into the Safe Zone`);
+      const into = (await page.evaluate(() => window.__marks.filter((k) => k.to === 'safe'))).at(-1);
+      const from = cutOf(into, n) + WITHIN;
+      const inside = await quanta(page, n, from, Infinity);
+      h.expect(inside.every((q) => q[1] < SILENT_PEAK), `the hum was heard ${((from - into.at[n]) * 1000).toFixed(0)} ms into the Safe Zone`);
       await page.locator('header .dq-back').click({ timeout: 4000 });
       await page.waitForFunction(() => window.__daily.route.name !== 'safe', null, { timeout: 3000 });
 

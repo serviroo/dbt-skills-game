@@ -843,6 +843,29 @@ export async function startHarness(flags = {}) {
     for (const ev of ['domcontentloaded', 'load', 'crash', 'close']) page.on(ev, () => log(ev));
     trail.set(page, { t0, life, logs, errors: [] });
   }
+  async function serveFromHere(ctx, offline) {
+    const setOffline = ctx.setOffline.bind(ctx);
+    ctx.setOffline = async (on) => {
+      offline = on;
+      await setOffline(on);
+    };
+    await ctx.route((url) => url.origin === server.url, async (route) => {
+      if (offline) return route.abort('internetdisconnected').catch(() => {});
+      const req = route.request();
+      const headers = Object.fromEntries(Object.entries(req.headers()).filter(([k]) => !['connection', 'content-length', 'host', 'keep-alive', 'transfer-encoding', 'upgrade'].includes(k)));
+      let res;
+      let body;
+      try {
+        res = await fetch(req.url(), { method: req.method(), headers, body: req.postDataBuffer() ?? undefined, redirect: 'manual' });
+        body = Buffer.from(await res.arrayBuffer());
+      } catch {
+        return route.abort('connectionrefused').catch(() => {});
+      }
+      const out = Object.fromEntries([...res.headers].filter(([k]) => k !== 'content-encoding' && k !== 'content-length'));
+      await route.fulfill({ status: res.status, headers: out, body }).catch(() => {});
+    });
+    await ctx.routeWebSocket((url) => url.host === new URL(server.url).host, () => {});
+  }
   /** Notes a step the scenario takes (a tap, a fill) in the page's evidence timeline. */
   const note = (page, ev, extra) => {
     const t = trail.get(page);
@@ -870,6 +893,7 @@ export async function startHarness(flags = {}) {
       browser.newContext = async (o = {}) => {
         const t0 = Date.now();
         const ctx = await newContext({ timezoneId: ZONE, ...o });
+        await serveFromHere(ctx, !!o.offline);
         await ctx.addInitScript(realTimers);
         await ctx.addInitScript(pageTrail);
         const throttle = flags['cpu-throttle'] ? Number(flags['cpu-throttle']) : 1;
@@ -901,7 +925,9 @@ export async function startHarness(flags = {}) {
   async function reachesServer(browser) {
     const token = crypto.randomUUID();
     fs.writeFileSync(path.join(out, 'run-token.txt'), token);
-    const page = await browser.newPage();
+    const ctx = await browser.newContext();
+    await ctx.unrouteAll();
+    const page = await ctx.newPage();
     try {
       const res = await page.goto(`${server.url}/${path.relative(root, out)}/run-token.txt`).catch((e) => e);
       const got = res instanceof Error ? res.message.split('\n')[0] : res?.ok() ? await res.text() : `HTTP ${res?.status()}`;
