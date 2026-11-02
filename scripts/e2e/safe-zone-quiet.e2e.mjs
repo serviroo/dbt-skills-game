@@ -2,7 +2,7 @@
 // in Give me a moment) is silent at the speakers within a click-free moment of it, a quick visit never brings an old
 // cue or echo back, their levels and mute never change, and a gift or rank cut short by the tap is kept. Measured on
 // the real post-mix output, render quantum by render quantum, against the audio clock at the moment of the tap.
-import { installAudioRecorder, audioReady, audioRecorded, audioEnded, watchCuts, cutOf } from './audio-recorder.mjs';
+import { installAudioRecorder, audioReady, audioRecorded, audioEnded, audioHeard, watchCuts, cutOf } from './audio-recorder.mjs';
 
 const TALL = { width: 390, height: 844 };
 const SMALL = { width: 320, height: 568 };
@@ -114,29 +114,7 @@ const now = (page, i = 0) => page.evaluate((i) => window.__taps[i].context.curre
 const until = audioRecorded;
 
 /** Tap i's output over [from, to] (its audio clock): RMS, peak, how much of it the reads covered, and when silence began. */
-const hear = (page, i, from, to) =>
-  page.evaluate(
-    ([i, from, to, P, R]) => {
-      const tap = window.__taps[i];
-      const sr = tap.context.sampleRate;
-      const Q = 128;
-      const inside = (k) => (k * Q) / sr >= from && ((k + 1) * Q) / sr <= to;
-      const qs = [...tap.q].filter(([k]) => inside(k)).sort((x, y) => x[0] - y[0]);
-      // a block the graph never rendered played nothing, so there was nothing to read
-      const unrendered = [...tap.unrendered].filter(inside).length;
-      let peak = 0;
-      let ss = 0;
-      for (const [, [p, s]] of qs) {
-        peak = Math.max(peak, p);
-        ss += s;
-      }
-      let k = qs.length;
-      while (k > 0 && qs[k - 1][1][0] < P && Math.sqrt(qs[k - 1][1][1] / Q) < R) k--;
-      const quietFrom = k === qs.length ? null : k === 0 ? from : (qs[k][0] * Q) / sr;
-      return { rms: qs.length ? Math.sqrt(ss / (qs.length * Q)) : 0, peak, cover: (qs.length * Q) / sr / (to - from - (unrendered * Q) / sr), unrendered, quietFrom };
-    },
-    [i, from, to, SILENT_PEAK, SILENT_RMS],
-  );
+const hear = (page, i, from, to) => audioHeard(page, i, from, to, [SILENT_PEAK, SILENT_RMS]);
 const silent = (x) => x.peak < SILENT_PEAK && x.rms < SILENT_RMS;
 // a stalled recorder must not pass for silence: every stretch judged silent has to be at least 90% read
 const covered = (x) => x.cover >= 0.9;
@@ -165,6 +143,13 @@ const leave = async (page) => {
   await page.waitForFunction(() => window.__daily.route.name === 'hub', null, { timeout: 3000 });
   return lastMark(page);
 };
+
+async function heardInside(h, page, m) {
+  const sr = await page.evaluate(() => window.__taps[0].context.sampleRate);
+  const through = ((Math.ceil((silentFrom(m) * sr) / 128) + Math.ceil((0.04 * sr) / 128)) * 128) / sr;
+  await until(page, 0, through);
+  await h.until(page, (t) => window.__taps[0].context.currentTime >= t, through, { polling: 20 });
+}
 
 /**
  * Score and long cues are sounding; the tap silences the speakers within WITHIN of the cut it places and keeps them
@@ -345,9 +330,7 @@ export const scenarios = {
       const visits = [];
       for (let i = 0; i < 3; i++) {
         const a = await enter(page);
-        // out again once 40 ms past where it must be silent have played, however far ahead the output's latency puts
-        // the cut
-        await until(page, 0, silentFrom(a) + 0.04);
+        await heardInside(h, page, a);
         const b = await leave(page);
         visits.push([a.at[0], b.at[0], silentFrom(a), silentMs(a)]);
         await h.sleep(80);
@@ -417,16 +400,11 @@ export const scenarios = {
       const tIn = m.at[n];
       // the hum's audio closes within a few seconds; its recording then ends with the last block its graph ran
       const end = await audioEnded(page, n, 5000);
-      // reads come in whole blocks, so past WITHIN starts with the first block after it; the block it falls in is never read
-      const past = await page.evaluate(([n, t]) => {
-        const sr = window.__taps[n].context.sampleRate;
-        return (Math.ceil((t * sr) / 128) * 128) / sr;
-      }, [n, silentFrom(m, n)]);
       const pre = await hear(page, n, tIn - 0.25, tIn);
-      const inside = await hear(page, n, past, end);
+      const inside = await hear(page, n, silentFrom(m, n), end);
       const start = await hear(page, n, tIn, end);
       c.ok(pre.rms > 1e-4, `hum: the hum was not audible before the tap (${fmt(pre)})`);
-      c.ok(end <= past || (covered(inside) && silent(inside)), `hum: the hum played on until ${((end - tIn) * 1000).toFixed(0)} ms after the tap (RMS/peak past ${silentMs(m, n)} ms ${fmt(inside)}, silent from ${quietAt(start, tIn)})`);
+      c.ok(!inside.blocks || (covered(inside) && silent(inside)), `hum: the hum played on until ${((end - tIn) * 1000).toFixed(0)} ms after the tap (RMS/peak past ${silentMs(m, n)} ms ${fmt(inside)}, silent from ${quietAt(start, tIn)})`);
       await until(page, 0, m.at[0] + 0.5 + 0.05);
       const eng = await hear(page, 0, silentFrom(m), m.at[0] + 0.5);
       c.ok(covered(eng) && silent(eng), `hum: the engine is not silent inside, or the reads missed it (${fmt(eng)})`);
@@ -502,6 +480,7 @@ export const scenarios = {
         const inside = await probe(page);
         await h.shot(page, `q5-race-${kind}-2-safe`);
         await page.evaluate(() => window.__daily.toast('A toast from outside'));
+        await heardInside(h, page, a);
         const b = await leave(page);
         await until(page, 0, b.at[0] + 2 + 0.05);
         const after = await probe(page);

@@ -139,6 +139,34 @@ export async function audioEnded(page, i, timeout = 15000) {
   }
 }
 
+export function audioHeard(page, i, from, to, silence) {
+  return page.evaluate(
+    ([i, from, to, [P, R]]) => {
+      const tap = window.__taps[i];
+      const sr = tap.context.sampleRate;
+      const Q = 128;
+      const roundoff = 1e-6;
+      const first = Math.ceil((from * sr) / Q - roundoff);
+      const blocks = Math.max(0, Math.floor((to * sr) / Q + roundoff) - first);
+      const inside = (k) => k >= first && k < first + blocks;
+      const qs = [...tap.q].filter(([k]) => inside(k)).sort((x, y) => x[0] - y[0]);
+      // a block the graph never rendered played nothing, so there was nothing to read
+      const unrendered = [...tap.unrendered].filter(inside).length;
+      let peak = 0;
+      let ss = 0;
+      for (const [, [p, s]] of qs) {
+        peak = Math.max(peak, p);
+        ss += s;
+      }
+      let k = qs.length;
+      while (k > 0 && qs[k - 1][1][0] < P && Math.sqrt(qs[k - 1][1][1] / Q) < R) k--;
+      const quietFrom = k === qs.length ? null : k === 0 ? from : (qs[k][0] * Q) / sr;
+      return { rms: qs.length ? Math.sqrt(ss / (qs.length * Q)) : 0, peak, cover: blocks > unrendered ? qs.length / (blocks - unrendered) : 0, blocks, unrendered, quietFrom };
+    },
+    [i, from, to, silence],
+  );
+}
+
 /**
  * Where a step into the Safe Zone places its cut on each tap's audio clock: window.__cutsIn(step) runs step() and gives,
  * per tap, the `at` the engine's quiet() uses or, on a clock of its own (the moment hum), its first stop() there less

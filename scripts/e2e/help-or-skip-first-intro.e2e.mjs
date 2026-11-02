@@ -4,7 +4,7 @@
 // Zone at once, with no name, welcome, XP, sound or reward first and nothing of the intro after it, and on a first visit
 // Leave goes straight to Home. Skip goes straight to Home with everything a watched intro gives. One press leaves the
 // intro once: the window under it never moves on, and a double tap or a held Enter lands nowhere else.
-import { installAudioRecorder, audioReady, audioRecorded } from './audio-recorder.mjs';
+import { installAudioRecorder, audioReady, audioRecorded, audioHeard } from './audio-recorder.mjs';
 import { until } from './harness.mjs';
 
 const PHONE = { width: 390, height: 844 };
@@ -391,25 +391,7 @@ async function welcomeNote(h, page) {
 }
 
 /** The speakers over [from, to] of the audio clock: loudest sample, RMS, and how much of the stretch was read. */
-const heard = (page, from, to) =>
-  page.evaluate(
-    ([from, to]) => {
-      const tap = window.__taps[0];
-      const q = 128 / tap.context.sampleRate;
-      const inside = (k) => k * q >= from && (k + 1) * q <= to;
-      const blocks = [...tap.q].filter(([k]) => inside(k));
-      // a block the graph never rendered played nothing, so there was nothing to read
-      const unrendered = [...tap.unrendered].filter(inside).length;
-      let peak = 0;
-      let ss = 0;
-      for (const [, [p, s]] of blocks) {
-        peak = Math.max(peak, p);
-        ss += s;
-      }
-      return { peak, rms: blocks.length ? Math.sqrt(ss / (blocks.length * 128)) : 0, read: (blocks.length * q) / (to - from - unrendered * q) };
-    },
-    [from, to],
-  );
+const heard = (page, from, to) => audioHeard(page, 0, from, to, [SILENT_PEAK, SILENT_RMS]);
 
 /** Where the press's cut lands on the audio clock: made in the press itself, where the engine places every sound
  *  (soon(): two frames ahead of the clock, or a frame past the output's latency where that is longer), not later. */
@@ -552,7 +534,7 @@ export const scenarios = {
       const after = await heard(page, cut + 0.017, at + 2.5);
       release();
       h.expect(before.rms > 1e-3, `the intro was not audible before the press (RMS ${before.rms}), so silence proves nothing`);
-      h.expect(after.read >= 0.9, `the recorder read only ${Math.round(after.read * 100)}% of the time after the press`);
+      h.expect(after.cover >= 0.9, `the recorder read only ${Math.round(after.cover * 100)}% of the time after the press`);
       h.expect(after.peak < SILENT_PEAK && after.rms < SILENT_RMS, `sound reached the speakers while the Safe Zone loaded (peak ${after.peak}, RMS ${after.rms})`);
       await until(page, () => window.__daily?.route.name === 'safe', null, { timeout: 30000 });
       h.expect(!errors.length, errors.join('\n'));
@@ -756,7 +738,7 @@ export const scenarios = {
         const after = await heard(page, cut + 0.117, at + 2);
         // the cue sounding as the press lands, ten times over silence (the letter's opening swells in from soft)
         h.expect(before.rms > 10 * SILENT_RMS, `${tag}: the intro was not audible at the press (RMS ${before.rms}), so silence proves nothing`);
-        h.expect(after.read >= 0.9, `${tag}: the recorder read only ${Math.round(after.read * 100)}% of the time after the press`);
+        h.expect(after.cover >= 0.9, `${tag}: the recorder read only ${Math.round(after.cover * 100)}% of the time after the press`);
         h.expect(after.peak < SILENT_PEAK && after.rms < SILENT_RMS, `${tag}: the intro played on over Home (peak ${after.peak}, RMS ${after.rms})`);
         await homeAtOnce(h, page, tag);
         h.expect(!errors.length, errors.join('\n'));
@@ -812,7 +794,7 @@ export const scenarios = {
       h.expect(o1 !== null && o2 !== null, `a tap never played: after Skip ${o1}, on Home ${o2}`);
       // past each tap itself (a 26 ms tick), into its room
       const [right, ref] = [await heard(page, o1 + 0.12, o1 + 0.6), await heard(page, o2 + 0.12, o2 + 0.6)];
-      h.expect(right.read >= 0.9 && ref.read >= 0.9, `the recorder read only ${Math.round(Math.min(right.read, ref.read) * 100)}% of the taps' echo`);
+      h.expect(right.cover >= 0.9 && ref.cover >= 0.9, `the recorder read only ${Math.round(Math.min(right.cover, ref.cover) * 100)}% of the taps' echo`);
       h.expect(ref.rms > 10 * SILENT_RMS, `a tap on Home had no echo to compare with (RMS ${ref.rms})`);
       h.expect(right.rms >= 0.7 * ref.rms, `a tap right after Skip lost its echo: RMS ${right.rms}, against ${ref.rms} on Home a moment later`);
       await until(page, () => window.__daily?.route.name === 'hub', null, { timeout: 30000 });
@@ -849,7 +831,7 @@ export const scenarios = {
       const at = await page.evaluate(() => window.__tap());
       await audioRecorded(page, 0, at + 0.7);
       const tapped = await heard(page, at, at + 0.6);
-      h.expect(tapped.read >= 0.9, `the recorder read only ${Math.round(tapped.read * 100)}% of the time after the tap`);
+      h.expect(tapped.cover >= 0.9, `the recorder read only ${Math.round(tapped.cover * 100)}% of the time after the tap`);
       h.expect(tapped.peak < SILENT_PEAK && tapped.rms < SILENT_RMS, `with Effects off, a tap on Home after Skip still sounded (peak ${tapped.peak}, RMS ${tapped.rms})`);
       await until(page, () => window.__daily?.route.name === 'hub', null, { timeout: 30000 });
       h.expect(!errors.length, errors.join('\n'));
