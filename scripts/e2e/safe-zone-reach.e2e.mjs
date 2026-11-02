@@ -34,6 +34,7 @@
 // show whole and take their taps, with the Sound panel open too, and Give me a moment's Done shows whole once scrolled
 // to; Home and Settings also fit whole, with no text on top of other text.
 import { gone } from './harness.mjs';
+import { faces } from './home-quest-fit.e2e.mjs';
 import { audit, boot, PAGE, SCREENS, settle, SKIP } from './layout-fit.e2e.mjs';
 import { listed } from './me-92-safe-zone-clean.e2e.mjs';
 import { overlay } from './safe-zone-typing.e2e.mjs';
@@ -575,6 +576,9 @@ function bars(phone, { font = false } = {}) {
         }
         for (const f of await audit(page, PAGE, SKIP)) if (!f.detail.endsWith('as the screen opens')) problems.push(`${at}: ${f.kind} ${f.what} (${f.detail})`);
         for (const pair of await crowded(page)) problems.push(`${at}: ${pair} sit on top of each other`);
+      }
+      if (route.name === 'hub') {
+        for (const pair of (await faces(page)).on) problems.push(`${at}, today's card as ${pair} sit on top of each other`);
       }
       for (const words of await cutShort(page, { breaks: WRAPS.has(route.name) })) problems.push(`${at}: ${words}`);
       await h.shot(page, `safe-zone-button-${phone}-${font ? 'text-' : ''}200-${route.name}`);

@@ -287,6 +287,31 @@ chromium.launchServer = (options) => launchServer({ ...options, args: [...option
   assert.notEqual(twice.code, 0);
   assert.match(twice.log, new RegExp(`"${name}-twice" on line 3 a second time`));
   assert(!twice.log.includes('renderer:'));
+  fs.writeFileSync(duplicate, `export const quarantined = { '${name}-held': 'it waits on its own fix' };
+export const scenarios = {
+  async '${name}-held'() {
+    throw new Error('the quarantined scenario ran');
+  },
+  async '${name}-kept'() {},
+};`);
+  const quarantine = await run('quarantine', [`--file=${name}-duplicate`]);
+  assert.equal(quarantine.code, 0);
+  assert.match(quarantine.log, new RegExp(`quarantined ${name}-held: it waits on its own fix`));
+  assert.match(quarantine.log, /1\/1 passed/);
+  const named = await run('quarantine-named', [`--scenario=${name}-held`]);
+  assert.notEqual(named.code, 0);
+  assert.match(named.log, /the quarantined scenario ran/);
+  fs.writeFileSync(duplicate, `export const quarantined = { '${name}-held': 'it waits on its own fix' };
+export const scenarios = { async '${name}-held'() { throw new Error('the quarantined scenario ran'); } };`);
+  const heldOnly = await run('quarantine-only', [`--file=${name}-duplicate`]);
+  assert.equal(heldOnly.code, 0);
+  assert.match(heldOnly.log, new RegExp(`quarantined ${name}-held: it waits on its own fix`));
+  assert.match(heldOnly.log, /every scenario in this run is quarantined/);
+  fs.writeFileSync(duplicate, `export const quarantined = { '${name}-gone': 'it was renamed' };
+export const scenarios = { async '${name}-kept'() {} };`);
+  const stale = await run('quarantine-stale', [`--file=${name}-duplicate`]);
+  assert.notEqual(stale.code, 0);
+  assert.match(stale.log, new RegExp(`quarantines "${name}-gone", which is not one of its scenarios`));
   fs.unlinkSync(duplicate);
   // a name used but never defined, in the test or in a function that runs in the page, stops the run before the browser.
   // A function runs there by any name, wrapper or CDP code field that leads back to it, and not for having its text logged

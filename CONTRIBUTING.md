@@ -95,8 +95,11 @@ export const scenarios = {
 
 Scenario names must be unique across all files. If two match, the runner stops before it starts anything. Scenarios
 from every file run side by side in no fixed order, so a scenario must not count on another one having run or not run
-yet. A file whose scenarios must run in the order they are written, one at a time, exports `serial = true`. Every
-scenario gets an `h` object from `scripts/e2e/harness.mjs`, the same but for `browser` and `open` in each browser:
+yet. A file whose scenarios must run in the order they are written, one at a time, exports `serial = true`. A scenario
+that fails now and then on code that didn't change is quarantined until its own fix lands: its file exports
+`quarantined = { '<name>': '<why>' }`, every run prints it as held out and lists it in `report.json`, and only
+`--scenario=<name>` still runs it. Every scenario gets an `h` object from `scripts/e2e/harness.mjs`, the same but for
+`browser` and `open` in each browser:
 
 - `open(seed?, query = '?mute', viewport = 390x844)`: a fresh browser profile with `seed` written to localStorage
   first. Returns `{ ctx, page, errors }`; close `ctx` when done.
