@@ -14,13 +14,15 @@
 // renderer check expects SwiftShader) and listens on that machine's 127.0.0.1 only. An SSH tunnel from here forwards
 // its port (-L) and the dev server's (-R), so both sides use 127.0.0.1. --ws needs --port, which keeps the dev server
 // on the forwarded port, and the run first checks that the browser reaches this run's dev server (CONTRIBUTING.md).
-// Writes screenshots and report.json to artifacts/e2e/<time>/.
+// Writes report.json to artifacts/e2e/<time>/ and each scenario's screenshots to a folder of its own there, moved to
+// failed/<scenario>/ when it fails; each scenario is marked in running/ there while it runs (scripts/e2e/keep.mjs).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseAst } from 'vite';
 import { startHarness } from './e2e/harness.mjs';
+import { folderOf, keep, mark, safe } from './e2e/keep.mjs';
 import { undefinedNames } from './e2e-scope-check.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -54,6 +56,8 @@ function twice(node, found = []) {
 
 const all = [];
 const fileOf = new Map();
+// each scenario's folder in the run's (scripts/e2e/keep.mjs), and whose it is; running/ and failed/ are the runner's own
+const folders = new Map([['running', 'the scenarios running'], ['failed', 'the failed scenarios']]);
 const serial = new Set();
 const files = fs.readdirSync(dir).filter((f) => f.endsWith('.e2e.mjs')).sort();
 // a name a scenario uses but never defines would stop it only once a browser got there
@@ -70,6 +74,10 @@ for (const f of files) {
   if (mod.serial === true) serial.add(file);
   for (const [name, run] of Object.entries(scenarios)) {
     if (fileOf.has(name)) throw new Error(`scenario "${name}" is in both ${fileOf.get(name)}.e2e.mjs and ${f}`);
+    // a folder of its own, or what two scenarios write would mix, and the failure of one would keep both
+    const folder = safe(name);
+    if (folders.has(folder)) throw new Error(`scenario "${name}" in ${f} would write to ${folder}/, the folder of ${folders.get(folder)}`);
+    folders.set(folder, `scenario "${name}"`);
     if (typeof run !== 'function') throw new Error(`scenario "${name}" in ${f} is not a function`);
     fileOf.set(name, file);
     all.push({ name, file, run, i: all.length });
@@ -121,9 +129,26 @@ const units = unitsOf(pick);
 let h;
 let report;
 let interrupted = false;
+let hung;
+let ended = false;
 const onSignal = () => {
   interrupted = true;
-  if (h) void h.stop().catch((e) => console.error(e));
+  // an interrupted run never passes, however it ends
+  process.exitCode = 130;
+  if (!h) return;
+  // Once the browsers and the server are stopped, every scenario ends within moments and the run writes its report. One
+  // that hangs where stopping them can't reach never ends, and the run would wait on it for good: 2 s after the stop the
+  // run ends as interrupted anyway, leaving that scenario's mark (scripts/e2e/keep.mjs keeps it).
+  void h
+    .stop()
+    .catch((e) => console.error(e))
+    .finally(() => {
+      if (ended || hung) return;
+      hung = setTimeout(() => {
+        console.log("interrupted, and a scenario still hadn't ended 2 s after the browsers and the server stopped");
+        process.exit(130);
+      }, 2000);
+    });
 };
 for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, onSignal);
 let failed = 0;
@@ -136,6 +161,12 @@ try {
       for (const { name, file, run, i } of unit.scenarios) {
         if (interrupted) break;
         const t = Date.now();
+        // a folder of its own for what it writes, and a mark until it ends: one that hangs past its CI step's time is
+        // kept from its mark (scripts/e2e/keep.mjs)
+        lane.out = folderOf(h.root, name);
+        fs.mkdirSync(lane.out, { recursive: true });
+        const running = mark(h.root, name);
+        let ended = true;
         try {
           let result;
           try {
@@ -153,7 +184,15 @@ try {
           failed++;
           report.scenarios.push({ name, file, ok: false, ms: Date.now() - t, i, error: String(e?.message ?? e) });
           console.log(`FAIL ${name}: ${e?.message ?? e}`);
+          // what it wrote (its screenshots and notes, and the fail- evidence above), for CI to upload; one that couldn't
+          // be kept keeps its mark, so CI's keep step tries again
+          const why = keep(h.root, name);
+          if (why) {
+            ended = false;
+            console.log(`${name}: what it wrote couldn't be kept in failed/: ${why}`);
+          }
         }
+        if (ended) fs.rmSync(running, { force: true });
       }
     }
   }));
@@ -166,7 +205,7 @@ try {
     stopError = e;
   }
   try {
-    if (report) fs.writeFileSync(path.join(h.out, 'report.json'), JSON.stringify(report, null, 2));
+    if (report) fs.writeFileSync(path.join(h.root, 'report.json'), JSON.stringify(report, null, 2));
   } catch (e) {
     if (stopError) console.error(stopError);
     throw e;
@@ -175,5 +214,7 @@ try {
   }
   if (stopError) throw stopError;
 }
-console.log(`${report.scenarios.filter((s) => s.ok).length}/${pick.length} passed, artifacts in ${path.relative(root, h.out)}`);
+ended = true;
+clearTimeout(hung);
+console.log(`${report.scenarios.filter((s) => s.ok).length}/${pick.length} passed, artifacts in ${path.relative(root, h.root)}`);
 process.exitCode = interrupted ? 130 : failed ? 1 : 0;
