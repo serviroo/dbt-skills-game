@@ -174,7 +174,7 @@ def mat(name):
             'trousers': (0x181c29, 0.85, 0.0, 'weave', 0.0, 0.3, 200),
             'stitch': (0x2b3753, 0.8, 0.0, 'weave', 0.0, 0.2, 260),
             'leather': (0x2b2a31, 0.6, 0.0, 'leather', 0.35, 0.35, 70),
-            'glove': (0x3a3946, 0.5, 0.0, 'leather', 0.3, 0.3, 120),
+            'glove': (0x4a4a5c, 0.5, 0.0, 'leather', 0.3, 0.3, 120),
             'boot': (0x232229, 0.62, 0.0, 'leather', 0.45, 0.4, 60),
             'iron': (0x353b49, 0.48, 0.85, 'hammer', 0.5, 0.35, 60),
             'glass': (0x0e1a2c, 0.12, 0.0, 'smooth', 0.0, 0.0, 10),
@@ -671,18 +671,21 @@ def hands():
             knuckles.append(c0 - pn * 0.011 - dk * 0.002)
             # a steady taper from the knuckle to a rounded tip
             pts = [c0 - dk * 0.016, c0, c0.lerp(c1, 0.5), c1, c1.lerp(c2, 0.5), c2, c2.lerp(tip, 0.45), tip - dt * 0.004, tip + dt * 0.001]
-            radii = [r * size * 1.2 for r in (0.0138, 0.0137, 0.0134, 0.013, 0.0126, 0.0121, 0.0115, 0.0102, 0.0066)]
+            # full enough that neighbours touch, so a closed hand reads as one mass under the outline
+            radii = [r * size * 1.3 for r in (0.0138, 0.0137, 0.0134, 0.013, 0.0126, 0.0121, 0.0115, 0.0102, 0.0066)]
             bones = [fb('hand'), fb(f'{k}_01'), fb(f'{k}_01'), fb(f'{k}_02'), fb(f'{k}_02'), fb(f'{k}_03'), fb(f'{k}_03'), fb(f'{k}_03')]
-            tube(f'{k}-{s}', pts, radii, 'glove', ('chain', bones), n=8, aspect=1.0, front=pn, sub=1, uv=2.6, posed=True)
+            tube(f'{k}-{s}', pts, radii, 'glove', ('chain', bones), n=10, aspect=0.8, front=pn, sub=1, uv=2.6, posed=True)
         # the ridge of knuckles across the back of the hand
         ends = [knuckles[0] + (knuckles[0] - knuckles[1]) * 0.35] + knuckles + [knuckles[-1] + (knuckles[-1] - knuckles[-2]) * 0.35]
         knuckles_o = tube(f'knuckles-{s}', ends, [0.008, 0.0118, 0.0122, 0.012, 0.011, 0.0072], 'glove', [fb('hand')] + [fb(f'{k}_01') for k in ('index', 'middle', 'ring', 'pinky')],
              n=10, steps=3, aspect=0.8, front=pn, sub=1, uv=2.6, posed=True)
         t1, t2, t3, tip = [JP[fb(f'thumb_0{i}')] for i in (1, 2, 3)] + [JP[fb('thumb_04_leaf')]]
+        # the tip turns in over the index finger, so the thumb lies across the fist rather than standing off it
+        tip = tip.lerp(JP[fb('index_02')].lerp(JP[fb('index_03')], 0.5), 0.35)
         dt = (tip - t3).normalized()
         pts = [t1.lerp(h, 0.35), t1, t1.lerp(t2, 0.5), t2, t2.lerp(t3, 0.5), t3, t3.lerp(tip, 0.45), tip - dt * 0.004, tip + dt * 0.001]
         bones = [fb('hand'), fb('thumb_01'), fb('thumb_01'), fb('thumb_02'), fb('thumb_02'), fb('thumb_03'), fb('thumb_03'), fb('thumb_03')]
-        tube(f'thumb-{s}', pts, [r * 1.12 for r in (0.0165, 0.0158, 0.015, 0.0143, 0.0136, 0.0128, 0.0119, 0.0102, 0.0066)], 'glove', ('chain', bones), n=8, aspect=1.0, front=pn, sub=1, uv=2.6, posed=True)
+        tube(f'thumb-{s}', pts, [r * 1.12 for r in (0.0165, 0.0158, 0.015, 0.0143, 0.0136, 0.0128, 0.0119, 0.0102, 0.0066)], 'glove', ('chain', bones), n=10, steps=3, aspect=0.8, front=pn, sub=1, uv=2.6, posed=True)
         # the ball of the thumb, joining it to the palm
         thenar_o = tube(f'thenar-{s}', [h.lerp(t1, 0.25) + d * 0.02, t1.lerp(t2, 0.4)], [0.019, 0.0145], 'glove',
                         [fb('hand'), fb('thumb_01'), fb('thumb_02')], n=10, aspect=0.75, front=pn, sub=1, uv=2.6, posed=True)
