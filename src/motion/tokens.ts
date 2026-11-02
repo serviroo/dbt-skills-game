@@ -62,6 +62,9 @@ export const WINDOW = {
   reducedCloseMs: 180,
 } as const;
 
+/** The Safe Zone's calm fade in: a new screen's words, and Lights up and Sound back as the keyboard goes down. */
+export const SAFE_FADE = { ms: 520 } as const;
+
 /** The intro's Safe Zone and Skip: taps land on nothing this long after one is pressed, as under a closing window in the
  *  companion, so the second tap of a double tap never presses what opens in its place. */
 export const WAYS = { settleMs: 450 } as const;
