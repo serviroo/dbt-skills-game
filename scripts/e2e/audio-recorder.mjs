@@ -167,12 +167,6 @@ export function audioHeard(page, i, from, to, silence) {
   );
 }
 
-/**
- * Where a step into the Safe Zone places its cut on each tap's audio clock: window.__cutsIn(step) runs step() and gives,
- * per tap, the `at` the engine's quiet() uses or, on a clock of its own (the moment hum), its first stop() there less
- * SCORE.safeOutSec, the ramp it stops over; null where it placed none. Each also keeps the time it placed and the latest
- * it may place: soon() as it is placed, plus that ramp for a stop, the same sum the hum makes, so rounding can't pass it.
- */
 export async function watchCuts(page) {
   await page.evaluate(async () => {
     const { AudioEngine } = await import('/src/audio/engine.ts');
@@ -205,10 +199,6 @@ export async function watchCuts(page) {
   });
 }
 
-/**
- * Where the step `m` (the audio clocks as it began, `m.at`, and its cuts from window.__cutsIn, `m.cut`) placed its cut on
- * tap i's clock: in the step itself, where the engine places every sound, not later.
- */
 export function cutOf(m, i = 0) {
   const cut = m.cut[i];
   if (!cut) throw new Error(`the step placed no cut on tap ${i}`);

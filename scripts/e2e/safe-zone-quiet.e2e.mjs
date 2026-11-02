@@ -12,9 +12,8 @@ const AUDIO = 'dbt.audio.v1';
 // silent: a peak below one step of 16-bit audio and RMS below -100 dBFS, as in me-92
 const SILENT_PEAK = 2 ** -15;
 const SILENT_RMS = 1e-5;
-// the speakers must be silent this soon after the cut the tap places, which the engine places where it places every
-// sound (soon(): two frames ahead of the audio clock, or a frame past the output's latency where that is longer): the
-// click-free ramp and a few render quanta of audio clock
+// the speakers must be silent this soon after the cut the tap places: the click-free ramp and a few render quanta of
+// audio clock
 const WITHIN = 0.051;
 const CUES = ['reward_chime', 'chest_burst', 'soft_chime'];
 
@@ -53,8 +52,8 @@ async function boot(h, opts) {
   await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile') && window.__taps.length > 0, null, { timeout: 30000 });
   await audioReady(page);
   await h.reachHub(page);
-  // the audio clock at every step into or out of the Safe Zone, where on each clock the step placed its cut, and every
-  // sound the app asks for
+  // the audio clock at every step into or out of the Safe Zone, where each step placed its cut, and every sound the app
+  // asks for
   await watchCuts(page);
   await page.evaluate(() => {
     const a = window.__daily;
@@ -119,7 +118,6 @@ const silent = (x) => x.peak < SILENT_PEAK && x.rms < SILENT_RMS;
 // a stalled recorder must not pass for silence: every stretch judged silent has to be at least 90% read
 const covered = (x) => x.cover >= 0.9;
 const fmt = (x) => `${x.rms.toExponential(1)}/${x.peak.toExponential(1)}, ${(x.cover * 100).toFixed(0)}% read${x.unrendered ? `, ${x.unrendered} blocks never rendered` : ''}`;
-/** Where tap i must be silent from after the step `m`, and how long that is after the tap, in ms. */
 const silentFrom = (m, i = 0) => cutOf(m, i) + WITHIN;
 const silentMs = (m, i = 0) => ((silentFrom(m, i) - m.at[i]) * 1000).toFixed(0);
 const quietAt = (x, t) => (x.quietFrom === null ? 'never' : `${((x.quietFrom - t) * 1000).toFixed(1)} ms after the tap`);

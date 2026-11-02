@@ -54,8 +54,6 @@ async function visit(h, query, viewport = PHONE, { seed = {}, prepare } = {}) {
       window.__cues.push({ cue, at: performance.now() });
       return play.call(this, cue, ...args);
     };
-    // the cut the press makes in its own click (once a scenario notes __pressAt): where on the audio clock it is placed
-    // (soon(), unless it is given a time), and soon() as it is made
     for (const [name, i] of [['quiet', 2], ['stopAll', 1]]) {
       const f = AudioEngine.prototype[name];
       AudioEngine.prototype[name] = function (...a) {
@@ -393,8 +391,6 @@ async function welcomeNote(h, page) {
 /** The speakers over [from, to] of the audio clock: loudest sample, RMS, and how much of the stretch was read. */
 const heard = (page, from, to) => audioHeard(page, 0, from, to, [SILENT_PEAK, SILENT_RMS]);
 
-/** Where the press's cut lands on the audio clock: made in the press itself, where the engine places every sound
- *  (soon(): two frames ahead of the clock, or a frame past the output's latency where that is longer), not later. */
 function cutAt(h, at, cut, tag) {
   h.expect(cut, `${tag}: the press made no cut in its own click`);
   h.expect(cut.at >= at && cut.at <= cut.soon, `${tag}: the press's cut was placed ${((cut.at - at) * 1000).toFixed(1)} ms after it, past where the engine places every sound (${((cut.soon - at) * 1000).toFixed(1)} ms)`);
@@ -530,7 +526,6 @@ export const scenarios = {
       // two and a half seconds of the companion still on its way
       await audioRecorded(page, 0, at + 2.5);
       const before = await heard(page, at - 0.5, at);
-      // past the 15 ms ramp to silence (SCORE.safeOutSec) from where the engine placed it, with room for a last sample
       const after = await heard(page, cut + 0.017, at + 2.5);
       release();
       h.expect(before.rms > 1e-3, `the intro was not audible before the press (RMS ${before.rms}), so silence proves nothing`);
@@ -711,9 +706,6 @@ export const scenarios = {
             true,
           );
         }, !!hidden);
-        // Skip is pressed in the page the moment the recorder shows the cue sounding: the 0.2 s up to the audio clock,
-        // as far as it has heard them, ten times over silence. A press from outside lands whenever the page next runs,
-        // which on a page held for a second or two is after the cue has died away
         await until(page, (min) => {
           const tap = window.__taps[0];
           const q = 128 / tap.context.sampleRate;
@@ -732,8 +724,7 @@ export const scenarios = {
         const at = await page.evaluate(() => window.__pressAt);
         const cut = cutAt(h, at, await page.evaluate(() => window.__cut), tag);
         await audioRecorded(page, 0, at + 2);
-        // past the 40 ms cut (SCORE.leaveSec) from where the engine placed it, and its sources' end (stoppedBy), with
-        // room for its last few samples
+        // past the 40 ms cut (SCORE.leaveSec), with room for its last few samples
         const before = await heard(page, at - 0.2, at);
         const after = await heard(page, cut + 0.117, at + 2);
         // the cue sounding as the press lands, ten times over silence (the letter's opening swells in from soft)

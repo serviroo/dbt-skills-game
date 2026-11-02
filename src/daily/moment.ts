@@ -129,7 +129,6 @@ function lowHum(scale: number) {
   });
   breath.gain.setTargetAtTime(0.05, soon(ctx), 0.8);
   let dead = false;
-  // a silent source ending where the fade out as the page hides does: the pause comes when it ends
   let nap: ConstantSourceNode | undefined;
   const noNap = () => {
     if (!nap) return;
@@ -160,8 +159,6 @@ function lowHum(scale: number) {
     if (!document.hidden) return void wake.gain.setTargetAtTime(1, t, WAKE_TAU);
     // hidden: fade out, then pause like the rest of the app's sound (a phone may pause it sooner; see `paused`)
     wake.gain.setTargetAtTime(0, t, SLEEP_TAU);
-    // timed on the audio clock, not by a timer: that clock moves in whole buffers and lags on a busy device, and a pause
-    // landing before the fade is done cuts the hum off where it can still be heard
     nap = ctx.createConstantSource();
     nap.offset.value = 0;
     nap.connect(ctx.destination);

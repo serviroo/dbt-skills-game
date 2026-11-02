@@ -216,8 +216,7 @@ export const scenarios = {
     },
     async '${name}-companion-hold'(h) {
       record(h);
-      // a sleep that ends early, here at half its time, still holds the companion module 9 s by the clock that
-      // measures it, and the held request then loads through the harness's own route
+      // a sleep that ends early, here at half its time, still holds the companion module 9 s by the clock that measures it
       const held = [];
       let asked;
       const { page } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', undefined, (ctx) => {

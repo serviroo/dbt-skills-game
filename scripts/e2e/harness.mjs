@@ -843,15 +843,6 @@ export async function startHarness(flags = {}) {
     for (const ev of ['domcontentloaded', 'load', 'crash', 'close']) page.on(ev, () => log(ev));
     trail.set(page, { t0, life, logs, errors: [] });
   }
-  /**
-   * Answers every request a page in `ctx` makes to the dev server from this process, which fetches it from the server
-   * itself. The browser's own network stack fails every request still waiting for a connection with ERR_NETWORK_CHANGED
-   * whenever the machine it runs on gains or loses a network address, as a CI job starting or stopping a Docker network
-   * does, and a page that loses a module that way never starts. An answered request never waits on that stack. Offline
-   * (setOffline, or the offline option) still fails every request, as the browser fails them. Vite's live-reload socket
-   * opens, as its client expects, and hears nothing: the browser lets no page answered from here open a socket to this
-   * machine, and no file changed meanwhile reloads a page a scenario is driving.
-   */
   async function serveFromHere(ctx, offline) {
     const setOffline = ctx.setOffline.bind(ctx);
     ctx.setOffline = async (on) => {
@@ -861,7 +852,6 @@ export async function startHarness(flags = {}) {
     await ctx.route((url) => url.origin === server.url, async (route) => {
       if (offline) return route.abort('internetdisconnected').catch(() => {});
       const req = route.request();
-      // the headers fetch sets itself, or refuses
       const headers = Object.fromEntries(Object.entries(req.headers()).filter(([k]) => !['connection', 'content-length', 'host', 'keep-alive', 'transfer-encoding', 'upgrade'].includes(k)));
       let res;
       let body;
@@ -871,9 +861,7 @@ export async function startHarness(flags = {}) {
       } catch {
         return route.abort('connectionrefused').catch(() => {});
       }
-      // fetch has already undone any compression, so the body goes as it is
       const out = Object.fromEntries([...res.headers].filter(([k]) => k !== 'content-encoding' && k !== 'content-length'));
-      // the page may have closed meanwhile, ending the request
       await route.fulfill({ status: res.status, headers: out, body }).catch(() => {});
     });
     await ctx.routeWebSocket((url) => url.host === new URL(server.url).host, () => {});
@@ -938,7 +926,6 @@ export async function startHarness(flags = {}) {
     const token = crypto.randomUUID();
     fs.writeFileSync(path.join(out, 'run-token.txt'), token);
     const ctx = await browser.newContext();
-    // past the route that answers pages from here (see serveFromHere()), the way the requests it leaves go
     await ctx.unrouteAll();
     const page = await ctx.newPage();
     try {
