@@ -35,7 +35,7 @@ const rigSkin = root.listSkins().find((s) => s.listJoints().some((j) => j.getNam
 if (!rigSkin) throw new Error(`${RIG} has no skeleton with a hand_r joint`);
 const joints = rigSkin.listJoints();
 const jointIndex = new Map(joints.map((j, i) => [j.getName(), i]));
-if (!['idle', 'reach', 'hold'].every((c) => root.listAnimations().some((a) => a.getName() === c))) throw new Error(`${RIG} lacks the idle, reach and hold clips`);
+if (!['idle', 'reach', 'hold'].every((c) => root.listAnimations().filter((a) => a.getName() === c).length === 1)) throw new Error(`${RIG} needs exactly one each of the idle, reach and hold clips`);
 
 /* ---------- the rig without its old figure: no meshes, no other skins, no nodes outside the scene */
 for (const n of root.listNodes()) if (n.getMesh()) n.dispose();

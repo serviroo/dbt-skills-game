@@ -26,6 +26,7 @@ import bmesh
 import math
 import os
 import random
+import re
 import sys
 from mathutils import Euler, Vector
 from mathutils.bvhtree import BVHTree
@@ -67,7 +68,12 @@ for a in bpy.data.actions:
 # the rig file's own meshes, materials and images go too, so the new ones keep their names on a rebuild from hero.glb
 bpy.data.orphans_purge(do_local_ids=True, do_linked_ids=True, do_recursive=True)
 ARM.animation_data_clear()
-IDLE = next(a for a in bpy.data.actions if 'idle' in a.name.lower())
+# the figure is modelled in the first frame of the clip named exactly 'idle', the one build-hero.mjs binds to; Blender
+# renames a second clip of that name 'idle.001', so a rig with two can't say which pose the figure stands in
+idles = [a for a in bpy.data.actions if re.fullmatch(r'idle(\.\d+)?', a.name)]
+if [a.name for a in idles] != ['idle']:
+    raise RuntimeError(f"{RIG} needs exactly one animation named 'idle'; it has {', '.join(sorted(a.name for a in bpy.data.actions)) or 'none'}")
+IDLE = idles[0]
 ARM.animation_data_create()
 ARM.animation_data.action = IDLE
 if getattr(IDLE, 'slots', None) and len(IDLE.slots):
