@@ -9,6 +9,7 @@ import { INTRO_WAYS, LETTER, END_CARD, NAME_PROMPT, TITLE_SCREEN } from '../cont
 import { DEFAULT_COMPANION, DEFAULT_NAME, chooseYou, cleanName } from '../core/you';
 import { mayMentionTherapist } from '../core/session';
 import { LanternWindow, lanternLayer } from './lantern-window';
+import { now, onFrame } from '../daily/clock';
 
 /** Sound hook (wired to the audio engine by the app). */
 export const uiSounds: { play?: (cue: string, opts?: Record<string, number>) => void } = {};
@@ -383,6 +384,34 @@ const EMBLEM: Record<RewardItem['id'], () => string> = {
   charm: () => ICON_STAR,
 };
 
+/**
+ * The companion's card shows the moth itself in 3D, waking as it is met (src/scene/vignettes/scenes/moth.ts), through
+ * the companion's scene host. Its drawing stays underneath: it shows while the moth loads and wherever there is no
+ * WebGL. Returns the function that takes the moth down.
+ */
+function meetCompanion(em: HTMLElement): () => void {
+  em.querySelector('svg')?.classList.add('dq-scene-flat');
+  let gone = false;
+  let off = () => {};
+  // the moth wakes from the first frame it is seen on (live: drawn and fading in over its drawing), however long its
+  // model and the GPU took; until then it is held asleep
+  let woke = NaN;
+  const beat = () => {
+    const t = now();
+    if (Number.isNaN(woke) && em.classList.contains('is-scene-live')) woke = t;
+    return { e: Number.isNaN(woke) ? 0 : t - woke, dur: Infinity, started: true, done: false };
+  };
+  import('../scene/vignettes/host')
+    .then(({ mountScene, playerAccent }) => {
+      if (!gone) off = mountScene(em, { kind: 'moth', clock: { now, onFrame, beat }, accent: playerAccent(), reduced: () => params.reduced, onMotion });
+    })
+    .catch((err: unknown) => console.warn('[rewards] the 3D companion did not load; its drawing stays', err));
+  return () => {
+    gone = true;
+    off();
+  };
+}
+
 /** Gacha-style reveal: cards flip in one by one, rarity light first, then the item. Resolves with the action. */
 export async function rewardCards(items: RewardItem[], opts: { onCard?: (i: number) => void; left?: AbortSignal } = {}): Promise<'letter'> {
   const root = el('div', 'ov interactive rw');
@@ -406,13 +435,20 @@ export async function rewardCards(items: RewardItem[], opts: { onCard?: (i: numb
   root.append(head, grid, actions);
   ui().append(root);
   const e = entrance(root, opts.left);
+  let offMoth = () => {};
+  const leftMoth = () => offMoth();
+  opts.left?.addEventListener('abort', leftMoth, { once: true });
   e.animate(root, [{ opacity: 0 }, { opacity: 1 }], { duration: 500, easing: 'ease-out' });
   e.animate(head, [{ opacity: 0, letterSpacing: '0.5em' }, { opacity: 1, letterSpacing: '0.22em' }], { duration: 700, easing: 'cubic-bezier(.16,1,.3,1)' });
   let at = 450;
   cards.forEach((c, i) => {
     e.cue(
       at / 1000,
-      () => opts.onCard?.(i),
+      () => {
+        opts.onCard?.(i);
+        // the moth wakes as its card turns over
+        if (items[i].id === 'companion') offMoth = meetCompanion(c.querySelector<HTMLElement>('.em')!);
+      },
       () => (!e.reduced || i === 0) && snd('reward_chime', { index: i }),
     );
     e.animate(c, [
@@ -432,6 +468,8 @@ export async function rewardCards(items: RewardItem[], opts: { onCard?: (i: numb
     }),
   );
   await e.leave(380);
+  opts.left?.removeEventListener('abort', leftMoth);
+  offMoth();
   return 'letter';
 }
 

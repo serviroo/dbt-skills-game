@@ -48,7 +48,7 @@ export function loadWatch(): Promise<void> {
  * a wing turns about the root the camp gives it (./figures). The packer merges identical quantized geometry, so two
  * figures can share one in different places (the knights' eyes): each place gets its own copy, made once.
  */
-function settle(part: THREE.Object3D, made: Map<string, THREE.BufferGeometry>) {
+export function settle(part: THREE.Object3D, made: Map<string, THREE.BufferGeometry>) {
   part.traverse((o) => {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh) return;

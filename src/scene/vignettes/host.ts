@@ -29,6 +29,8 @@ const SCENES = {
   tide: () => import('./scenes/tide'),
   hands: () => import('./scenes/hands'),
   glow: () => import('./scenes/glow'),
+  // the companion, met in the intro's rewards: a model too
+  moth: () => import('./scenes/moth').then((m) => m.ready().then(() => m)),
 } satisfies Record<string, () => Promise<{ build: BuildScene }>>;
 
 export type SceneKind = keyof typeof SCENES;

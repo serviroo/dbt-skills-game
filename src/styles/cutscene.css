@@ -333,6 +333,23 @@
   width: 100%;
   height: 100%;
 }
+/* the companion's moth in 3D fills its emblem. Its window is black where the moth isn't and blends with the card, so
+   the emblem itself takes no filter while the moth is there (a filter would cut the window off from the card): the
+   drawing's glow goes on the drawing, and fades out with it as the moth fades in */
+.rw-card .em.is-scene-mounted {
+  position: relative;
+  filter: none;
+}
+.rw-card .em.is-scene-mounted > svg {
+  filter: drop-shadow(0 0 10px var(--rc-glow));
+}
+.rw-card .em > .dq-scene {
+  inset: 0;
+  border-radius: 0;
+  -webkit-mask-image: none;
+  mask-image: none;
+  mix-blend-mode: lighten;
+}
 .rw-card .nm {
   font-family: var(--font-display);
   font-weight: 600;
