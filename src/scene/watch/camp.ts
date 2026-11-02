@@ -4,13 +4,13 @@ import type { BuildScene } from '../vignettes/runtime';
 import { FIGURES, type Figure } from './figures';
 import { makeMats, sway } from './kit';
 import { loadWatch } from './models';
-import { buildSky, HORIZON } from './sky';
+import { buildSky, HORIZON, nightAt, starTurn, type Night } from './sky';
 import { buildWorld, HEARTH, LANTERN, SPOTS } from './world';
 
 /**
  * The Night Watch's camp, a scene of the companion's shared scene host (src/scene/vignettes/host.ts): the world, the
- * sky and one figure for every watcher who has arrived. It reports where each figure is in the frame, so the roster
- * can lay a labelled button over it; the scene itself takes no input.
+ * sky (the player's own night, on the device's clock) and one figure for every watcher who has arrived. It reports
+ * where each figure is in the frame, so the roster can lay a labelled button over it; the scene itself takes no input.
  */
 
 /** Where a figure is in the frame, as shares of the frame's width and height from its top left. */
@@ -28,12 +28,14 @@ export interface CampInput {
   onHits(hits: CampHit[]): void;
 }
 
-/** What the camp is doing, for the E2E checks: who stands in it, where, and how often it was built and taken down. */
+/** What the camp is doing, for the E2E checks: who stands in it, where, how often it was built and taken down, and the
+ *  night its sky shows, with where its moon is in the frame. */
 interface CampHook {
   builds: number;
   disposed: number;
   ids: ShadowId[];
   hits: CampHit[];
+  sky?: Night & { moon: { x: number; y: number } };
 }
 const hook: CampHook = ((window as unknown as { __camp?: CampHook }).__camp ??= { builds: 0, disposed: 0, ids: [], hits: [] });
 
@@ -44,6 +46,9 @@ const FOV = 36;
 /** a still frame (reduced motion) is posed at this moment: the Lantern at the middle of its breath */
 const STILL_T = 0;
 const TAU = Math.PI * 2;
+/** how often an open camp looks at the clock again for its moon and glow: both move well under a pixel in that time
+ *  (the stars turn every frame) */
+const SKY_EVERY = 60_000;
 
 /** Every place the frame must hold, whoever has arrived, so the camp doesn't reframe as the Watch grows. */
 function framePoints() {
@@ -88,8 +93,33 @@ export const build: BuildScene = (_accent, opts) => {
   const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 200);
   const mats = makeMats();
   const world = buildWorld(mats);
-  const sky = buildSky();
+  const sky = buildSky(world.skyline);
   scene.add(world.group, sky.group);
+  let nightMs = 0;
+  let sized = false;
+  /**
+   * The sky follows the device's clock, the one thing in the camp that doesn't come from the beat: the glow by its
+   * hours, the moon and stars by standard time; the stars every frame, the rest on building and then about once a
+   * minute, or at once if the clock is set back. A new moon place is worked out with the camera at rest, where the
+   * frame was fitted.
+   */
+  function night() {
+    const ms = Date.now();
+    if (nightMs && ms >= nightMs && ms - nightMs < SKY_EVERY) {
+      const turn = starTurn(ms);
+      sky.turn(turn);
+      if (hook.sky) hook.sky.turn = turn;
+      return;
+    }
+    nightMs = ms;
+    const n = nightAt(new Date(ms));
+    sky.set(n);
+    if (sized) {
+      place(0, 0);
+      sky.frame(camera);
+    }
+    hook.sky = { ...n, moon: { ...sky.moonAt } };
+  }
 
   const figures: { f: Figure; spot: THREE.Group }[] = [];
   for (const id of input.ids) {
@@ -104,6 +134,7 @@ export const build: BuildScene = (_accent, opts) => {
   }
   hook.builds++;
   hook.ids = [...input.ids];
+  night();
 
   const target = new THREE.Vector3(0, 0.95, -0.35);
   const frame = framePoints();
@@ -173,6 +204,7 @@ export const build: BuildScene = (_accent, opts) => {
     pose(b, still) {
       const t = still ? STILL_T : b.e;
       sway.uTime.value = t;
+      night();
       // the camera drifts a few degrees around the camp and back over a minute; still, it rests in the middle
       place(still ? 0 : Math.sin((t / 64) * TAU) * 0.045, still ? 0 : Math.sin((t / 41) * TAU) * 0.06);
       world.tick(t, still);
@@ -186,6 +218,8 @@ export const build: BuildScene = (_accent, opts) => {
       place(0, 0);
       camera.userData.px = Math.min(3, Math.max(1, height / 480));
       sky.frame(camera);
+      sized = true;
+      if (hook.sky) hook.sky.moon = { ...sky.moonAt };
       // where the figures are, with the camera at rest: its slow drift moves them a few pixels at most, so the buttons
       // over them are placed once per frame size and an idle camp does no style work
       scene.updateMatrixWorld();
@@ -197,6 +231,7 @@ export const build: BuildScene = (_accent, opts) => {
       hook.disposed++;
       hook.ids = [];
       hook.hits = [];
+      delete hook.sky;
     },
   };
 };

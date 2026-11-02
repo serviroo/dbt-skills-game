@@ -22,8 +22,8 @@ anything a player sees or hears.
 | gold | `#C9A45C` | Rewards only: the chest, ranks, titles. If everything is gold, nothing is. |
 | ice | `#E6F1FF` | Text. |
 | mint | `#89CF9D` | Tiny doses, only for things that belong to the player. |
-| rose | `#E2968C` | Home's horizon at dawn only, low and soft in the dawn sky. |
-| amber | `#D67048` | Home's horizon at dusk only, low and soft in the dusk sky. |
+| rose | `#E2968C` | The horizon at dawn only (Home and the camp), low and soft in the dawn sky. |
+| amber | `#D67048` | The horizon at dusk only (Home and the camp), low and soft in the dusk sky. |
 
 The window material: a dark translucent plate (`rgba(5,17,31,.93)`), one lit hairline on top and a darker one below,
 a thin blue rule under the title. Tokens live in `src/styles/tokens.css`.
@@ -40,6 +40,15 @@ night. Opening or leaving Home fades the sky in 0.9 s, a new hour drifts in over
 the new one, and the Safe Zone always opens on night at once. The pictures live in `public/sky/` (tall ones for
 portrait screens, wide ones for landscape), the layers in `src/daily/daily.css`, the timings in
 `src/motion/tokens.ts`.
+
+**The camp's sky** follows the player's own night on the same clock. The moon has that night's real phase, lit on
+its right as it waxes (its left in a southern time zone), and fades into the sky toward new moon. It climbs from low
+on the left at 17:00 to the top of the sky around midnight and down to the right by 08:00, riding over the pine tops;
+by day it drifts back, so it never jumps. The moon and the stars, which turn about the pole with the hour, go by
+standard time (those hours are 18:00 and 09:00 on a summer-time clock), so a night the clocks change moves neither.
+At dusk a soft amber glow comes up low on the right and at dawn a rose one on the left, each over half an hour on the
+clock and gone before the top of the frame, and the faint stars fade with it. It's worked out on the device from the
+date and time alone, never stored and never fetched (`src/scene/watch/sky.ts`).
 
 ## Type
 

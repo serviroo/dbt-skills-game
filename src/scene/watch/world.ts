@@ -32,6 +32,8 @@ export interface World {
   tick(t: number, still: boolean): void;
   /** frees what lives outside the scene graph's geometries and materials (instance buffers) */
   dispose(): void;
+  /** every point of the pines' crowns as drawn, so the sky can keep the moon clear of them */
+  skyline: THREE.Vector3[];
 }
 
 const TAU = Math.PI * 2;
@@ -266,6 +268,29 @@ function pineSpots() {
   return out;
 }
 
+/**
+ * The pines' crowns as they are drawn: every corner of the needles' triangles and the middle of every edge, ragged
+ * jitter and all, placed by the same matrices the instanced crowns use (each pine's spot, turn and size), so the moon's
+ * gap holds for the real trees. Worked out once per camp.
+ */
+function pineSkyline(needles: THREE.BufferGeometry, spots: THREE.Matrix4[]) {
+  const pos = needles.getAttribute('position');
+  const index = needles.getIndex();
+  const count = index ? index.count : pos.count;
+  const seen = new Set<string>();
+  const local: THREE.Vector3[] = [];
+  const keep = (v: THREE.Vector3) => {
+    const key = `${v.x.toFixed(4)},${v.y.toFixed(4)},${v.z.toFixed(4)}`;
+    if (!seen.has(key)) (seen.add(key), local.push(v));
+  };
+  const corner = (i: number) => new THREE.Vector3().fromBufferAttribute(pos, index ? index.getX(i) : i);
+  for (let i = 0; i + 2 < count; i += 3) {
+    const tri = [corner(i), corner(i + 1), corner(i + 2)];
+    for (let k = 0; k < 3; k++) keep(tri[k]), keep(tri[k].clone().add(tri[(k + 1) % 3]).multiplyScalar(0.5));
+  }
+  return spots.flatMap((m) => local.map((v) => v.clone().applyMatrix4(m)));
+}
+
 /** Grass blades in tufts around the camp, swaying a little; none in the fire, the tent or where the watchers stand. */
 function grass() {
   const blade = new THREE.BufferGeometry();
@@ -443,6 +468,7 @@ export function buildWorld(m: Mats): World {
   const flameBase = flameMat.color.clone();
   return {
     group,
+    skyline: pineSkyline(needles, spots),
     tick(t, still) {
       // the Lantern breathes once every five seconds (0.2 Hz); the fire swells on two slower, gentler waves
       const lamp = still ? 0 : Math.sin((t / 5) * TAU);
