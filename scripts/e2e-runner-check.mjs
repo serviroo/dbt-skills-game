@@ -331,6 +331,17 @@ chromium.launchServer = (options) => launchServer({ ...options, args: [...option
   assert.notEqual(twice.code, 0);
   assert.match(twice.log, new RegExp(`"${name}-twice" on line 3 a second time`));
   assert(!twice.log.includes('renderer:'));
+  // two names that make one folder, or a name that makes the runner's own, stop the run before the browser too
+  fs.writeFileSync(duplicate, `export const scenarios = {\n  async '${name}.same'() {},\n  async '${name}-same'() {},\n};`);
+  const shared = await run('shared-folder', [`--scenario=${name}-same`]);
+  assert.notEqual(shared.code, 0);
+  assert.match(shared.log, new RegExp(`scenario "${name}-same" in \\S+ would write to ${name}-same/, the folder of scenario "${name}\\.same"`));
+  assert(!shared.log.includes('renderer:'));
+  fs.writeFileSync(duplicate, `export const scenarios = { async failed() {} };`);
+  const reserved = await run('reserved-folder', ['--scenario=failed']);
+  assert.notEqual(reserved.code, 0);
+  assert.match(reserved.log, /scenario "failed" in \S+ would write to failed\/, the folder of the failed scenarios/);
+  assert(!reserved.log.includes('renderer:'));
   fs.unlinkSync(duplicate);
   // a name used but never defined, in the test or in a function that runs in the page, stops the run before the browser.
   // A function runs there by any name, wrapper or CDP code field that leads back to it, and not for having its text logged

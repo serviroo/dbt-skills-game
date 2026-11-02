@@ -10,7 +10,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const safe = (name) => name.replace(/[^\w-]+/g, '-');
+/** The name of the folder a scenario writes to; scripts/e2e.mjs lets no two scenarios share one, nor running/ or failed/ */
+export const safe = (name) => name.replace(/[^\w-]+/g, '-');
 
 /** The folder the scenario `name` writes to in the run folder `out` */
 export const folderOf = (out, name) => path.join(out, safe(name));

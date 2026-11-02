@@ -22,7 +22,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseAst } from 'vite';
 import { startHarness } from './e2e/harness.mjs';
-import { folderOf, keep, mark } from './e2e/keep.mjs';
+import { folderOf, keep, mark, safe } from './e2e/keep.mjs';
 import { undefinedNames } from './e2e-scope-check.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -56,6 +56,8 @@ function twice(node, found = []) {
 
 const all = [];
 const fileOf = new Map();
+// each scenario's folder in the run's (scripts/e2e/keep.mjs), and whose it is; running/ and failed/ are the runner's own
+const folders = new Map([['running', 'the scenarios running'], ['failed', 'the failed scenarios']]);
 const serial = new Set();
 const files = fs.readdirSync(dir).filter((f) => f.endsWith('.e2e.mjs')).sort();
 // a name a scenario uses but never defines would stop it only once a browser got there
@@ -72,6 +74,10 @@ for (const f of files) {
   if (mod.serial === true) serial.add(file);
   for (const [name, run] of Object.entries(scenarios)) {
     if (fileOf.has(name)) throw new Error(`scenario "${name}" is in both ${fileOf.get(name)}.e2e.mjs and ${f}`);
+    // a folder of its own, or what two scenarios write would mix, and the failure of one would keep both
+    const folder = safe(name);
+    if (folders.has(folder)) throw new Error(`scenario "${name}" in ${f} would write to ${folder}/, the folder of ${folders.get(folder)}`);
+    folders.set(folder, `scenario "${name}"`);
     if (typeof run !== 'function') throw new Error(`scenario "${name}" in ${f} is not a function`);
     fileOf.set(name, file);
     all.push({ name, file, run, i: all.length });
