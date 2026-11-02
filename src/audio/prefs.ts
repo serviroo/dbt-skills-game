@@ -4,7 +4,7 @@
  */
 import type { AudioEngine, UserLevels } from './engine';
 import { AUDIO_KEY } from '../core/stored-names';
-import { write } from '../core/cleared';
+import { setStored, write } from '../core/cleared';
 
 export interface AudioLevels extends UserLevels {
   /** The low hum in Give me a moment, which plays outside the engine; a save from before it has the full level. */
@@ -41,7 +41,7 @@ export function savePrefs(p: AudioLevels) {
   const out = JSON.stringify({ v: 1, master: unit(p.master), music: unit(p.music), sfx: unit(p.sfx), hum: unit(p.hum), muted: p.muted === true });
   write(() => {
     try {
-      localStorage.setItem(AUDIO_KEY, out);
+      setStored(AUDIO_KEY, out);
     } catch {
       /* storage blocked or full: the levels still hold for this visit */
     }
