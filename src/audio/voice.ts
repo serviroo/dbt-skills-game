@@ -308,10 +308,10 @@ export class Voice {
   }
 
   /** Fade this voice out from `at` over `ramp` seconds and stop its sources. A stop is final: a later one only ever
-   *  silences it sooner (Skip during a long fade-out), never later. */
+   *  silences it sooner (Skip during a long fade-out), never later. True if this stop is the one it keeps. */
   stop(at: number, ramp = 0.03) {
     const kill = stoppedBy(at, ramp);
-    if (kill >= this.killAt) return;
+    if (kill >= this.killAt) return false;
     this.killAt = kill;
     for (const c of [...this.children, ...this.parts]) c.stop(at, ramp);
     const tau = Math.max(0.002, ramp / 4);
@@ -331,6 +331,7 @@ export class Voice {
       }
     }
     this.end = Math.min(this.end, kill);
+    return true;
   }
 
   get isStopped() {

@@ -1139,12 +1139,10 @@ export class Music {
 
   stop(fade = 1, at = soon(this.host.lib.ctx)) {
     for (const s of this.live) {
-      // one already fading out ends no later than this, and its notes are placed only up to the sooner stop
-      if (at < s.end) {
-        s.end = at;
-        s.fadeOut = fade;
-      }
-      s.voice.stop(at, fade);
+      // one already fading out ends no later than this, and places no note past it
+      if (!s.voice.stop(at, fade)) continue;
+      s.end = Math.min(s.end, at);
+      s.fadeOut = fade;
     }
     this.current = null;
   }

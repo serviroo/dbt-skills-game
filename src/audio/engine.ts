@@ -259,13 +259,7 @@ export class AudioEngine {
           }
           // the gate hum and the aura belong to the dark world: they leave when the score lifts into D major
           if (name !== 'reward' && name !== 'end' && name !== 'calm') return;
-          for (const n of ['gate_hum', 'aura_bed'] as BedName[]) {
-            const b = this.beds.get(n);
-            if (!b) continue;
-            if (!b.stopped) b.stop(2.5, at);
-            this.letGo(b.voice);
-            this.beds.delete(n);
-          }
+          for (const n of ['gate_hum', 'aura_bed'] as BedName[]) this.stopBed(n, 2.5, at);
         },
       },
       musicIn,
@@ -476,6 +470,12 @@ export class AudioEngine {
     const h = built.open(this.when(o.at));
     this.beds.set(name, h);
     return h;
+  }
+
+  /** Stop a bed over `fade` seconds; one already fading ends no later than this. It stays in reach by its name, for a
+   *  later, sooner stop (the cut scene ending at once), until a new one of that name replaces it or stopAll() ends it. */
+  stopBed(name: BedName, fade = 0.5, at?: number) {
+    this.beds.get(name)?.stop(fade, at);
   }
 
   private makeRoom(at: number, db: number, tau: number, back: number, tauBack: number) {
@@ -731,10 +731,7 @@ export class AudioEngine {
         case 'bed_stop': {
           const name = loopName as BedName;
           if (e.cue === 'bed_stop') {
-            const b = this.beds.get(name);
-            b?.stop(o.fade ?? 0.5, at);
-            if (b) this.letGo(b.voice);
-            this.beds.delete(name);
+            this.stopBed(name, o.fade ?? 0.5, at);
             break;
           }
           const h = this.bed(name, { at, level: e.loop?.level ?? 1, fadeIn: o.fade ?? 0.5 });
