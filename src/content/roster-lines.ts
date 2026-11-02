@@ -46,6 +46,17 @@ export const ROSTER_COPY = {
   closeCard: 'Close the card',
 };
 
+export const SABLE_ASK = {
+  ask: 'Ask Sable',
+  opens: 'Sable opens the watch log for your week.',
+  times: (n: number) => (n === 1 ? 'once' : n === 2 ? 'twice' : `${n} times`),
+  helped: 'You said it helped.',
+  keep: (skill: string) => `Sable underlines ${skill}. It helped, so it's one to keep close, {name}.`,
+  again: (skill: string) => `Sable underlines ${skill}. You keep coming back to it, {name}. That's how a skill gets steady.`,
+  each: 'Every one of those is real practice, {name}.',
+  quiet: "Sable says the log is quiet this week, and quiet is allowed. The Watch is glad you're here, {name}.",
+};
+
 /** Titles are earned by using things and never lost. 'night-warden' keeps its own rank window. */
 export const TITLE_IDS = ['professional-lurker', 'left-the-lobby', 'self-healer', 'default-skin-day', 'night-warden'] as const;
 export type TitleId = (typeof TITLE_IDS)[number];

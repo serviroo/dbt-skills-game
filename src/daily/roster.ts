@@ -9,10 +9,12 @@ import type { CampHit, CampInput } from '../scene/watch/camp';
 import '../scene/watch/camp.css';
 import { icon } from './art';
 import { now, onFrame } from './clock';
-import { INVENTORY, ROSTER, ROSTER_COPY, type ShadowDef, type ShadowId } from '../content/roster-lines';
+import { SKILL } from '../content/dbt';
+import { INVENTORY, ROSTER, ROSTER_COPY, SABLE_ASK, type ShadowDef, type ShadowId } from '../content/roster-lines';
+import { CALM, css, WINDOW } from '../motion/tokens';
 import type { App } from './app';
-import { cleanName, type Store } from './store';
-import { focusWhole, h, holdView, seen, typo } from './ui';
+import { addDays, cleanName, helped, isSkillId, type Store } from './store';
+import { btn, focusWhole, h, holdView, seen, typo } from './ui';
 
 let svgN = 0;
 
@@ -147,6 +149,62 @@ export function brambleNap(app: App) {
   return h('div', { class: 'w2-bramble', title: 'Bramble, asleep', html: shadowSVG('bramble', { size: 92, label: 'Bramble, a shadow bear, asleep in the corner' }) }, h('span', { class: 'w2-bramble-z', 'aria-hidden': 'true', text: 'z' }));
 }
 
+const sableWeek = (st: Store) => {
+  const today = st.today();
+  const from = addDays(today, -6);
+  const week = new Map<string, { n: number; last: number; helped: boolean }>();
+  for (const e of st.state.events) {
+    if (e.day < from || e.day > today || !isSkillId(e.skill)) continue;
+    const w = week.get(e.skill) ?? { n: 0, last: 0, helped: false };
+    if (e.k === 'skill') {
+      w.n += 1;
+      w.last = Math.max(w.last, e.t);
+    } else if (e.k === 'feedback' && helped(e.data?.answer)) w.helped = true;
+    week.set(e.skill, w);
+  }
+  return [...week]
+    .filter(([, w]) => w.n)
+    .sort(([, a], [, b]) => b.n - a.n || b.last - a.last)
+    .map(([id, w]) => ({ skill: SKILL[id], ...w }));
+};
+
+function sableSays(st: Store) {
+  const week = sableWeek(st);
+  if (!week.length) return [h('p', { class: 'w2-sable-line', text: typo(SABLE_ASK.quiet) })];
+  const kept = week.find((w) => w.helped);
+  const close = kept ? SABLE_ASK.keep(kept.skill.sl) : week[0].n > 1 ? SABLE_ASK.again(week[0].skill.sl) : SABLE_ASK.each;
+  return [
+    h('p', { class: 'w2-sable-line', text: typo(SABLE_ASK.opens) }),
+    h(
+      'ul',
+      { class: 'w2-sable-log' },
+      week.map((w) =>
+        h(
+          'li',
+          { 'data-skill': w.skill.id },
+          h('span', { class: 'w2-sable-n', text: typo(w.skill.sl) }),
+          h('span', { class: 'w2-sable-r', text: typo(`${w.skill.real}, ${SABLE_ASK.times(w.n)}`) }),
+          w.helped ? h('span', { class: 'w2-sable-h', text: typo(SABLE_ASK.helped) }) : null,
+        ),
+      ),
+    ),
+    h('p', { class: 'w2-sable-line', text: typo(close) }),
+  ];
+}
+
+function askSable(app: App) {
+  const say = h('div', { class: 'w2-sable-say', 'aria-live': 'polite' });
+  const ask = btn(
+    SABLE_ASK.ask,
+    () => {
+      say.replaceChildren(...sableSays(app.store));
+      animate(say, [{ opacity: 0 }, { opacity: 1 }], { duration: app.reduced() ? WINDOW.reducedFadeMs : CALM.fadeMs, easing: css(CALM.ease) });
+    },
+    { kind: 'quiet', cls: 'w2-sable-ask' },
+  );
+  return h('div', { class: 'w2-sable' }, ask, say);
+}
+
 function namedPanel(app: App, s: ShadowDef, onName: (id: ShadowId, v: string) => void) {
   const st = app.store;
   const name = st.state.settings.names[s.id] ?? '';
@@ -179,6 +237,7 @@ function namedPanel(app: App, s: ShadowDef, onName: (id: ShadowId, v: string) =>
     h('p', { class: 'w2-sh-role', text: s.role }),
     nick,
     h('p', { class: 'w2-sh-idle', text: typo(s.idle) }),
+    s.id === 'sable' ? askSable(app) : null,
     h('div', { class: 'dq-field w2-sh-field' }, h('label', { for: id, class: 'dq-label w2-sh-label', text: ROSTER_COPY.nameLabel }), input),
   );
   return { el, input, nick };
