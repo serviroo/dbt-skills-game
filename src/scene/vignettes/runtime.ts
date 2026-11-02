@@ -4,7 +4,7 @@ import { deviceDpr, lendRenderer, type Lease } from '../lease';
 import { sceneStats } from '../stats';
 import type { Beat, SceneOpts } from './host';
 
-/** One scene: everything it draws, posed as a pure function of the beat. */
+/** One scene: everything it draws, posed as a pure function of the beat (the camp's sky also follows the wall clock). */
 export interface Vignette {
   readonly scene: THREE.Scene;
   readonly camera: THREE.PerspectiveCamera;
