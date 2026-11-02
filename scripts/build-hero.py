@@ -174,7 +174,7 @@ def mat(name):
             'trousers': (0x181c29, 0.85, 0.0, 'weave', 0.0, 0.3, 200),
             'stitch': (0x2b3753, 0.8, 0.0, 'weave', 0.0, 0.2, 260),
             'leather': (0x2b2a31, 0.6, 0.0, 'leather', 0.35, 0.35, 70),
-            'glove': (0x26252c, 0.55, 0.0, 'leather', 0.3, 0.3, 120),
+            'glove': (0x3a3946, 0.5, 0.0, 'leather', 0.3, 0.3, 120),
             'boot': (0x232229, 0.62, 0.0, 'leather', 0.45, 0.4, 60),
             'iron': (0x353b49, 0.48, 0.85, 'hammer', 0.5, 0.35, 60),
             'glass': (0x0e1a2c, 0.12, 0.0, 'smooth', 0.0, 0.0, 10),
@@ -461,7 +461,12 @@ def hood_and_mantle():
     # outline and read as a cord round the face
     yc0 = cols[2][0]
     out = [(V(p.x, p.y - yc0, 0).normalized() if V(p.x, p.y - yc0, 0).length > 1e-6 else V(0, 1, 0)) for p in rows[0]]
-    fold = [[p + o * 0.008 + V(0, 0, 0.007) for p, o in zip(rows[0], out)], [p + o * 0.017 + V(0, 0, -0.008) for p, o in zip(rows[0], out)]]
+    # a flat band round the face that fades out towards the jaw: carried down to the edge, it pushed out through the
+    # mantle as two ropes either side of the chin
+    yb0 = cols[4][0]
+    fade = [smoothstep(yb0, yb0 + 0.06, p.y) for p in rows[0]]
+    fold = [[p + o * 0.012 * f + V(0, 0, 0.003 * f) for p, o, f in zip(rows[0], out, fade)],
+            [p + o * 0.025 * f + V(0, 0, -0.003 * f) for p, o, f in zip(rows[0], out, fade)]]
     cloth = fold[::-1] + rows
     verts = [p for row in cloth for p in row]
     faces = [(i * n + j, i * n + j + 1, (i + 1) * n + j + 1, (i + 1) * n + j) for i in range(len(cloth) - 1) for j in range(n - 1)]
@@ -657,30 +662,81 @@ def hands():
                  (0.138, 0.048, 0.016, -0.005, 0.0125), (0.152, 0.04, 0.012, -0.005, 0.0135))]
         v, f, _ = loft(palm, 16, cap0=True, cap1=True)
         pb = [fb('lowerarm'), fb('hand')] + [fb(f'{k}_01') for k in FINGERS]
-        add(f'palm-{s}', v, f, 'glove', pb, sub=1, center=h + d * 0.05, uv=2.6, posed=True)
+        palm_o = add(f'palm-{s}', v, f, 'glove', pb, sub=1, center=h + d * 0.05, uv=2.6, posed=True)
         knuckles = []
         for k, size in (('index', 1.0), ('middle', 1.03), ('ring', 0.98), ('pinky', 0.88)):
             c0, c1, c2, tip = [JP[fb(f'{k}_0{i}')] for i in (1, 2, 3)] + [JP[fb(f'{k}_04_leaf')]]
             dk = (c1 - c0).normalized()
             dt = (tip - c2).normalized()
             knuckles.append(c0 - pn * 0.011 - dk * 0.002)
-            # each joint a little narrower than the pads either side of it, flatter than round, tapering to the tip
+            # a steady taper from the knuckle to a rounded tip
             pts = [c0 - dk * 0.016, c0, c0.lerp(c1, 0.5), c1, c1.lerp(c2, 0.5), c2, c2.lerp(tip, 0.45), tip - dt * 0.004, tip + dt * 0.001]
-            radii = [r * size * 1.2 for r in (0.0138, 0.0138, 0.0131, 0.0119, 0.0124, 0.0111, 0.0113, 0.0097, 0.0062)]
+            radii = [r * size * 1.2 for r in (0.0138, 0.0137, 0.0134, 0.013, 0.0126, 0.0121, 0.0115, 0.0102, 0.0066)]
             bones = [fb('hand'), fb(f'{k}_01'), fb(f'{k}_01'), fb(f'{k}_02'), fb(f'{k}_02'), fb(f'{k}_03'), fb(f'{k}_03'), fb(f'{k}_03')]
             tube(f'{k}-{s}', pts, radii, 'glove', ('chain', bones), n=8, aspect=1.0, front=pn, sub=1, uv=2.6, posed=True)
         # the ridge of knuckles across the back of the hand
         ends = [knuckles[0] + (knuckles[0] - knuckles[1]) * 0.35] + knuckles + [knuckles[-1] + (knuckles[-1] - knuckles[-2]) * 0.35]
-        tube(f'knuckles-{s}', ends, [0.008, 0.0118, 0.0122, 0.012, 0.011, 0.0072], 'glove', [fb('hand')] + [fb(f'{k}_01') for k in ('index', 'middle', 'ring', 'pinky')],
+        knuckles_o = tube(f'knuckles-{s}', ends, [0.008, 0.0118, 0.0122, 0.012, 0.011, 0.0072], 'glove', [fb('hand')] + [fb(f'{k}_01') for k in ('index', 'middle', 'ring', 'pinky')],
              n=10, steps=3, aspect=0.8, front=pn, sub=1, uv=2.6, posed=True)
         t1, t2, t3, tip = [JP[fb(f'thumb_0{i}')] for i in (1, 2, 3)] + [JP[fb('thumb_04_leaf')]]
         dt = (tip - t3).normalized()
         pts = [t1.lerp(h, 0.35), t1, t1.lerp(t2, 0.5), t2, t2.lerp(t3, 0.5), t3, t3.lerp(tip, 0.45), tip - dt * 0.004, tip + dt * 0.001]
         bones = [fb('hand'), fb('thumb_01'), fb('thumb_01'), fb('thumb_02'), fb('thumb_02'), fb('thumb_03'), fb('thumb_03'), fb('thumb_03')]
-        tube(f'thumb-{s}', pts, [r * 1.12 for r in (0.0165, 0.0155, 0.0146, 0.0132, 0.0135, 0.0121, 0.0119, 0.0102, 0.0066)], 'glove', ('chain', bones), n=8, aspect=1.0, front=pn, sub=1, uv=2.6, posed=True)
+        tube(f'thumb-{s}', pts, [r * 1.12 for r in (0.0165, 0.0158, 0.015, 0.0143, 0.0136, 0.0128, 0.0119, 0.0102, 0.0066)], 'glove', ('chain', bones), n=8, aspect=1.0, front=pn, sub=1, uv=2.6, posed=True)
         # the ball of the thumb, joining it to the palm
-        tube(f'thenar-{s}', [h.lerp(t1, 0.25) + d * 0.02, t1.lerp(t2, 0.4)], [0.019, 0.0145], 'glove',
-             [fb('hand'), fb('thumb_01'), fb('thumb_02')], n=10, aspect=0.75, front=pn, sub=1, uv=2.6, posed=True)
+        thenar_o = tube(f'thenar-{s}', [h.lerp(t1, 0.25) + d * 0.02, t1.lerp(t2, 0.4)], [0.019, 0.0145], 'glove',
+                        [fb('hand'), fb('thumb_01'), fb('thumb_02')], n=10, aspect=0.75, front=pn, sub=1, uv=2.6, posed=True)
+        # the palm, the knuckles and the ball of the thumb are one piece of leather; the fingers stay their own, rooted in
+        # it, because a fist melted whole welds the curled fingertips to the palm and tears open when the hand opens
+        fuse(f'hand-{s}', [palm_o, knuckles_o, thenar_o])
+
+
+def fuse(name, pieces, voxel=0.002, tris=1600):
+    """
+    Melts pieces into one closed surface, so they draw one outline rather than one each. Each new vertex takes the skin
+    weights of the nearest old ones.
+    """
+    from mathutils.kdtree import KDTree
+    src = []
+    for o in pieces:
+        names = {g.index: g.name for g in o.vertex_groups}
+        for v in o.data.vertices:
+            src.append((o.matrix_world @ v.co, {names[g.group]: g.weight for g in v.groups}))
+    tree = KDTree(len(src))
+    for i, (co, _) in enumerate(src):
+        tree.insert(co, i)
+    tree.balance()
+    PARTS[:] = [x for x in PARTS if x[0] not in pieces]
+    with bpy.context.temp_override(active_object=pieces[0], selected_editable_objects=pieces, object=pieces[0]):
+        bpy.ops.object.join()
+    o = pieces[0]
+    o.name = o.data.name = f'wanderer-{name}'
+    o.vertex_groups.clear()
+    md = o.modifiers.new('melt', 'REMESH')
+    md.mode = 'VOXEL'
+    md.voxel_size = voxel
+    md = o.modifiers.new('soften', 'SMOOTH')
+    md.factor = 0.5
+    md.iterations = 4
+    apply_mods(o)
+    md = o.modifiers.new('slim', 'DECIMATE')
+    md.ratio = min(1.0, tris / max(1, sum(len(p.vertices) - 2 for p in o.data.polygons)))
+    apply_mods(o)
+    for p in o.data.polygons:
+        p.use_smooth = True
+    groups = {}
+    for v in o.data.vertices:
+        ws = {}
+        near_ = tree.find_n(o.matrix_world @ v.co, 6)
+        for co, i, dist in near_:
+            k = 1.0 / (dist + 0.001) ** 2
+            for b, x in src[i][1].items():
+                ws[b] = ws.get(b, 0.0) + x * k
+        for b, x in top4(ws).items():
+            if b not in groups:
+                groups[b] = o.vertex_groups.new(name=b)
+            groups[b].add([v.index], x, 'REPLACE')
+    PARTS.append((o, 'body', 2.6))
 
 
 def legs():
