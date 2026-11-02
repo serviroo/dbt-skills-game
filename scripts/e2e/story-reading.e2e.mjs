@@ -67,7 +67,7 @@ export async function holdStorage(page, kinds) {
 export const opening = (page) =>
   page.evaluate(() => {
     const w = document.querySelector('.st-write');
-    return !!w && w.inert && getComputedStyle(w).opacity === '0';
+    return !!w && w.inert && getComputedStyle(w).visibility === 'hidden';
   });
 /** Lets the held reads through one at a time, all but those starting with `keep`, until the writer is in */
 export async function letIn(page, keep) {

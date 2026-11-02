@@ -89,10 +89,10 @@ const onDisk = (page, db, store, op, id) =>
       }),
     [db, store, op, id],
   );
-/** Whether the screen `sel` is in: in reach and not see-through. */
+/** Whether the screen `sel` is in: in reach and showing. */
 const isIn = (sel) => {
   const el = document.querySelector(sel);
-  return !!el && !el.inert && getComputedStyle(el).opacity !== '0';
+  return !!el && !el.inert && getComputedStyle(el).visibility !== 'hidden';
 };
 /** Waits for the screen `sel` to come in. */
 const comesIn = (h, page, sel, where, timeout = 5000) =>

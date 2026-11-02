@@ -915,7 +915,7 @@ export class App {
     focus?.setAttribute('tabindex', '-1');
     const enter = (waited: boolean) => {
       out.el.inert = false;
-      out.el.style.opacity = '';
+      out.el.style.visibility = '';
       if (!o.quiet) {
         const a = animate(out.el, this.reduced() ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], {
           duration: this.reduced() ? WINDOW.reducedFadeMs : 300,
@@ -930,7 +930,7 @@ export class App {
     // a screen filled in from storage comes in once it holds what it opens on, never empty first and then changed
     if (out.ready) {
       out.el.inert = true;
-      out.el.style.opacity = '0';
+      out.el.style.visibility = 'hidden';
       const go = () => this.current === out && enter(true);
       void out.ready.then(go, go);
     } else enter(false);
