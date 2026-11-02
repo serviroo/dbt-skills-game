@@ -133,7 +133,9 @@ export const unreachable = (page, { typing = false, down = false, sound = false,
 /**
  * Whether any of the Safe Zone shows through "Talk to someone now" where it's pinned: Talk's box looks the same with the
  * page there and with it gone. Talk's own words and edges are left out of both: a software renderer, as CI's is, can draw
- * letters a shade apart from one shot to the next, so only Talk's band and what shows through it is compared.
+ * letters a shade apart from one shot to the next, so only Talk's band and what shows through it is compared. The top bar
+ * and the shade it casts are left out too: they are drawn over the page and Talk alike, and pinned under the bar, Talk's
+ * top sits in that shade, which the browser can redraw a shade apart from one shot to the next.
  */
 const showsThrough = async (page) => {
   const clip = await page.evaluate(() => {
@@ -144,7 +146,7 @@ const showsThrough = async (page) => {
     return { x, y, width: Math.min(r.right, innerWidth) - x, height: Math.min(r.bottom, innerHeight) - y };
   });
   if (!clip || clip.width < 1 || clip.height < 1) return false;
-  const hollow = await page.addStyleTag({ content: '.dq-sz-talk { color: transparent !important; background: none !important; border-color: transparent !important; outline-color: transparent !important; box-shadow: none !important; transition: none !important; } .dq-sz-talk * { visibility: hidden !important; }' });
+  const hollow = await page.addStyleTag({ content: '.dq-sz-talk { color: transparent !important; background: none !important; border-color: transparent !important; outline-color: transparent !important; box-shadow: none !important; transition: none !important; } .dq-sz-talk * { visibility: hidden !important; } .dq-top, .dq-top *, .dq-top::after, .dq-sky-top { visibility: hidden !important; transition: none !important; }' });
   const shot = () => page.screenshot({ clip, caret: 'hide' });
   const seen = await shot();
   const tag = await page.addStyleTag({ content: '.dq-safezone > :not(.dq-sz-foot) { opacity: 0 !important; transition: none !important; }' });
@@ -474,6 +476,50 @@ const BAR = '.dq-top :is(button, a[href]), .dq-mo-done';
 const WRAPS = new Set(['hub', 'settings', 'stories', 'write']);
 
 /**
+ * The show-through check itself, at 320x568 at 200% with Talk pinned under the top bar: it still finds a band the page
+ * shows through, and the top bar or its shade drawn a shade apart between its two shots, as a busy browser can redraw
+ * them, isn't the page showing through.
+ */
+function talkCheck() {
+  return async (h) => {
+    const p = PHONES['320x568'];
+    const problems = [];
+    const { ctx, page, errors } = await boot(h, { width: p.width / 2, height: p.height / 2 });
+    await page.evaluate(overlay);
+    await page.locator('header .dq-safe').click();
+    const tap = (name) => page.locator('.dq-sz-body').getByRole('button', { name, exact: true }).last().evaluate((b) => b.click());
+    const at = (title) => page.locator('.dq-sz-t', { hasText: title }).first().waitFor({ timeout: 10000 });
+    await page.locator('.dq-sz-t').first().waitFor({ timeout: 10000 });
+    await tap('I might not be safe');
+    await at('Talk to someone now');
+    await tap('Back to breathing');
+    await at('Breathe with the light');
+    await page.evaluate(() => (document.querySelector('.dq').scrollTop = 1e6));
+    await settle(page);
+    const pinned = await page.evaluate(() => Math.abs(document.querySelector('.dq-sz-talk').getBoundingClientRect().top - parseFloat(getComputedStyle(document.querySelector('.dq')).getPropertyValue('--dq-top'))) < 1);
+    h.expect(pinned, '"Talk to someone now" is not pinned under the top bar, so this checks nothing');
+    if (await showsThrough(page)) problems.push('the page shows through "Talk to someone now"');
+    // the bar and its shade drawn brighter once the page is gone, before the second shot
+    await page.evaluate(() => {
+      const o = new MutationObserver((m) => {
+        if (!m.some((r) => [...r.addedNodes].some((n) => n.textContent.includes('opacity: 0')))) return;
+        for (const e of document.querySelectorAll('.dq-top, .dq-sky-top')) e.style.filter = 'brightness(2)';
+        o.disconnect();
+      });
+      o.observe(document.head, { childList: true });
+    });
+    if (await showsThrough(page)) problems.push('the top bar drawn brighter between the two shots counts as the page showing through "Talk to someone now"');
+    await page.evaluate(() => document.querySelectorAll('.dq-top, .dq-sky-top').forEach((e) => (e.style.filter = '')));
+    const band = await page.addStyleTag({ content: '.dq-sz-foot { background: none !important; }' });
+    if (!(await showsThrough(page))) problems.push('the page showing through a see-through band behind "Talk to someone now" goes unseen');
+    await band.evaluate((s) => s.remove());
+    if (errors.length) problems.push(errors.join(' | '));
+    await ctx.close();
+    h.expect(!problems.length, problems.join('\n'));
+  };
+}
+
+/**
  * The Safe Zone stays one tap from every screen at 200%, browser zoom or the phone's own text: on every screen with a top
  * bar, the Safe Zone button and the rest of the bar show whole inside the screen, at least 44 px each way, and take their
  * own taps, its mark and icons whole; on Give me a moment its Done does too once scrolled to. The bar takes no more rows
@@ -643,4 +689,5 @@ export const scenarios = {
   ...Object.fromEntries(['568x320', '320x568'].map((phone) => [`sound-panel-swipe-${phone}-200`, swipe(phone)])),
   ...Object.fromEntries(Object.keys(PHONES).map((phone) => [`safe-zone-button-${phone}-200`, bars(phone)])),
   ...Object.fromEntries(Object.keys(PHONES).map((phone) => [`safe-zone-button-${phone}-text-200`, bars(phone, { font: true })])),
+  'safe-zone-talk-check-320x568-200': talkCheck(),
 };
