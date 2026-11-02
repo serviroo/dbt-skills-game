@@ -19,11 +19,10 @@ const seed = (h) => ({
   'dbt.app.v1': h.SEEN,
 });
 
-/** What the page shows once it has settled into the intro or the companion: 'intro' or the companion's screen. */
-const showing = (page) =>
-  page
-    .waitForFunction(() => (window.__daily && document.querySelector('#dq-main > *') ? document.querySelector('.dq')?.dataset.screen : document.querySelector('.title-screen') ? 'intro' : null), null, { timeout: 30000 })
-    .then((r) => r.jsonValue());
+/** The companion's screen once it shows one, or null. */
+const screenOf = () => (window.__daily && document.querySelector('#dq-main > *') ? document.querySelector('.dq')?.dataset.screen : null);
+/** What a page just loaded settles into: 'intro' or the companion's screen. */
+const showing = (h, page) => h.until(page, () => (document.querySelector('.title-screen') ? 'intro' : (window.__daily && document.querySelector('#dq-main > *') ? document.querySelector('.dq')?.dataset.screen : null)), null, { timeout: 30000 });
 
 /** Counts the history entries each page load adds, as __pushes. */
 const countPushes = () => {
@@ -48,7 +47,8 @@ async function replay(page) {
 
 /** The replay is over: the companion is on Settings, focus on Replay cutscene, and the address is the one before it. */
 async function backOnSettings(h, page, before, tag) {
-  const at = await showing(page);
+  // the intro stays up until the press (or Back's popstate) has ended it and the companion has opened
+  const at = await h.until(page, screenOf, null, { timeout: 30000 });
   h.expect(at === 'settings', `${tag}: the replay ended on ${at}, not back on Settings where it was played from`);
   const search = new URL(page.url()).search;
   h.expect(search === before, `${tag}: the address is ${search} after the replay, not ${before} as before it`);
@@ -73,14 +73,14 @@ async function neverAgain(h, page, before, tag) {
       window.__moves = 0;
       history[m]();
     }, move);
-    await page.waitForFunction((n) => window.__moves >= n, moves, { timeout: 10000 });
-    await page.waitForFunction((n) => document.querySelector('.dq')?.dataset.screen === n || !!document.querySelector('.title-screen'), to, { timeout: 10000 });
-    const at = await showing(page);
+    await h.until(page, (n) => window.__moves >= n, moves);
+    const shown = () => (document.querySelector('.title-screen') ? 'intro' : document.querySelector('.dq')?.dataset.screen);
+    const at = await h.until(page, (n) => document.querySelector('.title-screen') || document.querySelector('.dq')?.dataset.screen === n, to).then(() => page.evaluate(shown), () => page.evaluate(shown).catch(() => 'a new page'));
     h.expect(at === to, `${tag}: ${move} after the replay showed ${at}, not ${to}`);
     h.expect(await page.evaluate(() => window.__samePage === true), `${tag}: ${move} after the replay loaded the page again`);
   }
   await page.reload();
-  const at = await showing(page);
+  const at = await showing(h, page);
   h.expect(at !== 'intro', `${tag}: a reload after the replay played the intro again`);
   const search = new URL(page.url()).search;
   h.expect(search === before, `${tag}: the address is ${search} after a reload, not ${before}`);
