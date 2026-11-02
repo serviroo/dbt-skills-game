@@ -1,12 +1,12 @@
 // The camp's sky follows the player's own night on the device's clock. The moon has that night's phase: full on the
 // night of the March 2026 eclipse, lost in the sky at the August 2026 new moon, half lit at first quarter, on its right
-// in a northern zone and in UTC, and on its left in Sydney and Johannesburg. It climbs across the sky from low on the
-// left at dusk to the top around midnight and down to the right as dawn ends, drifting back by day and riding over the
-// pines, and an open camp follows the clock as the hours pass, with no jump on a night the clocks change. The stars
-// turn about the pole with the hour, frame by frame. At dusk an amber glow comes up low on the right over half an hour
-// and at dawn a rose one on the left, while the faint stars fade; at night neither glows. Everything is read off the
-// pixels the camp shows, with reduced motion so the frame holds still where the moon was placed, at phone, sideways
-// and desktop sizes.
+// in a northern zone, in UTC, Bahia de Banderas and Kolkata, and on its left in Sydney and Johannesburg. It climbs
+// across the sky from low on the left at dusk to the top around midnight and down to the right as dawn ends, drifting
+// back by day and riding over the pines, and an open camp follows the clock as the hours pass, with no jump on a night
+// the clocks change. The stars turn about the pole with the hour, frame by frame. At dusk an amber glow comes up low on
+// the right over half an hour and at dawn a rose one on the left, while the faint stars fade; at night neither glows.
+// Everything is read off the pixels the camp shows, with reduced motion so the frame holds still where the moon was
+// placed, at phone, sideways and desktop sizes.
 import sharp from 'sharp';
 import { screenshot } from './harness.mjs';
 
@@ -70,7 +70,8 @@ const lum = (g, x, y) => {
 
 /**
  * The moon's disc where the camp says it is: the mean of its left and right halves inside 80% of its radius, clear of
- * the line between them, and the brightest of each out to the rim, a ring just outside its rim, and the sky beside its halo for comparison.
+ * the line between them, and the brightest of each out to the rim; a ring just outside its rim; and the sky beside its
+ * halo for comparison.
  */
 function disc(g, moon) {
   const cx = ((moon.x + 1) / 2) * g.w, cy = ((1 - moon.y) / 2) * g.h;
@@ -150,12 +151,12 @@ export const scenarios = {
   async 'camp-sky-moon-phase'(h) {
     const runs = [
       ['full', at(2026, 3, 3, 23, 30), {}, (s) => s.lit > 0.95, (d) => d.left > d.sky + 60 && d.right > d.sky + 60 && Math.abs(d.left - d.right) < 40],
-      // the mean new moon itself (08:14 UTC on 13 August, about 14 hours after the eclipse's): the moon is lost in the
-      // sky, no dark disc, no ring. Midnight in UTC-8, so the moon is at the top of the sky, clear of the pines and the
-      // glow, whatever zone this run is in
+      // just past the mean new moon (07:46 UTC on 13 August, about 14 hours after the eclipse's): the moon is lost in
+      // the sky, no dark disc, no ring. Midnight in UTC-8, so the moon is at the top of the sky, clear of the pines and
+      // the glow, whatever zone this run is in
       ['new', Date.UTC(2026, 7, 13, 8, 0), { timezoneId: 'Etc/GMT+8' }, (s) => s.lit < 0.001, (d) => Math.abs(d.left - d.sky) < 8 && Math.abs(d.right - d.sky) < 8 && Math.abs(d.ring - d.sky) < 8],
       // two and a half days on, a young crescent: its lit edge clearly there, the dark side close to the sky, never
-      // darker (no dark disc) and only a faint earthshine above it, at noon in UTC-8, the top of the sky again
+      // darker (no dark disc) and only a faint earthshine above it, at noon in UTC-8, near the top of the sky again
       ['crescent', Date.UTC(2026, 7, 15, 20, 0), { timezoneId: 'Etc/GMT+8' }, (s) => s.lit > 0.05 && s.lit < 0.1 && !s.south, (d) => d.peakRight > d.sky + 60 && d.left > d.sky - 8 && d.left < d.sky + 20],
       ['quarter-north', at(2026, 3, 25, 23, 30), {}, (s) => s.lit > 0.35 && s.lit < 0.65 && !s.south, (d) => d.right > d.sky + 60 && d.right > d.left + 50],
       // 23:30 in Sydney (summer time, UTC+11), whatever zone this run is in
@@ -163,6 +164,10 @@ export const scenarios = {
       // a southern zone without summer time, known by its name (23:30 in Johannesburg, UTC+2), and plain UTC, northern
       ['quarter-johannesburg', Date.UTC(2026, 2, 25, 21, 30), { timezoneId: 'Africa/Johannesburg' }, (s) => s.lit > 0.35 && s.lit < 0.65 && s.south, (d) => d.left > d.sky + 60 && d.left > d.right + 50],
       ['quarter-utc', Date.UTC(2026, 2, 25, 23, 30), { timezoneId: 'UTC' }, (s) => s.lit > 0.35 && s.lit < 0.65 && !s.south, (d) => d.right > d.sky + 60 && d.right > d.left + 50],
+      // northern zones without daylight saving whose names start like southern ones or are nowhere on the list: 23:30
+      // in Bahia de Banderas (UTC-6, not Bahia in Brazil) and in Kolkata (UTC+5:30)
+      ['quarter-bahia-banderas', Date.UTC(2026, 2, 26, 5, 30), { timezoneId: 'America/Bahia_Banderas' }, (s) => s.lit > 0.35 && s.lit < 0.65 && !s.south, (d) => d.right > d.sky + 60 && d.right > d.left + 50],
+      ['quarter-kolkata', Date.UTC(2026, 2, 25, 18, 0), { timezoneId: 'Asia/Kolkata' }, (s) => s.lit > 0.35 && s.lit < 0.65 && !s.south, (d) => d.right > d.sky + 60 && d.right > d.left + 50],
     ];
     const seen = {};
     for (const [tag, time, zone, okSky, okDisc] of runs) {

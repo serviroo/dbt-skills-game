@@ -9,8 +9,8 @@ import { buildWorld, HEARTH, LANTERN, SPOTS } from './world';
 
 /**
  * The Night Watch's camp, a scene of the companion's shared scene host (src/scene/vignettes/host.ts): the world, the
- * sky (the player's own night, on the device's clock) and one figure for every watcher who has arrived. It reports where
- * each figure is in the frame, so the roster can lay a labelled button over it; the scene itself takes no input.
+ * sky (the player's own night, on the device's clock) and one figure for every watcher who has arrived. It reports
+ * where each figure is in the frame, so the roster can lay a labelled button over it; the scene itself takes no input.
  */
 
 /** Where a figure is in the frame, as shares of the frame's width and height from its top left. */
@@ -99,8 +99,9 @@ export const build: BuildScene = (_accent, opts) => {
   let sized = false;
   /**
    * The sky follows the device's clock, the one thing in the camp that doesn't come from the beat: the glow by its
-   * hours, the moon and stars by standard time; the stars every frame, the rest on building and then about once a minute, or at once if the clock is set back. A new moon place is
-   * worked out with the camera at rest, where the frame was fitted.
+   * hours, the moon and stars by standard time; the stars every frame, the rest on building and then about once a
+   * minute, or at once if the clock is set back. A new moon place is worked out with the camera at rest, where the
+   * frame was fitted.
    */
   function night() {
     const ms = Date.now();

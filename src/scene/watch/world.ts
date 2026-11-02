@@ -32,7 +32,7 @@ export interface World {
   tick(t: number, still: boolean): void;
   /** frees what lives outside the scene graph's geometries and materials (instance buffers) */
   dispose(): void;
-  /** points along the edges of every pine's crown as the camera sees them, so the sky can keep the moon above them */
+  /** every point of the pines' crowns as drawn, so the sky can keep the moon clear of them */
   skyline: THREE.Vector3[];
 }
 
@@ -231,19 +231,17 @@ function ground() {
   return new THREE.Mesh(g, mat);
 }
 
-/** a pine's tiers of needles: where each starts, how tall it is and how wide at its foot */
-const TIERS: [number, number, number][] = [
-  [1.0, 1.25, 0.95],
-  [1.65, 1.1, 0.78],
-  [2.25, 0.95, 0.6],
-  [2.8, 0.8, 0.4],
-];
-
 /** A pine: a trunk and four stacked, ragged tiers of needles. Two geometries, instanced around the camp. */
 function pine(): { bark: THREE.BufferGeometry; needles: THREE.BufferGeometry } {
   const bark = limb([0, 0, 0], [0, 1.3, 0], 0.13, 0.08, 6);
   const tiers: THREE.BufferGeometry[] = [];
-  TIERS.forEach(([y, h, r], i) => {
+  const t: [number, number, number][] = [
+    [1.0, 1.25, 0.95],
+    [1.65, 1.1, 0.78],
+    [2.25, 0.95, 0.6],
+    [2.8, 0.8, 0.4],
+  ];
+  t.forEach(([y, h, r], i) => {
     const g = new THREE.ConeGeometry(r, h, 7, 2);
     g.translate(0, y + h / 2 - 0.1, 0);
     tiers.push(jitter(g, [0.06, 0.05, 0.06], 50 + i));
@@ -271,22 +269,26 @@ function pineSpots() {
 }
 
 /**
- * The outline of each pine at its spot, as the camera looking in from +z sees it: points down both slopes of every
- * tier, a little wider for the needles' ragged edge. Worked out once per camp.
+ * The pines' crowns as they are drawn: every corner of the needles' triangles and the middle of every edge, ragged
+ * jitter and all, placed by the same matrices the instanced crowns use (each pine's spot, turn and size), so the moon's
+ * gap holds for the real trees. Worked out once per camp.
  */
-function pineSkyline(spots: THREE.Matrix4[]) {
-  const out: THREE.Vector3[] = [];
-  const at = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3();
-  for (const m of spots) {
-    m.decompose(at, q, s);
-    for (const [y, h, r] of TIERS) {
-      for (let k = 0; k <= 4; k++) {
-        const f = k / 4, up = y - 0.1 + h * f, w = (r + 0.08) * (1 - f);
-        for (const side of [-1, 1]) out.push(new THREE.Vector3(at.x + side * w * s.x, at.y + up * s.y, at.z));
-      }
-    }
+function pineSkyline(needles: THREE.BufferGeometry, spots: THREE.Matrix4[]) {
+  const pos = needles.getAttribute('position');
+  const index = needles.getIndex();
+  const count = index ? index.count : pos.count;
+  const seen = new Set<string>();
+  const local: THREE.Vector3[] = [];
+  const keep = (v: THREE.Vector3) => {
+    const key = `${v.x.toFixed(4)},${v.y.toFixed(4)},${v.z.toFixed(4)}`;
+    if (!seen.has(key)) (seen.add(key), local.push(v));
+  };
+  const corner = (i: number) => new THREE.Vector3().fromBufferAttribute(pos, index ? index.getX(i) : i);
+  for (let i = 0; i + 2 < count; i += 3) {
+    const tri = [corner(i), corner(i + 1), corner(i + 2)];
+    for (let k = 0; k < 3; k++) keep(tri[k]), keep(tri[k].clone().add(tri[(k + 1) % 3]).multiplyScalar(0.5));
   }
-  return out;
+  return spots.flatMap((m) => local.map((v) => v.clone().applyMatrix4(m)));
 }
 
 /** Grass blades in tufts around the camp, swaying a little; none in the fire, the tent or where the watchers stand. */
@@ -466,7 +468,7 @@ export function buildWorld(m: Mats): World {
   const flameBase = flameMat.color.clone();
   return {
     group,
-    skyline: pineSkyline(spots),
+    skyline: pineSkyline(needles, spots),
     tick(t, still) {
       // the Lantern breathes once every five seconds (0.2 Hz); the fire swells on two slower, gentler waves
       const lamp = still ? 0 : Math.sin((t / 5) * TAU);

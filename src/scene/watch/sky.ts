@@ -40,21 +40,22 @@ const MONTH = 29.530588853;
 /** a sidereal day: the stars come round again in this many milliseconds */
 const STAR_DAY = 86164091;
 /**
- * Time zones south of the equator without daylight saving, by name, the old names browsers still report included
- * (America/Buenos_Aires for America/Argentina/Buenos_Aires). A zone with daylight saving tells by itself: the south's
- * summer time falls in January.
+ * Time zones south of the equator without daylight saving, by their whole name, the old names browsers still report
+ * included (America/Buenos_Aires for America/Argentina/Buenos_Aires). Whole names only, so a northern zone that starts
+ * the same way (America/Bahia_Banderas) is never taken for one. A zone with daylight saving tells by itself: the
+ * south's summer time falls in January.
  */
 const SOUTH = new RegExp(
-  [
-    '^(Australia|Antarctica|Brazil|Chile)/',
-    '^NZ',
-    '^Pacific/(Auckland|Chatham|Fiji|Tongatapu|Apia|Pago_Pago|Niue|Noumea|Norfolk|Efate|Port_Moresby|Bougainville|Guadalcanal|Nauru|Funafuti|Kanton|Enderbury|Wallis|Fakaofo|Tahiti|Marquesas|Gambier|Pitcairn|Rarotonga|Easter|Galapagos)',
-    '^America/(Argentina|Buenos_Aires|Cordoba|Catamarca|Jujuy|Mendoza|Rosario|Sao_Paulo|Santiago|Montevideo|Asuncion|La_Paz|Lima|Guayaquil|Punta_Arenas|Campo_Grande|Cuiaba|Recife|Bahia|Fortaleza|Belem|Santarem|Maceio|Araguaina|Porto_Velho|Rio_Branco|Porto_Acre|Eirunepe|Manaus|Noronha)',
-    '^Africa/(Johannesburg|Maputo|Harare|Lusaka|Windhoek|Gaborone|Maseru|Mbabane|Blantyre|Lubumbashi|Kinshasa|Brazzaville|Luanda|Dar_es_Salaam|Nairobi|Kigali|Bujumbura)',
-    '^Asia/(Jakarta|Makassar|Jayapura|Dili)',
-    '^Indian/(Mauritius|Reunion|Antananarivo|Mayotte|Comoro|Mahe|Chagos|Cocos|Christmas|Kerguelen)',
-    '^Atlantic/(St_Helena|Stanley|South_Georgia)',
-  ].join('|'),
+  `^(${[
+    '(Australia|Antarctica|Brazil|Chile)/[A-Za-z_/-]+',
+    'NZ|NZ-CHAT',
+    'Pacific/(Auckland|Chatham|Fiji|Tongatapu|Apia|Pago_Pago|Niue|Noumea|Norfolk|Efate|Port_Moresby|Bougainville|Guadalcanal|Nauru|Funafuti|Kanton|Enderbury|Wallis|Fakaofo|Tahiti|Marquesas|Gambier|Pitcairn|Rarotonga|Easter|Galapagos)',
+    'America/(Argentina/[A-Za-z_]+|Buenos_Aires|Cordoba|Catamarca|Jujuy|Mendoza|Rosario|Sao_Paulo|Santiago|Montevideo|Asuncion|La_Paz|Lima|Guayaquil|Punta_Arenas|Campo_Grande|Cuiaba|Recife|Bahia|Fortaleza|Belem|Santarem|Maceio|Araguaina|Porto_Velho|Rio_Branco|Porto_Acre|Eirunepe|Manaus|Noronha)',
+    'Africa/(Johannesburg|Maputo|Harare|Lusaka|Windhoek|Gaborone|Maseru|Mbabane|Blantyre|Lubumbashi|Kinshasa|Brazzaville|Luanda|Dar_es_Salaam|Nairobi|Kigali|Bujumbura)',
+    'Asia/(Jakarta|Makassar|Jayapura|Dili)',
+    'Indian/(Mauritius|Reunion|Antananarivo|Mayotte|Comoro|Mahe|Chagos|Cocos|Christmas|Kerguelen)',
+    'Atlantic/(St_Helena|Stanley|South_Georgia)',
+  ].join('|')})$`,
 );
 
 const zone = () => {
