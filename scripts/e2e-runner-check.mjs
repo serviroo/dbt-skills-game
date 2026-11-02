@@ -301,6 +301,12 @@ export const scenarios = {
   const named = await run('quarantine-named', [`--scenario=${name}-held`]);
   assert.notEqual(named.code, 0);
   assert.match(named.log, /the quarantined scenario ran/);
+  fs.writeFileSync(duplicate, `export const quarantined = { '${name}-held': 'it waits on its own fix' };
+export const scenarios = { async '${name}-held'() { throw new Error('the quarantined scenario ran'); } };`);
+  const heldOnly = await run('quarantine-only', [`--file=${name}-duplicate`]);
+  assert.equal(heldOnly.code, 0);
+  assert.match(heldOnly.log, new RegExp(`quarantined ${name}-held: it waits on its own fix`));
+  assert.match(heldOnly.log, /every scenario in this run is quarantined/);
   fs.writeFileSync(duplicate, `export const quarantined = { '${name}-gone': 'it was renamed' };
 export const scenarios = { async '${name}-kept'() {} };`);
   const stale = await run('quarantine-stale', [`--file=${name}-duplicate`]);

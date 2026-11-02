@@ -118,11 +118,11 @@ if (flags.shard) {
   }
 }
 const matched = runnable.filter((s) => (!flags.file || s.file === flags.file) && (!flags.scenario || s.name === flags.scenario));
-if (!matched.length) throw new Error(`scenario ${flags.scenario} is not in ${flags.file}.e2e.mjs`);
+if (flags.scenario && !matched.length) throw new Error(`scenario ${flags.scenario} is not in ${flags.file}.e2e.mjs`);
 for (const s of held) console.log(`quarantined ${s.name}: ${quarantined.get(s.name)}`);
 const pick = matched.filter((s) => !part || part.has(s.name));
 if (!pick.length) {
-  console.log(`shard ${flags.shard} has no scenarios`);
+  console.log(matched.length ? `shard ${flags.shard} has no scenarios` : 'every scenario in this run is quarantined');
   process.exit(0);
 }
 const units = unitsOf(pick);
