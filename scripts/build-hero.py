@@ -457,12 +457,15 @@ def hood_and_mantle():
         h = smoothstep(1.565, 1.665, p.y)
         return {'Head': h, 'neck_01': (1 - h) * 0.55, 'spine_03': (1 - h) * 0.45}
     n = len(rows[0])
-    verts = [p for row in rows for p in row]
-    faces = [(i * n + j, i * n + j + 1, (i + 1) * n + j + 1, (i + 1) * n + j) for i in range(R - 1) for j in range(n - 1)]
+    # the opening's edge folds back over the outside of the hood, as part of the same cloth: a separate rim drew its own
+    # outline and read as a cord round the face
+    yc0 = cols[2][0]
+    out = [(V(p.x, p.y - yc0, 0).normalized() if V(p.x, p.y - yc0, 0).length > 1e-6 else V(0, 1, 0)) for p in rows[0]]
+    fold = [[p + o * 0.008 + V(0, 0, 0.007) for p, o in zip(rows[0], out)], [p + o * 0.017 + V(0, 0, -0.008) for p, o in zip(rows[0], out)]]
+    cloth = fold[::-1] + rows
+    verts = [p for row in cloth for p in row]
+    faces = [(i * n + j, i * n + j + 1, (i + 1) * n + j + 1, (i + 1) * n + j) for i in range(len(cloth) - 1) for j in range(n - 1)]
     add('hood', verts, faces, 'hood', hood_w, role='cloth', solid=0.011, sub=1, center=(0, 1.665, -0.05))
-    # the opening's edge folded back on itself: a flat hem sunk into the edge, deeper than it is wide
-    rim = [rows[0][j] + V(0, 0, -0.003) for j in range(n)]
-    tube('hood-rim', rim, 0.0085, 'hood', hood_w, n=10, steps=2, aspect=1.9, uv=1.2)
 
     # the mantle: from the hood's lower edge (closed across the chin) out over the shoulders to its hem. It is drawn in the
     # idle's first frame, where it hangs over arms at rest, starting from where the hood's edge is carried in that frame.
@@ -649,8 +652,9 @@ def hands():
         palm = [dict(c=h + d * a + wv * wo + pn * no, t=d, f=pn, rx=hw, rz=ht) for a, hw, ht, wo, no in
                 # a narrow wrist, the full heel of the hand on the palm side, then flatter to the knuckles
                 ((-0.02, 0.027, 0.02, -0.001, 0.0), (0.01, 0.035, 0.022, -0.002, 0.002), (0.035, 0.044, 0.025, -0.003, 0.006),
-                 (0.07, 0.05, 0.021, -0.004, 0.0075), (0.1, 0.052, 0.017, -0.005, 0.008), (0.12, 0.05, 0.0155, -0.005, 0.0085),
-                 (0.133, 0.043, 0.0125, -0.005, 0.0085))]
+                 (0.07, 0.05, 0.021, -0.004, 0.0075), (0.1, 0.053, 0.019, -0.005, 0.009), (0.12, 0.052, 0.018, -0.005, 0.0105),
+                 # on under the first joints, so the curled fingers close against it
+                 (0.138, 0.048, 0.016, -0.005, 0.0125), (0.152, 0.04, 0.012, -0.005, 0.0135))]
         v, f, _ = loft(palm, 16, cap0=True, cap1=True)
         pb = [fb('lowerarm'), fb('hand')] + [fb(f'{k}_01') for k in FINGERS]
         add(f'palm-{s}', v, f, 'glove', pb, sub=1, center=h + d * 0.05, uv=2.6, posed=True)
@@ -659,21 +663,21 @@ def hands():
             c0, c1, c2, tip = [JP[fb(f'{k}_0{i}')] for i in (1, 2, 3)] + [JP[fb(f'{k}_04_leaf')]]
             dk = (c1 - c0).normalized()
             dt = (tip - c2).normalized()
-            knuckles.append(c0 - pn * 0.0085 - dk * 0.003)
+            knuckles.append(c0 - pn * 0.011 - dk * 0.002)
             # each joint a little narrower than the pads either side of it, flatter than round, tapering to the tip
             pts = [c0 - dk * 0.016, c0, c0.lerp(c1, 0.5), c1, c1.lerp(c2, 0.5), c2, c2.lerp(tip, 0.45), tip - dt * 0.004, tip + dt * 0.001]
-            radii = [r * size for r in (0.0138, 0.0138, 0.0131, 0.0119, 0.0124, 0.0111, 0.0113, 0.0097, 0.0062)]
+            radii = [r * size * 1.2 for r in (0.0138, 0.0138, 0.0131, 0.0119, 0.0124, 0.0111, 0.0113, 0.0097, 0.0062)]
             bones = [fb('hand'), fb(f'{k}_01'), fb(f'{k}_01'), fb(f'{k}_02'), fb(f'{k}_02'), fb(f'{k}_03'), fb(f'{k}_03'), fb(f'{k}_03')]
-            tube(f'{k}-{s}', pts, radii, 'glove', ('chain', bones), n=8, aspect=0.82, front=pn, sub=1, uv=2.6, posed=True)
+            tube(f'{k}-{s}', pts, radii, 'glove', ('chain', bones), n=8, aspect=1.0, front=pn, sub=1, uv=2.6, posed=True)
         # the ridge of knuckles across the back of the hand
         ends = [knuckles[0] + (knuckles[0] - knuckles[1]) * 0.35] + knuckles + [knuckles[-1] + (knuckles[-1] - knuckles[-2]) * 0.35]
-        tube(f'knuckles-{s}', ends, [0.006, 0.0088, 0.0092, 0.009, 0.0082, 0.0055], 'glove', [fb('hand')] + [fb(f'{k}_01') for k in ('index', 'middle', 'ring', 'pinky')],
-             n=10, steps=3, aspect=0.7, front=pn, sub=1, uv=2.6, posed=True)
+        tube(f'knuckles-{s}', ends, [0.008, 0.0118, 0.0122, 0.012, 0.011, 0.0072], 'glove', [fb('hand')] + [fb(f'{k}_01') for k in ('index', 'middle', 'ring', 'pinky')],
+             n=10, steps=3, aspect=0.8, front=pn, sub=1, uv=2.6, posed=True)
         t1, t2, t3, tip = [JP[fb(f'thumb_0{i}')] for i in (1, 2, 3)] + [JP[fb('thumb_04_leaf')]]
         dt = (tip - t3).normalized()
         pts = [t1.lerp(h, 0.35), t1, t1.lerp(t2, 0.5), t2, t2.lerp(t3, 0.5), t3, t3.lerp(tip, 0.45), tip - dt * 0.004, tip + dt * 0.001]
         bones = [fb('hand'), fb('thumb_01'), fb('thumb_01'), fb('thumb_02'), fb('thumb_02'), fb('thumb_03'), fb('thumb_03'), fb('thumb_03')]
-        tube(f'thumb-{s}', pts, [0.0165, 0.0155, 0.0146, 0.0132, 0.0135, 0.0121, 0.0119, 0.0102, 0.0066], 'glove', ('chain', bones), n=8, aspect=0.86, front=pn, sub=1, uv=2.6, posed=True)
+        tube(f'thumb-{s}', pts, [r * 1.12 for r in (0.0165, 0.0155, 0.0146, 0.0132, 0.0135, 0.0121, 0.0119, 0.0102, 0.0066)], 'glove', ('chain', bones), n=8, aspect=1.0, front=pn, sub=1, uv=2.6, posed=True)
         # the ball of the thumb, joining it to the palm
         tube(f'thenar-{s}', [h.lerp(t1, 0.25) + d * 0.02, t1.lerp(t2, 0.4)], [0.019, 0.0145], 'glove',
              [fb('hand'), fb('thumb_01'), fb('thumb_02')], n=10, aspect=0.75, front=pn, sub=1, uv=2.6, posed=True)
