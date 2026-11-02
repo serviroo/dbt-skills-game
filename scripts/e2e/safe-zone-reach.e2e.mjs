@@ -132,7 +132,8 @@ export const unreachable = (page, { typing = false, down = false, sound = false,
 
 /**
  * Whether any of the Safe Zone shows through "Talk to someone now" where it's pinned: Talk's box looks the same with the
- * page there and with it gone.
+ * page there and with it gone. Talk's own words and edges are left out of both: a software renderer, as CI's is, can draw
+ * letters a shade apart from one shot to the next, so only Talk's band and what shows through it is compared.
  */
 const showsThrough = async (page) => {
   const clip = await page.evaluate(() => {
@@ -143,11 +144,12 @@ const showsThrough = async (page) => {
     return { x, y, width: Math.min(r.right, innerWidth) - x, height: Math.min(r.bottom, innerHeight) - y };
   });
   if (!clip || clip.width < 1 || clip.height < 1) return false;
+  const hollow = await page.addStyleTag({ content: '.dq-sz-talk { color: transparent !important; background: none !important; border-color: transparent !important; outline-color: transparent !important; box-shadow: none !important; transition: none !important; } .dq-sz-talk * { visibility: hidden !important; }' });
   const shot = () => page.screenshot({ clip, caret: 'hide' });
   const seen = await shot();
   const tag = await page.addStyleTag({ content: '.dq-safezone > :not(.dq-sz-foot) { opacity: 0 !important; transition: none !important; }' });
   const bare = await shot();
-  await tag.evaluate((s) => s.remove());
+  for (const t of [tag, hollow]) await t.evaluate((s) => s.remove());
   return !seen.equals(bare);
 };
 
