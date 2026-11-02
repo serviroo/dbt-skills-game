@@ -42,12 +42,13 @@ portrait screens, wide ones for landscape), the layers in `src/daily/daily.css`,
 `src/motion/tokens.ts`.
 
 **The camp's sky** follows the player's own night on the same clock. The moon has that night's real phase, lit on
-its right as it waxes (its left in a southern time zone), and climbs from low on the left at dusk (17:00) to the top
-of the sky around midnight and down to the right as dawn ends (08:00), riding over the pine tops; by day it drifts
-back, so it never jumps. The stars turn about the pole with the hour. At dusk a soft amber glow comes up low on the
-right and at dawn a rose one on the left, each over half an hour and gone before the top of the frame, and the faint
-stars fade with it. It's worked out on the device from the date and time alone, never stored and never fetched
-(`src/scene/watch/sky.ts`).
+its right as it waxes (its left in a southern time zone), and fades into the sky toward new moon. It climbs from low
+on the left at 17:00 to the top of the sky around midnight and down to the right by 08:00, riding over the pine tops;
+by day it drifts back, so it never jumps. The moon and the stars, which turn about the pole with the hour, go by
+standard time (those hours are 18:00 and 09:00 on a summer-time clock), so a night the clocks change moves neither.
+At dusk a soft amber glow comes up low on the right and at dawn a rose one on the left, each over half an hour on the
+clock and gone before the top of the frame, and the faint stars fade with it. It's worked out on the device from the
+date and time alone, never stored and never fetched (`src/scene/watch/sky.ts`).
 
 ## Type
 

@@ -25,7 +25,7 @@ export interface Night {
   /** a southern-hemisphere zone sees the moon lit on its other side */
   south: boolean;
   /** where the moon is along its path, 0 low on the left as dusk begins (17:00), 1 low on the right as dawn ends
-   *  (08:00); through the day it drifts back to the start, so it never jumps */
+   *  (08:00), on standard time; through the day it drifts back to the start, so it never jumps */
   p: number;
   /** how far into dusk or dawn (by `mood`) the sky is, 0 to 1: each comes in over its first half hour and goes over
    *  its last, so an open camp never changes all at once */
@@ -89,21 +89,24 @@ function twilight(h: number, from: number, to: number) {
 }
 
 /**
- * The night at `d` on the device's clock: its hours, the moon's place and the glow follow the wall clock, as Home's
- * sky does. `tz` (the device's zone name by default) only settles the hemisphere for a zone without daylight saving.
+ * The night at `d` on the device's clock. The glow follows the wall clock, as Home's sky does; the moon's place goes
+ * by the zone's standard time, as the stars do, so a night that changes the clocks doesn't move it. `tz` (the device's
+ * zone name by default) only settles the hemisphere for a zone without daylight saving.
  */
 export function nightAt(d: Date, tz = zone()): Night {
   const t = d.getTime();
   const age = ((((t - NEW_MOON) / 864e5 / MONTH) % 1) + 1) % 1;
   const h = d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
   const o = offsetsIn(d.getFullYear());
+  const local = t - Math.max(o.jan, o.jul) * 6e4;
+  const hs = (((local % 864e5) + 864e5) % 864e5) / 36e5;
   const mood = moodAt(d);
   return {
     mood,
     age,
     lit: (1 - Math.cos(age * TAU)) / 2,
     south: o.jan !== o.jul ? o.jan < o.jul : SOUTH.test(tz),
-    p: h >= 17 ? (h - 17) / 15 : h < 8 ? (h + 7) / 15 : 1 - (h - 8) / 9,
+    p: hs >= 17 ? (hs - 17) / 15 : hs < 8 ? (hs + 7) / 15 : 1 - (hs - 8) / 9,
     glow: mood === 'dusk' ? twilight(h, 17, 20) : mood === 'dawn' ? twilight(h, 5, 8) : 0,
     turn: starTurn(t),
   };
@@ -247,6 +250,9 @@ function moon() {
         // the disc fills the middle fifth of the quad; the rest is halo
         vec2 p = vUv * 5.0;
         float r = length(p);
+        // how much of the moon there is to see: toward new moon the whole of it, disc, earthshine and halo, fades into
+        // the sky, as the real one is lost in the sun's glare, rather than standing dark against it
+        float seen = smoothstep(0.0, 0.1, uLit);
         vec3 col = vec3(0.0);
         if (r < 1.0) {
           vec3 nrm = vec3(p, sqrt(1.0 - r * r));
@@ -255,13 +261,13 @@ function moon() {
           vec3 ground = mix(vec3(0.72, 0.8, 0.92), vec3(0.95, 0.97, 1.0), smoothstep(0.35, 0.75, seas));
           // the dark side keeps a faint earthshine, all but gone at new moon
           col = ground * lit * 1.9 + vec3(0.03, 0.05, 0.09) * (1.0 - lit) * (0.3 + 0.7 * smoothstep(0.0, 0.25, uLit));
-          col *= 1.0 - smoothstep(0.93, 1.0, r) * 0.5;
+          col *= (1.0 - smoothstep(0.93, 1.0, r) * 0.5) * seen;
         }
         // the disc covers what is behind it (a star never shows through the dark side); the halo only adds light
-        float cover = 1.0 - smoothstep(0.985, 1.015, r);
-        // the halo is as bright as the moon is full, a new moon keeping only a trace of it; it lies around the disc and
-        // never over it, so the dark side of a half moon stays dark
-        float halo = (exp(-max(r - 1.0, 0.0) * 1.6) * 0.16 + exp(-max(r - 1.0, 0.0) * 0.45) * 0.05) * (0.15 + 0.85 * uLit) * smoothstep(0.97, 1.03, r);
+        float cover = (1.0 - smoothstep(0.985, 1.015, r)) * seen;
+        // the halo is as bright as the moon is full; it lies around the disc and never over it, so the dark side of a
+        // half moon stays dark
+        float halo = (exp(-max(r - 1.0, 0.0) * 1.6) * 0.16 + exp(-max(r - 1.0, 0.0) * 0.45) * 0.05) * (0.15 + 0.85 * uLit) * seen * smoothstep(0.97, 1.03, r);
         col += vec3(0.42, 0.62, 1.0) * halo * (1.0 - smoothstep(3.6, 5.0, r));
         gl_FragColor = vec4(col, cover);
         #include <tonemapping_fragment>
@@ -283,7 +289,7 @@ function moon() {
 }
 
 /** how far the moon's middle keeps from a pine's outline, in disc radii: the disc and the bright edge of its halo */
-const CLEAR = 1.35;
+const CLEAR = 1.6;
 /** the moon's disc radius as a share of the frame's half height (its quad is 0.36 of the frame, the disc a fifth) */
 const DISC = 0.072;
 /** the most a pine lifts the moon off its path, in the same shares: over a treetop, but behind a tall near pine, as a

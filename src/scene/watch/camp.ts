@@ -98,8 +98,8 @@ export const build: BuildScene = (_accent, opts) => {
   let nightMs = 0;
   let sized = false;
   /**
-   * The sky follows the wall clock, the one thing in the camp that doesn't come from the beat: the stars every frame,
-   * the rest on building and then about once a minute, or at once if the clock is set back. A new moon place is
+   * The sky follows the device's clock, the one thing in the camp that doesn't come from the beat: the glow by its
+   * hours, the moon and stars by standard time; the stars every frame, the rest on building and then about once a minute, or at once if the clock is set back. A new moon place is
    * worked out with the camera at rest, where the frame was fitted.
    */
   function night() {

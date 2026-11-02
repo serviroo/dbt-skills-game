@@ -1,11 +1,12 @@
 // The camp's sky follows the player's own night on the device's clock. The moon has that night's phase: full on the
-// night of the March 2026 eclipse, dark at the August 2026 eclipse's new moon, half lit at first quarter, on its right
-// in a northern zone and on its left in Sydney. It climbs across the sky from low on the left at dusk to the top
-// around midnight and down to the right as dawn ends, drifting back by day, always clear of the pines, and an open camp
-// follows the clock as the hours pass. The stars turn about the pole with the hour, frame by frame. At dusk an amber
-// glow comes up low on the right over half an hour and at dawn a rose one on the left, while the faint stars fade; at
-// night neither glows. Everything is read off the pixels the camp shows, with reduced motion so
-// the frame holds still where the moon was placed, at phone, sideways and desktop sizes.
+// night of the March 2026 eclipse, lost in the sky at the August 2026 new moon, half lit at first quarter, on its right
+// in a northern zone and in UTC, and on its left in Sydney and Johannesburg. It climbs across the sky from low on the
+// left at dusk to the top around midnight and down to the right as dawn ends, drifting back by day and riding over the
+// pines, and an open camp follows the clock as the hours pass, with no jump on a night the clocks change. The stars
+// turn about the pole with the hour, frame by frame. At dusk an amber glow comes up low on the right over half an hour
+// and at dawn a rose one on the left, while the faint stars fade; at night neither glows. Everything is read off the
+// pixels the camp shows, with reduced motion so the frame holds still where the moon was placed, at phone, sideways
+// and desktop sizes.
 import sharp from 'sharp';
 import { screenshot } from './harness.mjs';
 
@@ -68,16 +69,26 @@ const lum = (g, x, y) => {
 };
 
 /**
- * The moon's disc where the camp says it is: the mean brightness of its left and right halves (inside 80% of its
- * radius, clear of the line between them), and of the sky just outside its halo for comparison.
+ * The moon's disc where the camp says it is: the mean of its left and right halves inside 80% of its radius, clear of
+ * the line between them, and the brightest of each out to the rim, a ring just outside its rim, and the sky beside its halo for comparison.
  */
 function disc(g, moon) {
   const cx = ((moon.x + 1) / 2) * g.w, cy = ((1 - moon.y) / 2) * g.h;
   // the moon's quad is 0.36 of the frame's height and its disc the middle fifth of that
   const r = g.h * 0.036;
+  const peak = {};
   const half = (side) => {
-    let n = 0, s = 0;
-    for (let y = -r; y <= r; y++) for (let x = -r; x <= r; x++) if (x * side > r * 0.15 && x * x + y * y < (r * 0.8) ** 2) (n++, (s += lum(g, cx + x, cy + y)));
+    let n = 0, s = 0, top = 0;
+    for (let y = -r; y <= r; y++) {
+      for (let x = -r; x <= r; x++) {
+        if (x * side <= r * 0.15) continue;
+        // the brightest out to the rim, where a young crescent's thin lit edge is; the mean inside 80% of the radius
+        const d2 = x * x + y * y;
+        if (d2 < (r * 0.95) ** 2) top = Math.max(top, lum(g, cx + x, cy + y));
+        if (d2 < (r * 0.8) ** 2) (n++, (s += lum(g, cx + x, cy + y)));
+      }
+    }
+    peak[side] = top;
     return s / n;
   };
   // the sky beside the halo, left and right of the moon and inside the frame
@@ -88,7 +99,16 @@ function disc(g, moon) {
       if (x >= 0 && x < g.w && y >= 0 && y < g.h) (n++, (s += lum(g, x, y)));
     }
   }
-  return { left: +half(-1).toFixed(1), right: +half(1).toFixed(1), sky: +(s / n).toFixed(1), at: [Math.round(cx), Math.round(cy)], r: +r.toFixed(1) };
+  // just outside the rim, where a halo or a dark edge would show
+  let rn = 0, rs = 0;
+  for (let a = 0; a < 48; a++) {
+    for (const k of [1.08, 1.25, 1.45]) {
+      const x = cx + Math.cos((a / 48) * TAU) * r * k, y = cy + Math.sin((a / 48) * TAU) * r * k;
+      if (x >= 0 && x < g.w && y >= 0 && y < g.h) (rn++, (rs += lum(g, x, y)));
+    }
+  }
+  const left = +half(-1).toFixed(1), right = +half(1).toFixed(1);
+  return { left, right, peakLeft: Math.round(peak[-1]), peakRight: Math.round(peak[1]), ring: +(rs / rn).toFixed(1), sky: +(s / n).toFixed(1), at: [Math.round(cx), Math.round(cy)], r: +r.toFixed(1) };
 }
 
 /**
@@ -125,14 +145,24 @@ function horizon(g, moon, low) {
 const SKY_BAND = 0.2;
 
 export const scenarios = {
-  /** tonight's phase: full, new and first quarter, lit on the right in the north and on the left in Sydney */
+  /** tonight's phase: full; new, lost in the sky; a young crescent, faint but there; first quarter, lit on the right in
+   *  the north and UTC and on the left in Sydney and Johannesburg */
   async 'camp-sky-moon-phase'(h) {
     const runs = [
       ['full', at(2026, 3, 3, 23, 30), {}, (s) => s.lit > 0.95, (d) => d.left > d.sky + 60 && d.right > d.sky + 60 && Math.abs(d.left - d.right) < 40],
-      ['new', at(2026, 8, 12, 23, 30), {}, (s) => s.lit < 0.05, (d) => d.left < d.sky + 45 && d.right < d.sky + 45],
+      // the mean new moon itself (08:14 UTC on 13 August, about 14 hours after the eclipse's): the moon is lost in the
+      // sky, no dark disc, no ring. Midnight in UTC-8, so the moon is at the top of the sky, clear of the pines and the
+      // glow, whatever zone this run is in
+      ['new', Date.UTC(2026, 7, 13, 8, 0), { timezoneId: 'Etc/GMT+8' }, (s) => s.lit < 0.001, (d) => Math.abs(d.left - d.sky) < 8 && Math.abs(d.right - d.sky) < 8 && Math.abs(d.ring - d.sky) < 8],
+      // two and a half days on, a young crescent: its lit edge clearly there, the dark side close to the sky, never
+      // darker (no dark disc) and only a faint earthshine above it, at noon in UTC-8, the top of the sky again
+      ['crescent', Date.UTC(2026, 7, 15, 20, 0), { timezoneId: 'Etc/GMT+8' }, (s) => s.lit > 0.05 && s.lit < 0.1 && !s.south, (d) => d.peakRight > d.sky + 60 && d.left > d.sky - 8 && d.left < d.sky + 20],
       ['quarter-north', at(2026, 3, 25, 23, 30), {}, (s) => s.lit > 0.35 && s.lit < 0.65 && !s.south, (d) => d.right > d.sky + 60 && d.right > d.left + 50],
       // 23:30 in Sydney (summer time, UTC+11), whatever zone this run is in
       ['quarter-sydney', Date.UTC(2026, 2, 25, 12, 30), { timezoneId: 'Australia/Sydney' }, (s) => s.lit > 0.35 && s.lit < 0.65 && s.south, (d) => d.left > d.sky + 60 && d.left > d.right + 50],
+      // a southern zone without summer time, known by its name (23:30 in Johannesburg, UTC+2), and plain UTC, northern
+      ['quarter-johannesburg', Date.UTC(2026, 2, 25, 21, 30), { timezoneId: 'Africa/Johannesburg' }, (s) => s.lit > 0.35 && s.lit < 0.65 && s.south, (d) => d.left > d.sky + 60 && d.left > d.right + 50],
+      ['quarter-utc', Date.UTC(2026, 2, 25, 23, 30), { timezoneId: 'UTC' }, (s) => s.lit > 0.35 && s.lit < 0.65 && !s.south, (d) => d.right > d.sky + 60 && d.right > d.left + 50],
     ];
     const seen = {};
     for (const [tag, time, zone, okSky, okDisc] of runs) {
@@ -147,7 +177,6 @@ export const scenarios = {
       h.expect(!errors.length, errors.join('\n'));
       await ctx.close();
     }
-    h.expect(seen.full.left - seen.new.left > 100 && seen.full.right - seen.new.right > 100, `the new moon is nearly as bright as the full one (${JSON.stringify([seen.full, seen.new])})`);
     // the same half-lit moon, the other way round, so the zone and not the frame decides which side is lit
     h.expect(seen['quarter-north'].right - seen['quarter-north'].left > 50 && seen['quarter-sydney'].left - seen['quarter-sydney'].right > 50, 'first quarter is not mirrored between the north and Sydney');
   },
@@ -163,7 +192,7 @@ export const scenarios = {
       // 08:00 to 17:00, so 12:30 is the middle of that
       // and the hours between, where the moon passes the pines
       const hours = [['17:00', first], ['00:30', at(2026, 3, 4, 0, 30)], ['07:59', at(2026, 3, 4, 7, 59)], ['12:30', at(2026, 3, 4, 12, 30)]];
-      for (const [hh, mm] of [[18, 45], [20, 0], [22, 0], [26, 30], [29, 0]]) hours.push([`${hh % 24}:${String(mm).padStart(2, '0')}`, at(2026, 3, 3, hh, mm)]);
+      for (const [hh, mm] of [[18, 45], [20, 0], [22, 0], [26, 30], [29, 0], [30, 45]]) hours.push([`${hh % 24}:${String(mm).padStart(2, '0')}`, at(2026, 3, 3, hh, mm)]);
       for (const [name, time] of hours) {
         if (time !== first) {
           await page.clock.setSystemTime(time);
@@ -178,7 +207,8 @@ export const scenarios = {
         // the full moon is there on screen, where the camp put it: whole where it rests (dusk, midnight, dawn, midday),
         // as a pine across either half would darken it; on its way between, it may pass behind a tall pine, never
         // all of it
-        const rest = hours.indexOf(hours.find((x) => x[0] === name)) < 4;
+        // and whole at 06:45 on a desktop, where a pine used to touch it
+        const rest = hours.indexOf(hours.find((x) => x[0] === name)) < 4 || (tag === 'desk' && name === '6:45');
         const whole = d.left > d.sky + 60 && d.right > d.sky + 60 && Math.abs(d.left - d.right) < 40;
         h.expect(rest ? whole : Math.max(d.left, d.right) > d.sky + 60, `${tag} ${name}: no ${rest ? 'whole ' : ''}full moon at ${JSON.stringify(d.at)} (${JSON.stringify(d)})`);
         h.expect(d.at[0] - d.r > 0 && d.at[0] + d.r < g.w && d.at[1] - d.r > 0, `${tag} ${name}: the moon is off the frame at ${JSON.stringify(d.at)} in ${g.w} x ${g.h}`);
@@ -217,6 +247,26 @@ export const scenarios = {
     // it goes on along its path to the right (up or down a little, as it rides over the pines)
     h.expect(Math.abs(b.p - 5 / 15) < 0.01 && b.moon.x > a.moon.x + 0.1 && Math.abs(b.moon.y - a.moon.y) < 0.1, `two hours on, the moon moved from ${JSON.stringify(a.moon)} to ${JSON.stringify(b.moon)} (night at ${b.p})`);
     h.expect(route === 'shadows' && (await page.evaluate(() => window.__camp.builds)) === 1, 'the camp was built again to follow the clock');
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  /** a night that changes the clocks (London, 01:00 GMT to 02:00 BST): an open camp's moon and stars go on as they were */
+  async 'camp-sky-clock-change'(h) {
+    const first = Date.UTC(2026, 2, 29, 0, 58);
+    const { ctx, page, errors } = await campAt(h, first, PHONE, { timezoneId: 'Europe/London' });
+    const a = await skyOf(page);
+    await page.clock.setSystemTime(Date.UTC(2026, 2, 29, 1, 2));
+    await page.waitForFunction((p) => window.__camp.sky && window.__camp.sky.p > p, a.p, { timeout: 10000 }).catch(async (e) => {
+      if (e.name !== 'TimeoutError') throw e;
+      throw new Error(`after the clocks changed, the open camp still shows ${JSON.stringify(await skyOf(page))}`);
+    });
+    const b = await skyOf(page);
+    const turned = (((b.turn - a.turn) % TAU) + TAU) % TAU;
+    console.log(`  00:58 GMT p ${a.p.toFixed(4)} moon ${JSON.stringify(a.moon)} -> 02:02 BST p ${b.p.toFixed(4)} moon ${JSON.stringify(b.moon)}, stars ${turned.toFixed(4)} rad`);
+    // a few minutes of night, not an hour: the moon goes on by about a hundredth of its path and the stars by a degree
+    h.expect(b.p - a.p < 0.01 && Math.abs(b.moon.x - a.moon.x) < 0.01 && Math.abs(b.moon.y - a.moon.y) < 0.01, `the moon jumped as the clocks changed: ${JSON.stringify(a)} -> ${JSON.stringify(b)}`);
+    h.expect(turned < 0.03, `the stars jumped ${turned.toFixed(3)} rad as the clocks changed`);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },
