@@ -191,7 +191,7 @@ def fur_mat(name):
     # page z (forwards along the body) is Blender -y
     z = m.math('MULTIPLY', m.N('ShaderNodeSeparateXYZ', Vector=m.obj).outputs['Y'], -1.0)
     thorax = m.ramp(shade, [(0.3, 0x9d8fe0), (0.7, 0xcdc2fb)])
-    ruff = m.ramp(shade, [(0.3, 0xd9d0ff), (0.7, 0xf6f3ff)])
+    ruff = m.ramp(shade, [(0.3, 0xcfc5fd), (0.7, 0xe9e3ff)])
     belly = m.ramp(shade, [(0.3, 0x8f80d6), (0.7, 0xc4b8f8)])
     col = m.mix(m.smooth(0.07, 0.14, z), thorax, ruff)
     back = m.smooth(0.04, -0.03, z)
@@ -208,7 +208,7 @@ def fur_mat(name):
 def wing_mat(name, hind, root):
     """
     The wing's pattern. Its bands are arcs round the wing's root (`root`, page x and z), as a moth's lines curve across
-    its wing: pale at the root with a rose blush, a fine pale line, a dark wavy line with a pale glow outside it, and the
+    its wing: pale at the root with a rose blush, a dark wavy line with a pale glow outside it, and the
     outer wing deeper violet. The fringe, the veins and the hind wing's ring follow the wing's own coordinates (UV map
     'pattern'): u across the wing from the front edge (0) to the back (1), v out from the root (0) to the edge (1).
     """
@@ -231,10 +231,6 @@ def wing_mat(name, hind, root):
     # a cloud of scales: the colour wanders a little
     cloud = m.N('ShaderNodeTexNoise', Vector=m.obj, Scale=16.0, Detail=5.0)
     base = m.mix(m.math('MULTIPLY', cloud.outputs['Fac'], 0.16), base, 0x5f4fae)
-    # the fine pale line nearer the root
-    if not hind:
-        near = m.math('ABSOLUTE', m.math('SUBTRACT', dn, 0.3))
-        base = m.mix(m.math('MULTIPLY', m.smooth(0.02, 0.004, near), 0.6), base, 0xf4f0ff)
     # the dark wavy line, and the pale glow of scales just outside it
     wave = m.math('MULTIPLY_ADD', m.math('SINE', m.math('MULTIPLY', ang, 11.0 if hind else 14.0)), 0.016, 0.6 if hind else 0.64)
     off = m.math('SUBTRACT', dn, wave)
@@ -534,8 +530,8 @@ def wing(f, s, hind):
 
 
 def antenna(f, s):
-    """a feathered antenna: a shaft curving up and out from the head, with a pair of barbs at every joint"""
-    shaft = [V(s * 0.022, 0.215, 0.215), V(s * 0.05, 0.27, 0.235), V(s * 0.095, 0.325, 0.23), V(s * 0.15, 0.36, 0.205), V(s * 0.2, 0.37, 0.17)]
+    """a feathered antenna: a shaft curving up, out and forwards from the head, with a pair of barbs at every joint"""
+    shaft = [V(s * 0.022, 0.215, 0.215), V(s * 0.05, 0.25, 0.26), V(s * 0.09, 0.28, 0.31), V(s * 0.145, 0.3, 0.365), V(s * 0.2, 0.305, 0.425)]
     path = []
     for i in range(len(shaft) - 1):
         for k in range(5):
@@ -806,7 +802,7 @@ def preview(root):
     os.makedirs(os.path.join(OUT, 'out'), exist_ok=True)
     look = B(V(0, 0.15, 0.0))
     # front, three-quarter, back three-quarter, and from high in front as the page shows it
-    for i, (az, el, dist) in enumerate(((0.0, 0.42, 2.4), (0.7, 0.35, 2.2), (2.6, 0.5, 2.4), (0.0, 1.35, 2.2))):
+    for i, (az, el, dist) in enumerate(((0.0, 0.42, 2.4), (0.7, 0.35, 2.2), (2.6, 0.5, 2.4), (0.0, 1.05, 2.2))):
         d = Vector((math.sin(az) * math.cos(el), -math.cos(az) * math.cos(el), math.sin(el)))
         cam.location = look + d * dist
         cam.rotation_euler = (look - cam.location).to_track_quat('-Z', 'Y').to_euler()

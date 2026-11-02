@@ -14,11 +14,15 @@ import type { BuildScene } from '../runtime';
  */
 
 const FOV = 26;
-/** where the camera looks, and how high above the moth it looks from (radians), in front of its head */
+/**
+ * where the camera looks, and how high above the moth it looks from (radians), in front of its head: high enough to see
+ * the wings open, low enough that the antennae rising from the head stand out above it, as a moth's should
+ */
 const AIM = new THREE.Vector3(0, 0.13, -0.03);
-const RISE = 1.35;
-/** half the widest the moth gets (wings at rest), over the share of its window it may fill */
-const HALF_SPAN = 0.6;
+const RISE = 1.05;
+/** the middle of the head (as built in scripts/build-moth.py) */
+const HEAD = new THREE.Vector3(0, 0.165, 0.19);
+/** the share of its window, out from the middle, the moth may reach at its widest */
 const FILL = 0.9;
 /** where each side's wings and antenna turn (as built: ROOT_X, ROOT_Y in scripts/build-moth.py) */
 const WING_ROOT = new THREE.Vector3(0.045, 0.13, 0);
@@ -149,7 +153,62 @@ export const build: BuildScene = (accent) => {
   hook.builds++;
 
   let dist = 3;
-  const probe = { lift: REST, antenna: 0, e: 0 };
+  // each antenna's tip, in its hinge's space: its box's corner out at its side, up and forwards, where it sweeps to
+  const tips = [1, -1].map((s) => {
+    const [ax0, , , ax1, ay1, az1] = hook.parts[`moth-ant${s}`];
+    return new THREE.Vector3(s > 0 ? ax1 : ax0, ay1, az1).sub(ANT_ROOT.clone().setX(ANT_ROOT.x * s));
+  });
+  const v = new THREE.Vector3();
+  /** how far above the head the lower antenna tip shows, as a share of the window's height */
+  const antennaeAbove = () => {
+    const head = v.copy(HEAD).project(camera).y;
+    return Math.min(...ants.map((a, i) => a.localToWorld(tips[i].clone()).project(camera).y - head)) / 2;
+  };
+  const probe = { lift: REST, antenna: 0, e: 0, antennaeAbove: 0 };
+
+  /** every corner of every part's box, in its own part's space (the wings' and antennae's about their hinges) */
+  const corners = [moth.children[0], moth.children[1], ...wings, ...ants].map((g) => {
+    const name = g instanceof THREE.Group ? g.children[0].name : g.name;
+    const [x0, y0, z0, x1, y1, z1] = hook.parts[name];
+    const at = g instanceof THREE.Group ? g.position : new THREE.Vector3();
+    return { g, pts: [x0, x1].flatMap((x) => [y0, y1].flatMap((y) => [z0, z1].map((z) => new THREE.Vector3(x, y, z).sub(at)))) };
+  });
+  /** places the camera `d` from where it looks, as pose does */
+  const place = (d: number) => {
+    camera.position.set(AIM.x, AIM.y + Math.sin(RISE) * d, AIM.z + Math.cos(RISE) * d);
+    camera.lookAt(AIM);
+    camera.updateMatrixWorld();
+  };
+  /**
+   * The nearest distance at which the whole moth, its wings at their widest in a breath, stays within FILL of its
+   * window's middle, in perspective (near wing tips show bigger than far ones). Found by halving, from the boxes'
+   * corners.
+   */
+  function fit() {
+    wings[0].rotation.z = REST - BREATH_LIFT / 2;
+    wings[1].rotation.z = -wings[0].rotation.z;
+    for (const a of ants) a.rotation.set(0, 0, 0);
+    moth.position.y = 0;
+    moth.updateMatrixWorld(true);
+    const reach = (d: number) => {
+      place(d);
+      let m = 0;
+      for (const { g, pts } of corners) for (const p of pts) {
+        const q = v.copy(p);
+        if (g instanceof THREE.Group) g.localToWorld(q);
+        q.project(camera);
+        m = Math.max(m, Math.abs(q.x), Math.abs(q.y));
+      }
+      return m;
+    };
+    let lo = 0.5, hi = 20;
+    for (let i = 0; i < 24; i++) {
+      const mid = (lo + hi) / 2;
+      if (reach(mid) > FILL) lo = mid;
+      else hi = mid;
+    }
+    return hi;
+  }
 
   return {
     scene,
@@ -168,18 +227,17 @@ export const build: BuildScene = (accent) => {
       ants[1].rotation.set(-drift * 0.6, 0, -drift);
       moth.position.y = 0.006 * breath * woke;
       // from high in front, its face and eyes in sight and its head at the top of the window, as the drawing has it
-      camera.position.set(AIM.x, AIM.y + Math.sin(RISE) * dist, AIM.z + Math.cos(RISE) * dist);
-      camera.lookAt(AIM);
+      place(dist);
+      moth.updateMatrixWorld();
       probe.lift = lift;
+      probe.antennaeAbove = antennaeAbove();
       probe.antenna = drift;
       probe.e = e;
     },
     resize(w, h) {
       camera.aspect = w / h;
-      // the whole moth inside its window across the narrower side
-      const half = Math.tan(THREE.MathUtils.degToRad(FOV / 2)) * Math.min(1, camera.aspect);
-      dist = HALF_SPAN / FILL / half;
       camera.updateProjectionMatrix();
+      dist = fit();
     },
     dispose() {
       for (const m of [halo, aura]) {

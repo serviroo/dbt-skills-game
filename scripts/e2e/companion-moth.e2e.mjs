@@ -1,6 +1,6 @@
 // The companion moth in 3D on its reward card: on a phone and a desktop the card's emblem shows the moth live and drawn,
-// its drawing hidden underneath; it wakes as it is met (its wings, folded up over its back, open to rest) and then
-// breathes, its wings and antennae moving on; every part of it is where the model file puts it, left and right alike;
+// its drawing hidden underneath, whole in a window that melts into the card; it wakes as it is met (its wings, folded up
+// over its back, open to rest) and then breathes, its wings and antennae moving on, the antennae clear above its head; every part of it is where the model file puts it, left and right alike;
 // with reduced motion it is one still frame, awake; with no WebGL the drawing stays and no scene is left; reading the
 // note takes it down with nothing left behind, and so does leaving the real intro from its rewards by Skip or the Safe
 // Zone, with the intro's own 3D stage drawing behind the cards.
@@ -115,6 +115,8 @@ export const scenarios = {
       await h.sleep(1500);
       const b = (await state(page)).scenes.last.probe;
       h.expect(Math.abs(b.lift - REST) < 0.08 && b.lift !== a.lift && b.antenna !== a.antenna, `${tag}: the awake moth is not breathing at rest (${JSON.stringify([a, b])})`);
+      // a moth, not a butterfly: its feathered antennae stand clear above its head on screen
+      h.expect(b.antennaeAbove > 0.08, `${tag}: the antennae barely show above the head (${b.antennaeAbove.toFixed(3)} of the window's height)`);
       const p = await pixels(page);
       h.expect(p.sd > 10 && p.max > 140 && p.mean > 8, `${tag}: the moth looks blank (${JSON.stringify(p)})`);
       const s = await state(page);
