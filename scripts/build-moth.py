@@ -179,22 +179,30 @@ def strands(m, scale, along):
     return w.outputs['Fac']
 
 
-def fur_mat(name, lo, hi, band=None):
-    """fur shaded from `lo` in the hollows to `hi` on top, with rings across the abdomen when `band` is given"""
+def fur_mat(name):
+    """
+    The body's one coat of fur, its colour following the body with no seams: lilac over the thorax, paler and nearly
+    white over the ruff and the head, deeper down the abdomen, which has the faintest rings. Each part's colour is shaded
+    from its hollows to its tops by a soft cloud.
+    """
     m = Mat(name)
     n = m.N('ShaderNodeTexNoise', Vector=m.obj, Scale=9.0, Detail=4.0)
-    col = m.ramp(n.outputs['Fac'], [(0.3, lo), (0.7, hi)])
+    shade = n.outputs['Fac']
+    # page z (forwards along the body) is Blender -y
+    z = m.math('MULTIPLY', m.N('ShaderNodeSeparateXYZ', Vector=m.obj).outputs['Y'], -1.0)
+    thorax = m.ramp(shade, [(0.3, 0x9d8fe0), (0.7, 0xcdc2fb)])
+    ruff = m.ramp(shade, [(0.3, 0xd9d0ff), (0.7, 0xf6f3ff)])
+    belly = m.ramp(shade, [(0.3, 0x8f80d6), (0.7, 0xc4b8f8)])
+    col = m.mix(m.smooth(0.07, 0.14, z), thorax, ruff)
+    back = m.smooth(0.04, -0.03, z)
+    ring = m.N('ShaderNodeTexWave', Vector=m.obj, Scale=13.0, Distortion=0.6)
+    ring.wave_type = 'BANDS'
+    ring.bands_direction = 'Y'
+    belly = m.mix(m.math('MULTIPLY', m.smooth(0.7, 0.98, ring.outputs['Fac']), 0.08), belly, 0x5f50a8)
+    col = m.mix(back, col, belly)
     h = strands(m, 160.0, (1.0, 1.0, 5.0))
-    if band is not None:
-        # rings along the abdomen (page z is Blender -y): the joins between segments a little darker
-        ring = m.N('ShaderNodeTexWave', Vector=m.obj, Scale=13.0, Distortion=0.6)
-        ring.wave_type = 'BANDS'
-        ring.bands_direction = 'Y'
-        dark = m.smooth(0.75, 0.98, ring.outputs['Fac'])
-        col = m.mix(m.math('MULTIPLY', dark, 0.16), col, band)
-        h = m.math('ADD', h, m.math('MULTIPLY', dark, -0.25))
-    rough = m.math('MULTIPLY_ADD', n.outputs['Fac'], 0.1, 0.84)
-    return m.finish(col, rough, h, bump=0.3)
+    rough = m.math('MULTIPLY_ADD', shade, 0.1, 0.84)
+    return m.finish(col, rough, h, bump=0.2)
 
 
 def wing_mat(name, hind, root):
@@ -293,9 +301,7 @@ FORE_ROOT_Z = 0.075
 HIND_ROOT_Z = 0.0
 
 MATS = {
-    'fur': fur_mat('fur', 0x9d8fe0, 0xcdc2fb),
-    'collar': fur_mat('collar', 0xd9d0ff, 0xf6f3ff),
-    'abdomen': fur_mat('abdomen', 0x8f80d6, 0xc4b8f8, band=0x5f50a8),
+    'fur': fur_mat('fur'),
     'leg': plain_mat('leg', 0xd2c8fb, 0.75),
     'antenna': plain_mat('antenna', 0xe8e0ff, 0.6, 200.0),
     'fore': wing_mat('fore', False, (ROOT_X, FORE_ROOT_Z)),
@@ -400,7 +406,7 @@ class Fig:
 
 
 def metaball_mesh(f, name, elements, m, res=0.012, fur=0.0):
-    """a smooth organic body from metaball elements (each: co, surface radius r, size s)"""
+    """a smooth organic body from metaball elements (each: co, surface radius r, size s, and how stiff it is)"""
     mb = bpy.data.metaballs.new(f'{f.id}-{name}')
     mb.resolution = mb.render_resolution = res
     mb.threshold = 0.6
@@ -408,7 +414,9 @@ def metaball_mesh(f, name, elements, m, res=0.012, fur=0.0):
         el = mb.elements.new()
         el.type = 'ELLIPSOID'
         el.co = B(V(e['co']))
-        el.stiffness = 10.0
+        # a stiff element blends only where it nearly touches another and meets the threshold at 0.78 of its radius
+        # alone; a soft one melts into its neighbours
+        el.stiffness = e.get('stiff', 10.0)
         el.radius = e['r'] / 0.78
         sx, sy, sz = e.get('s', (1, 1, 1))
         el.size_x, el.size_y, el.size_z = sx, sz, sy
@@ -557,8 +565,8 @@ def moth():
     f = Fig('moth')
     E = []
 
-    def el(co, r, s=(1, 1, 1)):
-        E.append(dict(co=co, r=r, s=s))
+    def el(co, r, s=(1, 1, 1), stiff=10.0):
+        E.append(dict(co=co, r=r, s=s, stiff=stiff))
     # the masses under the fluff: head, thorax and a short abdomen tapering back and down
     core = [((0, 0.165, 0.19), 0.07, (1.0, 0.95, 0.9)), ((0, 0.15, 0.1), 0.09, (1.05, 0.95, 1.05))]
     for co, r, sz in core:
@@ -566,7 +574,7 @@ def moth():
     for z, y, r in ((0.0, 0.13, 0.07), (-0.055, 0.12, 0.064), (-0.11, 0.108, 0.055), (-0.16, 0.097, 0.044), (-0.2, 0.088, 0.03)):
         el((0, y, z), r, (1.0, 0.9, 0.9))
     # the fluff: soft clumps all over the head and thorax, biggest in the ruff behind the head, and smaller ones down
-    # the abdomen, so the moth reads as one round pompom of fur
+    # the abdomen, melting into each other so the moth wears one plush coat with a gentle swell to it
     def clumps(c, r, sz, n, size, up=-0.2, back=1.0):
         for _ in range(n):
             while True:
@@ -575,28 +583,16 @@ def moth():
                     break
             d.z *= back
             p = V(c) + V(d.x * r * sz[0], d.y * r * sz[1], d.z * r * sz[2]) * 0.92
-            el(tuple(p), size * random.uniform(0.75, 1.15), (1.0, 0.85, 1.0))
-    clumps((0, 0.15, 0.1), 0.09, (1.05, 0.95, 1.05), 40, 0.034, up=-0.35)
-    clumps((0, 0.175, 0.145), 0.085, (1.2, 0.85, 0.7), 24, 0.038, up=-0.1)
-    clumps((0, 0.165, 0.19), 0.07, (1.0, 0.95, 0.9), 18, 0.026, up=-0.45)
+            el(tuple(p), size * random.uniform(0.75, 1.15), (1.0, 0.85, 1.0), stiff=3.0)
+    clumps((0, 0.15, 0.1), 0.09, (1.05, 0.95, 1.05), 26, 0.036, up=-0.35)
+    clumps((0, 0.175, 0.145), 0.085, (1.2, 0.85, 0.7), 16, 0.04, up=-0.1)
+    clumps((0, 0.165, 0.19), 0.07, (1.0, 0.95, 0.9), 12, 0.028, up=-0.45)
     for z, y, r in ((0.0, 0.13, 0.07), (-0.055, 0.12, 0.064), (-0.11, 0.108, 0.055), (-0.16, 0.097, 0.044)):
-        clumps((0, y, z), r, (1.0, 0.9, 0.9), 9, r * 0.36, up=-0.5)
+        clumps((0, y, z), r, (1.0, 0.9, 0.9), 6, r * 0.4, up=-0.5)
     body = metaball_mesh(f, 'body', E, 'fur', res=0.007, fur=0.003)
-    # the ruff and the head are paler than the thorax, the abdomen ringed
-    body.data.materials.append(MATS['collar'].m)
-    body.data.materials.append(MATS['abdomen'].m)
-    for poly in body.data.polygons:
-        c = poly.center
-        z, y = -c.y, c.z
-        if z < 0.03:
-            poly.material_index = 2
-        elif z > 0.11 or (z > 0.07 and y > 0.2):
-            poly.material_index = 1
-        else:
-            poly.material_index = 0
-    # eyes: big and round, high on the sides of the head, so they show from above as the drawing has them
+    # eyes: big and round, high on the front of the head's sides, so they show from above as the drawing has them
     for s in (-1, 1):
-        p, n = on_surface(body, V(0, 0.17, 0.19), V(s * 0.45, 0.42, 0.5))
+        p, n = on_surface(body, V(0, 0.17, 0.19), V(s * 0.4, 0.4, 0.62))
         f.ball(f'eye{s}', p - n * 0.012, 0.032, EYE, s=(0.9, 1.0, 0.9), n=14, role='eye')
     # legs folded under the thorax, feet just reaching the ground
     for s in (-1, 1):
@@ -809,8 +805,8 @@ def preview(root):
     SCENE.camera = cam
     os.makedirs(os.path.join(OUT, 'out'), exist_ok=True)
     look = B(V(0, 0.15, 0.0))
-    # front, three-quarter, back three-quarter, and from above and behind as the page shows it
-    for i, (az, el, dist) in enumerate(((0.0, 0.42, 2.4), (0.7, 0.35, 2.2), (2.6, 0.5, 2.4), (math.pi, 1.12, 2.2))):
+    # front, three-quarter, back three-quarter, and from high in front as the page shows it
+    for i, (az, el, dist) in enumerate(((0.0, 0.42, 2.4), (0.7, 0.35, 2.2), (2.6, 0.5, 2.4), (0.0, 1.35, 2.2))):
         d = Vector((math.sin(az) * math.cos(el), -math.cos(az) * math.cos(el), math.sin(el)))
         cam.location = look + d * dist
         cam.rotation_euler = (look - cam.location).to_track_quat('-Z', 'Y').to_euler()

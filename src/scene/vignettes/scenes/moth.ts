@@ -9,16 +9,17 @@ import type { BuildScene } from '../runtime';
  * The companion, a small night moth, as modelled in Blender (scripts/build-moth.py, packed by scripts/build-moth.mjs into
  * public/models/moth.glb). It wakes as it is met: its wings, folded up over its back, open to rest, and from then on
  * lift a little and settle with the slow breath while its antennae drift. Moonlight from above, the player's accent as
- * a rim from behind, a low violet fill; its eyes are its own light, mint, each in a soft halo.
+ * a rim from behind, a low violet fill; its eyes are its own light, mint, each in a soft halo, and the soft violet glow
+ * every epic reward card's emblem has lies behind it.
  */
 
 const FOV = 26;
-/** where the camera looks, how high above the moth it looks from (radians) and how much room is left round it */
+/** where the camera looks, and how high above the moth it looks from (radians), in front of its head */
 const AIM = new THREE.Vector3(0, 0.13, -0.03);
-const RISE = 1.05;
+const RISE = 1.35;
 /** half the widest the moth gets (wings at rest), over the share of its window it may fill */
 const HALF_SPAN = 0.6;
-const FILL = 1;
+const FILL = 0.9;
 /** where each side's wings and antenna turn (as built: ROOT_X, ROOT_Y in scripts/build-moth.py) */
 const WING_ROOT = new THREE.Vector3(0.045, 0.13, 0);
 const ANT_ROOT = new THREE.Vector3(0.022, 0.215, 0.215);
@@ -85,15 +86,13 @@ function hinge(name: string, at: THREE.Vector3) {
   return g;
 }
 
-/** A soft round halo for the eyes: the eye itself is the light's core, this is its glow. */
-function haloTexture() {
+/** A soft round glow, white, its strength out from the middle given as [share of the radius, opacity] stops. */
+function haloTexture(stops: [number, number][]) {
   const c = document.createElement('canvas');
   c.width = c.height = 64;
   const x = c.getContext('2d')!;
   const g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
-  g.addColorStop(0, 'rgba(255,255,255,1)');
-  g.addColorStop(0.35, 'rgba(255,255,255,0.38)');
-  g.addColorStop(1, 'rgba(255,255,255,0)');
+  for (const [at, a] of stops) g.addColorStop(at, `rgba(255,255,255,${a})`);
   x.fillStyle = g;
   x.fillRect(0, 0, 64, 64);
   const t = new THREE.CanvasTexture(c);
@@ -106,14 +105,17 @@ export const build: BuildScene = (accent) => {
   // nothing behind it: the card shows through wherever the moth isn't (src/styles/cutscene.css)
   scene.background = new THREE.Color(0x000000);
   const camera = new THREE.PerspectiveCamera(FOV, 1, 0.05, 20);
+  // the head's way is up on screen
+  camera.up.set(0, 0, 1);
 
   scene.add(new THREE.HemisphereLight(0xe4dcff, 0x1a1236, 1));
+  // every light on the middle line, so both wings are lit alike however they are raised
   const moon = new THREE.DirectionalLight(0xf0ecff, 3.3);
-  moon.position.set(-0.7, 1.6, -0.6);
+  moon.position.set(0, 1.6, 0.5);
   const rim = new THREE.DirectionalLight(accent, 2.2);
-  rim.position.set(0.5, 0.35, 1.3);
+  rim.position.set(0, 0.6, -1.3);
   const fill = new THREE.DirectionalLight(0x7b3fe4, 0.7);
-  fill.position.set(0.9, 0.15, 1.0);
+  fill.position.set(0, 0.15, 1.0);
   scene.add(moon, rim, fill);
 
   const moth = new THREE.Group();
@@ -128,7 +130,7 @@ export const build: BuildScene = (accent) => {
   const ants = [1, -1].map((s) => hinge(`ant${s}`, ANT_ROOT.clone().setX(ANT_ROOT.x * s)));
   moth.add(...wings, ...ants);
   // each eye is its light's core; this is its soft halo, mint as the eyes are, wide enough to read on a phone
-  const halo = new THREE.SpriteMaterial({ map: haloTexture(), color: 0x89cf9d, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false });
+  const halo = new THREE.SpriteMaterial({ map: haloTexture([[0, 1], [0.35, 0.38], [1, 0]]), color: 0x89cf9d, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false });
   const [x0, y0, z0, x1, y1, z1] = hook.parts['moth-eye'];
   for (const s of [-1, 1]) {
     const glow = new THREE.Sprite(halo);
@@ -137,7 +139,13 @@ export const build: BuildScene = (accent) => {
     glow.scale.setScalar(0.2);
     moth.add(glow);
   }
-  scene.add(moth);
+  // the card's violet glow, soft and wide, under the moth
+  const aura = new THREE.SpriteMaterial({ map: haloTexture([[0, 0.8], [0.45, 0.32], [1, 0]]), color: 0x7b3fe4, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+  const behind = new THREE.Sprite(aura);
+  behind.position.set(0, 0, -0.03);
+  behind.scale.setScalar(1.25);
+  behind.renderOrder = -1;
+  scene.add(moth, behind);
   hook.builds++;
 
   let dist = 3;
@@ -159,8 +167,8 @@ export const build: BuildScene = (accent) => {
       ants[0].rotation.set(drift * 0.6, 0, -drift);
       ants[1].rotation.set(-drift * 0.6, 0, -drift);
       moth.position.y = 0.006 * breath * woke;
-      // from above and behind, its head at the top of the window, as the drawing has it
-      camera.position.set(AIM.x, AIM.y + Math.sin(RISE) * dist, AIM.z - Math.cos(RISE) * dist);
+      // from high in front, its face and eyes in sight and its head at the top of the window, as the drawing has it
+      camera.position.set(AIM.x, AIM.y + Math.sin(RISE) * dist, AIM.z + Math.cos(RISE) * dist);
       camera.lookAt(AIM);
       probe.lift = lift;
       probe.antenna = drift;
@@ -174,8 +182,10 @@ export const build: BuildScene = (accent) => {
       camera.updateProjectionMatrix();
     },
     dispose() {
-      halo.map?.dispose();
-      halo.dispose();
+      for (const m of [halo, aura]) {
+        m.map?.dispose();
+        m.dispose();
+      }
       hook.disposed++;
     },
   };

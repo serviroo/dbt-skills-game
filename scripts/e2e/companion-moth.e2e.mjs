@@ -56,7 +56,7 @@ async function pixels(page) {
 
 /**
  * The moth's window melts into the card: just inside the emblem's corners the card looks as it does just outside them,
- * with no dark square round the moth, while it fades in as much as after.
+ * with no dark square round the moth, while it fades in as much as after; and the moth fits inside it.
  */
 async function seamless(h, page, where) {
   const c = card(page);
@@ -70,6 +70,11 @@ async function seamless(h, page, where) {
   const pairs = [[em.x + 3, em.y + 3, em.x - 3, em.y + 3], [em.x + em.width - 3, em.y + 3, em.x + em.width + 3, em.y + 3], [em.x + 3, em.y + em.height - 3, em.x - 3, em.y + em.height - 3], [em.x + em.width - 3, em.y + em.height - 3, em.x + em.width + 3, em.y + em.height - 3]];
   const gaps = pairs.map(([x0, y0, x1, y1]) => +(at(x1, y1) - at(x0, y0)).toFixed(1));
   h.expect(gaps.every((g) => Math.abs(g) < 6), `${where}: the moth's window shows as a square on the card (outside minus inside: ${gaps})`);
+  // and the moth is whole inside it: nothing of it reaches the window's left and right edges, where it would be cut off
+  const edge = (x) => Math.max(...Array.from({ length: Math.floor(em.height) - 6 }, (_, i) => at(x, em.y + 3 + i)));
+  const card0 = Math.max(at(em.x - 3, em.y + em.height / 2), at(em.x + em.width + 3, em.y + em.height / 2));
+  const sides = [edge(em.x + 1), edge(em.x + em.width - 1)];
+  h.expect(sides.every((l) => l < card0 + 25), `${where}: the moth is cut off at its window's side (edge brightness ${sides.map(Math.round)}, card ${Math.round(card0)})`);
 }
 
 /** Every part of the moth where the model puts it: both sides alike, the antennae above the head, the feet on the ground. */
