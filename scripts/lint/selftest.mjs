@@ -20,7 +20,7 @@ const RULE_FINDINGS = {
   'no-soft-hyphen-characters': 1,
   'stored-writes-go-through-cleared': 2,
   'tap-elements-not-points': 3,
-  'handle-lost-gpu-context': 2,
+  'handle-lost-gpu-context': 3,
 };
 
 function checkRules() {

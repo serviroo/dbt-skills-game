@@ -228,6 +228,13 @@ function functionOf(context, callee) {
   return def?.type === 'VariableDeclarator' && FUNCTIONS.has(def.init?.type) ? def.init : null;
 }
 
+function listenThroughHandOvers(listened, handedOver) {
+  const newlyHeard = () => handedOver.filter(({ canvas, param }) => listened.has(param) && !listened.has(canvas));
+  for (let heard = newlyHeard(); heard.length; heard = newlyHeard()) {
+    for (const { canvas } of heard) listened.add(canvas);
+  }
+}
+
 const handleLostGpuContext = {
   meta: {
     messages: {
@@ -256,7 +263,7 @@ const handleLostGpuContext = {
         });
       },
       'Program:exit'() {
-        for (const { canvas, param } of handedOver) if (listened.has(param)) listened.add(canvas);
+        listenThroughHandOvers(listened, handedOver);
         for (const { node, canvases } of renderers) {
           if (!canvases.some((canvas) => listened.has(canvas))) context.report({ node, messageId: 'lost' });
         }

@@ -21,13 +21,14 @@ export async function onBeat(page, check, arg, sec, what) {
     ]);
     return { time, drawn, done: await page.evaluate(check, arg) };
   };
-  let r = await read();
-  const by = r.time + sec;
   const stalled = `the intro drew no frame for ${STALL / 1000} s of the page running, waiting for ${what}`;
+  const next = (ok) => poll(page, read, ok, stalled, { timeout: STALL, polling: 50 });
+  let r = await next(() => true);
+  const by = r.time + sec;
   while (!r.done) {
     if (r.time > by) throw new Error(`waited ${sec} s of the scene's clock for ${what}`);
     const { drawn } = r;
-    r = await poll(page, read, (n) => n.done || n.drawn !== drawn, stalled, { timeout: STALL, polling: 50 });
+    r = await next((n) => n.done || n.drawn !== drawn);
   }
 }
 

@@ -20,3 +20,27 @@ export function makeScenes(canvas: HTMLCanvasElement, spare: HTMLCanvasElement, 
   const unwatched = new THREE.WebGLRenderer({ canvas: spare });
   return [shown, own, helped, unwatched];
 }
+
+export function makeHandedOn(canvas: HTMLCanvasElement, bare: HTMLCanvasElement, onLost: () => void) {
+  const handedOn = new THREE.WebGLRenderer({ canvas });
+  handOn(canvas, onLost);
+  const passedOn = new THREE.WebGLRenderer({ canvas: bare });
+  passOn(bare);
+  return [handedOn, passedOn];
+}
+
+function handOn(target: HTMLCanvasElement, onLost: () => void) {
+  listenFor(target, onLost);
+}
+
+function listenFor(target: HTMLCanvasElement, onLost: () => void) {
+  target.addEventListener(LOST, onLost);
+}
+
+function passOn(target: HTMLCanvasElement) {
+  sizeDown(target);
+}
+
+function sizeDown(target: HTMLCanvasElement) {
+  target.width = 1;
+}
