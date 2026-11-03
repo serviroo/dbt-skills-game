@@ -1,11 +1,12 @@
 // Runs the end-to-end scenarios in scripts/e2e/*.e2e.mjs against its own Vite dev server and Playwright Chromium, then
 // stops only the processes it started. Exits 1 if any scenario fails.
-// node scripts/e2e.mjs [--file=<name>] [--scenario=<name>] [--shard=<i>/<n>] [--jobs=<n>] [--cpu-throttle=<n>] [--headed] [--software] [--ws=<endpoint from scripts/e2e-browser.mjs> --port=<dev server port>]
+// node scripts/e2e.mjs [--file=<name>] [--scenario=<name>] [--shard=<i>/<n>] [--timings=<file>] [--jobs=<n>] [--cpu-throttle=<n>] [--headed] [--software] [--ws=<endpoint from scripts/e2e-browser.mjs> --port=<dev server port>]
 // Scenarios run side by side in --jobs browsers (default one for every 4 of this machine's CPU threads, at most 4, and 1
 // with --ws), each browser taking the longest one left. A file that exports `serial = true` runs its scenarios in the
 // order they are written, one at a time in one browser.
-// --shard=2/4 runs the second of four parts; scenarios are spread by their CI seconds in scripts/e2e/timings.json
-// (15 s for one not listed there; a serial file goes whole to one part), so CI can run the parts in parallel.
+// --shard=2/4 runs the second of four parts; scenarios are spread by the median of their recent CI seconds in
+// scripts/e2e/timings.json, or in --timings over it (15 s for one listed in neither; a serial file goes whole to one
+// part), so CI can run the parts in parallel.
 // --file=names runs scripts/e2e/names.e2e.mjs only. Browsers use this machine's GPU (Vulkan) by default.
 // --software explicitly uses SwiftShader on machines without a GPU, including browser children started by builds.
 // --cpu-throttle=4 slows every page's CPU work by four through CDP; report.json records the requested rate and any failure.
@@ -26,7 +27,7 @@ import { undefinedNames } from './e2e-scope-check.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.join(root, 'scripts/e2e');
 const flags = Object.fromEntries(process.argv.slice(2).filter((a) => a.startsWith('--')).map((a) => { const [k, ...v] = a.slice(2).split('='); return [k, v.length ? v.join('=') : 'true']; }));
-for (const key of ['file', 'scenario', 'shard', 'jobs', 'cpu-throttle', 'port']) {
+for (const key of ['file', 'scenario', 'shard', 'timings', 'jobs', 'cpu-throttle', 'port']) {
   if (flags[key] === '') throw new Error(`--${key} needs a value`);
 }
 if (flags.jobs && !/^[1-9]\d*$/.test(flags.jobs)) throw new Error(`--jobs needs a whole number of 1 or more, got ${flags.jobs}`);
@@ -86,8 +87,22 @@ if (flags.scenario && !fileOf.has(flags.scenario)) throw new Error('no scenario 
 const runnable = all.filter((s) => s.name === flags.scenario || !quarantined.has(s.name));
 const held = all.filter((s) => !runnable.includes(s) && (!flags.file || s.file === flags.file));
 
-const timings = fs.existsSync(path.join(dir, 'timings.json')) ? JSON.parse(fs.readFileSync(path.join(dir, 'timings.json'), 'utf8')) : {};
-const weight = (s) => (Number.isFinite(timings[s.name]) ? timings[s.name] : 15);
+const readJson = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
+const committed = path.join(dir, 'timings.json');
+const timings = {
+  ...(fs.existsSync(committed) ? readJson(committed) : {}),
+  ...(flags.timings ? readJson(path.resolve(flags.timings)) : {}),
+};
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+function weight(s) {
+  const t = timings[s.name];
+  const seconds = Array.isArray(t) && t.length ? median(t) : t;
+  return Number.isFinite(seconds) ? seconds : 15;
+}
 /** What one browser runs at a time, longest first: a scenario, or a serial file's scenarios in order. */
 function unitsOf(list) {
   const units = [];
@@ -116,6 +131,8 @@ if (flags.shard) {
     load[k] += unit.weight;
     if (k + 1 === +m[1]) for (const s of unit.scenarios) part.add(s.name);
   }
+  const planned = Math.round(load[+m[1] - 1] / 60);
+  console.log(`part ${flags.shard}: ${part.size} scenarios, about ${planned} min by CI timings (parts ${load.map((l) => Math.round(l / 60)).join(', ')})`);
 }
 const matched = runnable.filter((s) => (!flags.file || s.file === flags.file) && (!flags.scenario || s.name === flags.scenario));
 if (flags.scenario && !matched.length) throw new Error(`scenario ${flags.scenario} is not in ${flags.file}.e2e.mjs`);
