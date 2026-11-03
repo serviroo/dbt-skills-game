@@ -29,14 +29,24 @@ function children(node) {
     .flatMap(([, value]) => (Array.isArray(value) ? value : [value]).filter(isNode));
 }
 
-function declaredAs(context, id) {
+function variableOf(context, id) {
   for (let scope = context.sourceCode.getScope(id); scope; scope = scope.upper) {
     const variable = scope.set.get(id.name);
-    if (!variable) continue;
-    const def = variable.defs[0]?.node;
-    return def?.type === 'VariableDeclarator' && def.id.type === 'Identifier' ? def.init : null;
+    if (variable) return variable;
   }
   return null;
+}
+
+function declaratorOf(context, id) {
+  const def = variableOf(context, id)?.defs[0]?.node;
+  return def?.type === 'VariableDeclarator' && def.id.type === 'Identifier' ? def : null;
+}
+
+const declaredAs = (context, id) => declaratorOf(context, id)?.init ?? null;
+
+function constantOf(context, id) {
+  const def = declaratorOf(context, id);
+  return def?.parent.kind === 'const' ? def.init : null;
 }
 
 function readsAudioClock(context, node, seen = new Set()) {
@@ -149,11 +159,25 @@ const storedWritesGoThroughCleared = {
   },
 };
 
-const POINTER_METHODS = new Set(['click', 'dblclick', 'down', 'tap']);
+const POINTER_METHODS = new Set(['click', 'dblclick', 'move', 'tap']);
 
-const isFixedNumber = (node) =>
-  (node?.type === 'Literal' && typeof node.value === 'number') ||
-  (node?.type === 'UnaryExpression' && node.operator === '-' && isFixedNumber(node.argument));
+function isFixedNumber(context, node, resolving = new Set()) {
+  switch (node?.type) {
+    case 'Literal':
+      return typeof node.value === 'number';
+    case 'UnaryExpression':
+      return node.operator === '-' && isFixedNumber(context, node.argument, resolving);
+    case 'BinaryExpression':
+      return isFixedNumber(context, node.left, resolving) && isFixedNumber(context, node.right, resolving);
+    case 'Identifier': {
+      const variable = variableOf(context, node);
+      if (!variable || resolving.has(variable)) return false;
+      return isFixedNumber(context, constantOf(context, node), new Set(resolving).add(variable));
+    }
+    default:
+      return false;
+  }
+}
 
 const tapElementsNotPoints = {
   meta: {
@@ -169,35 +193,73 @@ const tapElementsNotPoints = {
         const device = node.callee.type === 'MemberExpression' ? node.callee.object : null;
         if (!POINTER_METHODS.has(methodName(node))) return;
         if (!isNamed(device, 'mouse') && !isNamed(device, 'touchscreen')) return;
-        if (node.arguments.slice(0, 2).some(isFixedNumber)) context.report({ node, messageId: 'point' });
+        const fixed = node.arguments.slice(0, 2).some((arg) => isFixedNumber(context, arg));
+        if (fixed) context.report({ node, messageId: 'point' });
       },
     };
   },
 };
 
+const LOST_EVENT = 'webglcontextlost';
+
+function canvasOf(context, node) {
+  if (node?.type === 'Identifier') return variableOf(context, node);
+  if (isNamed(node, 'domElement') && node.object.type === 'Identifier') return variableOf(context, node.object);
+  return null;
+}
+
+function rendererCanvases(context, node) {
+  const options = node.arguments[0]?.type === 'ObjectExpression' ? node.arguments[0].properties : [];
+  const given = options.find((p) => p.type === 'Property' && !p.computed && p.key.name === 'canvas');
+  const bound = node.parent.type === 'VariableDeclarator' ? node.parent.id : null;
+  return [canvasOf(context, given?.value), canvasOf(context, bound)].filter(Boolean);
+}
+
+function lossListenerTarget(context, call) {
+  if (methodName(call) !== 'addEventListener') return null;
+  const event = call.arguments[0];
+  const named = event?.type === 'Identifier' ? constantOf(context, event) : event;
+  return named?.type === 'Literal' && named.value === LOST_EVENT ? canvasOf(context, call.callee.object) : null;
+}
+
+function functionOf(context, callee) {
+  const def = callee.type === 'Identifier' ? variableOf(context, callee)?.defs[0]?.node : null;
+  if (def?.type === 'FunctionDeclaration') return def;
+  return def?.type === 'VariableDeclarator' && FUNCTIONS.has(def.init?.type) ? def.init : null;
+}
+
 const handleLostGpuContext = {
   meta: {
     messages: {
       lost:
-        'Handle a lost graphics context (webglcontextlost or isContextLost) where the renderer is made, or the ' +
-        'scene keeps drawing into a dead canvas.',
+        'Listen for webglcontextlost on this renderer\'s canvas, here or through a function this file calls, or ' +
+        'the scene keeps drawing into a dead canvas.',
     },
   },
   create(context) {
     const renderers = [];
-    let handled = false;
+    const listened = new Set();
+    const handedOver = [];
     return {
       NewExpression(node) {
-        if (isGlobal(node.callee, 'WebGLRenderer')) renderers.push(node);
+        if (isGlobal(node.callee, 'WebGLRenderer')) renderers.push({ node, canvases: rendererCanvases(context, node) });
       },
-      Literal(node) {
-        if (node.value === 'webglcontextlost') handled = true;
-      },
-      MemberExpression(node) {
-        if (isNamed(node, 'isContextLost')) handled = true;
+      CallExpression(node) {
+        const target = lossListenerTarget(context, node);
+        if (target) listened.add(target);
+        const fn = functionOf(context, node.callee);
+        if (!fn) return;
+        node.arguments.forEach((arg, i) => {
+          const canvas = canvasOf(context, arg);
+          const param = fn.params[i];
+          if (canvas && param?.type === 'Identifier') handedOver.push({ canvas, param: variableOf(context, param) });
+        });
       },
       'Program:exit'() {
-        if (!handled) for (const node of renderers) context.report({ node, messageId: 'lost' });
+        for (const { canvas, param } of handedOver) if (listened.has(param)) listened.add(canvas);
+        for (const { node, canvases } of renderers) {
+          if (!canvases.some((canvas) => listened.has(canvas))) context.report({ node, messageId: 'lost' });
+        }
       },
     };
   },

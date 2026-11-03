@@ -64,7 +64,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   };
   let lease: Lease | undefined;
   try {
-    lease = lendRenderer(holder, evict);
+    lease = lendRenderer(holder, { evict, lost: () => onLost(), restored: () => onRestored() });
     vig = build(new THREE.Color(opts.accent ?? '#4fb8ff'), opts);
   } catch (err) {
     if (vig) disposeTree(vig.scene);
@@ -75,7 +75,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   }
   const v = vig;
   const lent = lease;
-  const { renderer, canvas } = lent;
+  const { renderer } = lent;
 
   const { clock } = opts;
   const still = () => opts.reduced();
@@ -309,8 +309,6 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
     timeIn = 1;
     resync();
   };
-  canvas.addEventListener('webglcontextlost', onLost);
-  canvas.addEventListener('webglcontextrestored', onRestored);
   const offMotion = opts.onMotion(resync);
 
   return () => {
@@ -319,8 +317,6 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
     dropFence();
     io.disconnect();
     ro.disconnect();
-    canvas.removeEventListener('webglcontextlost', onLost);
-    canvas.removeEventListener('webglcontextrestored', onRestored);
     offMotion();
     setLive(false);
     v.dispose?.();

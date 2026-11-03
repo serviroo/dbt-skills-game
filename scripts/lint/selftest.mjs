@@ -19,8 +19,8 @@ const RULE_FINDINGS = {
   'follow-device-preferences': 1,
   'no-soft-hyphen-characters': 1,
   'stored-writes-go-through-cleared': 2,
-  'tap-elements-not-points': 1,
-  'handle-lost-gpu-context': 1,
+  'tap-elements-not-points': 3,
+  'handle-lost-gpu-context': 2,
 };
 
 function checkRules() {

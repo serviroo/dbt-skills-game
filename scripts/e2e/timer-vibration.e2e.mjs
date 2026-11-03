@@ -3,11 +3,13 @@
 // every second, on more time, while the page is out of sight, inside the Safe Zone or in the intro, and the choice
 // survives a reload.
 
+import { appears, playing } from './beat.mjs';
 import { gone } from './harness.mjs';
 import { tapWhereItIs } from './taps.mjs';
 
 const START = JSON.stringify([40]);
 const END = JSON.stringify([40, 120, 40]);
+const FIRST_WINDOW_SEC = 10;
 /** a skip's double pulse, a 200 ms rest, then the next timer's start pulse: one pattern, so neither cuts the other off */
 const END_THEN_START = JSON.stringify([40, 120, 40, 200, 40]);
 /** what stops a pattern still playing */
@@ -367,11 +369,13 @@ export const scenarios = {
     await page.keyboard.press('Enter');
     await page.keyboard.press('Enter');
     await gone(name, 10000);
+    await playing(page);
+    await appears(page, '.sw .sw-plate', FIRST_WINDOW_SEC);
     const plate = page.locator('.sw .sw-plate').last();
     let tapped = 0;
     for (let i = 0; i < 12; i++) {
-      await h.sleep(1500);
       if (await plate.count()) tapped += await tapWhereItIs(page, plate).then(() => 1, () => 0);
+      await h.sleep(1500);
     }
     h.expect(tapped > 0, 'no Lantern window in the intro took a tap');
     await h.shot(page, 'intro-quiet');
