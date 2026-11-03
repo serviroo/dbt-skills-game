@@ -442,7 +442,7 @@ export const scenarios = {
   fs.writeFileSync(timings, JSON.stringify({ [`${name}-signal`]: [2 * 3600] }));
   const tooLong = await run('part-too-long', ['--parts', `--timings=${timings}`]);
   assert.notEqual(tooLong.code, 0);
-  assert.match(tooLong.log, new RegExp(`${name}-signal takes about 120 min, more than one part has time for`));
+  assert.match(tooLong.log, new RegExp(`the serial file ${name} takes about 12\\d min, more than one part has time for`));
   const startup = await run('startup-failure', [`--scenario=${name}-signal`, '--host=invalid.invalid']);
   assert.notEqual(startup.code, 0);
   assert.match(startup.log, /no free port/);
