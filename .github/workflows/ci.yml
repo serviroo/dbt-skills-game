@@ -192,7 +192,7 @@ jobs:
 
   timings:
     needs: [plan, e2e]
-    if: ${{ !cancelled() && (needs.e2e.result == 'success' || needs.e2e.result == 'failure') }}
+    if: ${{ always() && needs.e2e.result != 'skipped' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
