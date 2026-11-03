@@ -1,11 +1,35 @@
-import { flat, live, PHONE, scenes, seed, toSkill } from './skill-scenes.e2e.mjs';
+import { deviceMotion } from './device-motion.e2e.mjs';
+import {
+  DESK,
+  drawn,
+  flat,
+  inStep,
+  keepsTime,
+  live,
+  looks,
+  losesContext,
+  moreTime,
+  openStopped,
+  pair,
+  PHONE,
+  scenes,
+  seed,
+  SIDE,
+  slowGpu,
+  steps,
+  toSkill,
+  until,
+} from './skill-scenes.e2e.mjs';
 
+const SMALL = { width: 320, height: 568 };
+const SIZES = [['phone', PHONE], ['small', SMALL], ['side', SIDE]];
 const PICS = {
-  clouds: { label: 'Clouds crossing the sky', words: /Each thought is a cloud/ },
-  cars: { label: 'Cars on a quiet road', words: /car going past/ },
-  leaves: { label: 'Leaves on a stream', words: /sits on a leaf/ },
+  clouds: { label: 'Clouds crossing the sky', words: /Each thought is a cloud/, most: 3 },
+  cars: { label: 'Cars on a quiet road', words: /car going past/, most: 2 },
+  leaves: { label: 'Leaves on a stream', words: /sits on a leaf/, most: 3 },
 };
 const NAMES = Object.keys(PICS);
+const SCENED = ['clouds'];
 
 const tap = (page, name) => page.locator('.dq-skill').getByRole('button', { name, exact: true }).first().click();
 async function toThoughts(h, page, pic) {
@@ -16,7 +40,225 @@ async function toThoughts(h, page, pic) {
   await page.locator('.dq-timer-stage').scrollIntoViewIfNeeded();
 }
 
+const thoughts = (last) => last.probe.things.split(' ').filter(Boolean).map((t) => t.split(':').map(Number));
+const out = ([, x, y]) => Math.hypot(x, y);
+
+async function countdownClear(h, page, where) {
+  const [num, win] = await Promise.all([
+    page.locator('.dq-timer-num').boundingBox(),
+    page.locator('.dq-scene').boundingBox(),
+  ]);
+  h.expect(
+    num && win && num.y >= win.y + win.height - 1,
+    `${where}: the countdown is over the scene (${JSON.stringify({ num, win })})`,
+  );
+}
+
+async function otherCopy(h, ctx, page, errors) {
+  const [other] = await Promise.all([ctx.waitForEvent('page'), page.evaluate(() => void window.open('/?mute'))]);
+  other.on('pageerror', (e) => errors.push('pageerror, other copy: ' + e.message));
+  await h.openSettings(other);
+  await page.bringToFront();
+  return (m) => other.getByRole('radio', { name: `Motion: ${m}`, exact: true }).click();
+}
+
+async function holdsStill(h, page, pic, where) {
+  await page.waitForFunction(() => window.__scenes?.last.still, null, { timeout: 15000 });
+  const a = await scenes(page);
+  await h.frames(page, 60);
+  const b = await scenes(page);
+  h.expect(
+    a.last.kind === 'thoughts' && a.last.probe.pic === pic && b.frames === a.frames,
+    `${where}: not one still frame of the ${pic} (${a.frames} -> ${b.frames}, ${JSON.stringify(a.last)})`,
+  );
+  h.expect(
+    thoughts(a.last).some((t) => out(t) < 0.8),
+    `${where}: no thought stands in the window (${a.last.probe.things})`,
+  );
+}
+
+async function moving(h, page, where) {
+  const from = await scenes(page);
+  await until(page, (n) => window.__scenes.frames > n + 10 && !window.__scenes.last.still, from.frames);
+  const c = await pair(page);
+  h.expect(
+    c.s.frames > from.frames + 10 && !c.s.last.still,
+    `${where}: the scene is not moving (${from.frames} -> ${c.s.frames})`,
+  );
+  inStep(h, c, where);
+}
+
+const countBuffers = () => {
+  window.__buffers = 0;
+  const p = WebGL2RenderingContext.prototype;
+  const [make, drop] = [p.createBuffer, p.deleteBuffer];
+  p.createBuffer = function () {
+    const b = make.call(this);
+    if (b) window.__buffers++;
+    return b;
+  };
+  p.deleteBuffer = function (b) {
+    if (b && this.isBuffer(b)) window.__buffers--;
+    return drop.call(this, b);
+  };
+};
+
+async function picture(h, pic) {
+  for (const [tag, vp] of [...SIZES, ['desk', DESK]]) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
+    await ctx.addInitScript(countBuffers);
+    await openStopped(h, page, (h, page) => toThoughts(h, page, pic), `${pic} ${tag}`);
+    h.expect(
+      PICS[pic].words.test(await page.locator('.dq-skill').innerText()),
+      `${pic} ${tag}: the watch step does not say ${PICS[pic].words}`,
+    );
+    await looks(h, page, `${pic}-${tag}`, 'thoughts', vp, undefined, { stopped: true });
+    h.expect(
+      (await scenes(page)).last.probe.pic === pic,
+      `${pic} ${tag}: the scene shows ${(await scenes(page)).last.probe.pic}`,
+    );
+    await countdownClear(h, page, `${pic} ${tag}`);
+    if (tag === 'phone') {
+      const path = new Map();
+      let most = 0;
+      for await (const at of steps(h, page, pic, 2000, { run: true })) {
+        const up = thoughts(at);
+        for (const t of up) path.set(t[0], [...(path.get(t[0]) ?? []), { e: at.e, x: t[1], y: t[2], r: out(t) }]);
+        const seen = up.filter((t) => out(t) < 1);
+        most = Math.max(most, seen.length);
+        h.expect(
+          seen.length <= PICS[pic].most,
+          `${pic}: ${seen.length} thoughts in the window at once at ${at.e.toFixed(1)} s (${at.probe.things})`,
+        );
+        for (const a of seen)
+          for (const b of seen)
+            if (a !== b)
+              h.expect(
+                Math.hypot(a[1] - b[1], a[2] - b[2]) >= 0.3,
+                `${pic}: two thoughts on top of each other at ${at.e.toFixed(1)} s (${at.probe.things})`,
+              );
+        if (at.e >= at.dur - 4) break;
+      }
+      const said = [...path]
+        .map(([n, ps]) => `${n}: ${ps.map((p) => `${p.e.toFixed(0)}s ${p.x.toFixed(2)}/${p.r.toFixed(2)}`).join(' ')}`)
+        .join('; ');
+      const crossed = [...path].filter(([, ps]) => {
+        const inside = ps.filter((p) => p.r < 0.75);
+        const steady = ps.every(
+          (p, i) => !i || (Math.hypot(p.x - ps[i - 1].x, p.y - ps[i - 1].y) > 0.05 && p.x > ps[i - 1].x - 0.02),
+        );
+        return ps[0].r > 1 && inside.length && ps[ps.length - 1].r > 1 && steady
+          && inside[inside.length - 1].e - inside[0].e >= 4;
+      });
+      h.expect(
+        crossed.length >= 1,
+        `${pic}: no thought came in, crossed the window steadily and went out within the minute (${said})`,
+      );
+      console.log(`  ${pic}: ${crossed.length} crossed in the minute, at most ${most} in view; ${said}`);
+      await page.locator('.dq-timer').getByRole('button', { name: '+30 s', exact: true }).click();
+      await keepsTime(h, page, 'thoughts');
+      const held = await page.evaluate(() => window.__buffers);
+      h.expect(held === 0, `${pic} left: ${held} GPU buffers still held`);
+    }
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  }
+}
+
 export const scenarios = {
+  async 'thoughts-clouds'(h) {
+    await picture(h, 'clouds');
+  },
+
+  async 'thoughts-clouds-moon'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
+    await openStopped(h, page, (h, page) => toThoughts(h, page, 'clouds'), 'clouds moon');
+    const moon = [];
+    let shot = false;
+    for await (const at of steps(h, page, 'clouds moon', 2000, { run: true })) {
+      if (at.e >= at.dur - 2) break;
+      moon.push(at.probe.moon);
+      if (!shot && at.probe.moon < 0.5) {
+        shot = true;
+        await h.shot(page, 'thoughts-clouds-moon');
+      }
+    }
+    const low = moon.indexOf(Math.min(...moon));
+    h.expect(
+      moon[low] < 0.5 && moon.slice(low).some((m) => m > 0.95),
+      `clouds: the moon did not dim behind a cloud and come back (${moon.map((m) => m.toFixed(2)).join(' ')})`,
+    );
+    console.log(`  clouds moon: ${moon.map((m) => m.toFixed(2)).join(' ')}`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  async 'thoughts-still'(h) {
+    for (const [k, [tag, vp]] of SIZES.entries()) {
+      for (const pic of SCENED) {
+        const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+        await page.reload();
+        await toThoughts(h, page, pic);
+        await live(h, page, `still ${pic} ${tag}`);
+        await holdsStill(h, page, pic, `reduced motion, ${pic} ${tag}`);
+        await drawn(h, page, `still ${pic} ${tag}`);
+        await h.shot(page, `thoughts-still-${pic}-${tag}`);
+        h.expect(!errors.length, errors.join('\n'));
+        await ctx.close();
+      }
+      const pic = SCENED[k % SCENED.length];
+      const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
+      const device = await deviceMotion(ctx, page);
+      await toThoughts(h, page, pic);
+      await live(h, page, `motion ${pic} ${tag}`);
+      await moreTime(page);
+      await moving(h, page, `${pic} ${tag}, Full`);
+      await device('reduce');
+      await holdsStill(h, page, pic, `${pic} ${tag}, device set to reduce motion`);
+      await device('no-preference');
+      await moving(h, page, `${pic} ${tag}, device back to motion`);
+      const set = await otherCopy(h, ctx, page, errors);
+      await set('Reduced');
+      await holdsStill(h, page, pic, `${pic} ${tag}, Reduced in another copy`);
+      await set('Full');
+      await moving(h, page, `${pic} ${tag}, Full again`);
+      h.expect(!errors.length, errors.join('\n'));
+      await ctx.close();
+    }
+  },
+
+  async 'thoughts-context-loss'(h) {
+    for (const [k, [tag, vp]] of SIZES.entries()) {
+      const pic = SCENED[k % SCENED.length];
+      const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
+      await openStopped(h, page, (h, page) => toThoughts(h, page, pic), `lost ${pic} ${tag}`);
+      const { now } = await losesContext(h, page, `${pic} ${tag}`, `thoughts-lost-${pic}-${tag}`, async () => {
+        h.expect(
+          await page.locator(`.dq-thoughts--${pic}`).isVisible(),
+          `lost ${pic} ${tag}: the flat ${pic} did not come back`,
+        );
+      });
+      h.expect(now.s.last.probe.pic === pic, `restored ${pic} ${tag}: the scene shows ${now.s.last.probe.pic}`);
+      h.expect(!errors.length, errors.join('\n'));
+      await ctx.close();
+    }
+  },
+
+  async 'thoughts-slow-gpu'(h) {
+    const COST = { clouds: [40000, 600] };
+    for (const [k, [tag, vp]] of SIZES.entries()) {
+      const pic = SCENED[k % SCENED.length];
+      await slowGpu(h, {
+        vp,
+        reach: (h, page) => toThoughts(h, page, pic),
+        more: 0,
+        cost: COST[pic],
+        tag: `thoughts-slow-gpu-${pic}-${tag}`,
+      });
+    }
+  },
+
   async 'thoughts-no-webgl'(h) {
     for (const pic of NAMES) {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
@@ -43,7 +285,7 @@ export const scenarios = {
       const shown = await flat(page);
       const others = NAMES.filter((p) => p !== pic);
       h.expect(
-        shown.length > 0 && shown.every(Boolean) && (await page.locator(`.dq-thoughts--${pic}`).isVisible()),
+        shown.length > 1 && shown.every(Boolean) && (await page.locator(`.dq-thoughts--${pic}`).isVisible()),
         `no WebGL ${pic}: the flat ${pic} is hidden (${JSON.stringify(shown)})`,
       );
       h.expect(

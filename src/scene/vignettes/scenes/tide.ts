@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { NIGHT_GLSL, nightBackdrop, OUT_GLSL } from '../common';
+import { hash, NIGHT_GLSL, nightBackdrop, OUT_GLSL } from '../common';
 import type { BuildScene } from '../runtime';
 
 /**
@@ -24,10 +24,6 @@ const MOON_DIR = new THREE.Vector3(0.14, 0.123, -1).normalize();
 /** reduced motion shows the moment just after a wash has turned, the wet sand still bright */
 const STILL_T = PERIOD * 0.52;
 
-const hash = (n: number) => {
-  const x = Math.sin(n * 12.9898 + 4.1) * 43758.5453;
-  return x - Math.floor(x);
-};
 const easeOut = (x: number) => 1 - (1 - x) * (1 - x);
 const easeInOut = (x: number) => x * x * (3 - 2 * x);
 
