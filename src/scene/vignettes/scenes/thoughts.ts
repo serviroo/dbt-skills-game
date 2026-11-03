@@ -1,9 +1,11 @@
 import * as THREE from 'three';
+import type { ThoughtPic } from '../../../content/spectator-lines';
 import { THOUGHTS } from '../../../motion/tokens';
 import type { BuildScene } from '../runtime';
 import { paintCars } from './thoughts/cars';
 import { paintClouds } from './thoughts/clouds';
-import { FOV, type Passing } from './thoughts/picture';
+import { paintLeaves } from './thoughts/leaves';
+import { FOV, type Paint, type Passing } from './thoughts/picture';
 
 const STILL_T = 6;
 
@@ -20,13 +22,14 @@ function passing(pace: Pace, at: number, t: number) {
   return on;
 }
 
-const PICTURES = {
+const PICTURES: Record<ThoughtPic, { paint: Paint; at: number }> = {
   clouds: { paint: paintClouds, at: 0.42 },
   cars: { paint: paintCars, at: 0.55 },
+  leaves: { paint: paintLeaves, at: 0.5 },
 };
 
 export const build: BuildScene = (_accent, opts) => {
-  const pic = opts.input as keyof typeof PICTURES;
+  const pic = opts.input as ThoughtPic;
   const { paint, at } = PICTURES[pic];
   const pace = THOUGHTS[pic];
   const scene = new THREE.Scene();

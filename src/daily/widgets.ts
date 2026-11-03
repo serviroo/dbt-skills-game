@@ -516,7 +516,7 @@ export function timerView(
   // a visual with a 3D scene follows this countdown: the scene ticks only when the timer renders, with its beat
   const ticks = new Set<(t: number) => void>();
   let beat: Beat = { e: 0, dur, started: false, done: false };
-  const unmount = scene && (visual !== 'thoughts' || opts.input !== 'leaves')
+  const unmount = scene
     ? mountScene(stageEl, {
         kind: visual,
         // the breathing light is the player's own light, in their accent colour
