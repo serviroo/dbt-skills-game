@@ -105,7 +105,7 @@ function shy() {
 }
 
 /** The words of each text in `node` set as dq-words, each word that can break whole in it, with its breaks. */
-function setWhole(node: Node) {
+export function setWhole(node: Node) {
   const texts: Text[] = [];
   if (node instanceof Text) texts.push(node);
   else for (let w = document.createTreeWalker(node, NodeFilter.SHOW_TEXT), t = w.nextNode(); t; t = w.nextNode()) texts.push(t as Text);

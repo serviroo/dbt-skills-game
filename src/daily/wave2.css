@@ -598,46 +598,6 @@
   font-style: italic;
   color: var(--t-body);
 }
-.w2-sable {
-  margin-top: 12px;
-}
-.w2-sable-ask {
-  width: 100%;
-}
-.w2-sable-say {
-  font-size: 16px;
-  line-height: 1.5;
-  color: var(--t-body);
-}
-.w2-sable-say:not(:empty) {
-  margin-top: 12px;
-}
-.w2-sable-line {
-  margin: 0;
-}
-.w2-sable-log {
-  display: grid;
-  gap: 8px;
-  margin: 10px 0;
-  padding: 0;
-  list-style: none;
-}
-.w2-sable-log li {
-  display: flex;
-  flex-direction: column;
-  padding-left: 10px;
-  border-left: 2px solid rgba(79, 184, 255, 0.4);
-}
-.w2-sable-n {
-  font-weight: 500;
-  color: var(--t-title);
-}
-.w2-sable-r {
-  color: var(--t-dim);
-}
-.w2-sable-h {
-  color: var(--mint);
-}
 .w2-sh-field {
   margin-top: auto;
   padding-top: 14px;

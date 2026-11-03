@@ -7,6 +7,7 @@ import { animate } from '../ui/anim';
 import { mountScene } from '../scene/vignettes/host';
 import type { CampHit, CampInput } from '../scene/watch/camp';
 import '../scene/watch/camp.css';
+import './ask-sable.css';
 import { icon } from './art';
 import { now, onFrame } from './clock';
 import { SKILL } from '../content/dbt';
@@ -14,7 +15,7 @@ import { INVENTORY, ROSTER, ROSTER_COPY, SABLE_ASK, type ShadowDef, type ShadowI
 import { CALM, css, WINDOW } from '../motion/tokens';
 import type { App } from './app';
 import { addDays, cleanName, helped, isSkillId, type Store } from './store';
-import { btn, focusWhole, h, holdView, seen, typo, wholeWords } from './ui';
+import { btn, focusWhole, h, holdView, seen, setWhole, typo } from './ui';
 
 let svgN = 0;
 
@@ -172,7 +173,9 @@ function sableSays(st: Store) {
   const week = sableWeek(st);
   if (!week.length) return [h('p', { class: 'w2-sable-line', text: typo(SABLE_ASK.quiet) })];
   const kept = week.find((w) => w.helped);
-  const close = kept ? SABLE_ASK.keep(kept.skill.sl) : week[0].n > 1 ? SABLE_ASK.again(week[0].skill.sl) : SABLE_ASK.each;
+  let close = SABLE_ASK.each;
+  if (kept) close = SABLE_ASK.keep(kept.skill.sl);
+  else if (week[0].n > 1) close = SABLE_ASK.again(week[0].skill.sl);
   return [
     h('p', { class: 'w2-sable-line', text: typo(SABLE_ASK.opens) }),
     h(
@@ -198,8 +201,9 @@ function askSable(app: App) {
     SABLE_ASK.ask,
     () => {
       say.replaceChildren(...sableSays(app.store));
-      wholeWords(say)();
-      animate(say, [{ opacity: 0 }, { opacity: 1 }], { duration: app.reduced() ? WINDOW.reducedFadeMs : CALM.fadeMs, easing: css(CALM.ease) });
+      setWhole(say);
+      const duration = app.reduced() ? WINDOW.reducedFadeMs : CALM.fadeMs;
+      animate(say, [{ opacity: 0 }, { opacity: 1 }], { duration, easing: css(CALM.ease) });
       say.focus({ preventScroll: true });
       say.scrollIntoView({ block: 'nearest', behavior: app.reduced() ? 'auto' : 'smooth' });
     },
