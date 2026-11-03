@@ -115,25 +115,31 @@ export interface BedHandle {
   readonly stopped: boolean;
 }
 
-export function startBed(lib: Lib, name: BedName, dest: AudioNode, t: number, level: number, fadeIn: number, seed: number): BedHandle {
+export function buildBed(lib: Lib, name: BedName, dest: AudioNode, level: number, fadeIn: number, seed: number) {
   const def = BEDS[name];
-  const v = new Voice(lib, t, dest, { room: def.room, hall: def.hall, gain: def.gain }, seed);
+  const v = new Voice(lib, 0, dest, { room: def.room, hall: def.hall, gain: def.gain, held: true }, seed);
   const lvl = v.gain(0, v.wet);
-  lvl.gain.setValueAtTime(0, t);
-  lvl.gain.setTargetAtTime(level, t, Math.max(0.003, fadeIn / 4));
-  def.fn(v, t, lvl);
+  const fade = v.at(lvl.gain);
+  fade.setValueAtTime(0, 0);
+  fade.setTargetAtTime(level, 0, Math.max(0.003, fadeIn / 4));
+  def.fn(v, 0, lvl);
   return {
-    name,
-    level(x, ramp = 0.5, at = soon(lib.ctx)) {
-      if (v.isStopped) return;
-      lvl.gain.cancelScheduledValues(at);
-      lvl.gain.setTargetAtTime(Math.max(0, x), at, Math.max(0.003, ramp / 4));
-    },
-    stop(ramp = 0.5, at = soon(lib.ctx)) {
-      v.stop(at, ramp);
-    },
-    get stopped() {
-      return v.isStopped;
+    open(at: number): BedHandle {
+      v.open(at);
+      return {
+        name,
+        level(x, ramp = 0.5, at = soon(lib.ctx)) {
+          if (v.isStopped) return;
+          lvl.gain.cancelScheduledValues(at);
+          lvl.gain.setTargetAtTime(Math.max(0, x), at, Math.max(0.003, ramp / 4));
+        },
+        stop(ramp = 0.5, at = soon(lib.ctx)) {
+          v.stop(at, ramp);
+        },
+        get stopped() {
+          return v.isStopped;
+        },
+      };
     },
   };
 }
@@ -149,12 +155,14 @@ export interface ChargeHandle {
  * brightness and 2-4 kHz shimmer thicken with charge. release() drains it back to idle in ~350 ms with no penalty
  * sound; stop() cuts it for the burst.
  */
-export function startCharge(lib: Lib, dest: AudioNode, t: number, seed: number): ChargeHandle {
-  const v = new Voice(lib, t, dest, { room: 0.12, hall: 0.28 }, seed);
+export function buildCharge(lib: Lib, dest: AudioNode, seed: number) {
+  const v = new Voice(lib, 0, dest, { room: 0.12, hall: 0.28, held: true }, seed);
+  const t = 0;
   const T = t + LONG;
   const hum = v.gain(0, v.wet);
-  hum.gain.setValueAtTime(0, t);
-  hum.gain.setTargetAtTime(1, t, 0.3);
+  const swell = v.at(hum.gain);
+  swell.setValueAtTime(0, t);
+  swell.setTargetAtTime(1, t, 0.3);
   const breath = v.gain(0.7, hum);
   v.lfo(0.25, 0.3, breath.gain, t, T);
   const hl = v.filt('lowpass', 520, 0.8, breath);
@@ -212,15 +220,20 @@ export function startCharge(lib: Lib, dest: AudioNode, t: number, seed: number):
   };
   let stopped = false;
   return {
-    set(c, at = soon(lib.ctx)) {
-      if (!stopped) apply(c, at, 0.03);
-    },
-    release(at = soon(lib.ctx)) {
-      if (!stopped) apply(0, at, 0.09);
-    },
-    stop(at = soon(lib.ctx), ramp = 0.03) {
-      stopped = true;
-      v.stop(at, ramp);
+    open(at: number): ChargeHandle {
+      v.open(at);
+      return {
+        set(c, at = soon(lib.ctx)) {
+          if (!stopped) apply(c, at, 0.03);
+        },
+        release(at = soon(lib.ctx)) {
+          if (!stopped) apply(0, at, 0.09);
+        },
+        stop(at = soon(lib.ctx), ramp = 0.03) {
+          stopped = true;
+          v.stop(at, ramp);
+        },
+      };
     },
   };
 }

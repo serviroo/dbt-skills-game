@@ -4,7 +4,7 @@
  * OfflineAudioContext (renderOffline), so captured videos get the exact soundtrack the app plays.
  */
 import { CUES } from './cues';
-import { BED_NAMES, startBed, startCharge, type BedHandle, type BedName, type ChargeHandle } from './beds';
+import { BED_NAMES, buildBed, buildCharge, type BedHandle, type BedName, type ChargeHandle } from './beds';
 import { AHEAD, Music, SECTIONS, type Section, type SectionOpts } from './music';
 import { clipCurve, makeCrackle, makeIR, makeNoise, dB, type Ctx } from './dsp';
 import { holdAt, soon, taper } from './param';
@@ -460,13 +460,13 @@ export class AudioEngine {
 
   /** Start (or re-level) a continuous bed. Calling it again for a running bed ramps its level. */
   bed(name: BedName, o: { at?: number; level?: number; fadeIn?: number } = {}): BedHandle {
-    const at = this.when(o.at);
     const cur = this.beds.get(name);
     if (cur && !cur.stopped) {
-      if (o.level !== undefined) cur.level(o.level, o.fadeIn ?? 0.5, at);
+      if (o.level !== undefined) cur.level(o.level, o.fadeIn ?? 0.5, this.when(o.at));
       return cur;
     }
-    const h = startBed(this.lib, name, this.bedBus, at, o.level ?? 1, o.fadeIn ?? 0.5, this.nextSeed());
+    const built = buildBed(this.lib, name, this.bedBus, o.level ?? 1, o.fadeIn ?? 0.5, this.nextSeed());
+    const h = built.open(this.when(o.at));
     this.beds.set(name, h);
     return h;
   }
@@ -490,8 +490,9 @@ export class AudioEngine {
    *  score steps back (-2 dB idle, -9 dB at full charge); after stop() it swells back in behind the burst. */
   chargeLoop(o: { at?: number } = {}): ChargeHandle {
     if (this.charge) return this.charge;
+    const built = buildCharge(this.lib, this.sfx, this.nextSeed());
     const t0 = this.when(o.at);
-    const h = startCharge(this.lib, this.sfx, t0, this.nextSeed());
+    const h = built.open(t0);
     const self = this;
     this.toFocus(dB(-2), t0, 0.4);
     this.charge = {
