@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { THOUGHTS } from '../../../motion/tokens';
 import type { BuildScene } from '../runtime';
+import { paintCars } from './thoughts/cars';
 import { paintClouds } from './thoughts/clouds';
 import { FOV, type Passing } from './thoughts/picture';
 
@@ -21,6 +22,7 @@ function passing(pace: Pace, at: number, t: number) {
 
 const PICTURES = {
   clouds: { paint: paintClouds, at: 0.42 },
+  cars: { paint: paintCars, at: 0.55 },
 };
 
 export const build: BuildScene = (_accent, opts) => {

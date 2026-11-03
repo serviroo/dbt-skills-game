@@ -29,7 +29,7 @@ const PICS = {
   leaves: { label: 'Leaves on a stream', words: /sits on a leaf/, most: 3 },
 };
 const NAMES = Object.keys(PICS);
-const SCENED = ['clouds'];
+const SCENED = ['clouds', 'cars'];
 
 const tap = (page, name) => page.locator('.dq-skill').getByRole('button', { name, exact: true }).first().click();
 async function toThoughts(h, page, pic) {
@@ -169,6 +169,9 @@ export const scenarios = {
   async 'thoughts-clouds'(h) {
     await picture(h, 'clouds');
   },
+  async 'thoughts-cars'(h) {
+    await picture(h, 'cars');
+  },
 
   async 'thoughts-clouds-moon'(h) {
     const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
@@ -246,7 +249,7 @@ export const scenarios = {
   },
 
   async 'thoughts-slow-gpu'(h) {
-    const COST = { clouds: [40000, 600] };
+    const COST = { clouds: [40000, 600], cars: [40000, 3500] };
     for (const [k, [tag, vp]] of SIZES.entries()) {
       const pic = SCENED[k % SCENED.length];
       await slowGpu(h, {
