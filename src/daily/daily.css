@@ -1912,8 +1912,7 @@ textarea.dq-input {
   font: inherit;
   color: inherit;
   border: 1px solid;
-  border-color: var(--edge, rgba(125, 150, 197, 0.45)) var(--edge-shade, rgba(54, 66, 87, 0.9))
-    var(--edge-shade, rgba(54, 66, 87, 0.9)) var(--edge, rgba(125, 150, 197, 0.45));
+  border-color: rgba(125, 150, 197, 0.45) rgba(54, 66, 87, 0.9) rgba(54, 66, 87, 0.9) rgba(125, 150, 197, 0.45);
   background: linear-gradient(180deg, rgba(10, 24, 42, 0.82), rgba(6, 15, 28, 0.86));
   cursor: pointer;
   transition:
@@ -4728,8 +4727,7 @@ textarea.dq-input {
   align-content: center;
   grid-template-columns: 24px minmax(0, 1fr) auto;
   min-height: 82px;
-  border-color: var(--edge, rgba(137, 207, 157, 0.42)) var(--edge-shade, rgba(54, 66, 87, 0.9))
-    var(--edge-shade, rgba(54, 66, 87, 0.9)) var(--edge, rgba(137, 207, 157, 0.42));
+  border-color: rgba(137, 207, 157, 0.42) rgba(54, 66, 87, 0.9) rgba(54, 66, 87, 0.9) rgba(137, 207, 157, 0.42);
   background:
     radial-gradient(80% 120% at 0% 50%, rgba(137, 207, 157, 0.08), transparent 60%),
     linear-gradient(180deg, rgba(10, 24, 42, 0.82), rgba(6, 15, 28, 0.86));
@@ -4779,8 +4777,7 @@ textarea.dq-input {
   font: inherit;
   color: inherit;
   border: 1px solid;
-  border-color: var(--edge, rgba(143, 180, 225, 0.55)) var(--edge-shade, rgba(54, 66, 87, 0.95))
-    var(--edge-shade, rgba(54, 66, 87, 0.95)) var(--edge, rgba(143, 180, 225, 0.55));
+  border-color: rgba(143, 180, 225, 0.55) rgba(54, 66, 87, 0.95) rgba(54, 66, 87, 0.95) rgba(143, 180, 225, 0.55);
   background:
     radial-gradient(70% 120% at 10% 50%, rgba(31, 109, 243, 0.14), transparent 65%),
     linear-gradient(180deg, rgba(11, 26, 46, 0.9), rgba(6, 14, 27, 0.92));

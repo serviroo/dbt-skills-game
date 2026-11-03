@@ -14,6 +14,7 @@ import './text-200.css';
 import './print.css';
 import './contrast.css';
 import { App, type DailyOpts } from './app';
+import { wireContrast } from './contrast';
 import { hubScreen } from './hub';
 import { comfortScreen, daysScreen, diaryScreen, libraryScreen, printScreen, restScreen, settingsScreen, shadowsScreen } from './pages';
 import { artScreen, drawScreen, pieceScreen } from './artroom';
@@ -50,6 +51,7 @@ export function mountDaily(root: HTMLElement, opts: DailyOpts): { unmount(): voi
     ease: easeScreen,
     moment: momentScreen,
   });
+  const offContrast = wireContrast(app);
   app.start();
   const unnarrow = watchNarrow(root);
   (window as unknown as { __daily?: App }).__daily = app;
@@ -58,6 +60,7 @@ export function mountDaily(root: HTMLElement, opts: DailyOpts): { unmount(): voi
     route: () => app.route.name,
     unmount() {
       unnarrow();
+      offContrast();
       app.destroy();
       delete (window as unknown as { __daily?: App }).__daily;
     },

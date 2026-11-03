@@ -17,7 +17,6 @@
   --w2-tick: var(--hair-lit);
   --edge: var(--hair-lit);
   --edge-soft: var(--hair-lit);
-  --edge-shade: var(--hair-lit);
   --edge-accent: var(--accent);
   --lit-fill: rgba(42, 66, 96, 0.95);
   --knob: var(--t-title);
@@ -29,9 +28,11 @@
   --t-title: #ffffff;
   --edge: var(--body);
   --edge-soft: var(--body);
-  --edge-shade: var(--body);
   --link: #ffffff;
 }
 :root[data-dq-contrast='high'] .dq-stealth {
   --gold: var(--gold-hi);
+}
+:where(:root[data-dq-contrast='high']) :is(.dq-tile, .dq-artentry) {
+  border-color: var(--edge);
 }

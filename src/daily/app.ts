@@ -17,7 +17,6 @@ import { dayDiff, Store, type State } from './store';
 import { h, typo } from './ui';
 import { volumeButton, type VolumeButton, type VolumeCtrl } from '../ui/volume';
 import { wireWardrobe } from './wardrobe';
-import { showContrast, wireContrast } from './contrast';
 import { vesperLap } from './roster';
 
 export type Route =
@@ -237,7 +236,7 @@ export class App {
       this.root.querySelectorAll('[data-you-name]').forEach((n) => (n.textContent = playerName()));
     });
     this.applySound();
-    this.offs.push(wireWardrobe(this), wireContrast(this));
+    this.offs.push(wireWardrobe(this));
     const vis = () => {
       if (document.visibilityState === 'visible') this.dayCheck();
     };
@@ -268,7 +267,6 @@ export class App {
   private afterClear() {
     // the store is back to the defaults, Motion on Auto among them: what moves follows that from here
     this.applyMotion();
-    showContrast(this);
     this.clearForSafe();
     if (this.route.name !== 'safe') this.go({ name: 'settings' }, { replace: true });
     // what visits kept for Back and Forward (answers, typed text) goes too: every way back now lands on Settings
