@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Character } from '../character/hero';
+import type { Stage } from '../../core/stage';
 import { light } from '../toon';
 import { clamp, smoothstep } from '../../core/math';
 import { params } from '../../core/params';
@@ -62,7 +63,10 @@ export interface AwakenOpts {
   ownFloor?: boolean;
 }
 
-export function buildAwaken(scene: THREE.Scene, hero: Character, opts: AwakenOpts = {}) {
+export function buildAwaken(stage: Stage, hero: Character, opts: AwakenOpts = {}) {
+  const scene = stage.scene;
+  // the screen's shape as the stage frames for it (it keeps its last one while the page has no area)
+  const aspect = () => stage.width / stage.height;
   const group = new THREE.Group();
   group.name = 'awaken';
   const anchor = hero.group.position.clone();
@@ -154,7 +158,7 @@ export function buildAwaken(scene: THREE.Scene, hero: Character, opts: AwakenOpt
     smoke.uniforms.uRoll.value = s.roll;
     smoke.uniforms.uMist.value = smoothstep(0, 0.25, s.rise);
     smoke.uniforms.uLinger.value = s.linger;
-    smoke.uniforms.uAspect.value = typeof window !== 'undefined' ? window.innerWidth / Math.max(1, window.innerHeight) : 1;
+    smoke.uniforms.uAspect.value = aspect();
     // one soft lilac swell replaces the reference's 1.7 s strobe: a single sine bump, peak at 45 % of the smoke
     const sw = s.smoke > 0 && s.smoke < 1 ? Math.pow(Math.sin(Math.PI * clamp((s.smoke - 0.12) / 0.8)), 2) : 0;
     smoke.uniforms.uSwell.value = sw;
@@ -220,7 +224,7 @@ export function buildAwaken(scene: THREE.Scene, hero: Character, opts: AwakenOpt
       s.linger = smoothstep(AWAKEN_AT.smoke + 0.25, sEnd, tHit) * (1 - smoothstep(sEnd + 0.6, sEnd + 3.2, tHit));
       if (tHit < 0) s.pool = 0;
       rubble.set(tHit);
-      vesper.set((tHit - VESPER.at) / VESPER.dur, typeof window !== 'undefined' ? window.innerWidth / Math.max(1, window.innerHeight) : 1, t);
+      vesper.set((tHit - VESPER.at) / VESPER.dur, aspect(), t);
       update(t);
     },
     /** Suggested grade flash for the lilac swell (feed stage.grade flashAmount, colour FLASH_COLOR). Peak 0.009: the grade mixes in linear light, so more lifts the blacks to milk. */

@@ -146,13 +146,29 @@ function markup(label: string) {
   </div>`;
 }
 
+const LABEL = 'Hold to open';
+
+/**
+ * Where the hold prompt (the ring and its label) stands on this screen, measured from a hidden copy of the overlay, so
+ * the chest can be framed clear of it before it shows.
+ */
+export function promptRect(): DOMRect {
+  const root = el('div', 'chest-hold') as HTMLDivElement;
+  root.innerHTML = markup(LABEL);
+  root.style.visibility = 'hidden';
+  (document.getElementById('ui') ?? document.body).append(root);
+  const r = root.querySelector('.ch-dock')!.getBoundingClientRect();
+  root.remove();
+  return r;
+}
+
 /**
  * Hold-to-charge overlay. Resolves when the charge reaches 100 %. Releasing early drains over 300-400 ms with no
  * penalty; the player can press again at any time and continue from where the drain is.
  */
 export function holdToCharge(opts: HoldOpts): Promise<void> {
   const dur = Math.max(0.2, opts.durationSec ?? 1.5);
-  const label = opts.label ?? 'Hold to open';
+  const label = opts.label ?? LABEL;
   const root = el('div', 'chest-hold') as HTMLDivElement;
   root.innerHTML = markup(label);
   (opts.parent ?? document.getElementById('ui') ?? document.body).append(root);
