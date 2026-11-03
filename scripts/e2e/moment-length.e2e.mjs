@@ -65,6 +65,8 @@ const restToday = async (h, page) => {
   return (save.events ?? []).filter((e) => e.k === 'rest' && e.day === day).length;
 };
 const safeOneTap = (page) => page.locator('.dq-top').getByRole('button', { name: /Safe Zone/ }).isVisible();
+const humClosed = (page) =>
+  page.waitForFunction(() => window.__hum.closed >= 1, null, { timeout: 5000 }).catch(() => {});
 
 async function noCountdown(h, page, where) {
   const text = await page.locator('.dq-moment').innerText();
@@ -197,6 +199,7 @@ export const scenarios = {
     await page.clock.fastForward(61000);
     await page.locator('.dq-mo-line', { hasText: END }).waitFor({ timeout: 5000 });
     await page.clock.runFor(2000);
+    await humClosed(page);
     const off = await page.evaluate(() => ({ ...window.__hum }));
     h.expect(off.stopped >= on.started && off.closed >= 1, 'the hum kept playing after the moment ended: ' + JSON.stringify(off));
     h.expect(!(await page.getByRole('switch', { name: 'Low hum', exact: true }).isVisible()), 'the hum switch is still up after the end');
@@ -218,6 +221,7 @@ export const scenarios = {
     await page.clock.runFor(1000);
     await page.clock.fastForward(61000);
     await page.clock.runFor(2000);
+    await humClosed(page);
     const off = await page.evaluate(() => ({ ...window.__hum, line: document.querySelector('.dq-mo-line')?.textContent }));
     h.expect(off.stopped >= on.started && off.closed >= 1, 'with no frames the hum kept playing past its time: ' + JSON.stringify(off));
     h.expect(END.test(off.line ?? ''), 'with no frames the moment did not end: ' + off.line);
