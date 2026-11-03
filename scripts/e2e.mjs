@@ -1,6 +1,6 @@
 // Runs the end-to-end scenarios in scripts/e2e/*.e2e.mjs against its own Vite dev server and Playwright Chromium, then
 // stops only the processes it started. Exits 1 if any scenario fails.
-// node scripts/e2e.mjs [--file=<name>] [--scenario=<name>] [--shard=<i>/<n>] [--timings=<file>] [--jobs=<n>] [--cpu-throttle=<n>] [--headed] [--software] [--ws=<endpoint from scripts/e2e-browser.mjs> --port=<dev server port>]
+// node scripts/e2e.mjs [--file=<name>] [--scenario=<name>] [--shard=<i>/<n>] [--parts] [--timings=<file>] [--jobs=<n>] [--cpu-throttle=<n>] [--headed] [--software] [--ws=<endpoint from scripts/e2e-browser.mjs> --port=<dev server port>]
 // Scenarios run side by side in --jobs browsers (default one for every 4 of this machine's CPU threads, at most 4, and 1
 // with --ws), each browser taking the longest one left. A file that exports `serial = true` runs its scenarios in the
 // order they are written, one at a time in one browser.
@@ -120,19 +120,48 @@ function unitsOf(list) {
   return units.sort((a, b) => b.weight - a.weight || a.scenarios[0].i - b.scenarios[0].i);
 }
 
+const SLOWEST_RUNNER = 1.33;
+const PART_BUDGET_S = 24 * 60;
+function pack(n) {
+  const load = Array(n).fill(0);
+  const parts = Array.from({ length: n }, () => []);
+  for (const unit of unitsOf(runnable)) {
+    const k = load.indexOf(Math.min(...load));
+    load[k] += unit.weight;
+    parts[k].push(...unit.scenarios.map((s) => s.name));
+  }
+  return { load, parts };
+}
+const minutes = (load) => load.map((l) => Math.round(l / 60)).join(', ');
+
+if (flags.parts) {
+  const units = unitsOf(runnable);
+  const fits = (seconds) => seconds * SLOWEST_RUNNER <= PART_BUDGET_S;
+  const [longest] = units;
+  if (longest && !fits(longest.weight)) {
+    const [first] = longest.scenarios;
+    const what = longest.scenarios.length > 1 ? `the serial file ${first.file}` : first.name;
+    throw new Error(`${what} takes about ${Math.round(longest.weight / 60)} min, more than one part has time for`);
+  }
+  const total = units.reduce((sum, u) => sum + u.weight, 0);
+  let n = Math.max(1, Math.ceil((total * SLOWEST_RUNNER) / PART_BUDGET_S));
+  let load = pack(n).load;
+  while (!fits(Math.max(...load))) load = pack(++n).load;
+  const most = Math.max(...load) / 60;
+  const slow = `${(most * SLOWEST_RUNNER).toFixed(1)} on a runner ${SLOWEST_RUNNER}x slower`;
+  console.error(`${n} parts, the longest about ${most.toFixed(1)} min (${slow}; parts ${minutes(load)})`);
+  console.log(n);
+  process.exit(0);
+}
+
 let part = null;
 if (flags.shard) {
   const m = /^(\d+)\/(\d+)$/.exec(flags.shard);
   if (!m || +m[1] < 1 || +m[1] > +m[2]) throw new Error(`--shard needs <i>/<n> with 1 <= i <= n, got ${flags.shard}`);
-  const load = Array(+m[2]).fill(0);
-  part = new Set();
-  for (const unit of unitsOf(runnable)) {
-    const k = load.indexOf(Math.min(...load));
-    load[k] += unit.weight;
-    if (k + 1 === +m[1]) for (const s of unit.scenarios) part.add(s.name);
-  }
+  const { load, parts } = pack(+m[2]);
+  part = new Set(parts[+m[1] - 1]);
   const planned = Math.round(load[+m[1] - 1] / 60);
-  console.log(`part ${flags.shard}: ${part.size} scenarios, about ${planned} min by CI timings (parts ${load.map((l) => Math.round(l / 60)).join(', ')})`);
+  console.log(`part ${flags.shard}: ${part.size} scenarios, about ${planned} min by CI timings (parts ${minutes(load)})`);
 }
 const matched = runnable.filter((s) => (!flags.file || s.file === flags.file) && (!flags.scenario || s.name === flags.scenario));
 if (flags.scenario && !matched.length) throw new Error(`scenario ${flags.scenario} is not in ${flags.file}.e2e.mjs`);

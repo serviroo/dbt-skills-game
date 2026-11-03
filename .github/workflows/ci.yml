@@ -114,9 +114,12 @@ jobs:
     timeout-minutes: 5
     permissions:
       actions: read
+      contents: read
     outputs:
       artifact: ${{ steps.find.outputs.artifact }}
       run: ${{ steps.find.outputs.run }}
+      parts: ${{ steps.parts.outputs.parts }}
+      shards: ${{ steps.parts.outputs.shards }}
     steps:
       - id: find
         continue-on-error: true
@@ -132,10 +135,40 @@ jobs:
           echo "::notice title=E2E timings::Parts split by the e2e-timings of run $run"
           echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
           echo "run=$run" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20.x
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v8
+        if: steps.find.outputs.artifact != ''
+        with:
+          artifact-ids: ${{ steps.find.outputs.artifact }}
+          run-id: ${{ steps.find.outputs.run }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/timings
+      - id: parts
+        name: Enough e2e parts that each finishes in time on the slowest runner
+        env:
+          PLANNED: ${{ steps.find.outputs.artifact }}
+        shell: bash
+        run: |
+          timings=$(find "$RUNNER_TEMP/timings" -name e2e-timings.json 2>/dev/null | head -n 1)
+          missing="the planned e2e-timings artifact $PLANNED has no e2e-timings.json"
+          [ -z "$PLANNED" ] || [ -n "$timings" ] || { echo "$missing"; exit 1; }
+          log=$RUNNER_TEMP/parts.log
+          n=$(node scripts/e2e.mjs --parts ${timings:+"--timings=$timings"} 2>"$log") || { cat "$log"; exit 1; }
+          [[ $n =~ ^[1-9][0-9]*$ ]] || { cat "$log"; echo "--parts printed '$n', not a part count"; exit 1; }
+          echo "::notice title=E2E parts::$(cat "$log")"
+          echo "parts=$n" >> "$GITHUB_OUTPUT"
+          echo "shards=[$(seq -s, 1 "$n")]" >> "$GITHUB_OUTPUT"
 
   e2e:
     needs: [proven, plan]
-    if: ${{ !cancelled() && needs.proven.outputs.run == '' }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.proven.outputs.run == '' }}
     runs-on: ubuntu-24.04
     container:
       image: mcr.microsoft.com/playwright:v1.64.1-noble
@@ -145,9 +178,9 @@ jobs:
       STORED_IDS_BASE: ${{ github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha }}
     strategy:
       fail-fast: false
-      # GitHub runs at most 20 jobs at once here: with no other run holding runners, all 18 parts start with check and secrets
+      # GitHub runs at most 20 jobs at once here, so parts past the first 20 jobs start as the first ones finish
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -167,13 +200,14 @@ jobs:
           run-id: ${{ needs.plan.outputs.run }}
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/timings
-      - name: E2E part ${{ matrix.shard }} of 18
+      - name: E2E part ${{ matrix.shard }} of ${{ needs.plan.outputs.parts }}
         env:
           PLANNED: ${{ needs.plan.outputs.artifact }}
         run: |
           timings=$(find "$RUNNER_TEMP/timings" -name e2e-timings.json 2>/dev/null | head -n 1)
           [ -z "$PLANNED" ] || [ -n "$timings" ] || { echo "the planned e2e-timings artifact $PLANNED has no e2e-timings.json"; exit 1; }
-          node scripts/e2e.mjs --software --shard=${{ matrix.shard }}/18 ${timings:+"--timings=$timings"}
+          shard=${{ matrix.shard }}/${{ needs.plan.outputs.parts }}
+          node scripts/e2e.mjs --software --shard="$shard" ${timings:+"--timings=$timings"}
       - uses: actions/upload-artifact@v7
         if: always()
         with:

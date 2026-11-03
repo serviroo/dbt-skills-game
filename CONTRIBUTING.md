@@ -69,7 +69,9 @@ and saves screenshots and `report.json` to `artifacts/e2e/<time>/`. It exits non
 run side by side, longest first, each in a browser of its own: `--jobs=<n>` browsers, by default one for every 4 of the
 machine's CPU threads and at most 4, so one on CI's 4-vCPU runners. CI runs the same checks on every pull request and
 splits the scenarios into parts with `--shard=<i>/<n>`, spread by the median of the last five times each one took on
-CI. Every CI run adds its times to the `e2e-timings` artifact and the next run splits by that, so a new or slower
+CI. The plan job picks how many parts with `node scripts/e2e.mjs --parts`: the fewest that keep each part under 24
+minutes on a runner 1.33x slower than the median, the slowest GitHub's have been, so the count grows with the suite.
+Every CI run adds its times to the `e2e-timings` artifact and the next run splits by that, so a new or slower
 scenario evens out on its own; `scripts/e2e/timings.json` is the fallback when no run has one, and a scenario in
 neither counts as 15 s. To refresh that file, run `node scripts/e2e-timings.mjs <every part's report.json>` on the
 `e2e-times-*` artifacts of one or more runs. For anything visual, also look at it in a browser at phone width (390 and 320 px) with motion
