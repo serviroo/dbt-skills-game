@@ -149,7 +149,6 @@ export function wholeWords(root: HTMLElement) {
   return () => mo.disconnect();
 }
 
-/** `root` with its words kept whole as wholeWords keeps them, for words set once (set them again after a change). */
 export function keptWhole<T extends HTMLElement>(root: T) {
   setWhole(root);
   return root;

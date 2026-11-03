@@ -728,7 +728,6 @@
   flex-direction: column;
   gap: 12px;
 }
-/* the words go under the picture once they no longer fit beside it */
 .w2-item {
   position: relative;
   display: flex;

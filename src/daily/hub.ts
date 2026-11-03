@@ -16,7 +16,6 @@ import { loadoutArt } from './widgets';
 import { classRow, foilLayer, moonflower, nameRow, titleRow, titleUnlock } from './wave2';
 import { cardBackArt, worn } from './wardrobe';
 
-/** A skill's card face, its words kept whole: a word wider than the card breaks there with a hyphen, never past its edge. */
 export function skillCard(...args: Parameters<typeof cardFace>) {
   return keptWhole(cardFace(...args));
 }

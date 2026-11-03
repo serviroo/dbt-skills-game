@@ -560,8 +560,7 @@
 }
 /* words kept whole (wholeWords in ui.ts): a word moves to the next line whole, and breaks, with a hyphen, at a soft
    hyphen only where it alone is wider than its line. Its whole width is the least room it asks for, as a word's is, so a
-   row lays out as it would without the breaks; in a flex row the words go narrower than that only where the row is. A
-   word's own lines wrap as usual inside lines set to balance: balancing them drops the hyphen where the word breaks */
+   row lays out as it would without the breaks; in a flex row the words go narrower than that only where the row is */
 dq-words {
   min-width: 0;
 }
@@ -575,8 +574,6 @@ dq-word {
 .dq-skill dq-word {
   width: auto;
 }
-/* the hyphen drawn in Jost, set so it never makes its line taller: Bodoni Moda's hyphen is a hairline that hangs past
-   the word, where it can't be seen */
 dq-shy {
   font-family: var(--font-ui);
   line-height: 0;
@@ -2953,9 +2950,7 @@ textarea.dq-input {
    other reason (the last, or the one before a wide card) keeps its share. Each card sits in a cell its row stretches,
    followed by a spacer as wide as the cell past the share (the card a pixel under it, so rounding never parts them);
    the spacer wraps under a card wider than its share, which then fills the cell. The share is a length worked out on
-   the cell, so the words inside a card that is a size container of its own (an ally's) can keep to it too. No card is
-   wider than the row: a word wider than the whole row (the phone's own text at 200%) breaks there with a hyphen
-   (skillCard keeps its words whole). */
+   the cell, so the words inside a card that is a size container of its own (an ally's) can keep to it too. */
 @property --share {
   syntax: '<length>';
   inherits: true;
@@ -3148,7 +3143,6 @@ textarea.dq-input {
   gap: 10px;
   margin: 4px 0 0;
 }
-/* the labels' column in characters (ch), which grow with the phone's own text size as the labels do; em doesn't */
 .dq-libf {
   display: grid;
   grid-template-columns: 6ch minmax(0, 1fr);
@@ -3265,9 +3259,8 @@ textarea.dq-input {
 .dq-libsec--fav .dq-libsec-ic {
   color: var(--mint);
 }
-/* a phone at 200% zoom, held either way, or with its own text at 200% (the list 27 characters wide or less, counted in
-   ch, which grow with the phone's own text size): a skill's names take the whole row, its minutes and arrow the line
-   under them, and its pin a strip under the row, so no name is squeezed narrower than its words */
+/* a phone at 200% zoom, held either way: a skill's names take the whole row, its minutes and arrow the line under
+   them, and its pin a strip under the row, so no name is squeezed narrower than its words */
 @container (max-width: 27ch) {
   .dq-libitem {
     flex-wrap: wrap;
@@ -3461,7 +3454,6 @@ textarea.dq-input {
   font-weight: 400;
   line-height: 1.2;
   color: var(--t-body);
-  /* in characters, which grow with the phone's own text size as the words do; em doesn't */
   max-width: 14ch;
   hyphens: auto;
 }
@@ -4853,8 +4845,7 @@ textarea.dq-input {
   width: 92px;
   height: auto;
 }
-/* a phone zoomed to 200%, or with its own text at 200% (the list 24 characters wide or less, counted in ch, which grow
-   with the phone's own text size): each entry's picture gets a row of its own above its words */
+/* a phone zoomed to 200%: each entry's picture gets a row of its own above its words */
 @container (max-width: 24ch) {
   .dq-artentry {
     grid-template-columns: minmax(0, 1fr) 20px;
@@ -4891,7 +4882,6 @@ textarea.dq-input {
   height: 20px;
   color: var(--t-dim);
 }
-/* the unfinished drawing's words and button go under its picture once they no longer fit beside it */
 .dq-art-draft {
   display: flex;
   flex-wrap: wrap;
@@ -4929,8 +4919,6 @@ textarea.dq-input {
   gap: 14px 12px;
   align-items: start;
 }
-/* a phone zoomed to 200%, or with its own text at 200% (the list 24 characters wide or less, counted in ch, which grow
-   with the phone's own text size): one drawing a row, so a card has room for its words */
 @container (max-width: 24ch) {
   .dq-gallery {
     grid-template-columns: minmax(0, 1fr);
@@ -5942,7 +5930,6 @@ textarea.dq-input {
   .dq-sheet {
     align-items: center;
   }
-  /* the drawing's name and buttons go under it once they no longer fit beside it */
   .dq-piece-body {
     flex-direction: row;
     flex-wrap: wrap;
