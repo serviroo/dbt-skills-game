@@ -10,7 +10,7 @@
  * (persistent = false); exports read both.
  */
 import type { App } from './app';
-import { connectionLost, uid, validDay } from './store';
+import { connectionLost, STORAGE_WAIT_MS, uid, validDay, type TxTurn } from './store';
 import { BESIDE, STORY_DB } from '../core/stored-names';
 import { canWrite, cleared, dropBefore, fromBefore, goneElsewhere, marked, mayWrite, onClear, removeStored, setStored, write } from '../core/cleared';
 
@@ -188,6 +188,13 @@ export class StoryStore {
   private unreadable = false;
   /** Reads of the stored stories that got no answer; exportAll compares it before and after. */
   private readFails = 0;
+  /** A write didn't reach storage this visit, so what it wrote is held in memory only. */
+  private heldBack = false;
+  private stalled = 0;
+  /** Opens of the database so far; one that isn't the latest when it answers changes nothing. */
+  private opens = 0;
+  /** Ends the open under way with no database, so nothing waiting on an open given up on waits for ever. */
+  private dropOpen = () => {};
   private lost = new WeakSet<IDBDatabase>();
   private mem = { stories: new Map<string, Story>(), chapters: new Map<string, Chapter>(), cards: new Map<string, Card[]>(), days: new Set<string>() };
   private cardImports = new Set<string>();
@@ -231,7 +238,9 @@ export class StoryStore {
 
   /** Opens the database; a lost connection on open gets one more try (`again`). Null when there is none to use. */
   private connect(again: boolean): Promise<IDBDatabase | null> {
+    const turn = ++this.opens;
     return new Promise((resolve) => {
+      this.dropOpen = () => resolve(null);
       try {
         if (typeof indexedDB === 'undefined') throw new Error('no idb');
         // this game's data is being cleared: opening would make the database again
@@ -246,6 +255,11 @@ export class StoryStore {
         };
         open.onsuccess = () => {
           const db = open.result;
+          // an open given up on or replaced while it waited closes what it got and changes nothing
+          if (turn !== this.opens) {
+            db.close();
+            return resolve(null);
+          }
           db.onversionchange = (e) => {
             db.close();
             // deleted: another copy cleared this game's data
@@ -254,6 +268,7 @@ export class StoryStore {
           resolve(db);
         };
         const fail = (retry: boolean) => {
+          if (turn !== this.opens) return resolve(null);
           if (again && retry) return resolve(this.connect(false));
           this.persistent = false;
           this.unreadable = true;
@@ -269,9 +284,28 @@ export class StoryStore {
     });
   }
 
+  /** Reads that got no answer so far: a screen opening compares it before and after, as exportAll does. */
+  get misses() {
+    return this.readFails;
+  }
+  /** Times storage was given up on for not answering in time: a screen opening compares it before and after. */
+  get stalls() {
+    return this.stalled;
+  }
+
+  /** Storage given up on, or that couldn't be opened, is tried again (Try again on a screen that couldn't open). */
+  reopen() {
+    if (cleared()) return;
+    // nothing is unsaved while every write reached storage
+    if (!this.heldBack) this.persistent = true;
+    if (!this.unreadable) return;
+    this.unreadable = false;
+    this.db = this.connect(true);
+  }
+
   /** One fresh connection in place of a lost one (callers that saw the same loss share it). True when there is one. */
   private async reconnect(old: IDBDatabase) {
-    if (cleared()) return false;
+    if (cleared() || this.unreadable) return false;
     if (!this.lost.has(old)) {
       this.lost.add(old);
       try {
@@ -290,23 +324,64 @@ export class StoryStore {
    * A read that still gets no answer counts in readFails.
    */
   private async tx<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>): Promise<{ v: T } | null> {
-    if (mode === 'readonly') return this.run(stores, mode, fn);
+    if (mode === 'readonly') return this.answered(stores, mode, fn);
     // a clear checking its Save Crystal holds writes; once it clears they never happen
     if (!canWrite() && !(await mayWrite())) return null;
-    const job = this.run(stores, mode, fn);
-    this.writes.add(job);
-    void job.finally(() => this.writes.delete(job));
+    const turn: TxTurn = {};
+    const job = this.answered(stores, mode, fn, turn);
+    // a clear's check waits until the write is over: its transaction ended, or given up before it started one
+    const over = Promise.race([turn.job, job.then(() => (turn.off && !turn.t ? undefined : turn.job))]);
+    this.writes.add(over);
+    void over.finally(() => this.writes.delete(over));
     return job;
   }
 
-  private async run<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>): Promise<{ v: T } | null> {
+  /**
+   * Runs fn in one transaction, as run. One storage leaves unanswered past STORAGE_WAIT_MS counts as failed, and the
+   * database is given up for the visit, as one that couldn't be opened: nothing more is read from it, or written over
+   * what it couldn't read.
+   */
+  private answered<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>, turn: TxTurn = {}): Promise<{ v: T } | null> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unanswered = new Promise<null>((done) => (timer = setTimeout(() => done(null), STORAGE_WAIT_MS)));
+    const job = this.run(stores, mode, fn, turn);
+    turn.job = job;
+    return Promise.race([job.then((v) => ({ v })), unanswered]).then((r) => {
+      clearTimeout(timer);
+      if (r) return r.v;
+      // its transaction ends unfinished, so nothing lands after it was counted as failed, and one not started never starts
+      turn.off = true;
+      try {
+        turn.t?.abort();
+      } catch {
+        /* already finished */
+      }
+      if (mode === 'readonly') this.readFails++;
+      else this.heldBack = true;
+      // the database it waited on is given up and closed, once: a connection opened since (Try again) stays
+      const at = turn.db;
+      if (at && this.db === at) {
+        this.stalled++;
+        this.opens++;
+        this.dropOpen();
+        this.db = Promise.resolve(null);
+        void at.then((d) => d?.close());
+        this.persistent = false;
+        this.unreadable = true;
+      }
+      return null;
+    });
+  }
+
+  private async run<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>, turn: TxTurn = {}): Promise<{ v: T } | null> {
     let failed = false;
     for (let retry = true; ; retry = false) {
-      const db = await this.db;
-      if (!db) break;
+      turn.db = this.db;
+      const db = await turn.db;
+      if (!db || turn.off) break;
       let started = false;
       try {
-        const t = db.transaction(stores, mode);
+        const t = (turn.t = db.transaction(stores, mode));
         started = true;
         const done = new Promise<void>((ok, bad) => {
           t.oncomplete = () => ok();
@@ -329,11 +404,16 @@ export class StoryStore {
         return { v };
       } catch (e) {
         failed = true;
-        if (retry && connectionLost(e) && (await this.reconnect(db)) && (!started || mode === 'readonly')) continue;
+        if (!retry || !connectionLost(e)) break;
+        const back = this.reconnect(db);
+        // the open it now waits on is the one a stall gives up
+        turn.db = this.db;
+        if ((await back) && (!started || mode === 'readonly')) continue;
         break;
       }
     }
     if (failed) this.persistent = false;
+    if (mode !== 'readonly') this.heldBack = true;
     if (mode === 'readonly' && (failed || this.unreadable)) this.readFails++;
     return null;
   }
@@ -342,6 +422,8 @@ export class StoryStore {
   private dispose() {
     const db = this.db;
     this.db = Promise.resolve(null);
+    this.opens++;
+    this.dropOpen();
     void db.then((d) => d?.close());
     try {
       this.channel?.close();

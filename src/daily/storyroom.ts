@@ -7,6 +7,7 @@ import { cowrite } from '../cowriter/local';
 import type { CowriteReq, CowriteRes, CowriteTurn } from '../cowriter/types';
 import { CARE_KEY, READ_SIZES, type ReadSize } from '../core/stored-names';
 import { STORY_DRAWING, STORY_FIND, STORY_IMPORT, STORY_READ, STORY_START } from '../content/story-lines';
+import { CANT_OPEN } from '../content/daily-lines';
 import { write } from '../core/cleared';
 import type { App, Route, ScreenOut, Visit } from './app';
 import { icon } from './art';
@@ -18,7 +19,7 @@ import { match, spans, terms, type Span } from './storyfind';
 import { creditStory, STORY_CAP, storyStore, type Card, type CardMode, type Chapter, type Story } from './storystore';
 import { storyFromText, storyToText, type StoryText } from './storytext';
 import { keepTextSize, textSize } from './text-size';
-import { breakable, btn, h, p, segmented, shareOrSave, typo } from './ui';
+import { breakable, btn, cantOpen, h, p, segmented, shareOrSave, typo } from './ui';
 
 export const STORY = {
   title: 'Story Room',
@@ -547,6 +548,8 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const r = route as Extract<Route, { name: 'write' }>;
   // a search result opening this page hands over its words; Back or Forward to it brings none, so the page is as they left it
   const found = r.find && typeof visit.handed === 'string' ? { q: visit.handed, at: r.find.at } : null;
+  // Back or Forward to this visit, from reading too, opens the chapter, or the notes, it was on as they left
+  const went = visit.again ? (visit.kept as { ch: string; notes: boolean } | undefined) : undefined;
   const ss = store(app);
   const storyId = r.id;
   const offs: (() => void)[] = [];
@@ -943,6 +946,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
       } else keep.push(l);
     }
     cur = { id: c.id, kind: c.kind, title: c.title, bases };
+    ta.readOnly = false;
     pageIn();
     startBtn.disabled = false;
     tab = c.kind === 'notes' ? 'notes' : 'page';
@@ -1316,8 +1320,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const openRead = async () => {
     await flushAll();
     if (!alive) return;
-    // back from reading lands on the chapter they were on
-    r.ch = pageId || undefined;
     app.go({ name: 'read', id: storyId, ch: pageId || undefined });
   };
   const download = async () => {
@@ -1882,10 +1884,25 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   on(window, 'resize', grow);
 
   // ---------- start ----------
+  // storage that stalled while it opened, or failed to read what it opens on, leaves it shut: nothing on it edits, so
+  // nothing is written over what it couldn't read. A story this visit holds in memory (storage was never there to
+  // read) opens as ever
+  const shut = () => {
+    main.replaceChildren(
+      cantOpen(CANT_OPEN.story, CANT_OPEN.note, CANT_OPEN.retry, () => {
+        ss.reopen();
+        app.reopen();
+      }),
+    );
+    cw.remove();
+  };
   const init = async () => {
+    const [misses, stalls] = [ss.misses, ss.stalls];
+    const stalled = () => ss.stalls !== stalls;
     await ss.sweepLives();
     const s = await ss.story(storyId);
     if (!alive) return;
+    if (stalled() || (!s && ss.misses !== misses)) return shut();
     if (!s || s.removed) {
       main.replaceChildren(h('div', { class: 'dq-panel st-empty' }, h('p', { class: 'st-empty-t', text: STORY.gone }), h('div', { class: 'dq-actions' }, btn('Story Room', () => app.go({ name: 'stories' }, { replace: true }), { kind: 'primary' }))));
       cw.remove();
@@ -1894,15 +1911,55 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     story = s;
     notesId = s.notes;
     titleIn.value = s.title;
-    pageId = r.ch && s.chapters.includes(r.ch) ? r.ch : s.chapters[0] ?? '';
+    const ch = went?.ch || r.ch;
+    pageId = ch && s.chapters.includes(ch) ? ch : s.chapters[0] ?? '';
+    // search can open the notes; the Page tab then goes to the first chapter, or the one this visit was on
+    const notes = went ? went.notes : !!r.ch && r.ch === s.notes;
     // the first page takes its number now, so a Page or Notes tap while the chapter is made or its cards are read wins
     const n = ++picks;
-    if (!pageId) pageId = (await ss.addChapter(storyId)).id;
+    if (!pageId) {
+      const made = await ss.addChapter(storyId).catch(() => null);
+      if (!alive) return;
+      if (!made) return shut();
+      pageId = made.id;
+    }
     pageMade();
     await loadCards();
-    // search can open the notes; the Page tab then goes to the first chapter
-    const landed = await load(r.ch && r.ch === s.notes ? notesId : pageId, n);
-    await refreshStory();
+    const opening = notes ? notesId : pageId;
+    const landing = load(opening, n).then(async (ok) => {
+      if (ok || !alive || n !== picks) return ok;
+      if (stalled() || ss.misses !== misses) {
+        pageIn();
+        return false;
+      }
+      // a chapter that can't be read opens the first page in its place, and with no page to read, a new page takes
+      // their words, kept apart from the ones it couldn't read
+      const first = s.chapters[0];
+      if (first && first !== opening) {
+        pageId = first;
+        await loadCards();
+        if (await load(first, n)) return false;
+      }
+      const made = alive && n === picks ? await ss.addChapter(storyId).catch(() => null) : null;
+      if (made && alive && n === picks) {
+        pageId = made.id;
+        await loadCards();
+        if (await load(made.id, n)) return false;
+      }
+      // not even that: the page stays shut rather than take words it can't keep
+      if (alive && n === picks) {
+        ta.readOnly = true;
+        pageIn();
+      }
+      return false;
+    });
+    // in once the page it opens on is in the editor, before what follows its opening
+    await pageLoaded;
+    await Promise.all([refreshStory(), showPic()]);
+    if (!alive) return;
+    if (stalled() || (!cur && ss.misses !== misses)) return shut();
+    inView();
+    const landed = await landing;
     syncState();
     syncModes();
     kb();
@@ -1933,7 +1990,9 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   };
   renderCards(false);
   syncModes();
-  void init();
+  let inView!: () => void;
+  const ready = new Promise<void>((done) => (inView = done));
+  void init().finally(inView);
 
   return {
     el,
@@ -1941,6 +2000,22 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     mode: 'sub',
     bubbles: [0.9, 0.45],
     foot: dock,
+    // it comes in holding the story's title and the page it opens on, never "Untitled story" or an empty page first
+    ready,
+    // left before anything opened (storage slow to answer), it keeps what the visit was to open. The chapter is read as
+    // the visit comes back, so a save that lands as a copy after they leave is the chapter that opens
+    keep: () =>
+      shown
+        ? {
+            // notes typed over a change made elsewhere land as a page of their own: that page is what comes back
+            get ch() {
+              return tab === 'notes' && cur?.kind === 'page' ? cur.id : pageId;
+            },
+            get notes() {
+              return tab === 'notes' && cur?.kind !== 'page';
+            },
+          }
+        : went,
     leave: () => {
       commit();
       pinLive();
@@ -2023,9 +2098,22 @@ export function readScreen(app: App, route: Route): ScreenOut {
 
   let titled!: () => void;
   const ready = new Promise<void>((done) => (titled = done));
+  // storage that stalled, or failed to read the story, says so, never that the story is gone
+  const shut = () => {
+    title.textContent = STORY.title;
+    tools.remove();
+    page.replaceWith(
+      cantOpen(CANT_OPEN.story, CANT_OPEN.note, CANT_OPEN.retry, () => {
+        ss.reopen();
+        app.reopen();
+      }),
+    );
+  };
   const init = async () => {
+    const [misses, stalls] = [ss.misses, ss.stalls];
     const s = await ss.story(r.id);
     if (!alive) return;
+    if (ss.stalls !== stalls || (!s && ss.misses !== misses)) return shut();
     if (!s || s.removed) {
       title.textContent = STORY.title;
       titled();
@@ -2035,10 +2123,10 @@ export function readScreen(app: App, route: Route): ScreenOut {
     }
     title.textContent = shownTitle(s.title);
     sub.textContent = storyMeta(app, s);
-    titled();
     // what this copy holds but couldn't store yet reads as it is in the editor
     const chs = await Promise.all(s.chapters.map(async (id) => ss.unsaved(id) ?? (await ss.chapter(id))));
     if (!alive) return;
+    if (ss.stalls !== stalls || (chs.some((c) => !c) && ss.misses !== misses)) return shut();
     const shown = chs.flatMap((c, i) =>
       c && c.text.trim()
         ? [{ i, id: c.id, sec: h('section', { class: 'st-read-ch', 'data-id': c.id }, h('h2', { class: 'st-read-ch-h', text: c.title.trim() || `Chapter ${i + 1}` }), h('div', { class: 'st-read-text', text: c.text.trimEnd() })) }]
@@ -2078,7 +2166,7 @@ export function readScreen(app: App, route: Route): ScreenOut {
     title: STORY.title,
     mode: 'sub',
     bubbles: [0.9, 0.45],
-    // focus lands on the heading once it holds the story's title
+    // it comes in, and focus lands on the heading, once it holds the story, its words and the place it opens at
     ready,
     leave: () => {
       alive = false;

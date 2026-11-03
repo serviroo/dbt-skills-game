@@ -339,6 +339,14 @@ export const ART = {
   released: 'Ally released.',
 };
 
+/** A story or drawing storage didn't answer for: it is still there, and nothing was changed. */
+export const CANT_OPEN = {
+  story: "Can't open this story right now",
+  drawing: "Can't open this drawing right now",
+  note: "It's still on this device. Nothing was changed. Try again in a moment.",
+  retry: 'Try again',
+};
+
 /** Optional prompts for "Draw today". Offered one at a time; "Another" moves on; "No prompt" hides it. */
 export const ART_PROMPTS = [
   'Draw the weather inside.',

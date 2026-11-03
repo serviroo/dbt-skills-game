@@ -3,15 +3,15 @@
  * and "Design a shadow ally" (the drawing becomes the art on a new Shadow card). Nothing is graded.
  */
 import { animate } from '../ui/anim';
-import { ALLY_NAMES, ART, ART_PROMPTS } from '../content/daily-lines';
+import { ALLY_NAMES, ART, ART_PROMPTS, CANT_OPEN } from '../content/daily-lines';
 import { playerName } from '../core/you';
-import type { App, Route, ScreenOut } from './app';
+import type { App, Route, ScreenOut, Visit } from './app';
 import { icon } from './art';
 import { artStore, extrasOf, revOf, type Draft, type DrawingMeta, type DrawingRec } from './artstore';
 import { canvasBlob, INKS, InkPad, PAGE, renderDrawing, SIZES, TOOLS, type Paper, type Stroke, type Tool } from './ink';
 import { dayLabel } from './lines';
 import { uid } from './store';
-import { btn, chip, field, h, p, panel, radioKeys, redrawn, shareOrSave, typo } from './ui';
+import { btn, cantOpen, chip, field, h, p, panel, radioKeys, redrawn, shareOrSave, typo } from './ui';
 
 const store = (app: App) => artStore(app.store.key);
 const KEPT_APART = 'A newer copy of this drawing arrived, so this one was kept as its own page.';
@@ -285,16 +285,29 @@ function entryArt(kind: Paper) {
 }
 
 // ---------------- Drawing page ----------------
-export function drawScreen(app: App, route: Route): ScreenOut {
+/** What a visit to the drawing page keeps for Back and Forward: the drawing it holds and the draft its strokes are in. */
+interface DrawKept {
+  readonly id: string | null;
+  readonly key: string | undefined;
+}
+export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const r = route as Extract<Route, { name: 'draw' }>;
+  // Back or Forward to this visit, from the Safe Zone too, opens what it held: the page saved on it (a copy kept apart
+  // included), as Keep drawing would, and the strokes drawn since
+  const was = visit.again ? (visit.kept as DrawKept | undefined) : undefined;
+  const editId = was?.id ?? r.id;
   const kind: Paper = r.kind === 'ally' ? 'ally' : 'today';
   const as = store(app);
   const tab = as.claimTab();
   const own = (id?: string | null) => (id ? `edit:${id}:${tab.id}` : `${kind}:${tab.id}`);
-  let key = own(r.id);
+  let key = own(editId);
+  // the page and draft it opens from, or coming back, the ones its strokes were in; they stay there until this page's own
+  // draft or a save holds them, so a page left before they were read, or after a read that failed, still points at them
+  const from = was ? was.key : r.draft;
+  let mine = false;
   let saving = false;
   let storing = false;
-  let recId = r.id ?? null;
+  let recId = editId ?? null;
   let rec: DrawingRec | null = null;
   let bases: string[] | undefined;
   let promptRoll = 0;
@@ -319,6 +332,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     draftTimer = 0;
     if (!dirty) return;
     if (!key.endsWith(`:${tab.id}`)) key = own(recId);
+    mine = true;
     if (!pad.strokes.length && !recId) return void as.dropDraft(key);
     void as.putDraft({ key, kind, editId: recId ?? undefined, bases: recId ? bases : undefined, prompt, strokes: pad.strokes, t: Date.now() });
   };
@@ -506,6 +520,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     const saved: DrawingRec = { ...next, ...res.labels, id: res.id, updated: res.updated };
     rec = saved;
     recId = res.id;
+    mine = true;
     const failed = res.stored === 'failed';
     bases = failed && res.id === id ? [...(bases ?? []), res.rev].slice(-8) : [res.rev];
     const copied = res.id !== id;
@@ -810,30 +825,49 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     }
   }));
 
+  let drawn!: () => void;
+  const ready = new Promise<void>((done) => (drawn = done));
   void (async () => {
+    const [misses, stalls] = [as.misses, as.stalls];
     await tab.ready;
     if (left) return;
-    key = own(r.id);
+    key = own(editId);
     let draft: Draft | null = null;
-    if (r.draft) {
-      draft = await as.getDraft(r.draft);
+    if (from) {
+      draft = await as.getDraft(from);
       if (draft?.key.endsWith(`:${tab.id}`)) key = draft.key;
     }
     if (!draft) draft = await as.getDraft(key);
-    if (!draft && !r.draft) {
+    if (!draft && !from) {
       // this tab's other draft of the same page (a page first saved from a fresh screen), else one an earlier session
       // left; a younger draft may belong to a tab that is still open, so it only waits in the Art room
-      const same = (await as.drafts()).filter((d) => (r.id ? d.editId === r.id : d.kind === kind && !d.editId));
+      const same = (await as.drafts()).filter((d) => (editId ? d.editId === editId : d.kind === kind && !d.editId));
       const found = same.find((d) => d.key.endsWith(`:${tab.id}`)) ?? same.find((d) => !(Date.now() - d.t < ORPHAN_MS));
       if (found) {
         draft = found;
         if (found.key.endsWith(`:${tab.id}`)) key = found.key;
       }
     }
-    const id = r.id ?? draft?.editId;
+    const id = editId ?? draft?.editId;
+    if (id) rec = await as.get(id);
+    if (left) return;
+    // storage that stalled while it opened, or failed to read the draft or drawing it opens, leaves the page shut: there
+    // is nothing to draw on, so nothing is written over what it couldn't read. One this visit holds in memory (storage
+    // was never there to read) opens as ever
+    if (as.stalls !== stalls || (as.misses !== misses && ((from && !draft) || (id && !rec)))) {
+      // nothing left to lay out as the screen changes size
+      ro.disconnect();
+      promptRow.remove();
+      main.replaceWith(
+        cantOpen(CANT_OPEN.drawing, CANT_OPEN.note, CANT_OPEN.retry, () => {
+          as.reopen();
+          app.reopen();
+        }),
+      );
+      return;
+    }
     if (id) {
       recId = id;
-      rec = await as.get(id);
       if (rec) {
         const old = draft?.editId === id ? draft : null;
         bases = !old ? [revOf(rec)] : Array.isArray(old.bases) ? old.bases.filter((b): b is string => typeof b === 'string').slice(-8) : [];
@@ -846,7 +880,6 @@ export function drawScreen(app: App, route: Route): ScreenOut {
         renderPrompt();
       }
     }
-    if (left) return;
     if (draft) {
       if (draft.prompt !== undefined && kind === 'today') {
         prompt = draft.prompt;
@@ -860,13 +893,24 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     pad.el.inert = false;
     if (pad.strokes.length) hint.classList.add('is-gone');
     if (!as.persistent) say(p(ART.noStore, 'dq-small'));
-  })();
+  })().finally(drawn);
 
   return {
     el,
     title: kind === 'ally' ? ART.allyTitle : ART.todayTitle,
     mode: 'sub',
     bubbles: [0, 0],
+    // it comes in holding the drawing and its prompt, never an empty page first
+    ready,
+    // read as the visit comes back, so a save that lands after they leave (as a copy kept apart too) is what opens
+    keep: (): DrawKept => ({
+      get id() {
+        return mine ? recId : (editId ?? null);
+      },
+      get key() {
+        return mine ? key : from;
+      },
+    }),
     after: () => {
       app.sheetLayer.append(sheet, riseEl);
       ro.observe(main);
@@ -893,6 +937,19 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
   const body = h('div', { class: 'dq-piece-body' });
   let removed = false;
   let endRename = () => {};
+  // storage that stalled, or failed to read it, says so, never that the page is gone; once, so focus on Try again stays
+  let closed = false;
+  const shut = () => {
+    if (closed) return;
+    closed = true;
+    endRename();
+    body.replaceChildren(
+      cantOpen(CANT_OPEN.drawing, CANT_OPEN.note, CANT_OPEN.retry, () => {
+        as.reopen();
+        app.reopen();
+      }),
+    );
+  };
   const missing = () => {
     endRename();
     body.replaceChildren(p('That page is no longer here.', 'dq-text dq-empty'), h('div', { class: 'dq-actions' }, btn('Art room', () => app.go({ name: 'art' }), { kind: 'quiet' })));
@@ -905,8 +962,11 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
   // hidden while a removal's Undo lasts (from this tab or another): it shows as gone, and comes back with the Undo
   let hidden = false;
   const offShown = as.onChange(() => {
+    const [misses, stalls] = [as.misses, as.stalls];
     void as.isShown(id).then((on) => {
-      if (removed || on !== hidden) return;
+      if (removed) return;
+      if (as.stalls !== stalls || as.misses !== misses) return shut();
+      if (on !== hidden) return;
       if (on) return app.go({ name: 'piece', id }, { replace: true, quiet: true });
       hidden = true;
       missing();
@@ -915,8 +975,10 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
   let offChange = () => {};
   const el = h('div', { class: 'dq-page dq-piece' }, h('h1', { class: 'dq-sr', 'data-focus': '', text: 'Your page' }), body);
   void (async () => {
+    const [misses, stalls] = [as.misses, as.stalls];
     let rec = await as.get(id);
     const on = !!rec && (await as.isShown(id));
+    if (!removed && (as.stalls !== stalls || ((!rec || !on) && as.misses !== misses))) return shut();
     if (!rec || !on || removed || hidden) {
       if (!removed) hidden = true;
       missing();
