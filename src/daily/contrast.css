@@ -1,0 +1,22 @@
+:root[data-dq-contrast='high'] {
+  --dim: var(--body);
+  --rule: var(--hair-lit);
+  --hair-shade: var(--hair-lit);
+}
+:root[data-dq-contrast='high'] :is(.dq, .dq-sw) {
+  --t-body: var(--t-title);
+  --t-dim: var(--body);
+  --t-faint: var(--body);
+  --plate-a: var(--plate);
+  --plate-b: var(--plate);
+  --hl: var(--hair-lit);
+  --hs: var(--hair-lit);
+  --rule: var(--hair-lit);
+  --w2-tick: var(--hair-lit);
+  --edge: var(--hair-lit);
+  --edge-soft: var(--hair-lit);
+  --knob: var(--t-title);
+  --hint: var(--body);
+  --focus: var(--t-title);
+  --muted-op: 0.8;
+}

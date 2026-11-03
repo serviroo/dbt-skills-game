@@ -12,6 +12,7 @@ import './story.css';
 import './wave2.css';
 import './text-200.css';
 import './print.css';
+import './contrast.css';
 import { App, type DailyOpts } from './app';
 import { hubScreen } from './hub';
 import { comfortScreen, daysScreen, diaryScreen, libraryScreen, printScreen, restScreen, settingsScreen, shadowsScreen } from './pages';

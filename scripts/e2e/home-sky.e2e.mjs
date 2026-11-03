@@ -131,7 +131,7 @@ async function settle(h, page) {
 
 /** Screenshot with extra CSS applied through constructed sheets (no inline style, so the page's CSP never matters).
  *  Transitions are off while the CSS goes on and comes off again, so the page is left exactly as it was. */
-async function capture(page, css) {
+export async function capture(page, css) {
   await page.evaluate((text) => {
     const still = new CSSStyleSheet();
     still.replaceSync('.dq *, .dq *::before, .dq *::after { transition: none !important; }');
@@ -152,7 +152,7 @@ async function capture(page, css) {
   const { data, info } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   return { data, w: info.width, h: info.height };
 }
-const px = (img, x, y) => {
+export const px = (img, x, y) => {
   const i = (Math.min(img.h - 1, Math.max(0, Math.round(y))) * img.w + Math.min(img.w - 1, Math.max(0, Math.round(x)))) * 4;
   return [img.data[i], img.data[i + 1], img.data[i + 2]];
 };
@@ -165,14 +165,14 @@ const patch = (img, x, y) => {
 
 const lin = (c) => ((c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
 const lum = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-const ratio = (a, b) => {
+export const ratio = (a, b) => {
   const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
   return (x + 0.05) / (y + 0.05);
 };
 
 // the bubbles drift on their own clock, so the pictures leave them out
 const NO_BUBBLES = '.dq-bubbles { visibility: hidden !important; }';
-const NO_TEXT = `${NO_BUBBLES} .dq, .dq * { color: transparent !important; -webkit-text-fill-color: transparent !important; text-shadow: none !important; caret-color: transparent !important; }`;
+export const NO_TEXT = `${NO_BUBBLES} .dq, .dq * { color: transparent !important; -webkit-text-fill-color: transparent !important; text-shadow: none !important; caret-color: transparent !important; }`;
 const SKY_ONLY = `${NO_BUBBLES} .dq-view, .dq-top > *, .dq-toast { visibility: hidden !important; }`;
 
 /** Every piece of text the player can see, with the colour it is drawn in and the part of it that shows. */
@@ -222,7 +222,7 @@ const textBoxes = (page) =>
 
 /** WCAG AA for each visible text: the contrast against the background behind it, taken where it is weakest
  *  (the tenth percentile of the pixels behind its line box, so one stray edge pixel does not decide it). */
-async function contrast(page) {
+export async function contrast(page) {
   const boxes = await textBoxes(page);
   const bg = await capture(page, NO_TEXT);
   const rows = [];

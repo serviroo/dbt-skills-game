@@ -34,6 +34,7 @@ import { supportListsCopy } from './support-lists';
 import { keepTextSize, textSize } from './text-size';
 import { pageHead, restHead, wholeText } from './page-head';
 import { choose, wholeChoice } from './choice';
+import { showContrast } from './contrast';
 
 // ---------------- Stealth room (the Rest room) ----------------
 /** The Stealth title is never stored separately: any rest event means it is unlocked. The first one carries its id. */
@@ -1364,6 +1365,7 @@ export function settingsScreen(app: App): ScreenOut {
       if (sound) sound.checked = s.settings.sound;
     }
     if (buzzIn) buzzIn.checked = s.settings.vibrate;
+    contrastIn.checked = s.settings.highContrast;
   };
   const restore = async ({ raw, data, incomplete: fileIncomplete }: Peek) => {
     const merged = st.merge(data);
@@ -1373,6 +1375,7 @@ export function settingsScreen(app: App): ScreenOut {
     const unreadBack = restoreUnread((raw as { unreadSaves?: unknown }).unreadSaves, st);
     app.applyMotion();
     app.applySound();
+    showContrast(app);
     showChoices();
     app.shown = null;
     const rawArt = (raw as { art?: unknown }).art;
@@ -1680,6 +1683,13 @@ export function settingsScreen(app: App): ScreenOut {
     : null;
   // another open copy can turn it on or off: the switch shows the choice a buzz follows, as Motion, Text size and Sound
   // show theirs
+  const contrast = toggle('Higher contrast', s.settings.highContrast, (v) => {
+    s.settings.highContrast = v;
+    st.touch('highContrast');
+    st.save();
+    showContrast(app);
+  }, 'Brighter words and firmer edges on every screen, the Safe Zone too.');
+  const contrastIn = contrast.querySelector('input')!;
   const buzzIn = vibrate?.querySelector('input');
   const offChoices = st.onChange(showChoices);
   const levels = app.opts.volume ? volumeSliders(app.opts.volume, { hum: true }) : null;
@@ -1729,6 +1739,7 @@ export function settingsScreen(app: App): ScreenOut {
           h('span', { class: 'dq-setting-l' }, h('span', { class: 'dq-setting-t', text: 'Text size' }), h('span', { class: 'dq-setting-h', text: 'Bigger words in the Safe Zone and when you read a story.' })),
           segmented('Text size', [...READ_SIZES], textSize(app), (v) => keepTextSize(app, v as ReadSize), { labels: ['Regular', 'Larger', 'Largest'], cls: 'dq-seg--3' }),
         ),
+        contrast,
         vibrate,
       ),
       panel({ title: 'Crisis lines', ic: icon('phone') }, regionPicker(app, undefined, SAFE.settings)),

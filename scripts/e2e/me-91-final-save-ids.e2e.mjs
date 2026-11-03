@@ -64,10 +64,10 @@ export function fullSave(now) {
     },
     maps: [{ id: 'map-1', t: t0, urge: 'Quit', p1: 'Rest', c1: 'Guilt', p2: 'Pride', c2: 'Tired', choice: 'Wait', at: t0 }],
     lines: ids.line.map((id, i) => ({ day: dayOf(t0 + i * DAY), id, tag: 'STATUS', text: `Line ${id}`, t: t0 + i * DAY })),
-    settings: { sound: false, motion: 'reduce', vibrate: true, emotionRows: ['Sadness', 'Joy'], urgeRows: ['Urge to give up on today'] },
+    settings: { sound: false, motion: 'reduce', vibrate: true, highContrast: false, emotionRows: ['Sadness', 'Joy'], urgeRows: ['Urge to give up on today'] },
     flags: { rankSeen: 5, wardenSeen: true, giftDay: today, cardDay: today, greetDay: today, safeCredit: false, therapistLineShown: true, checkinDay: today },
     gone: { 'c-old': t0 },
-    setAt: { sound: t0, motion: t0, vibrate: t0, emotionRows: t0, urgeRows: t0, safeCredit: t0 },
+    setAt: { sound: t0, motion: t0, vibrate: t0, highContrast: t0, emotionRows: t0, urgeRows: t0, safeCredit: t0 },
     skillPins: { [ids.skill[0]]: { pinned: true, at: t0 }, [ids.skill[1]]: { pinned: false, at: t0 } },
     profile: {
       theme: last(ids.theme),
