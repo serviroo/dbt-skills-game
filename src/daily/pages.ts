@@ -1681,8 +1681,6 @@ export function settingsScreen(app: App): ScreenOut {
         if (v) app.buzz('start');
       }, 'One soft buzz as it starts, two as it ends.')
     : null;
-  // another open copy can turn it on or off: the switch shows the choice a buzz follows, as Motion, Text size and Sound
-  // show theirs
   const contrast = toggle('Higher contrast', s.settings.highContrast, (v) => {
     s.settings.highContrast = v;
     st.touch('highContrast');
@@ -1690,6 +1688,8 @@ export function settingsScreen(app: App): ScreenOut {
     showContrast(app);
   }, 'Brighter words and firmer edges on every screen, the Safe Zone too.');
   const contrastIn = contrast.querySelector('input')!;
+  // another open copy can turn it on or off: the switch shows the choice a buzz follows, as Motion, Text size and Sound
+  // show theirs
   const buzzIn = vibrate?.querySelector('input');
   const offChoices = st.onChange(showChoices);
   const levels = app.opts.volume ? volumeSliders(app.opts.volume, { hum: true }) : null;

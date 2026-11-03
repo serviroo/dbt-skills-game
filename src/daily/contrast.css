@@ -32,3 +32,6 @@
   --edge-shade: var(--body);
   --link: #ffffff;
 }
+:root[data-dq-contrast='high'] .dq-stealth {
+  --gold: var(--gold-hi);
+}

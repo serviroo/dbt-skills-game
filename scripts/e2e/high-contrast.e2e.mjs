@@ -1,5 +1,5 @@
 import { boot, settle } from './layout-fit.e2e.mjs';
-import { capture, contrast, NO_TEXT, px, ratio } from './home-sky.e2e.mjs';
+import { capture, contrast, FIELDS, NO_TEXT, px, ratio } from './home-sky.e2e.mjs';
 
 const SWITCH = 'Higher contrast';
 const TEXT_MIN = 7;
@@ -14,10 +14,17 @@ const SCREENS = [
   ['skill', { name: 'skill', id: 'check-facts' }],
   ['library', { name: 'library' }],
   ['moment', { name: 'moment' }],
+  ['ease', { name: 'ease' }],
+  ['rest', { name: 'rest' }],
   ['diary', { name: 'diary' }],
+  ['days', { name: 'days' }],
+  ['print', { name: 'print' }],
+  ['comfort', { name: 'comfort' }],
+  ['lines', { name: 'lines' }],
   ['night-watch', { name: 'shadows' }],
   ['art', { name: 'art' }],
   ['draw', { name: 'draw', kind: 'today' }],
+  ['piece', { name: 'piece', id: 'draw-today' }],
   ['stories', { name: 'stories' }],
   ['write', { name: 'write', id: 'tale-1' }],
   ['read', { name: 'read', id: 'tale-1' }],
@@ -52,7 +59,6 @@ async function go(page, route) {
   await settle(page);
 }
 
-const FIELDS = 'select, textarea, input:not([type=checkbox]):not([type=range])';
 const CONTROLS = `button, a.dq-btn, ${FIELDS}, .dq-switch-ui, .dq-seg, .dq-panel`;
 
 const edges = (page) =>

@@ -289,7 +289,7 @@
 .st-title::placeholder {
   font-style: italic;
   font-weight: 500;
-  color: #6f86a6;
+  color: var(--hint, #6f86a6);
   opacity: 1;
 }
 .st-title:focus,
@@ -481,7 +481,7 @@
 }
 .st-ta::placeholder {
   font-style: italic;
-  color: #6f86a6;
+  color: var(--hint, #6f86a6);
   opacity: 1;
 }
 .st-ta:focus-visible {
@@ -1381,7 +1381,7 @@
   padding-left: 44px;
 }
 .st-find-in::placeholder {
-  color: #7f97b6;
+  color: var(--hint, #7f97b6);
   opacity: 1;
 }
 .st-find-n {
