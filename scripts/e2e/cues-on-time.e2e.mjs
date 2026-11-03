@@ -264,6 +264,13 @@ export const scenarios = {
     try {
       await page.evaluate(async () => {
         const { Music } = await import('/src/audio/music.ts');
+        const { Voice } = await import('/src/audio/voice.ts');
+        const open = Voice.prototype.open;
+        window.__opens = [];
+        Voice.prototype.open = function (at) {
+          if (window.__watch) window.__opens.push(at);
+          return open.call(this, at);
+        };
         const schedule = Music.prototype.scheduleUntil;
         Music.prototype.scheduleUntil = function (...a) {
           window.__music = this;
@@ -280,12 +287,15 @@ export const scenarios = {
           const out = [];
           const watched = (name, fn) => {
             const was = window.__behind.length;
+            const opened = window.__opens.length;
             const ask = clock.currentTime;
             const t0 = performance.now();
             window.__watch = true;
             fn();
             window.__watch = false;
-            return { name, rate, ask, done: clock.currentTime, ms: performance.now() - t0, behind: window.__behind.slice(was) };
+            const opens = window.__opens.slice(opened);
+            const ms = performance.now() - t0;
+            return { name, rate, ask, done: clock.currentTime, ms, behind: window.__behind.slice(was), opens };
           };
           for (const name of sections) {
             const o = watched(name, () => window.__music.to(name, 0.3));
@@ -324,6 +334,10 @@ export const scenarios = {
         if (v.behind) why.push(`${v.behind} of its parts were placed up to ${v.worstMs} ms behind the audio clock (${[...new Set(o.behind.map((b) => b[0]))].join(', ')})`);
         if (!o.hit && (o.start < o.ask - 1e-4 || o.start > o.done + LEAD + o.ms / 1000 + 1e-4)) why.push(`it starts ${v.leadMs} ms past the clock once it is open`);
         if (!(level > 3e-4)) why.push(`it was not heard (RMS ${level})`);
+        const roarLag = o.hit ? Math.max(...o.opens) - Math.min(...o.opens) : 0;
+        if (o.hit && !(o.opens.length >= 2 && roarLag < 1e-6)) {
+          why.push(`its roar opened ${(roarLag * 1000).toFixed(1)} ms after the hit (${o.opens.length} parts opened)`);
+        }
         const plain = levels[`awaken hit ${o.rate}`];
         if (o.name === 'awaken hit after a stall' && !(level >= 0.7 * plain)) why.push(`its first chord is at ${((level / plain) * 100).toFixed(0)}% of the one without a stall`);
         if (why.length) bad.push(`${o.name} at CPU x${o.rate} (built in ${v.buildMs} ms): ${why.join(', ')}`);
@@ -331,6 +345,78 @@ export const scenarios = {
       h.expect(!bad.length, `${bad.length} of ${opened.length} parts of the score did not open on time: ${bad.join('; ')}`);
       h.expect(!errors.length, errors.join('\n'));
       return { opened: opened.length, slowestMs: Math.max(...opened.map((o) => +o.ms.toFixed(1))) };
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'every-bed-and-the-charge-loop-start-on-time-however-slow-their-build'(h) {
+    const { ctx, page, errors } = await boot(h, { music: 1, sfx: 1 });
+    try {
+      await page.evaluate(async () => {
+        const { AudioEngine } = await import('/src/audio/engine.ts');
+        const { Voice } = await import('/src/audio/voice.ts');
+        const play = AudioEngine.prototype.play;
+        AudioEngine.prototype.play = function (...a) {
+          window.__engine = this;
+          return play.apply(this, a);
+        };
+        for (const m of ['osc', 'noise', 'lfo', 'loop']) {
+          const make = Voice.prototype[m];
+          Voice.prototype[m] = function (...a) {
+            const until = performance.now() + (window.__watch ? 2 : 0);
+            while (performance.now() < until);
+            return make.apply(this, a);
+          };
+        }
+        window.__daily.sound('ui_tap');
+      });
+      await page.waitForFunction(() => !!window.__engine);
+      const cdp = await ctx.newCDPSession(page);
+      const started = [];
+      for (const rate of RATES) {
+        await cdp.send('Emulation.setCPUThrottlingRate', { rate });
+        started.push(...(await page.evaluate(async (rate) => {
+          const { BED_NAMES } = await import('/src/audio/beds.ts');
+          const engine = window.__engine;
+          const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+          const out = [];
+          const watched = (name, fn) => {
+            const was = window.__behind.length;
+            const t0 = performance.now();
+            window.__watch = true;
+            const handle = fn();
+            window.__watch = false;
+            out.push({ name, rate, ms: performance.now() - t0, behind: window.__behind.slice(was) });
+            return handle;
+          };
+          for (const name of BED_NAMES) {
+            const bed = watched(name, () => engine.bed(name, { level: 0.5 }));
+            await sleep(400);
+            bed.stop(0.05);
+            await sleep(300);
+          }
+          const charge = watched('charge loop', () => engine.chargeLoop());
+          await sleep(400);
+          charge.stop();
+          await sleep(300);
+          return out;
+        }, rate)));
+      }
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+      const bad = [];
+      for (const s of started) {
+        const worstMs = s.behind.length ? Math.max(...s.behind.map((b) => b[1])) * 1000 : 0;
+        note(h, 'bed', { part: s.name, rate: s.rate, buildMs: +s.ms.toFixed(1), behind: s.behind.length, worstMs });
+        if (!s.behind.length) continue;
+        const where = [...new Set(s.behind.map((b) => b[0]))].join(', ');
+        const late = `${s.behind.length} of its parts were placed up to ${worstMs.toFixed(1)} ms behind the clock`;
+        bad.push(`${s.name} at CPU x${s.rate} (built in ${s.ms.toFixed(1)} ms): ${late} (${where})`);
+      }
+      const of = `${bad.length} of ${started.length} beds and charge loops`;
+      h.expect(!bad.length, `${of} did not start on time: ${bad.join('; ')}`);
+      h.expect(!errors.length, errors.join('\n'));
+      return { started: started.length, slowestMs: Math.max(...started.map((s) => +s.ms.toFixed(1))) };
     } finally {
       await ctx.close();
     }

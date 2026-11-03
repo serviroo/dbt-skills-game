@@ -417,6 +417,7 @@ export class AudioEngine {
     } catch (err) {
       console.warn('[audio] cue failed', cue, err);
     }
+    if (cue === "awaken_hit") this.music.armHit();
     const at = this.when(opts.at);
     v.open(at);
     if (UI_DUCK.has(cue)) {

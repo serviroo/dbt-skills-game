@@ -547,6 +547,7 @@ function once(t: number, from: number, to: number, fn: (t: number) => void) {
 interface SectionImpl {
   tick(from: number, to: number): void;
   hush?(at: number): void;
+  arm?(): void;
   hit?(at: number): void;
 }
 /** Builds a section on its held voice (the times its sources are given count from the opening) and returns what times
@@ -870,20 +871,26 @@ const FACTORIES: Record<Section, Factory> = {
       let gap = 1.0;
       let roarTo = -Infinity;
       const stand = o.standAt !== undefined && o.hitAt !== undefined ? o.standAt - o.hitAt : 7.04;
+      let armed = false;
+      const arm = () => {
+        if (armed || hitAt !== Infinity) return;
+        armed = true;
+        swellPedal(0);
+        roarNotes(0, 0, BEAT / 4);
+      };
       return {
         hush(at: number) {
           if (hitAt === Infinity) cut(at);
         },
+        arm,
         hit(at: number) {
           if (hitAt !== Infinity) return;
           // the hit places the roar's first chord itself, now; what follows comes in the score's windows (see tick)
-          swellPedal(0);
-          roarNotes(0, 0, BEAT / 4);
-          const t = Math.max(at, soon(host.lib.ctx));
-          hitAt = t;
-          roarTo = t + BEAT / 4;
-          rp.open(t);
-          cut(Math.max(t, soon(host.lib.ctx)));
+          arm();
+          hitAt = at;
+          roarTo = at + BEAT / 4;
+          rp.open(at);
+          cut(Math.max(at, soon(host.lib.ctx)));
         },
         tick(from, to) {
           const bEnd = Math.min(to, cutAt - 0.12, hitAt - 0.12);
@@ -981,7 +988,8 @@ const FACTORIES: Record<Section, Factory> = {
         steps(base + BAR * 0.25, BAR, from, to, grooveOffs, (_b, k, t) => {
           const [s, lv] = groove[k];
           const down = s % 4 === 0;
-          taiko(rp, t, 0.2 * lv, drums, { f0: down ? 84 : 120, f1: down ? 52 : 80, dec: down ? 0.22 : 0.12, slap: 1.8, sat: dSat });
+          const dec = down ? 0.22 : 0.12;
+          taiko(rp, t, 0.2 * lv, drums, { f0: down ? 84 : 120, f1: down ? 52 : 80, dec, slap: 1.8, sat: dSat });
         });
       }
     };
@@ -1159,6 +1167,10 @@ export class Music {
   /** The director started the hush / played the hit: an open-ended awaken section follows it. */
   onHush(at: number) {
     for (const s of this.live) if (s.name === "awaken" && s.end === Infinity) s.impl.hush?.(at);
+  }
+
+  armHit() {
+    for (const s of this.live) if (s.name === "awaken" && s.end === Infinity) s.impl.arm?.();
   }
 
   onHit(at: number) {
