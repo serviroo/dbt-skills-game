@@ -65,14 +65,17 @@ async function heldCopy(h, seed) {
  * Holds the copy `page` (from heldCopy) inside its write of a key matching `pattern`, which `start` (source run in
  * it) begins, through a real clear in a second tab, while a new game in a third tab stores something of its own (`own`,
  * run there, returns its key). Then lets it go and returns whether the late write landed, how the held copy stopped
- * (it shows the clear, or reloads into the new game), and what is stored under the late key and the new game's key then.
+ * (it shows the clear, or reloads into the new game), what is stored under the late key and the new game's key
+ * then, and which other keys matching `pattern` are left.
  */
 async function heldThroughClear(h, ctx, page, pattern, start, own) {
   const cdp = await ctx.newCDPSession(page);
   await cdp.send('Debugger.enable');
   const stopped = new Promise((r) => cdp.once('Debugger.paused', r));
   const begun = cdp.send('Runtime.evaluate', { expression: `window.__hold = ${JSON.stringify(pattern)}; (${start})()`, awaitPromise: true });
-  await stopped;
+  const frame = (await stopped).callFrames[0].callFrameId;
+  const { result } = await cdp.send('Debugger.evaluateOnCallFrame', { callFrameId: frame, expression: 'k' });
+  const heldKey = result.value;
   const clearer = await ctx.newPage();
   await clearer.goto(h.server.url + '/?mute');
   await clearer.waitForFunction(() => !!window.__daily?.store, null, { timeout: 30000 });
@@ -87,10 +90,10 @@ async function heldThroughClear(h, ctx, page, pattern, start, own) {
   await next.waitForFunction(() => !!window.__daily?.store, null, { timeout: 30000 });
   const ownKey = await next.evaluate(own);
   for (const p of [clearer, next])
-    await p.evaluate((p) => {
-      window.__landed = [];
-      window.addEventListener('storage', (e) => e.newValue !== null && new RegExp(p).test(e.key) && window.__landed.push(e.key));
-    }, pattern);
+    await p.evaluate((k) => {
+      window.__landed = false;
+      window.addEventListener('storage', (e) => e.key === k && e.newValue !== null && (window.__landed = true));
+    }, heldKey);
   let reloaded = false;
   page.once('load', () => (reloaded = true));
   await cdp.send('Debugger.resume');
@@ -99,11 +102,19 @@ async function heldThroughClear(h, ctx, page, pattern, start, own) {
   let shown = null;
   for (const end = Date.now() + 15000; !shown && Date.now() < end; await h.sleep(200))
     shown = reloaded ? 'reloaded' : ((await page.evaluate(async () => (await import('/src/core/cleared.ts')).cleared()).catch(() => false)) && 'cleared');
-  const [late] = await clearer.evaluate(() => window.__landed);
+  const landed = await clearer.evaluate(() => window.__landed);
   // the new game's own listeners for the late write ran before its test listener heard it
-  if (late) await next.waitForFunction(() => window.__landed.length > 0, null, { timeout: 5000 }).catch(() => undefined);
-  const [lateNow, ownNow, save] = await next.evaluate(([a, b, s]) => [a ? localStorage.getItem(a) : null, localStorage.getItem(b), localStorage.getItem(s)], [late, ownKey, h.SAVE]);
-  return { landed: !!late, shown, late: lateNow, own: ownNow, save };
+  if (landed) await next.waitForFunction(() => window.__landed, null, { timeout: 5000 }).catch(() => undefined);
+  const now = await next.evaluate(
+    ([held, own, p, s]) => ({
+      late: localStorage.getItem(held),
+      left: Object.keys(localStorage).filter((k) => k !== own && new RegExp(p).test(k)),
+      own: localStorage.getItem(own),
+      save: localStorage.getItem(s),
+    }),
+    [heldKey, ownKey, pattern, h.SAVE],
+  );
+  return { landed, shown, heldKey, ...now };
 }
 
 const stored = (page, key) => page.evaluate((k) => JSON.parse(localStorage.getItem(k) ?? 'null'), key);
@@ -270,7 +281,10 @@ export const scenarios = {
       });
       expect(r.landed, 'the held-up names never landed after the clear, so this checks nothing');
       expect(!/Robin|Pip/.test(r.save ?? ''), 'the new game took the names stored late into its save: ' + r.save);
-      expect(r.shown && r.late === null, 'names stored again, unchanged, by a copy held up through the clear are still there: ' + JSON.stringify(r));
+      expect(
+        r.shown && !r.left.length,
+        'names stored again, unchanged, by a copy held up through the clear are still there: ' + JSON.stringify(r),
+      );
       expect(r.own === '3', 'the new game lost what it stored: ' + JSON.stringify(r));
       expect(!errors.length, errors.join('\n'));
     } finally {
@@ -293,7 +307,10 @@ export const scenarios = {
         return Object.keys(localStorage).find((k) => k.endsWith('.new-page'));
       });
       expect(r.landed, 'the held-up words never landed after the clear, so this checks nothing');
-      expect(r.shown && r.late === null, 'chapter words mirrored by a copy held up through the clear are still there: ' + JSON.stringify(r));
+      expect(
+        r.shown && !r.left.length,
+        'chapter words mirrored by a copy held up through the clear are still there: ' + JSON.stringify(r),
+      );
       expect(/A new game/.test(r.own ?? ''), 'the new game lost its words: ' + JSON.stringify(r));
       expect(!errors.length, errors.join('\n'));
     } finally {
