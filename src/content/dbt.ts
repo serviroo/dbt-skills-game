@@ -32,6 +32,9 @@ export type ListId = 'comfort' | 'activities' | 'reasons';
 export type Effect = 'saveSoothe' | 'saveMap';
 /** a timer's picture: `ring` is the breathing light, `count` the countdown ring alone, for a timer that isn't a breath */
 export type Visual = 'ring' | 'count' | 'drift' | 'wave' | 'tide' | 'hands' | 'cold' | 'glow' | 'thoughts';
+type TimerPicture =
+  | { visual?: Exclude<Visual, 'thoughts'>; scene?: undefined }
+  | { visual: 'thoughts'; scene: (a: Answers) => ThoughtPic };
 
 interface Base {
   id?: string;
@@ -45,7 +48,7 @@ export type Step =
   | (Base & { kind: 'input'; text: Txt; key: string; placeholder?: string; fills?: string[]; skip?: string; cta?: string; lines?: number; prefix?: (a: Answers) => string })
   | (Base & { kind: 'slider'; text: Txt; key: string; min: number; max: number; ends?: [string, string]; words?: string[] })
   | (Base & { kind: 'breath'; text: Txt; inhale: number; exhale: number; rounds: number; alt?: [number, number]; words?: [string, string] })
-  | (Base & { kind: 'timer'; text: Txt; seconds: number | ((a: Answers) => number); start?: string; visual?: Visual; small?: string; options?: Opt[]; big?: Txt; dim?: boolean; scene?: (a: Answers) => unknown })
+  | (Base & TimerPicture & { kind: 'timer'; text: Txt; seconds: number | ((a: Answers) => number); start?: string; small?: string; options?: Opt[]; big?: Txt; dim?: boolean })
   | (Base & { kind: 'hold'; text: Txt; seconds: number; label: string; done: string; tone?: 'heal' })
   | (Base & { kind: 'tier'; text: Txt; key: string; from: string; tiers: string[] })
   | (Base & { kind: 'count'; text: Txt; n: number; label: string })

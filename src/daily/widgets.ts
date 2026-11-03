@@ -328,10 +328,21 @@ function thoughtsPicture(pic: ThoughtPic) {
     );
     for (let i = 0; i < Math.ceil(pace.crossSec / pace.spaceSec); i++) {
       const car = sv('g');
-      for (const x of [-1, 1])
+      car.append(
+        sv('path', {
+          d: 'M-5 2V-1Q-5-2.6-3.6-2.8L-2.6-5.2Q-2.3-5.8-1.6-5.8H1.6Q2.3-5.8 2.6-5.2L3.6-2.8Q5-2.6 5-1V2Z',
+          fill: 'rgba(14,24,40,.92)',
+          stroke: 'rgba(200,235,255,.7)',
+          'stroke-width': 1.1,
+          'vector-effect': 'non-scaling-stroke',
+        }),
+        sv('path', { d: 'M-2.6-3L-2-5H2L2.6-3Z', fill: 'rgba(137,180,220,.2)' }),
+        sv('path', { d: 'M-4.4 2h1.6v1.2h-1.6ZM2.8 2h1.6v1.2h-1.6Z', fill: 'rgba(7,8,15,.9)' }),
+      );
+      for (const x of [-3.2, 3.2])
         car.append(
-          sv('circle', { cx: x, cy: 0, r: 5, fill: 'rgba(230,241,255,.14)' }),
-          sv('circle', { cx: x, cy: 0, r: 1.9, fill: '#e6f1ff' }),
+          sv('circle', { cx: x, cy: 0, r: 2.4, fill: 'rgba(230,241,255,.14)' }),
+          sv('circle', { cx: x, cy: 0, r: 1.1, fill: '#e6f1ff' }),
         );
       things.push(car);
     }
@@ -339,9 +350,8 @@ function thoughtsPicture(pic: ThoughtPic) {
       const v = 1 - u;
       const x = v * v * v * 4 + 3 * v * v * u * 110 + 3 * v * u * u * 158 + u * u * u * 186;
       const y = v * v * v * 116 + 3 * v * v * u * 115 + 3 * v * u * u * 124 + u * u * u * 184;
-      const apart = 1.5 + 4 * u * u;
-      el.setAttribute('transform', `translate(${x.toFixed(2)} ${y.toFixed(2)})`);
-      el.querySelectorAll('circle').forEach((c, k) => c.setAttribute('cx', ((k < 2 ? -1 : 1) * apart).toFixed(2)));
+      const near = 0.6 + 1.6 * u * u;
+      el.setAttribute('transform', `translate(${x.toFixed(2)} ${y.toFixed(2)}) scale(${near.toFixed(3)})`);
     };
   } else {
     g.append(
@@ -402,6 +412,10 @@ function spoken(s: number) {
   return [m ? part(m, 'minute') : '', r || !m ? part(r, 'second') : ''].filter(Boolean).join(' ');
 }
 
+type TimerPicture =
+  | { visual?: Exclude<Visual, 'thoughts'>; input?: undefined }
+  | { visual: 'thoughts'; input: ThoughtPic };
+
 /**
  * Countdown with an optional visual. Waits for a tap when `start` is given, or for the caller's own start() when `held`;
  * that start brings `reveal` (the countdown unless the caller names something further down) into view if it isn't,
@@ -410,7 +424,7 @@ function spoken(s: number) {
  * `reveal`, the countdown or at least its figures can come with it. A screen reader hears
  * it start, get more time and end, never each second. A visual with a 3D scene shows it unless `scene` is false.
  */
-export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; scene?: boolean; input?: unknown; start?: string; held?: boolean; extend?: number; big?: string; extra?: HTMLElement[]; peers?: HTMLElement[]; reveal?: HTMLElement; keep?: HTMLElement; onStart?: () => void; onDone: () => void }) {
+export function timerView(ctx: Ctx, opts: TimerPicture & { seconds: number; scene?: boolean; start?: string; held?: boolean; extend?: number; big?: string; extra?: HTMLElement[]; peers?: HTMLElement[]; reveal?: HTMLElement; keep?: HTMLElement; onStart?: () => void; onDone: () => void }) {
   let dur = opts.seconds;
   const visual = opts.visual ?? 'ring';
   const scene = opts.scene !== false && hasScene(visual);
@@ -463,7 +477,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; sc
     parts.mist = lantern.mist;
     svg.append(lantern.g);
   }
-  const thoughts = visual === 'thoughts' ? thoughtsPicture(opts.input as ThoughtPic) : null;
+  const thoughts = opts.visual === 'thoughts' ? thoughtsPicture(opts.input) : null;
   if (thoughts) svg.append(...thoughts.els);
   const num = h('div', { class: 'dq-timer-num' });
   const big = opts.big ? h('p', { class: 'dq-timer-big', text: typo(opts.big) }) : null;

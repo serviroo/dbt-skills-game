@@ -54,6 +54,13 @@ export const scenarios = {
         page.$$eval('.dq-thoughts > [visibility]', (els) =>
           els.map((e) => `${e.getAttribute('visibility')} ${e.getAttribute('transform')}`).join(' | '),
         );
+      const drawn = await page.$$eval('.dq-thoughts > [visibility=visible]', (els) =>
+        els.map((e) => (e.matches('path') ? e : e.querySelector('path'))?.getBBox().width ?? 0),
+      );
+      h.expect(
+        drawn.length > 0 && drawn.every((w) => w > 0),
+        `no WebGL ${pic}: a thought has no shape of its own (${JSON.stringify(drawn)})`,
+      );
       const a = await look();
       await page.clock.runFor(2000);
       const b = await look();
