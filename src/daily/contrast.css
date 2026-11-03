@@ -25,3 +25,10 @@
   --focus: var(--t-title);
   --muted-op: 0.8;
 }
+:root[data-dq-contrast='high'] .dq-safezone.is-lit {
+  --t-title: #ffffff;
+  --edge: var(--body);
+  --edge-soft: var(--body);
+  --edge-shade: var(--body);
+  --link: #ffffff;
+}

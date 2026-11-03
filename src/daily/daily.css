@@ -613,7 +613,7 @@ dq-shy::before {
   color: var(--mint) !important;
 }
 .dq-a {
-  color: #a9d6f7;
+  color: var(--link, #a9d6f7);
   text-decoration: underline;
   text-underline-offset: 3px;
   text-decoration-color: rgba(169, 214, 247, 0.45);

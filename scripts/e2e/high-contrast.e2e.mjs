@@ -3,7 +3,6 @@ import { capture, contrast, NO_TEXT, px, ratio } from './home-sky.e2e.mjs';
 
 const SWITCH = 'Higher contrast';
 const TEXT_MIN = 7;
-const LARGE_MIN = 4.5;
 const EDGE_MIN = 3;
 const DPR = 2;
 
@@ -24,12 +23,18 @@ const SCREENS = [
   ['read', { name: 'read', id: 'tale-1' }],
   ...SAFE_AT.map((at) => [`safe-${at}`, { name: 'safe', at }]),
   ['safe-lit-start', { name: 'safe', at: 'start' }, true],
+  ['safe-lit-check', { name: 'safe', at: 'check' }, true],
   ['safe-lit-talk', { name: 'safe', at: 'talk' }, true],
 ];
 const ZOOMED = ['home', 'settings', 'night-watch', 'safe-start', 'safe-talk', 'safe-lit-start'];
+const THEMED = ['home', 'settings', 'skill', 'safe-check', 'safe-lit-start', 'safe-lit-check', 'safe-lit-talk'];
 const LOOKS = [
-  [{ width: 390, height: 844 }, null, null],
+  [{ width: 390, height: 844 }, null, { theme: 'classic', accent: 'blue' }],
   [{ width: 195, height: 422 }, ZOOMED, { theme: 'mint', accent: 'green' }],
+];
+const THEMES = [
+  [{ width: 390, height: 844 }, THEMED, { theme: 'night', accent: 'violet' }],
+  [{ width: 390, height: 844 }, THEMED, { theme: 'gold', accent: 'honey' }],
 ];
 
 const shown = (page) => page.evaluate(() => document.documentElement.dataset.dqContrast ?? null);
@@ -71,23 +76,27 @@ const edges = (page) =>
         const hit = document.elementFromPoint(x + inward * 2, y);
         if (!hit || !el.parentElement.contains(hit)) continue;
         const text = (el.getAttribute('aria-label') ?? el.textContent).trim().slice(0, 30);
-        out.push({ where, side, text, x, inward, y });
+        out.push({ where, side, text, x, inward, y, width: parseFloat(w) });
       }
     }
     return out;
   }, CONTROLS);
+
+const alike = (a, b) => a.every((v, i) => Math.abs(v - b[i]) <= 6);
 
 async function edgeScores(page) {
   const found = await edges(page);
   if (!found.length) return [];
   const img = await capture(page, NO_TEXT);
   return found.map((e) => {
-    const off = px(img, (e.x - e.inward * 5) * DPR, e.y * DPR);
-    let best = 1;
-    for (let d = -1 * DPR; d <= 3 * DPR; d++) {
-      best = Math.max(best, ratio(px(img, e.x * DPR + e.inward * d, e.y * DPR), off));
-    }
-    return { ...e, score: Math.round(best * 100) / 100 };
+    const y = e.y * DPR;
+    const off = px(img, (e.x - e.inward * 5) * DPR, y);
+    const fill = px(img, (e.x + e.inward * (e.width + 3)) * DPR, y);
+    const band = [];
+    for (let d = -1; d <= e.width * DPR; d++) band.push(px(img, e.x * DPR + e.inward * (d + 0.5), y));
+    const line = band.filter((c) => !alike(c, fill));
+    const score = Math.max(...(line.length ? line : [fill]).map((c) => ratio(c, off)));
+    return { ...e, score: Math.round(score * 100) / 100 };
   });
 }
 
@@ -111,7 +120,7 @@ async function sweep(h, page) {
 }
 
 function weak({ text, edge }) {
-  const low = text.filter((r) => r.score < (r.need === 3 ? LARGE_MIN : TEXT_MIN));
+  const low = text.filter((r) => r.score < TEXT_MIN);
   const dull = edge.filter((r) => r.score < EDGE_MIN);
   const seen = new Set();
   const lines = [
@@ -119,6 +128,43 @@ function weak({ text, edge }) {
     ...dull.map((r) => `${r.side} edge of ${r.where} "${r.text}" ${r.score}:1 at ${r.at}+${Math.round(r.y)}`),
   ];
   return lines.filter((l) => !seen.has(l) && seen.add(l));
+}
+
+async function walk(h, looks) {
+  const problems = [];
+  const table = {};
+  for (const [vp, which, look] of looks) {
+    const zoom = vp.width === 195 ? ' at 200%' : '';
+    const size = `390x844${zoom}, ${look.theme}`;
+    const edit = (s) => {
+      s.settings.highContrast = true;
+      Object.assign(s.profile, look);
+    };
+    const { ctx, page, errors } = await boot(h, vp, { edit });
+    h.expect((await shown(page)) === 'high', `${size}: a save with Higher contrast on opened without it`);
+    for (const [id, route, lit] of SCREENS) {
+      if (which && !which.includes(id)) continue;
+      await go(page, route);
+      if (lit && !(await page.locator('.dq-safezone.is-lit').count())) {
+        await page.locator('.ca-sz-light').click();
+        await page.locator('.dq-safezone.is-lit').waitFor({ timeout: 10000 });
+        await settle(page);
+      }
+      const rows = await sweep(h, page);
+      const bad = weak(rows);
+      const least = (l) => (l.length ? Math.min(...l.map((r) => r.score)) : null);
+      const { text, edge } = rows;
+      table[`${id} ${size}`] = { lines: text.length, edges: edge.length, text: least(text), edge: least(edge) };
+      problems.push(...bad.map((b) => `${id} ${size}: ${b}`));
+      h.expect(rows.text.length > 0, `${id} ${size}: no text measured`);
+      await h.shot(page, `high-contrast-${id}-${vp.width}-${look.theme}`);
+    }
+    h.expect(!errors.length, `${size}: ${errors.join('\n')}`);
+    await ctx.close();
+  }
+  console.log(JSON.stringify(table, null, 1));
+  h.expect(!problems.length, `with Higher contrast on, these fall short:\n${problems.join('\n')}`);
+  return table;
 }
 
 export const scenarios = {
@@ -161,39 +207,6 @@ export const scenarios = {
     await ctx.close();
   },
 
-  async 'high-contrast-every-screen'(h) {
-    const problems = [];
-    const table = {};
-    for (const [vp, which, look] of LOOKS) {
-      const size = vp.width === 195 ? `390x844 at 200%, ${look.theme}` : '390x844';
-      const edit = (s) => {
-        s.settings.highContrast = true;
-        Object.assign(s.profile, look);
-      };
-      const { ctx, page, errors } = await boot(h, vp, { edit });
-      h.expect((await shown(page)) === 'high', `${size}: a save with Higher contrast on opened without it`);
-      for (const [id, route, lit] of SCREENS) {
-        if (which && !which.includes(id)) continue;
-        await go(page, route);
-        if (lit && !(await page.locator('.dq-safezone.is-lit').count())) {
-          await page.locator('.ca-sz-light').click();
-          await page.locator('.dq-safezone.is-lit').waitFor({ timeout: 10000 });
-          await settle(page);
-        }
-        const rows = await sweep(h, page);
-        const bad = weak(rows);
-        const least = (l) => (l.length ? Math.min(...l.map((r) => r.score)) : null);
-        const { text, edge } = rows;
-        table[`${id} ${size}`] = { lines: text.length, edges: edge.length, text: least(text), edge: least(edge) };
-        problems.push(...bad.map((b) => `${id} ${size}: ${b}`));
-        h.expect(rows.text.length > 0, `${id} ${size}: no text measured`);
-        await h.shot(page, `high-contrast-${id}-${vp.width}`);
-      }
-      h.expect(!errors.length, `${size}: ${errors.join('\n')}`);
-      await ctx.close();
-    }
-    console.log(JSON.stringify(table, null, 1));
-    h.expect(!problems.length, `with Higher contrast on, these fall short:\n${problems.join('\n')}`);
-    return table;
-  },
+  'high-contrast-every-screen': (h) => walk(h, LOOKS),
+  'high-contrast-themes': (h) => walk(h, THEMES),
 };
