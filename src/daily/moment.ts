@@ -88,19 +88,13 @@ export function easeScreen(app: App, route: Route): ScreenOut {
 /** The hum's fade back in after the page wakes (about 0.4 s), and its fade out as the page hides (time constants). */
 const WAKE_TAU = 0.12;
 const SLEEP_TAU = 0.02;
-/** The soft fade when the hum is turned off or the moment ends (time constant). */
 const OFF_TAU = 0.25;
 
 type Hum = { stop(ramp?: number): void };
-/** Every hum still sounding, fading ones too: the Safe Zone silences each of them, wherever the player has gone since. */
 const hums = new Set<Hum>();
-/** The Safe Zone is opening: every hum reaches exact silence at once. */
 export const silenceHums = () => hums.forEach((h) => h.stop(SCORE.safeOutSec));
 
-/**
- * A low, soft two-note hum that swells a little with the breath. Off by default; made only after the player turns it on.
- * It follows the player's levels (`level`, again whenever `volume` changes) until it has fallen silent.
- */
+/** A low, soft two-note hum that swells a little with the breath. Off by default; made only after the player turns it on. */
 function lowHum(level: () => number, volume?: VolumeCtrl) {
   type AC = typeof AudioContext;
   const Ctor: AC | undefined = window.AudioContext ?? (window as unknown as { webkitAudioContext?: AC }).webkitAudioContext;
@@ -221,7 +215,6 @@ function lowHum(level: () => number, volume?: VolumeCtrl) {
       if (!open) return;
       const t = soon(ctx);
       const at = t + (ramp ?? silentAfter(OFF_TAU));
-      // a stop is final: a later one (the Safe Zone opening during the soft fade) only silences it sooner
       if (at >= end) return;
       const first = end === Infinity;
       end = at;
@@ -229,12 +222,9 @@ function lowHum(level: () => number, volume?: VolumeCtrl) {
         holdAt(breath.gain, t);
         breath.gain.linearRampToValueAtTime(0, at);
       } else breath.gain.setTargetAtTime(0, t, OFF_TAU);
-      // the oscillators end once the fade is silent, on the audio clock
       oscs.forEach((o) => o.stop(at));
       if (!first) return;
       unlisten();
-      // closed once the oscillators end, or at once by a context that has stopped running (a call came in, the phone
-      // locked): it plays nothing more of the fade, and its oscillators would never end
       oscs[0].onended = close;
       const idle = () => ctx.state !== 'running' && close();
       ctx.addEventListener('statechange', idle);

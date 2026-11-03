@@ -46,8 +46,7 @@ export interface VoiceOpts {
   held?: boolean;
 }
 
-/** When a voice stopped at `at` over `ramp` (see Voice.stop) has gone silent and its sources have ended: its fade to 0
- *  has the time constant ramp / 4, and its sources end only once that is silent, about 2.6 ramps on. */
+/** When a voice stopped at `at` over `ramp` (see Voice.stop) has gone silent and its sources have ended. */
 export const stoppedBy = (at: number, ramp: number) => at + silentAfter(Math.max(0.002, ramp / 4));
 
 /**
@@ -69,8 +68,8 @@ export class Voice {
   private sources: { n: AudioScheduledSourceNode; stop: number; span: { b: number } | null }[] = [];
   /** While held, what it was given to start and set, each placed by open(at) `at` later. */
   private held: ((at: number) => void)[] | null;
-  /** When its stop() has silenced it and its sources have ended (Infinity until then): a later stop only brings it sooner,
-   *  and nothing it is given later, such as a held part opened after it, sounds past it. */
+  /** When its stop() has silenced it and its sources have ended (Infinity until then): a stop is final, and nothing it
+   *  is given later, such as a held part opened after it, sounds past it. */
   private killAt = Infinity;
   private children: Voice[] = [];
   private parts: Voice[] = [];
@@ -307,8 +306,7 @@ export class Voice {
     return end;
   }
 
-  /** Fade this voice out from `at` over `ramp` seconds and stop its sources. A stop is final: a later one only ever
-   *  silences it sooner (Skip during a long fade-out), never later. True if this stop is the one it keeps. */
+  /** Fade this voice out from `at` over `ramp` seconds and stop its sources. */
   stop(at: number, ramp = 0.03) {
     const kill = stoppedBy(at, ramp);
     if (kill >= this.killAt) return false;

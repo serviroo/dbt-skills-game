@@ -113,7 +113,6 @@ export interface BedHandle {
   level(v: number, rampSec?: number, at?: number): void;
   stop(rampSec?: number, at?: number): void;
   readonly stopped: boolean;
-  /** What sounds it, for the engine to reach while it fades. */
   readonly voice: Voice;
 }
 

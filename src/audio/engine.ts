@@ -113,8 +113,6 @@ export class AudioEngine {
   private volume: GainNode;
   readonly limiter: DynamicsCompressorNode;
   private beds = new Map<BedName, BedHandle>();
-  /** Voices stopped and still fading (beds, the charge hum, cues, the hush), until their sources end: a later stopAll, such
-   *  as Skip just after a reset, still silences them sooner. */
   private fading = new Set<Voice>();
   private active = new Set<Voice>();
   private mlevel: GainNode;
@@ -472,8 +470,6 @@ export class AudioEngine {
     return h;
   }
 
-  /** Stop a bed over `fade` seconds; one already fading ends no later than this. It stays in reach by its name, for a
-   *  later, sooner stop (the cut scene ending at once), until a new one of that name replaces it or stopAll() ends it. */
   stopBed(name: BedName, fade = 0.5, at?: number) {
     this.beds.get(name)?.stop(fade, at);
   }
@@ -632,7 +628,6 @@ export class AudioEngine {
     this.duckG.gain.setTargetAtTime(dB(db), at, Math.max(0.003, ramp / 4));
   }
 
-  /** Keeps a stopped voice in reach of a later stop until its sources have ended; those that have are let go. */
   private letGo(v: Voice) {
     for (const f of this.fading) if (f.end <= this.ctx.currentTime) this.fading.delete(f);
     this.fading.add(v);

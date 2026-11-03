@@ -1139,7 +1139,6 @@ export class Music {
 
   stop(fade = 1, at = soon(this.host.lib.ctx)) {
     for (const s of this.live) {
-      // one already fading out ends no later than this, and places no note past it
       if (!s.voice.stop(at, fade)) continue;
       s.end = Math.min(s.end, at);
       s.fadeOut = fade;

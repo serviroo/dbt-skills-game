@@ -1,20 +1,8 @@
-// Every fade ends in silence. A sound stopped with a fade (a cue, a bed, the score, the charge hum, everything at once
-// on Skip or a replay's reset) keeps its sources running until the fade has fallen below the floor, so the end is never
-// a step, and Skip while a fade is still under way ends that fade too. Each fade is rendered offline through the engine at the game's real lengths, beside a twin render that never
-// stops, and read where the sounds go into the mix (the beds', score's and effects' inputs, ahead of the echo and the
-// limiter). There both renders agree, to within rounding far under the floor, until the stop, so the level just before
-// the sources end, against the twin's at the same moment, is how far the fade has fallen (in Chromium, a fade that far
-// down has already landed on exact silence: it sets the value to its target past 10 time constants).
 
-// nothing of a sound is heard below -80 dB
 const FLOOR_DB = -80;
-// the render and its twin agree before the stop to this much under the sound, so the measure reads below the floor
 const TWIN_DB = -100;
-// how much just before the sources end, and how much after (the stop is final: nothing runs on)
 const BEFORE = 0.002;
 const AFTER = [0.002, 0.05];
-// the fades the game makes, at their lengths (src/app.ts, src/audio/engine.ts, src/audio/events.ts, the director)
-// (a cue the engine plays offline is not one it stops with the rest: the cue's own stop stands for it)
 const FADES = [
   { name: 'replay: reset', fade: 0.3, start: ['ambient', 'calm', 'charge'], stop: 'reset' },
   { name: 'Skip: stopAll', fade: 'leaveSec', start: ['gate_hum', 'windows', 'charge'], stop: 'stopAll' },
@@ -23,17 +11,27 @@ const FADES = [
   { name: 'score fading out of a section', fade: 2, start: ['windows'], stop: 'music' },
   { name: 'a cue the cut scene stops', fade: 0.04, start: ['breath_out'], stop: 'cue' },
   { name: 'charge hum cut for the burst', fade: 0.03, start: ['charge'], stop: 'charge' },
-  // Skip half a second into a long fade: it ends as Skip ends everything
   { name: 'Skip during the gate hum fading', fade: 2.5, start: ['gate_hum'], stop: 'bed', skip: 0.5 },
   { name: 'Skip during the score fading out', fade: 2, start: ['windows'], stop: 'music', skip: 0.5 },
-  { name: 'Skip during the lift into D major', fade: 2.5, start: ['gate_hum', 'aura_bed', 'windows'], stop: 'lift', skip: 0.5 },
-  { name: 'Skip just after a replay\'s reset', fade: 0.3, start: ['ambient', 'calm', 'charge'], stop: 'reset', skip: 0.1 },
+  {
+    name: 'Skip during the lift into D major',
+    fade: 2.5,
+    start: ['gate_hum', 'aura_bed', 'windows'],
+    stop: 'lift',
+    skip: 0.5,
+  },
+  {
+    name: "Skip just after a replay's reset",
+    fade: 0.3,
+    start: ['ambient', 'calm', 'charge'],
+    stop: 'reset',
+    skip: 0.1,
+  },
   { name: 'Skip during a scheduled bed stop', fade: 2.5, start: ['gate_hum'], stop: 'bed_stop', skip: 0.5 },
 ];
 const RATES = [44100, 48000];
 
 export const scenarios = {
-  /** every fade has fallen below -80 dB where its sources end, and nothing of it sounds after */
   async 'every-fade-ends-in-silence'({ open, expect }) {
     const { ctx, page, errors } = await open({}, '?lab=audio&mute');
     await page.waitForFunction(() => window.__lab === true, null, { timeout: 30000 });
@@ -45,7 +43,6 @@ export const scenarios = {
       const { SCORE } = await import('/src/motion/tokens.ts');
       const T0 = 0.02;
       const AT = 2;
-      // the mix's inputs come out on this channel of the render, beside the speakers' two
       const PROBE = 2;
       const render = async (f, sr, fade, stopped) => {
         const len = stoppedBy(AT, fade) + after[1] + 0.1;
@@ -70,9 +67,10 @@ export const scenarios = {
           else if (f.stop === 'stopAll') eng.stopAll(fade, AT);
           else if (f.stop === 'bed') bed.stop(fade, AT);
           else if (f.stop === 'music') eng.music.stop(fade, AT);
-          // the score lifting into D major lets the dark world's beds go over `fade` (2.5 s)
           else if (f.stop === 'lift') eng.music.to('reward', 1, { at: AT });
-          else if (f.stop === 'bed_stop') eng.schedule([{ t: 0, cue: 'bed_stop', loop: { name: f.start[0] }, opts: { fade } }], AT);
+          else if (f.stop === 'bed_stop') {
+            eng.schedule([{ t: 0, cue: 'bed_stop', loop: { name: f.start[0] }, opts: { fade } }], AT);
+          }
           else if (f.stop === 'cue') cue.stop(AT, fade);
           else charge.stop(AT, fade);
           if (f.skip) eng.stopAll(SCORE.leaveSec, AT + f.skip);
@@ -90,7 +88,6 @@ export const scenarios = {
         for (const f of fades) {
           const fade = typeof f.fade === 'number' ? f.fade : SCORE[f.fade];
           const [cut, twin] = await Promise.all([render(f, sr, fade, true), render(f, sr, fade, false)]);
-          // the last sample the sources play: Skip's end, where Skip comes during the fade
           const k = Math.floor((f.skip ? stoppedBy(AT + f.skip, SCORE.leaveSec) : stoppedBy(AT, fade)) * sr) - 1;
           const w = Math.round(before * sr);
           const [a0, a1] = after.map((s) => k + Math.round(s * sr));
@@ -110,23 +107,23 @@ export const scenarios = {
       }
       return out;
     }, [FADES, RATES, BEFORE, AFTER]);
-    expect(got.length === FADES.length * RATES.length, `rendered ${got.length} of ${FADES.length * RATES.length} fades`);
+    const renders = FADES.length * RATES.length;
+    expect(got.length === renders, `rendered ${got.length} of ${renders} fades`);
     for (const g of got) {
       const at = `${g.name} (${g.fade} s, ${g.sr} Hz)`;
+      const atStop = g.atStop.toFixed(1);
       expect(g.level > 1e-4, `${at}: the sound is too quiet to measure its fade (${g.level.toExponential(2)})`);
       expect(g.apart < TWIN_DB, `${at}: the render and its twin differ before the stop, at ${g.apart.toFixed(1)} dB`);
-      expect(g.atStop < FLOOR_DB, `${at}: still at ${g.atStop.toFixed(1)} dB where its sources end, above ${FLOOR_DB} dB`);
+      expect(g.atStop < FLOOR_DB, `${at}: still at ${atStop} dB where its sources end, above ${FLOOR_DB} dB`);
       expect(g.after < FLOOR_DB, `${at}: still sounds at ${g.after.toFixed(1)} dB after its sources end`);
     }
     expect(!errors.length, errors.join('\n'));
     await ctx.close();
     const db = (x) => (Number.isFinite(x) ? +x.toFixed(1) : 'silent');
-    return Object.fromEntries(got.map((g) => [`${g.name} ${g.sr}`, { atStop: db(g.atStop), after: db(g.after), twin: db(g.apart) }]));
+    const measured = (g) => ({ atStop: db(g.atStop), after: db(g.after), twin: db(g.apart) });
+    return Object.fromEntries(got.map((g) => [`${g.name} ${g.sr}`, measured(g)]));
   },
 
-  /** Skip, or a replay's reset, before a score change already placed ahead: the section's notes are placed only up to
-   *  that sooner stop, so none starts in its fade (a render placing the score on as it plays matches one that stopped
-   *  placing it there) */
   async 'no-note-starts-after-a-sooner-stop'({ open, expect }) {
     const { ctx, page, errors } = await open({}, '?lab=audio&mute');
     await page.waitForFunction(() => window.__lab === true, null, { timeout: 30000 });
@@ -145,15 +142,13 @@ export const scenarios = {
         eng.testInput('music').connect(probe, 0, 2);
         eng.music.to('windows', 0.5, { at: T0 });
         eng.music.scheduleUntil(AT);
-        // the change into the next section, placed ahead, then Skip or the reset sooner (both stop everything)
         eng.music.stop(2, AT + AHEAD);
         eng[stop](fade, AT);
-        // the score goes on being placed as the game plays
         if (late) eng.music.scheduleUntil(len);
         return (await c.startRendering()).getChannelData(2);
       };
       const out = [];
-      for (const [name, stop, fade] of [['Skip', 'stopAll', SCORE.leaveSec], ['a replay\'s reset', 'reset', 0.3]]) {
+      for (const [name, stop, fade] of [['Skip', 'stopAll', SCORE.leaveSec], ["a replay's reset", 'reset', 0.3]]) {
         const [placed, held] = await Promise.all([render(stop, fade, true), render(stop, fade, false)]);
         let diff = 0;
         let level = 0;
@@ -161,23 +156,21 @@ export const scenarios = {
         for (let i = from; i < placed.length; i++) diff += (placed[i] - held[i]) ** 2;
         for (let i = Math.floor((AT - 1) * sr); i < from; i++) level += held[i] ** 2;
         const dB = (x) => (x > 0 ? 20 * Math.log10(x) : -Infinity);
-        out.push({ name, level: Math.sqrt(level / sr), apart: dB(Math.sqrt(diff / (placed.length - from)) / Math.sqrt(level / sr)) });
+        const rms = Math.sqrt(level / sr);
+        out.push({ name, level: rms, apart: dB(Math.sqrt(diff / (placed.length - from)) / rms) });
       }
       return out;
     });
     for (const g of got) {
       expect(g.level > 1e-4, `${g.name}: the score is too quiet to measure (${g.level.toExponential(2)})`);
-      expect(g.apart < TWIN_DB, `${g.name}: notes placed after it sound in its fade, at ${g.apart.toFixed(1)} dB of the score`);
+      const apart = g.apart.toFixed(1);
+      expect(g.apart < TWIN_DB, `${g.name}: notes placed after it sound in its fade, at ${apart} dB of the score`);
     }
     expect(!errors.length, errors.join('\n'));
     await ctx.close();
     return Object.fromEntries(got.map((g) => [g.name, Number.isFinite(g.apart) ? +g.apart.toFixed(1) : 'silent']));
   },
-  /**
-   * a sound asked to stop twice sounds exactly as if only the stop it keeps had been asked, the sooner one to fall silent:
-   * the score places no note past it and leaves no gap before it, and a bed already fading on its own leaves with the
-   * lift into D major, and one fading by name still answers a sooner stop by its name
-   */
+
   async 'a-sooner-stop-wins'({ open, expect }) {
     const { ctx, page, errors } = await open({}, '?lab=audio&mute');
     await page.waitForFunction(() => window.__lab === true, null, { timeout: 30000 });
@@ -188,18 +181,67 @@ export const scenarios = {
       const T0 = 0.02;
       const AT = 2;
       const PROBE = 2;
-      // each sound, its first stop, the second one at AT, which of the two it keeps and when that one ends
       const skip = (e) => e.stopAll(SCORE.leaveSec, AT);
+      const score = (e) => e.music.to('windows', 0.5, { at: T0 });
+      const gateHum = (e) => e.bed('gate_hum', { at: T0 });
       const STOPS = [
-        { name: 'score stopped later, then fading out of its section', start: (e) => e.music.to('windows', 0.5, { at: T0 }), first: (e) => e.music.stop(2, AT + 4), then: (e) => e.music.stop(1, AT), keeps: 'then', ends: stoppedBy(AT, 1) },
-        { name: 'score stopped soon, then asked sooner to fade far longer', start: (e) => e.music.to('windows', 0.5, { at: T0 }), first: (e) => e.music.stop(0.5, AT + 0.5), then: (e) => e.music.stop(4, AT), keeps: 'first', ends: stoppedBy(AT + 0.5, 0.5) },
-        { name: 'gate hum stopping later, then the lift into D major', start: (e) => e.bed('gate_hum', { at: T0 }), first: (e, h) => h.stop(0.5, AT + 6), then: (e) => e.music.to('reward', 1, { at: AT }), keeps: 'then', ends: stoppedBy(AT, 2.5) },
-        { name: 'gate hum stopping later, then Skip', start: (e) => e.bed('gate_hum', { at: T0 }), first: (e, h) => h.stop(0.5, AT + 6), then: skip, keeps: 'then', ends: stoppedBy(AT, SCORE.leaveSec) },
-        { name: 'vortex roar fading out, then the cut scene ending at once', start: (e) => e.bed('vortex_roar', { at: T0 }), first: (e) => e.stopBed('vortex_roar', 1.5, AT), then: (e) => e.stopBed('vortex_roar', 0.04, AT), keeps: 'then', ends: stoppedBy(AT, 0.04) },
-        { name: 'cue stopped later, then Skip', start: (e) => e.play('breath_out', { at: T0, dur: 6 }), first: (e, h) => h.stop(AT + 3, 2), then: skip, keeps: 'then', ends: stoppedBy(AT, SCORE.leaveSec) },
-        { name: 'charge hum stopped later, then Skip', start: (e) => e.chargeLoop({ at: T0 }), first: (e, h) => h.stop(AT + 3, 1), then: skip, keeps: 'then', ends: stoppedBy(AT, SCORE.leaveSec) },
+        {
+          name: 'score stopped later, then fading out of its section',
+          start: score,
+          first: (e) => e.music.stop(2, AT + 4),
+          then: (e) => e.music.stop(1, AT),
+          keeps: 'then',
+          ends: stoppedBy(AT, 1),
+        },
+        {
+          name: 'score stopped soon, then asked sooner to fade far longer',
+          start: score,
+          first: (e) => e.music.stop(0.5, AT + 0.5),
+          then: (e) => e.music.stop(4, AT),
+          keeps: 'first',
+          ends: stoppedBy(AT + 0.5, 0.5),
+        },
+        {
+          name: 'gate hum stopping later, then the lift into D major',
+          start: gateHum,
+          first: (e, h) => h.stop(0.5, AT + 6),
+          then: (e) => e.music.to('reward', 1, { at: AT }),
+          keeps: 'then',
+          ends: stoppedBy(AT, 2.5),
+        },
+        {
+          name: 'gate hum stopping later, then Skip',
+          start: gateHum,
+          first: (e, h) => h.stop(0.5, AT + 6),
+          then: skip,
+          keeps: 'then',
+          ends: stoppedBy(AT, SCORE.leaveSec),
+        },
+        {
+          name: 'vortex roar fading out, then the cut scene ending at once',
+          start: (e) => e.bed('vortex_roar', { at: T0 }),
+          first: (e) => e.stopBed('vortex_roar', 1.5, AT),
+          then: (e) => e.stopBed('vortex_roar', 0.04, AT),
+          keeps: 'then',
+          ends: stoppedBy(AT, 0.04),
+        },
+        {
+          name: 'cue stopped later, then Skip',
+          start: (e) => e.play('breath_out', { at: T0, dur: 6 }),
+          first: (e, h) => h.stop(AT + 3, 2),
+          then: skip,
+          keeps: 'then',
+          ends: stoppedBy(AT, SCORE.leaveSec),
+        },
+        {
+          name: 'charge hum stopped later, then Skip',
+          start: (e) => e.chargeLoop({ at: T0 }),
+          first: (e, h) => h.stop(AT + 3, 1),
+          then: skip,
+          keeps: 'then',
+          ends: stoppedBy(AT, SCORE.leaveSec),
+        },
       ];
-      // the score is placed in windows, as live: up to the stops, then on past them
       const render = async (s, sr, stops) => {
         const len = s.ends + 0.1;
         const c = new OfflineAudioContext(4, Math.ceil(len * sr), sr);
@@ -225,7 +267,8 @@ export const scenarios = {
           const [a, b] = [Math.floor((AT - 1) * sr), Math.floor(AT * sr)];
           let diff = 0;
           for (let i = b; i < both.length; i++) diff += (both[i] - kept[i]) ** 2;
-          out.push({ name: s.name, sr, level: rms(kept, a, b), apart: 20 * Math.log10(Math.sqrt(diff / (both.length - b)) / rms(kept, a, b)) });
+          const level = rms(kept, a, b);
+          out.push({ name: s.name, sr, level, apart: 20 * Math.log10(Math.sqrt(diff / (both.length - b)) / level) });
         }
       }
       return out;
@@ -238,6 +281,7 @@ export const scenarios = {
     }
     expect(!errors.length, errors.join('\n'));
     await ctx.close();
-    return Object.fromEntries(got.map((g) => [`${g.name} ${g.sr}`, Number.isFinite(g.apart) ? +g.apart.toFixed(1) : 'same']));
+    const apart = (g) => (Number.isFinite(g.apart) ? +g.apart.toFixed(1) : 'same');
+    return Object.fromEntries(got.map((g) => [`${g.name} ${g.sr}`, apart(g)]));
   },
 };
