@@ -161,7 +161,7 @@ class Strings {
   private bite: number;
   private vib: GainNode[];
   private vibDepth: number;
-  constructor(v: Voice, t0: number, private n: number, o: StringOpts) {
+  constructor(private v: Voice, t0: number, private n: number, o: StringOpts) {
     this.out = v.gain(o.level, ensemble(v, t0, o.dest, o.ens ?? (n >= 2 ? 0.45 : 0)));
     this.weights = o.weights;
     this.cut = o.cutoff;
@@ -207,14 +207,14 @@ class Strings {
     const att = o.att ?? 0.2;
     for (let i = 0; i < this.n; i++) {
       const m = notes[i];
-      const g = this.gains[i].gain;
+      const g = this.v.at(this.gains[i].gain);
       // players never move together: each part arrives a few ms apart (low parts first, like a real section)
       const ti = t + (o.swell ? i * 0.009 + h01(Math.round(t * 50) + i, 41) * 0.012 : 0);
       if (m === undefined) {
         g.setTargetAtTime(0, ti, 0.12);
         continue;
       }
-      for (const os of this.oscs[i]) os.frequency.setTargetAtTime(midi(m), ti, glide);
+      for (const os of this.oscs[i]) this.v.at(os.frequency).setTargetAtTime(midi(m), ti, glide);
       const L = (o.levels?.[i] ?? this.weights?.[i] ?? 1) / Math.sqrt(this.n);
       if (o.dip) {
         g.setTargetAtTime(L * 0.55, ti, 0.02);
@@ -229,19 +229,20 @@ class Strings {
       }
     }
     if (this.bow) {
-      const b = this.bow.gain;
+      const b = this.v.at(this.bow.gain);
       b.setTargetAtTime(this.bowLvl * 2, t, 0.03);
       b.setTargetAtTime(this.bowLvl, t + 0.18, 0.5);
     }
     // the bow bites (brighter for a moment), and players add vibrato only once the note has settled
     if (this.bite > 0) {
-      const f = this.lp.frequency;
+      const f = this.v.at(this.lp.frequency);
       f.setTargetAtTime(this.cut * (1 + this.bite), t, 0.04);
       f.setTargetAtTime(this.cut, t + 0.16, 0.45);
     }
     for (const g of this.vib) {
-      g.gain.setTargetAtTime(this.vibDepth * 0.3, t, 0.04);
-      g.gain.setTargetAtTime(this.vibDepth, t + 0.28, 0.35);
+      const depth = this.v.at(g.gain);
+      depth.setTargetAtTime(this.vibDepth * 0.3, t, 0.04);
+      depth.setTargetAtTime(this.vibDepth, t + 0.28, 0.35);
     }
   }
 }
@@ -255,7 +256,7 @@ class Pad {
   private gains: GainNode[] = [];
   private base: number[][] = [];
   constructor(
-    v: Voice,
+    private v: Voice,
     t0: number,
     n: number,
     o: { wave: OscillatorType | 'warm' | 'brass'; detune: number; cutoff: number; q: number; lfo?: [number, number]; level: number; dest: AudioNode; vib?: number; drive?: number },
@@ -300,16 +301,17 @@ class Pad {
   chord(t: number, notes: number[], glide = 0.05, levels?: number[], accent = 0) {
     for (let i = 0; i < this.oscs.length; i++) {
       const m = notes[i];
-      const g = this.gains[i].gain;
+      const g = this.v.at(this.gains[i].gain);
       if (m === undefined) {
         g.setTargetAtTime(0, t, 0.08);
         continue;
       }
       this.oscs[i].forEach((os, k) => {
-        os.frequency.setTargetAtTime(midi(m), t, glide);
+        this.v.at(os.frequency).setTargetAtTime(midi(m), t, glide);
         if (accent) {
-          os.detune.setValueAtTime(this.base[i][k] - 35 * accent, t);
-          os.detune.linearRampToValueAtTime(this.base[i][k], t + 0.09);
+          const detune = this.v.at(os.detune);
+          detune.setValueAtTime(this.base[i][k] - 35 * accent, t);
+          detune.linearRampToValueAtTime(this.base[i][k], t + 0.09);
         }
       });
       const L = (levels?.[i] ?? 1) / Math.sqrt(this.oscs.length);
@@ -327,7 +329,7 @@ class Choir {
   private oscs: OscillatorNode[][] = [];
   private gains: GainNode[] = [];
   private f1: BiquadFilterNode;
-  constructor(v: Voice, t0: number, n: number, level: number, dest: AudioNode) {
+  constructor(private v: Voice, t0: number, n: number, level: number, dest: AudioNode) {
     this.out = v.gain(level, ensemble(v, t0, dest, 0.55));
     this.f1 = v.filt('bandpass', 700, 5, v.gain(1.0, this.out));
     const f2 = v.filt('bandpass', 1220, 7, v.gain(0.6, this.out));
@@ -361,27 +363,28 @@ class Choir {
     for (let i = 0; i < this.oscs.length; i++) {
       const m = notes[i];
       if (m === undefined) {
-        this.gains[i].gain.setTargetAtTime(0, t, 0.1);
+        this.v.at(this.gains[i].gain).setTargetAtTime(0, t, 0.1);
         continue;
       }
-      for (const os of this.oscs[i]) os.frequency.setTargetAtTime(midi(m), t, glide);
-      this.gains[i].gain.setTargetAtTime(1 / Math.sqrt(this.oscs.length), t, 0.15);
+      for (const os of this.oscs[i]) this.v.at(os.frequency).setTargetAtTime(midi(m), t, glide);
+      this.v.at(this.gains[i].gain).setTargetAtTime(1 / Math.sqrt(this.oscs.length), t, 0.15);
     }
     // the vowel opens on each new chord ('oh' -> 'ah')
-    this.f1.frequency.setTargetAtTime(560, t, 0.02);
-    this.f1.frequency.setTargetAtTime(720, t + 0.08, 0.25);
+    const vowel = this.v.at(this.f1.frequency);
+    vowel.setTargetAtTime(560, t, 0.02);
+    vowel.setTargetAtTime(720, t + 0.08, 0.25);
   }
 }
 
 /** A long noise source behind a gain that is struck per event: hats, ticks, bow chiff. tau*8 must be < the spacing. */
 class Hits {
   readonly g: GainNode;
-  constructor(v: Voice, t0: number, color: 'white' | 'pink', into: AudioNode) {
+  constructor(private v: Voice, t0: number, color: 'white' | 'pink', into: AudioNode) {
     this.g = v.gain(0, into);
     v.noise(color, t0, t0 + LONG, this.g);
   }
   hit(t: number, peak: number, tau: number, a = 0.0008) {
-    const p = this.g.gain;
+    const p = this.v.at(this.g.gain);
     p.setValueAtTime(0, t);
     p.linearRampToValueAtTime(peak, t + a);
     p.setTargetAtTime(0, t + a, tau);
@@ -392,8 +395,9 @@ function pluck(v: Voice, t: number, m: number, o: { peak: number; tau: number; c
   const g = v.gain(0, o.dest);
   const end = v.perc(g.gain, t, o.peak, 0.004, o.tau);
   const lp = v.filt('lowpass', o.cutoff, 1.2, g);
-  lp.frequency.setValueAtTime(o.cutoff * (o.env ?? 3), t);
-  lp.frequency.setTargetAtTime(o.cutoff, t, o.tau * 0.6);
+  const cutoff = v.at(lp.frequency);
+  cutoff.setValueAtTime(o.cutoff * (o.env ?? 3), t);
+  cutoff.setTargetAtTime(o.cutoff, t, o.tau * 0.6);
   v.osc(o.wave ?? 'sawtooth', midi(m), t, end, lp);
 }
 
@@ -417,8 +421,9 @@ function thump(v: Voice, t: number, peak: number, f0 = 70, f1 = 44, dest: AudioN
   const g = v.gain(0, sat ?? satBus(v, 2.2, dest));
   const end = v.perc(g.gain, t, peak, 0.004, 0.11);
   const o = v.osc('sine', f0, t, end + 0.05, g);
-  o.frequency.setValueAtTime(f0, t);
-  o.frequency.exponentialRampToValueAtTime(f1, t + 0.16);
+  const pitch = v.at(o.frequency);
+  pitch.setValueAtTime(f0, t);
+  pitch.exponentialRampToValueAtTime(f1, t + 0.16);
 }
 
 /** Heartbeat: the felt low thump plus a muffled knock (saturated 170 Hz) that a phone speaker can carry. */
@@ -427,8 +432,9 @@ function heart(v: Voice, t: number, peak: number, buses: { low: AudioNode; knock
   const g = v.gain(0, buses.knock);
   const e = v.perc(g.gain, t, peak * 2.4, 0.003, 0.035);
   const o = v.osc('triangle', 170, t, e, g);
-  o.frequency.setValueAtTime(170, t);
-  o.frequency.exponentialRampToValueAtTime(105, t + 0.08);
+  const pitch = v.at(o.frequency);
+  pitch.setValueAtTime(170, t);
+  pitch.exponentialRampToValueAtTime(105, t + 0.08);
 }
 
 function heartBuses(v: Voice, dest: AudioNode = v.dry, low = 1) {
@@ -443,14 +449,16 @@ function taiko(v: Voice, t: number, peak: number, dest: AudioNode, o: { f0?: num
   const g = v.gain(0, o.sat ?? satBus(v, 1.8, dest));
   const end = v.perc(g.gain, t, peak, 0.0015, dec);
   const b = v.osc('sine', f0 * 1.4, t, end, g);
-  b.frequency.setValueAtTime(f0 * 1.4, t);
-  b.frequency.exponentialRampToValueAtTime(f0, t + 0.012);
-  b.frequency.exponentialRampToValueAtTime(f1, t + 0.18);
+  const pitch = v.at(b.frequency);
+  pitch.setValueAtTime(f0 * 1.4, t);
+  pitch.exponentialRampToValueAtTime(f0, t + 0.012);
+  pitch.exponentialRampToValueAtTime(f1, t + 0.18);
   const g2 = v.gain(0, dest);
   const e2 = v.perc(g2.gain, t, peak * 0.3, 0.001, dec * 0.3);
   const m2 = v.osc('triangle', f0 * 2.3, t, e2, g2);
-  m2.frequency.setValueAtTime(f0 * 2.5, t);
-  m2.frequency.exponentialRampToValueAtTime(f1 * 2.3, t + 0.12);
+  const tok = v.at(m2.frequency);
+  tok.setValueAtTime(f0 * 2.5, t);
+  tok.exponentialRampToValueAtTime(f1 * 2.3, t + 0.12);
   const ng = v.gain(0, v.filt('lowpass', 300, 0.7, dest));
   v.perc(ng.gain, t, peak * 1.2, 0.002, dec * 0.45);
   v.noise('brown', t, t + dec * 4, ng);
@@ -465,12 +473,13 @@ function lowPiano(v: Voice, t: number, m: number, peak: number, dest: AudioNode)
   const parts: [number, number, number, number][] = [[1, 0.7, 2.4, -0.7], [1, 0.6, 2.2, 0.8], [2.003, 0.42, 1.3, 0], [3.009, 0.26, 0.8, 0], [4.02, 0.16, 0.45, 0], [5.04, 0.09, 0.28, 0], [6.07, 0.05, 0.18, 0]];
   for (const [r, a, tau, det] of parts) {
     const g = v.gain(0, dest);
-    g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(peak * a, t + 0.003);
-    g.gain.setTargetAtTime(0, t + 0.003, tau);
+    const level = v.at(g.gain);
+    level.setValueAtTime(0, t);
+    level.linearRampToValueAtTime(peak * a, t + 0.003);
+    level.setTargetAtTime(0, t + 0.003, tau);
     // past -26 dB the partial is buried under the reverb: fade it in 0.2 s and free the oscillator
     const fe = t + 0.003 + tau * 3;
-    g.gain.setTargetAtTime(0, fe, 0.05);
+    level.setTargetAtTime(0, fe, 0.05);
     const o = v.osc('sine', f * r, t, fe + 0.4, g);
     if (det) o.detune.value = v.cents + det;
   }
@@ -483,7 +492,7 @@ function lowPiano(v: Voice, t: number, m: number, peak: number, dest: AudioNode)
 function revSwell(v: Voice, t0: number, t1: number, peak: number, dest: AudioNode, hp = 3000) {
   const g = v.gain(0, v.filt('highpass', hp, 0.6, dest));
   v.ramp(g.gain, t0, peak * 0.01, peak, t1 - t0);
-  g.gain.setTargetAtTime(0, t1, 0.01);
+  v.at(g.gain).setTargetAtTime(0, t1, 0.01);
   v.noise('white', t0, t1 + 0.12, g);
 }
 
@@ -491,7 +500,7 @@ function revSwell(v: Voice, t0: number, t1: number, peak: number, dest: AudioNod
 function timpRoll(v: Voice, t0: number, t1: number, peak: number, dest: AudioNode) {
   const g = v.gain(0, dest);
   v.ramp(g.gain, t0, peak * 0.03, peak, t1 - t0);
-  g.gain.setTargetAtTime(0, t1, 0.012);
+  v.at(g.gain).setTargetAtTime(0, t1, 0.012);
   const am = v.gain(0.55, g);
   v.lfo(15, 0.45, am.gain, t0, t1 + 0.1);
   v.osc('sine', midi(38), t0, t1 + 0.1, am);
@@ -501,9 +510,10 @@ function timpRoll(v: Voice, t0: number, t1: number, peak: number, dest: AudioNod
 /** Cymbal crash: broadband air with a long decay. */
 function crash(v: Voice, t: number, peak: number, dest: AudioNode) {
   const g = v.gain(0, v.filt('highpass', 3600, 0.6, dest));
-  g.gain.setValueAtTime(0, t);
-  g.gain.linearRampToValueAtTime(peak, t + 0.002);
-  g.gain.setTargetAtTime(0, t + 0.002, 0.75);
+  const level = v.at(g.gain);
+  level.setValueAtTime(0, t);
+  level.linearRampToValueAtTime(peak, t + 0.002);
+  level.setTargetAtTime(0, t + 0.002, 0.75);
   v.noise('white', t, t + 4.6, g);
   const s = v.gain(0, v.filt('bandpass', 7000, 0.6, dest));
   v.perc(s.gain, t, peak * 0.6, 0.002, 0.25);
@@ -859,24 +869,21 @@ const FACTORIES: Record<Section, Factory> = {
       let nextBeat = start + 0.6;
       let gap = 1.0;
       let roarTo = -Infinity;
-      let roarOpen = false;
-      const ensure = () => {
-        if (roarOpen) return;
-        roarOpen = true;
-        rp.open(hitAt);
-        ped.gain.setValueAtTime(0, hitAt);
-        ped.gain.setTargetAtTime(0.11, hitAt, 0.2);
-      };
+      const stand = o.standAt !== undefined && o.hitAt !== undefined ? o.standAt - o.hitAt : 7.04;
       return {
         hush(at: number) {
           if (hitAt === Infinity) cut(at);
         },
         hit(at: number) {
           if (hitAt !== Infinity) return;
-          cut(at);
-          hitAt = at;
           // the hit places the roar's first chord itself, now; what follows comes in the score's windows (see tick)
-          roarTick(at, at + BEAT / 4);
+          swellPedal(0);
+          roarNotes(0, 0, BEAT / 4);
+          const t = Math.max(at, soon(host.lib.ctx));
+          hitAt = t;
+          roarTo = t + BEAT / 4;
+          rp.open(t);
+          cut(Math.max(t, soon(host.lib.ctx)));
         },
         tick(from, to) {
           const bEnd = Math.min(to, cutAt - 0.12, hitAt - 0.12);
@@ -899,22 +906,33 @@ const FACTORIES: Record<Section, Factory> = {
       function roarTick(after: number, to: number) {
         const from = Math.max(hitAt, roarTo, after);
         if (!(to > from)) return;
+        if (roarTo === -Infinity) {
+          rp.open(hitAt);
+          swellPedal(from);
+        }
         roarTo = to;
-        ensure();
-        const standAt = o.standAt ?? hitAt + 7.04;
-        const B = Math.max(1.5, (standAt - hitAt) / 2);
-        grid(hitAt, B, from, to, (i, t) => {
+        roarNotes(hitAt, from, to);
+      }
+      function swellPedal(t: number) {
+        const pedal = rp.at(ped.gain);
+        pedal.setValueAtTime(0, t);
+        pedal.setTargetAtTime(0.11, t, 0.2);
+      }
+      function roarNotes(base: number, from: number, to: number) {
+        const standAt = base + stand;
+        const B = Math.max(1.5, stand / 2);
+        grid(base, B, from, to, (i, t) => {
           const k = i < 3 ? i : (i - 3) % 3;
           const [notes, tp] = prog[k];
           brass.chord(t, notes, 0.03, i === 2 ? [1.4, 1.3, 1, 1, 1, 1, 1] : undefined, i === 2 ? 1.5 : i > 0 ? 1 : 0.6);
           choir.chord(t, tp);
-          const lp = brass.lp.frequency;
+          const lp = rp.at(brass.lp.frequency);
           lp.setTargetAtTime(i === 2 ? 3200 : 3000, t, 0.03);
           lp.setTargetAtTime(i === 2 ? 2300 : 2200, t + 0.35, 0.5);
           if (i < 3) {
             const [a, b] = theme[i];
             const t2 = t + B * (i === 2 ? 0.35 : 0.62);
-            const hl = horns.lp.frequency;
+            const hl = rp.at(horns.lp.frequency);
             for (const [tt, m] of [[t, a], [t2, b]]) {
               horns.chord(tt, [m - 12, m], { dip: true, att: 0.07, glide: 0.04 });
               hl.setTargetAtTime(3600, tt, 0.025);
@@ -922,47 +940,48 @@ const FACTORIES: Record<Section, Factory> = {
             }
           }
           if (i > 0) {
-            thump(v, t, i === 2 ? 0.36 : 0.22, 82, 40, roar, thSat);
-            taiko(v, t, i === 2 ? 0.34 : 0.24, drums, { f0: 80, f1: 48, dec: 0.32, sat: dSat });
+            thump(rp, t, i === 2 ? 0.36 : 0.22, 82, 40, roar, thSat);
+            taiko(rp, t, i === 2 ? 0.34 : 0.24, drums, { f0: 80, f1: 48, dec: 0.32, sat: dSat });
           }
-          const rg = roll.gain;
+          const rg = rp.at(roll.gain);
           rg.setValueAtTime(0.0015, t + B * 0.45);
           rg.exponentialRampToValueAtTime(0.08, t + B - 0.015);
           rg.setTargetAtTime(0.0012, t + B, 0.25);
           if (i === 2) {
-            crash(v, t, 0.18, v.wet);
+            crash(rp, t, 0.18, v.wet);
             // the stand lands low: a deep drop under the crash (reference stand: 63-125 Hz within 5-6 dB of the full mix)
-            thump(v, t, 0.5, 66, 34, roar, thSat);
-            thump(v, t + 0.012, 0.32, 125, 62, roar, thSat);
-            top.out.gain.setTargetAtTime(0.12, t, 0.08);
+            thump(rp, t, 0.5, 66, 34, roar, thSat);
+            thump(rp, t + 0.012, 0.32, 125, 62, roar, thSat);
+            rp.at(top.out.gain).setTargetAtTime(0.12, t, 0.08);
             // the theme's last climb (A, then the leap to D) sits on top of the stand
-            horns.out.gain.setTargetAtTime(0.38, t, 0.05);
+            rp.at(horns.out.gain).setTargetAtTime(0.38, t, 0.05);
             top.chord(t, [74, 77, 81], { att: 0.06 });
           } else if (i > 2) top.chord(t, k === 0 ? [74, 77, 82] : k === 1 ? [76, 79, 84] : [74, 77, 81], { dip: true, att: 0.1 });
         });
         once(standAt - 1.6, from, to, (t) => {
-          revSwell(v, t, standAt - 0.005, 0.06, v.wet, 3800);
-          timpRoll(v, t, standAt - 0.004, 0.16, drums);
+          revSwell(rp, t, standAt - 0.005, 0.06, v.wet, 3800);
+          timpRoll(rp, t, standAt - 0.004, 0.16, drums);
         });
         // the held breath before the stand: the wall (not the horns' theme) draws back ~4 dB under the rising swell, then
         // lands on the stand
         once(standAt - 0.95, from, to, (t) => {
-          for (const g of [wall.gain, drums.gain]) {
+          for (const g of [wall.gain, drums.gain].map((p) => rp.at(p))) {
             g.setTargetAtTime(dB(-4), t, 0.12);
             g.setTargetAtTime(1, standAt - 0.004, 0.003);
           }
         });
-        grid(hitAt + BEAT / 4, BEAT / 4, from, to, (i, t) => {
+        grid(base + BEAT / 4, BEAT / 4, from, to, (i, t) => {
           const a = (i % 4 === 3 ? 1 : i % 2 ? 0.55 : 0.75) * (0.88 + 0.24 * h01(i, 31));
-          const k = Math.floor((t - hitAt) / B);
+          const k = Math.floor((t - base) / B);
           const kk = k < 3 ? k : (k - 3) % 3;
-          spic(v, t + (h01(i, 32) - 0.5) * 0.007, figs[kk][(i + 1) % 16], 0.06 * a, spBus);
+          spic(rp, t + (h01(i, 32) - 0.5) * 0.007, figs[kk][(i + 1) % 16], 0.06 * a, spBus);
           if (k >= 1) hats.hit(t, (i % 2 ? 0.055 : 0.1) * (k >= 2 ? 1.3 : 1), k >= 2 && i % 4 === 1 ? 0.03 : 0.012);
-          if (i % 2 === 1) pluck(v, t, i % 8 === 7 ? 50 : 38, { peak: 0.055 * a, tau: 0.09, cutoff: 650, dest: roar });
+          if (i % 2 === 1) pluck(rp, t, i % 8 === 7 ? 50 : 38, { peak: 0.055 * a, tau: 0.09, cutoff: 650, dest: roar });
         });
-        steps(hitAt + BAR * 0.25, BAR, from, to, grooveOffs, (_b, k, t) => {
+        steps(base + BAR * 0.25, BAR, from, to, grooveOffs, (_b, k, t) => {
           const [s, lv] = groove[k];
-          taiko(v, t, 0.2 * lv, drums, { f0: s % 4 === 0 ? 84 : 120, f1: s % 4 === 0 ? 52 : 80, dec: s % 4 === 0 ? 0.22 : 0.12, slap: 1.8, sat: dSat });
+          const down = s % 4 === 0;
+          taiko(rp, t, 0.2 * lv, drums, { f0: down ? 84 : 120, f1: down ? 52 : 80, dec: down ? 0.22 : 0.12, slap: 1.8, sat: dSat });
         });
       }
     };

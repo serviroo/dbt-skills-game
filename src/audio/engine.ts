@@ -439,8 +439,8 @@ export class AudioEngine {
     if (cue === 'soldier_ignite') this.makeRoom(at, -3, 0.03, at + 0.5, 0.3);
     else if (cue === 'stand_swell') this.makeRoom(at + 0.12, -2, 0.2, at + 1.04, 0.004);
     if (cue === "awaken_hit") {
-      this.music.onHit(at);
       if (this.hushV) this.unhush(at);
+      this.music.onHit(at);
     }
     if (this.live) {
       this.active.add(v);

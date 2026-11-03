@@ -88,12 +88,6 @@ async function boot(h, levels) {
   return { ctx, page, errors, tap };
 }
 
-export const quarantined = {
-  'every-score-part-opens-on-time-on-a-busy-page':
-    "at CPU x20 on CI's runners a part of the score, or the roar after AWAKEN's hit, is placed behind the audio clock. " +
-    'Its fix builds the opening and the roar held, then times them, as the engine already does for cues',
-};
-
 export const scenarios = {
   /**
    * The companion's short cues, played through its sound path again and again while the page stalls for 5 to 45 ms at a
