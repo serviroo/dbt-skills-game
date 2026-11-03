@@ -194,7 +194,7 @@ const textBoxes = (page) =>
       for (let e = el; e && e !== document.body; e = e.parentElement) op *= Number(getComputedStyle(e).opacity);
       if (op < 0.05) continue;
       const clips = [];
-      for (let e = el.parentElement; e && e !== document.body; e = e.parentElement) {
+      for (let e = el; e && e !== document.body; e = e.parentElement) {
         const s = getComputedStyle(e);
         if (s.overflowX !== 'visible' || s.overflowY !== 'visible') clips.push(e.getBoundingClientRect());
       }

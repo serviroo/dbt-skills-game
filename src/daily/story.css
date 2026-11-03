@@ -5,7 +5,8 @@
   align-content: center;
   grid-template-columns: 24px minmax(0, 1fr);
   min-height: 82px;
-  border-color: rgba(168, 220, 255, 0.42) rgba(54, 66, 87, 0.9) rgba(54, 66, 87, 0.9) rgba(168, 220, 255, 0.42);
+  border-color: var(--edge, rgba(168, 220, 255, 0.42)) var(--edge-shade, rgba(54, 66, 87, 0.9))
+    var(--edge-shade, rgba(54, 66, 87, 0.9)) var(--edge, rgba(168, 220, 255, 0.42));
 }
 .dq-tile--story .dq-tile-ic {
   color: #a8dcff;

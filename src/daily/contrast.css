@@ -7,6 +7,8 @@
   --t-body: var(--t-title);
   --t-dim: var(--body);
   --t-faint: var(--body);
+  --dim: var(--body);
+  --hair-shade: var(--hair-lit);
   --plate-a: var(--plate);
   --plate-b: var(--plate);
   --hl: var(--hair-lit);
@@ -15,6 +17,9 @@
   --w2-tick: var(--hair-lit);
   --edge: var(--hair-lit);
   --edge-soft: var(--hair-lit);
+  --edge-shade: var(--hair-lit);
+  --edge-accent: var(--accent);
+  --lit-fill: rgba(42, 66, 96, 0.95);
   --knob: var(--t-title);
   --hint: var(--body);
   --focus: var(--t-title);

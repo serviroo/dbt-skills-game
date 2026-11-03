@@ -7,6 +7,8 @@ const LARGE_MIN = 4.5;
 const EDGE_MIN = 3;
 const DPR = 2;
 
+const SAFE_AT = ['start', 'breathe', 'squeeze', 'cold', 'check', 'stop'];
+SAFE_AT.push('reasons', 'comfort', 'people', 'talk', 'close');
 const SCREENS = [
   ['home', { name: 'hub' }],
   ['settings', { name: 'settings' }],
@@ -16,14 +18,19 @@ const SCREENS = [
   ['diary', { name: 'diary' }],
   ['night-watch', { name: 'shadows' }],
   ['art', { name: 'art' }],
+  ['draw', { name: 'draw', kind: 'today' }],
   ['stories', { name: 'stories' }],
+  ['write', { name: 'write', id: 'tale-1' }],
   ['read', { name: 'read', id: 'tale-1' }],
-  ['safe-start', { name: 'safe', at: 'start' }],
-  ['safe-breathe', { name: 'safe', at: 'breathe' }],
-  ['safe-comfort', { name: 'safe', at: 'comfort' }],
-  ['safe-talk', { name: 'safe', at: 'talk' }],
+  ...SAFE_AT.map((at) => [`safe-${at}`, { name: 'safe', at }]),
+  ['safe-lit-start', { name: 'safe', at: 'start' }, true],
+  ['safe-lit-talk', { name: 'safe', at: 'talk' }, true],
 ];
-const ZOOMED = ['home', 'settings', 'safe-start', 'safe-talk'];
+const ZOOMED = ['home', 'settings', 'night-watch', 'safe-start', 'safe-talk', 'safe-lit-start'];
+const LOOKS = [
+  [{ width: 390, height: 844 }, null, null],
+  [{ width: 195, height: 422 }, ZOOMED, { theme: 'mint', accent: 'green' }],
+];
 
 const shown = (page) => page.evaluate(() => document.documentElement.dataset.dqContrast ?? null);
 const toggleIn = (page) => page.getByRole('switch', { name: SWITCH });
@@ -40,35 +47,46 @@ async function go(page, route) {
   await settle(page);
 }
 
+const FIELDS = 'select, textarea, input:not([type=checkbox]):not([type=range])';
+const CONTROLS = `button, a.dq-btn, ${FIELDS}, .dq-switch-ui, .dq-seg, .dq-panel`;
+
 const edges = (page) =>
-  page.evaluate(() => {
+  page.evaluate((sel) => {
     const top = document.querySelector('.dq-top')?.getBoundingClientRect().bottom ?? 0;
     const out = [];
-    const sel = '.dq-btn:not(.dq-btn--link), .dq-seg, .dq-switch-ui, .dq-input';
     for (const el of document.querySelectorAll(sel)) {
       if (el.closest('[aria-hidden="true"]:not(.dq-switch-ui), :disabled, [aria-disabled="true"]')) continue;
       if (!el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) continue;
       const cs = getComputedStyle(el);
-      if (parseFloat(cs.borderLeftWidth) < 1 || cs.borderLeftStyle === 'none') continue;
       const r = el.getBoundingClientRect();
       const y = r.top + r.height / 2;
-      if (r.height < 8 || r.left < 6 || y < (el.closest('.dq-top') ? 0 : top) + 2 || y > innerHeight - 2) continue;
-      const hit = document.elementFromPoint(r.left + 2, y);
-      if (!hit || !el.parentElement.contains(hit)) continue;
+      if (r.height < 8 || r.width < 16 || y < (el.closest('.dq-top') ? 0 : top + 12) || y > innerHeight - 2) continue;
       const where = [el.tagName.toLowerCase(), ...el.classList].slice(0, 2).join('.');
-      out.push({ where, text: el.textContent.trim().slice(0, 30), x: r.left, y });
+      for (const [side, x, inward] of [['left', r.left, 1], ['right', r.right, -1]]) {
+        const w = side === 'left' ? cs.borderLeftWidth : cs.borderRightWidth;
+        const style = side === 'left' ? cs.borderLeftStyle : cs.borderRightStyle;
+        const color = side === 'left' ? cs.borderLeftColor : cs.borderRightColor;
+        const clear = color === 'transparent' || /,\s*0\)$/.test(color);
+        if (parseFloat(w) < 1 || style === 'none' || clear || x < 6 || x > innerWidth - 6) continue;
+        const hit = document.elementFromPoint(x + inward * 2, y);
+        if (!hit || !el.parentElement.contains(hit)) continue;
+        const text = (el.getAttribute('aria-label') ?? el.textContent).trim().slice(0, 30);
+        out.push({ where, side, text, x, inward, y });
+      }
     }
     return out;
-  });
+  }, CONTROLS);
 
 async function edgeScores(page) {
   const found = await edges(page);
   if (!found.length) return [];
   const img = await capture(page, NO_TEXT);
   return found.map((e) => {
-    const off = px(img, (e.x - 5) * DPR, e.y * DPR);
+    const off = px(img, (e.x - e.inward * 5) * DPR, e.y * DPR);
     let best = 1;
-    for (let x = (e.x - 1) * DPR; x <= (e.x + 3) * DPR; x++) best = Math.max(best, ratio(px(img, x, e.y * DPR), off));
+    for (let d = -1 * DPR; d <= 3 * DPR; d++) {
+      best = Math.max(best, ratio(px(img, e.x * DPR + e.inward * d, e.y * DPR), off));
+    }
     return { ...e, score: Math.round(best * 100) / 100 };
   });
 }
@@ -85,7 +103,7 @@ async function sweep(h, page) {
     await page.evaluate((t) => document.querySelector('.dq').scrollTo({ top: t, behavior: 'instant' }), y);
     await h.sleep(120);
     text.push(...(await contrast(page)).map((r) => ({ ...r, y })));
-    edge.push(...(await edgeScores(page)).map((r) => ({ ...r, y })));
+    edge.push(...(await edgeScores(page)).map((r) => ({ ...r, at: y })));
     if (y >= max) break;
   }
   await page.evaluate(() => document.querySelector('.dq').scrollTo({ top: 0, behavior: 'instant' }));
@@ -98,7 +116,7 @@ function weak({ text, edge }) {
   const seen = new Set();
   const lines = [
     ...low.map((r) => `text "${r.text}" (${r.where}) ${r.score}:1`),
-    ...dull.map((r) => `edge of ${r.where} "${r.text}" ${r.score}:1`),
+    ...dull.map((r) => `${r.side} edge of ${r.where} "${r.text}" ${r.score}:1 at ${r.at}+${Math.round(r.y)}`),
   ];
   return lines.filter((l) => !seen.has(l) && seen.add(l));
 }
@@ -146,13 +164,22 @@ export const scenarios = {
   async 'high-contrast-every-screen'(h) {
     const problems = [];
     const table = {};
-    for (const [vp, which] of [[{ width: 390, height: 844 }, null], [{ width: 195, height: 422 }, ZOOMED]]) {
-      const size = vp.width === 195 ? '390x844 at 200%' : '390x844';
-      const { ctx, page, errors } = await boot(h, vp, { edit: (s) => (s.settings.highContrast = true) });
+    for (const [vp, which, look] of LOOKS) {
+      const size = vp.width === 195 ? `390x844 at 200%, ${look.theme}` : '390x844';
+      const edit = (s) => {
+        s.settings.highContrast = true;
+        Object.assign(s.profile, look);
+      };
+      const { ctx, page, errors } = await boot(h, vp, { edit });
       h.expect((await shown(page)) === 'high', `${size}: a save with Higher contrast on opened without it`);
-      for (const [id, route] of SCREENS) {
+      for (const [id, route, lit] of SCREENS) {
         if (which && !which.includes(id)) continue;
         await go(page, route);
+        if (lit && !(await page.locator('.dq-safezone.is-lit').count())) {
+          await page.locator('.ca-sz-light').click();
+          await page.locator('.dq-safezone.is-lit').waitFor({ timeout: 10000 });
+          await settle(page);
+        }
         const rows = await sweep(h, page);
         const bad = weak(rows);
         const least = (l) => (l.length ? Math.min(...l.map((r) => r.score)) : null);

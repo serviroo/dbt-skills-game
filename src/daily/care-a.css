@@ -132,7 +132,7 @@
   min-height: 44px;
   padding: 0 11px;
   white-space: nowrap;
-  border: 1px solid rgba(160, 200, 235, 0.32);
+  border: 1px solid var(--edge, rgba(160, 200, 235, 0.32));
   border-radius: 22px;
   background: rgba(10, 22, 38, 0.6);
   font: 500 14px/1.2 var(--font-ui);
@@ -141,7 +141,7 @@
   cursor: pointer;
 }
 .ca-sz-light:focus-visible {
-  outline: 2px solid #4fb8ff;
+  outline: 2px solid var(--focus, #4fb8ff);
   outline-offset: 2px;
 }
 .ca-sz-light-ic {
@@ -201,7 +201,7 @@
   color: #ffffff;
 }
 .dq.ca-szlit .ca-sz-light {
-  background: rgba(70, 100, 136, 0.8);
+  background: var(--lit-fill, rgba(70, 100, 136, 0.8));
   border-color: rgba(220, 238, 252, 0.6);
   color: #ffffff;
 }
