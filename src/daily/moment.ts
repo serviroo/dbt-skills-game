@@ -151,7 +151,7 @@ function lowHum(level: () => number, volume?: VolumeCtrl) {
   // the system made is left to the system (or the next tap): a call keeps the hum quiet until it ends.
   const paused = () => {
     if (ctx.state === 'running') return;
-    const t = ctx.currentTime;
+    const t = soon(ctx);
     wake.gain.cancelScheduledValues(0);
     wake.gain.setValueAtTime(0, t);
     wake.gain.setTargetAtTime(1, t, WAKE_TAU);

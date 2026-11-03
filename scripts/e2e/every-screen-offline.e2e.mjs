@@ -8,6 +8,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tapWhereItIs } from './taps.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const BASE = '/game/';
@@ -206,18 +207,6 @@ async function home(h, page) {
   await h.reachHub(page);
 }
 
-/** taps the middle of `loc` where it is now, as a player does: a Playwright click first waits for two still frames, which a
- *  scene drawing about one frame a second in software can take longer to give than the click waits. Like a player, it
- *  taps a button once it has shown: until then it takes no tap, and a tap there only completes the screen */
-async function tapWhereItIs(page, loc) {
-  const el = await loc.elementHandle({ timeout: 2000 });
-  await page.waitForFunction((b) => {
-    const r = b.getBoundingClientRect();
-    return b.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
-  }, el, { timeout: 20000 });
-  const box = await loc.boundingBox({ timeout: 2000 });
-  if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-}
 const tile = (page, title) => page.locator('nav.dq-menu .dq-tile').filter({ has: page.locator('.dq-tile-t', { hasText: new RegExp(`^${title}$`) }) });
 const heading = (page) => page.locator('.dq-view h1').first().textContent({ timeout: 10000 });
 
@@ -603,7 +592,8 @@ async function replayIntro(h, page, problems) {
   let shots;
   awakenShots.then((r) => (shots = r));
   while (shots === undefined) {
-    if (await page.locator('.sw-layer .sw').count()) await page.mouse.click(195, 600);
+    const plate = page.locator('.sw-layer .sw .sw-plate').last();
+    if (await plate.count()) await tapWhereItIs(page, plate).catch(() => {});
     await h.sleep(800);
   }
   h.expect(!!shots, 'the replayed intro never reached the awaken scene');

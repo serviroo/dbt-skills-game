@@ -2509,8 +2509,6 @@ textarea.dq-input {
   white-space: normal;
   text-align: center;
 }
-.dq-sz .dq-btn--primary {
-}
 .dq-sz .dq-opt {
   min-height: 54px;
   font-size: calc(19px * var(--text-scale, 1));

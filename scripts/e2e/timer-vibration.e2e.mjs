@@ -4,6 +4,7 @@
 // survives a reload.
 
 import { gone } from './harness.mjs';
+import { tapWhereItIs } from './taps.mjs';
 
 const START = JSON.stringify([40]);
 const END = JSON.stringify([40, 120, 40]);
@@ -359,18 +360,20 @@ export const scenarios = {
     const { ctx, page, errors } = await open(h, { clock: false });
     await turnOn(h, page);
     await page.goto(h.server.url + '/?fresh&mute');
-    await h.sleep(2500);
-    await page.mouse.click(195, 500);
+    await page.locator('.title-screen').click({ timeout: 20000 });
     const name = page.locator('#np-name');
     await name.waitFor({ timeout: 15000 });
     await name.fill('Sky');
     await page.keyboard.press('Enter');
     await page.keyboard.press('Enter');
     await gone(name, 10000);
+    const plate = page.locator('.sw .sw-plate').last();
+    let tapped = 0;
     for (let i = 0; i < 12; i++) {
       await h.sleep(1500);
-      await page.mouse.click(195, 700);
+      if (await plate.count()) tapped += await tapWhereItIs(page, plate).then(() => 1, () => 0);
     }
+    h.expect(tapped > 0, 'no Lantern window in the intro took a tap');
     await h.shot(page, 'intro-quiet');
     const got = await buzzes(page);
     h.expect(got === none, `the intro buzzed: ${got}`);
