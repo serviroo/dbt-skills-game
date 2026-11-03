@@ -54,6 +54,30 @@ const SCREENS = [
   ['reading', { name: 'read', id: 'tale-1' }],
   ...SAFE_AT.map((at) => [`Safe Zone ${at}`, { name: 'safe', at }]),
 ];
+const NARROWED_BY_CONTAINER_QUERIES = ['Library', 'A quiet minute', 'Art room'];
+
+const withoutContainerQueries = (page) =>
+  page.evaluate(() => {
+    const unknown = (name, value) => name.startsWith('container') || /\dcq(w|h|i|b|min|max)\b/.test(value);
+    const strip = (list) => {
+      for (let i = list.cssRules.length - 1; i >= 0; i--) {
+        const rule = list.cssRules[i];
+        if (rule instanceof CSSContainerRule) {
+          list.deleteRule(i);
+        } else if (rule instanceof CSSSupportsRule && rule.conditionText === 'not (container-type: inline-size)') {
+          const inner = [...rule.cssRules].map((r) => r.cssText);
+          list.deleteRule(i);
+          for (const text of inner.reverse()) list.insertRule(text, i);
+        } else {
+          for (const name of [...(rule.style ?? [])]) {
+            if (unknown(name, rule.style.getPropertyValue(name))) rule.style.removeProperty(name);
+          }
+          if (rule.cssRules) strip(rule);
+        }
+      }
+    };
+    for (const sheet of document.styleSheets) strip(sheet);
+  });
 
 /**
  * Waits until the screen stops changing: no DOM changes for 300 ms (at most 3 s), and its entry motion done. A ring that
@@ -354,9 +378,12 @@ function sweep(phone, { font = false } = {}) {
         if (words) for (const f of await cutShort(page, { scope: sheet ? `${sheet} *` : '#dq-main *' })) failed.push(`${size} ${where}: ${f}`);
         await h.shot(page, `wide-${phone.width}x${phone.height}${font ? '-text' : ''}-${where.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`);
       };
-      for (const [where, route] of SCREENS) {
+      const go = async (route) => {
         await page.evaluate((r) => window.__daily.go(r), route);
         await page.waitForFunction((n) => window.__daily.route.name === n, route.name, { timeout: 10000 });
+      };
+      for (const [where, route] of SCREENS) {
+        await go(route);
         // a skill opened at one of its parts shows its intro first; that part is the screen to check
         if (route.entry) {
           await page.locator('.dq-step-body .dq-intro').waitFor({ timeout: 10000 });
@@ -375,6 +402,15 @@ function sweep(phone, { font = false } = {}) {
         await page.waitForFunction(() => window.__daily.route.name === 'shadows', null, { timeout: 10000 });
         await check('Night Watch, unzoomed');
         await page.setViewportSize(zoomed);
+      }
+      if (!font) {
+        await withoutContainerQueries(page);
+        for (const [where, route] of SCREENS.filter(([name]) => NARROWED_BY_CONTAINER_QUERIES.includes(name))) {
+          await go(route);
+          await check(`${where} without container queries`);
+        }
+        await page.reload();
+        await h.reachHub(page);
       }
       // Home once the check-in is answered with a feeling that asks how strong it is
       await page.evaluate(() => window.__daily.go({ name: 'hub' }));

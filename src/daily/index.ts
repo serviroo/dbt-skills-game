@@ -10,6 +10,7 @@ import './care-b.css';
 import './stealth.css';
 import './story.css';
 import './wave2.css';
+import './no-container-queries.css';
 import './print.css';
 import { App, type DailyOpts } from './app';
 import { hubScreen } from './hub';
