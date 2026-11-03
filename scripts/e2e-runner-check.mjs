@@ -426,6 +426,23 @@ export const scenarios = {
     assert.match(empty.log, new RegExp(`--${key} needs a value`));
     assert(!empty.log.includes('renderer:'));
   }
+  const timings = path.join(out, 'timings.json');
+  fs.writeFileSync(timings, JSON.stringify({ [`${name}-signal`]: [5] }));
+  const parts = await run('part-count', ['--parts', `--timings=${timings}`]);
+  assert.equal(parts.code, 0, parts.log);
+  const count = /^(\d+)$/m.exec(parts.log)?.[1];
+  const said = /^(\d+) parts, the longest about ([\d.]+) min \(([\d.]+) on a runner 1\.33x slower/m.exec(parts.log);
+  assert(count && said && said[1] === count, `--parts gave no count it explained: ${parts.log}`);
+  assert(+said[3] <= 24, `the longest of ${count} parts takes ${said[3]} min on the slowest runner`);
+  assert(!parts.log.includes('renderer:'));
+  const ci = fs.readFileSync(path.join(root, '.github/workflows/ci.yml'), 'utf8');
+  const handCount = /shard=[^\n"]*\/\d|shard: \[\d/;
+  assert.doesNotMatch(ci, handCount, 'ci.yml sets the e2e part count by hand, not from --parts in the plan job');
+  for (const old of ['--shard=${{ matrix.shard }}/18', 'shard: [1, 2, 3]']) assert.match(old, handCount);
+  fs.writeFileSync(timings, JSON.stringify({ [`${name}-signal`]: [2 * 3600] }));
+  const tooLong = await run('part-too-long', ['--parts', `--timings=${timings}`]);
+  assert.notEqual(tooLong.code, 0);
+  assert.match(tooLong.log, new RegExp(`the serial file ${name} takes about 12\\d min, more than one part has time for`));
   const startup = await run('startup-failure', [`--scenario=${name}-signal`, '--host=invalid.invalid']);
   assert.notEqual(startup.code, 0);
   assert.match(startup.log, /no free port/);
