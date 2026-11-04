@@ -335,7 +335,7 @@ const reach = (page, sel, { below = true, optional = false } = {}) =>
     { sel, below, optional },
   );
 
-/** Every screen, and the sheets, on one phone at 200% zoom. */
+/** Every screen, and the sheets, on one phone at 200% zoom or with its text at 200%. */
 function sweep(phone, { textAt200 = false } = {}) {
   return async (h) => {
     const failed = [];
@@ -515,6 +515,30 @@ function sweep(phone, { textAt200 = false } = {}) {
         await page.keyboard.press('Escape');
         await page.locator('.w2-camp-card').waitFor({ state: 'hidden', timeout: 10000 });
       }
+      await page.evaluate(async () => {
+        const drop = IDBFactory.prototype.deleteDatabase;
+        IDBFactory.prototype.deleteDatabase = function (name) {
+          if (!name.endsWith('.story')) return drop.call(this, name);
+          IDBFactory.prototype.deleteDatabase = drop;
+          const held = new EventTarget();
+          window.__failHeldDelete = () => {
+            held.error = new DOMException('failed', 'UnknownError');
+            held.onerror?.(new Event('error'));
+          };
+          return held;
+        };
+        (await (await import('/src/core/cleared.ts')).holdAll()).clear();
+        void (await import('/src/daily/clear.ts')).clearGame();
+      });
+      const cleared = (title) => page.locator('.dq-cleared-h', { hasText: title }).waitFor({ timeout: 30000 });
+      await cleared('Clearing');
+      await check('Clearing');
+      await page.evaluate(() => window.__failHeldDelete());
+      await cleared('Not finished');
+      await check('Not finished');
+      await page.locator('.dq-cleared .dq-actions button').click();
+      await cleared('All clear');
+      await check('All clear');
       if (errors.length) failed.push(`${size}: ${errors.join(' | ')}`);
     } finally {
       await ctx.close();

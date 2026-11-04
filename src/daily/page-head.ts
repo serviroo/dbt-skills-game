@@ -2,6 +2,11 @@ import { h, keptWhole, p } from './ui';
 
 const pageTitle = (text: string) => keptWhole(h('h1', { class: 'dq-h1', 'data-focus': '', text }));
 
+export function wholeText(el: HTMLElement, text: string) {
+  el.textContent = text;
+  keptWhole(el);
+}
+
 export const pageHead = (title: string, sub?: string) =>
   h('header', { class: 'dq-pagehead' }, pageTitle(title), sub ? p(sub, 'dq-text dq-pagesub') : null);
 

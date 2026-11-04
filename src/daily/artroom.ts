@@ -11,8 +11,8 @@ import { artStore, extrasOf, revOf, type Draft, type DrawingMeta, type DrawingRe
 import { canvasBlob, INKS, InkPad, PAGE, renderDrawing, SIZES, TOOLS, type Paper, type Stroke, type Tool } from './ink';
 import { dayLabel } from './lines';
 import { uid } from './store';
-import { btn, chip, field, h, keptWhole, p, panel, radioKeys, redrawn, shareOrSave, typo, wholeText } from './ui';
-import { pageHead } from './page-head';
+import { btn, chip, field, h, keptWhole, p, panel, radioKeys, redrawn, shareOrSave, typo } from './ui';
+import { pageHead, wholeText } from './page-head';
 
 const store = (app: App) => artStore(app.store.key);
 const KEPT_APART = 'A newer copy of this drawing arrived, so this one was kept as its own page.';

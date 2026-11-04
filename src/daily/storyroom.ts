@@ -18,8 +18,8 @@ import { match, spans, terms, type Span } from './storyfind';
 import { creditStory, STORY_CAP, storyStore, type Card, type CardMode, type Chapter, type Story } from './storystore';
 import { storyFromText, storyToText, type StoryText } from './storytext';
 import { keepTextSize, textSize } from './text-size';
-import { breakable, btn, h, keptWhole, p, segmented, shareOrSave, typo, wholeText } from './ui';
-import { storyHead } from './page-head';
+import { breakable, btn, h, keptWhole, p, segmented, shareOrSave, typo } from './ui';
+import { storyHead, wholeText } from './page-head';
 
 export const STORY = {
   title: 'Story Room',
