@@ -870,10 +870,10 @@ const FACTORIES: Record<Section, Factory> = {
       let nextBeat = start + 0.6;
       let gap = 1.0;
       let roarTo = -Infinity;
-      const stand = o.standAt !== undefined && o.hitAt !== undefined ? o.standAt - o.hitAt : 7.04;
+      const lateStandAt = o.hitAt === undefined ? o.standAt : undefined;
+      let stand = o.standAt !== undefined && o.hitAt !== undefined ? o.standAt - o.hitAt : 7.04;
       let armed = false;
-      const arm = () => {
-        if (armed || hitAt !== Infinity) return;
+      const placeFirstChord = () => {
         armed = true;
         swellPedal(0);
         roarNotes(0, 0, BEAT / 4);
@@ -882,15 +882,18 @@ const FACTORIES: Record<Section, Factory> = {
         hush(at: number) {
           if (hitAt === Infinity) cut(at);
         },
-        arm,
+        arm() {
+          if (!armed && hitAt === Infinity && lateStandAt === undefined) placeFirstChord();
+        },
         hit(at: number) {
           if (hitAt !== Infinity) return;
+          cut(Math.max(at, soon(host.lib.ctx)));
+          if (lateStandAt !== undefined) stand = lateStandAt - at;
           // the hit places the roar's first chord itself, now; what follows comes in the score's windows (see tick)
-          arm();
+          if (!armed) placeFirstChord();
           hitAt = at;
           roarTo = at + BEAT / 4;
           rp.open(at);
-          cut(Math.max(at, soon(host.lib.ctx)));
         },
         tick(from, to) {
           const bEnd = Math.min(to, cutAt - 0.12, hitAt - 0.12);
