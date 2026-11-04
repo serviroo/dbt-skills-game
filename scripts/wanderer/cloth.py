@@ -156,11 +156,12 @@ def mantle(fig, hood_rows):
         rows.append(row)
     clear(rig, rows)
     weights = [top4(x) for row in mantle_weights(collar, K, cz) for x in row]
-    fig.grid('mantle', rows, 'mantle', weights, solid=0.009, center=(0, 1.3, -0.05), posed=True)
+    piece = fig.grid('mantle', rows, 'mantle', weights, solid=0.009, center=(0, 1.3, -0.05), posed=True)
     hem = rows[-1]
     hem_w = [weights[(K - 1) * M + j] for j in range(M)]
     fig.tube('mantle-piping', hem + [hem[0]], 0.0042, 'stitch',
              lambda p: hem_w[min(range(M), key=lambda j: (hem[j] - p).length)], n=5, posed=True)
+    return piece
 
 
 def mantle_weights(collar, K, cz):
@@ -232,14 +233,15 @@ def clear(rig, rows):
 def coat(fig):
     secs = [dict(c=(0, y, zc), rx=rx, rz=rz) for y, rx, rz, zc in TORSO]
     v, f, _ = loft(secs, 28)
-    fig.add('coat', v, f, 'coat', SPINE + ['clavicle_l', 'clavicle_r'], sub=1, center=(0, 1.2, 0))
-    coat_skirt(fig)
+    torso = fig.add('coat', v, f, 'coat', SPINE + ['clavicle_l', 'clavicle_r'], sub=1, center=(0, 1.2, 0))
+    skirt = coat_skirt(fig)
     belt = [dict(c=(0, y, -0.025), rx=0.19, rz=0.138) for y in (0.995, 1.045)]
     v, f, _ = loft(belt, 36)
     fig.add('belt', v, f, 'leather', ['pelvis', 'spine_01'], solid=0.006, center=(0, 1.02, 0))
     fz = -0.025 + 0.138 + 0.008
     pts = [V(-0.022, 1.004, fz), V(0.022, 1.004, fz), V(0.022, 1.036, fz), V(-0.022, 1.036, fz)]
     fig.tube('buckle', pts, 0.0035, 'iron', ['pelvis'], n=6, closed=True, uv=2.0)
+    return torso, skirt
 
 
 def coat_skirt(fig):
@@ -271,7 +273,7 @@ def coat_skirt(fig):
                     legs[b] = x * share
             weights.append(mix({'pelvis': 1.0}, legs, 0.1 + 0.55 * t))
         rows.append(row)
-    fig.grid('skirt', rows, 'coat', weights, solid=0.008, closed=False, center=(0, 0.6, -0.05))
+    skirt = fig.grid('skirt', rows, 'coat', weights, solid=0.008, closed=False, center=(0, 0.6, -0.05))
     nearest = lambda pts, p: min(range(len(pts)), key=lambda i: (pts[i] - p).length)
     for e in (0, n):
         edge = [rows[k][e] for k in range(K)]
@@ -279,6 +281,7 @@ def coat_skirt(fig):
                  lambda p, e=e, edge=edge: weights[nearest(edge, p) * (n + 1) + e], n=5)
     hem = rows[-1]
     fig.tube('skirt-piping', hem, 0.005, 'stitch', lambda p: weights[(K - 1) * (n + 1) + nearest(hem, p)], n=5)
+    return skirt
 
 
 def sleeves(fig):
