@@ -101,7 +101,8 @@ void main() {
   vec3 R = reflect(-V, normalize(mix(n, vec3(0.0, 1.0, 0.0), 0.6)));
   float fres = 0.02 + 0.98 * pow(1.0 - max(dot(n, V), 0.0), 5.0);
   float md = max(dot(R, uMoon), 0.0);
-  col += wet * ((skyDome(R, uMoon, t, 0.0) + moonHalo(R, uMoon) * 0.3) * fres * 0.6 + MOON * (pow(md, 260.0) * 0.22 + pow(md, 36.0) * 0.012));
+  vec3 mirror = (skyDome(R, uMoon, t, 0.0) + moonHalo(R, uMoon) * 0.3) * fres * 0.6;
+  col += wet * (mirror + MOON * (pow(md, 260.0) * 0.22 + pow(md, 36.0) * 0.012));
 
   // water: the thin sheet of the wash on the sand, and the sea beyond
   float under = 1.0 - smoothstep(now - 0.015, now + 0.015, p.y);
@@ -119,7 +120,8 @@ void main() {
     vec3 deep = vec3(0.0011, 0.0030, 0.0068);
     // the sheet is so thin the wet sand shows through it, darker and bluer as it deepens towards the sea
     vec3 body = mix(alb * (MOONLIGHT * 0.06 + vec3(0.004, 0.007, 0.013)) * vec3(0.7, 0.85, 1.0), deep, max(depth, sea));
-    vec3 wcol = mix(body, skyDome(Rw, uMoon, t, 0.0) + moonHalo(Rw, uMoon) * 0.3, fw) + MOON * (pow(mw, 1800.0 * rough) * 2.0 + pow(mw, 140.0 * rough) * 0.014);
+    vec3 sky = skyDome(Rw, uMoon, t, 0.0) + moonHalo(Rw, uMoon) * 0.3;
+    vec3 wcol = mix(body, sky, fw) + MOON * (pow(mw, 1800.0 * rough) * 2.0 + pow(mw, 140.0 * rough) * 0.014);
 
     // foam: a thin line along the edge, lace on the sheet that thins as the water slides back
     float lace = fbm2(vec2(p.x * 2.2, p.y * 3.2) + vec2(0.0, uWash.y * 3.7));
@@ -161,7 +163,14 @@ export const build: BuildScene = () => {
     const z = 4.2 - 74.2 * Math.pow(1 - v, 2.2);
     gp.setXYZ(i, u * (7 + (4.2 - z) * 1.5), 0, z);
   }
-  const shore = new THREE.Mesh(geo, new THREE.ShaderMaterial({ vertexShader: SHORE_VERT, fragmentShader: SHORE_FRAG, uniforms: { uTime: time, uMoon: moon, uWash: wash, uPrev: before } }));
+  const shore = new THREE.Mesh(
+    geo,
+    new THREE.ShaderMaterial({
+      vertexShader: SHORE_VERT,
+      fragmentShader: SHORE_FRAG,
+      uniforms: { uTime: time, uMoon: moon, uWash: wash, uPrev: before },
+    }),
+  );
   shore.frustumCulled = false;
   scene.add(nightBackdrop(camera, moon, time), shore);
 

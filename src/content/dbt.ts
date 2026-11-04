@@ -2,6 +2,7 @@
  * DBT skills content for the daily companion. All copy is original, written for this app in plain words
  * (Linehan's handouts are named and taught, never reproduced). Voice: the Lantern, kind and brief.
  */
+import { thoughtPic, watchThoughts, type TimerPicture } from './spectator-lines';
 
 export type ModuleId = 'mind' | 'dt' | 'er' | 'ie';
 export type StatId = 'sense' | 'stamina' | 'intelligence' | 'agility';
@@ -32,9 +33,6 @@ export type ListId = 'comfort' | 'activities' | 'reasons';
 export type Effect = 'saveSoothe' | 'saveMap';
 /** a timer's picture: `ring` is the breathing light, `count` the countdown ring alone, for a timer that isn't a breath */
 export type Visual = 'ring' | 'count' | 'drift' | 'wave' | 'tide' | 'hands' | 'cold' | 'glow' | 'thoughts';
-type TimerPicture =
-  | { visual?: Exclude<Visual, 'thoughts'>; scene?: undefined }
-  | { visual: 'thoughts'; scene: (a: Answers) => ThoughtPic };
 
 interface Base {
   id?: string;
@@ -48,7 +46,10 @@ export type Step =
   | (Base & { kind: 'input'; text: Txt; key: string; placeholder?: string; fills?: string[]; skip?: string; cta?: string; lines?: number; prefix?: (a: Answers) => string })
   | (Base & { kind: 'slider'; text: Txt; key: string; min: number; max: number; ends?: [string, string]; words?: string[] })
   | (Base & { kind: 'breath'; text: Txt; inhale: number; exhale: number; rounds: number; alt?: [number, number]; words?: [string, string] })
-  | (Base & TimerPicture & { kind: 'timer'; text: Txt; seconds: number | ((a: Answers) => number); start?: string; small?: string; options?: Opt[]; big?: Txt; dim?: boolean })
+  | (Base & TimerPicture & {
+      kind: 'timer'; text: Txt; seconds: number | ((a: Answers) => number); start?: string; small?: string;
+      options?: Opt[]; big?: Txt; dim?: boolean;
+    })
   | (Base & { kind: 'hold'; text: Txt; seconds: number; label: string; done: string; tone?: 'heal' })
   | (Base & { kind: 'tier'; text: Txt; key: string; from: string; tiers: string[] })
   | (Base & { kind: 'count'; text: Txt; n: number; label: string })
@@ -151,16 +152,6 @@ function tierLine(a: Answers) {
 const said = (a: Answers, k: string, fb = '') => {
   const v = s(a, k).trim().replace(/[\s.!?]+$/, '') || fb;
   return v.charAt(0).toUpperCase() + v.slice(1);
-};
-const THOUGHT_PICS = {
-  clouds: 'Each thought is a cloud. Watch it drift in, cross the sky and drift out.',
-  cars: 'Each thought is a car going past. Watch it come and go. No need to get in.',
-  leaves: 'Each thought sits on a leaf. Watch the stream carry it away.',
-};
-export type ThoughtPic = keyof typeof THOUGHT_PICS;
-const thoughtPic = (a: Answers): ThoughtPic => {
-  const pic = s(a, 'pic');
-  return Object.hasOwn(THOUGHT_PICS, pic) ? (pic as ThoughtPic) : 'clouds';
 };
 
 const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
@@ -510,8 +501,8 @@ export const SKILLS: Skill[] = [
         kind: 'timer',
         seconds: 60,
         visual: 'thoughts',
-        text: (a) => `${THOUGHT_PICS[thoughtPic(a)]} If you get pulled into one, that's normal. Step back and watch again.`,
-        scene: thoughtPic,
+        text: (a) => watchThoughts(s(a, 'pic')),
+        scene: (a) => thoughtPic(s(a, 'pic')),
       },
       { kind: 'say', text: "Thoughts are only thoughts. They aren't facts, and they aren't orders. You can notice one without doing what it says." },
       {

@@ -1,0 +1,12 @@
+.dq-timer-svg .dq-thoughts path {
+  filter: none;
+}
+.dq-timer-svg--thoughts ~ .dq-timer-center {
+  inset: auto 0 -36px;
+}
+.dq-timer-stage:has(.dq-timer-svg--thoughts) {
+  margin-bottom: 36px;
+}
+.dq-timer-svg--thoughts ~ .dq-timer-center .dq-timer-num {
+  font-size: calc(26px * var(--text-scale, 1));
+}

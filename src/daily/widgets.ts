@@ -2,11 +2,13 @@
  * Guided-practice widgets. Every visual is a pure function of elapsed time from clock.onFrame, so they pause,
  * seek and capture cleanly. Reduced motion keeps the pacing (numbers, words, fades) and drops movement.
  */
-import { COOL, type Skill, type ThoughtPic, type Visual } from '../content/dbt';
+import { COOL, type Skill, type Visual } from '../content/dbt';
+import type { ThoughtPic } from '../content/spectator-lines';
 import { THOUGHTS } from '../motion/tokens';
 import { hasScene, mountScene, playerAccent, type Beat } from '../scene/vignettes/host';
 import { onFrame, now, backInSight } from './clock';
 import { btn, h, p, scrollerOf, typo } from './ui';
+import './spectator.css';
 
 const LN = 'fill="none" stroke="#a9dcff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"';
 const MINT = 'fill="none" stroke="#89cf9d" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"';
@@ -382,10 +384,8 @@ function thoughtsPicture(pic: ThoughtPic) {
     }
     put = (el, u, n, e) => {
       const y = [102, 88, 120, 95, 112][((n % 5) + 5) % 5] + 3 * Math.sin(u * 4.1 + n);
-      el.setAttribute(
-        'transform',
-        `translate(${(6 + 188 * u).toFixed(2)} ${y.toFixed(2)}) rotate(${((n * 67 + e * 6 * (n % 2 ? 1 : -1)) % 360).toFixed(1)})`,
-      );
+      const turn = (n * 67 + e * 6 * (n % 2 ? 1 : -1)) % 360;
+      el.setAttribute('transform', `translate(${(6 + 188 * u).toFixed(2)} ${y.toFixed(2)}) rotate(${turn.toFixed(1)})`);
     };
   }
   g.append(...things);
@@ -424,7 +424,23 @@ type TimerPicture =
  * `reveal`, the countdown or at least its figures can come with it. A screen reader hears
  * it start, get more time and end, never each second. A visual with a 3D scene shows it unless `scene` is false.
  */
-export function timerView(ctx: Ctx, opts: TimerPicture & { seconds: number; scene?: boolean; start?: string; held?: boolean; extend?: number; big?: string; extra?: HTMLElement[]; peers?: HTMLElement[]; reveal?: HTMLElement; keep?: HTMLElement; onStart?: () => void; onDone: () => void }) {
+export function timerView(
+  ctx: Ctx,
+  opts: TimerPicture & {
+    seconds: number;
+    scene?: boolean;
+    start?: string;
+    held?: boolean;
+    extend?: number;
+    big?: string;
+    extra?: HTMLElement[];
+    peers?: HTMLElement[];
+    reveal?: HTMLElement;
+    keep?: HTMLElement;
+    onStart?: () => void;
+    onDone: () => void;
+  },
+) {
   let dur = opts.seconds;
   const visual = opts.visual ?? 'ring';
   const scene = opts.scene !== false && hasScene(visual);
