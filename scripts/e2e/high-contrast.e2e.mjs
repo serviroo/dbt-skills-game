@@ -1,4 +1,4 @@
-import { boot, settle } from './layout-fit.e2e.mjs';
+import { boot, SAFE_AT, settle } from './layout-fit.e2e.mjs';
 import { capture, contrast, FIELDS, NO_TEXT, px, ratio } from './home-sky.e2e.mjs';
 
 const SWITCH = 'Higher contrast';
@@ -6,8 +6,6 @@ const TEXT_MIN = 7;
 const EDGE_MIN = 3;
 const DPR = 2;
 
-const SAFE_AT = ['start', 'breathe', 'squeeze', 'cold', 'check', 'stop'];
-SAFE_AT.push('reasons', 'comfort', 'people', 'talk', 'close');
 const SCREENS = [
   ['home', { name: 'hub' }],
   ['settings', { name: 'settings' }],
@@ -128,12 +126,11 @@ async function sweep(h, page) {
 function weak({ text, edge }) {
   const low = text.filter((r) => r.score < TEXT_MIN);
   const dull = edge.filter((r) => r.score < EDGE_MIN);
-  const seen = new Set();
   const lines = [
     ...low.map((r) => `text "${r.text}" (${r.where}) ${r.score}:1`),
     ...dull.map((r) => `${r.side} edge of ${r.where} "${r.text}" ${r.score}:1 at ${r.at}+${Math.round(r.y)}`),
   ];
-  return lines.filter((l) => !seen.has(l) && seen.add(l));
+  return [...new Set(lines)];
 }
 
 async function walk(h, looks) {

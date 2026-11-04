@@ -159,6 +159,8 @@ never plays, credits or shows anything: a removal in the Safe Zone leaves Undo i
 - `prefers-reduced-motion` and the in-game motion setting are both honoured, and a change to either (the device's
   setting, or Motion in any open tab) reaches every scene and animation at once, without a reload.
 - Text contrast at least 4.5:1; body text sizes as above.
+- Higher contrast in Settings lifts every line of text to at least 7:1 and every control edge to at least 3:1, on
+  every screen and in the Safe Zone with its lights up or down.
 - Nothing depends on sound.
 - Every control has a label a screen reader can read, and every tap target is at least 44 px.
 - Back and Forward (and a phone's back gesture) follow the companion. Back closes whatever is open on top first, and
