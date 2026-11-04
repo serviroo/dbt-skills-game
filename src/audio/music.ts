@@ -1128,8 +1128,8 @@ export class Music {
     score(0).tick(0, AHEAD);
     voice.at(voice.out.gain).setValueAtTime(0, 0);
     voice.at(voice.out.gain).setTargetAtTime(1, 0, Math.max(0.004, crossfade / 4));
+    this.stop(o.fadeOut ?? crossfade, o.at);
     const at = o.at ?? soon(lib.ctx);
-    this.stop(o.fadeOut ?? crossfade, at);
     voice.open(at);
     this.live.push({ name, voice, impl: score(at), start: at, end: Infinity, until: at + AHEAD });
     this.current = name;

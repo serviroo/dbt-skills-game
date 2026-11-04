@@ -463,7 +463,8 @@ export const scenarios = {
         levels[`${o.name} ${o.rate}`] = level;
         const why = [];
         if (v.behind) why.push(`${v.behind} of its parts were placed up to ${v.worstMs} ms behind the audio clock (${[...new Set(o.behind.map((b) => b[0]))].join(', ')})`);
-        if (!o.hit && (o.start < o.ask - 1e-4 || o.start > o.done + LEAD + 1e-4)) why.push(`it starts ${v.leadMs} ms past the clock once it is open`);
+        const late = o.start < o.ask - 1e-4 || o.start > o.done + LEAD + 1e-4;
+        if (!o.hit && late) why.push(`it starts ${v.leadMs} ms past the clock once it is built`);
         if (!(level > 3e-4)) why.push(`it was not heard (RMS ${level})`);
         const roarLag = o.hit ? Math.max(...o.opens) - Math.min(...o.opens) : 0;
         if (o.hit && !(o.opens.length >= 2 && roarLag < 1e-6)) {
