@@ -8,7 +8,7 @@ const day = () => {
   const d = new Date(Date.now() - 6 * 3600000);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
-const seed = (h) => ({
+export const seed = (h) => ({
   [h.SAVE]: JSON.stringify({ v: 1, events: [{ id: 'reading-visit', k: 'visit', xp: 10, t: 1, day: day() }], flags: { greetDay: day(), therapistLineShown: true } }),
   [h.YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: 1, companionAt: 1 }),
   'dbt.app.v1': h.SEEN,
