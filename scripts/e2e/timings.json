@@ -353,6 +353,7 @@
   "hands-still": [123, 71],
   "hidden-button-press": [28, 33],
   "high-contrast-every-screen": [110],
+  "high-contrast-follows-other-tab": [4],
   "high-contrast-saved": [8],
   "high-contrast-themes": [55],
   "history-from-another-version": [3],

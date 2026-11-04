@@ -5,6 +5,7 @@ const SWITCH = 'Higher contrast';
 const TEXT_MIN = 7;
 const EDGE_MIN = 3;
 const DPR = 2;
+const FIRST_SAVE = 'e2e-first-save';
 
 const SCREENS = [
   ['home', { name: 'hub' }],
@@ -172,13 +173,16 @@ async function walk(h, looks) {
 
 export const scenarios = {
   async 'high-contrast-saved'(h) {
-    let seeded;
-    const { ctx, page, errors } = await boot(h, { width: 390, height: 844 }, { edit: (s) => {
+    const keepFirstSave = (ctx) => ctx.addInitScript(([key, slot]) => {
+      if (!sessionStorage.getItem(slot)) sessionStorage.setItem(slot, localStorage.getItem(key) ?? '');
+    }, [h.SAVE, FIRST_SAVE]);
+    const { ctx, page, errors } = await boot(h, { width: 390, height: 844 }, { prepare: keepFirstSave, edit: (s) => {
       delete s.settings.highContrast;
       delete s.setAt.highContrast;
-      seeded = structuredClone(s);
     } });
-    h.expect(!('highContrast' in seeded.settings), 'the old save already holds a contrast choice');
+    const first = JSON.parse((await page.evaluate((k) => sessionStorage.getItem(k), FIRST_SAVE)) || 'null');
+    const old = first?.settings && !('highContrast' in first.settings) && !('highContrast' in (first.setAt ?? {}));
+    h.expect(old, 'the app did not start on a save from before Higher contrast: ' + JSON.stringify(first?.settings));
     await openSettings(page);
     h.expect(!(await toggleIn(page).isChecked()), 'Higher contrast is on for a save from before it');
     h.expect((await shown(page)) === null, 'the page shows higher contrast for a save from before it');
@@ -207,6 +211,51 @@ export const scenarios = {
     h.expect((await shown(page)) === null, 'turning Higher contrast off left it on');
     await other.waitForFunction(() => !document.documentElement.dataset.dqContrast, null, { timeout: 10000 });
     h.expect(JSON.parse(await h.ls(page, h.SAVE)).settings?.highContrast === false, 'turning it off was not saved');
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  async 'high-contrast-follows-other-tab'(h) {
+    const { ctx, page, errors } = await boot(h, { width: 390, height: 844 });
+    const other = await ctx.newPage();
+    other.on('pageerror', (e) => errors.push('pageerror (second tab): ' + e.message));
+    await other.goto(page.url());
+    await h.reachHub(other);
+    await openSettings(page);
+    await openSettings(other);
+    const disk = async () => JSON.parse(await h.ls(page, h.SAVE));
+    const before = await disk();
+    const caughtUp = (tab, on, motion) =>
+      tab.waitForFunction(([name, on, motion]) => {
+        const inputs = [...document.querySelectorAll('.dq-settings input[role="switch"]')];
+        const input = inputs.find((i) => i.labels[0]?.textContent.includes(name));
+        const picked = document.querySelector(`.dq-settings [aria-label="Motion: ${motion}"]`);
+        const raised = document.documentElement.dataset.dqContrast === 'high';
+        return input?.checked === on && raised === on && picked?.getAttribute('aria-checked') === 'true';
+      }, [SWITCH, on, motion], { timeout: 10000 }).then(() => true, () => false);
+    await other.getByRole('radio', { name: 'Motion: Full' }).click();
+    await toggleIn(page).click();
+    h.expect(await caughtUp(other, true, 'Full'), 'the second tab did not pick up Higher contrast turned on');
+    h.expect(await caughtUp(page, true, 'Full'), 'turning Higher contrast on undid Motion set in the other tab');
+    let saved = await disk();
+    h.expect(saved.settings.highContrast === true && saved.settings.motion === 'full', 'the save lost a choice: '
+      + JSON.stringify({ highContrast: saved.settings.highContrast, motion: saved.settings.motion }));
+    await page.getByRole('radio', { name: 'Motion: Auto' }).click();
+    await toggleIn(other).click();
+    h.expect(await caughtUp(page, false, 'Auto'), 'the first tab did not pick up Higher contrast turned off');
+    h.expect(await caughtUp(other, false, 'Auto'), 'turning Higher contrast off undid Motion set in the other tab');
+    saved = await disk();
+    h.expect(saved.settings.highContrast === false && saved.settings.motion === 'system', 'the save lost a choice: '
+      + JSON.stringify({ highContrast: saved.settings.highContrast, motion: saved.settings.motion }));
+    const moved = (a = {}, b = {}) => [...new Set([...Object.keys(a), ...Object.keys(b)])]
+      .filter((k) => k !== 'motion' && k !== 'highContrast' && JSON.stringify(a[k]) !== JSON.stringify(b[k]));
+    const overwritten = [
+      ...moved(before.settings, saved.settings).map((k) => `settings.${k}`),
+      ...moved(before.setAt, saved.setAt).map((k) => `setAt.${k}`),
+      ...moved(before.profile, saved.profile).map((k) => `profile.${k}`),
+    ];
+    h.expect(!overwritten.length, `switching between tabs changed other choices: ${overwritten.join(', ')}`);
+    await h.shot(other, 'high-contrast-follows-other-tab');
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },
