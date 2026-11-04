@@ -216,14 +216,14 @@ if (problems.length) {
 const idRows = (list) => {
   const rows = [];
   for (const id of list.map((x) => JSON.stringify(x))) {
-    if (rows.length && rows.at(-1).length + id.length < 119) rows[rows.length - 1] += `,${id}`;
+    if (rows.length && rows.at(-1).length + id.length < 118) rows[rows.length - 1] += `,${id}`;
     else rows.push(`      ${id}`);
   }
   return rows;
 };
 const idEntry = (kind, list) => {
   const line = `    ${JSON.stringify(kind)}: ${JSON.stringify(list)}`;
-  if (line.length < 120) return line;
+  if (line.length < 119) return line;
   return `    ${JSON.stringify(kind)}: [\n${idRows(list).join(',\n')}\n    ]`;
 };
 if (added.length && flags.update) {

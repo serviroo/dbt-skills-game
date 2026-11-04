@@ -127,13 +127,13 @@ export interface Flags {
 /** Choices one copy can change and another must take whole: the later change wins. */
 export type NameKey = `name:${ShadowId}`;
 export type SetKey = Exclude<keyof Settings, 'names'> | 'safeCredit' | NameKey;
+/** How this device plays: a Save Crystal brings them only where this device still has its defaults. */
+const DEVICE_SET_KEYS: SetKey[] = ['sound', 'motion', 'vibrate', 'highContrast'];
 /** The choices round 9 stores in settings and setAt. */
-const BASE_SET_KEYS: SetKey[] = ['sound', 'motion', 'vibrate', 'highContrast', 'emotionRows', 'urgeRows', 'safeCredit'];
+const BASE_SET_KEYS: SetKey[] = [...DEVICE_SET_KEYS, 'emotionRows', 'urgeRows', 'safeCredit'];
 /** Wave 2 choices. Stored in the top-level profile (with titlesSeen), which a round 9 copy keeps whole instead of dropping. */
 const PROFILE_SET_KEYS: SetKey[] = ['region', 'theme', 'accent', 'cardBack', 'plate', 'title', 'playerName', 'companion', ...SHADOW_IDS.map((id): NameKey => `name:${id}`)];
 const SET_KEYS: SetKey[] = [...BASE_SET_KEYS, ...PROFILE_SET_KEYS];
-/** How this device plays: a Save Crystal brings them only where this device still has its defaults. */
-const DEVICE_SET_KEYS: SetKey[] = ['sound', 'motion', 'vibrate', 'highContrast'];
 const ROW_SET_KEYS: SetKey[] = ['emotionRows', 'urgeRows'];
 export { cleanName };
 const LIST_KEYS = ['comfort', 'activities', 'reasons', 'people'] as const;

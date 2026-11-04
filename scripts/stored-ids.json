@@ -6,8 +6,8 @@
       "dbt.install-hint.v1","dbt.cleared"
     ],
     "beside-save-key": [
-      ".art",".story",".story.live",".unreadable",".stealth",".safe-light",".read-size",".moment-length",".skill-draft",
-      ".art.gone"
+      ".art",".story",".story.live",".unreadable",".stealth",".safe-light",".read-size",".moment-length",
+      ".skill-draft",".art.gone"
     ],
     "indexeddb-store": [
       ".art/meta",".art/strokes",".art/thumbs",".art/drafts",".story/stories",".story/chapters",".story/cards",
@@ -27,13 +27,13 @@
       "lists.people[].phone","lists.people[].at","maps[].id","maps[].t","maps[].urge","maps[].p1","maps[].c1",
       "maps[].p2","maps[].c2","maps[].choice","maps[].at","lines[].day","lines[].id","lines[].tag","lines[].text",
       "lines[].t","settings.sound","settings.motion","settings.emotionRows[]","settings.urgeRows[]","flags.rankSeen",
-      "flags.wardenSeen","flags.giftDay","flags.cardDay","flags.greetDay","flags.safeCredit","flags.therapistLineShown",
-      "flags.checkinDay","gone.<id>","setAt.sound","setAt.motion","setAt.emotionRows","setAt.urgeRows",
-      "setAt.safeCredit","profile.theme","profile.accent","profile.cardBack","profile.plate","profile.title",
-      "profile.playerName","profile.companion","profile.names.<shadow>","profile.titlesSeen[]","profile.setAt.theme",
-      "profile.setAt.accent","profile.setAt.cardBack","profile.setAt.plate","profile.setAt.title",
-      "profile.setAt.playerName","profile.setAt.companion","profile.setAt.name:<shadow>","profile.region",
-      "profile.setAt.region","flags.questAsideDay","flags.questAsideAt","skillPins.<skill>.pinned",
+      "flags.wardenSeen","flags.giftDay","flags.cardDay","flags.greetDay","flags.safeCredit",
+      "flags.therapistLineShown","flags.checkinDay","gone.<id>","setAt.sound","setAt.motion","setAt.emotionRows",
+      "setAt.urgeRows","setAt.safeCredit","profile.theme","profile.accent","profile.cardBack","profile.plate",
+      "profile.title","profile.playerName","profile.companion","profile.names.<shadow>","profile.titlesSeen[]",
+      "profile.setAt.theme","profile.setAt.accent","profile.setAt.cardBack","profile.setAt.plate",
+      "profile.setAt.title","profile.setAt.playerName","profile.setAt.companion","profile.setAt.name:<shadow>",
+      "profile.region","profile.setAt.region","flags.questAsideDay","flags.questAsideAt","skillPins.<skill>.pinned",
       "skillPins.<skill>.at","settings.vibrate","setAt.vibrate","flags.welcomeOwed","lists.comfort[].place",
       "lists.comfort[].placeAt","lists.activities[].place","lists.activities[].placeAt","lists.reasons[].place",
       "lists.reasons[].placeAt","lists.people[].place","lists.people[].placeAt","afterClear","settings.highContrast",
@@ -77,9 +77,9 @@
     ],
     "feedback-answer": ["Yes","A little","Not this time","Skip"],
     "line": [
-      "l01","l02","l03","l04","l05","l06","l07","l08","l09","l10","l11","l12","l13","l14","l15","m01","m02","m03","m04",
-      "m05","m06","m07","m08","m09","m10","m11","m12","m13","m14","m15","u01","u02","u03","u04","u05","u06","u07","u08",
-      "u09","u10","u11","u12","u13","u14","u15"
+      "l01","l02","l03","l04","l05","l06","l07","l08","l09","l10","l11","l12","l13","l14","l15","m01","m02","m03",
+      "m04","m05","m06","m07","m08","m09","m10","m11","m12","m13","m14","m15","u01","u02","u03","u04","u05","u06",
+      "u07","u08","u09","u10","u11","u12","u13","u14","u15"
     ],
     "shadow": ["sable","anvil","bramble","vesper","crest","block","harrow"],
     "title": ["professional-lurker","left-the-lobby","self-healer","default-skin-day","night-warden"],
@@ -92,9 +92,9 @@
     "chapter-kind": ["page","notes"],
     "cowriter-card-mode": ["continue","whatif","polish","questions"],
     "stored-interface-field": [
-      "Ev.id","Ev.t","Ev.day","Ev.k","Ev.xp","Ev.stat","Ev.skill","Ev.data","Item.id","Item.text","Item.at","Person.id",
-      "Person.name","Person.phone","Person.at","SavedMap.id","SavedMap.t","SavedMap.urge","SavedMap.p1","SavedMap.c1",
-      "SavedMap.p2","SavedMap.c2","SavedMap.choice","SavedMap.at","DiaryEntry.day","DiaryEntry.emotions",
+      "Ev.id","Ev.t","Ev.day","Ev.k","Ev.xp","Ev.stat","Ev.skill","Ev.data","Item.id","Item.text","Item.at",
+      "Person.id","Person.name","Person.phone","Person.at","SavedMap.id","SavedMap.t","SavedMap.urge","SavedMap.p1",
+      "SavedMap.c1","SavedMap.p2","SavedMap.c2","SavedMap.choice","SavedMap.at","DiaryEntry.day","DiaryEntry.emotions",
       "DiaryEntry.urges","DiaryEntry.note","DiaryEntry.updatedAt","DiaryEntry.ft","LineEntry.day","LineEntry.id",
       "LineEntry.tag","LineEntry.text","LineEntry.t","Settings.sound","Settings.motion","Settings.emotionRows",
       "Settings.urgeRows","Settings.theme","Settings.accent","Settings.cardBack","Settings.plate","Settings.title",

@@ -188,7 +188,8 @@ export const scenarios = {
     await h.reachHub(other);
     await toggleIn(page).click();
     h.expect((await shown(page)) === 'high', 'turning Higher contrast on did not raise the contrast');
-    await other.waitForFunction(() => document.documentElement.dataset.dqContrast === 'high', null, { timeout: 10000 });
+    const raised = () => document.documentElement.dataset.dqContrast === 'high';
+    await other.waitForFunction(raised, null, { timeout: 10000 });
     const saved = JSON.parse(await h.ls(page, h.SAVE));
     const kept = saved.settings?.highContrast;
     h.expect(kept === true, 'Higher contrast was not saved: ' + JSON.stringify(kept));
