@@ -84,6 +84,7 @@ export class Voice {
    *  is given later, such as a held part opened after it, sounds past it. */
   private killAt = Infinity;
   private children: Voice[] = [];
+  private parent: Voice | null = null;
   private parts: Voice[] = [];
 
   constructor(readonly lib: Lib, t: number, dest: AudioNode, o: VoiceOpts = {}, seed = 1) {
@@ -118,7 +119,7 @@ export class Voice {
   /** A sub-voice feeding this one, stopped with it (or on its own). */
   child(dest: AudioNode = this.wet, seed = 7) {
     const c = new Voice(this.lib, this.t, dest, {}, seed);
-    c.held = this.held;
+    c.parent = this;
     c.killAt = this.killAt;
     this.children.push(c);
     return c;
@@ -149,7 +150,7 @@ export class Voice {
 
   /** `p`'s timed automation, in this voice's time: set at once, or kept while the voice is held and set by open(). */
   at(p: AudioParam): Timed {
-    const held = this.held;
+    const held = this.holding();
     if (!held) return p;
     return {
       setValueAtTime: (v, t) => keep(held, t, (d) => p.setValueAtTime(v, t + d)),
@@ -166,8 +167,9 @@ export class Voice {
   }
 
   private reg<T extends AudioScheduledSourceNode>(n: T, t0: number, t1: number, offset = 0) {
-    if (this.held) {
-      keep(this.held, t0, (d) => this.reg(n, t0 + d, t1 + d, offset));
+    const held = this.holding();
+    if (held) {
+      keep(held, t0, (d) => this.reg(n, t0 + d, t1 + d, offset));
       return n;
     }
     if (t0 >= this.killAt) return n;
@@ -351,7 +353,11 @@ export class Voice {
   }
 
   get isHeld() {
-    return this.held !== null;
+    return this.holding() !== null;
+  }
+
+  private holding(): Placing[] | null {
+    return this.parent ? this.parent.holding() : this.held;
   }
 
   get isStopped() {

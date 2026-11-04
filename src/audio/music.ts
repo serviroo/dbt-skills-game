@@ -551,7 +551,7 @@ interface SectionImpl {
   hit?(at: number): void;
 }
 /** Builds a section on its held voice (the times its sources and envelopes are given count from the opening) and
- *  returns its score timed from `start`. */
+ *  returns its score timed from `start`; that runs twice, so it places nothing itself. */
 type Factory = (v: Voice, o: SectionOpts, host: MusicHost) => (start: number) => SectionImpl;
 
 const BEAT = 60 / 72;
@@ -857,9 +857,9 @@ const FACTORIES: Record<Section, Factory> = {
     v.at(lb.out.gain).linearRampToValueAtTime(0.018, 0.2);
     v.at(lb.out.gain).exponentialRampToValueAtTime(0.3, Math.max(0.5, nominal));
     v.ramp(lb.lp.frequency, 0.2, 320, 2400, Math.max(0.3, nominal - 0.2));
-    if (o.at !== undefined && hitIn !== Infinity) {
-      const cutAt = o.at + hitIn - 0.78;
-      host.hush(cutAt, o.at + hitIn);
+    if (o.at !== undefined && o.hitAt !== undefined) {
+      const cutAt = o.hitAt - 0.78;
+      host.hush(cutAt, o.hitAt);
       build.gain.setTargetAtTime(0, cutAt, 0.006);
       bv.stop(cutAt, 0.024);
     }
