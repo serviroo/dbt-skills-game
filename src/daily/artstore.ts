@@ -982,17 +982,25 @@ export class ArtStore {
     return saved || (!!m && !this.deleted.has(id) && !this.landed.has(landKey(m.id, revOf(m))));
   }
 
-  async putDraft(d: Draft) {
+  async putDraft(d: Draft, replaces?: string) {
     const turn = ++this.draftTurn;
+    const replacing = replaces && this.draftTurns.get(replaces);
     this.draftTurns.set(d.key, turn);
     this.mem.drafts.set(d.key, d);
-    await this.tx(['drafts', 'meta'], 'readwrite', async (t) => {
+    const moved = await this.tx(['drafts', 'meta'], 'readwrite', async (t) => {
       if (d.editId && !this.keepsEdit(d.editId, !!(await req(t.objectStore('meta').get(d.editId))))) d = detached(d);
       t.objectStore('drafts').put(storedDraft(d), d.key);
+      if (replaces) t.objectStore('drafts').delete(replaces);
+      return true;
     }, () => {
       if (d.editId && this.deleted.has(d.editId)) d = detached(d);
+      return false;
     });
     if (this.draftTurns.get(d.key) === turn) this.mem.drafts.set(d.key, d);
+    if (moved && replaces && this.draftTurns.get(replaces) === replacing) {
+      this.draftTurns.set(replaces, ++this.draftTurn);
+      this.mem.drafts.delete(replaces);
+    }
   }
 
   async dropDraft(key: string) {

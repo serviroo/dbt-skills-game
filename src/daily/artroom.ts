@@ -5,7 +5,7 @@
 import { animate } from '../ui/anim';
 import { ALLY_NAMES, ART, ART_PROMPTS } from '../content/daily-lines';
 import { playerName } from '../core/you';
-import type { App, Route, ScreenOut } from './app';
+import type { App, Route, ScreenOut, Visit } from './app';
 import { icon } from './art';
 import { artStore, extrasOf, revOf, type Draft, type DrawingMeta, type DrawingRec } from './artstore';
 import { canvasBlob, INKS, InkPad, PAGE, renderDrawing, SIZES, TOOLS, type Paper, type Stroke, type Tool } from './ink';
@@ -285,16 +285,24 @@ function entryArt(kind: Paper) {
 }
 
 // ---------------- Drawing page ----------------
-export function drawScreen(app: App, route: Route): ScreenOut {
+interface DrawKept {
+  readonly id: string | null;
+  readonly key: string | undefined;
+}
+export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const r = route as Extract<Route, { name: 'draw' }>;
+  const was = visit.again ? (visit.kept as DrawKept | undefined) : undefined;
+  const editId = was?.id ?? r.id;
+  const from = was ? was.key : r.draft;
   const kind: Paper = r.kind === 'ally' ? 'ally' : 'today';
   const as = store(app);
   const tab = as.claimTab();
   const own = (id?: string | null) => (id ? `edit:${id}:${tab.id}` : `${kind}:${tab.id}`);
-  let key = own(r.id);
+  let key = own(editId);
+  let wrote = false;
   let saving = false;
   let storing = false;
-  let recId = r.id ?? null;
+  let recId = editId ?? null;
   let rec: DrawingRec | null = null;
   let bases: string[] | undefined;
   let promptRoll = 0;
@@ -314,14 +322,18 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     if ((had || msg.hasChildNodes()) && el.isConnected && noteInTools) layout();
   };
 
-  const flushDraft = () => {
+  const writeDraft = (replaces?: string) => {
     if (draftTimer) clearTimeout(draftTimer);
     draftTimer = 0;
     if (!dirty) return;
     if (!key.endsWith(`:${tab.id}`)) key = own(recId);
+    wrote = true;
     if (!pad.strokes.length && !recId) return void as.dropDraft(key);
-    void as.putDraft({ key, kind, editId: recId ?? undefined, bases: recId ? bases : undefined, prompt, strokes: pad.strokes, t: Date.now() });
+    const owner = recId ?? undefined;
+    const draft = { key, kind, editId: owner, bases: recId ? bases : undefined, prompt, strokes: pad.strokes };
+    void as.putDraft({ ...draft, t: Date.now() }, replaces);
   };
+  const flushDraft = () => writeDraft();
   const pad = new InkPad({
     kind,
     still: () => app.reduced(),
@@ -506,13 +518,15 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     const saved: DrawingRec = { ...next, ...res.labels, id: res.id, updated: res.updated };
     rec = saved;
     recId = res.id;
+    wrote = true;
     const failed = res.stored === 'failed';
     bases = failed && res.id === id ? [...(bases ?? []), res.rev].slice(-8) : [res.rev];
     const copied = res.id !== id;
     const oldKey = key.endsWith(`:${tab.id}`) ? key : own(first ? undefined : id);
     key = oldKey;
     // a copy kept only in memory rewrites the removal's draft in place, so the strokes stay on disk as one draft
-    if (copied && !(lost && failed)) key = own(res.id);
+    const fresh = oldKey === own(undefined);
+    if ((copied && !(lost && failed)) || (fresh && !failed)) key = own(res.id);
     if (failed) {
       dirty = true;
       flushDraft();
@@ -521,10 +535,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
       if (draftTimer) clearTimeout(draftTimer);
       draftTimer = 0;
       await as.dropDraft(oldKey);
-    } else {
-      flushDraft();
-      if (copied) await as.dropDraft(oldKey);
-    }
+    } else writeDraft(key !== oldKey ? oldKey : undefined);
     const xp = creditArt(app, kind);
     app.sound('check');
     return { first, xp, rec: saved, copied, failed };
@@ -813,24 +824,24 @@ export function drawScreen(app: App, route: Route): ScreenOut {
   void (async () => {
     await tab.ready;
     if (left) return;
-    key = own(r.id);
+    key = own(editId);
     let draft: Draft | null = null;
-    if (r.draft) {
-      draft = await as.getDraft(r.draft);
+    if (from) {
+      draft = await as.getDraft(from);
       if (draft?.key.endsWith(`:${tab.id}`)) key = draft.key;
     }
     if (!draft) draft = await as.getDraft(key);
-    if (!draft && !r.draft) {
+    if (!draft && !from) {
       // this tab's other draft of the same page (a page first saved from a fresh screen), else one an earlier session
       // left; a younger draft may belong to a tab that is still open, so it only waits in the Art room
-      const same = (await as.drafts()).filter((d) => (r.id ? d.editId === r.id : d.kind === kind && !d.editId));
+      const same = (await as.drafts()).filter((d) => (editId ? d.editId === editId : d.kind === kind && !d.editId));
       const found = same.find((d) => d.key.endsWith(`:${tab.id}`)) ?? same.find((d) => !(Date.now() - d.t < ORPHAN_MS));
       if (found) {
         draft = found;
         if (found.key.endsWith(`:${tab.id}`)) key = found.key;
       }
     }
-    const id = r.id ?? draft?.editId;
+    const id = editId ?? draft?.editId;
     if (id) {
       recId = id;
       rec = await as.get(id);
@@ -867,6 +878,14 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     title: kind === 'ally' ? ART.allyTitle : ART.todayTitle,
     mode: 'sub',
     bubbles: [0, 0],
+    keep: (): DrawKept => ({
+      get id() {
+        return wrote ? recId : (editId ?? null);
+      },
+      get key() {
+        return wrote ? key : from;
+      },
+    }),
     after: () => {
       app.sheetLayer.append(sheet, riseEl);
       ro.observe(main);
