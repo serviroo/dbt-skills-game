@@ -1,4 +1,5 @@
 {
+  "a-hit-scheduled-in-the-first-window-opens-the-roar-on-the-hit": [2],
   "a-part-stopped-before-it-opens-places-nothing-past-its-stop": [2, 3],
   "a-sooner-stop-wins": [10],
   "a11y-names-art": [2],

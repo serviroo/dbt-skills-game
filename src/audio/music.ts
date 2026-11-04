@@ -920,7 +920,7 @@ const FACTORIES: Record<Section, Factory> = {
       };
       function roarTick(after: number, to: number) {
         const from = Math.max(hitAt, roarTo, after);
-        if (!(to > from)) return;
+        if (v.isHeld || !(to > from)) return;
         if (roarTo === -Infinity) {
           rp.open(hitAt);
           swellPedal(from);

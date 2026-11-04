@@ -350,6 +350,10 @@ export class Voice {
     return true;
   }
 
+  get isHeld() {
+    return this.held !== null;
+  }
+
   get isStopped() {
     return this.killAt !== Infinity;
   }

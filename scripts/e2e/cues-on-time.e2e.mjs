@@ -616,6 +616,41 @@ export const scenarios = {
     }
   },
 
+  async 'a-hit-scheduled-in-the-first-window-opens-the-roar-on-the-hit'(h) {
+    const { ctx, page, errors } = await h.open({}, '?lab=audio&mute');
+    try {
+      await page.waitForFunction(() => window.__lab === true, null, { timeout: 30000 });
+      const [at, hit] = [0.3, 0.9];
+      const opens = await page.evaluate(async ([at, hit]) => {
+        const { renderOffline } = await import('/src/audio/engine.ts');
+        const { Voice } = await import('/src/audio/voice.ts');
+        const open = Voice.prototype.open;
+        const opens = [];
+        Voice.prototype.open = function (t) {
+          opens.push(t);
+          return open.call(this, t);
+        };
+        try {
+          const awaken = { t: at, cue: 'music', opts: { section: 'awaken', fade: 0.3, hitAt: hit } };
+          await renderOffline([awaken], 1.5, 48000);
+        } finally {
+          Voice.prototype.open = open;
+        }
+        return opens;
+      }, [at, hit]);
+      note(h, 'hit-in-first-window', { opens });
+      const roar = opens.filter((t) => t > at + 1e-9);
+      const where = roar.length ? roar.map((t) => t.toFixed(3)).join(', ') + ' s' : 'never';
+      const onTheHit = roar.length === 1 && Math.abs(roar[0] - hit) < 1e-9;
+      h.expect(onTheHit, `the roar opened ${where}, not once on the hit at ${hit} s`);
+      h.expect(!errors.length, errors.join('\n'));
+      return { opens: opens.length };
+    } finally {
+      await ctx.close();
+    }
+  },
+
+
   /**
    * The score is scheduled up to 0.7 s ahead. A stall longer than that, across one of the calm score's chord changes,
    * leaves the change behind the clock: it is dropped, so nothing is placed in the past, and the score plays on.
