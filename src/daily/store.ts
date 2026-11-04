@@ -133,6 +133,7 @@ const PROFILE_SET_KEYS: SetKey[] = ['region', 'theme', 'accent', 'cardBack', 'pl
 const SET_KEYS: SetKey[] = [...BASE_SET_KEYS, ...PROFILE_SET_KEYS];
 /** How this device plays: a Save Crystal brings them only where this device still has its defaults. */
 const DEVICE_SET_KEYS: SetKey[] = ['sound', 'motion', 'vibrate'];
+const ROW_SET_KEYS: SetKey[] = ['emotionRows', 'urgeRows'];
 export { cleanName };
 const LIST_KEYS = ['comfort', 'activities', 'reasons', 'people'] as const;
 /** Choices kept beside a save that open screens show: one made in another open copy reaches them too (see onChange). */
@@ -614,6 +615,7 @@ function prune<T extends { id: string; at?: number }>(list: T[], gone: Record<st
   for (let i = list.length - 1; i >= 0; i--) if (goneAt(gone, list[i].id) >= atOf(list[i])) list.splice(i, 1);
 }
 type SetVal = boolean | string | string[];
+const sameSet = (a: SetVal, b: SetVal) => JSON.stringify(a) === JSON.stringify(b);
 const nameId = (k: SetKey) => (k.startsWith('name:') ? (k.slice(5) as ShadowId) : null);
 /** The choice as stored: a value this build can't use (see Kept) counts as itself, not as the default it shows. */
 function getSet(s: State, k: SetKey): SetVal {
@@ -640,6 +642,15 @@ function putSet(s: State, k: SetKey, v: SetVal) {
   else if (k === 'motion') s.settings.motion = v as Settings['motion'];
   else if (k === 'emotionRows' || k === 'urgeRows') s.settings[k].splice(0, s.settings[k].length, ...(v as string[]));
   else (s.settings as unknown as Record<string, SetVal>)[k] = v;
+}
+function takeSet(s: State, k: SetKey, v: SetVal) {
+  putSet(s, k, Array.isArray(v) ? [...v] : v);
+  // the rows the other copy stored (past what this build shows) go with them, as that copy would write them
+  const now = getSet(s, k);
+  if (!Array.isArray(v) || !Array.isArray(now)) return;
+  const t = AS_STORED.get(v);
+  if (t && t.read === JSON.stringify(v)) twin(now, t.raw, true);
+  else AS_STORED.delete(now);
 }
 /** What two copies must agree on beyond events, diary and lines, in a form where order inside a set doesn't count. */
 function canon(s: State) {
@@ -1404,15 +1415,8 @@ export class Store {
       const mt = this.state.setAt[k] ?? 0, ot = other.setAt[k] ?? 0;
       const mv = getSet(this.state, k), ov = getSet(other, k);
       if (ot > mt || (ot === mt && JSON.stringify(ov) > JSON.stringify(mv))) {
-        putSet(this.state, k, Array.isArray(ov) ? [...ov] : ov);
+        takeSet(this.state, k, ov);
         if (own(other.setAt, k)) this.state.setAt[k] = ot;
-        // the rows the other copy stored (past what this build shows) go with them, as that copy would write them
-        const now = getSet(this.state, k);
-        if (Array.isArray(ov) && Array.isArray(now)) {
-          const t = AS_STORED.get(ov);
-          if (t && t.read === JSON.stringify(ov)) twin(now, t.raw, true);
-          else AS_STORED.delete(now);
-        }
       }
     }
   }
@@ -1664,13 +1668,13 @@ export class Store {
   /**
    * Union merge for Restore: imported data can only add. Events, list items, people and maps by id, in lists a newer
    * build added too (duplicates inside the file count once; one removed here comes back, newer than its removal), diary
-   * per field, the newer line per day, and the diary rows the file uses, and the titles the file has seen. The Wardrobe
-   * picks, the equipped title, each shadow's name and the crisis-line country come from the file only where this device
-   * has no change time for that choice (the player never set it here), so a new device gets them back; one the player
-   * made here, a cleared name included, always wins. A choice taken from the file takes the file's change time too,
-   * never later than this device's now (now when the file has none), so another open copy doesn't see it as older than
-   * its own default. Explicit sound, motion and vibration choices stay on this device, and the file's removals are not
-   * applied.
+   * per field, the newer line per day, and the titles the file has seen. The diary rows, the Wardrobe picks, the
+   * equipped title, each shadow's name and the crisis-line country come from the file whole, an empty row list
+   * included, only where this device has no change time for that choice (the player never set it here), so a new device
+   * gets them back; one the player made here, a cleared name included, always wins. A choice taken from the file takes
+   * the file's change time too, never later than this device's now (now when the file has none), so another open copy
+   * doesn't see it as older than its own default. Sound, motion, vibration and diary rows that differ from the defaults
+   * here count as chosen here, and the file's removals are not applied.
    */
   merge(other: State) {
     this.sync();
@@ -1708,22 +1712,6 @@ export class Store {
     }
     bring(this.state.maps, other.maps);
     adoptRaw(this.state, other, { newer, now: this.now() });
-    const rowsOf = (kind: 'emotions' | 'urges', named: string[]) => {
-      const names = new Set(named);
-      for (const e of Object.values(other.diary)) for (const k of Object.keys(e[kind])) names.add(k);
-      return names;
-    };
-    const addRows = (k: 'emotionRows' | 'urgeRows', names: Set<string>, cap: number) => {
-      const list = this.state.settings[k];
-      const had = list.length;
-      for (const n of names) {
-        if (list.length >= cap) break;
-        if (n && !list.includes(n)) list.push(n);
-      }
-      if (list.length !== had) this.touch(k);
-    };
-    addRows('emotionRows', rowsOf('emotions', other.settings.emotionRows), ROW_CAP.emotions);
-    addRows('urgeRows', rowsOf('urges', other.settings.urgeRows), ROW_CAP.urges);
     const now = this.now();
     const blank = freshState(0);
     // a choice either copy holds as a value this build can't use came from a newer build: like any field it doesn't
@@ -1742,14 +1730,14 @@ export class Store {
       // later than this device's own change, so no other open copy undoes it
       this.state.setAt[k] = own(this.state.setAt, k) ? Math.max(now, (this.state.setAt[k] ?? 0) + 1) : Math.min(other.setAt[k] ?? now, now);
     }
-    for (const k of [...DEVICE_SET_KEYS, ...PROFILE_SET_KEYS]) {
+    for (const k of [...DEVICE_SET_KEYS, ...ROW_SET_KEYS, ...PROFILE_SET_KEYS]) {
       if (own(this.state.setAt, k) || raws.has(k)) continue;
-      if (DEVICE_SET_KEYS.includes(k) && getSet(this.state, k) !== getSet(blank, k)) continue;
+      if (!PROFILE_SET_KEYS.includes(k) && !sameSet(getSet(this.state, k), getSet(blank, k))) continue;
       const ov = getSet(other, k);
       const ft = own(other.setAt, k) ? other.setAt[k] : undefined;
       const timed = typeof ft === 'number' && ft > 0;
-      if (!timed && ov === getSet(blank, k)) continue;
-      putSet(this.state, k, ov);
+      if (!timed && sameSet(ov, getSet(blank, k))) continue;
+      takeSet(this.state, k, ov);
       this.state.setAt[k] = timed ? Math.min(ft, now) : now;
     }
     this.save();

@@ -281,6 +281,8 @@ export const scenarios = {
       raw.preferences = { audio: { v: 1, master: .9, music: .8, sfx: .7, hum: .66, muted: false }, room: { aquarium: true, words: true }, safeLight: 'up' };
       raw.settings.sound = true; raw.settings.motion = 'full'; raw.settings.vibrate = true;
       raw.setAt.sound = 5; raw.setAt.motion = 5; raw.setAt.vibrate = 5;
+      raw.settings.emotionRows = ['Calm']; raw.settings.urgeRows = ['Rest'];
+      raw.setAt.emotionRows = 5; raw.setAt.urgeRows = 5;
       await page.evaluate(() => {
         const a = window.__daily;
         a.opts.volume.set({ master: .11, music: .22, sfx: .33, hum: .44, muted: true });
@@ -288,16 +290,36 @@ export const scenarios = {
         a.store.state.settings.motion = 'reduce';
         // off, as it starts, but chosen here: the file's "on" must not replace it
         a.store.state.settings.vibrate = false;
-        a.store.touch('sound'); a.store.touch('motion'); a.store.touch('vibrate'); a.store.save();
+        a.store.state.settings.emotionRows = ['Joy'];
+        a.store.state.settings.urgeRows = [];
+        for (const k of ['sound', 'motion', 'vibrate', 'emotionRows']) a.store.touch(k);
+        a.store.save();
         localStorage.setItem(a.store.key + '.stealth', JSON.stringify({ aquarium: false, words: false }));
         localStorage.setItem(a.store.key + '.safe-light', 'dim');
       });
       await restore(page, raw);
       const actual = await page.evaluate(() => {
         const a = window.__daily;
-        return { audio: a.opts.volume.get(), sound: a.store.state.settings.sound, motion: a.store.state.settings.motion, vibrate: a.store.state.settings.vibrate, room: JSON.parse(localStorage.getItem(a.store.key + '.stealth')), light: localStorage.getItem(a.store.key + '.safe-light') };
+        const { sound, motion, vibrate, emotionRows, urgeRows } = a.store.state.settings;
+        return {
+          audio: a.opts.volume.get(),
+          sound,
+          motion,
+          vibrate,
+          rows: [emotionRows, urgeRows],
+          room: JSON.parse(localStorage.getItem(a.store.key + '.stealth')),
+          light: localStorage.getItem(a.store.key + '.safe-light'),
+        };
       });
-      assert.deepEqual(actual, { audio: { master: .11, music: .22, sfx: .33, hum: .44, muted: true }, sound: false, motion: 'reduce', vibrate: false, room: { aquarium: false, words: false }, light: 'dim' });
+      assert.deepEqual(actual, {
+        audio: { master: .11, music: .22, sfx: .33, hum: .44, muted: true },
+        sound: false,
+        motion: 'reduce',
+        vibrate: false,
+        rows: [['Joy'], []],
+        room: { aquarium: false, words: false },
+        light: 'dim',
+      });
     } finally { await ctx.close(); }
   },
 
@@ -764,11 +786,20 @@ export const scenarios = {
   async 'crystal-old-fixture'(h) {
     const raw = JSON.parse(fs.readFileSync(fixture, 'utf8'));
     h.expect(raw.v === 1 && !raw.preferences, 'Fixture must remain an actual v1 crystal exported by main.');
+    delete raw.settings.emotionRows;
+    delete raw.settings.urgeRows;
     const { ctx, page } = await h.open(seed(h));
     try {
       await ready(page);
+      await page.evaluate(() => {
+        window.__daily.store.state.settings.emotionRows = ['Calm'];
+        window.__daily.store.save();
+      });
       await restore(page, raw);
       const actual = await crystal(h, page, 'old-fixture-restored');
+      const rows = [actual.settings.emotionRows, actual.settings.urgeRows];
+      const kept = JSON.stringify(rows);
+      h.expect(kept === '[["Calm"],["Urge to give up on today"]]', 'Old crystal changed the rows: ' + kept);
       h.expect(actual.profile.playerName === 'Kit' && actual.profile.companion === 'Lumen', 'Old crystal lost names.');
       h.expect(actual.diary['2026-01-02'].note === 'A quiet afternoon.', 'Old crystal lost diary.');
       h.expect(actual.stories.chapters.some((c) => c.text === 'A chapter to keep.'), 'Old crystal lost story.');
