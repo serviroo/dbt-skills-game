@@ -711,7 +711,7 @@ export class AudioEngine {
   }
 
   /** Full charge reached: cut the charge loop, 200 ms hush, then the gold burst (visual leads by 1-2 frames). */
-  chestBurst(at = soon(this.ctx)) {
+  chestBurst(at: number) {
     this.charge?.stop(at, 0.03);
     this.hush(at, at + 0.2);
     return this.play("chest_burst", { at: at + 0.2 });
@@ -729,7 +729,7 @@ export class AudioEngine {
    * - { t, cue: 'music_stop' | 'music_level' | 'music_lowpass' | 'music_lift', opts: { fade? | v, ramp? | hz, ramp? | db, ramp? } }
    * - { t, cue: 'hush', opts: { until } } / { t, cue: 'duck', opts: { db, ramp? } }
    */
-  schedule(events: SoundEvent[], t0 = soon(this.ctx)) {
+  schedule(events: SoundEvent[], t0: number) {
     const named = this.named;
     const sorted = [...events].sort((a, b) => a.t - b.t);
     for (const e of sorted) {
