@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
-import { screenshot } from './harness.mjs';
+import { frames, screenshot } from './harness.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -140,7 +140,7 @@ async function capture(page, css) {
     window.__shotSheets = [still, look];
     document.adoptedStyleSheets = [...document.adoptedStyleSheets, still, look];
   }, css);
-  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await frames(page, 2);
   const png = await screenshot(page);
   await page.evaluate(() => {
     const [still, look] = window.__shotSheets;
@@ -247,12 +247,11 @@ async function contrast(page) {
 
 /** Every text's contrast at each scroll position of Home, 80 px apart from the top to the very end. The sky stays put
  *  while the page moves over it, so each line passes over every part of the sky behind its column. */
-async function sweep(h, page) {
+async function sweep(page) {
   const max = await page.evaluate(() => { const r = document.querySelector('.dq'); return r.scrollHeight - r.clientHeight; });
   const rows = [];
   for (let y = 0; ; y = Math.min(y + 80, max)) {
     await page.evaluate((top) => document.querySelector('.dq').scrollTo({ top, behavior: 'instant' }), y);
-    await h.sleep(100);
     for (const r of await contrast(page)) rows.push({ ...r, y });
     if (y >= max) return rows;
   }
@@ -387,7 +386,7 @@ async function contrastIn(h, mood) {
       bad.push(`${mood} at ${name} does not paint its own ${shape} picture: ` + JSON.stringify(pic));
       continue;
     }
-    const rows = await sweep(h, page);
+    const rows = await sweep(page);
     const low = rows.filter((r) => r.score < FLOOR);
     const w = weakest(rows);
     // the three weakest lines, each at its weakest place, so the report shows the sky's own margin next to any text
@@ -435,7 +434,6 @@ export const scenarios = {
         // is opaque, so the sky never reaches it and one mood proves it
         if (mood === 'night') {
           await page.evaluate(() => document.querySelector('.dq-card:not(.is-open) .dq-cb-t').scrollIntoView({ block: 'center', behavior: 'instant' }));
-          await h.sleep(100);
           const back = (await contrast(page)).filter((r) => r.where === 'dq-cb-t');
           expect(back.length && back.every((r) => r.score >= FLOOR), `the closed card's text at ${name} is missing or below ${FLOOR}:1: ` + JSON.stringify(back));
         }
