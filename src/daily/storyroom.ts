@@ -19,6 +19,7 @@ import { creditStory, STORY_CAP, storyStore, type Card, type CardMode, type Chap
 import { storyFromText, storyToText, type StoryText } from './storytext';
 import { keepTextSize, textSize } from './text-size';
 import { breakable, btn, h, keptWhole, p, segmented, shareOrSave, typo } from './ui';
+import { cantOpen, opening } from './cant-open';
 import { storyHead, wholeText } from './page-head';
 
 export const STORY = {
@@ -1879,10 +1880,16 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   on(window, 'resize', grow);
 
   // ---------- start ----------
+  const shut = () => {
+    main.replaceChildren(cantOpen(app, ss.link, 'story'));
+    cw.remove();
+  };
   const init = async () => {
+    const watch = opening(ss.link);
     await ss.sweepLives();
     const s = await ss.story(storyId);
     if (!alive) return;
+    if (watch.stalled() || (!s && watch.missed())) return shut();
     if (!s || s.removed) {
       main.replaceChildren(h('div', { class: 'dq-panel st-empty' }, h('p', { class: 'st-empty-t', text: STORY.gone }), h('div', { class: 'dq-actions' }, btn('Story Room', () => app.go({ name: 'stories' }, { replace: true }), { kind: 'primary' }))));
       cw.remove();
@@ -1896,11 +1903,17 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     const notes = went ? went.notes : !!r.ch && r.ch === s.notes;
     // the first page takes its number now, so a Page or Notes tap while the chapter is made or its cards are read wins
     const n = ++picks;
-    if (!pageId) pageId = (await ss.addChapter(storyId)).id;
+    if (!pageId) {
+      const made = await ss.addChapter(storyId).catch(() => null);
+      if (!alive) return;
+      if (!made) return shut();
+      pageId = made.id;
+    }
     pageMade();
     await loadCards();
     // search can open the notes; the Page tab then goes to the first chapter
     const landed = await load(notes ? notesId : pageId, n);
+    if (watch.stalled() || (!cur && watch.missed())) return shut();
     await refreshStory();
     syncState();
     syncModes();
@@ -2033,9 +2046,16 @@ export function readScreen(app: App, route: Route): ScreenOut {
 
   let titled!: () => void;
   const ready = new Promise<void>((done) => (titled = done));
+  const shut = () => {
+    wholeText(title, STORY.title);
+    tools.remove();
+    page.replaceWith(cantOpen(app, ss.link, 'story'));
+  };
   const init = async () => {
+    const watch = opening(ss.link);
     const s = await ss.story(r.id);
     if (!alive) return;
+    if (watch.stalled() || (!s && watch.missed())) return shut();
     if (!s || s.removed) {
       wholeText(title, STORY.title);
       titled();
@@ -2049,6 +2069,7 @@ export function readScreen(app: App, route: Route): ScreenOut {
     // what this copy holds but couldn't store yet reads as it is in the editor
     const chs = await Promise.all(s.chapters.map(async (id) => ss.unsaved(id) ?? (await ss.chapter(id))));
     if (!alive) return;
+    if (watch.stalled() || (chs.some((c) => !c) && watch.missed())) return shut();
     const shown = chs.flatMap((c, i) =>
       c && c.text.trim()
         ? [{ i, id: c.id, sec: h('section', { class: 'st-read-ch', 'data-id': c.id }, h('h2', { class: 'st-read-ch-h', text: c.title.trim() || `Chapter ${i + 1}` }), h('div', { class: 'st-read-text', text: c.text.trimEnd() })) }]

@@ -8,6 +8,7 @@ import { playerName } from '../core/you';
 import type { App, Route, ScreenOut, Visit } from './app';
 import { icon } from './art';
 import { artStore, extrasOf, revOf, type Draft, type DrawingMeta, type DrawingRec } from './artstore';
+import { cantOpen, opening } from './cant-open';
 import { canvasBlob, INKS, InkPad, PAGE, renderDrawing, SIZES, TOOLS, type Paper, type Stroke, type Tool } from './ink';
 import { dayLabel } from './lines';
 import { uid } from './store';
@@ -822,6 +823,7 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
   }));
 
   void (async () => {
+    const watch = opening(as.link);
     await tab.ready;
     if (left) return;
     key = own(editId);
@@ -845,6 +847,19 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     if (id) {
       recId = id;
       rec = await as.get(id);
+    }
+    if (left) return;
+    const unread = watch.missed() && ((await as.link.connected()) || (!!id && !rec));
+    if (left) return;
+    if (watch.stalled() || unread) {
+      ro.disconnect();
+      promptRow.remove();
+      main.replaceWith(cantOpen(app, as.link, 'drawing'));
+      return;
+    }
+    const shared = [own(), own(id)].includes(key);
+    if (watch.missed() && shared && !draft) key = `${kind}:${uid()}:${tab.id}`;
+    if (id) {
       if (rec) {
         const old = draft?.editId === id ? draft : null;
         bases = !old ? [revOf(rec)] : Array.isArray(old.bases) ? old.bases.filter((b): b is string => typeof b === 'string').slice(-8) : [];
@@ -857,7 +872,6 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
         renderPrompt();
       }
     }
-    if (left) return;
     if (draft) {
       if (draft.prompt !== undefined && kind === 'today') {
         prompt = draft.prompt;
@@ -912,6 +926,13 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
   const body = h('div', { class: 'dq-piece-body' });
   let removed = false;
   let endRename = () => {};
+  let closed = false;
+  const shut = () => {
+    if (closed) return;
+    closed = true;
+    endRename();
+    body.replaceChildren(cantOpen(app, as.link, 'drawing'));
+  };
   const missing = () => {
     endRename();
     body.replaceChildren(p('That page is no longer here.', 'dq-text dq-empty'), h('div', { class: 'dq-actions' }, btn('Art room', () => app.go({ name: 'art' }), { kind: 'quiet' })));
@@ -924,8 +945,11 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
   // hidden while a removal's Undo lasts (from this tab or another): it shows as gone, and comes back with the Undo
   let hidden = false;
   const offShown = as.onChange(() => {
+    const watch = opening(as.link);
     void as.isShown(id).then((on) => {
-      if (removed || on !== hidden) return;
+      if (removed) return;
+      if (!on && (watch.stalled() || watch.missed())) return shut();
+      if (on !== hidden) return;
       if (on) return app.go({ name: 'piece', id }, { replace: true, quiet: true });
       hidden = true;
       missing();
@@ -934,8 +958,10 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
   let offChange = () => {};
   const el = h('div', { class: 'dq-page dq-piece' }, h('h1', { class: 'dq-sr', 'data-focus': '', text: 'Your page' }), body);
   void (async () => {
+    const watch = opening(as.link);
     let rec = await as.get(id);
     const on = !!rec && (await as.isShown(id));
+    if (!removed && (watch.stalled() || ((!rec || !on) && watch.missed()))) return shut();
     if (!rec || !on || removed || hidden) {
       if (!removed) hidden = true;
       missing();
