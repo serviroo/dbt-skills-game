@@ -48,7 +48,7 @@ const holdElsewhere = (page, db, name) =>
   );
 const tryAgain = (page) => page.locator('.dq-cant').getByRole('button', { name: 'Try again', exact: true }).click();
 
-async function panelShows(h, page, sel, what, where) {
+export async function panelShows(h, page, sel, what, where) {
   const title = page.locator(`${sel} .dq-cant .st-empty-t`);
   await title.waitFor({ timeout: 15000 }).catch(() => {});
   const said = await title.textContent({ timeout: 1000 }).catch(() => null);
