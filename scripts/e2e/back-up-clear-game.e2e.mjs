@@ -661,9 +661,10 @@ export const scenarios = {
         const third = path.join(h.out, 'crystal-restored.json');
         await back.saveAs(third);
         const want = content(raw2), got = content(JSON.parse(fs.readFileSync(third, 'utf8')));
-        // Restore adds the file's diary rows to the ones a new device starts with
-        h.expect(want.rows.every((r) => got.rows.includes(r)), `restored diary rows ${JSON.stringify(got.rows)} miss some of ${JSON.stringify(want.rows)}`);
-        for (const k of Object.keys(want).filter((k) => k !== 'rows')) h.expect(JSON.stringify(got[k]) === JSON.stringify(want[k]), `restored ${k}: ${JSON.stringify(got[k])} (want ${JSON.stringify(want[k])})`);
+        for (const k of Object.keys(want)) {
+          const [g, w] = [JSON.stringify(got[k]), JSON.stringify(want[k])];
+          h.expect(g === w, `restored ${k}: ${g} (want ${w})`);
+        }
         h.expect(!freshErrors.length, freshErrors.join('\n'));
       } finally {
         await fresh.close();

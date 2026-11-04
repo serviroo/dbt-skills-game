@@ -231,9 +231,17 @@ export const scenarios = {
   async 'final-ids-round-trip'({ open, shot, ls, youOf, expect, reachHub, openSettings, out, server, SAVE, YOU, SEEN }) {
     const now = Date.now();
     const save = fullSave(now);
-    const audio = JSON.stringify({ v: 1, master: 0.5, music: 0.25, sfx: 0.75, muted: true });
+    save.settings.emotionRows = ['Joy', 'Calm'];
+    save.settings.urgeRows = [];
+    const audio = JSON.stringify({ v: 1, master: 0.5, music: 0.25, sfx: 0.75, hum: 0, muted: true });
+    const beside = {
+      'dbt.audio.v1': audio,
+      [`${SAVE}.read-size`]: 'largest',
+      [`${SAVE}.moment-length`]: '1',
+      [`${SAVE}.stealth`]: '{"words":true}',
+    };
     // a copy of a save no version could read, kept beside this one: every Save Crystal carries it as it is
-    const a = await open({ [SAVE]: JSON.stringify(save), [`${SAVE}.unreadable.${now - 5}`]: '{not a save', [YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: save.created, companionAt: save.created }), 'dbt.app.v1': SEEN, 'dbt.audio.v1': audio });
+    const a = await open({ [SAVE]: JSON.stringify(save), [`${SAVE}.unreadable.${now - 5}`]: '{not a save', [YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: save.created, companionAt: save.created }), 'dbt.app.v1': SEEN, ...beside });
     await reachHub(a.page);
     const seeded = await seedStores(a.page, SAVE, now);
     await a.page.evaluate(async ({ SAVE, now }) => {
@@ -299,6 +307,8 @@ export const scenarios = {
     const b = await open({ 'dbt.app.v1': SEEN });
     await reachHub(b.page);
     const fresh = JSON.parse(await ls(b.page, SAVE));
+    const blank = await exportCrystal(b.page, openSettings, path.join(out, 'me91-crystal-blank.json'));
+    await b.page.goto(server.url + '/?mute');
     const said = await restoreCrystal(b.page, openSettings, fileX);
     expect(/drawings/.test(said) && /stories/.test(said), 'restore did not bring drawings and stories: ' + said);
     const shadowsB = await shadowCounts(b.page, reachHub, server.url);
@@ -308,7 +318,14 @@ export const scenarios = {
     const y = await exportCrystal(b.page, openSettings, path.join(out, 'me91-crystal-y.json'));
     await storedNamesOk(b.page, SAVE, expect);
     const cy = content(y);
-    expect(y.settings.sound === x.settings.sound && y.settings.motion === x.settings.motion && x.settings.vibrate === true && y.settings.vibrate === true, 'restore onto a fresh device did not bring back sound, motion and vibration');
+    const choices = (c) => ({ ...c.settings, ...content(c).profile, ...c.preferences });
+    const [was, sent, back] = [blank, x, y].map(choices);
+    const unset = Object.keys(was).filter((k) => !Object.hasOwn(sent, k) || same(sent[k], was[k]));
+    expect(!unset.length, `still at their defaults, so this round trip can't show them: ${unset.join(', ')}`);
+    for (const [k, v] of Object.entries(sent)) {
+      const [sentAs, backAs] = [JSON.stringify(v), JSON.stringify(back[k])];
+      expect(sentAs === backAs, `${k} changed on the way through a fresh device: ${sentAs} came back as ${backAs}`);
+    }
     expect(save.events.every((e) => same(cx.events[e.id], e)), 'the first export changed an event field');
     expect(same(x.gone, save.gone) && Object.entries(save.setAt).every(([k, v]) => x.setAt[k] === v), 'the first export lost removal or setting times');
     expect(x.flags.safeCredit === save.flags.safeCredit && x.setAt.safeCredit === save.setAt.safeCredit, 'visiting the Safe Zone changed its credit choice');
@@ -321,7 +338,6 @@ export const scenarios = {
     const pins = (o) => JSON.stringify(Object.entries(o ?? {}).sort((p, q) => (p[0] < q[0] ? -1 : 1)));
     expect(pins(x.skillPins) === pins(save.skillPins) && pins(y.skillPins) === pins(x.skillPins), `pins changed on the way through: ${pins(save.skillPins)} then ${pins(x.skillPins)} then ${pins(y.skillPins)}`);
     expect(same(y.profile.setAt, x.profile.setAt), 'restore lost profile choice times');
-    for (const k of ['emotionRows', 'urgeRows']) expect(x.settings[k].every((row) => y.settings[k].includes(row)), `restore lost ${k}`);
     for (const part of ['events', 'diary', 'lists', 'maps', 'lines', 'profile', 'art', 'drafts', 'stories', 'chapters']) {
       const want = cx[part], got = cy[part];
       const missing = want && typeof want === 'object' && !Array.isArray(want) && part !== 'diary' && part !== 'profile' ? Object.keys(want).filter((k) => !same(want[k], got?.[k])) : same(want, got) ? [] : [part];
