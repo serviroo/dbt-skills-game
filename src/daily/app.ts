@@ -351,13 +351,15 @@ export class App {
    * Opened for help, it is the Safe Zone alone: the day, its visit and any welcome open as the player leaves (see show).
    */
   start() {
-    if (this.opts.help) this.route = { name: 'safe' };
-    else this.turnDay();
+    const help = !!this.opts.help;
+    if (!help) {
+      this.store.openDay();
+      this.lastDay = this.store.today();
+    }
     // Home is always the companion's first history entry. Opened again on a later one (a reload),
     // it goes back to that first entry: the page opens on Home and nothing is credited again.
     const s: unknown = history.state;
     const from = isEntry(s) && s.replayed && s.i > 0 && this.known(s.route) ? s : null;
-    const help = !!this.opts.help && (!from || !!from.sheet);
     let to = from ? 1 : 0;
     if (from && help) to = from.i;
     if (isEntry(s) && s.i > to) {

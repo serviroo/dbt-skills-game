@@ -641,7 +641,7 @@
   "replay-end-card-reload": [8],
   "replay-forward-fresh": [5],
   "replay-help": [3],
-  "replay-help-then-back": [3],
+  "replay-help-then-back": [4],
   "replay-reload": [4],
   "replay-skip-reload": [3],
   "repo-copies-bring-every-module-they-load": [1],

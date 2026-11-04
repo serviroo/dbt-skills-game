@@ -136,6 +136,43 @@ async function backWhileLoading(h, file) {
   }
 }
 
+async function helpThenBack(h, backs) {
+  const tag = `help, then Back ${backs}x`;
+  const { ctx, page, errors, before } = await settings(h);
+  let release;
+  const held = new Promise((r) => (release = r));
+  try {
+    await replay(h, page, tag);
+    let reached;
+    const asked = new Promise((r) => (reached = r));
+    await ctx.route('**/src/daily/index.ts*', (r) => {
+      reached();
+      return held.then(() => r.fallback());
+    });
+    await page.locator('.ui-safe').click();
+    await asked;
+    for (let i = 0; i < backs; i++) await page.goBack({ waitUntil: 'commit' });
+    release();
+    if (backs === 1) await backOnSettings(h, page, before, tag);
+    const at = await h.until(page, screenOf, null, { timeout: 30000 });
+    h.expect(at === (backs === 1 ? 'settings' : 'hub'), `${tag}: the companion opened on ${at}`);
+    const pushes = await page.evaluate(() => window.__pushes);
+    h.expect(pushes === 0, `${tag}: the page that played the replay added ${pushes} history entries`);
+    const [step, next] = backs === 1 ? ['back', 'hub'] : ['forward', 'settings'];
+    await (step === 'back' ? page.goBack({ waitUntil: 'commit' }) : page.goForward({ waitUntil: 'commit' }));
+    await h.until(page, (n) => document.querySelector('.dq')?.dataset.screen === n, next).catch(() => undefined);
+    const then = await page.evaluate(screenOf);
+    h.expect(then === next, `${tag}: ${step} from there showed ${then}, not ${next}`);
+    h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
+  } catch (e) {
+    await h.evidence(page, 'replay-help-then-back-fail');
+    throw e;
+  } finally {
+    release();
+    await ctx.close();
+  }
+}
+
 export const scenarios = {
   async 'replay-skip-reload'(h) {
     const { ctx, page, errors, before } = await settings(h);
@@ -219,34 +256,7 @@ export const scenarios = {
   },
 
   async 'replay-help-then-back'(h) {
-    const { ctx, page, errors, before } = await settings(h);
-    let release;
-    const held = new Promise((r) => (release = r));
-    try {
-      await replay(h, page, 'help-back');
-      let reached;
-      const asked = new Promise((r) => (reached = r));
-      await ctx.route('**/src/daily/index.ts*', (r) => {
-        reached();
-        return held.then(() => r.fallback());
-      });
-      await page.locator('.ui-safe').click();
-      await asked;
-      await page.goBack({ waitUntil: 'commit' });
-      release();
-      await backOnSettings(h, page, before, 'help-back');
-      await page.goBack({ waitUntil: 'commit' });
-      await h.until(page, () => document.querySelector('.dq')?.dataset.screen !== 'settings');
-      const home = await page.evaluate(screenOf);
-      h.expect(home === 'hub', `help-back: Back from Settings showed ${home}, not Home`);
-      h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
-    } catch (e) {
-      await h.evidence(page, 'replay-help-then-back-fail');
-      throw e;
-    } finally {
-      release();
-      await ctx.close();
-    }
+    for (const backs of [1, 2]) await helpThenBack(h, backs);
   },
 
   async 'replay-reload'(h) {

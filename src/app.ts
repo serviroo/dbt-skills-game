@@ -139,7 +139,7 @@ export async function runApp(stage: Stage | null, makeStage: () => Stage | null)
     stage ??= makeStage();
     help = await intro(stage, audio, state, replay);
   }
-  await enterDaily(stage, audio, state, help);
+  await enterDaily(stage, audio, state, help, replay);
 }
 
 /**
@@ -255,7 +255,13 @@ async function playIntro(stage: Stage, audio: AppAudio | null, left: AbortSignal
   }
 }
 
-async function enterDaily(stage: Stage | null, audio: AppAudio | null, state: AppState, help: boolean) {
+async function enterDaily(
+  stage: Stage | null,
+  audio: AppAudio | null,
+  state: AppState,
+  help: boolean,
+  back: AbortSignal | null,
+) {
   // the companion is DOM only: stop the WebGL loop to save battery and keep UI timing on the page clock
   useRealClock();
   if (stage && !params.capture) stage.stop();
@@ -270,8 +276,10 @@ async function enterDaily(stage: Stage | null, audio: AppAudio | null, state: Ap
   const k = Object.keys(dailyMods)[0];
   if (!k) return;
   const m = (await dailyMods[k]().catch(offerReload)) as { mountDaily:(r: HTMLElement, o: unknown) => { unmount(): void; settled: Promise<void>; route(): string } };
+  const helpLeft = help && !!back?.aborted;
+  if (helpLeft) audio?.engine?.quiet(false, SCORE.safeBackSec);
   const daily = m.mountDaily(root, {
-    help,
+    help: help && !helpLeft,
     onReplay: (here: unknown, replay: unknown) => {
       if (replaying()) return;
       state.seenCutscene = true;
