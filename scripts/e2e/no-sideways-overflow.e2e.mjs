@@ -148,7 +148,8 @@ const width = (page, sheet = null) =>
       range.selectNodeContents(n);
       const r = range.getBoundingClientRect();
       const left = clipper.getBoundingClientRect().left + clipper.clientLeft;
-      if (r.width && (r.left < left - 0.5 || r.right > left + clipper.clientWidth + 0.5)) cutAtSide.push(`"${n.textContent.trim().slice(0, 24)}" in ${label(p)}, cut by ${label(clipper)}`);
+      const cut = r.width && (r.left < left - 0.5 || r.right > left + clipper.clientWidth + 0.5);
+      if (cut) cutAtSide.push(`"${n.textContent.trim().slice(0, 24)}" in ${label(p)}, cut by ${label(clipper)}`);
     }
     const box = sheet && document.querySelector(sheet);
     const inner = box ? [box, ...box.querySelectorAll('*')].filter((e) => getComputedStyle(e).overflowX !== 'visible' && e.scrollWidth > e.clientWidth + 1 && e.checkVisibility() && !e.closest('.dq-sr')).map((e) => `${label(e)} ${e.scrollWidth - e.clientWidth} px wider than it shows`) : [];
@@ -186,7 +187,10 @@ async function breaksWithNoHyphenSeen(page, pixelReader, scope = 'body') {
       return !!a && !!b && b.top > a.top + a.height / 2;
     });
     const movedByScrollIntoView = new Set([document.scrollingElement]);
-    for (const s of marks) for (let p = s.parentElement; p; p = p.parentElement) if (p.scrollHeight > p.clientHeight || p.scrollWidth > p.clientWidth) movedByScrollIntoView.add(p);
+    const scrolls = (e) => e.scrollHeight > e.clientHeight || e.scrollWidth > e.clientWidth;
+    for (const s of marks) {
+      for (let p = s.parentElement; p; p = p.parentElement) if (scrolls(p)) movedByScrollIntoView.add(p);
+    }
     window.__marks = { marks, scrollsToRestore: [...movedByScrollIntoView].map((e) => [e, e.scrollTop, e.scrollLeft]) };
     return marks.length;
   }, scope);
@@ -207,7 +211,9 @@ async function breaksWithNoHyphenSeen(page, pixelReader, scope = 'body') {
       const r = s.getBoundingClientRect();
       const size = parseFloat(getComputedStyle(s).fontSize);
       const [x, y] = [Math.max(r.left - size / 2, 0), Math.max(r.top, 0)];
-      return { x, y, width: Math.min(r.right + size, innerWidth) - x, height: Math.min(r.bottom, innerHeight) - y, size, word: `${s.previousSibling.textContent}|${s.nextSibling.textContent}` };
+      const width = Math.min(r.right + size, innerWidth) - x;
+      const height = Math.min(r.bottom, innerHeight) - y;
+      return { x, y, width, height, size, word: `${s.previousSibling.textContent}|${s.nextSibling.textContent}` };
     }, i);
     let ink = 0;
     if (strokeArea.width >= 1 && strokeArea.height >= 1) {
@@ -241,14 +247,19 @@ async function areaThatDiffers(pngs) {
     }),
   );
   let n = 0;
-  for (let k = 0; k < a.length; k += 4) if (Math.max(Math.abs(a[k] - b[k]), Math.abs(a[k + 1] - b[k + 1]), Math.abs(a[k + 2] - b[k + 2])) > 40) n++;
+  for (let k = 0; k < a.length; k += 4) {
+    if (Math.max(Math.abs(a[k] - b[k]), Math.abs(a[k + 1] - b[k + 1]), Math.abs(a[k + 2] - b[k + 2])) > 40) n++;
+  }
   return n / devicePixelRatio ** 2;
 }
 
 async function weekKeyboardReach(page) {
-  if ((await page.getByRole('region', { name: 'Past seven days', exact: true }).count()) !== 1) return 'is not a region named Past seven days';
+  const regions = await page.getByRole('region', { name: 'Past seven days', exact: true }).count();
+  if (regions !== 1) return 'is not a region named Past seven days';
   const before = await page.evaluate(() => {
-    const stops = [...document.querySelectorAll('a[href], button, input, select, textarea, [tabindex]')].filter((e) => e.tabIndex >= 0 && !e.disabled && e.checkVisibility());
+    const stops = [...document.querySelectorAll('a[href], button, input, select, textarea, [tabindex]')].filter(
+      (e) => e.tabIndex >= 0 && !e.disabled && e.checkVisibility(),
+    );
     const at = stops.indexOf(document.querySelector('.dq-week'));
     if (at > 0) stops[at - 1].focus();
     return at > 0;
@@ -257,19 +268,23 @@ async function weekKeyboardReach(page) {
   await page.keyboard.press('Tab');
   return page.evaluate(() => {
     const e = document.activeElement;
-    if (!e?.matches('.dq-week')) return `is skipped: Tab lands on ${e?.tagName.toLowerCase()}.${[...(e?.classList ?? [])].join('.')}`;
+    const name = (el) => `${el?.tagName.toLowerCase()}.${[...(el?.classList ?? [])].join('.')}`;
+    if (!e?.matches('.dq-week')) return `is skipped: Tab lands on ${name(e)}`;
     const cs = getComputedStyle(e);
     const ring = parseFloat(cs.outlineWidth);
-    if (!e.matches(':focus-visible') || cs.outlineStyle === 'none' || ring < 2) return `shows no focus ring (${cs.outlineStyle} ${cs.outlineWidth})`;
+    const noRing = !e.matches(':focus-visible') || cs.outlineStyle === 'none' || ring < 2;
+    if (noRing) return `shows no focus ring (${cs.outlineStyle} ${cs.outlineWidth})`;
     e.scrollIntoView({ block: 'center', behavior: 'instant' });
     const r = e.getBoundingClientRect();
     const out = ring + parseFloat(cs.outlineOffset);
+    const outer = { left: r.left - out, right: r.right + out, top: r.top - out, bottom: r.bottom + out };
+    const edges = (b) => [b.left, b.right, b.top, b.bottom].map(Math.round);
     for (let p = e.parentElement; p && p !== document.body; p = p.parentElement) {
       const ps = getComputedStyle(p);
       const q = p.getBoundingClientRect();
-      const cutsSides = ps.overflowX !== 'visible' && (r.left - out < q.left - 0.5 || r.right + out > q.right + 0.5);
-      const cutsTopOrBottom = /hidden|clip/.test(ps.overflowY) && (r.top - out < q.top - 0.5 || r.bottom + out > q.bottom + 0.5);
-      if (cutsSides || cutsTopOrBottom) return `has its focus ring cut by ${p.tagName.toLowerCase()}.${[...p.classList].join('.')} (${[r.left - out, r.right + out, r.top - out, r.bottom + out].map(Math.round)} in ${[q.left, q.right, q.top, q.bottom].map(Math.round)})`;
+      const cutsSides = ps.overflowX !== 'visible' && (outer.left < q.left - 0.5 || outer.right > q.right + 0.5);
+      const cutsEnds = /hidden|clip/.test(ps.overflowY) && (outer.top < q.top - 0.5 || outer.bottom > q.bottom + 0.5);
+      if (cutsSides || cutsEnds) return `has its focus ring cut by ${name(p)} (${edges(outer)} in ${edges(q)})`;
     }
     return '';
   });
@@ -323,7 +338,9 @@ function sweep(phone, { textAt200 = false } = {}) {
     const now = Date.now();
     const save = fullSave(now);
     const you = JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: save.created, companionAt: save.created });
-    const { ctx, page, errors } = await h.open({ [h.SAVE]: JSON.stringify(save), [h.YOU]: you, 'dbt.app.v1': h.SEEN }, '?mute', zoomed, undefined, textAt200 ? { isMobile: true, hasTouch: true } : {});
+    const stored = { [h.SAVE]: JSON.stringify(save), [h.YOU]: you, 'dbt.app.v1': h.SEEN };
+    const phoneLike = textAt200 ? { isMobile: true, hasTouch: true } : {};
+    const { ctx, page, errors } = await h.open(stored, '?mute', zoomed, undefined, phoneLike);
     const pixelReader = await ctx.newPage();
     try {
       await h.reachHub(page);
@@ -356,7 +373,8 @@ function sweep(phone, { textAt200 = false } = {}) {
         if (w.moth) bad.push('the moth is over the badge');
         if (bad.length) failed.push(`${size} ${where}: ${bad.join('; ')} on a ${w.vw} px screen; past the edge: ${w.past.join(', ') || 'nothing found'}`);
         if (words) for (const f of await cutShort(page, { scope: sheet ? `${sheet} *` : '#dq-main *' })) failed.push(`${size} ${where}: ${f}`);
-        await h.shot(page, `wide-${phone.width}x${phone.height}${textAt200 ? '-text' : ''}-${where.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`);
+        const slug = where.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+        await h.shot(page, `wide-${phone.width}x${phone.height}${textAt200 ? '-text' : ''}-${slug}`);
       };
       const go = async (route) => {
         await page.evaluate((r) => window.__daily.go(r), route);
@@ -382,8 +400,6 @@ function sweep(phone, { textAt200 = false } = {}) {
         await page.waitForFunction(() => window.__daily.route.name === 'shadows', null, { timeout: 10000 });
         await check('Night Watch, unzoomed');
         await page.setViewportSize(zoomed);
-      }
-      if (!textAt200) {
         await withoutContainerQueries(page);
         for (const [where, route] of SCREENS.filter(([name]) => NARROWED_BY_CONTAINER_QUERIES.includes(name))) {
           await go(route);

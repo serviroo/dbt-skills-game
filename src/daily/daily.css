@@ -3078,7 +3078,6 @@ textarea.dq-input {
   color: var(--t-dim);
 }
 .dq-liblist {
-  container-type: inline-size;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -3258,40 +3257,6 @@ textarea.dq-input {
 }
 .dq-libsec--fav .dq-libsec-ic {
   color: var(--mint);
-}
-/* a phone at 200% zoom, held either way: a skill's names take the whole row, its minutes and arrow the line under
-   them, and its pin a strip under the row, so no name is squeezed narrower than its words */
-@container (max-width: 27ch) {
-  .dq-libitem {
-    flex-wrap: wrap;
-  }
-  .dq-libitem .dq-librow {
-    flex-basis: 100%;
-    grid-template-columns: minmax(0, 1fr) 20px;
-    padding: 11px 10px;
-  }
-  .dq-librow-n,
-  .dq-librow-r {
-    grid-column: 1 / -1;
-  }
-  .dq-librow-r {
-    letter-spacing: 0.06em;
-  }
-  .dq-librow-m {
-    grid-column: 1;
-    grid-row: 3;
-  }
-  .dq-librow-c {
-    grid-column: 2;
-    grid-row: 3;
-  }
-  .dq-libpin {
-    width: 100%;
-    justify-items: end;
-    padding: 0 10px;
-    border-left: 0;
-    border-top: 1px solid rgba(62, 100, 133, 0.3);
-  }
 }
 
 .dq-diary-grid,
@@ -4799,7 +4764,6 @@ textarea.dq-input {
   padding-bottom: 48px;
 }
 .dq-artentries {
-  container-type: inline-size;
   display: grid;
   gap: 12px;
 }
@@ -4844,15 +4808,6 @@ textarea.dq-input {
   display: block;
   width: 92px;
   height: auto;
-}
-/* a phone zoomed to 200%: each entry's picture gets a row of its own above its words */
-@container (max-width: 24ch) {
-  .dq-artentry {
-    grid-template-columns: minmax(0, 1fr) 20px;
-  }
-  .dq-artentry-art {
-    grid-column: 1 / -1;
-  }
 }
 .dq-artentry-txt {
   display: flex;
@@ -4907,7 +4862,6 @@ textarea.dq-input {
   margin-top: 10px;
 }
 .dq-art-pages {
-  container-type: inline-size;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -4918,11 +4872,6 @@ textarea.dq-input {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px 12px;
   align-items: start;
-}
-@container (max-width: 24ch) {
-  .dq-gallery {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 .dq-galitem {
   display: flex;

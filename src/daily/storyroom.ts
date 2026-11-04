@@ -19,6 +19,7 @@ import { creditStory, STORY_CAP, storyStore, type Card, type CardMode, type Chap
 import { storyFromText, storyToText, type StoryText } from './storytext';
 import { keepTextSize, textSize } from './text-size';
 import { breakable, btn, h, keptWhole, p, segmented, shareOrSave, typo } from './ui';
+import { storyHead } from './page-head';
 
 export const STORY = {
   title: 'Story Room',
@@ -127,9 +128,6 @@ const marked = (text: string, at: Span[], place?: Span, shown = (from: number, t
   return out;
 };
 const SEARCH_IC = '<svg class="dq-ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="5.5"/><path d="M14.6 14.6l4.6 4.6"/></svg>';
-
-const pageHead = (title: string, sub: string, extra?: HTMLElement | null) =>
-  h('header', { class: 'dq-pagehead st-head' }, h('div', { class: 'st-head-row' }, keptWhole(h('h1', { class: 'dq-h1', 'data-focus': '', text: title })), extra ?? null), p(sub, 'dq-text dq-pagesub'));
 
 // ---------------- the shelf ----------------
 export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut {
@@ -274,7 +272,7 @@ export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut 
   const el = h(
     'div',
     { class: 'dq-page st-page st-shelfpage' },
-    pageHead(STORY.title, STORY.sub, xp ? h('span', { class: 'dq-xp st-xp', text: `+${xp} XP` }) : null),
+    storyHead(STORY.title, STORY.sub, xp ? h('span', { class: 'dq-xp st-xp', text: `+${xp} XP` }) : null),
     top,
     fileIn,
     bringBox,

@@ -154,6 +154,11 @@ export function keptWhole<T extends HTMLElement>(root: T) {
   return root;
 }
 
+export function wholeText(el: HTMLElement, text: string) {
+  el.textContent = text;
+  setWhole(el);
+}
+
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 /** Display copy to HTML: escapes, typographic quotes, **bold** as Lantern emphasis. */
 export function md(s: string) {

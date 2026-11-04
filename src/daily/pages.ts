@@ -14,7 +14,7 @@ import { artStore } from './artstore';
 import { storyStore } from './storystore';
 import { addDays, cleanName, dayKey, fieldKey, fieldTimes, isSkillId, nextPlace, ROW_CAP, uid, type DiaryEntry, type Ev, type Item, type Person, type State, type Store } from './store';
 import { entryList, type EntryOpts } from './entries';
-import { btn, copyText, field, focusWhole, h, keptWhole, md, p, panel, place, quotes, redrawn, scrollerOf, segmented, shareOrSave, toggle, typo } from './ui';
+import { btn, copyText, field, focusWhole, h, md, p, panel, place, quotes, redrawn, scrollerOf, segmented, shareOrSave, toggle, typo } from './ui';
 import type { KeepStatus } from '../pwa/register';
 import { volumeSliders } from '../ui/volume';
 import { STEALTH, STEALTH_LINES } from '../content/stealth-lines';
@@ -32,8 +32,7 @@ import { crystalContent, makeCrystal, readCrystal, restorePreferences, restoreUn
 import { restoreSkillDrafts } from './skilldraft';
 import { supportListsCopy } from './support-lists';
 import { keepTextSize, textSize } from './text-size';
-
-const pageHead = (title: string, sub?: string) => h('header', { class: 'dq-pagehead' }, keptWhole(h('h1', { class: 'dq-h1', 'data-focus': '', text: title })), sub ? p(sub, 'dq-text dq-pagesub') : null);
+import { pageHead, restHead } from './page-head';
 
 // ---------------- Stealth room (the Rest room) ----------------
 /** The Stealth title is never stored separately: any rest event means it is unlocked. The first one carries its id. */
@@ -171,7 +170,7 @@ export function restScreen(app: App): ScreenOut {
   });
   const slime = new Slime({ reduced: () => app.reduced(), label: STEALTH.slimeLabel, onPoke: () => app.sound('bubble') });
   el.append(
-    h('header', { class: 'dq-pagehead dq-st-head' }, h('p', { class: 'dq-st-kicker', text: STEALTH.kicker }), keptWhole(h('h1', { class: 'dq-h1', 'data-focus': '', text: STEALTH.title })), p(STEALTH.sub, 'dq-text dq-pagesub dq-st-sub')),
+    restHead(STEALTH.kicker, STEALTH.title, STEALTH.sub),
     title,
     stage,
     h(

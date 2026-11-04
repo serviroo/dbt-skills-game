@@ -4,7 +4,8 @@ import { CALM, css, WINDOW } from '../motion/tokens';
 import { LINE_COPY } from '../content/daily-lines';
 import type { App, ScreenOut } from './app';
 import { icon } from './art';
-import { btn, h, keptWhole, p, panel, radioKeys, redrawn, typo } from './ui';
+import { btn, h, p, panel, radioKeys, redrawn, typo } from './ui';
+import { pageHead } from './page-head';
 import type { LineEntry } from './store';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -142,7 +143,7 @@ export function linesScreen(app: App): ScreenOut {
   const el = h(
     'div',
     { class: 'dq-page dq-lineslog' },
-    h('header', { class: 'dq-pagehead' }, keptWhole(h('h1', { class: 'dq-h1', 'data-focus': '', text: LINE_COPY.history })), p(LINE_COPY.historySub, 'dq-text dq-pagesub')),
+    pageHead(LINE_COPY.history, LINE_COPY.historySub),
     log.node,
   );
   const off = app.store.onChange(log.update);
