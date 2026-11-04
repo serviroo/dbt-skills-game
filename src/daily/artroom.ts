@@ -822,7 +822,7 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     }
   }));
 
-  void (async () => {
+  const ready = (async () => {
     const watch = opening(as.link);
     await tab.ready;
     if (left) return;
@@ -892,6 +892,7 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     title: kind === 'ally' ? ART.allyTitle : ART.todayTitle,
     mode: 'sub',
     bubbles: [0, 0],
+    ready,
     keep: (): DrawKept => ({
       get id() {
         return wrote ? recId : (editId ?? null);
@@ -957,7 +958,7 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
   });
   let offChange = () => {};
   const el = h('div', { class: 'dq-page dq-piece' }, h('h1', { class: 'dq-sr', 'data-focus': '', text: 'Your page' }), body);
-  void (async () => {
+  const ready = (async () => {
     const watch = opening(as.link);
     let rec = await as.get(id);
     const on = !!rec && (await as.isShown(id));
@@ -1104,5 +1105,12 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
       ),
     );
   })();
-  return { el, title: 'Your page', mode: 'sub', bubbles: [1.6, 0.6], leave: () => { removed = true; endRename(); off(); offShown(); offChange(); } };
+  const leave = () => {
+    removed = true;
+    endRename();
+    off();
+    offShown();
+    offChange();
+  };
+  return { el, title: 'Your page', mode: 'sub', bubbles: [1.6, 0.6], ready, leave };
 }
