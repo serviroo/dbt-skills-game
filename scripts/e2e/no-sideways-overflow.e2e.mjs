@@ -111,6 +111,17 @@ const width = (page, sheet = null) =>
       const r = range.getBoundingClientRect();
       if (out(r) && !past.some((x) => x.startsWith(label(p)))) past.push(`"${n.textContent.trim().slice(0, 24)}" in ${label(p)} ${Math.round(r.left)}..${Math.round(r.right)}`);
     }
+    const fieldsCut = [];
+    const measure = document.createElement('canvas').getContext('2d');
+    for (const f of document.querySelectorAll('#dq-main input:not([type=range]), #dq-main select')) {
+      if (!f.checkVisibility()) continue;
+      const cs = getComputedStyle(f);
+      const shown = f instanceof HTMLSelectElement ? f.selectedOptions[0]?.text : f.value || f.placeholder;
+      measure.font = cs.font;
+      const room = f.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      const cut = shown && measure.measureText(shown).width > room + 1;
+      if (cut) fieldsCut.push(`"${shown.slice(0, 24)}" in ${label(f)}`);
+    }
     const cutAtSide = [];
     const main = document.querySelector('#dq-main');
     const texts = main && document.createTreeWalker(main, NodeFilter.SHOW_TEXT);
@@ -142,6 +153,7 @@ const width = (page, sheet = null) =>
       vw: innerWidth,
       past: past.slice(0, 6),
       cutAtSide,
+      fieldsCut,
       inner,
       under: !!box && box.getBoundingClientRect().top < bar - 0.5,
       cut,
@@ -150,8 +162,8 @@ const width = (page, sheet = null) =>
     };
   }, sheet);
 
-async function breaksWithNoHyphenSeen(page, pixelReader, scope = 'body') {
-  const count = await page.evaluate((scope) => {
+async function softBreaks(page, pixelReader, scope = 'body') {
+  const { count, pastOwnHyphen } = await page.evaluate((scope) => {
     const screenReaderOnly = (e) => !!e.closest('.dq-sr') || getComputedStyle(e).clipPath === 'inset(50%)';
     const lines = (t) => {
       const range = document.createRange();
@@ -169,7 +181,26 @@ async function breaksWithNoHyphenSeen(page, pixelReader, scope = 'body') {
       for (let p = s.parentElement; p; p = p.parentElement) if (scrolls(p)) movedByScrollIntoView.add(p);
     }
     window.__marks = { marks, scrollsToRestore: [...movedByScrollIntoView].map((e) => [e, e.scrollTop, e.scrollLeft]) };
-    return marks.length;
+    const ownHyphenOnLine = (s) => {
+      const line = lines(s.previousSibling).at(-1);
+      const before = s.closest('dq-words') ?? s.parentElement;
+      const walk = document.createTreeWalker(before, NodeFilter.SHOW_TEXT);
+      let hyphen = null;
+      for (let n; (n = walk.nextNode()) && s.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_PRECEDING; ) {
+        for (let i = 0; i < n.data.length; i++) {
+          if (/\s/.test(n.data[i])) hyphen = null;
+          else if (n.data[i] === '-') hyphen = [n, i];
+        }
+      }
+      if (!hyphen) return false;
+      const range = document.createRange();
+      range.setStart(hyphen[0], hyphen[1]);
+      range.setEnd(hyphen[0], hyphen[1] + 1);
+      const at = range.getClientRects()[0];
+      return !!at && Math.abs(at.top - line.top) < line.height / 2;
+    };
+    const word = (s) => `${s.previousSibling.textContent}|${s.nextSibling.textContent}`;
+    return { count: marks.length, pastOwnHyphen: marks.filter(ownHyphenOnLine).map(word) };
   }, scope);
   const out = [];
   const shown = (i, clear) =>
@@ -209,7 +240,7 @@ async function breaksWithNoHyphenSeen(page, pixelReader, scope = 'body') {
     for (const [e, top, left] of window.__marks.scrollsToRestore) e.scrollTo(left, top);
     delete window.__marks;
   });
-  return out;
+  return { unseen: out, pastOwnHyphen };
 }
 
 async function areaThatDiffers(pngs) {
@@ -340,8 +371,11 @@ function sweep(phone, { textAt200 = false } = {}) {
         if (w.dq > 0) bad.push(`the companion scrolls ${w.dq} px sideways`);
         if (w.past.length) bad.push('something reaches past the edge');
         if (w.cutAtSide.length) bad.push(`words cut at the side: ${w.cutAtSide.join(', ')}`);
-        const marks = await breaksWithNoHyphenSeen(page, pixelReader, sheet ?? 'body');
-        if (marks.length) bad.push(`words broken with no hyphen to see: ${marks.join(', ')}`);
+        if (w.fieldsCut.length) bad.push(`fields cut their own words: ${w.fieldsCut.join(', ')}`);
+        const breaks = await softBreaks(page, pixelReader, sheet ?? 'body');
+        if (breaks.unseen.length) bad.push(`words broken with no hyphen to see: ${breaks.unseen.join(', ')}`);
+        const past = breaks.pastOwnHyphen;
+        if (past.length) bad.push(`words broken past their own hyphen: ${past.join(', ')}`);
         const safe = await reach(page, '.dq-top .dq-safe', { below: false, optional: true });
         if (safe) bad.push(`the Safe Zone button is out of reach: ${safe}`);
         if (w.inner.length) bad.push(`inside the sheet: ${w.inner.join(', ')}`);
@@ -670,7 +704,7 @@ async function emptySlot(h) {
 const NARROW_SCREENS = [
   ['A quiet minute', { name: 'ease' }, ['.dq-ease-panel']],
   ['Art room', { name: 'art' }, ['.dq-artentries', '.dq-art-pages']],
-  ['Library', { name: 'library' }, ['.dq-liblist']],
+  ['Library', { name: 'library' }, ['.dq-liblist', '.dq-libfind']],
 ];
 
 async function narrowLayouts(h) {

@@ -1,5 +1,6 @@
 const NARROW_AT: [selector: string, ch: number][] = [
   ['.dq-ease-panel', 20],
+  ['.dq-libfind', 20],
   ['.dq-artentries', 24],
   ['.dq-art-pages', 24],
   ['.dq-liblist', 27],

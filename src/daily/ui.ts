@@ -113,8 +113,8 @@ export function setWhole(node: Node) {
     if (!t.parentElement || t.parentElement.closest(KEEP_OUT)) continue;
     const parts: (string | Node)[] = [];
     let from = 0;
-    // a word, or a number its no-break spaces hold together
-    for (const m of t.data.matchAll(/\S+(?:\u00A0\S+)*/g)) {
+    // a word up to and with its own hyphen, or a number its no-break spaces hold together
+    for (const m of t.data.matchAll(/[^\s-]+(?:\u00A0[^\s-]+)*-*|-+/g)) {
       // it breaks at a soft hyphen in a run of letters, or after a no-break space
       const breaks = new Map<number, () => Node>();
       for (const r of m[0].matchAll(/\p{L}+/gu)) for (const k of breaksIn(r[0], r.index)) breaks.set(k, shy);

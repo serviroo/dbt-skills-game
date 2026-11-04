@@ -13,6 +13,10 @@
 .dq-artentries[data-narrow] .dq-artentry-art {
   grid-column: 1 / -1;
 }
+.dq-libfind[data-narrow] .dq-libf {
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 6px;
+}
 .dq-art-pages[data-narrow] .dq-gallery {
   grid-template-columns: minmax(0, 1fr);
 }
