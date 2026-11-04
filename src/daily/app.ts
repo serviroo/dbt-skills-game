@@ -102,7 +102,7 @@ const buzzLeft = (pattern: readonly number[], ms: number) => {
 };
 
 export interface DailyOpts {
-  onReplay(entry: unknown): void;
+  onReplay(here: unknown, replay: unknown): void;
   /** The player asked for help in the intro: the companion opens on the Safe Zone, with Home's entry behind it. */
   help?: boolean;
   sound?: { play(cue: string): void; setMuted?(muted: boolean): void; quiet?(on: boolean): void };
@@ -359,8 +359,8 @@ export class App {
     // Home is always the companion's first history entry. Opened again on a later one (a reload),
     // it goes back to that first entry: the page opens on Home and nothing is credited again.
     const s: unknown = history.state;
-    const from = !help && isEntry(s) && s.replayed && s.i > 0 && this.known(s.route) ? s.route : null;
-    const to = from ? 1 : 0;
+    const from = isEntry(s) && s.replayed && s.i > 0 && this.known(s.route) ? s : null;
+    const to = !from ? 0 : help ? from.i : 1;
     if (isEntry(s) && s.i > to) {
       this.travelling = true;
       try {
@@ -370,8 +370,9 @@ export class App {
       }
     }
     if (from) {
-      const key = this.write('replace', { dq: 1, i: 1, key: this.newKey(), route: from }).key;
-      return this.show(from, { again: false, key, hand: REPLAYED });
+      const route: Route = help ? { name: 'safe' } : from.route;
+      const key = this.write('replace', { dq: 1, i: to, key: this.newKey(), route }).key;
+      return this.show(route, { again: false, key, hand: help ? undefined : REPLAYED });
     }
     this.write('replace', HOME);
     if (help) return this.show({ name: 'safe' }, { again: false, key: this.write('push', { dq: 1, i: 1, key: this.newKey(), route: { name: 'safe' } }).key });
@@ -943,8 +944,7 @@ export class App {
 
   replay() {
     const e: Entry = { ...this.trail[this.at], replayed: true };
-    this.write('replace', e);
-    this.later(() => this.opts.onReplay({ ...e, i: e.i + 1, key: this.newKey(), sheet: true }));
+    this.later(() => this.opts.onReplay(e, { ...e, i: e.i + 1, key: this.newKey(), sheet: true }));
   }
 
   /** The Lantern button, a moment's Done, a removed story: back to where the player was before this visit. */

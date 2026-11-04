@@ -46,9 +46,10 @@ async function settings(h, viewport) {
   return { ctx, page, errors, before: new URL(page.url()).search };
 }
 
-async function replay(h, page, tag, started) {
+async function replay(h, page, tag, { started, double } = {}) {
   await page.evaluate(() => sessionStorage.removeItem('replay-history'));
-  await page.getByRole('button', { name: 'Replay cutscene' }).click();
+  const button = page.getByRole('button', { name: 'Replay cutscene' });
+  await (double ? button.dblclick() : button.click());
   await (started ?? page.getByRole('button', { name: 'Skip intro' }).waitFor({ timeout: 30000 }));
   const log = await page.evaluate(() => sessionStorage.getItem('replay-history')?.trim());
   h.expect(log === 'push', `${tag}: Replay cutscene changed history as "${log}", not one push inside the tap`);
@@ -69,7 +70,7 @@ async function move(h, page, step, to, moves) {
     window.__moves = 0;
   });
   await (step === 'back' ? page.goBack({ waitUntil: 'commit' }) : page.goForward({ waitUntil: 'commit' }));
-  await h.until(page, (n) => window.__moves >= n, moves);
+  await h.until(page, (n) => !window.__samePage || window.__moves >= n, moves);
   const settled = (n) => document.querySelector('.title-screen') || document.querySelector('.dq')?.dataset.screen === n;
   await h.until(page, settled, to).catch(() => undefined);
   return page.evaluate(shown).catch(() => 'a new page');
@@ -114,7 +115,7 @@ async function backWhileLoading(h, file) {
       reached();
       return held.then(() => r.fallback());
     });
-    await replay(h, page, tag, asked);
+    await replay(h, page, tag, { started: asked });
     await page.goBack({ waitUntil: 'commit' });
     release();
     await backOnSettings(h, page, before, tag);
@@ -134,7 +135,7 @@ export const scenarios = {
   async 'replay-skip-reload'(h) {
     const { ctx, page, errors, before } = await settings(h);
     try {
-      await replay(h, page, 'skip');
+      await replay(h, page, 'skip', { double: true });
       await h.shot(page, 'skip-replaying');
       await page.getByRole('button', { name: 'Skip intro' }).click();
       await backOnSettings(h, page, before, 'skip');
@@ -181,6 +182,31 @@ export const scenarios = {
       h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
     } catch (e) {
       await h.evidence(page, 'replay-back-fail');
+      throw e;
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'replay-help'(h) {
+    const { ctx, page, errors, before } = await settings(h);
+    try {
+      await replay(h, page, 'help');
+      await page.locator('.ui-safe').click();
+      const at = await h.until(page, screenOf, null, { timeout: 30000 });
+      h.expect(at === 'safe', `help: the Safe Zone button in the replay opened ${at}`);
+      const pushes = await page.evaluate(() => window.__pushes);
+      h.expect(pushes === 0, `help: the page playing the replay added ${pushes} history entries for the Safe Zone`);
+      const search = new URL(page.url()).search;
+      h.expect(search === before, `help: the address is ${search} in the Safe Zone, not ${before}`);
+      await h.shot(page, 'help-safe');
+      await page.goBack({ waitUntil: 'commit' });
+      await h.until(page, () => document.querySelector('.dq')?.dataset.screen !== 'safe');
+      const back = await page.evaluate(screenOf);
+      h.expect(back === 'settings', `help: Back from the Safe Zone showed ${back}, not Settings`);
+      h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
+    } catch (e) {
+      await h.evidence(page, 'replay-help-fail');
       throw e;
     } finally {
       await ctx.close();

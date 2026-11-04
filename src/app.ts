@@ -163,7 +163,7 @@ async function intro(stage: Stage | null, audio: AppAudio | null, state: AppStat
     };
     const offButtons = introWays(take);
     const back = () => take('skip');
-    if (params.cutscene) window.addEventListener('popstate', back);
+    if (replaying()) window.addEventListener('popstate', back);
     offWays = () => {
       offButtons();
       window.removeEventListener('popstate', back);
@@ -178,7 +178,7 @@ async function intro(stage: Stage | null, audio: AppAudio | null, state: AppStat
     location.reload();
     await new Promise(() => undefined);
   }
-  if (params.cutscene) history.replaceState(history.state, '', address(false));
+  if (replaying()) history.replaceState(history.state, '', address(false));
   return end === 'safe';
 }
 
@@ -260,10 +260,12 @@ async function enterDaily(stage: Stage | null, audio: AppAudio | null, state: Ap
   const m = (await dailyMods[k]().catch(offerReload)) as { mountDaily:(r: HTMLElement, o: unknown) => { unmount(): void; settled: Promise<void>; route(): string } };
   const daily = m.mountDaily(root, {
     help,
-    onReplay: (entry: unknown) => {
+    onReplay: (here: unknown, replay: unknown) => {
+      if (replaying()) return;
       state.seenCutscene = true;
       save(state);
-      history.pushState(entry, '', address(true));
+      history.replaceState(here, '');
+      history.pushState(replay, '', address(true));
       location.reload();
     },
     sound: audio

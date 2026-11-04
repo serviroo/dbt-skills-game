@@ -639,6 +639,7 @@
   "replay-back": [3],
   "replay-back-while-loading": [4],
   "replay-end-card-reload": [8],
+  "replay-help": [3],
   "replay-skip-reload": [3],
   "repo-copies-bring-every-module-they-load": [1],
   "restore-drafts-twice": [10, 10],
