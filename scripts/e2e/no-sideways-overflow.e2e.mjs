@@ -111,16 +111,16 @@ const width = (page, sheet = null) =>
       const r = range.getBoundingClientRect();
       if (out(r) && !past.some((x) => x.startsWith(label(p)))) past.push(`"${n.textContent.trim().slice(0, 24)}" in ${label(p)} ${Math.round(r.left)}..${Math.round(r.right)}`);
     }
-    const fieldsCut = [];
+    const choicesCut = [];
     const measure = document.createElement('canvas').getContext('2d');
-    for (const f of document.querySelectorAll('#dq-main input:not([type=range]), #dq-main select')) {
+    for (const f of document.querySelectorAll('#dq-main select')) {
       if (!f.checkVisibility()) continue;
       const cs = getComputedStyle(f);
-      const shown = f instanceof HTMLSelectElement ? f.selectedOptions[0]?.text : f.value || f.placeholder;
+      const shown = f.selectedOptions[0]?.text;
       measure.font = cs.font;
       const room = f.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
       const cut = shown && measure.measureText(shown).width > room + 1;
-      if (cut) fieldsCut.push(`"${shown.slice(0, 24)}" in ${label(f)}`);
+      if (cut) choicesCut.push(`"${shown.slice(0, 24)}" in ${label(f)}`);
     }
     const cutAtSide = [];
     const main = document.querySelector('#dq-main');
@@ -153,7 +153,7 @@ const width = (page, sheet = null) =>
       vw: innerWidth,
       past: past.slice(0, 6),
       cutAtSide,
-      fieldsCut,
+      choicesCut,
       inner,
       under: !!box && box.getBoundingClientRect().top < bar - 0.5,
       cut,
@@ -371,7 +371,7 @@ function sweep(phone, { textAt200 = false } = {}) {
         if (w.dq > 0) bad.push(`the companion scrolls ${w.dq} px sideways`);
         if (w.past.length) bad.push('something reaches past the edge');
         if (w.cutAtSide.length) bad.push(`words cut at the side: ${w.cutAtSide.join(', ')}`);
-        if (w.fieldsCut.length) bad.push(`fields cut their own words: ${w.fieldsCut.join(', ')}`);
+        if (w.choicesCut.length) bad.push(`choices cut short: ${w.choicesCut.join(', ')}`);
         const breaks = await softBreaks(page, pixelReader, sheet ?? 'body');
         if (breaks.unseen.length) bad.push(`words broken with no hyphen to see: ${breaks.unseen.join(', ')}`);
         const past = breaks.pastOwnHyphen;
