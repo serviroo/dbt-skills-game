@@ -343,7 +343,7 @@ def interp(vals, n):
     return out
 
 
-def tube_mesh(pts, r, n=8, closed=False, steps=1, aspect=1.0, front=(0, 0, 1)):
+def tube_mesh(pts, r, n=8, closed=False, steps=1, aspect=1.0, front=(0, 0, 1), caps=True):
     """a tube along pts; r is one radius or one per point"""
     if steps > 1:
         pts = smooth_path(pts, steps)
@@ -357,7 +357,7 @@ def tube_mesh(pts, r, n=8, closed=False, steps=1, aspect=1.0, front=(0, 0, 1)):
     if closed:
         # the seam's two rings face along the loop
         secs[0]['t'] = secs[-1]['t'] = V(pts[1]) - V(pts[-2])
-    v, f, rings = loft(secs, n, cap0=not closed, cap1=not closed)
+    v, f, rings = loft(secs, n, cap0=caps and not closed, cap1=caps and not closed)
     if closed:
         # weld the end ring onto the start ring
         last, first = rings[-1], rings[0]
@@ -432,7 +432,7 @@ def apply_mods(o):
     bpy.data.meshes.remove(old)
 
 
-def unwrap(objs, margin):
+def unwrap(objs, margin, scales=None):
     bpy.ops.object.select_all(action='DESELECT')
     for o in objs:
         o.select_set(True)
@@ -441,6 +441,16 @@ def unwrap(objs, margin):
     bpy.ops.mesh.select_all(action='SELECT')
     bpy.ops.uv.smart_project(angle_limit=math.radians(60), island_margin=0.003, area_weight=0.6, correct_aspect=True,
                              scale_to_bounds=False)
+    if scales:
+        bpy.ops.object.mode_set(mode='OBJECT')
+        for o in objs:
+            k = scales.get(o.name, 1.0)
+            if k != 1.0:
+                for d in o.data.uv_layers.active.data:
+                    d.uv = d.uv * k
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.select_all(action='SELECT')
+        bpy.ops.uv.select_all(action='SELECT')
     bpy.ops.uv.pack_islands(margin=margin, rotate=True)
     bpy.ops.object.mode_set(mode='OBJECT')
 
@@ -546,7 +556,7 @@ def stage(samples, width, height, ground_color, ground_rough):
     return cam
 
 
-def light(name, kind, at, color, power, size=0.5):
+def light(name, kind, at, color, power, size=0.5, aim=(0, 0.9, 0)):
     ld = bpy.data.lights.new(name, kind)
     ld.color = hexrgb(color)
     ld.energy = power
@@ -555,4 +565,4 @@ def light(name, kind, at, color, power, size=0.5):
     lo = bpy.data.objects.new(name, ld)
     bpy.context.scene.collection.objects.link(lo)
     lo.location = B(V(at))
-    lo.rotation_euler = (B(V(0, 0.9, 0)) - lo.location).to_track_quat('-Z', 'Y').to_euler()
+    lo.rotation_euler = (B(V(aim)) - lo.location).to_track_quat('-Z', 'Y').to_euler()

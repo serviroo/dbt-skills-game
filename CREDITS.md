@@ -4,15 +4,17 @@ Everything in The Lantern is original to this project or comes from the permissi
 
 ## 3D character
 
-The hooded wanderer in the intro (`public/models/hero.glb`) is built by `scripts/build-hero.mjs` from three free packs by
-[Quaternius](https://quaternius.com), all released under
+The Wanderer in the intro (`public/models/hero.glb`) is original to this project: modelled, textured and baked in
+[Blender](https://www.blender.org) by `scripts/build-hero.py`, then put on its skeleton and packed for the web by
+`scripts/build-hero.mjs`.
+
+Its skeleton and the way it moves come from two packs by [Quaternius](https://quaternius.com), both released under
 [CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/) (public domain):
 
 | Pack | What's used |
 | --- | --- |
-| Modular Character Outfits - Fantasy [Standard] | The ranger outfit: hood, coat, arms, legs and boots, recoloured to night tones |
-| Universal Base Characters [Standard] | The head, eyes and brows of one base body |
-| Universal Animation Library [Standard] | The idle, walk and spell clips |
+| Modular Character Outfits - Fantasy [Standard] | The skeleton |
+| Universal Animation Library [Standard] | The idle, walk, reach and hold movements |
 
 CC0 doesn't require credit, but Quaternius made this possible, so here it is.
 

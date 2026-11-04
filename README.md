@@ -104,8 +104,9 @@ US, call or text 988, or text HOME to 741741.
 
 ## Credits
 
-The hooded wanderer is built from CC0 packs by Quaternius. Everything else is drawn and synthesised in code (three.js,
-Web Audio), and the fonts are Jost and Bodoni Moda (SIL Open Font License). Full list in [CREDITS.md](CREDITS.md).
+The hooded Wanderer is modelled in Blender for this game and moves with CC0 animations by Quaternius.
+Everything else is drawn and synthesised in code (three.js, Web Audio), and the fonts are Jost and Bodoni Moda
+(SIL Open Font License). Full list in [CREDITS.md](CREDITS.md).
 
 ## License
 
