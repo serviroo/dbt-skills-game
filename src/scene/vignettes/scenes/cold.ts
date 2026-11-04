@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { NIGHT_GLSL, OUT_GLSL, WORLD_VERT } from '../common';
+import { smoothstep } from '../../../core/math';
+import { hash, NIGHT_GLSL, OUT_GLSL, WORLD_VERT } from '../common';
 import type { BuildScene } from '../runtime';
 
 /**
@@ -51,10 +52,6 @@ const WIND = 0.35;
 const MIST_AT = 1.2;
 const MIST_LIFE = 7;
 
-const hash = (n: number) => {
-  const x = Math.sin(n * 12.9898 + 4.1) * 43758.5453;
-  return x - Math.floor(x);
-};
 /** breath k: when it starts, how strong it is, how far off the middle it passes and the way it blows */
 const gustOf = (k: number) => ({
   at: FIRST + k * EVERY + (hash(k) - 0.5) * JITTER,
@@ -73,11 +70,6 @@ function lastGust(t: number) {
  * mist's wisps come from noise that differs from one GPU to the next, and on some a fading wisp lies over the moon
  */
 const STILL_T = gustOf(1).at + MIST_AT + MIST_LIFE + 0.1;
-
-const smooth = (a: number, b: number, x: number) => {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
-};
 
 /**
  * The bowl's profile, from the middle of its base round the foot, up the outside, over the lip and down the inside, and
@@ -470,11 +462,11 @@ export const build: BuildScene = (accent) => {
   const bp = bowlGeo.attributes.position as THREE.BufferAttribute;
   for (let i = 0; i < bp.count; i++) {
     const x = bp.getX(i), y = bp.getY(i), z = bp.getZ(i);
-    const k = smooth(WATER_Y + 0.02, RIM_Y, y);
+    const k = smoothstep(WATER_Y + 0.02, RIM_Y, y);
     if (k <= 0) continue;
     const a = Math.atan2(z, x);
     const w = 1 + 0.007 * k * (Math.sin(2 * a + 0.4) + 0.6 * Math.sin(3 * a + 2.1));
-    bp.setXYZ(i, x * w, y + 0.008 * k * Math.sin(3 * a + 1.3) * smooth(RIM_Y - 0.02, RIM_Y + 0.03, y), z * w);
+    bp.setXYZ(i, x * w, y + 0.008 * k * Math.sin(3 * a + 1.3) * smoothstep(RIM_Y - 0.02, RIM_Y + 0.03, y), z * w);
   }
   const bowl = new THREE.Mesh(
     bowlGeo,
@@ -533,7 +525,10 @@ export const build: BuildScene = (accent) => {
         const strength = o.strength * Math.exp(-Math.max(0, age - (2 * FRONT) / SPEED) / SETTLE);
         g.set(front, strength, o.side, o.way);
         // along its way across the water, as the shader sees it without its ragged edges
-        for (let x = -WATER_R; x <= WATER_R; x += 0.05) breeze = Math.max(breeze, strength * smooth(front + 0.12, front - 0.18, x) * Math.exp(-Math.max(front - x, 0) / 0.7));
+        for (let x = -WATER_R; x <= WATER_R; x += 0.05) {
+          const reach = strength * smoothstep(front + 0.12, front - 0.18, x);
+          breeze = Math.max(breeze, reach * Math.exp(-Math.max(front - x, 0) / 0.7));
+        }
         const life = (age - MIST_AT) / MIST_LIFE;
         const on = life > 0 && life < 1;
         m.set(on ? life : 0, on ? 0.7 + 0.3 * o.strength : 0, -0.25 - 0.3 * Math.cos(o.way), hash(n + 2.3) * 20);

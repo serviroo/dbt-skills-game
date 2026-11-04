@@ -14,6 +14,9 @@ import fs from 'node:fs';
 import sharp from 'sharp';
 import { deviceMotion } from './device-motion.e2e.mjs';
 import { gone, screenshot, until as pageUntil } from './harness.mjs';
+import { after, scenes, steps } from './scene-clock.mjs';
+
+export { after, scenes, steps };
 
 /** how long a scene's stage hides its flat picture while the scene loads (SCENE.waitMs) */
 const WAIT_MS = Number(/\bwaitMs:\s*(\d+)/.exec(fs.readFileSync(new URL('../../src/motion/tokens.ts', import.meta.url), 'utf8'))?.[1]);
@@ -26,7 +29,6 @@ export const DESK = { width: 1440, height: 900 };
 const VIEWS = [['phone', PHONE], ['small', { width: 320, height: 568 }], ['side', SIDE], ['desk', { width: 1280, height: 800 }]];
 
 export const seed = (h) => ({ 'dbt.app.v1': h.SEEN });
-export const scenes = (page) => page.evaluate(() => (window.__scenes ? JSON.parse(JSON.stringify(window.__scenes)) : null));
 /** the scene's last beat and the countdown on screen, read in the same moment */
 export const pair = (page) => page.evaluate(() => ({ s: window.__scenes ? JSON.parse(JSON.stringify(window.__scenes)) : null, num: document.querySelector('.dq-timer-num')?.textContent ?? '' }));
 const wiseRuns = async (h, page) => JSON.parse((await h.ls(page, h.SAVE)) ?? '{"events":[]}').events.filter((e) => e.k === 'skill' && e.skill === 'wise-mind').length;
@@ -217,7 +219,8 @@ export function inStep(h, { s, num }, where) {
   const b = s?.last;
   h.expect(b && !b.still, `${where}: no moving frame has been drawn`);
   if (num === 'Done') return h.expect(b.done && b.e >= b.dur - 0.05, `${where}: the countdown is done but the scene is at ${b.e.toFixed(2)} of ${b.dur} s`);
-  const left = Number(num);
+  const [m, sec] = num.includes(':') ? num.split(':').map(Number) : [0, Number(num)];
+  const left = m * 60 + sec;
   const sceneLeft = b.dur - b.e;
   h.expect(!b.done && sceneLeft > left - 1 - 0.1 && sceneLeft <= left + 0.1, `${where}: the scene is at ${b.e.toFixed(2)} of ${b.dur} s but the countdown says ${num}`);
 }
@@ -393,13 +396,6 @@ export async function looks(h, page, tag, kind, vp, stage = '.dq-timer-stage', {
   h.expect(win.x >= 0 && win.x + win.width <= vp.width, `${kind} ${tag}: the scene window is cut off at the sides`);
   await h.shot(page, `${kind}-${tag}`);
   console.log(`  ${kind} ${tag}: ${s.frames} frames at pixel ratio ${s.dpr}, pixels ${JSON.stringify(p)}`);
-}
-
-/** The scene's probe after jumping the page clock forward `ms` and letting a few frames draw. */
-export async function after(h, page, ms) {
-  // the page clock is stopped: the jump runs the next animation frame once, which draws the scene at the new moment
-  if (ms > 0) await page.clock.fastForward(Math.round(ms));
-  return (await scenes(page)).last;
 }
 
 /**
@@ -1020,8 +1016,11 @@ export const scenarios = {
       await showsStopped(h, page, `wave ${tag}`);
       const first = (await scenes(page)).last;
       await looks(h, page, tag, 'wave', vp, undefined, { stopped: true });
-      const seen = [first, await after(h, page, 0)];
-      while (seen[seen.length - 1].probe.t < 34) seen.push(await after(h, page, 2500));
+      const seen = [first];
+      for await (const at of steps(h, page, `wave ${tag}`, 2500)) {
+        seen.push(at);
+        if (at.probe.t >= 34) break;
+      }
       const at = (a, b) => seen.filter((x) => x.probe.t >= a && x.probe.t <= b).map((x) => x.probe.board);
       const [start, crest, past] = [at(0, 4), at(12, 18), at(26, 34)];
       const ride = seen.map((x) => `${x.probe.t.toFixed(1)}s ${x.probe.board.toFixed(2)}`).join(', ');

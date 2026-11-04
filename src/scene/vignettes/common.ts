@@ -12,6 +12,11 @@ export function rng(seed: number) {
   return () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
 }
 
+export const hash = (n: number) => {
+  const x = Math.sin(n * 12.9898 + 4.1) * 43758.5453;
+  return x - Math.floor(x);
+};
+
 /** Hashes and value noise in one, two and three dimensions, shared by every scene shader. */
 export const NOISE_GLSL = /* glsl */ `
 float hash1(float n) { return fract(sin(n) * 43758.5453); }
