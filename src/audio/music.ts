@@ -549,9 +549,9 @@ interface SectionImpl {
   hush?(at: number): void;
   arm?(): void;
   hit?(at: number): void;
+  opened?(until: number): void;
 }
-/** Builds a section on its held voice (the times its sources and envelopes are given count from the opening) and
- *  returns its score timed from `start`; that runs twice, so it places nothing itself. */
+/** Builds a section on its held voice, its times counting from the opening; the opener it returns runs twice. */
 type Factory = (v: Voice, o: SectionOpts, host: MusicHost) => (start: number) => SectionImpl;
 
 const BEAT = 60 / 72;
@@ -648,11 +648,10 @@ const FACTORIES: Record<Section, Factory> = {
             const c = Math.floor(bi / 2) % 4;
             const [, d, a] = pat[k];
             const g = v.gain(0, pulseBus);
-            const env = v.at(g.gain);
-            env.setValueAtTime(0, t);
-            env.linearRampToValueAtTime(0.036 * a, t + 0.012);
-            env.setValueAtTime(0.036 * a, t + d);
-            env.linearRampToValueAtTime(0, t + d + 0.05);
+            v.at(g.gain).setValueAtTime(0, t);
+            v.at(g.gain).linearRampToValueAtTime(0.036 * a, t + 0.012);
+            v.at(g.gain).setValueAtTime(0.036 * a, t + d);
+            v.at(g.gain).linearRampToValueAtTime(0, t + d + 0.05);
             v.osc('sine', midi(roots[c]), t, t + d + 0.06, g);
             v.osc('sine', midi(roots[c] + 36), t, t + d + 0.06, v.gain(0.12, g));
             v.osc('triangle', midi(roots[c] + 12), t, t + d + 0.06, v.gain(0.3, g));
@@ -726,8 +725,7 @@ const FACTORIES: Record<Section, Factory> = {
     v.at(drone.out.gain).setTargetAtTime(0.05, IGN - 0.02, 0.03);
     v.at(drone.out.gain).setTargetAtTime(0.12, IGN + 1.0, 0.6);
     return (start) => {
-      const ignAt = start + IGN;
-      const breathAt = start + HOLD;
+      const [ignAt, breathAt] = [start + IGN, start + HOLD];
       return {
         tick(from, to) {
           grid(start, BAR * 2, from, to, (i, t) => {
@@ -858,10 +856,9 @@ const FACTORIES: Record<Section, Factory> = {
     v.at(lb.out.gain).exponentialRampToValueAtTime(0.3, Math.max(0.5, nominal));
     v.ramp(lb.lp.frequency, 0.2, 320, 2400, Math.max(0.3, nominal - 0.2));
     if (o.at !== undefined && o.hitAt !== undefined) {
-      const cutAt = o.hitAt - 0.78;
-      host.hush(cutAt, o.hitAt);
-      build.gain.setTargetAtTime(0, cutAt, 0.006);
-      bv.stop(cutAt, 0.024);
+      host.hush(o.hitAt - 0.78, o.hitAt);
+      build.gain.setTargetAtTime(0, o.hitAt - 0.78, 0.006);
+      bv.stop(o.hitAt - 0.78, 0.024);
     }
     return (start) => {
       let hitAt = start + hitIn;
@@ -887,6 +884,7 @@ const FACTORIES: Record<Section, Factory> = {
         hush(at: number) {
           if (hitAt === Infinity) cut(at);
         },
+        opened: (until: number) => roarTick(soon(host.lib.ctx), until),
         arm() {
           if (!armed && hitAt === Infinity && lateStandAt === undefined) placeFirstChord();
         },
@@ -1131,7 +1129,9 @@ export class Music {
     this.stop(o.fadeOut ?? crossfade, o.at);
     const at = o.at ?? soon(lib.ctx);
     voice.open(at);
-    this.live.push({ name, voice, impl: score(at), start: at, end: Infinity, until: at + AHEAD });
+    const impl = score(at);
+    impl.opened?.(at + AHEAD);
+    this.live.push({ name, voice, impl, start: at, end: Infinity, until: at + AHEAD });
     this.current = name;
     this.host.onSection?.(name, at);
   }

@@ -632,7 +632,7 @@ export const scenarios = {
         };
         try {
           const awaken = { t: at, cue: 'music', opts: { section: 'awaken', fade: 0.3, hitAt: hit } };
-          await renderOffline([awaken], 1.5, 48000);
+          await renderOffline([awaken], hit + 0.05, 48000);
         } finally {
           Voice.prototype.open = open;
         }
