@@ -102,6 +102,34 @@ async function toEndCard(page) {
   await page.locator('.endcard').waitFor({ timeout: 30000 });
 }
 
+async function backWhileLoading(h, file) {
+  const { ctx, page, errors, before } = await settings(h);
+  const tag = `back while ${file} loads`;
+  let release;
+  const held = new Promise((r) => (release = r));
+  try {
+    let reached;
+    const asked = new Promise((r) => (reached = r));
+    await ctx.route(`**/${file}*`, (r) => {
+      reached();
+      return held.then(() => r.fallback());
+    });
+    await replay(h, page, tag, asked);
+    await page.goBack({ waitUntil: 'commit' });
+    release();
+    await backOnSettings(h, page, before, tag);
+    const intro = await page.evaluate(() => !!document.querySelector('.title-screen'));
+    h.expect(!intro, `${tag}: Back before the replay had loaded still played the intro`);
+    h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
+  } catch (e) {
+    await h.evidence(page, 'replay-back-while-loading-fail');
+    throw e;
+  } finally {
+    release();
+    await ctx.close();
+  }
+}
+
 export const scenarios = {
   async 'replay-skip-reload'(h) {
     const { ctx, page, errors, before } = await settings(h);
@@ -160,29 +188,6 @@ export const scenarios = {
   },
 
   async 'replay-back-while-loading'(h) {
-    const { ctx, page, errors, before } = await settings(h);
-    let release;
-    const held = new Promise((r) => (release = r));
-    try {
-      let reached;
-      const asked = new Promise((r) => (reached = r));
-      await ctx.route('**/src/audio/engine.ts*', (r) => {
-        reached();
-        return held.then(() => r.fallback());
-      });
-      await replay(h, page, 'loading', asked);
-      await page.goBack({ waitUntil: 'commit' });
-      release();
-      await backOnSettings(h, page, before, 'loading');
-      const intro = await page.evaluate(() => !!document.querySelector('.title-screen'));
-      h.expect(!intro, 'loading: Back before the replay had loaded still played the intro');
-      h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
-    } catch (e) {
-      await h.evidence(page, 'replay-back-while-loading-fail');
-      throw e;
-    } finally {
-      release();
-      await ctx.close();
-    }
+    for (const file of ['src/main.ts', 'src/audio/engine.ts']) await backWhileLoading(h, file);
   },
 };

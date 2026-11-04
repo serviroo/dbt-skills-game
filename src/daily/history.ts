@@ -11,6 +11,7 @@ export interface Entry {
   place?: Place;
   /** a window, sheet, menu or panel open over the screen */
   sheet?: true;
+  replayed?: true;
 }
 
 export const HOME: Entry = { dq: 1, i: 0, key: 'home', route: { name: 'hub' } };

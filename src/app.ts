@@ -260,7 +260,6 @@ async function enterDaily(stage: Stage | null, audio: AppAudio | null, state: Ap
   const m = (await dailyMods[k]().catch(offerReload)) as { mountDaily:(r: HTMLElement, o: unknown) => { unmount(): void; settled: Promise<void>; route(): string } };
   const daily = m.mountDaily(root, {
     help,
-    replayed: params.cutscene,
     onReplay: (entry: unknown) => {
       state.seenCutscene = true;
       save(state);

@@ -105,7 +105,6 @@ export interface DailyOpts {
   onReplay(entry: unknown): void;
   /** The player asked for help in the intro: the companion opens on the Safe Zone, with Home's entry behind it. */
   help?: boolean;
-  replayed?: boolean;
   sound?: { play(cue: string): void; setMuted?(muted: boolean): void; quiet?(on: boolean): void };
   /** Their levels (the speaker control). When present it owns mute; the old Sound switch goes away. */
   volume?: VolumeCtrl;
@@ -360,7 +359,7 @@ export class App {
     // Home is always the companion's first history entry. Opened again on a later one (a reload),
     // it goes back to that first entry: the page opens on Home and nothing is credited again.
     const s: unknown = history.state;
-    const from = !help && this.opts.replayed && isEntry(s) && s.i > 0 && this.known(s.route) ? s.route : null;
+    const from = !help && isEntry(s) && s.replayed && s.i > 0 && this.known(s.route) ? s.route : null;
     const to = from ? 1 : 0;
     if (isEntry(s) && s.i > to) {
       this.travelling = true;
@@ -943,7 +942,9 @@ export class App {
   }
 
   replay() {
-    this.later(() => this.opts.onReplay({ dq: 1, i: this.at + 1, key: this.newKey(), route: this.route, sheet: true }));
+    const e: Entry = { ...this.trail[this.at], replayed: true };
+    this.write('replace', e);
+    this.later(() => this.opts.onReplay({ ...e, i: e.i + 1, key: this.newKey(), sheet: true }));
   }
 
   /** The Lantern button, a moment's Done, a removed story: back to where the player was before this visit. */
