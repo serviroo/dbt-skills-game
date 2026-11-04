@@ -14,7 +14,7 @@ import { SKILL } from '../content/dbt';
 import { INVENTORY, ROSTER, ROSTER_COPY, SABLE_ASK, type ShadowDef, type ShadowId } from '../content/roster-lines';
 import { CALM, css, WINDOW } from '../motion/tokens';
 import type { App } from './app';
-import { addDays, cleanName, helped, isSkillId, type Store } from './store';
+import { addDays, cleanName, isSkillId, type Store } from './store';
 import { btn, focusWhole, h, holdView, seen, setWhole, typo } from './ui';
 
 let svgN = 0;
@@ -153,20 +153,18 @@ export function brambleNap(app: App) {
 const sableWeek = (st: Store) => {
   const today = st.today();
   const from = addDays(today, -6);
-  const week = new Map<string, { n: number; last: number; helped: boolean }>();
+  const codes = Array.from({ length: 7 }, (_, i) => st.skillCodes(addDays(from, i)));
+  const week = new Map<string, { n: number; last: number }>();
   for (const e of st.state.events) {
-    if (e.day < from || e.day > today || !isSkillId(e.skill)) continue;
-    const w = week.get(e.skill) ?? { n: 0, last: 0, helped: false };
-    if (e.k === 'skill') {
-      w.n += 1;
-      w.last = Math.max(w.last, e.t);
-    } else if (e.k === 'feedback' && helped(e.data?.answer)) w.helped = true;
+    if (e.k !== 'skill' || e.day < from || e.day > today || !isSkillId(e.skill)) continue;
+    const w = week.get(e.skill) ?? { n: 0, last: 0 };
+    w.n += 1;
+    w.last = Math.max(w.last, e.t);
     week.set(e.skill, w);
   }
   return [...week]
-    .filter(([, w]) => w.n)
     .sort(([, a], [, b]) => b.n - a.n || b.last - a.last)
-    .map(([id, w]) => ({ skill: SKILL[id], ...w }));
+    .map(([id, w]) => ({ skill: SKILL[id], helped: codes.some((c) => c[id] === 5), ...w }));
 };
 
 function sableSays(st: Store) {

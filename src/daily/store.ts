@@ -669,7 +669,6 @@ const fromBig = (b: bigint) => (b > SAFE ? b.toString() : Number(b));
 const stamp = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) && x > 0 ? fromBig(BigInt(Math.floor(x))) : typeof x === 'string' && /^\d+$/.test(x) ? fromBig(BigInt(x)) : 0);
 const oneOf = <T extends string>(x: unknown, list: readonly T[], fallback: T): T => (typeof x === 'string' && (list as readonly string[]).includes(x) ? (x as T) : fallback);
 export const isSkillId = (id: unknown): id is string => typeof id === 'string' && Object.prototype.hasOwnProperty.call(SKILL, id);
-export const helped = (answer: unknown) => answer === 'Yes' || answer === 'A little';
 /** The latest time a Date can hold: a later stamp is read as this, so one more change still counts as later. */
 const PIN_AT_MAX = 8.64e15;
 /** Whether their pin decision replaces mine: the later one wins, and at the same time an unpin does, in every copy. */
@@ -1655,7 +1654,7 @@ export class Store {
       if (e.k === 'skill' && out[e.skill] === undefined) out[e.skill] = 'p';
       if (e.k === 'feedback') {
         const a = e.data?.answer;
-        if (helped(a)) out[e.skill] = 5;
+        if (a === 'Yes' || a === 'A little') out[e.skill] = 5;
         else if (a === 'Not this time' && out[e.skill] !== 5) out[e.skill] = 4;
       }
     }
