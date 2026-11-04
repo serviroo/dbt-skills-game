@@ -355,7 +355,7 @@ export const scenarios = {
   },
 
   async 'every-bed-and-the-charge-loop-start-on-time-however-slow-their-build'(h) {
-    const { ctx, page, errors, tap } = await boot(h, { music: 1, sfx: 1 });
+    const { ctx, page, errors, tap } = await boot(h, { music: 0, sfx: 1 });
     try {
       await page.evaluate(recordOpens);
       await page.evaluate(async () => {
@@ -381,16 +381,30 @@ export const scenarios = {
       const started = [];
       for (const rate of RATES) {
         await cdp.send('Emulation.setCPUThrottlingRate', { rate });
-        started.push(...(await page.evaluate(async ([rate, LEAD]) => {
+        started.push(...(await page.evaluate(async ([rate, LEAD, tap, Q]) => {
           const { BED_NAMES } = await import('/src/audio/beds.ts');
           const { stoppedBy } = await import('/src/audio/voice.ts');
           const engine = window.__engine;
-          const clock = window.__taps.find((t) => t.from === 'GainNode').context;
+          const rec = window.__taps[tap];
+          const clock = rec.context;
+          const tick = () => new Promise((done) => setTimeout(done, 10));
           const reach = async (t) => {
-            while (clock.currentTime < t) await new Promise((done) => setTimeout(done, 10));
+            while (clock.currentTime < t) await tick();
+          };
+          const recent = () => {
+            let ss = 0;
+            for (let k = rec.end - 31; k <= rec.end; k++) ss += rec.q.get(k)?.[1] ?? 0;
+            return Math.sqrt(ss / (32 * Q));
+          };
+          const silence = async () => {
+            const from = clock.currentTime;
+            while (!(rec.end !== undefined && ((rec.end - 31) * Q) / clock.sampleRate > from && recent() < 3e-5)) {
+              await tick();
+            }
           };
           const out = [];
           const play = async (name, start, stop) => {
+            await silence();
             const was = window.__behind.length;
             const opened = window.__opens.length;
             const ask = clock.currentTime;
@@ -411,7 +425,7 @@ export const scenarios = {
           }
           await play('charge loop', () => engine.chargeLoop(), (charge, at) => charge.stop(at, 0.05));
           return out;
-        }, [rate, LEAD])));
+        }, [rate, LEAD, tap, Q])));
       }
       await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
       await audioRecorded(page, tap, Math.max(...started.map((s) => Math.max(s.ask, ...s.opens))) + 0.6);
@@ -420,17 +434,21 @@ export const scenarios = {
         const at = Math.min(...s.opens);
         const lag = Math.max(...s.opens) - at;
         const { rms } = await audioHeard(page, tap, at + 0.2, at + 0.55, [0, 0]);
+        const before = (await audioHeard(page, tap, at - 0.1, at - 0.01, [0, 0])).rms;
         const worstMs = s.behind.length ? Math.max(...s.behind.map((b) => b[1])) * 1000 : 0;
         const leadMs = +((at - s.done) * 1000).toFixed(1);
-        note(h, 'bed', { part: s.name, rate: s.rate, buildMs: +s.ms.toFixed(1), behind: s.behind.length, worstMs, leadMs, rms });
+        const buildMs = +s.ms.toFixed(1);
+        note(h, 'bed', { part: s.name, rate: s.rate, buildMs, behind: s.behind.length, worstMs, leadMs, rms, before });
         const why = [];
         if (s.behind.length) {
           const where = [...new Set(s.behind.map((b) => b[0]))].join(', ');
-          why.push(`${s.behind.length} of its parts were placed up to ${worstMs.toFixed(1)} ms behind the clock (${where})`);
+          const worst = worstMs.toFixed(1);
+          why.push(`${s.behind.length} of its parts were placed up to ${worst} ms behind the clock (${where})`);
         }
         if (!s.opens.length) why.push('it never opened');
-        else if (at < s.ask - 1e-4 || at > s.done + LEAD + 1e-4) why.push(`it opens ${leadMs} ms past the clock once built`);
+        else if (at < s.ask - 1e-4 || at > s.done + LEAD + 1e-4) why.push(`it opens ${leadMs} ms past the clock`);
         if (lag > 1e-6) why.push(`its parts opened ${(lag * 1000).toFixed(1)} ms apart`);
+        if (!(before < 1e-4)) why.push(`something still sounded as it opened (RMS ${before})`);
         if (!(rms > 3e-4)) why.push(`it was not heard (RMS ${rms})`);
         if (why.length) bad.push(`${s.name} at CPU x${s.rate} (built in ${s.ms.toFixed(1)} ms): ${why.join(', ')}`);
       }
