@@ -358,8 +358,7 @@ export function skillScreen(app: App, route: Route, visit: Visit): ScreenOut {
         const peers = s.options?.filter((o) => o.instead).map((o) => btn(o.label, go(o), { kind: 'primary' })) ?? [];
         const tv = timerView(ctx, {
           seconds: secs,
-          visual: s.visual,
-          input: s.scene?.(answers),
+          ...(s.visual === 'thoughts' ? { visual: s.visual, input: s.scene(answers) } : { visual: s.visual }),
           start: s.start,
           // every timer can take more time (principle 3): +15 s up to 30 s, +30 s above
           extend: secs <= 30 ? 15 : 30,

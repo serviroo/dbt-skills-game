@@ -3,9 +3,12 @@
  * seek and capture cleanly. Reduced motion keeps the pacing (numbers, words, fades) and drops movement.
  */
 import { COOL, type Skill, type Visual } from '../content/dbt';
+import type { ThoughtPic } from '../content/spectator-lines';
+import { THOUGHTS } from '../motion/tokens';
 import { hasScene, mountScene, playerAccent, type Beat } from '../scene/vignettes/host';
 import { onFrame, now, backInSight } from './clock';
 import { btn, h, p, scrollerOf, typo } from './ui';
+import './spectator.css';
 
 const LN = 'fill="none" stroke="#a9dcff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"';
 const MINT = 'fill="none" stroke="#89cf9d" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"';
@@ -259,6 +262,148 @@ function lanternOnStone() {
   return { g, mist };
 }
 
+function thoughtsPicture(pic: ThoughtPic) {
+  const pace = THOUGHTS[pic];
+  const clip = `dqc${++gid}`;
+  const cp = sv('clipPath', { id: clip });
+  cp.append(sv('circle', { cx: 100, cy: 100, r: 70 }));
+  const g = sv('g', {
+    'clip-path': `url(#${clip})`,
+    class: `dq-scene-flat dq-thoughts dq-thoughts--${pic}`,
+    fill: 'none',
+    'stroke-linecap': 'round',
+    'stroke-linejoin': 'round',
+  });
+  const line = (d: string, o: number, w = 1.2) =>
+    sv('path', { d, stroke: `rgba(170,215,255,${o})`, 'stroke-width': w });
+  const moon = (x: number, y: number) => [
+    sv('circle', { cx: x, cy: y, r: 15, fill: 'rgba(230,241,255,.07)' }),
+    sv('circle', { cx: x, cy: y, r: 6.5, fill: 'rgba(230,241,255,.85)' }),
+  ];
+  const things: SVGElement[] = [];
+  let put: (el: SVGElement, u: number, n: number, e: number) => void;
+  if (pic === 'clouds') {
+    g.append(
+      ...moon(130, 68),
+      sv('path', {
+        d: 'M28 142Q52 128 76 136T124 131T174 138V180H28Z',
+        fill: 'rgba(7,8,15,.6)',
+        stroke: 'rgba(170,215,255,.4)',
+        'stroke-width': 1.2,
+      }),
+      line('M28 156Q64 145 98 152T174 150', 0.25, 1),
+    );
+    for (let i = 0; i < Math.ceil(pace.crossSec / pace.spaceSec); i++) {
+      things.push(
+        sv('path', {
+          d: 'M-24 7C-31 7 -31 -2 -23 -2C-23 -11 -11 -13 -6 -6C-2 -15 11 -15 13 -5C20 -9 28 -3 24 7Z',
+          fill: 'rgba(14,24,40,.92)',
+          stroke: 'rgba(200,235,255,.75)',
+          'stroke-width': 1.4,
+        }),
+      );
+    }
+    put = (el, u, n) =>
+      el.setAttribute('transform', `translate(${(4 + 192 * u).toFixed(2)} ${[70, 104, 87][((n % 3) + 3) % 3]})`);
+  } else if (pic === 'cars') {
+    g.append(
+      ...moon(70, 66),
+      line('M28 96Q60 86 92 93T150 88T174 94', 0.32),
+      line('M20 110Q90 108 136 114T172 150T188 176', 0.5, 1.4),
+      line('M24 122Q92 120 128 128T158 160T170 180', 0.5, 1.4),
+    );
+    g.append(
+      sv('path', {
+        d: 'M22 116Q91 114 132 121T165 155T179 178',
+        stroke: 'rgba(170,215,255,.3)',
+        'stroke-width': 1,
+        'stroke-dasharray': '3 5',
+      }),
+    );
+    g.append(
+      sv('path', {
+        d: 'M24 172Q100 160 176 174V190H24Z',
+        fill: 'rgba(7,8,15,.7)',
+        stroke: 'rgba(170,215,255,.35)',
+        'stroke-width': 1.2,
+      }),
+    );
+    for (let i = 0; i < Math.ceil(pace.crossSec / pace.spaceSec); i++) {
+      const car = sv('g');
+      car.append(
+        sv('path', {
+          d: 'M-5 2V-1Q-5-2.6-3.6-2.8L-2.6-5.2Q-2.3-5.8-1.6-5.8H1.6Q2.3-5.8 2.6-5.2L3.6-2.8Q5-2.6 5-1V2Z',
+          fill: 'rgba(14,24,40,.92)',
+          stroke: 'rgba(200,235,255,.7)',
+          'stroke-width': 1.1,
+          'vector-effect': 'non-scaling-stroke',
+        }),
+        sv('path', { d: 'M-2.6-3L-2-5H2L2.6-3Z', fill: 'rgba(137,180,220,.2)' }),
+        sv('path', { d: 'M-4.4 2h1.6v1.2h-1.6ZM2.8 2h1.6v1.2h-1.6Z', fill: 'rgba(7,8,15,.9)' }),
+      );
+      for (const x of [-3.2, 3.2])
+        car.append(
+          sv('circle', { cx: x, cy: 0, r: 2.4, fill: 'rgba(230,241,255,.14)' }),
+          sv('circle', { cx: x, cy: 0, r: 1.1, fill: '#e6f1ff' }),
+        );
+      things.push(car);
+    }
+    put = (el, u) => {
+      const v = 1 - u;
+      const x = v * v * v * 4 + 3 * v * v * u * 110 + 3 * v * u * u * 158 + u * u * u * 186;
+      const y = v * v * v * 116 + 3 * v * v * u * 115 + 3 * v * u * u * 124 + u * u * u * 184;
+      const near = 0.6 + 1.6 * u * u;
+      el.setAttribute('transform', `translate(${x.toFixed(2)} ${y.toFixed(2)}) scale(${near.toFixed(3)})`);
+    };
+  } else {
+    g.append(
+      sv('path', { d: 'M28 58H172V66Q132 72 100 66T28 68Z', fill: 'rgba(7,8,15,.6)' }),
+      line('M28 68Q64 62 100 66T172 66', 0.45, 1.3),
+      line('M28 140Q70 134 104 139T172 136', 0.45, 1.3),
+    );
+    g.append(sv('path', { d: 'M28 140Q70 134 104 139T172 136V176H28Z', fill: 'rgba(7,8,15,.55)' }));
+    g.append(
+      sv('path', {
+        d: 'M104 78h8M100 90h14M106 101h7M98 112h16M104 124h9',
+        stroke: 'rgba(230,241,255,.5)',
+        'stroke-width': 1.4,
+      }),
+    );
+    for (let i = 0; i < Math.ceil(pace.crossSec / pace.spaceSec); i++) {
+      const leaf = sv('g');
+      leaf.append(
+        sv('path', {
+          d: 'M-9 0C-5 -6 5 -6 10 0C5 6 -5 6 -9 0Z',
+          fill: 'rgba(137,180,220,.14)',
+          stroke: 'rgba(200,235,255,.82)',
+          'stroke-width': 1.3,
+        }),
+        sv('path', { d: 'M-12 1L10 0', stroke: 'rgba(200,235,255,.6)', 'stroke-width': 0.9 }),
+      );
+      things.push(leaf);
+    }
+    put = (el, u, n, e) => {
+      const y = [102, 88, 120, 95, 112][((n % 5) + 5) % 5] + 3 * Math.sin(u * 4.1 + n);
+      const turn = (n * 67 + e * 6 * (n % 2 ? 1 : -1)) % 360;
+      el.setAttribute('transform', `translate(${(6 + 188 * u).toFixed(2)} ${y.toFixed(2)}) rotate(${turn.toFixed(1)})`);
+    };
+  }
+  g.append(...things);
+  return {
+    els: [cp, g],
+    pose(e: number, still: boolean) {
+      const shift = (still ? 0 : e) + 0.45 * pace.crossSec;
+      const last = Math.floor(shift / pace.spaceSec);
+      things.forEach((el, i) => {
+        const n = last - i;
+        const u = (shift - n * pace.spaceSec) / pace.crossSec;
+        el.setAttribute('visibility', u < 1 ? 'visible' : 'hidden');
+        if (u < 1) put(el, u, n, still ? 0 : e);
+      });
+    },
+  };
+}
+
 /** A length of time as it is said: "30 seconds", "1 minute", "1 minute 30 seconds". */
 function spoken(s: number) {
   const m = Math.floor(s / 60);
@@ -266,6 +411,10 @@ function spoken(s: number) {
   const part = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;
   return [m ? part(m, 'minute') : '', r || !m ? part(r, 'second') : ''].filter(Boolean).join(' ');
 }
+
+type TimerPicture =
+  | { visual?: Exclude<Visual, 'thoughts'>; input?: undefined }
+  | { visual: 'thoughts'; input: ThoughtPic };
 
 /**
  * Countdown with an optional visual. Waits for a tap when `start` is given, or for the caller's own start() when `held`;
@@ -275,7 +424,23 @@ function spoken(s: number) {
  * `reveal`, the countdown or at least its figures can come with it. A screen reader hears
  * it start, get more time and end, never each second. A visual with a 3D scene shows it unless `scene` is false.
  */
-export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; scene?: boolean; input?: unknown; start?: string; held?: boolean; extend?: number; big?: string; extra?: HTMLElement[]; peers?: HTMLElement[]; reveal?: HTMLElement; keep?: HTMLElement; onStart?: () => void; onDone: () => void }) {
+export function timerView(
+  ctx: Ctx,
+  opts: TimerPicture & {
+    seconds: number;
+    scene?: boolean;
+    start?: string;
+    held?: boolean;
+    extend?: number;
+    big?: string;
+    extra?: HTMLElement[];
+    peers?: HTMLElement[];
+    reveal?: HTMLElement;
+    keep?: HTMLElement;
+    onStart?: () => void;
+    onDone: () => void;
+  },
+) {
   let dur = opts.seconds;
   const visual = opts.visual ?? 'ring';
   const scene = opts.scene !== false && hasScene(visual);
@@ -283,7 +448,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; sc
   const svg = sv('svg', { viewBox: wide ? '0 0 320 160' : '0 0 200 200', class: `dq-timer-svg dq-timer-svg--${visual}`, 'aria-hidden': 'true' }) as SVGSVGElement;
   const parts: Record<string, SVGElement> = {};
   if (!wide) {
-    const gradId = ringBase(svg, visual !== 'drift' && visual !== 'tide');
+    const gradId = ringBase(svg, visual !== 'drift' && visual !== 'tide' && visual !== 'thoughts');
     parts.orb = sv('circle', { cx: 100, cy: visual === 'glow' ? 118 : 100, r: 60, fill: `url(#${gradId})` });
     if (scene) parts.orb.classList.add('dq-scene-flat');
     svg.append(parts.orb);
@@ -328,6 +493,8 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; sc
     parts.mist = lantern.mist;
     svg.append(lantern.g);
   }
+  const thoughts = opts.visual === 'thoughts' ? thoughtsPicture(opts.input) : null;
+  if (thoughts) svg.append(...thoughts.els);
   const num = h('div', { class: 'dq-timer-num' });
   const big = opts.big ? h('p', { class: 'dq-timer-big', text: typo(opts.big) }) : null;
   const stageEl = h('div', { class: `dq-timer-stage ${wide ? 'is-wide' : ''}` }, svg, h('div', { class: 'dq-timer-center' }, num));
@@ -400,6 +567,7 @@ export function timerView(ctx: Ctx, opts: { seconds: number; visual?: Visual; sc
         c.setAttribute('opacity', still ? '0.8' : (0.45 + 0.4 * Math.sin(e * 0.7 + i * 1.9)).toFixed(2));
       });
     }
+    thoughts?.pose(e, still);
     if (parts.tide) {
       const kids = Array.from(parts.tide.children);
       kids.forEach((c, i) => {
