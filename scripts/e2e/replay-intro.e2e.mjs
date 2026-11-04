@@ -87,6 +87,11 @@ async function neverAgain(h, page, before, tag) {
     const same = await page.evaluate(() => window.__samePage === true);
     h.expect(same, `${tag}: ${step} after the replay loaded the page again`);
   }
+  const cdp = await page.context().newCDPSession(page);
+  const { entries } = await cdp.send('Page.getNavigationHistory');
+  await cdp.detach();
+  const flagged = entries.filter((e) => new URL(e.url).searchParams.has('cutscene')).length;
+  h.expect(!flagged, `${tag}: ${flagged} history entries still ask for the replay`);
   await page.reload();
   const at = await h.until(page, shown, null, { timeout: 30000 });
   h.expect(at !== 'intro', `${tag}: a reload after the replay played the intro again`);
@@ -207,6 +212,53 @@ export const scenarios = {
       h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
     } catch (e) {
       await h.evidence(page, 'replay-help-fail');
+      throw e;
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'replay-help-then-back'(h) {
+    const { ctx, page, errors, before } = await settings(h);
+    let release;
+    const held = new Promise((r) => (release = r));
+    try {
+      await replay(h, page, 'help-back');
+      let reached;
+      const asked = new Promise((r) => (reached = r));
+      await ctx.route('**/src/daily/index.ts*', (r) => {
+        reached();
+        return held.then(() => r.fallback());
+      });
+      await page.locator('.ui-safe').click();
+      await asked;
+      await page.goBack({ waitUntil: 'commit' });
+      release();
+      await backOnSettings(h, page, before, 'help-back');
+      await page.goBack({ waitUntil: 'commit' });
+      await h.until(page, () => document.querySelector('.dq')?.dataset.screen !== 'settings');
+      const home = await page.evaluate(screenOf);
+      h.expect(home === 'hub', `help-back: Back from Settings showed ${home}, not Home`);
+      h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
+    } catch (e) {
+      await h.evidence(page, 'replay-help-then-back-fail');
+      throw e;
+    } finally {
+      release();
+      await ctx.close();
+    }
+  },
+
+  async 'replay-reload'(h) {
+    const { ctx, page, errors, before } = await settings(h);
+    try {
+      await replay(h, page, 'reload');
+      await page.reload();
+      await backOnSettings(h, page, before, 'reload');
+      await neverAgain(h, page, before, 'reload');
+      h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
+    } catch (e) {
+      await h.evidence(page, 'replay-reload-fail');
       throw e;
     } finally {
       await ctx.close();

@@ -109,6 +109,7 @@ async function sealedUntil(): Promise<void> {
 
 /** `stage` is the 3D stage when boot made one up front (labs, captures); `makeStage` makes it, null without WebGL. */
 export async function runApp(stage: Stage | null, makeStage: () => Stage | null) {
+  const replay = replaying() ? leaveReplayAddress() : null;
   await sealedUntil();
   const state = load();
   if (params.fresh) state.seenCutscene = false;
@@ -130,13 +131,13 @@ export async function runApp(stage: Stage | null, makeStage: () => Stage | null)
       })
       .catch(() => undefined);
 
-  const wantCutscene = !state.seenCutscene || !!params.shot || replaying();
+  const wantCutscene = !state.seenCutscene || !!params.shot || (!!replay && !replay.aborted);
   let help = false;
   // only the intro draws on the 3D stage: the companion is DOM only (its small scenes bring their own renderer), so a
   // returning player never sets up WebGL for it
   if (wantCutscene) {
     stage ??= makeStage();
-    help = await intro(stage, audio, state);
+    help = await intro(stage, audio, state, replay);
   }
   await enterDaily(stage, audio, state, help);
 }
@@ -146,7 +147,7 @@ export async function runApp(stage: Stage | null, makeStage: () => Stage | null)
  * left for help, even while a load is pending or the graphics fail), it ends here: it counts as seen, and the companion
  * opens next. True when the player left it for the Safe Zone.
  */
-async function intro(stage: Stage | null, audio: AppAudio | null, state: AppState): Promise<boolean> {
+async function intro(stage: Stage | null, audio: AppAudio | null, state: AppState, replay: AbortSignal | null) {
   mountCutsceneVolume(audio);
   const left = new AbortController();
   let offWays = () => {};
@@ -163,10 +164,10 @@ async function intro(stage: Stage | null, audio: AppAudio | null, state: AppStat
     };
     const offButtons = introWays(take);
     const back = () => take('skip');
-    if (replaying()) window.addEventListener('popstate', back);
+    replay?.addEventListener('abort', back);
     offWays = () => {
       offButtons();
-      window.removeEventListener('popstate', back);
+      replay?.removeEventListener('abort', back);
     };
   });
   const end = await Promise.race([stage ? playIntro(stage, audio, left.signal) : playWithoutStage(audio, left.signal), way]);
@@ -178,11 +179,17 @@ async function intro(stage: Stage | null, audio: AppAudio | null, state: AppStat
     location.reload();
     await new Promise(() => undefined);
   }
-  if (replaying()) history.replaceState(history.state, '', address(false));
   return end === 'safe';
 }
 
 const replaying = () => new URLSearchParams(location.search).has('cutscene');
+
+function leaveReplayAddress() {
+  history.replaceState(history.state, '', address(false));
+  const back = new AbortController();
+  addEventListener('popstate', () => back.abort(), { once: true });
+  return back.signal;
+}
 
 function address(replay: boolean) {
   const q = location.search.slice(1).split('&').filter((p) => p && p.split('=')[0] !== 'cutscene');

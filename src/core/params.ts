@@ -85,5 +85,4 @@ export const params = {
   skipIntro: q.has('skipintro'),
   fresh: q.has('fresh'),
   nopost: q.has('nopost'),
-  cutscene: q.has('cutscene'),
 };
