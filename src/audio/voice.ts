@@ -49,6 +49,17 @@ export interface VoiceOpts {
 /** When a voice stopped at `at` over `ramp` (see Voice.stop) has gone silent and its sources have ended. */
 export const stoppedBy = (at: number, ramp: number) => at + silentAfter(Math.max(0.002, ramp / 4));
 
+interface Placing {
+  t: number;
+  cancelsBefore: number;
+  place(at: number): void;
+}
+
+function keep(held: Placing[], t: number, place: (at: number) => void, cancels = false) {
+  const cancelsBefore = (held[held.length - 1]?.cancelsBefore ?? 0) + (cancels ? 1 : 0);
+  held.push({ t, cancelsBefore, place });
+}
+
 /**
  * One sounding thing (a cue, a bed, a music layer). Owns a stop-able output, optional reverb sends, a pan, and a
  * transposition (detune in cents applied to every oscillator and filter it creates).
@@ -66,8 +77,9 @@ export class Voice {
   t: number;
   end: number;
   private sources: { n: AudioScheduledSourceNode; stop: number; span: { b: number } | null }[] = [];
-  /** While held, what it was given to start and set, each placed by open(at) `at` later. */
-  private held: ((at: number) => void)[] | null;
+  /** While held, what it and its children were given to start and set, each placed by open(at) `at` later, earliest
+   *  first (never across a cancel). */
+  private held: Placing[] | null;
   /** When its stop() has silenced it and its sources have ended (Infinity until then): a stop is final, and nothing it
    *  is given later, such as a held part opened after it, sounds past it. */
   private killAt = Infinity;
@@ -105,7 +117,8 @@ export class Voice {
 
   /** A sub-voice feeding this one, stopped with it (or on its own). */
   child(dest: AudioNode = this.wet, seed = 7) {
-    const c = new Voice(this.lib, this.t, dest, { held: !!this.held }, seed);
+    const c = new Voice(this.lib, this.t, dest, {}, seed);
+    c.held = this.held;
     c.killAt = this.killAt;
     this.children.push(c);
     return c;
@@ -122,11 +135,16 @@ export class Voice {
   /** Starts and sets what this held voice and its children were given, `at` later; from then on times are the clock's. */
   open(at: number) {
     const held = this.held ?? [];
+    this.release(at);
+    held.sort((a, b) => a.cancelsBefore - b.cancelsBefore || a.t - b.t);
+    for (const h of held) h.place(at);
+  }
+
+  private release(at: number) {
     this.held = null;
     this.t = at;
     this.end = Math.min(at, this.killAt);
-    for (const c of this.children) c.open(at);
-    for (const f of held) f(at);
+    for (const c of this.children) c.release(at);
   }
 
   /** `p`'s timed automation, in this voice's time: set at once, or kept while the voice is held and set by open(). */
@@ -134,11 +152,11 @@ export class Voice {
     const held = this.held;
     if (!held) return p;
     return {
-      setValueAtTime: (v, t) => void held.push((d) => p.setValueAtTime(v, t + d)),
-      linearRampToValueAtTime: (v, t) => void held.push((d) => p.linearRampToValueAtTime(v, t + d)),
-      exponentialRampToValueAtTime: (v, t) => void held.push((d) => p.exponentialRampToValueAtTime(v, t + d)),
-      setTargetAtTime: (v, t, tau) => void held.push((d) => p.setTargetAtTime(v, t + d, tau)),
-      cancelScheduledValues: (t) => void held.push((d) => p.cancelScheduledValues(t + d)),
+      setValueAtTime: (v, t) => keep(held, t, (d) => p.setValueAtTime(v, t + d)),
+      linearRampToValueAtTime: (v, t) => keep(held, t, (d) => p.linearRampToValueAtTime(v, t + d)),
+      exponentialRampToValueAtTime: (v, t) => keep(held, t, (d) => p.exponentialRampToValueAtTime(v, t + d)),
+      setTargetAtTime: (v, t, tau) => keep(held, t, (d) => p.setTargetAtTime(v, t + d, tau)),
+      cancelScheduledValues: (t) => keep(held, t, (d) => p.cancelScheduledValues(t + d), true),
     };
   }
 
@@ -149,7 +167,7 @@ export class Voice {
 
   private reg<T extends AudioScheduledSourceNode>(n: T, t0: number, t1: number, offset = 0) {
     if (this.held) {
-      this.held.push((d) => this.reg(n, t0 + d, t1 + d, offset));
+      keep(this.held, t0, (d) => this.reg(n, t0 + d, t1 + d, offset));
       return n;
     }
     if (t0 >= this.killAt) return n;
