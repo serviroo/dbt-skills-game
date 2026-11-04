@@ -113,6 +113,7 @@ export interface BedHandle {
   level(v: number, rampSec?: number, at?: number): void;
   stop(rampSec?: number, at?: number): void;
   readonly stopped: boolean;
+  readonly voice: Voice;
 }
 
 export function buildBed(lib: Lib, name: BedName, dest: AudioNode, level: number, fadeIn: number, seed: number) {
@@ -139,6 +140,7 @@ export function buildBed(lib: Lib, name: BedName, dest: AudioNode, level: number
         get stopped() {
           return v.isStopped;
         },
+        voice: v,
       };
     },
   };
@@ -148,6 +150,7 @@ export interface ChargeHandle {
   set(c: number, at?: number): void;
   release(at?: number): void;
   stop(at?: number, ramp?: number): void;
+  readonly voice: Voice;
 }
 
 /**
@@ -233,6 +236,7 @@ export function buildCharge(lib: Lib, dest: AudioNode, seed: number) {
           stopped = true;
           v.stop(at, ramp);
         },
+        voice: v,
       };
     },
   };

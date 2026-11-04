@@ -1100,7 +1100,6 @@ interface Live {
   impl: SectionImpl;
   start: number;
   end: number;
-  fadeOut: number;
   until: number;
 }
 
@@ -1130,7 +1129,7 @@ export class Music {
     voice.out.gain.setValueAtTime(0, at);
     voice.out.gain.setTargetAtTime(1, at, Math.max(0.004, crossfade / 4));
     const impl = open(at);
-    this.live.push({ name, voice, impl, start: at, end: Infinity, fadeOut: 0, until: at });
+    this.live.push({ name, voice, impl, start: at, end: Infinity, until: at });
     this.current = name;
     this.host.onSection?.(name, at);
     // its opening is placed now, not when the next window comes round (by then it would be behind soon())
@@ -1138,12 +1137,7 @@ export class Music {
   }
 
   stop(fade = 1, at = soon(this.host.lib.ctx)) {
-    for (const s of this.live) {
-      if (s.end !== Infinity) continue;
-      s.end = at;
-      s.fadeOut = fade;
-      s.voice.stop(at, fade);
-    }
+    for (const s of this.live) if (s.voice.stop(at, fade)) s.end = Math.min(s.end, at);
     this.current = null;
   }
 
@@ -1191,6 +1185,6 @@ export class Music {
         s.until = lim;
       }
     }
-    this.live = this.live.filter((s) => s.end === Infinity || s.end + s.fadeOut * 2 > t - 5);
+    this.live = this.live.filter((s) => s.voice.silentAt > t - 5);
   }
 }

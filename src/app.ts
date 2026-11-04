@@ -78,10 +78,7 @@ async function makeAudio(): Promise<AppAudio | null> {
       play: (c, o) => e.play(c, o),
       bed: (n) => ({
         level: (v: number, r = 0.5) => void e.bed(n as never, { level: v, fadeIn: r }),
-        stop: (r = 0.5) => {
-          const b = (e as unknown as { beds: Map<string, { stopped?: boolean; stop(r?: number): void }> }).beds.get(n);
-          if (b && !b.stopped) b.stop(r);
-        },
+        stop: (r = 0.5) => e.stopBed(n as never, r),
       }),
       chargeLoop: () => e.chargeLoop(),
       music: { to: (s, f, o) => e.music.to(s as never, f, o), stop: (f) => e.music.stop(f) },

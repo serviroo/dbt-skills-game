@@ -1,5 +1,6 @@
 import { mulberry32, type Rng } from '../core/math';
 import { tanhCurve, type Ctx } from './dsp';
+import { silentAfter } from './param';
 
 /** Shared, engine-owned resources every voice can draw on. */
 export interface Lib {
@@ -46,7 +47,7 @@ export interface VoiceOpts {
 }
 
 /** When a voice stopped at `at` over `ramp` (see Voice.stop) has gone silent and its sources have ended. */
-export const stoppedBy = (at: number, ramp: number) => at + ramp * 1.6 + 0.02;
+export const stoppedBy = (at: number, ramp: number) => at + silentAfter(Math.max(0.002, ramp / 4));
 
 /**
  * One sounding thing (a cue, a bed, a music layer). Owns a stop-able output, optional reverb sends, a pan, and a
@@ -307,8 +308,8 @@ export class Voice {
 
   /** Fade this voice out from `at` over `ramp` seconds and stop its sources. */
   stop(at: number, ramp = 0.03) {
-    if (this.killAt !== Infinity) return;
     const kill = stoppedBy(at, ramp);
+    if (kill >= this.killAt) return false;
     this.killAt = kill;
     for (const c of [...this.children, ...this.parts]) c.stop(at, ramp);
     const tau = Math.max(0.002, ramp / 4);
@@ -328,9 +329,14 @@ export class Voice {
       }
     }
     this.end = Math.min(this.end, kill);
+    return true;
   }
 
   get isStopped() {
     return this.killAt !== Infinity;
+  }
+
+  get silentAt() {
+    return this.killAt;
   }
 }

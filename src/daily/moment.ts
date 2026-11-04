@@ -6,7 +6,8 @@
  */
 import { animate } from '../ui/anim';
 import { SCORE, WINDOW } from '../motion/tokens';
-import { holdAt, soon, taper } from '../audio/param';
+import { holdAt, silentAfter, soon, taper } from '../audio/param';
+import type { VolumeCtrl } from '../audio/prefs';
 import { type Next } from '../content/dbt';
 import { CHECKIN } from '../content/daily-lines';
 import { cleared, setStored, write } from '../core/cleared';
@@ -87,9 +88,14 @@ export function easeScreen(app: App, route: Route): ScreenOut {
 /** The hum's fade back in after the page wakes (about 0.4 s), and its fade out as the page hides (time constants). */
 const WAKE_TAU = 0.12;
 const SLEEP_TAU = 0.02;
+const OFF_TAU = 0.25;
+
+type Hum = { stop(ramp?: number): void };
+const hums = new Set<Hum>();
+export const silenceHums = () => hums.forEach((h) => h.stop(SCORE.safeOutSec));
 
 /** A low, soft two-note hum that swells a little with the breath. Off by default; made only after the player turns it on. */
-function lowHum(scale: number) {
+function lowHum(level: () => number, volume?: VolumeCtrl) {
   type AC = typeof AudioContext;
   const Ctor: AC | undefined = window.AudioContext ?? (window as unknown as { webkitAudioContext?: AC }).webkitAudioContext;
   if (!Ctor) return null;
@@ -105,7 +111,7 @@ function lowHum(scale: number) {
   const breath = ctx.createGain();
   breath.gain.value = 0;
   const vol = ctx.createGain();
-  vol.gain.value = scale;
+  vol.gain.value = level();
   const wake = ctx.createGain();
   const lp = ctx.createBiquadFilter();
   lp.type = 'lowpass';
@@ -128,7 +134,8 @@ function lowHum(scale: number) {
     return o;
   });
   breath.gain.setTargetAtTime(0.05, soon(ctx), 0.8);
-  let dead = false;
+  let end = Infinity;
+  let open = true;
   let nap: ConstantSourceNode | undefined;
   const noNap = () => {
     if (!nap) return;
@@ -137,20 +144,19 @@ function lowHum(scale: number) {
     nap = undefined;
   };
   const resume = () => {
-    if (!dead && !document.hidden && ctx.state !== 'running') ctx.resume().catch(() => {});
+    if (end === Infinity && !document.hidden && ctx.state !== 'running') ctx.resume().catch(() => {});
   };
   // A paused context (the page hidden, a locked phone, a call) picks up at the audio clock where it stopped, so
   // silence and a short fade-in are set at that time: whoever resumes it, the hum comes back without a pop. A pause
   // the system made is left to the system (or the next tap): a call keeps the hum quiet until it ends.
   const paused = () => {
-    if (dead || ctx.state === 'running') return;
+    if (ctx.state === 'running') return;
     const t = ctx.currentTime;
     wake.gain.cancelScheduledValues(0);
     wake.gain.setValueAtTime(0, t);
     wake.gain.setTargetAtTime(1, t, WAKE_TAU);
   };
   const seen = () => {
-    if (dead) return;
     noNap();
     // already paused: `paused` has set where it comes back from
     if (ctx.state !== 'running') return resume();
@@ -165,7 +171,7 @@ function lowHum(scale: number) {
     nap.onended = () => {
       noNap();
       // a page shown again before this pause lands still found the hum running, so it is woken once the pause lands
-      if (!dead && document.hidden && ctx.state === 'running') ctx.suspend().then(resume, () => {});
+      if (document.hidden && ctx.state === 'running') ctx.suspend().then(resume, () => {});
     };
     nap.start();
     nap.stop(t + SLEEP_TAU * 6);
@@ -183,47 +189,50 @@ function lowHum(scale: number) {
     window.removeEventListener('click', resume);
     window.removeEventListener('keydown', resume);
   };
-  return {
-    setScale(s: number) {
-      if (dead) return;
-      // the glide the engine gives Master, Music and Effects (setUser: ramp 0.08 s, tau = ramp / 4), so no click
-      vol.gain.setTargetAtTime(s, soon(ctx), 0.02);
-      // a level moved in the speaker control wakes a paused hum like any tap: the control keeps its taps and keys
-      resume();
-    },
+  const offLevel = volume?.subscribe(() => {
+    if (!open) return;
+    // the glide the engine gives Master, Music and Effects (setUser: ramp 0.08 s, tau = ramp / 4), so no click
+    vol.gain.setTargetAtTime(level(), soon(ctx), 0.02);
+    // a level moved in the speaker control wakes a paused hum like any tap: the control keeps its taps and keys
+    resume();
+  });
+  const close = () => {
+    if (!open) return;
+    open = false;
+    hums.delete(hum);
+    offLevel?.();
+    void ctx.close();
+  };
+  const hum = {
     breathe(s: number) {
-      if (dead) return;
+      if (end !== Infinity) return;
       const t = soon(ctx);
       breath.gain.setTargetAtTime(0.035 + s * 0.03, t, 0.25);
       lp.frequency.setTargetAtTime(300 + s * 140, t, 0.3);
     },
     /** A soft fade of about a second, or exact silence `ramp` seconds from now (the Safe Zone opening). */
     stop(ramp?: number) {
-      if (dead) return;
-      dead = true;
-      unlisten();
+      if (!open) return;
       const t = soon(ctx);
+      const at = t + (ramp ?? silentAfter(OFF_TAU));
+      if (at >= end) return;
+      const first = end === Infinity;
+      end = at;
       if (ramp !== undefined) {
         holdAt(breath.gain, t);
-        breath.gain.linearRampToValueAtTime(0, t + ramp);
-        oscs.forEach((o) => o.stop(t + ramp));
-        // closed once the oscillators end; the timer covers a suspended context (a call came in), where they never do
-        let open = true;
-        const close = () => {
-          if (open) void ctx.close();
-          open = false;
-        };
-        oscs[0].onended = close;
-        setTimeout(close, ramp * 1000 + 250);
-        return;
-      }
-      breath.gain.setTargetAtTime(0, t, 0.25);
-      setTimeout(() => {
-        oscs.forEach((o) => o.stop());
-        void ctx.close();
-      }, 1200);
+        breath.gain.linearRampToValueAtTime(0, at);
+      } else breath.gain.setTargetAtTime(0, t, OFF_TAU);
+      oscs.forEach((o) => o.stop(at));
+      if (!first) return;
+      unlisten();
+      oscs[0].onended = close;
+      const idle = () => ctx.state !== 'running' && close();
+      ctx.addEventListener('statechange', idle);
+      idle();
     },
   };
+  hums.add(hum);
+  return hum;
 }
 
 const LINE_S = 7;
@@ -250,7 +259,7 @@ export function momentScreen(app: App, route: Route): ScreenOut {
   if (!st.state.events.some((e) => e.k === 'rest' && e.day === st.today())) st.add('rest', 10);
   const m = momentView(app, { then: r.then, hum: true, done: () => app.back() });
   const el = h('div', { class: 'dq-moment' }, h('h1', { class: 'dq-sr', 'data-focus': '', text: 'Give me a moment' }), m.stage, m.words, m.foot);
-  return { el, title: 'Give me a moment', mode: 'sub', bubbles: [0.6, 0.3], leave: m.leave, silence: m.silence };
+  return { el, title: 'Give me a moment', mode: 'sub', bubbles: [0.6, 0.3], leave: m.leave };
 }
 
 /**
@@ -294,10 +303,9 @@ export function momentView(app: App, o: { done: () => void; then?: string; hum?:
     const l = app.opts.volume?.get();
     return l ? (l.muted ? 0 : taper(l.master) * taper(l.hum)) : (st.state.settings.sound ? 1 : 0);
   };
-  const offVolume = app.opts.volume?.subscribe(() => hum?.setScale(humScale()));
   const humToggle = o.hum
     ? toggle('Low hum', false, (on) => {
-        if (on) hum = lowHum(humScale());
+        if (on) hum = lowHum(humScale, app.opts.volume);
         else {
           hum?.stop();
           hum = null;
@@ -460,13 +468,8 @@ export function momentView(app: App, o: { done: () => void; then?: string; hum?:
       stop();
       unmount?.();
       fades.forEach((a) => a.cancel());
-      offVolume?.();
       offLength();
       hum?.stop();
-      hum = null;
-    },
-    silence: () => {
-      hum?.stop(SCORE.safeOutSec);
       hum = null;
     },
   };
