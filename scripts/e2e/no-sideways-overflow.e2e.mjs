@@ -231,8 +231,8 @@ async function areaThatDiffers(pngs) {
 }
 
 async function weekKeyboardReach(page) {
-  const regions = await page.getByRole('region', { name: 'Past seven days', exact: true }).count();
-  if (regions !== 1) return 'is not a region named Past seven days';
+  const regions = await page.getByRole('region', { name: 'Past 7 days', exact: true }).count();
+  if (regions !== 1) return 'is not a region named Past 7 days';
   const before = await page.evaluate(() => {
     const stops = [...document.querySelectorAll('a[href], button, input, select, textarea, [tabindex]')].filter(
       (e) => e.tabIndex >= 0 && !e.disabled && e.checkVisibility(),
@@ -665,8 +665,54 @@ async function emptySlot(h) {
   h.expect(!failed.length, failed.join('\n'));
 }
 
+const NARROW_SCREENS = [
+  ['A quiet minute', { name: 'ease' }, ['.dq-ease-panel']],
+  ['Art room', { name: 'art' }, ['.dq-artentries', '.dq-art-pages']],
+  ['Library', { name: 'library' }, ['.dq-liblist']],
+];
+
+async function narrowLayouts(h) {
+  const failed = [];
+  const countLoops = (ctx) =>
+    ctx.addInitScript(() => {
+      window.__resizeLoops = [];
+      addEventListener('error', (e) => /ResizeObserver/.test(e.message) && window.__resizeLoops.push(e.message));
+    });
+  const phone = SIZES[0];
+  const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', phone, countLoops, { isMobile: true });
+  const narrowIn = async (where, selectors, want) => {
+    const states = await page.evaluate(
+      (s) => [...document.querySelectorAll(s.join(', '))].map((e) => e.hasAttribute('data-narrow')),
+      selectors,
+    );
+    const wrong = !states.length || states.some((n) => n !== want);
+    if (wrong) failed.push(`${where}: narrow should be ${want}, is ${states}`);
+  };
+  const visit = async ([where, route, selectors], want) => {
+    await page.evaluate((r) => window.__daily.go(r), route);
+    await page.locator(selectors[0]).first().waitFor({ timeout: 10000 });
+    await settle(page);
+    await narrowIn(`${where} at ${want ? '200%' : 'normal'} text`, selectors, want);
+  };
+  try {
+    await h.reachHub(page);
+    for (const screen of NARROW_SCREENS) await visit(screen, false);
+    await scaleText(page);
+    await settle(page);
+    await narrowIn('Library once the text grows while it is open', NARROW_SCREENS[2][2], true);
+    for (const screen of NARROW_SCREENS) await visit(screen, true);
+    const loops = await page.evaluate(() => window.__resizeLoops);
+    if (loops.length) failed.push(`resize loops: ${loops.join(' | ')}`);
+    if (errors.length) failed.push(errors.join(' | '));
+  } finally {
+    await ctx.close();
+  }
+  h.expect(!failed.length, failed.join('\n'));
+}
+
 export const scenarios = Object.fromEntries([
   ['no-sideways-overflow-empty-slot', emptySlot],
+  ['no-sideways-overflow-narrow-layouts', narrowLayouts],
   ...SIZES.flatMap((phone) => [
     [`no-sideways-overflow-${phone.width}x${phone.height}`, sweep(phone)],
     [`no-sideways-overflow-${phone.width}x${phone.height}-text-200`, sweep(phone, { textAt200: true })],
