@@ -264,6 +264,7 @@
   "every-cue-reads-on-a-phone-speaker": [29, 20],
   "every-fade-ends-in-silence": [20],
   "every-score-part-opens-on-time-on-a-busy-page": [38],
+  "every-score-section-and-the-hush-open-on-time-however-slow-their-build": [84],
   "every-timed-call-counts-page-time": [1, 1],
   "fading-hum-still-answers": [25],
   "fill-waits-out-a-stop": [3, 3],

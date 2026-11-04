@@ -527,26 +527,29 @@ export class AudioEngine {
    * -35 dBFS RMS) so the hit lands +22 dB over it. With `to`, everything returns at `to` in ~5 ms. Without it the hush
    * holds until unhush() or the next awaken_hit. An open-ended awaken section cuts its build here.
    */
-  hush(from = soon(this.ctx), to?: number) {
-    for (const g of [this.hushBeds.gain, this.hushMusic.gain, this.hushHall.gain, this.hushRoom.gain]) {
-      g.cancelScheduledValues(from);
-      g.setTargetAtTime(0.008, from, 0.007);
-      if (to !== undefined) g.setTargetAtTime(1, to, 0.0015);
-    }
-    this.hushV?.stop(from, 0.02);
-    const end = to ?? from + 120;
-    const v = new Voice(this.lib, from, this.sfx, {}, this.nextSeed());
+  hush(from?: number, to?: number) {
+    const v = new Voice(this.lib, 0, this.sfx, { held: true }, this.nextSeed());
     const g = v.gain(0, v.dry);
-    g.gain.setValueAtTime(0, from);
-    g.gain.linearRampToValueAtTime(0.065, from + 0.03);
+    v.at(g.gain).setValueAtTime(0, 0);
+    v.at(g.gain).linearRampToValueAtTime(0.065, 0.03);
+    const end = 120;
+    v.noise("brown", 0, end + 0.05, v.filt("lowpass", 240, 0.7, g));
+    v.noise("pink", 0, end + 0.05, v.gain(0.08, v.filt("highpass", 1800, 0.7, g)));
+    const at = from ?? soon(this.ctx);
+    for (const p of [this.hushBeds.gain, this.hushMusic.gain, this.hushHall.gain, this.hushRoom.gain]) {
+      p.cancelScheduledValues(at);
+      p.setTargetAtTime(0.008, at, 0.007);
+      if (to !== undefined) p.setTargetAtTime(1, to, 0.0015);
+    }
+    this.hushV?.stop(at, 0.02);
+    v.open(at);
     if (to !== undefined) {
       g.gain.setValueAtTime(0.065, to - 0.01);
       g.gain.linearRampToValueAtTime(0, to + 0.02);
+      v.stop(to + 0.02, 0.02);
     }
-    v.noise("brown", from, end + 0.05, v.filt("lowpass", 240, 0.7, g));
-    v.noise("pink", from, end + 0.05, v.gain(0.08, v.filt("highpass", 1800, 0.7, g)));
     this.hushV = to === undefined ? v : null;
-    this.music.onHush(from);
+    this.music.onHush(at);
   }
 
   /** End an open-ended hush (awaken_hit does this itself). */

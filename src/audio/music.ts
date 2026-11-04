@@ -9,7 +9,7 @@ export interface SectionOpts {
   at?: number;
   /** Fade of the outgoing section; defaults to the crossfade. Use ~0.04 for a hard audio cut. */
   fadeOut?: number;
-  /** awaken only: context time of the hit (default start + 4.86 s, as in the keyframe table). */
+  /** awaken only, with `at`: context time of the hit (default start + 4.86 s, as in the keyframe table). */
   hitAt?: number;
   /** awaken only: context time of the stand-up, the loudest moment (default hitAt + 7.04 s). */
   standAt?: number;
@@ -550,8 +550,8 @@ interface SectionImpl {
   arm?(): void;
   hit?(at: number): void;
 }
-/** Builds a section on its held voice (the times its sources are given count from the opening) and returns what times
- *  it from `start`: its envelopes, its opening chords and its score. */
+/** Builds a section on its held voice (the times its sources and envelopes are given count from the opening) and
+ *  returns its score timed from `start`. */
 type Factory = (v: Voice, o: SectionOpts, host: MusicHost) => (start: number) => SectionImpl;
 
 const BEAT = 60 / 72;
@@ -600,14 +600,14 @@ const FACTORIES: Record<Section, Factory> = {
     const hi = new Strings(v, 0, 2, { wave: 'string', cutoff: 6000, level: 0, dest: v.wet, vib: 5, presence: 4, body: 3400 });
     const chords = [Dm9, Bbmaj7];
     const vel = [1, 0.4, 0.7, 0.4];
+    v.at(sub.gain).setValueAtTime(0, 0);
+    v.at(sub.gain).setTargetAtTime(0.09, 0, 0.6);
+    v.at(lead.gain).setValueAtTime(0, 0);
+    v.at(lead.gain).setTargetAtTime(0.008, 0.2, 0.8);
+    v.at(hi.out.gain).setValueAtTime(0, 1.8);
+    v.at(hi.out.gain).linearRampToValueAtTime(0.03, 5.5);
+    hi.chord(0, [86, 93], { att: 0.05 });
     return (start) => {
-      sub.gain.setValueAtTime(0, start);
-      sub.gain.setTargetAtTime(0.09, start, 0.6);
-      lead.gain.setValueAtTime(0, start);
-      lead.gain.setTargetAtTime(0.008, start + 0.2, 0.8);
-      hi.out.gain.setValueAtTime(0, start + 1.8);
-      hi.out.gain.linearRampToValueAtTime(0.03, start + 5.5);
-      hi.chord(start, [86, 93], { att: 0.05 });
       return {
         tick(from, to) {
           grid(start, BAR * 2, from, to, (i, t) => str.chord(t, chords[i % 2], { glide: 0.25, att: i ? 0.4 : 0.6, swell: BAR * 2 }));
@@ -633,25 +633,26 @@ const FACTORIES: Record<Section, Factory> = {
     const spBus = v.gain(0, v.filt('lowpass', 6500, 0.6, v.filt('peaking', 2500, 1, v.wet, 3)));
     const clock = new Hits(v, 0, 'white', v.filt('highpass', 6500, 0.7, v.pan(0.22, v.gain(1, v.wet))));
     const acc = [1, 0.3, 0.55, 0.3];
+    v.at(spBus.gain).setValueAtTime(0, BAR * 0.75);
+    v.at(spBus.gain).linearRampToValueAtTime(0.7, BAR * 1.25);
+    v.at(spBus.gain).linearRampToValueAtTime(1, BAR * 3);
     return (start) => {
-      spBus.gain.setValueAtTime(0, start + BAR * 0.75);
-      spBus.gain.linearRampToValueAtTime(0.7, start + BAR * 1.25);
-      spBus.gain.linearRampToValueAtTime(1, start + BAR * 3);
       const ci = (t: number) => Math.floor((t - start + 1e-6) / (BAR * 2)) % 4;
       return {
         tick(from, to) {
           grid(start, BAR * 2, from, to, (i, t) => {
             str.chord(t, chords[i % 4], { glide: 0.25, att: 0.3, dip: i > 0, swell: BAR * 2 });
-            so.frequency.setTargetAtTime(midi(26 + ((chords[i % 4][0] - 38 + 24) % 12)), t, 0.2);
+            v.at(so.frequency).setTargetAtTime(midi(26 + ((chords[i % 4][0] - 38 + 24) % 12)), t, 0.2);
           });
           steps(start, BAR, from, to, offs, (bi, k, t) => {
             const c = Math.floor(bi / 2) % 4;
             const [, d, a] = pat[k];
             const g = v.gain(0, pulseBus);
-            g.gain.setValueAtTime(0, t);
-            g.gain.linearRampToValueAtTime(0.036 * a, t + 0.012);
-            g.gain.setValueAtTime(0.036 * a, t + d);
-            g.gain.linearRampToValueAtTime(0, t + d + 0.05);
+            const env = v.at(g.gain);
+            env.setValueAtTime(0, t);
+            env.linearRampToValueAtTime(0.036 * a, t + 0.012);
+            env.setValueAtTime(0.036 * a, t + d);
+            env.linearRampToValueAtTime(0, t + d + 0.05);
             v.osc('sine', midi(roots[c]), t, t + d + 0.06, g);
             v.osc('sine', midi(roots[c] + 36), t, t + d + 0.06, v.gain(0.12, g));
             v.osc('triangle', midi(roots[c] + 12), t, t + d + 0.06, v.gain(0.3, g));
@@ -693,38 +694,40 @@ const FACTORIES: Record<Section, Factory> = {
     const clock = new Hits(v, 0, 'white', v.filt('bandpass', 4200, 1.2, v.pan(-0.2, v.gain(1, v.wet))));
     const hb = heartBuses(v, v.dry, 0.7);
     const lowBus = v.gain(0, v.filt('lowpass', 1100, 0.7, v.wet));
+    drone.chord(0, [38, 45, 50], { att: 0.3, glide: 0.01 });
+    const IGN = 12.0;
+    // the held breath: everything grows until 1.5 s before the ignition, then draws back ~6 dB under the reverse swell
+    const HOLD = IGN - 1.5;
+    v.at(cello.out.gain).setValueAtTime(0, 0);
+    v.at(cello.out.gain).linearRampToValueAtTime(0.075, 0.4);
+    v.at(cello.out.gain).exponentialRampToValueAtTime(0.12, HOLD);
+    v.at(cello.out.gain).setTargetAtTime(0.055, HOLD, 0.35);
+    v.at(cello.out.gain).setTargetAtTime(0.035, IGN - 0.02, 0.04);
+    v.at(cello.out.gain).setTargetAtTime(0.08, IGN + 0.9, 0.7);
+    v.at(shim.gain).setValueAtTime(0, 0);
+    v.at(shim.gain).linearRampToValueAtTime(0.06, 0.8);
+    v.at(shim.gain).exponentialRampToValueAtTime(0.28, HOLD);
+    v.at(shim.gain).setTargetAtTime(0.14, HOLD, 0.35);
+    v.at(shim.gain).setTargetAtTime(0.04, IGN - 0.02, 0.05);
+    v.at(shim.gain).setTargetAtTime(0.12, IGN + 0.9, 0.8);
+    v.at(tremBus.gain).setValueAtTime(0, 0);
+    v.at(tremBus.gain).linearRampToValueAtTime(0.025, 0.5);
+    v.at(tremBus.gain).exponentialRampToValueAtTime(0.11, HOLD);
+    v.at(tremBus.gain).setTargetAtTime(0.05, HOLD, 0.35);
+    v.at(lowBus.gain).setValueAtTime(0, BAR * 1.9);
+    v.at(lowBus.gain).linearRampToValueAtTime(1, BAR * 3.0);
+    // the eyes ignite ~12.0 s in: pulse, clock and heartbeat stop dead and the cluster drops back, so the ignition
+    // swell speaks into stillness; the drone holds and the cluster breathes back in
+    v.at(lowBus.gain).setTargetAtTime(0.5, HOLD, 0.35);
+    v.at(lowBus.gain).setTargetAtTime(0, IGN - 0.02, 0.03);
+    v.at(tremBus.gain).setTargetAtTime(0.02, IGN, 0.05);
+    v.at(tremBus.gain).setTargetAtTime(0.05, IGN + 0.7, 0.5);
+    v.at(drone.out.gain).setTargetAtTime(0.08, HOLD, 0.4);
+    v.at(drone.out.gain).setTargetAtTime(0.05, IGN - 0.02, 0.03);
+    v.at(drone.out.gain).setTargetAtTime(0.12, IGN + 1.0, 0.6);
     return (start) => {
-      drone.chord(start, [38, 45, 50], { att: 0.3, glide: 0.01 });
-      const IGN = start + 12.0;
-      // the held breath: everything grows until 1.5 s before the ignition, then draws back ~6 dB under the reverse swell
-      const HOLD = IGN - 1.5;
-      cello.out.gain.setValueAtTime(0, start);
-      cello.out.gain.linearRampToValueAtTime(0.075, start + 0.4);
-      cello.out.gain.exponentialRampToValueAtTime(0.12, HOLD);
-      cello.out.gain.setTargetAtTime(0.055, HOLD, 0.35);
-      cello.out.gain.setTargetAtTime(0.035, IGN - 0.02, 0.04);
-      cello.out.gain.setTargetAtTime(0.08, IGN + 0.9, 0.7);
-      shim.gain.setValueAtTime(0, start);
-      shim.gain.linearRampToValueAtTime(0.06, start + 0.8);
-      shim.gain.exponentialRampToValueAtTime(0.28, HOLD);
-      shim.gain.setTargetAtTime(0.14, HOLD, 0.35);
-      shim.gain.setTargetAtTime(0.04, IGN - 0.02, 0.05);
-      shim.gain.setTargetAtTime(0.12, IGN + 0.9, 0.8);
-      tremBus.gain.setValueAtTime(0, start);
-      tremBus.gain.linearRampToValueAtTime(0.025, start + 0.5);
-      tremBus.gain.exponentialRampToValueAtTime(0.11, HOLD);
-      tremBus.gain.setTargetAtTime(0.05, HOLD, 0.35);
-      lowBus.gain.setValueAtTime(0, start + BAR * 1.9);
-      lowBus.gain.linearRampToValueAtTime(1, start + BAR * 3.0);
-      // the eyes ignite ~12.0 s in: pulse, clock and heartbeat stop dead and the cluster drops back, so the ignition swell
-      // speaks into stillness; the drone holds and the cluster breathes back in
-      lowBus.gain.setTargetAtTime(0.5, HOLD, 0.35);
-      lowBus.gain.setTargetAtTime(0, IGN - 0.02, 0.03);
-      tremBus.gain.setTargetAtTime(0.02, IGN, 0.05);
-      tremBus.gain.setTargetAtTime(0.05, IGN + 0.7, 0.5);
-      drone.out.gain.setTargetAtTime(0.08, HOLD, 0.4);
-      drone.out.gain.setTargetAtTime(0.05, IGN - 0.02, 0.03);
-      drone.out.gain.setTargetAtTime(0.12, IGN + 1.0, 0.6);
+      const ignAt = start + IGN;
+      const breathAt = start + HOLD;
       return {
         tick(from, to) {
           grid(start, BAR * 2, from, to, (i, t) => {
@@ -736,22 +739,22 @@ const FACTORIES: Record<Section, Factory> = {
           for (const [dt, m, att] of line) once(start + dt, from, to, (t) => cello.chord(t, [m - 12, m], { att, glide: 0.08 }));
           grid(start, BEAT, from, to, (i, t) => {
             if (t - start < BAR * 1.6 && i % 2) return;
-            if (t > IGN - 0.35) return;
+            if (t > ignAt - 0.35) return;
             const k = Math.min(1, (t - start) / (BAR * 3.4));
-            const held = t > HOLD ? 0.6 : 1;
+            const held = t > breathAt ? 0.6 : 1;
             heart(v, t, (0.07 + 0.04 * k) * held, hb);
             heart(v, t + 0.27, (0.05 + 0.025 * k) * held, hb);
           });
           grid(start + BAR, BEAT / 2, from, to, (i, t) => {
-            if (t > IGN - 0.02) return;
+            if (t > ignAt - 0.02) return;
             const k = Math.min(1, (t - start - BAR) / (BAR * 2.4));
-            const held = 0.45 + 0.55 * Math.min(1, Math.max(0, (IGN - 0.1 - t) / 1.3));
+            const held = 0.45 + 0.55 * Math.min(1, Math.max(0, (ignAt - 0.1 - t) / 1.3));
             clock.hit(t, (i % 2 ? 0.1 : 0.16) * (0.45 + 0.55 * k) * held, 0.016);
           });
           grid(start + BAR * 2, BEAT / 2, from, to, (i, t) => {
-            if (t < IGN - 0.02) spic(v, t, i % 4 === 3 ? 50 : 38, i % 2 ? 0.07 : 0.1, lowBus, 0.07, 0.05);
+            if (t < ignAt - 0.02) spic(v, t, i % 4 === 3 ? 50 : 38, i % 2 ? 0.07 : 0.1, lowBus, 0.07, 0.05);
           });
-          once(start + 10.3, from, to, (t) => revSwell(v, t, start + 12.0, 0.05, v.wet, 2400));
+          once(start + 10.3, from, to, (t) => revSwell(v, t, ignAt, 0.05, v.wet, 2400));
         },
       };
     };
@@ -827,46 +830,48 @@ const FACTORIES: Record<Section, Factory> = {
     const grooveOffs = groove.map(([s]) => (s * BEAT) / 4);
     // the Warden theme in horns and trombones (octaves): D-F over Bb, E-G over C, then A and the leap to D on the stand
     const theme = [[62, 65], [64, 67], [69, 74]];
+    // Timing: with hitAt known (offline renders) everything is scheduled now. Live, the build runs until the
+    // director calls hush() (build cuts dead) and plays awaken_hit (the roar starts on that exact moment).
+    const hitIn = o.at !== undefined && o.hitAt !== undefined ? o.hitAt - o.at : Infinity;
+    const nominal = hitIn !== Infinity ? Math.max(0.5, hitIn - 0.78) : 4.08;
+    v.ramp(dr.gain, 0, 0.03, 0.1, nominal);
+    v.ramp(dlp.frequency, 0, 260, 2600, nominal);
+    const sAt = Math.min(nominal - 0.6, 1.85);
+    v.at(st.gain).setValueAtTime(0, 0);
+    v.at(st.gain).linearRampToValueAtTime(0.08, 0.4);
+    v.ramp(st.gain, sAt, 0.08, 0.24, Math.max(0.3, nominal - sAt));
+    v.at(trl.frequency).setValueAtTime(6, 0);
+    v.at(trl.frequency).linearRampToValueAtTime(12, nominal);
+    const rv = bv.gain(0, build);
+    const rs = Math.max(0, nominal - 1.7);
+    v.ramp(rv.gain, rs, 0.002, 0.2, nominal - rs);
+    const rb = bv.filt('bandpass', 400, 0.9, rv);
+    v.ramp(rb.frequency, rs, 380, 3400, nominal - rs);
+    bv.noise('pink', rs, LONG, rb);
+    const cym = bv.gain(0, bv.filt('lowpass', 11000, 0.6, bv.filt('highpass', 4000, 0.6, build)));
+    v.ramp(cym.gain, rs, 0.0008, 0.07, nominal - rs);
+    bv.noise('white', rs, LONG, cym);
+    const clock = new Hits(bv, 0, 'white', bv.filt('bandpass', 4600, 1.1, bv.pan(0.2, build)));
+    lb.chord(0, [50, 57, 62], 0.01);
+    v.at(lb.out.gain).setValueAtTime(0, 0);
+    v.at(lb.out.gain).linearRampToValueAtTime(0.018, 0.2);
+    v.at(lb.out.gain).exponentialRampToValueAtTime(0.3, Math.max(0.5, nominal));
+    v.ramp(lb.lp.frequency, 0.2, 320, 2400, Math.max(0.3, nominal - 0.2));
+    if (o.at !== undefined && hitIn !== Infinity) {
+      const cutAt = o.at + hitIn - 0.78;
+      host.hush(cutAt, o.at + hitIn);
+      build.gain.setTargetAtTime(0, cutAt, 0.006);
+      bv.stop(cutAt, 0.024);
+    }
     return (start) => {
-      // Timing: with hitAt known (offline renders) everything is scheduled now. Live, the build runs until the
-      // director calls hush() (build cuts dead) and plays awaken_hit (the roar starts on that exact moment).
-      let hitAt = o.hitAt ?? Infinity;
-      let cutAt = o.hitAt !== undefined ? o.hitAt - 0.78 : Infinity;
-      if (o.hitAt !== undefined) host.hush(cutAt, o.hitAt);
-      const nominal = o.hitAt !== undefined ? Math.max(0.5, cutAt - start) : 4.08;
+      let hitAt = start + hitIn;
+      let cutAt = hitAt - 0.78;
       const cut = (at: number) => {
         if (cutAt !== Infinity && at >= cutAt) return;
         cutAt = at;
         build.gain.setTargetAtTime(0, at, 0.006);
         bv.stop(at, 0.024);
       };
-      v.ramp(dr.gain, start, 0.03, 0.1, nominal);
-      v.ramp(dlp.frequency, start, 260, 2600, nominal);
-      const sAt = start + Math.min(nominal - 0.6, 1.85);
-      st.gain.setValueAtTime(0, start);
-      st.gain.linearRampToValueAtTime(0.08, start + 0.4);
-      v.ramp(st.gain, sAt, 0.08, 0.24, Math.max(0.3, start + nominal - sAt));
-      trl.frequency.setValueAtTime(6, start);
-      trl.frequency.linearRampToValueAtTime(12, start + nominal);
-      const rv = bv.gain(0, build);
-      const rs = start + Math.max(0, nominal - 1.7);
-      v.ramp(rv.gain, rs, 0.002, 0.2, start + nominal - rs);
-      const rb = bv.filt('bandpass', 400, 0.9, rv);
-      v.ramp(rb.frequency, rs, 380, 3400, start + nominal - rs);
-      bv.noise('pink', rs, start + LONG, rb);
-      const cym = bv.gain(0, bv.filt('lowpass', 11000, 0.6, bv.filt('highpass', 4000, 0.6, build)));
-      v.ramp(cym.gain, rs, 0.0008, 0.07, start + nominal - rs);
-      bv.noise('white', rs, start + LONG, cym);
-      const clock = new Hits(bv, start, 'white', bv.filt('bandpass', 4600, 1.1, bv.pan(0.2, build)));
-      lb.chord(start, [50, 57, 62], 0.01);
-      lb.out.gain.setValueAtTime(0, start);
-      lb.out.gain.linearRampToValueAtTime(0.018, start + 0.2);
-      lb.out.gain.exponentialRampToValueAtTime(0.3, start + Math.max(0.5, nominal));
-      v.ramp(lb.lp.frequency, start + 0.2, 320, 2400, Math.max(0.3, nominal - 0.2));
-      if (cutAt !== Infinity) {
-        build.gain.setTargetAtTime(0, cutAt, 0.006);
-        bv.stop(cutAt, 0.024);
-      }
       let nextBeat = start + 0.6;
       let gap = 1.0;
       let roarTo = -Infinity;
@@ -1006,15 +1011,15 @@ const FACTORIES: Record<Section, Factory> = {
     const harpBus = v.gain(0, v.filt('peaking', 2600, 1, v.wet, 2));
     const chords = [Dadd9, Gmaj9, Bm7, Aadd9];
     const tones = [[74, 78, 81, 86], [74, 78, 83, 86], [74, 78, 81, 83], [76, 81, 83, 88]];
+    v.at(harpBus.gain).setValueAtTime(0, BAR * 0.25);
+    v.at(harpBus.gain).linearRampToValueAtTime(1, BAR * 0.8);
     return (start) => {
-      harpBus.gain.setValueAtTime(0, start + BAR * 0.25);
-      harpBus.gain.linearRampToValueAtTime(1, start + BAR * 0.8);
       const ci = (t: number) => Math.floor((t - start + 1e-6) / (BAR * 2)) % 4;
       return {
         tick(from, to) {
           grid(start, BAR * 2, from, to, (i, t) => {
             str.chord(t, chords[i % 4], { glide: 0.3, att: 0.35, dip: i > 0, swell: BAR * 2 });
-            so.frequency.setTargetAtTime(midi(26 + ((chords[i % 4][0] - 38 + 24) % 12)), t, 0.2);
+            v.at(so.frequency).setTargetAtTime(midi(26 + ((chords[i % 4][0] - 38 + 24) % 12)), t, 0.2);
           });
           grid(start + BAR * 0.25, BEAT / 2, from, to, (i, t) => {
             // after the first cycle the harp breathes: one bar on, one bar off (the player may sit with the chest or the letter)
@@ -1043,10 +1048,10 @@ const FACTORIES: Record<Section, Factory> = {
     const motif: [number, number][] = [[0.5, 74], [1.54, 78], [2.58, 76], [3.63, 79], [4.67, 81], [5.71, 86]];
     const chords = [Dadd9, Gmaj9, Dadd9, Aadd9];
     const tops = [[78, 81], [79, 83], [78, 81], [76, 81]];
+    v.at(hi.out.gain).setValueAtTime(0, 0);
+    v.at(hi.out.gain).linearRampToValueAtTime(0.028, 4);
+    v.at(solo.out.gain).setTargetAtTime(0, 10, 1.5);
     return (start) => {
-      hi.out.gain.setValueAtTime(0, start);
-      hi.out.gain.linearRampToValueAtTime(0.028, start + 4);
-      solo.out.gain.setTargetAtTime(0, start + 10, 1.5);
       return {
         tick(from, to) {
           for (const [dt, m] of motif) once(start + dt, from, to, (t) => solo.chord(t, [m], { dip: true, att: dt > 5 ? 0.25 : 0.1, glide: 0.05 }));
@@ -1072,9 +1077,9 @@ const FACTORIES: Record<Section, Factory> = {
     const chords = [[50, 57, 62, 64, 66], [43, 55, 59, 62, 66]];
     const tops = [[74, 78], [74, 79]];
     const penta = [74, 76, 78, 81, 83, 86];
+    v.at(hi.out.gain).setValueAtTime(0.07, 0);
+    v.at(hi.out.gain).linearRampToValueAtTime(0.11, 2.5);
     return (start) => {
-      hi.out.gain.setValueAtTime(0.07, start);
-      hi.out.gain.linearRampToValueAtTime(0.11, start + 2.5);
       return {
         tick(from, to) {
           grid(start, bar * 2, from, to, (i, t) => {
@@ -1118,22 +1123,17 @@ export class Music {
 
   to(name: Section, crossfade = 2, o: SectionOpts = {}) {
     const lib = this.host.lib;
-    // built before its start is read, so building can't push its opening into the past; placing the opening's first
-    // notes takes up to about as long as building did, so a part that was slow to build starts that much later
-    const built = performance.now();
     const voice = new Voice(lib, 0, this.dest, { hall: name === "awaken" ? 0.22 : 0.32, room: 0, gain: SECTION_GAIN[name], held: true }, this.host.seed());
-    const open = FACTORIES[name](voice, o, this.host);
-    const at = o.at ?? soon(lib.ctx) + (performance.now() - built) / 1000;
+    const score = FACTORIES[name](voice, o, this.host);
+    score(0).tick(0, AHEAD);
+    voice.at(voice.out.gain).setValueAtTime(0, 0);
+    voice.at(voice.out.gain).setTargetAtTime(1, 0, Math.max(0.004, crossfade / 4));
+    const at = o.at ?? soon(lib.ctx);
     this.stop(o.fadeOut ?? crossfade, at);
     voice.open(at);
-    voice.out.gain.setValueAtTime(0, at);
-    voice.out.gain.setTargetAtTime(1, at, Math.max(0.004, crossfade / 4));
-    const impl = open(at);
-    this.live.push({ name, voice, impl, start: at, end: Infinity, until: at });
+    this.live.push({ name, voice, impl: score(at), start: at, end: Infinity, until: at + AHEAD });
     this.current = name;
     this.host.onSection?.(name, at);
-    // its opening is placed now, not when the next window comes round (by then it would be behind soon())
-    this.scheduleUntil(lib.ctx.currentTime + AHEAD, at);
   }
 
   stop(fade = 1, at = soon(this.host.lib.ctx)) {
