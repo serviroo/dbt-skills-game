@@ -130,7 +130,7 @@ export async function runApp(stage: Stage | null, makeStage: () => Stage | null)
       })
       .catch(() => undefined);
 
-  const wantCutscene = !state.seenCutscene || !!params.shot || params.cutscene;
+  const wantCutscene = !state.seenCutscene || !!params.shot || replaying();
   let help = false;
   // only the intro draws on the 3D stage: the companion is DOM only (its small scenes bring their own renderer), so a
   // returning player never sets up WebGL for it
@@ -181,6 +181,8 @@ async function intro(stage: Stage | null, audio: AppAudio | null, state: AppStat
   if (params.cutscene) history.replaceState(history.state, '', address(false));
   return end === 'safe';
 }
+
+const replaying = () => new URLSearchParams(location.search).has('cutscene');
 
 function address(replay: boolean) {
   const q = location.search.slice(1).split('&').filter((p) => p && p.split('=')[0] !== 'cutscene');

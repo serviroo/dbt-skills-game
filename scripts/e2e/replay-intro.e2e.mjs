@@ -31,7 +31,7 @@ const logHistory = () => {
   window.__pushes = 0;
   history.pushState = (...a) => {
     window.__pushes++;
-    note('push');
+    note(navigator.userActivation.isActive ? 'push' : 'push-untapped');
     return pushState.apply(history, a);
   };
   history.go = (by) => {
@@ -46,10 +46,10 @@ async function settings(h, viewport) {
   return { ctx, page, errors, before: new URL(page.url()).search };
 }
 
-async function replay(h, page, tag) {
+async function replay(h, page, tag, started) {
   await page.evaluate(() => sessionStorage.removeItem('replay-history'));
   await page.getByRole('button', { name: 'Replay cutscene' }).click();
-  await page.getByRole('button', { name: 'Skip intro' }).waitFor({ timeout: 30000 });
+  await (started ?? page.getByRole('button', { name: 'Skip intro' }).waitFor({ timeout: 30000 }));
   const log = await page.evaluate(() => sessionStorage.getItem('replay-history')?.trim());
   h.expect(log === 'push', `${tag}: Replay cutscene changed history as "${log}", not one push inside the tap`);
 }
@@ -155,6 +155,33 @@ export const scenarios = {
       await h.evidence(page, 'replay-back-fail');
       throw e;
     } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'replay-back-while-loading'(h) {
+    const { ctx, page, errors, before } = await settings(h);
+    let release;
+    const held = new Promise((r) => (release = r));
+    try {
+      let reached;
+      const asked = new Promise((r) => (reached = r));
+      await ctx.route('**/src/audio/engine.ts*', (r) => {
+        reached();
+        return held.then(() => r.fallback());
+      });
+      await replay(h, page, 'loading', asked);
+      await page.goBack({ waitUntil: 'commit' });
+      release();
+      await backOnSettings(h, page, before, 'loading');
+      const intro = await page.evaluate(() => !!document.querySelector('.title-screen'));
+      h.expect(!intro, 'loading: Back before the replay had loaded still played the intro');
+      h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
+    } catch (e) {
+      await h.evidence(page, 'replay-back-while-loading-fail');
+      throw e;
+    } finally {
+      release();
       await ctx.close();
     }
   },
