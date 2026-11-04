@@ -31,24 +31,31 @@ export function watchNarrow(root: HTMLElement) {
     const resized = entries.map((e) => e.target);
     requestAnimationFrame(() => resized.forEach(fit));
   });
-  const watch = () => {
+  const add = (el: Element) => {
+    if (watched.has(el)) return;
+    watched.add(el);
+    fit(el);
+    sizes.observe(el);
+  };
+  const watch = (changes: MutationRecord[]) => {
     for (const el of watched) {
       if (el.isConnected) continue;
       sizes.unobserve(el);
       watched.delete(el);
     }
-    for (const el of root.querySelectorAll(NARROWS)) {
-      if (watched.has(el)) continue;
-      watched.add(el);
-      fit(el);
-      sizes.observe(el);
+    for (const { addedNodes } of changes) {
+      for (const node of addedNodes) {
+        if (!(node instanceof Element)) continue;
+        if (node.matches(NARROWS)) add(node);
+        node.querySelectorAll(NARROWS).forEach(add);
+      }
     }
   };
   const refit = () => watched.forEach(fit);
   const added = new MutationObserver(watch);
   added.observe(root, { childList: true, subtree: true });
   document.fonts.addEventListener('loadingdone', refit);
-  watch();
+  root.querySelectorAll(NARROWS).forEach(add);
   return () => {
     added.disconnect();
     sizes.disconnect();

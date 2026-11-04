@@ -481,7 +481,9 @@ function sweep(phone, { textAt200 = false } = {}) {
           const held = new EventTarget();
           window.__failHeldDelete = () => {
             held.error = new DOMException('failed', 'UnknownError');
-            held.onerror?.(new Event('error'));
+            const failed = new Event('error');
+            held.dispatchEvent(failed);
+            held.onerror?.(failed);
           };
           return held;
         };
@@ -701,6 +703,12 @@ async function narrowLayouts(h) {
     await settle(page);
     await narrowIn('Library once the text grows while it is open', NARROW_SCREENS[2][2], true);
     for (const screen of NARROW_SCREENS) await visit(screen, true);
+    await page.evaluate(() => {
+      const scaled = (s) => s.textContent.includes('text-size-adjust: 200%');
+      [...document.querySelectorAll('style')].filter(scaled).forEach((s) => s.remove());
+    });
+    await settle(page);
+    await narrowIn('Library once the text is back to normal', NARROW_SCREENS[2][2], false);
     const loops = await page.evaluate(() => window.__resizeLoops);
     if (loops.length) failed.push(`resize loops: ${loops.join(' | ')}`);
     if (errors.length) failed.push(errors.join(' | '));
