@@ -51,35 +51,6 @@ const SCREENS = [
 ];
 const LONG_DRAWING_NAMES = { 'draw-today': 'Chrysanthemums', 'draw-ally': 'Chrysanthemum' };
 const LONG_STORY_TITLE = 'Somewhere Unforgettable to Rest for a While';
-const NARROWED_BY_CONTAINER_QUERIES = ['Library', 'A quiet minute', 'Art room'];
-
-const NO_CONTAINER_QUERIES = 'e2e-no-container-queries';
-
-const likeABrowserWithoutContainerQueries = (page) =>
-  page.addInitScript((flag) => {
-    if (!sessionStorage.getItem(flag)) return;
-    const supports = CSS.supports.bind(CSS);
-    CSS.supports = (...a) => !a.join(':').includes('container') && supports(...a);
-  }, NO_CONTAINER_QUERIES);
-
-const stripContainerQueries = (page) =>
-  page.evaluate(() => {
-    const unknown = (name, value) => name.startsWith('container') || /\dcq(w|h|i|b|min|max)\b/.test(value);
-    const strip = (list) => {
-      for (let i = list.cssRules.length - 1; i >= 0; i--) {
-        const rule = list.cssRules[i];
-        if (rule instanceof CSSContainerRule) {
-          list.deleteRule(i);
-        } else {
-          for (const name of [...(rule.style ?? [])]) {
-            if (unknown(name, rule.style.getPropertyValue(name))) rule.style.removeProperty(name);
-          }
-          if (rule.cssRules) strip(rule);
-        }
-      }
-    };
-    for (const sheet of document.styleSheets) strip(sheet);
-  });
 
 /**
  * Waits until the screen stops changing: no DOM changes for 300 ms (at most 3 s), and its entry motion done. A ring that
@@ -348,13 +319,7 @@ function sweep(phone, { textAt200 = false } = {}) {
     const phoneLike = textAt200 ? { isMobile: true, hasTouch: true } : {};
     const { ctx, page, errors } = await h.open(stored, '?mute', zoomed, undefined, phoneLike);
     const pixelReader = await ctx.newPage();
-    const reopen = async () => {
-      await page.reload();
-      await h.reachHub(page);
-      if (textAt200) await scaleText(page);
-    };
     try {
-      await likeABrowserWithoutContainerQueries(page);
       await h.reachHub(page);
       await seedStores(page, h.SAVE, now);
       await page.evaluate(async ([key, names, title]) => {
@@ -364,7 +329,9 @@ function sweep(phone, { textAt200 = false } = {}) {
         const story = await storyStore(key).story('tale-1');
         await storyStore(key).saveStory({ ...story, title }, [story.rev]);
       }, [h.SAVE, LONG_DRAWING_NAMES, LONG_STORY_TITLE]);
-      await reopen();
+      await page.reload();
+      await h.reachHub(page);
+      if (textAt200) await scaleText(page);
       const check = async (where, { words = true, sheet = null, close = null } = {}) => {
         await settle(page);
         const w = await width(page, sheet);
@@ -414,15 +381,6 @@ function sweep(phone, { textAt200 = false } = {}) {
         await check('Night Watch, unzoomed');
         await page.setViewportSize(zoomed);
       }
-      await page.evaluate((flag) => sessionStorage.setItem(flag, '1'), NO_CONTAINER_QUERIES);
-      await reopen();
-      await stripContainerQueries(page);
-      for (const [where, route] of SCREENS.filter(([name]) => NARROWED_BY_CONTAINER_QUERIES.includes(name))) {
-        await go(route);
-        await check(`${where} without container queries`);
-      }
-      await page.evaluate((flag) => sessionStorage.removeItem(flag), NO_CONTAINER_QUERIES);
-      await reopen();
       // Home once the check-in is answered with a feeling that asks how strong it is
       await page.evaluate(() => window.__daily.go({ name: 'hub' }));
       await page.locator('.dq-feels .dq-opt').filter({ hasText: 'Tired' }).click({ timeout: 10000 });

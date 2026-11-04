@@ -21,7 +21,7 @@ import { linesScreen } from './lines';
 import { easeScreen, momentScreen } from './moment';
 import { safeScreen } from './safe';
 import { skillScreen } from './skill';
-import { narrowWithoutContainerQueries } from './narrow';
+import { watchNarrow } from './narrow';
 
 export type { DailyOpts } from './app';
 export { mothSVG, catSVG } from './art';
@@ -50,7 +50,7 @@ export function mountDaily(root: HTMLElement, opts: DailyOpts): { unmount(): voi
     moment: momentScreen,
   });
   app.start();
-  const unnarrow = narrowWithoutContainerQueries(root);
+  const unnarrow = watchNarrow(root);
   (window as unknown as { __daily?: App }).__daily = app;
   return {
     settled: app.settled.catch(() => undefined),
