@@ -813,6 +813,7 @@
   "skip-keeps-the-sound-levels": [6, 4],
   "skip-late-in-awaken": [87, 58],
   "skip-mid-silhouette": [76, 46],
+  "skip-reaches-a-shortened-score-fade-after-the-score-moves-on": [3],
   "skip-silences-every-sound": [27, 22],
   "skip-stops-the-intro-sound": [54, 49],
   "skip-then-restore": [8, 8],

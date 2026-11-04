@@ -335,4 +335,8 @@ export class Voice {
   get isStopped() {
     return this.killAt !== Infinity;
   }
+
+  get silentAt() {
+    return this.killAt;
+  }
 }

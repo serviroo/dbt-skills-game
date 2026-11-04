@@ -187,6 +187,50 @@ export const scenarios = {
     return Object.fromEntries(got.map((g) => [g.name, Number.isFinite(g.apart) ? +g.apart.toFixed(1) : 'silent']));
   },
 
+  async 'skip-reaches-a-shortened-score-fade-after-the-score-moves-on'({ open, expect }) {
+    const { ctx, page, errors } = await open({}, '?lab=audio&mute');
+    await page.waitForFunction(() => window.__lab === true, null, { timeout: 30000 });
+    const got = await page.evaluate(async (rates) => {
+      const { AudioEngine } = await import('/src/audio/engine.ts');
+      const { stoppedBy } = await import('/src/audio/voice.ts');
+      const { SCORE } = await import('/src/motion/tokens.ts');
+      const { AHEAD } = await import('/src/audio/music.ts');
+      const [T0, LONG, SHORT, SKIP, PROBE] = [0.02, 1, 6.5, 6.6, 2];
+      const out = [];
+      for (const sr of rates) {
+        const len = stoppedBy(SHORT, 0.5) + 0.1;
+        const c = new OfflineAudioContext(4, Math.ceil(len * sr), sr);
+        const eng = new AudioEngine(c);
+        const probe = c.createChannelMerger(4);
+        probe.connect(c.destination);
+        eng.testInput('music').connect(probe, 0, PROBE);
+        eng.music.to('windows', 0.5, { at: T0 });
+        eng.music.scheduleUntil(LONG);
+        eng.music.stop(8, LONG);
+        eng.music.stop(0.5, SHORT);
+        eng.music.scheduleUntil(SHORT + AHEAD);
+        eng.stopAll(SCORE.leaveSec, SKIP);
+        const d = (await c.startRendering()).getChannelData(PROBE);
+        const rms = (a, b) => {
+          let x = 0;
+          for (let i = a; i < b; i++) x += d[i] * d[i];
+          return Math.sqrt(x / (b - a));
+        };
+        const level = rms(Math.floor((LONG - 0.5) * sr), Math.floor(LONG * sr));
+        const after = rms(Math.ceil(stoppedBy(SKIP, SCORE.leaveSec) * sr), d.length);
+        out.push({ sr, level, after: 20 * Math.log10(after / level) });
+      }
+      return out;
+    }, RATES);
+    for (const g of got) {
+      expect(g.level > 1e-4, `${g.sr} Hz: the score is too quiet to measure (${g.level.toExponential(2)})`);
+      expect(g.after < FLOOR_DB, `${g.sr} Hz: the shortened fade still sounds at ${g.after.toFixed(1)} dB after Skip`);
+    }
+    expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+    return Object.fromEntries(got.map((g) => [g.sr, Number.isFinite(g.after) ? +g.after.toFixed(1) : 'silent']));
+  },
+
   async 'a-sooner-stop-wins'({ open, expect }) {
     const { ctx, page, errors } = await open({}, '?lab=audio&mute');
     await page.waitForFunction(() => window.__lab === true, null, { timeout: 30000 });
