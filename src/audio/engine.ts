@@ -96,6 +96,7 @@ export class AudioEngine {
   /** The shared room and hall echo and its sends; leaving the Safe Zone swaps in an empty echo on the same sends, and
    *  stopAll an empty echo with sends of its own. */
   private echo: Echo;
+  private closing = new Map<Echo, { by: number; silent: ConstantSourceNode }>();
   private userMaster = 1;
   private bedBus: GainNode;
   private hushBeds: GainNode;
@@ -650,23 +651,33 @@ export class AudioEngine {
     // return closes as they fade, until they are silent and it is dropped, timed on the audio clock, which stands still
     // while the page is hidden: none of their fade rings on, in the old echo or the new
     const old = this.echo;
-    for (const g of old.out) {
-      holdAt(g.gain, at);
-      g.gain.linearRampToValueAtTime(0, at + fade);
-    }
     const sends = this.makeSends(old.sends);
     this.echo = this.makeEcho(sends, old.room.buffer!, old.hall.buffer!);
     Object.assign(this.lib, { room: sends.sfxRoom, hall: sends.sfxHall });
     Object.assign(this.libMusic, { room: sends.musRoom, hall: sends.musHall });
-    const silent = this.ctx.createConstantSource();
-    silent.offset.value = 0;
-    silent.connect(this.ctx.destination);
-    silent.onended = () => {
-      silent.disconnect();
-      this.dropEcho(old);
-    };
-    silent.start(at);
+    for (const e of [old, ...this.closing.keys()]) this.closeEcho(e, at, fade);
+  }
+
+  private closeEcho(e: Echo, at: number, fade: number) {
+    const was = this.closing.get(e);
+    if (was && was.by <= at + fade) return;
+    for (const g of e.out) {
+      holdAt(g.gain, at);
+      g.gain.linearRampToValueAtTime(0, at + fade);
+    }
+    const silent = was?.silent ?? this.ctx.createConstantSource();
+    if (!was) {
+      silent.offset.value = 0;
+      silent.connect(this.ctx.destination);
+      silent.onended = () => {
+        silent.disconnect();
+        this.closing.delete(e);
+        this.dropEcho(e);
+      };
+      silent.start(at);
+    }
     silent.stop(stoppedBy(at, fade));
+    this.closing.set(e, { by: at + fade, silent });
   }
 
   /** Stop everything and restore the score controls (level, low-pass, lift, duck, hush) for a clean replay. */

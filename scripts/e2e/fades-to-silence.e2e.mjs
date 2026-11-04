@@ -52,10 +52,10 @@ export const scenarios = {
         probe.connect(c.destination);
         for (const n of [eng.bedBus, eng.testInput('music'), eng.testInput('sfx')]) n.connect(probe, 0, PROBE);
         let cue = null;
-        let bed = null;
+        const beds = [];
         let charge = null;
         for (const s of f.start) {
-          if (BED_NAMES.includes(s)) bed ??= eng.bed(s, { at: T0 });
+          if (BED_NAMES.includes(s)) beds.push(eng.bed(s, { at: T0 }));
           else if (CUES[s]) cue = eng.play(s, { at: T0, dur: 6 });
           else if (s === 'charge') charge = eng.chargeLoop({ at: T0 });
           else eng.music.to(s, 0.5, { at: T0 });
@@ -65,7 +65,7 @@ export const scenarios = {
         if (stopped) {
           if (f.stop === 'reset') eng.reset(fade, AT);
           else if (f.stop === 'stopAll') eng.stopAll(fade, AT);
-          else if (f.stop === 'bed') bed.stop(fade, AT);
+          else if (f.stop === 'bed') beds[0].stop(fade, AT);
           else if (f.stop === 'music') eng.music.stop(fade, AT);
           else if (f.stop === 'lift') eng.music.to('reward', 1, { at: AT });
           else if (f.stop === 'bed_stop') {
@@ -75,7 +75,8 @@ export const scenarios = {
           else charge.stop(AT, fade);
           if (f.skip) eng.stopAll(SCORE.leaveSec, AT + f.skip);
         }
-        return (await c.startRendering()).getChannelData(PROBE);
+        const out = await c.startRendering();
+        return { probe: out.getChannelData(PROBE), speaker: out.getChannelData(0) };
       };
       const rms = (d, a, b) => {
         let s = 0;
@@ -83,11 +84,13 @@ export const scenarios = {
         return Math.sqrt(s / (b - a));
       };
       const dB = (x) => (x > 0 ? 20 * Math.log10(x) : -Infinity);
+      const endsAll = (f) => f.skip || f.stop === 'reset' || f.stop === 'stopAll';
       const out = [];
       for (const sr of rates) {
         for (const f of fades) {
           const fade = typeof f.fade === 'number' ? f.fade : SCORE[f.fade];
-          const [cut, twin] = await Promise.all([render(f, sr, fade, true), render(f, sr, fade, false)]);
+          const [stopped, unstopped] = await Promise.all([render(f, sr, fade, true), render(f, sr, fade, false)]);
+          const [cut, twin] = [stopped.probe, unstopped.probe];
           const k = Math.floor((f.skip ? stoppedBy(AT + f.skip, SCORE.leaveSec) : stoppedBy(AT, fade)) * sr) - 1;
           const w = Math.round(before * sr);
           const [a0, a1] = after.map((s) => k + Math.round(s * sr));
@@ -102,6 +105,7 @@ export const scenarios = {
             apart: dB(Math.sqrt(diff / (b1 - b0)) / rms(twin, b0, b1)),
             atStop: dB(rms(cut, k - w, k) / rms(twin, k - w, k)),
             after: dB(rms(cut, a0, a1) / rms(twin, a0, a1)),
+            echo: endsAll(f) ? dB(rms(stopped.speaker, a0, a1) / rms(stopped.speaker, b0, b1)) : -Infinity,
           });
         }
       }
@@ -116,11 +120,12 @@ export const scenarios = {
       expect(g.apart < TWIN_DB, `${at}: the render and its twin differ before the stop, at ${g.apart.toFixed(1)} dB`);
       expect(g.atStop < FLOOR_DB, `${at}: still at ${atStop} dB where its sources end, above ${FLOOR_DB} dB`);
       expect(g.after < FLOOR_DB, `${at}: still sounds at ${g.after.toFixed(1)} dB after its sources end`);
+      expect(g.echo < FLOOR_DB, `${at}: its echo still rings at ${g.echo.toFixed(1)} dB after everything stopped`);
     }
     expect(!errors.length, errors.join('\n'));
     await ctx.close();
     const db = (x) => (Number.isFinite(x) ? +x.toFixed(1) : 'silent');
-    const measured = (g) => ({ atStop: db(g.atStop), after: db(g.after), twin: db(g.apart) });
+    const measured = (g) => ({ atStop: db(g.atStop), after: db(g.after), twin: db(g.apart), echo: db(g.echo) });
     return Object.fromEntries(got.map((g) => [`${g.name} ${g.sr}`, measured(g)]));
   },
 
