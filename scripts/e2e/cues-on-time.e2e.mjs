@@ -387,20 +387,26 @@ export const scenarios = {
           const engine = window.__engine;
           const rec = window.__taps[tap];
           const clock = rec.context;
-          const tick = () => new Promise((done) => setTimeout(done, 10));
-          const reach = async (t) => {
-            while (clock.currentTime < t) await tick();
-          };
           const recent = () => {
             let ss = 0;
             for (let k = rec.end - 31; k <= rec.end; k++) ss += rec.q.get(k)?.[1] ?? 0;
             return Math.sqrt(ss / (32 * Q));
           };
-          const silence = async () => {
-            const from = clock.currentTime;
-            while (!(rec.end !== undefined && ((rec.end - 31) * Q) / clock.sampleRate > from && recent() < 3e-5)) {
-              await tick();
+          const until = async (ready, what) => {
+            const by = performance.now() + 15000;
+            while (!ready()) {
+              if (rec.error || performance.now() > by) {
+                const now = `the context ${clock.state} at ${clock.currentTime.toFixed(3)} s`;
+                throw new Error(`${what} never came: ${now}, recorder ${rec.error ?? rec.status}, RMS ${recent()}`);
+              }
+              await new Promise((done) => setTimeout(done, 10));
             }
+          };
+          const reach = (t) => until(() => clock.currentTime >= t, `the audio clock reaching ${t.toFixed(3)} s`);
+          const silence = () => {
+            const from = clock.currentTime;
+            const heard = () => rec.end !== undefined && ((rec.end - 31) * Q) / clock.sampleRate > from;
+            return until(() => heard() && recent() < 3e-5, 'silence before the next opening');
           };
           const out = [];
           const play = async (name, start, stop) => {
