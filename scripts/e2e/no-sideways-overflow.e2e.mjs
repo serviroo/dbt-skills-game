@@ -50,9 +50,19 @@ const SCREENS = [
   ...SAFE_AT.map((at) => [`Safe Zone ${at}`, { name: 'safe', at }]),
 ];
 const LONG_DRAWING_NAMES = { 'draw-today': 'Chrysanthemums', 'draw-ally': 'Chrysanthemum' };
+const LONG_STORY_TITLE = 'Somewhere Unforgettable to Rest for a While';
 const NARROWED_BY_CONTAINER_QUERIES = ['Library', 'A quiet minute', 'Art room'];
 
-const withoutContainerQueries = (page) =>
+const NO_CONTAINER_QUERIES = 'e2e-no-container-queries';
+
+const likeABrowserWithoutContainerQueries = (page) =>
+  page.addInitScript((flag) => {
+    if (!sessionStorage.getItem(flag)) return;
+    const supports = CSS.supports.bind(CSS);
+    CSS.supports = (...a) => !a.join(':').includes('container') && supports(...a);
+  }, NO_CONTAINER_QUERIES);
+
+const stripContainerQueries = (page) =>
   page.evaluate(() => {
     const unknown = (name, value) => name.startsWith('container') || /\dcq(w|h|i|b|min|max)\b/.test(value);
     const strip = (list) => {
@@ -60,10 +70,6 @@ const withoutContainerQueries = (page) =>
         const rule = list.cssRules[i];
         if (rule instanceof CSSContainerRule) {
           list.deleteRule(i);
-        } else if (rule instanceof CSSSupportsRule && rule.conditionText === 'not (container-type: inline-size)') {
-          const inner = [...rule.cssRules].map((r) => r.cssText);
-          list.deleteRule(i);
-          for (const text of inner.reverse()) list.insertRule(text, i);
         } else {
           for (const name of [...(rule.style ?? [])]) {
             if (unknown(name, rule.style.getPropertyValue(name))) rule.style.removeProperty(name);
@@ -342,16 +348,23 @@ function sweep(phone, { textAt200 = false } = {}) {
     const phoneLike = textAt200 ? { isMobile: true, hasTouch: true } : {};
     const { ctx, page, errors } = await h.open(stored, '?mute', zoomed, undefined, phoneLike);
     const pixelReader = await ctx.newPage();
-    try {
-      await h.reachHub(page);
-      await seedStores(page, h.SAVE, now);
-      await page.evaluate(async ([key, names]) => {
-        const { artStore } = await import('/src/daily/artstore.ts');
-        for (const [id, name] of Object.entries(names)) await artStore(key).setLabels(id, { name });
-      }, [h.SAVE, LONG_DRAWING_NAMES]);
+    const reopen = async () => {
       await page.reload();
       await h.reachHub(page);
       if (textAt200) await scaleText(page);
+    };
+    try {
+      await likeABrowserWithoutContainerQueries(page);
+      await h.reachHub(page);
+      await seedStores(page, h.SAVE, now);
+      await page.evaluate(async ([key, names, title]) => {
+        const { artStore } = await import('/src/daily/artstore.ts');
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        for (const [id, name] of Object.entries(names)) await artStore(key).setLabels(id, { name });
+        const story = await storyStore(key).story('tale-1');
+        await storyStore(key).saveStory({ ...story, title }, [story.rev]);
+      }, [h.SAVE, LONG_DRAWING_NAMES, LONG_STORY_TITLE]);
+      await reopen();
       const check = async (where, { words = true, sheet = null, close = null } = {}) => {
         await settle(page);
         const w = await width(page, sheet);
@@ -400,14 +413,16 @@ function sweep(phone, { textAt200 = false } = {}) {
         await page.waitForFunction(() => window.__daily.route.name === 'shadows', null, { timeout: 10000 });
         await check('Night Watch, unzoomed');
         await page.setViewportSize(zoomed);
-        await withoutContainerQueries(page);
-        for (const [where, route] of SCREENS.filter(([name]) => NARROWED_BY_CONTAINER_QUERIES.includes(name))) {
-          await go(route);
-          await check(`${where} without container queries`);
-        }
-        await page.reload();
-        await h.reachHub(page);
       }
+      await page.evaluate((flag) => sessionStorage.setItem(flag, '1'), NO_CONTAINER_QUERIES);
+      await reopen();
+      await stripContainerQueries(page);
+      for (const [where, route] of SCREENS.filter(([name]) => NARROWED_BY_CONTAINER_QUERIES.includes(name))) {
+        await go(route);
+        await check(`${where} without container queries`);
+      }
+      await page.evaluate((flag) => sessionStorage.removeItem(flag), NO_CONTAINER_QUERIES);
+      await reopen();
       // Home once the check-in is answered with a feeling that asks how strong it is
       await page.evaluate(() => window.__daily.go({ name: 'hub' }));
       await page.locator('.dq-feels .dq-opt').filter({ hasText: 'Tired' }).click({ timeout: 10000 });
@@ -638,7 +653,38 @@ function steps(phone) {
   };
 }
 
+async function emptySlot(h) {
+  const failed = [];
+  for (const phone of SIZES.slice(0, 2)) {
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', phone, undefined, { isMobile: true });
+    try {
+      await h.reachHub(page);
+      await page.evaluate(() => window.__daily.go({ name: 'shadows' }));
+      const slot = page.locator('.w2-inv [data-item="empty"]');
+      await slot.waitFor({ timeout: 10000 });
+      const beside = await slot.evaluate((e) => {
+        const art = e.querySelector('.w2-item-art').getBoundingClientRect();
+        const words = e.querySelector('.w2-item-l').getBoundingClientRect();
+        return words.left >= art.right && words.top < art.bottom;
+      });
+      if (!beside) failed.push(`${phone.width}x${phone.height}: the empty slot's words are not beside its box`);
+      await scaleText(page);
+      await settle(page);
+      const w = await width(page);
+      const cut = [...w.past, ...w.cutAtSide];
+      const where = `${phone.width}x${phone.height}`;
+      if (w.doc !== w.vw || cut.length) failed.push(`${where} with its text at 200%: ${cut.join(', ') || 'too wide'}`);
+      await h.shot(page, `empty-slot-${phone.width}x${phone.height}-text`);
+      if (errors.length) failed.push(`${phone.width}x${phone.height}: ${errors.join(' | ')}`);
+    } finally {
+      await ctx.close();
+    }
+  }
+  h.expect(!failed.length, failed.join('\n'));
+}
+
 export const scenarios = Object.fromEntries([
+  ['no-sideways-overflow-empty-slot', emptySlot],
   ...SIZES.flatMap((phone) => [
     [`no-sideways-overflow-${phone.width}x${phone.height}`, sweep(phone)],
     [`no-sideways-overflow-${phone.width}x${phone.height}-text-200`, sweep(phone, { textAt200: true })],

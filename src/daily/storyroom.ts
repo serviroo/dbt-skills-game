@@ -18,7 +18,7 @@ import { match, spans, terms, type Span } from './storyfind';
 import { creditStory, STORY_CAP, storyStore, type Card, type CardMode, type Chapter, type Story } from './storystore';
 import { storyFromText, storyToText, type StoryText } from './storytext';
 import { keepTextSize, textSize } from './text-size';
-import { breakable, btn, h, keptWhole, p, segmented, shareOrSave, typo } from './ui';
+import { breakable, btn, h, keptWhole, p, segmented, shareOrSave, typo, wholeText } from './ui';
 import { storyHead } from './page-head';
 
 export const STORY = {
@@ -2025,13 +2025,13 @@ export function readScreen(app: App, route: Route): ScreenOut {
     const s = await ss.story(r.id);
     if (!alive) return;
     if (!s || s.removed) {
-      title.textContent = STORY.title;
+      wholeText(title, STORY.title);
       titled();
       tools.remove();
       body.replaceChildren(h('p', { class: 'st-read-empty', text: STORY_READ.gone }));
       return;
     }
-    title.textContent = shownTitle(s.title);
+    wholeText(title, shownTitle(s.title));
     sub.textContent = storyMeta(app, s);
     titled();
     // what this copy holds but couldn't store yet reads as it is in the editor

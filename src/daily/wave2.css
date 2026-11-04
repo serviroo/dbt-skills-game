@@ -738,7 +738,7 @@
   border: 1px solid rgba(125, 150, 197, 0.3);
   background: linear-gradient(180deg, var(--plate-a), var(--plate-b));
 }
-.w2-item-txt {
+.w2-item > :not(.w2-item-art) {
   flex: 1 1 0;
 }
 .w2-item--legendary {
