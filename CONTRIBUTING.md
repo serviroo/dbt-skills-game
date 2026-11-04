@@ -57,8 +57,8 @@ node scripts/e2e.mjs
 node scripts/e2e-runner-check.mjs
 ```
 
-`npm run lint` runs Oxlint and stylelint, then fails a line over 120 characters, or a file over 1,000 lines that is new or grows,
-counting only what your branch changes since `origin/main`.
+`npm run lint` runs Oxlint and stylelint, then fails a line over 120 characters, or a file over 1,000 lines that is
+new or grows, counting only what your branch changes since `origin/main`.
 
 The PWA checks test the build in `dist/`. `pwa-verify` runs in both Chromium and WebKit; on a machine where WebKit
 can't run, add `--browser=chromium`.

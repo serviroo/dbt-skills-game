@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0 --port 4173",
     "check:ids": "node scripts/check-stored-ids.mjs",
-    "lint": "node scripts/lint/selftest.mjs && oxlint && stylelint \"src/**/*.css\" && node scripts/lint/diff-limits.mjs"
+    "lint": "node scripts/lint/selftest.mjs && oxlint && npm run lint:css && node scripts/lint/diff-limits.mjs",
+    "lint:css": "stylelint \"src/**/*.css\""
   },
   "dependencies": {
     "postprocessing": "^6.39.5",
