@@ -183,9 +183,14 @@ async function intro(stage: Stage | null, audio: AppAudio | null, state: AppStat
 }
 
 const replaying = () => new URLSearchParams(location.search).has('cutscene');
+const byHistory = () => {
+  const [load] = performance.getEntriesByType('navigation') as PerformanceNavigationTiming[];
+  return load?.type === 'back_forward';
+};
 
 function leaveReplayAddress() {
   history.replaceState(history.state, '', address(false));
+  if (byHistory()) return null;
   const back = new AbortController();
   addEventListener('popstate', () => back.abort(), { once: true });
   return back.signal;

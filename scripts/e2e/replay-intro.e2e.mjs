@@ -265,6 +265,52 @@ export const scenarios = {
     }
   },
 
+  async 'replay-forward-fresh'(h) {
+    const { ctx, page, errors, before } = await settings(h);
+    const holds = [];
+    const hold = async () => {
+      let release;
+      const held = new Promise((r) => (release = r));
+      holds.push(release);
+      let reached;
+      const asked = new Promise((r) => (reached = r));
+      await ctx.unroute('**/src/main.ts*');
+      await ctx.route('**/src/main.ts*', (r) => {
+        reached();
+        return held.then(() => r.fallback());
+      });
+      return { asked, release };
+    };
+    try {
+      const first = await hold();
+      await replay(h, page, 'forward', { started: first.asked });
+      await page.goBack({ waitUntil: 'commit' });
+      first.release();
+      await backOnSettings(h, page, before, 'forward');
+      const second = await hold();
+      await page.reload({ waitUntil: 'commit' });
+      await second.asked;
+      await page.goForward({ waitUntil: 'commit' });
+      await page.goto(new URL('/robots.txt', page.url()).href);
+      await ctx.unroute('**/src/main.ts*');
+      second.release();
+      await page.goBack({ waitUntil: 'commit' });
+      const how = await page.evaluate(() => performance.getEntriesByType('navigation')[0]?.type);
+      h.expect(how === 'back_forward', `forward: the replay's entry loaded by ${how}, not fresh from history`);
+      const at = await h.until(page, shown, null, { timeout: 30000 });
+      h.expect(at === 'settings', `forward: the replay's entry loaded fresh from history showed ${at}, not Settings`);
+      const search = new URL(page.url()).search;
+      h.expect(search === before, `forward: the address is ${search} after that load, not ${before}`);
+      h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
+    } catch (e) {
+      await h.evidence(page, 'replay-forward-fresh-fail');
+      throw e;
+    } finally {
+      for (const release of holds) release();
+      await ctx.close();
+    }
+  },
+
   async 'replay-back-while-loading'(h) {
     for (const file of ['src/main.ts', 'src/audio/engine.ts']) await backWhileLoading(h, file);
   },

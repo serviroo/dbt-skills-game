@@ -639,6 +639,7 @@
   "replay-back": [3],
   "replay-back-while-loading": [4],
   "replay-end-card-reload": [8],
+  "replay-forward-fresh": [5],
   "replay-help": [3],
   "replay-help-then-back": [3],
   "replay-reload": [4],
