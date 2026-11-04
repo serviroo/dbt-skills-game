@@ -578,11 +578,15 @@ export class AudioEngine {
       else p.setTargetAtTime(1, at, Math.max(0.003, sec / 4));
     }
     if (!on) return;
-    for (const v of this.active) v.stop(at, sec);
+    for (const v of [...this.active, ...this.fading]) {
+      v.stop(at, sec);
+      this.letGo(v);
+    }
     this.active.clear();
     for (const c of this.named.values()) c.stop(at, sec);
     this.named.clear();
     this.charge?.stop(at, sec);
+    for (const e of [...this.closing.keys()]) this.closeEcho(e, at, sec);
   }
 
   /** Effects' and Music's sends into an echo, at their levels; made in place of `from`, they start where those are and go

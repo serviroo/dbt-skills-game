@@ -1,4 +1,3 @@
-
 const FLOOR_DB = -80;
 const TWIN_DB = -100;
 const BEFORE = 0.002;
@@ -28,6 +27,13 @@ const FADES = [
     skip: 0.1,
   },
   { name: 'Skip during a scheduled bed stop', fade: 2.5, start: ['gate_hum'], stop: 'bed_stop', skip: 0.5 },
+  {
+    name: "the Safe Zone in and out during a replay's reset",
+    fade: 0.3,
+    start: ['charge'],
+    stop: 'reset',
+    quiet: 0.02,
+  },
 ];
 const RATES = [44100, 48000];
 
@@ -74,6 +80,10 @@ export const scenarios = {
           else if (f.stop === 'cue') cue.stop(AT, fade);
           else charge.stop(AT, fade);
           if (f.skip) eng.stopAll(SCORE.leaveSec, AT + f.skip);
+          if (f.quiet) {
+            eng.quiet(true, SCORE.safeOutSec, AT + f.quiet);
+            eng.quiet(false, SCORE.safeBackSec, AT + f.quiet + SCORE.safeOutSec);
+          }
         }
         const out = await c.startRendering();
         return { probe: out.getChannelData(PROBE), speaker: out.getChannelData(0) };
@@ -84,14 +94,15 @@ export const scenarios = {
         return Math.sqrt(s / (b - a));
       };
       const dB = (x) => (x > 0 ? 20 * Math.log10(x) : -Infinity);
-      const endsAll = (f) => f.skip || f.stop === 'reset' || f.stop === 'stopAll';
+      const endsAll = (f) => f.skip || f.quiet || f.stop === 'reset' || f.stop === 'stopAll';
       const out = [];
       for (const sr of rates) {
         for (const f of fades) {
           const fade = typeof f.fade === 'number' ? f.fade : SCORE[f.fade];
           const [stopped, unstopped] = await Promise.all([render(f, sr, fade, true), render(f, sr, fade, false)]);
           const [cut, twin] = [stopped.probe, unstopped.probe];
-          const k = Math.floor((f.skip ? stoppedBy(AT + f.skip, SCORE.leaveSec) : stoppedBy(AT, fade)) * sr) - 1;
+          const last = f.skip ? [AT + f.skip, SCORE.leaveSec] : f.quiet ? [AT + f.quiet, SCORE.safeOutSec] : [AT, fade];
+          const k = Math.floor(stoppedBy(...last) * sr) - 1;
           const w = Math.round(before * sr);
           const [a0, a1] = after.map((s) => k + Math.round(s * sr));
           const [b0, b1] = [Math.floor((AT - 1) * sr), Math.floor(AT * sr)];
@@ -213,6 +224,7 @@ export const scenarios = {
           then: (e) => e.music.to('reward', 1, { at: AT }),
           keeps: 'then',
           ends: stoppedBy(AT, 2.5),
+          lifts: true,
         },
         {
           name: 'gate hum stopping later, then Skip',
@@ -231,10 +243,10 @@ export const scenarios = {
           ends: stoppedBy(AT, 0.04),
         },
         {
-          name: 'cue stopped later, then Skip',
+          name: 'cue stopped later, then stopped sooner as Skip stops it',
           start: (e) => e.play('breath_out', { at: T0, dur: 6 }),
           first: (e, h) => h.stop(AT + 3, 2),
-          then: skip,
+          then: (e, h) => h.stop(AT, SCORE.leaveSec),
           keeps: 'then',
           ends: stoppedBy(AT, SCORE.leaveSec),
         },
@@ -273,7 +285,10 @@ export const scenarios = {
           let diff = 0;
           for (let i = b; i < both.length; i++) diff += (both[i] - kept[i]) ** 2;
           const level = rms(kept, a, b);
-          out.push({ name: s.name, sr, level, apart: 20 * Math.log10(Math.sqrt(diff / (both.length - b)) / level) });
+          const apart = 20 * Math.log10(Math.sqrt(diff / (both.length - b)) / level);
+          const end = Math.ceil(s.ends * sr);
+          const after = s.lifts ? -Infinity : 20 * Math.log10(rms(both, end, both.length) / level);
+          out.push({ name: s.name, sr, level, apart, after });
         }
       }
       return out;
@@ -283,6 +298,7 @@ export const scenarios = {
       const at = `${g.name} (${g.sr} Hz)`;
       expect(g.level > 1e-4, `${at}: the sound is too quiet to measure (${g.level.toExponential(2)})`);
       expect(g.apart < FLOOR_DB, `${at}: differs from the stop it keeps alone by ${g.apart.toFixed(1)} dB`);
+      expect(g.after < FLOOR_DB, `${at}: still sounds at ${g.after.toFixed(1)} dB after the stop it keeps`);
     }
     expect(!errors.length, errors.join('\n'));
     await ctx.close();
