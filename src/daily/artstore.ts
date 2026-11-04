@@ -302,7 +302,7 @@ export class ArtStore {
   /** The newest draft write per key; an older one finishing later must not put its draft back in memory. */
   private draftTurns = new Map<string, number>();
   private draftTurn = 0;
-  private link: IdbLink;
+  readonly link: IdbLink;
   private onStorage = (e: StorageEvent) => {
     if (!e.key?.startsWith(`${this.goneKey}.`)) return;
     this.drop();
@@ -824,7 +824,7 @@ export class ArtStore {
       () => 'failed' as const,
     );
     // a write that failed with the database there leaves it hidden, for the next load to finish
-    const db = out === 'failed' && (await this.link.connected());
+    const db = out === 'failed' && (await this.link.holdsData());
     if (db) this.mine.set(id, g);
     else this.markGone(id, null, g);
     if (out === 'removed' || (out === 'failed' && !db && (!mm || revOf(mm) === g.rev))) {

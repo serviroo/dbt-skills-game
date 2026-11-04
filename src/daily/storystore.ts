@@ -210,7 +210,7 @@ export class StoryStore {
   private lastCopy = 0;
   private channel: BroadcastChannel | null = null;
   private listeners = new Set<() => void>();
-  private link: IdbLink;
+  readonly link: IdbLink;
 
   constructor(
     readonly name: string,
@@ -598,7 +598,7 @@ export class StoryStore {
     this.mem.stories.delete(id);
     this.lastStory.delete(id);
     // the player chose to delete the story, so its chapters' mirrors go too; a failed delete leaves it stored, mirrors and all
-    if (r || !(await this.link.connected())) {
+    if (r || !(await this.link.holdsData())) {
       const index = this.liveIndex();
       for (const c of gone) for (const l of index.get(c) ?? []) this.dropLive(l.key, c);
     }

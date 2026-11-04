@@ -948,6 +948,11 @@ export class App {
     }
   }
 
+  reopen() {
+    const e = this.trail[this.at];
+    this.show(this.route, { again: true, key: this.visitKey, at: e?.key === this.visitKey ? e.place : undefined });
+  }
+
   /** The Lantern button, a moment's Done, a removed story: back to where the player was before this visit. */
   back() {
     let to = this.firstOfVisit() - 1;
