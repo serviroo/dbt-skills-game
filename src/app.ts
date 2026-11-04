@@ -143,8 +143,8 @@ export async function runApp(stage: Stage | null, makeStage: () => Stage | null)
 
 /**
  * The intro, with the Safe Zone and Skip on every screen of it. However it ends (watched to the end card, skipped, or
- * left for help, even while a load is pending or the graphics fail; a replay by Back too), it ends here: it counts as
- * seen, and the companion opens next. True when the player left it for the Safe Zone.
+ * left for help, even while a load is pending or the graphics fail), it ends here: it counts as seen, and the companion
+ * opens next. True when the player left it for the Safe Zone.
  */
 async function intro(stage: Stage | null, audio: AppAudio | null, state: AppState): Promise<boolean> {
   mountCutsceneVolume(audio);
@@ -162,7 +162,6 @@ async function intro(stage: Stage | null, audio: AppAudio | null, state: AppStat
       resolve(w);
     };
     const offButtons = introWays(take);
-    // Back from a replay ends it as Skip does, back on the screen it was played from
     const back = () => take('skip');
     if (params.cutscene) window.addEventListener('popstate', back);
     offWays = () => {
@@ -175,18 +174,14 @@ async function intro(stage: Stage | null, audio: AppAudio | null, state: AppStat
   state.seenCutscene = true;
   save(state);
   if (end === 'replay') {
-    // the end card's Replay plays it again on the entry it stands on
     history.replaceState(history.state, '', address(true));
     location.reload();
     await new Promise(() => undefined);
   }
-  // the replay is over: the address is the one it was played from again, so a reload or a restored tab opens the
-  // companion
   if (params.cutscene) history.replaceState(history.state, '', address(false));
   return end === 'safe';
 }
 
-/** This page's address with the replay flag on or off, the rest of it as it was. */
 function address(replay: boolean) {
   const q = location.search.slice(1).split('&').filter((p) => p && p.split('=')[0] !== 'cutscene');
   if (replay) q.push('cutscene=1');

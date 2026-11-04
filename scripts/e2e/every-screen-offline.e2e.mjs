@@ -600,8 +600,8 @@ async function replayIntro(h, page, problems) {
   h.expect(shots.ok() && shots.fromServiceWorker(), `the awaken scene's script did not come from the offline cache (HTTP ${shots.status()})`);
   h.expect(!problems.length, `the intro's awaken scene offline:\n${problems.join('\n')}`);
   await tapWhereItIs(page, page.getByRole('button', { name: 'Skip intro' }));
-  // the replay ends back on Settings, where it was played from
-  await h.until(page, () => !!window.__daily && document.querySelector('.dq')?.dataset.screen === 'settings', null, { timeout: 30000 });
+  const onSettings = () => !!window.__daily && document.querySelector('.dq')?.dataset.screen === 'settings';
+  await h.until(page, onSettings, null, { timeout: 30000 });
   await listen(page);
   h.expect(!problems.length, `the intro replayed offline:\n${problems.join('\n')}`);
   await h.shot(page, 'offline-after-replay');
