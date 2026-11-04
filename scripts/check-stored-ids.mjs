@@ -213,10 +213,23 @@ if (problems.length) {
   console.error(`\nFAIL: ${problems.length} stored name${problems.length === 1 ? '' : 's'} at risk:\n  ${problems.join('\n  ')}`);
   process.exit(1);
 }
+const idRows = (list) => {
+  const rows = [];
+  for (const id of list.map((x) => JSON.stringify(x))) {
+    if (rows.length && rows.at(-1).length + id.length < 119) rows[rows.length - 1] += `,${id}`;
+    else rows.push(`      ${id}`);
+  }
+  return rows;
+};
+const idEntry = (kind, list) => {
+  const line = `    ${JSON.stringify(kind)}: ${JSON.stringify(list)}`;
+  if (line.length < 120) return line;
+  return `    ${JSON.stringify(kind)}: [\n${idRows(list).join(',\n')}\n    ]`;
+};
 if (added.length && flags.update) {
   const ids = { ...snap.ids };
   for (const [kind, list] of Object.entries(now)) ids[kind] = [...new Set([...(ids[kind] ?? []), ...list])];
-  const body = Object.entries(ids).map(([k, v]) => `    ${JSON.stringify(k)}: ${JSON.stringify(v)}`).join(',\n');
+  const body = Object.entries(ids).map(([k, v]) => idEntry(k, v)).join(',\n');
   const mig = migrations.length ? `[\n${migrations.map((m) => `    ${JSON.stringify(m)}`).join(',\n')}\n  ]` : '[]';
   fs.writeFileSync(snapPath, `{\n  "about": ${JSON.stringify(snap.about)},\n  "ids": {\n${body}\n  },\n  "migrations-format": ${JSON.stringify(snap['migrations-format'])},\n  "migrations": ${mig}\n}\n`);
   console.log(`\nFroze ${added.length} new id${added.length === 1 ? '' : 's'} in ${path.relative(root, snapPath)}.`);
