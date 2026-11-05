@@ -166,14 +166,15 @@ class Glove:
         root_idle = JP[fb('thumb_02')].lerp(middle, 0.25)
         rest_on = middle + across_idle * 0.021
         ball = JP[fb('thumb_01')].lerp(JP[fb('thumb_02')], 0.55).lerp(middle, 0.2)
-        stations = [(rig.unpose(ball, b1), 0.025, {fb('hand'): 0.35, b1: 0.65}, False)]
-        for f, r, w, joint, bone in ((0.0, 0.017, {b1: 0.5, b2: 0.5}, True, b2),
-                                     (0.28, 0.0158, {b2: 1.0}, False, b2),
-                                     (0.5, 0.0148, {b2: 0.5, b3: 0.5}, True, b3),
-                                     (0.72, 0.0138, {b3: 1.0}, False, b3),
-                                     (0.86, 0.0118, {b3: 1.0}, False, b3)):
-            stations.append((rig.unpose(root_idle.lerp(rest_on, f), bone), r, w, joint))
-        end = rig.unpose(rest_on, b3)
+        ball_w = {fb('hand'): 0.35, b1: 0.65}
+        stations = [(rig.unpose(ball, ball_w), 0.025, ball_w, False)]
+        for f, r, w, joint in ((0.0, 0.017, {b1: 0.5, b2: 0.5}, True),
+                               (0.28, 0.0158, {b2: 1.0}, False),
+                               (0.5, 0.0148, {b2: 0.5, b3: 0.5}, True),
+                               (0.72, 0.0138, {b3: 1.0}, False),
+                               (0.86, 0.0118, {b3: 1.0}, False)):
+            stations.append((rig.unpose(root_idle.lerp(rest_on, f), w), r, w, joint))
+        end = rig.unpose(rest_on, {b3: 1.0})
         prev = root
         for i, (c, r, w, joint) in enumerate(stations):
             ahead = stations[i + 1][0] if i + 1 < len(stations) else end

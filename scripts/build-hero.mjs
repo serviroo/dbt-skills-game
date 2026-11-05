@@ -22,10 +22,19 @@ const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
 const doc = await io.read(RIG);
 const root = doc.getRoot();
-const scene = root.listScenes()[0];
 const rigSkin = root.listSkins().find((s) => s.listJoints().some((j) => j.getName() === 'hand_r'));
 if (!rigSkin) throw new Error(`${RIG} has no skeleton with a hand_r joint`);
 const joints = rigSkin.listJoints();
+const nodesIn = (s) => {
+  const nodes = new Set();
+  s.traverse((n) => nodes.add(n));
+  return nodes;
+};
+const scene = root.listScenes().find((s) => {
+  const nodes = nodesIn(s);
+  return joints.every((j) => nodes.has(j));
+});
+if (!scene) throw new Error(`${RIG} has no scene that holds its whole hand_r skeleton`);
 const jointIndex = new Map(joints.map((j, i) => [j.getName(), i]));
 const clipCount = (c) => root.listAnimations().filter((a) => a.getName() === c).length;
 if (!['idle', 'reach', 'hold'].every((c) => clipCount(c) === 1)) {
@@ -35,8 +44,7 @@ if (!['idle', 'reach', 'hold'].every((c) => clipCount(c) === 1)) {
 const keepOnlyScene = () => {
   for (const s of root.listScenes()) if (s !== scene) s.dispose();
   for (const s of root.listSkins()) if (s !== rigSkin) s.dispose();
-  const inScene = new Set();
-  scene.traverse((n) => inScene.add(n));
+  const inScene = nodesIn(scene);
   for (const n of root.listNodes()) if (!inScene.has(n)) n.dispose();
 };
 for (const n of root.listNodes()) if (n.getMesh()) n.dispose();
@@ -141,7 +149,8 @@ for (const node of meshNodes) {
 const idle = root.listAnimations().find((a) => a.getName() === 'idle');
 const rest = joints.map((j) => [j.getTranslation(), j.getRotation(), j.getScale()]);
 for (const ch of idle.listChannels()) {
-  const v = ch.getSampler().getOutput().getElement(0, []);
+  const sampler = ch.getSampler();
+  const v = sampler.getOutput().getElement(sampler.getInterpolation() === 'CUBICSPLINE' ? 1 : 0, []);
   const n = ch.getTargetNode();
   if (ch.getTargetPath() === 'rotation') n.setRotation(v);
   else if (ch.getTargetPath() === 'translation') n.setTranslation(v);
