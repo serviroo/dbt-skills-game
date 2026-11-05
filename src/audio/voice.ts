@@ -49,7 +49,7 @@ interface Source {
 const feeds = new WeakMap<AudioNode, AudioNode>();
 const gainOf = new WeakMap<AudioParam, GainNode>();
 const clockOf = new WeakMap<GainNode, Voice>();
-const silentFrom = new WeakMap<GainNode, { last: number; at: number }>();
+const silentFrom = new WeakMap<GainNode, { last: number; at: number; peak: number }>();
 const SAME = 1e-9;
 const through = new WeakMap<GainNode, Source[]>();
 
@@ -189,29 +189,34 @@ export class Voice {
     const carried = () => {
       for (const s of through.get(g) ?? []) s.voice.extend(s);
     };
-    const note = (t: number, at: number) => {
+    const peak = () => silentFrom.get(g)?.peak ?? 1;
+    const note = (t: number, at: number, level = 0) => {
       const zero = this.clock.zero;
       const e = silentFrom.get(g);
-      if (e && t - zero < e.last - SAME) return;
-      silentFrom.set(g, { last: t - zero, at: at - zero });
+      const loudest = Math.max(e?.peak ?? 1, Math.abs(level));
+      if (e && t - zero < e.last - SAME) {
+        e.peak = loudest;
+        return;
+      }
+      silentFrom.set(g, { last: t - zero, at: at - zero, peak: loudest });
       if (at - zero !== (e?.at ?? Infinity)) carried();
     };
     return {
       setValueAtTime: (v, t) => {
         set.setValueAtTime(v, t);
-        note(t, v ? Infinity : t);
+        note(t, v ? Infinity : t, v);
       },
       linearRampToValueAtTime: (v, t) => {
         set.linearRampToValueAtTime(v, t);
-        note(t, v ? Infinity : t);
+        note(t, v ? Infinity : t, v);
       },
       exponentialRampToValueAtTime: (v, t) => {
         set.exponentialRampToValueAtTime(v, t);
-        note(t, Infinity);
+        note(t, Infinity, v);
       },
       setTargetAtTime: (v, t, tau) => {
         set.setTargetAtTime(v, t, tau);
-        note(t, v ? Infinity : t + silentAfter(tau));
+        note(t, v ? Infinity : t + silentAfter(tau, peak()), v);
       },
       cancelScheduledValues: (t) => {
         set.cancelScheduledValues(t);
@@ -379,7 +384,7 @@ export class Voice {
     p.linearRampToValueAtTime(peak, t + a);
     if (hold > 0) p.setValueAtTime(peak, t + a + hold);
     p.setTargetAtTime(0, t + a + hold, tau);
-    return t + a + hold + silentAfter(tau);
+    return t + a + hold + silentAfter(tau, Math.max(1, peak));
   }
 
   /** Exponential (linear-in-dB) move between two levels. */

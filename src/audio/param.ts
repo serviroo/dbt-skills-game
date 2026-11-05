@@ -7,7 +7,7 @@ export const taper = (p: number) => {
 };
 
 const SILENT_DB = -90;
-export const silentAfter = (tau: number) => tau * Math.log(10 ** (-SILENT_DB / 20));
+export const silentAfter = (tau: number, from = 1) => tau * Math.log(from * 10 ** (-SILENT_DB / 20));
 
 /** Cancels what is scheduled from `t` on and holds the value automation gives at `t`, so a new ramp starts there. */
 export function holdAt(p: AudioParam, t: number) {
