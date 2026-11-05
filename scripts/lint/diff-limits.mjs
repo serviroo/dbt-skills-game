@@ -28,7 +28,19 @@ function addedLines(base, paths) {
   return added;
 }
 
-const base = process.env.LINT_BASE || git('merge-base', 'HEAD', 'origin/main').trim();
+function baseCommit() {
+  const ref = process.env.LINT_BASE || 'origin/main';
+  try {
+    const base = process.env.LINT_BASE || git('merge-base', 'HEAD', 'origin/main').trim();
+    return git('rev-parse', '--verify', '--end-of-options', `${base}^{commit}`).trim();
+  } catch (error) {
+    console.error(`Can't find ${ref} to compare with. Run git fetch origin main, or set LINT_BASE to a commit.`);
+    console.error(String(error.stderr ?? error.message).trim());
+    process.exit(1);
+  }
+}
+
+const base = baseCommit();
 const problems = [];
 
 for (const row of git('diff', '--name-status', '-M', '--diff-filter=AMR', base, 'HEAD').split('\n')) {

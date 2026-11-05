@@ -120,7 +120,7 @@ const followDevicePreferences = {
   },
 };
 
-const SOFT_HYPHEN = '­';
+const SOFT_HYPHEN = '\u00ad';
 
 const noSoftHyphenCharacters = {
   meta: {

@@ -69,7 +69,7 @@ function checkDiffLimits() {
     git('commit', '-q', '--no-verify', '-m', message);
     return git('rev-parse', 'HEAD');
   };
-  const limits = (base) =>
+  const limits = (base = '') =>
     spawnSync('node', [path.join(here, 'diff-limits.mjs')], {
       cwd: repo,
       env: { ...env, LINT_BASE: base },
@@ -99,6 +99,14 @@ function checkDiffLimits() {
   commit('shrinks');
   const shrinks = limits(base);
   expect(shrinks.status === 0, `diff limits: a pull request within the limits failed:\n${shrinks.stderr}`);
+
+  for (const [missing, said] of [['', 'origin/main'], ['deadbeef', 'deadbeef']]) {
+    const lost = limits(missing);
+    expect(
+      lost.status === 1 && lost.stderr.includes(`Can't find ${said}`) && !lost.stderr.includes('    at '),
+      `diff limits: a missing ${said} did not say how to fix it:\n${lost.stderr}`,
+    );
+  }
 }
 
 try {
