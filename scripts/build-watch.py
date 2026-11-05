@@ -22,9 +22,9 @@ import sys
 from mathutils import Euler, Matrix, Vector
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from blender_kit import (TAU, B, Materials, V, apply_mods, ball_mesh, bake, dress, hexrgb, interp,  # noqa: E402
-                         light, loft, new_mesh, orient, path_secs, ridge, ring, shipping, smooth_path, stage, start,
-                         tube_mesh, unwrap)
+from blender_kit import (TAU, Materials, V, assemble, ball_mesh, bake, dress, export, glow,  # noqa: E402
+                         interp, light, loft, metaball, new_mesh, on_surface, orient, path_secs, ridge, ring,
+                         shipping, slim, smooth_path, stage, start, tris, tube_mesh, unwrap)
 
 ARGV = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 OUT = os.path.abspath(ARGV[0] if ARGV else '.')
@@ -64,16 +64,6 @@ mat = Materials({
     'cubeDark': (0x1a2133, 0.6, 0.3, 'stone', 0.4, 0.6, 18),
     'visor': (0x030409, 1.0, 0.0, 'smooth', 0.0, 0.0, 10),
 })
-
-
-def glow(name, color, strength):
-    m = bpy.data.materials.new(name)
-    m.use_nodes = True
-    b = m.node_tree.nodes['Principled BSDF']
-    b.inputs['Base Color'].default_value = (0, 0, 0, 1)
-    b.inputs['Emission Color'].default_value = (*hexrgb(color), 1)
-    b.inputs['Emission Strength'].default_value = strength
-    return m
 
 
 EYE = glow('eye', 0xcfefff, 6)
@@ -553,49 +543,7 @@ def harrow():
 
 
 def metaball_mesh(f, name, elements, m, res=0.025, decimate=None, fur=0.0, role='body'):
-    """a smooth organic body from metaball elements (each: co, surface radius r, size s, rotation); returns the object"""
-    mb = bpy.data.metaballs.new(f'{f.id}-{name}')
-    mb.resolution = mb.render_resolution = res
-    mb.threshold = 0.6
-    for e in elements:
-        el = mb.elements.new()
-        el.type = 'ELLIPSOID'
-        el.co = B(V(e['co']))
-        # stiff elements blend only where they nearly touch, so masses stay distinct: alone, one meets the threshold at
-        # 0.78 of its radius (stiffness 10, threshold 0.6)
-        el.stiffness = 10.0
-        el.radius = e['r'] / 0.78
-        sx, sy, sz = e.get('s', (1, 1, 1))
-        el.size_x, el.size_y, el.size_z = sx, sz, sy
-        if 'rot' in e:
-            C = Matrix(((1, 0, 0), (0, 0, -1), (0, 1, 0)))
-            el.rotation = (C @ Euler(e['rot'], 'XYZ').to_matrix() @ C.inverted()).to_quaternion()
-    mo = bpy.data.objects.new(mb.name, mb)
-    COLL.objects.link(mo)
-    dg = bpy.context.evaluated_depsgraph_get()
-    me = bpy.data.meshes.new_from_object(mo.evaluated_get(dg))
-    bpy.data.objects.remove(mo)
-    o = bpy.data.objects.new(f'{f.id}-{name}', me)
-    COLL.objects.link(o)
-    me.materials.append(mat(m))
-    sm = o.modifiers.new('smooth', 'SMOOTH')
-    sm.factor = 0.5
-    sm.iterations = 4
-    if fur:
-        # shaggy fur in the silhouette: clumps a few centimetres across
-        tex = bpy.data.textures.new(f'{f.id}-furtex', 'CLOUDS')
-        tex.noise_scale = 0.045
-        tex.noise_depth = 2
-        d = o.modifiers.new('fur', 'DISPLACE')
-        d.texture = tex
-        d.strength = fur
-        d.mid_level = 0.5
-    if decimate:
-        d = o.modifiers.new('dec', 'DECIMATE')
-        d.ratio = decimate
-    apply_mods(o)
-    for p in o.data.polygons:
-        p.use_smooth = True
+    o = metaball(COLL, f'{f.id}-{name}', elements, mat(m), res, fur=fur, decimate=decimate)
     f.parts.append((o, role))
     return o
 
@@ -605,15 +553,6 @@ def chain(el, pts, radii, s=(1, 1, 1), steps=3):
     path = smooth_path(pts, steps)
     for p, r in zip(path, interp(list(radii), len(path))):
         el(p, r, s)
-
-
-def on_surface(o, toward, frm):
-    """the point where a ray from `frm` towards `toward` meets the body, and its normal"""
-    d = V(toward) - V(frm)
-    ok, p, n, _ = raycast(o, V(frm), d.normalized())
-    if not ok:
-        raise RuntimeError(f'nothing hit on {o.name} from {frm}')
-    return p, n
 
 
 def bramble():
@@ -662,18 +601,6 @@ def bramble():
     p, n = on_surface(body, (-0.32, 0.055, 0.42), (0.2, 0.06, 0.45))
     f.ball('sole', p + n * 0.004, 0.055, 'pad', s=(0.3, 0.7, 0.8), n=12)
     return f
-
-
-def raycast(o, origin, direction):
-    """casts in page space against one object"""
-    mw = o.matrix_world
-    inv = mw.inverted()
-    ok, loc, nrm, idx = o.ray_cast(inv @ B(origin), (inv.to_3x3() @ B(direction)).normalized())
-    if not ok:
-        return False, None, None, None
-    w = mw @ loc
-    nw = (mw.to_3x3() @ nrm).normalized()
-    return True, V(w.x, w.z, -w.y), V(nw.x, nw.z, -nw.y), idx
 
 
 def bounds(o):
@@ -873,54 +800,12 @@ def bake_figure(f):
         o.data.materials.append(ship['cape'] if role == 'cape' else ship['body'])
 
 
-def assemble(f):
-    """joins each role's pieces into one mesh under the figure's root"""
-    root = bpy.data.objects.new(f.id, None)
-    COLL.objects.link(root)
-    groups = {}
-    for o, role in f.parts:
-        key = 'body' if role == 'cape' else role
-        groups.setdefault(key, []).append(o)
-    for key, objs in groups.items():
-        if len(objs) > 1:
-            with bpy.context.temp_override(active_object=objs[0], selected_editable_objects=objs, object=objs[0]):
-                bpy.ops.object.join()
-        o = objs[0]
-        o.name = o.data.name = f'{f.id}-{key}'
-        o.parent = root
-    return root
-
-
 TARGET = {'sable': 10000, 'anvil': 10500, 'harrow': 10500, 'bramble': 8000, 'vesper': 7000, 'block': 3000}
-
-
-def slim(f):
-    """collapses the bigger pieces evenly so the figure comes in near its triangle budget; small pieces keep their shape"""
-    count = lambda o: sum(len(p.vertices) - 2 for p in o.data.polygons)
-    sizes = [(o, count(o)) for o, _ in f.parts]
-    big = sum(n for _, n in sizes if n > 160)
-    small = sum(n for _, n in sizes if n <= 160)
-    r = max(0.2, min(1.0, (TARGET[f.id] - small) / max(1, big)))
-    if r >= 0.999:
-        return
-    for o, n in sizes:
-        if n > 160:
-            d = o.modifiers.new('slim', 'DECIMATE')
-            d.ratio = r
-            d.delimit = {'NORMAL', 'SHARP'}
-            apply_mods(o)
 
 
 def heavy(f):
     rows = sorted(((sum(len(p.vertices) - 2 for p in o.data.polygons), o.name) for o, _ in f.parts), reverse=True)
     print(f.id, 'heaviest:', ', '.join(f'{n}={t}' for t, n in rows[:12]), 'total', sum(t for t, _ in rows))
-
-
-def tris(root):
-    n = 0
-    for c in root.children:
-        n += sum(len(p.vertices) - 2 for p in c.data.polygons)
-    return n
 
 
 def preview(roots):
@@ -963,24 +848,15 @@ for id in ONLY:
     figs.append(f)
     print(f'built {id}: {len(f.parts)} pieces')
 for f in figs:
-    slim(f)
+    slim(f.parts, TARGET[f.id])
     heavy(f)
     bake_figure(f)
-roots = [assemble(f) for f in figs]
+roots = [assemble(COLL, f, lambda role: 'body' if role == 'cape' else role) for f in figs]
 for r in roots:
     print(f'{r.name}: {tris(r)} triangles')
-bpy.ops.object.select_all(action='DESELECT')
-for r in roots:
-    r.select_set(True)
     for c in r.children:
-        c.select_set(True)
         c.hide_render = False
-bpy.ops.export_scene.gltf(
-    filepath=os.path.join(OUT, 'watch-raw.glb'), export_format='GLB', use_selection=True, export_yup=True, export_apply=True,
-    export_texcoords=True, export_normals=True, export_tangents=False, export_materials='EXPORT', export_image_format='AUTO',
-    export_animations=False, export_cameras=False, export_lights=False, export_extras=False,
-)
-bpy.ops.wm.save_as_mainfile(filepath=os.path.join(OUT, 'watch.blend'))
+export(roots, OUT, 'watch')
 if RENDERS:
     preview(roots)
 print('done')

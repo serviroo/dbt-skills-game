@@ -4,7 +4,7 @@ import os
 import bmesh
 import bpy
 import numpy as np
-from mathutils import Euler, Vector
+from mathutils import Euler, Matrix, Vector
 
 TAU = math.tau
 
@@ -43,7 +43,33 @@ def hexrgb(h):
     return [(x / 12.92) if x <= 0.04045 else ((x + 0.055) / 1.055) ** 2.4 for x in c]
 
 
-class Mat:
+class Bakeable:
+    def wire(self, color, rough, metal, normal):
+        N = self.nt.nodes.new
+        L = self.nt.links.new
+        bsdf = N('ShaderNodeBsdfPrincipled')
+        L(color, bsdf.inputs['Base Color'])
+        L(rough, bsdf.inputs['Roughness'])
+        L(metal, bsdf.inputs['Metallic'])
+        L(normal, bsdf.inputs['Normal'])
+        out = N('ShaderNodeOutputMaterial')
+        L(bsdf.outputs['BSDF'], out.inputs['Surface'])
+        self.sock = {'color': color, 'rough': rough, 'metal': metal}
+        self.bsdf, self.out, self.emit = bsdf, out, N('ShaderNodeEmission')
+        self.img = N('ShaderNodeTexImage')
+        return bsdf
+
+    def route(self, what):
+        """sends one channel to the output as emission, or (None) puts the BSDF back"""
+        L = self.nt.links.new
+        if what is None:
+            L(self.bsdf.outputs['BSDF'], self.out.inputs['Surface'])
+            return
+        L(self.sock[what], self.emit.inputs['Color'])
+        L(self.emit.outputs['Emission'], self.out.inputs['Surface'])
+
+
+class Mat(Bakeable):
     """A procedural surface: colour, roughness, metalness and a bump, each a socket the baker can route to emission."""
 
     def __init__(self, name, color, rough, metal, detail, wear=0.0, bump=0.4, scale=30.0, var=0.12):
@@ -122,17 +148,7 @@ class Mat:
         bn.inputs['Strength'].default_value = bump
         bn.inputs['Distance'].default_value = 0.004
         L(height, bn.inputs['Height'])
-        bsdf = N('ShaderNodeBsdfPrincipled')
-        L(col, bsdf.inputs['Base Color'])
-        L(r, bsdf.inputs['Roughness'])
-        L(val.outputs[0], bsdf.inputs['Metallic'])
-        L(bn.outputs['Normal'], bsdf.inputs['Normal'])
-        out = N('ShaderNodeOutputMaterial')
-        L(bsdf.outputs['BSDF'], out.inputs['Surface'])
-        emit = N('ShaderNodeEmission')
-        self.sock = {'color': col, 'rough': r, 'metal': val.outputs[0]}
-        self.bsdf, self.out, self.emit = bsdf, out, emit
-        self.img = N('ShaderNodeTexImage')
+        self.wire(col, r, val.outputs[0], bn.outputs['Normal'])
 
     def detail(self, kind, obj, s):
         N = self.nt.nodes.new
@@ -221,15 +237,6 @@ class Mat:
             L(obj, w.inputs['Vector'])
             return w.outputs['Fac']
         raise ValueError(kind)
-
-    def route(self, what):
-        """sends one channel to the output as emission, or (None) puts the BSDF back"""
-        L = self.nt.links.new
-        if what is None:
-            L(self.bsdf.outputs['BSDF'], self.out.inputs['Surface'])
-            return
-        L(self.sock[what], self.emit.inputs['Color'])
-        L(self.emit.outputs['Emission'], self.out.inputs['Surface'])
 
 
 class Materials:
@@ -566,3 +573,136 @@ def light(name, kind, at, color, power, size=0.5, aim=(0, 0.9, 0)):
     bpy.context.scene.collection.objects.link(lo)
     lo.location = B(V(at))
     lo.rotation_euler = (B(V(aim)) - lo.location).to_track_quat('-Z', 'Y').to_euler()
+
+
+def glow(name, color, strength):
+    m = bpy.data.materials.new(name)
+    m.use_nodes = True
+    b = m.node_tree.nodes['Principled BSDF']
+    b.inputs['Base Color'].default_value = (0, 0, 0, 1)
+    b.inputs['Emission Color'].default_value = (*hexrgb(color), 1)
+    b.inputs['Emission Strength'].default_value = strength
+    return m
+
+
+def metaball(coll, name, elements, material, res, fur=0.0, decimate=None):
+    """a smooth organic body from metaball elements (each: co, surface radius r, size s, rotation);
+    returns the object"""
+    mb = bpy.data.metaballs.new(name)
+    mb.resolution = mb.render_resolution = res
+    mb.threshold = 0.6
+    for e in elements:
+        el = mb.elements.new()
+        el.type = 'ELLIPSOID'
+        el.co = B(V(e['co']))
+        # stiff elements blend only where they nearly touch, so masses stay distinct: alone, one meets the threshold at
+        # 0.78 of its radius (stiffness 10, threshold 0.6)
+        el.stiffness = 10.0
+        el.radius = e['r'] / 0.78
+        sx, sy, sz = e.get('s', (1, 1, 1))
+        el.size_x, el.size_y, el.size_z = sx, sz, sy
+        if 'rot' in e:
+            C = Matrix(((1, 0, 0), (0, 0, -1), (0, 1, 0)))
+            el.rotation = (C @ Euler(e['rot'], 'XYZ').to_matrix() @ C.inverted()).to_quaternion()
+    mo = bpy.data.objects.new(mb.name, mb)
+    coll.objects.link(mo)
+    dg = bpy.context.evaluated_depsgraph_get()
+    me = bpy.data.meshes.new_from_object(mo.evaluated_get(dg))
+    bpy.data.objects.remove(mo)
+    o = bpy.data.objects.new(name, me)
+    coll.objects.link(o)
+    me.materials.append(material)
+    sm = o.modifiers.new('smooth', 'SMOOTH')
+    sm.factor = 0.5
+    sm.iterations = 4
+    if fur:
+        # shaggy fur in the silhouette: clumps a few centimetres across
+        tex = bpy.data.textures.new(f'{name}-furtex', 'CLOUDS')
+        tex.noise_scale = 0.045
+        tex.noise_depth = 2
+        d = o.modifiers.new('fur', 'DISPLACE')
+        d.texture = tex
+        d.strength = fur
+        d.mid_level = 0.5
+    if decimate:
+        d = o.modifiers.new('dec', 'DECIMATE')
+        d.ratio = decimate
+    apply_mods(o)
+    for p in o.data.polygons:
+        p.use_smooth = True
+    return o
+
+
+def raycast(o, origin, direction):
+    """casts in page space against one object"""
+    mw = o.matrix_world
+    inv = mw.inverted()
+    ok, loc, nrm, idx = o.ray_cast(inv @ B(origin), (inv.to_3x3() @ B(direction)).normalized())
+    if not ok:
+        return False, None, None, None
+    w = mw @ loc
+    nw = (mw.to_3x3() @ nrm).normalized()
+    return True, V(w.x, w.z, -w.y), V(nw.x, nw.z, -nw.y), idx
+
+
+def on_surface(o, toward, frm):
+    """the point where a ray from `frm` towards `toward` meets the body, and its normal"""
+    d = V(toward) - V(frm)
+    ok, p, n, _ = raycast(o, V(frm), d.normalized())
+    if not ok:
+        raise RuntimeError(f'nothing hit on {o.name} from {frm}')
+    return p, n
+
+
+def assemble(coll, f, group=lambda role: role):
+    """joins each role's pieces into one mesh under the figure's root"""
+    root = bpy.data.objects.new(f.id, None)
+    coll.objects.link(root)
+    groups = {}
+    for o, role in f.parts:
+        groups.setdefault(group(role), []).append(o)
+    for key, objs in groups.items():
+        if len(objs) > 1:
+            with bpy.context.temp_override(active_object=objs[0], selected_editable_objects=objs, object=objs[0]):
+                bpy.ops.object.join()
+        o = objs[0]
+        o.name = o.data.name = f'{f.id}-{key}'
+        o.parent = root
+    return root
+
+
+def slim(parts, target):
+    """collapses the bigger pieces evenly so the figure comes in near its triangle budget;
+    small pieces keep their shape"""
+    count = lambda o: sum(len(p.vertices) - 2 for p in o.data.polygons)
+    sizes = [(o, count(o)) for o, _ in parts]
+    big = sum(n for _, n in sizes if n > 160)
+    small = sum(n for _, n in sizes if n <= 160)
+    r = max(0.2, min(1.0, (target - small) / max(1, big)))
+    if r >= 0.999:
+        return
+    for o, n in sizes:
+        if n > 160:
+            d = o.modifiers.new('slim', 'DECIMATE')
+            d.ratio = r
+            d.delimit = {'NORMAL', 'SHARP'}
+            apply_mods(o)
+
+
+def tris(root):
+    return sum(sum(len(p.vertices) - 2 for p in c.data.polygons) for c in root.children)
+
+
+def export(roots, out, name):
+    bpy.ops.object.select_all(action='DESELECT')
+    for r in roots:
+        r.select_set(True)
+        for c in r.children:
+            c.select_set(True)
+    bpy.ops.export_scene.gltf(
+        filepath=os.path.join(out, f'{name}-raw.glb'), export_format='GLB', use_selection=True, export_yup=True,
+        export_apply=True, export_texcoords=True, export_normals=True, export_tangents=False,
+        export_materials='EXPORT', export_image_format='AUTO', export_animations=False, export_cameras=False,
+        export_lights=False, export_extras=False,
+    )
+    bpy.ops.wm.save_as_mainfile(filepath=os.path.join(out, f'{name}.blend'))
