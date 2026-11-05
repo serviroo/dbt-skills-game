@@ -2,7 +2,7 @@ import { animate } from '../ui/anim';
 import { CALM, css, WINDOW } from '../motion/tokens';
 import { FEELINGS, isHeavy, MODULES, MODULE_ORDER, SKILL, STRENGTH_FEELINGS, suggestFor, type Feeling } from '../content/dbt';
 import { CHECKIN, QUEST, RANKS } from '../content/daily-lines';
-import type { App, ScreenOut } from './app';
+import type { App, Route, ScreenOut, Visit } from './app';
 import { cardArtSVG, catSVG, crystalSVG, glyph, icon, mothSVG } from './art';
 import { wait } from './clock';
 import { breakable, btn, chip, h, holdView, keptWhole, longName, md, panel, redrawn, segmented, typo } from './ui';
@@ -57,7 +57,7 @@ function cardFace(id: string, opts: { label?: string; special?: 'comfort' | 'fre
   );
 }
 
-function statusPanel(app: App) {
+function statusPanel(app: App, toast: Visit['toast']) {
   const st = app.store;
   const { from } = app.statFrom();
   // each part shows the save as it is now: gains and choices made in another open copy land in it at once, quietly
@@ -72,7 +72,7 @@ function statusPanel(app: App) {
   const title = titleRow(app);
   const rank = redrawn(() => (d.rank > 0 ? h('div', { class: 'dq-kv' }, h('dt', { text: 'Rank' }), h('dd', { text: `${RANKS[d.rank]}-Rank Wanderer` })) : null), () => null);
   const xp = redrawn(() => h('div', { class: 'dq-kv' }, h('dt', { text: 'XP' }), h('dd', {}, h('span', { class: 'dq-num', text: String(d.xp) }))), () => null);
-  const flower = redrawn(() => moonflower(app), () => el.querySelector('.w2-moonflower'));
+  const flower = redrawn(() => moonflower(app, toast), () => el.querySelector('.w2-moonflower'));
   const stats = redrawn(
     () =>
       h(
@@ -549,14 +549,14 @@ function menu(app: App) {
   };
 }
 
-export function hubScreen(app: App): ScreenOut {
+export function hubScreen(app: App, _route: Route, visit: Visit): ScreenOut {
   // today's gift as every open copy deals it: visit days restored there, or the companion renamed, change it here too
   const giftText = redrawn(() => h('span', { class: 'dq-gift-t', html: md(app.store.giftLine()) }), () => null);
   const gift = h('p', { class: 'dq-gift' }, h('span', { class: 'dq-gift-k', text: 'Daily gift' }), giftText.node);
   const quest = questSection(app);
   const chest = lobby(app, gift);
   const line = linePanel(app);
-  const status = statusPanel(app);
+  const status = statusPanel(app, visit.toast);
   const checkin = checkinPanel(app);
   const places = menu(app);
   const el = h(

@@ -252,13 +252,9 @@ export function restScreen(app: App): ScreenOut {
       slime.destroy();
       const w = window as unknown as { __stealth?: typeof hook };
       if (w.__stealth === hook) delete w.__stealth;
-      // B10: one quiet line wherever the player lands, except the Safe Zone. Waits for a pending Safe Zone credit to finish.
-      const delay = st.state.flags.safeCredit ? 5600 : 420;
-      window.setTimeout(() => {
-        const r = app.route.name;
-        if (app.root.isConnected && r !== 'rest' && r !== 'safe') app.toast(STEALTH.leave);
-      }, delay);
     },
+    // B10: one quiet line wherever the player lands, except the Safe Zone, after a Safe Zone credit still owed
+    parting: () => ({ text: STEALTH.leave, after: st.state.flags.safeCredit ? 5600 : 420 }),
   };
 }
 
@@ -1086,12 +1082,12 @@ export function printScreen(app: App, _route: Route, visit: Visit): ScreenOut {
 }
 
 // ---------------- Comfort inventory ----------------
-export function comfortScreen(app: App): ScreenOut {
+export function comfortScreen(app: App, _route: Route, visit: Visit): ScreenOut {
   const st = app.store;
   const s = st.state;
   // Undo pressed from the keys: its toast goes, so focus goes to the entry it brought back, on its Remove, in view
   const removed = (text: string, id: string, restore: () => void) =>
-    app.toast(`Removed "${text.length > 36 ? `${text.slice(0, 35)}…` : text}".`, {
+    visit.toast(`Removed "${text.length > 36 ? `${text.slice(0, 35)}…` : text}".`, {
       label: 'Undo',
       run: () => {
         const keyed = !!document.activeElement?.matches('.dq-toast-btn:focus-visible');

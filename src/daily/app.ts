@@ -15,6 +15,7 @@ import { silenceHums } from './moment';
 import { HOME, isEntry, REPLAYED, type Entry } from './history';
 import type { InkPad } from './ink';
 import { dayDiff, Store, type State } from './store';
+import { Toaster, type Note, type ToastAction } from './toast';
 import { h, typo } from './ui';
 import { volumeButton, type VolumeButton, type VolumeCtrl } from '../ui/volume';
 import { wireWardrobe } from './wardrobe';
@@ -59,6 +60,9 @@ export interface Visit {
   handed?: unknown;
   at?: Place;
   mark(place: Place): void;
+  toast(text: string, action?: ToastAction): void;
+  go(route: Route, o?: { replace?: boolean; toast?: Note }): void;
+  back(toast?: Note): void;
 }
 
 export interface ScreenOut {
@@ -74,6 +78,7 @@ export interface ScreenOut {
    */
   foot?: HTMLElement;
   leave?: () => void;
+  parting?: () => Note;
   after?: () => void;
   /** Focus waits for this, so a heading filled in from storage is read out whole, never empty and then changed unannounced. */
   ready?: Promise<unknown>;
@@ -130,7 +135,8 @@ export class App {
   private top: HTMLElement;
   private view: HTMLElement;
   private scrim: HTMLElement;
-  private toastEl: HTMLElement;
+  private toaster: Toaster;
+  private showing = 0;
   private sky: Sky;
   /** keeps --dq-top and --dq-foot at the pinned bars' real heights (scroll-padding in daily.css), on the host so the
    * window layer beside the page reads them too, and lets the foot go where it would leave the page too little room */
@@ -181,9 +187,19 @@ export class App {
     this.top = h('header', { class: 'dq-top' });
     this.view = h('main', { class: 'dq-view', id: 'dq-main' });
     this.scrim = h('div', { class: 'dq-scrim', 'aria-hidden': 'true' });
-    this.toastEl = h('div', { class: 'dq-toast', role: 'status', 'aria-live': 'polite' });
+    this.toaster = new Toaster(() => this.reduced());
     this.sheetLayer = h('div', { class: 'dq-sheets' });
-    this.root.append(this.sky.back, this.bubbles.canvas, h('div', { class: 'dq-vignette', 'aria-hidden': 'true' }), this.sheetLayer, this.sky.shade, this.top, this.view, this.toastEl, this.scrim);
+    this.root.append(
+      this.sky.back,
+      this.bubbles.canvas,
+      h('div', { class: 'dq-vignette', 'aria-hidden': 'true' }),
+      this.sheetLayer,
+      this.sky.shade,
+      this.top,
+      this.view,
+      this.toaster.el,
+      this.scrim,
+    );
     this.winLayer = h('div', { class: 'sw-layer dq-sw-layer' });
     host.append(this.root, this.winLayer);
     this.pins = new ResizeObserver(() => this.pin());
@@ -423,6 +439,7 @@ export class App {
   /** The chest on Home: today's gift (after a gap, a welcome back first) in a calm window, only when the player taps it. */
   async openGift() {
     const gen = this.winGen;
+    const at = this.showing;
     const { WELCOME_BACK } = await import('../content/daily-lines');
     if (gen !== this.winGen || this.route.name === 'safe') return;
     const st = this.store;
@@ -437,7 +454,7 @@ export class App {
     if ((await this.window(spec)) === DISMISSED) return;
     st.state.flags.giftDay = today;
     st.save();
-    void this.celebrate();
+    void this.celebrate(at);
   }
 
   /** Today's latest check-in, from any open copy, if there is one. */
@@ -529,7 +546,7 @@ export class App {
   }
 
   /** Rank-up moments and the quiet Safe Zone credit, shown only on the Lantern hub. */
-  async celebrate() {
+  private async celebrate(at: number) {
     if (this.busy || this.greeting || this.route.name !== 'hub' || this.hushed()) return;
     const st = this.store.state;
     const d = this.store.derived();
@@ -537,7 +554,7 @@ export class App {
       st.flags.safeCredit = false;
       this.store.touch('safeCredit');
       this.store.save();
-      this.toast(SAFE_CREDIT);
+      this.toast(at, SAFE_CREDIT);
     }
     if (d.rank > st.flags.rankSeen) {
       st.flags.rankSeen = d.rank;
@@ -555,59 +572,14 @@ export class App {
     }
   }
 
-  private toastN = 0;
-  /** what happens when the toast showing now goes without its action being taken */
-  private toastEnd: (() => void) | null = null;
-  /**
-   * A short message at the bottom, with an optional action (Undo). Its end runs once if the toast goes without the
-   * action: it ran out, another toast took its place, they left for a screen it wasn't for, or the Safe Zone opened.
-   */
-  toast(text: string, action?: { label: string; run(): void; end?(): void }) {
-    this.endToast();
-    if (this.route.name === 'safe') return action?.end?.();
-    const n = ++this.toastN;
-    this.toastEnd = action?.end ?? null;
-    this.toastEl.replaceChildren(h('span', { text: typo(text) }));
-    if (action)
-      this.toastEl.append(
-        h('button', {
-            type: 'button',
-            class: 'dq-toast-btn',
-            text: action.label,
-            onclick: () => {
-              // once the toast has gone, what it offered to undo has landed
-              if (n !== this.toastN) return;
-              this.toastN++;
-              this.toastEnd = null;
-              this.toastEl.classList.remove('is-on');
-              action.run();
-            },
-          }),
-      );
-    this.toastEl.classList.add('is-on');
-    const a = animate(this.toastEl, [{ opacity: 0, transform: 'translate(-50%, 8px)' }, { opacity: 1, transform: 'translate(-50%, 0)' }], { duration: this.reduced() ? 1 : 420, easing: 'cubic-bezier(.16,1,.3,1)' });
-    void a;
-    void wait(action ? 6 : 5).then(async () => {
-      if (n !== this.toastN) return;
-      // the action still works while the toast fades; its end lands once the toast is gone
-      animate(this.toastEl, [{ opacity: 1 }, { opacity: 0 }], { duration: 240, easing: 'ease-in' });
-      await wait(0.24);
-      if (n !== this.toastN) return;
-      this.toastN++;
-      this.toastEl.classList.remove('is-on');
-      this.endToast();
-    });
+  private toast(at: number, text: string, action?: ToastAction) {
+    if (at !== this.showing || this.route.name === 'safe') return action?.end?.();
+    this.toaster.show(text, action);
   }
-  /** Takes the toast away at once: a screen it wasn't for, the Safe Zone opening, or the game being cleared. */
-  private dropToast() {
-    this.toastN++;
-    this.toastEl.classList.remove('is-on');
-    this.endToast();
-  }
-  private endToast() {
-    const end = this.toastEnd;
-    this.toastEnd = null;
-    end?.();
+
+  private raise(at: number, { text, action, after }: Note) {
+    if (after) window.setTimeout(() => this.toast(at, text, action), after);
+    else this.toast(at, text, action);
   }
 
   /** Whether this build has the route's screen. A history entry can come from another version of the app. */
@@ -620,6 +592,10 @@ export class App {
    * goes to the new screen in memory (see Visit.handed); the route is written to history, so nothing typed goes in it.
    */
   go(route: Route, o: { replace?: boolean; quiet?: boolean; hand?: unknown } = {}) {
+    this.goWith(route, o);
+  }
+
+  private goWith(route: Route, o: { replace?: boolean; quiet?: boolean; hand?: unknown; toast?: Note }) {
     if (!this.known(route)) route = { name: 'hub' };
     // after clearing, Settings shows how it went; only the Safe Zone opens as ever
     if (cleared() && route.name !== 'safe') route = { name: 'settings' };
@@ -869,7 +845,11 @@ export class App {
   }
 
   /** Draws a screen. Every way in (a tap, Back, Forward, the Lantern button) comes through here. */
-  private show(route: Route, v: { again: boolean; key: string; at?: Place; hand?: unknown }, o: { quiet?: boolean } = {}) {
+  private show(
+    route: Route,
+    v: { again: boolean; key: string; at?: Place; hand?: unknown },
+    o: { quiet?: boolean; toast?: Note } = {},
+  ) {
     // Back, Forward and the Lantern button after clearing land on Settings too; only the Safe Zone opens as ever
     if (cleared() && route.name !== 'safe') route = { name: 'settings' };
     const safe = route.name === 'safe';
@@ -878,16 +858,28 @@ export class App {
     if (safe) this.clearForSafe();
     if (this.current?.keep) this.kept.set(this.visitKey, this.current.keep());
     this.current?.leave?.();
+    const parting = route.name === this.route.name ? undefined : this.current?.parting?.();
     this.sheetLayer.replaceChildren();
     if (this.current?.foot) this.pins.unobserve(this.current.foot);
     // a toast goes with the screen it was for (Home keeps one from the screen before); leaving ends its Undo
-    if (route.name !== 'hub') this.dropToast();
+    if (route.name !== 'hub') this.toaster.drop();
+    if (!o.quiet || v.key !== this.visitKey) this.showing++;
+    const at = this.showing;
     this.route = route;
     const key = v.key;
     this.visitKey = key;
     if (safe !== wasSafe) this.quietScore(safe);
     if (wasSafe && !safe) this.turnDay();
-    const out = this.screens[route.name](this, route, { again: v.again, kept: v.again ? this.kept.get(key) : undefined, handed: v.again ? undefined : v.hand, at: v.at, mark: (p) => this.mark(key, p) });
+    const out = this.screens[route.name](this, route, {
+      again: v.again,
+      kept: v.again ? this.kept.get(key) : undefined,
+      handed: v.again ? undefined : v.hand,
+      at: v.at,
+      mark: (p) => this.mark(key, p),
+      toast: (text, action) => this.toast(at, text, action),
+      go: (to, o) => (at === this.showing ? this.goWith(to, o ?? {}) : o?.toast?.action?.end?.()),
+      back: (toast) => (at === this.showing ? this.backWith(toast) : toast?.action?.end?.()),
+    });
     this.current = out;
     if (out.foot) this.pins.observe(out.foot, { box: 'border-box' });
     this.root.dataset.mode = out.mode;
@@ -919,15 +911,17 @@ export class App {
     out.after?.();
     if (route.name === 'hub' && !o.quiet && !fromSkill) {
       // a first welcome still owed comes before anything to celebrate
-      if (!this.store.state.flags.welcomeOwed) void this.celebrate();
+      if (!this.store.state.flags.welcomeOwed) void this.celebrate(at);
       else if (!this.greeting) this.greet();
     }
+    if (parting) this.raise(at, parting);
+    if (o.toast) this.raise(at, o.toast);
   }
 
   private clearForSafe() {
     this.winGen++;
     dismissWindows();
-    this.dropToast();
+    this.toaster.drop();
     this.dropScrim?.();
     document.querySelectorAll('[data-fx]').forEach((n) => n.remove());
     this.stopBuzz();
@@ -950,13 +944,17 @@ export class App {
 
   /** The Lantern button, a moment's Done, a removed story: back to where the player was before this visit. */
   back() {
+    this.backWith();
+  }
+
+  private backWith(toast?: Note) {
     let to = this.firstOfVisit() - 1;
     while (to > 0 && this.trail[to]?.sheet) to--;
     const e = this.trail[to];
-    if (to <= 0 || !e || !this.known(e.route)) return this.go({ name: 'hub' });
+    if (to <= 0 || !e || !this.known(e.route)) return this.goWith({ name: 'hub' }, { toast });
     this.closeSheets();
     this.travel(to);
-    this.show(e.route, { again: true, key: e.key, at: e.place });
+    this.show(e.route, { again: true, key: e.key, at: e.place }, { toast });
   }
 
   private renderTop(out: ScreenOut) {
@@ -994,6 +992,7 @@ export class App {
 
   destroy() {
     this.current?.leave?.();
+    this.showing++;
     this.sky.set(false, 0);
     this.pins.disconnect();
     this.volBtn?.dispose();

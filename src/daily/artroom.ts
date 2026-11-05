@@ -5,7 +5,7 @@
 import { animate } from '../ui/anim';
 import { ALLY_NAMES, ART, ART_PROMPTS } from '../content/daily-lines';
 import { playerName } from '../core/you';
-import type { App, Route, ScreenOut } from './app';
+import type { App, Route, ScreenOut, Visit } from './app';
 import { icon } from './art';
 import { artStore, extrasOf, revOf, type Draft, type DrawingMeta, type DrawingRec } from './artstore';
 import { canvasBlob, INKS, InkPad, PAGE, renderDrawing, SIZES, TOOLS, type Paper, type Stroke, type Tool } from './ink';
@@ -887,7 +887,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
 }
 
 // ---------------- One saved piece ----------------
-export function pieceScreen(app: App, route: Route): ScreenOut {
+export function pieceScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const id = (route as Extract<Route, { name: 'piece' }>).id;
   const as = store(app);
   const body = h('div', { class: 'dq-piece-body' });
@@ -1025,22 +1025,21 @@ export function pieceScreen(app: App, route: Route): ScreenOut {
         let done = false;
         removed = true;
         as.hide(id, revOf(rec!));
-        app.go({ name: ally ? 'shadows' : 'art' }, { replace: true });
-        app.toast(ally ? ART.released : ART.removed, {
-          label: 'Undo',
-          run: () => {
-            if (done) return;
-            done = true;
-            // the list it went back to takes focus to it
-            if (app.route.name === (ally ? 'shadows' : 'art')) back = id;
-            as.unhide(id);
-          },
-          end: () => {
-            if (done) return;
-            done = true;
-            void as.remove(id);
-          },
-        });
+        const list = ally ? 'shadows' : 'art';
+        const run = () => {
+          if (done) return;
+          done = true;
+          // the list it went back to takes focus to it
+          if (app.route.name === list) back = id;
+          as.unhide(id);
+        };
+        const end = () => {
+          if (done) return;
+          done = true;
+          void as.remove(id);
+        };
+        const action = { label: 'Undo', run, end };
+        visit.go({ name: list }, { replace: true, toast: { text: ally ? ART.released : ART.removed, action } });
       }, { kind: 'link' }),
     );
     paint();
