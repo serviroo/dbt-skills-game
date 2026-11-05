@@ -26,7 +26,7 @@ function expTo(p: Timed, t: number, from: number, to: number, dur: number) {
 function curveAt(p: Timed, values: Float32Array, t: number, dur: number) {
   p.cancelScheduledValues(t);
   p.setValueAtTime(values[0], t);
-  for (let i = 1; i < values.length; i++) p.linearRampToValueAtTime(values[i], t + (dur * i) / (values.length - 1));
+  for (let i = 1; i < values.length; i++) p.linearRampToValueAtTime(values[i], t + dur * (i / (values.length - 1)));
 }
 
 const IGNITION = bezierCurve(0.7, 0, 0.95, 0.55, 64);
@@ -36,7 +36,9 @@ const IGNITION = bezierCurve(0.7, 0, 0.95, 0.55, 64);
 function swell(p: Timed, t: number, peak: number, a: number, tau: number, hold = 0) {
   p.setValueAtTime(0, t);
   const N = 6;
-  for (let i = 1; i <= N; i++) p.linearRampToValueAtTime(peak * 0.5 * (1 - Math.cos((Math.PI * i) / N)), t + (a * i) / N);
+  for (let i = 1; i <= N; i++) {
+    p.linearRampToValueAtTime(peak * 0.5 * (1 - Math.cos((Math.PI * i) / N)), t + a * (i / N));
+  }
   if (hold > 0) p.setValueAtTime(peak, t + a + hold);
   p.setTargetAtTime(0, t + a + hold, tau);
 }
