@@ -14,7 +14,7 @@
       ".story/days",".story/chapters/index:story"
     ],
     "indexeddb-version": [".art@1",".story@1"],
-    "session-storage": ["dbt.tab","dbt.story.care"],
+    "session-storage": ["dbt.tab","dbt.story.care","dbt.replay"],
     "sw-cache": ["dbt.precache.","dbt.precache-meta"],
     "save-crystal-app": ["the-quiet-lantern"],
     "save-schema": ["1"],

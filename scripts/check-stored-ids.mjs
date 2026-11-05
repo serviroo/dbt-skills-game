@@ -99,7 +99,7 @@ async function collect() {
       'moment-length': [...names.MOMENT_LENGTHS],
       'indexeddb-store': [...names.ART_DB.stores.map((x) => `${names.BESIDE.art}/${x}`), ...names.STORY_DB.stores.map((x) => `${names.BESIDE.story}/${x}`), `${names.BESIDE.story}/chapters/index:${names.STORY_DB.chapterIndex}`],
       'indexeddb-version': [`${names.BESIDE.art}@${names.ART_DB.version}`, `${names.BESIDE.story}@${names.STORY_DB.version}`],
-      'session-storage': [names.TAB_KEY, names.CARE_KEY],
+      'session-storage': [...names.SESSION_KEYS],
       'sw-cache': [swName('PREFIX'), swName('META')].filter(Boolean),
       'save-crystal-app': [names.APP_ID],
       'save-schema': [String(store.SCHEMA)],

@@ -44,6 +44,8 @@ export type ReadSize = (typeof READ_SIZES)[number];
 
 export const TAB_KEY = 'dbt.tab';
 export const CARE_KEY = 'dbt.story.care';
+export const REPLAY_KEY = 'dbt.replay';
+export const SESSION_KEYS = [TAB_KEY, CARE_KEY, REPLAY_KEY];
 
 /** The offline worker's caches: the names src/pwa/sw-template.js uses (scripts/check-stored-ids.mjs checks they match). */
 export const SW_CACHE = { prefix: 'dbt.precache.', meta: 'dbt.precache-meta' } as const;

@@ -9,7 +9,8 @@ import { INTRO, NEW_VERSION, REWARDS } from './content/intro';
 import type { VolumeCtrl } from './audio/prefs';
 import { volumeButton, type VolumeButton } from './ui/volume';
 import { readYou } from './core/you';
-import { APP_KEY } from './core/stored-names';
+import { APP_KEY, REPLAY_KEY } from './core/stored-names';
+import type { Entry } from './daily/history';
 import { setStored, write } from './core/cleared';
 import { SCORE } from './motion/tokens';
 
@@ -109,6 +110,7 @@ async function sealedUntil(): Promise<void> {
 
 /** `stage` is the 3D stage when boot made one up front (labs, captures); `makeStage` makes it, null without WebGL. */
 export async function runApp(stage: Stage | null, makeStage: () => Stage | null) {
+  if (!replaying()) markReturn();
   const replay = replaying() ? leaveReplayAddress() : null;
   await sealedUntil();
   const state = load();
@@ -175,11 +177,16 @@ async function intro(stage: Stage | null, audio: AppAudio | null, state: AppStat
   state.seenCutscene = true;
   save(state);
   if (end === 'replay') {
-    history.replaceState(history.state, '', address(true));
-    location.reload();
+    const write = () => history.replaceState(history.state, '', address(true));
+    reloadReplaying(write, { here: keptReplay()?.here ?? null, replay: history.state }, 'replace');
     await new Promise(() => undefined);
   }
   return end === 'safe';
+}
+
+interface Kept {
+  here: Entry | null;
+  replay: unknown;
 }
 
 const replaying = () => new URLSearchParams(location.search).has('cutscene');
@@ -189,17 +196,46 @@ const byHistory = () => {
 };
 
 function leaveReplayAddress() {
-  history.replaceState(history.state, '', address(false));
+  history.replaceState(history.state ?? keptReplay()?.replay ?? null, '', address(false));
   if (byHistory()) return null;
   const back = new AbortController();
   addEventListener('popstate', () => back.abort(), { once: true });
+  addEventListener('pageshow', (e) => e.persisted && back.abort());
   return back.signal;
 }
 
 function address(replay: boolean) {
-  const q = location.search.slice(1).split('&').filter((p) => p && p.split('=')[0] !== 'cutscene');
+  const q = location.search.slice(1).split('&').filter((p) => p && !new URLSearchParams(p).has('cutscene'));
   if (replay) q.push('cutscene=1');
   return location.pathname + (q.length ? `?${q.join('&')}` : '') + location.hash;
+}
+
+function markReturn() {
+  const here = keptReplay()?.here;
+  const s = history.state as Entry | null;
+  if (!here || !byHistory() || s?.key !== here.key || s.i !== here.i) return;
+  history.replaceState(here, '');
+  sessionStorage.removeItem(REPLAY_KEY);
+}
+
+function reloadReplaying(write: () => void, kept: Kept, open: 'assign' | 'replace') {
+  try {
+    write();
+    location.reload();
+  } catch {
+    try {
+      sessionStorage.setItem(REPLAY_KEY, JSON.stringify(kept));
+    } catch {}
+    location[open](address(true));
+  }
+}
+
+function keptReplay(): Kept | null {
+  try {
+    return JSON.parse(sessionStorage.getItem(REPLAY_KEY) ?? 'null');
+  } catch {
+    return null;
+  }
 }
 
 /** The speaker on every cutscene beat, from the title screen to the end card (none without Web Audio or in captures). */
@@ -280,13 +316,14 @@ async function enterDaily(
   if (helpLeft) audio?.engine?.quiet(false, SCORE.safeBackSec);
   const daily = m.mountDaily(root, {
     help: help && !helpLeft,
-    onReplay: (here: unknown, replay: unknown) => {
+    onReplay: (here: Entry, replay: unknown) => {
       if (replaying()) return;
       state.seenCutscene = true;
       save(state);
-      history.replaceState(here, '');
-      history.pushState(replay, '', address(true));
-      location.reload();
+      reloadReplaying(() => {
+        history.replaceState(here, '');
+        history.pushState(replay, '', address(true));
+      }, { here, replay }, 'assign');
     },
     sound: audio
       ? {
