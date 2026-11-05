@@ -267,13 +267,17 @@ uniform vec3 uSize;
 uniform vec2 uView;
 varying vec2 vUv;
 varying float vI;
+const float GLOW_DEPTH = 0.95;
 void main() {
   vec4 l = uLamp[int(position.z + 0.5)];
   vUv = position.xy;
   vI = l.w;
-  vec4 clip = projectionMatrix * viewMatrix * vec4(l.xyz, 1.0);
+  vec4 view = viewMatrix * vec4(l.xyz, 1.0);
+  vec4 clip = projectionMatrix * view;
+  vec4 front = projectionMatrix * vec4(view.xyz * GLOW_DEPTH, 1.0);
   float px = clamp(uSize.x * projectionMatrix[1][1] * uView.y * 0.5 / clip.w, uSize.y, uSize.z) * (0.6 + 0.4 * l.w);
   clip.xy += position.xy * px * 2.0 / uView * clip.w;
+  clip.z = front.z / front.w * clip.w;
   gl_Position = clip;
 }`;
 const LAMP_FRAG = /* glsl */ `
@@ -381,7 +385,7 @@ export const paintCars: Paint = (scene, camera, time) => {
     new THREE.ShaderMaterial({
       vertexShader: LAMP_VERT, fragmentShader: LAMP_FRAG,
       uniforms: { uLamp: lamps, uSize: { value: new THREE.Vector3(1.1, 5, 26) }, uView: view },
-      transparent: true, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     }),
   );
   glows.frustumCulled = false;
