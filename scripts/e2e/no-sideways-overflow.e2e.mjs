@@ -111,17 +111,6 @@ const width = (page, sheet = null) =>
       const r = range.getBoundingClientRect();
       if (out(r) && !past.some((x) => x.startsWith(label(p)))) past.push(`"${n.textContent.trim().slice(0, 24)}" in ${label(p)} ${Math.round(r.left)}..${Math.round(r.right)}`);
     }
-    const choicesCut = [];
-    const measure = document.createElement('canvas').getContext('2d');
-    for (const f of document.querySelectorAll('#dq-main select')) {
-      if (!f.checkVisibility()) continue;
-      const cs = getComputedStyle(f);
-      const shown = f.selectedOptions[0]?.text;
-      measure.font = cs.font;
-      const room = f.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
-      const cut = shown && measure.measureText(shown).width > room + 1;
-      if (cut) choicesCut.push(`"${shown.slice(0, 24)}" in ${label(f)}`);
-    }
     const cutAtSide = [];
     const main = document.querySelector('#dq-main');
     const texts = main && document.createTreeWalker(main, NodeFilter.SHOW_TEXT);
@@ -153,7 +142,6 @@ const width = (page, sheet = null) =>
       vw: innerWidth,
       past: past.slice(0, 6),
       cutAtSide,
-      choicesCut,
       inner,
       under: !!box && box.getBoundingClientRect().top < bar - 0.5,
       cut,
@@ -161,6 +149,32 @@ const width = (page, sheet = null) =>
       moth: !!moth && [...document.querySelectorAll('.dq-ease-panel > .dq-chip > *')].some((c) => meets(c.getBoundingClientRect(), moth)),
     };
   }, sheet);
+
+async function choicesCutShort(page, scope) {
+  const cut = [];
+  const boxes = page.locator(`${scope} .dq-choice`);
+  for (let i = 0; i < (await boxes.count()); i++) {
+    const box = boxes.nth(i);
+    if (!(await box.isVisible())) continue;
+    const select = box.locator('select');
+    const was = await select.inputValue();
+    for (const value of await select.evaluate((s) => [...s.options].map((o) => o.value))) {
+      await select.selectOption(value);
+      const shown = await box.evaluate((b) => {
+        const s = b.querySelector('.dq-choice-shown');
+        const range = document.createRange();
+        range.selectNodeContents(s);
+        const [r, q, cs] = [range.getBoundingClientRect(), s.getBoundingClientRect(), getComputedStyle(s)];
+        const [left, right] = [q.left + parseFloat(cs.paddingLeft) - 1, q.right - parseFloat(cs.paddingRight) + 1];
+        const inside = r.left >= left && r.right <= right;
+        return inside && s.textContent === s.nextElementSibling.selectedOptions[0].text ? '' : s.textContent;
+      });
+      if (shown) cut.push(`"${shown.slice(0, 24)}"`);
+    }
+    await select.selectOption(was);
+  }
+  return cut;
+}
 
 async function softBreaks(page, pixelReader, scope = 'body') {
   const { count, pastOwnHyphen } = await page.evaluate((scope) => {
@@ -371,7 +385,8 @@ function sweep(phone, { textAt200 = false } = {}) {
         if (w.dq > 0) bad.push(`the companion scrolls ${w.dq} px sideways`);
         if (w.past.length) bad.push('something reaches past the edge');
         if (w.cutAtSide.length) bad.push(`words cut at the side: ${w.cutAtSide.join(', ')}`);
-        if (w.choicesCut.length) bad.push(`choices cut short: ${w.choicesCut.join(', ')}`);
+        const choices = await choicesCutShort(page, sheet ?? '#dq-main');
+        if (choices.length) bad.push(`choices cut short: ${choices.join(', ')}`);
         const breaks = await softBreaks(page, pixelReader, sheet ?? 'body');
         if (breaks.unseen.length) bad.push(`words broken with no hyphen to see: ${breaks.unseen.join(', ')}`);
         const past = breaks.pastOwnHyphen;

@@ -15,6 +15,7 @@ import { momentView } from './moment';
 import { nextPlace, uid, type Item, type Person } from './store';
 import { entryList } from './entries';
 import { btn, chip, field, focusWhole, h, p, panel, typo, wholeWords } from './ui';
+import { choose, wholeChoice } from './choice';
 import { supportListsCopy } from './support-lists';
 import { textSize } from './text-size';
 import { breathRing, coolChoice, pmrView, type Ctx } from './widgets';
@@ -47,10 +48,20 @@ export function regionPicker(app: App, picked?: () => void, text = { label: SAFE
     if (!select.isConnected) return void off();
     const now = regionOf(app).id;
     if (now === select.value) return;
-    select.value = now;
+    choose(select, now);
     picked?.();
   });
-  return h('div', { class: 'dq-setting dq-setting--col dq-region' }, h('label', { for: id, class: 'dq-setting-l' }, h('span', { class: 'dq-setting-t', text: text.label }), h('span', { class: 'dq-setting-h', text: text.hint })), select);
+  return h(
+    'div',
+    { class: 'dq-setting dq-setting--col dq-region' },
+    h(
+      'label',
+      { for: id, class: 'dq-setting-l' },
+      h('span', { class: 'dq-setting-t', text: text.label }),
+      h('span', { class: 'dq-setting-h', text: text.hint }),
+    ),
+    wholeChoice(select),
+  );
 }
 
 type At = 'start' | 'moment' | 'breathe' | 'cold' | 'squeeze' | 'check' | 'stop' | 'reasons' | 'people' | 'comfort' | 'talk' | 'close';

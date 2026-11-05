@@ -33,6 +33,7 @@ import { restoreSkillDrafts } from './skilldraft';
 import { supportListsCopy } from './support-lists';
 import { keepTextSize, textSize } from './text-size';
 import { pageHead, restHead, wholeText } from './page-head';
+import { choose, wholeChoice } from './choice';
 
 // ---------------- Stealth room (the Rest room) ----------------
 /** The Stealth title is never stored separately: any rest event means it is unlocked. The first one carries its id. */
@@ -395,13 +396,13 @@ export function libraryScreen(app: App): ScreenOut {
       render();
     });
     picks[key] = sel;
-    return h('div', { class: 'dq-libf' }, h('label', { for: id, class: 'dq-libf-l', text: label }), sel);
+    return h('div', { class: 'dq-libf' }, h('label', { for: id, class: 'dq-libf-l', text: label }), wholeChoice(sel));
   };
   const count = h('p', { class: 'dq-libcount', role: 'status' });
   const clearAll = () => {
     Object.assign(finding, { q: '', need: '', topic: '', time: '' });
     search.value = '';
-    for (const sel of Object.values(picks)) sel.value = '';
+    for (const sel of Object.values(picks)) choose(sel, '');
     render();
     search.focus();
   };
