@@ -32,8 +32,8 @@ import { crystalContent, makeCrystal, readCrystal, restorePreferences, restoreUn
 import { restoreSkillDrafts } from './skilldraft';
 import { supportListsCopy } from './support-lists';
 import { keepTextSize, textSize } from './text-size';
-
-const pageHead = (title: string, sub?: string) => h('header', { class: 'dq-pagehead' }, h('h1', { class: 'dq-h1', 'data-focus': '', text: title }), sub ? p(sub, 'dq-text dq-pagesub') : null);
+import { pageHead, restHead, wholeText } from './page-head';
+import { choose, wholeChoice } from './choice';
 
 // ---------------- Stealth room (the Rest room) ----------------
 /** The Stealth title is never stored separately: any rest event means it is unlocked. The first one carries its id. */
@@ -171,7 +171,7 @@ export function restScreen(app: App): ScreenOut {
   });
   const slime = new Slime({ reduced: () => app.reduced(), label: STEALTH.slimeLabel, onPoke: () => app.sound('bubble') });
   el.append(
-    h('header', { class: 'dq-pagehead dq-st-head' }, h('p', { class: 'dq-st-kicker', text: STEALTH.kicker }), h('h1', { class: 'dq-h1', 'data-focus': '', text: STEALTH.title }), p(STEALTH.sub, 'dq-text dq-pagesub dq-st-sub')),
+    restHead(STEALTH.kicker, STEALTH.title, STEALTH.sub),
     title,
     stage,
     h(
@@ -396,13 +396,13 @@ export function libraryScreen(app: App): ScreenOut {
       render();
     });
     picks[key] = sel;
-    return h('div', { class: 'dq-libf' }, h('label', { for: id, class: 'dq-libf-l', text: label }), sel);
+    return h('div', { class: 'dq-libf' }, h('label', { for: id, class: 'dq-libf-l', text: label }), wholeChoice(sel));
   };
   const count = h('p', { class: 'dq-libcount', role: 'status' });
   const clearAll = () => {
     Object.assign(finding, { q: '', need: '', topic: '', time: '' });
     search.value = '';
-    for (const sel of Object.values(picks)) sel.value = '';
+    for (const sel of Object.values(picks)) choose(sel, '');
     render();
     search.focus();
   };
@@ -781,7 +781,7 @@ export function diaryScreen(app: App, _route: Route, visit: Visit): ScreenOut {
     // Save tapped at the bottom of the screen brings the line under it into sight
     saved.scrollIntoView({ block: 'nearest', behavior: app.reduced() ? 'auto' : 'smooth' });
   };
-  const week = h('div', { class: 'dq-week' });
+  const week = h('div', { class: 'dq-week', tabindex: '0', role: 'region', 'aria-label': 'Past 7 days' });
   const renderWeek = () => {
     const days = Array.from({ length: 7 }, (_, i) => addDays(today, i - 6));
     const rows = [...rowsFor(s, 'emotions', days).map((r) => [r, 'emotions'] as const), ...rowsFor(s, 'urges', days).map((r) => [r, 'urges'] as const)];
@@ -1321,7 +1321,7 @@ function clearedScreen(): ScreenOut {
     const now = clearStatus();
     const done = now === 'done' || now === 'elsewhere-done';
     const failed = now === 'failed' || now === 'elsewhere-failed';
-    head.textContent = typo(done ? CLEAR_COPY.doneTitle : failed ? CLEAR_COPY.failedTitle : CLEAR_COPY.clearingTitle);
+    wholeText(head, typo(done ? CLEAR_COPY.doneTitle : failed ? CLEAR_COPY.failedTitle : CLEAR_COPY.clearingTitle));
     // the line is a live region: nothing around it is marked busy, so each change is read out as it comes
     text.textContent = typo(lines[now]);
     note.classList.toggle('is-hidden', !done);

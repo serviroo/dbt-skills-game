@@ -10,6 +10,7 @@ import './care-b.css';
 import './stealth.css';
 import './story.css';
 import './wave2.css';
+import './text-200.css';
 import './print.css';
 import { App, type DailyOpts } from './app';
 import { hubScreen } from './hub';
@@ -20,6 +21,7 @@ import { linesScreen } from './lines';
 import { easeScreen, momentScreen } from './moment';
 import { safeScreen } from './safe';
 import { skillScreen } from './skill';
+import { watchNarrow } from './narrow';
 
 export type { DailyOpts } from './app';
 export { mothSVG, catSVG } from './art';
@@ -48,11 +50,13 @@ export function mountDaily(root: HTMLElement, opts: DailyOpts): { unmount(): voi
     moment: momentScreen,
   });
   app.start();
+  const unnarrow = watchNarrow(root);
   (window as unknown as { __daily?: App }).__daily = app;
   return {
     settled: app.settled.catch(() => undefined),
     route: () => app.route.name,
     unmount() {
+      unnarrow();
       app.destroy();
       delete (window as unknown as { __daily?: App }).__daily;
     },

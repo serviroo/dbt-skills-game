@@ -13,7 +13,7 @@
 // the step (a hold, a timer's More time, choices, a slider, Next and Done) is in reach the same way once scrolled into
 // view, at least 44 px, with its words inside it and at least 16 px.
 import { fullSave, seedStores } from './me-91-final-save-ids.e2e.mjs';
-import { cutShort } from './safe-zone-reach.e2e.mjs';
+import { cutShort, scaleText } from './safe-zone-reach.e2e.mjs';
 
 const SIZES = [
   { width: 320, height: 568 },
@@ -33,6 +33,8 @@ const SCREENS = [
   ['A quiet minute', { name: 'ease' }],
   ['Rest', { name: 'rest' }],
   ['Diary', { name: 'diary' }],
+  ['Pick a day', { name: 'days' }],
+  ['Print a week', { name: 'print' }],
   ['Comfort', { name: 'comfort' }],
   ['Lines', { name: 'lines' }],
   ['Night Watch', { name: 'shadows' }],
@@ -41,11 +43,14 @@ const SCREENS = [
   ['drawing page', { name: 'draw', kind: 'today' }],
   ['shadow ally page', { name: 'draw', kind: 'ally' }],
   ['a drawing', { name: 'piece', id: 'draw-today' }],
+  ['a shadow ally', { name: 'piece', id: 'draw-ally' }],
   ['Story Room', { name: 'stories' }],
   ['writing', { name: 'write', id: 'tale-1' }],
   ['reading', { name: 'read', id: 'tale-1' }],
   ...SAFE_AT.map((at) => [`Safe Zone ${at}`, { name: 'safe', at }]),
 ];
+const LONG_DRAWING_NAMES = { 'draw-today': 'Chrysanthemums', 'draw-ally': 'Chrysanthemum' };
+const LONG_STORY_TITLE = 'Somewhere Unforgettable to Rest for a While';
 
 /**
  * Waits until the screen stops changing: no DOM changes for 300 ms (at most 3 s), and its entry motion done. A ring that
@@ -88,6 +93,7 @@ const width = (page, sheet = null) =>
     };
     const label = (e) => e.tagName.toLowerCase() + [...e.classList].slice(0, 2).map((c) => `.${c}`).join('');
     const out = (r) => r.width && (r.right > innerWidth + 0.5 || r.left < -0.5);
+    const screenReaderOnly = (e) => !!e.closest('.dq-sr') || getComputedStyle(e).clipPath === 'inset(50%)';
     const past = [...document.querySelectorAll('body *')]
       .filter((e) => out(e.getBoundingClientRect()) && e.checkVisibility() && !clips(e))
       .filter((e, _, all) => !all.includes(e.parentElement))
@@ -99,11 +105,28 @@ const width = (page, sheet = null) =>
     const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     for (let n; (n = walk.nextNode()) && past.length < 6; ) {
       const p = n.parentElement;
-      if (!n.textContent.trim() || !p.checkVisibility() || clips(p) || p.closest('.dq-sr')) continue;
+      if (!n.textContent.trim() || !p.checkVisibility() || clips(p) || screenReaderOnly(p)) continue;
       const range = document.createRange();
       range.selectNodeContents(n);
       const r = range.getBoundingClientRect();
       if (out(r) && !past.some((x) => x.startsWith(label(p)))) past.push(`"${n.textContent.trim().slice(0, 24)}" in ${label(p)} ${Math.round(r.left)}..${Math.round(r.right)}`);
+    }
+    const cutAtSide = [];
+    const main = document.querySelector('#dq-main');
+    const texts = main && document.createTreeWalker(main, NodeFilter.SHOW_TEXT);
+    for (let n; texts && (n = texts.nextNode()) && cutAtSide.length < 6; ) {
+      const p = n.parentElement;
+      if (!n.textContent.trim() || !p.checkVisibility() || screenReaderOnly(p)) continue;
+      let clipper = p;
+      while (clipper !== main && getComputedStyle(clipper).overflowX === 'visible') clipper = clipper.parentElement;
+      const scrollsSideways = /auto|scroll/.test(getComputedStyle(clipper).overflowX);
+      if (clipper === main || scrollsSideways) continue;
+      const range = document.createRange();
+      range.selectNodeContents(n);
+      const r = range.getBoundingClientRect();
+      const left = clipper.getBoundingClientRect().left + clipper.clientLeft;
+      const cut = r.width && (r.left < left - 0.5 || r.right > left + clipper.clientWidth + 0.5);
+      if (cut) cutAtSide.push(`"${n.textContent.trim().slice(0, 24)}" in ${label(p)}, cut by ${label(clipper)}`);
     }
     const box = sheet && document.querySelector(sheet);
     const inner = box ? [box, ...box.querySelectorAll('*')].filter((e) => getComputedStyle(e).overflowX !== 'visible' && e.scrollWidth > e.clientWidth + 1 && e.checkVisibility() && !e.closest('.dq-sr')).map((e) => `${label(e)} ${e.scrollWidth - e.clientWidth} px wider than it shows`) : [];
@@ -118,6 +141,7 @@ const width = (page, sheet = null) =>
       dq: dq ? dq.scrollWidth - dq.clientWidth : 0,
       vw: innerWidth,
       past: past.slice(0, 6),
+      cutAtSide,
       inner,
       under: !!box && box.getBoundingClientRect().top < bar - 0.5,
       cut,
@@ -125,6 +149,168 @@ const width = (page, sheet = null) =>
       moth: !!moth && [...document.querySelectorAll('.dq-ease-panel > .dq-chip > *')].some((c) => meets(c.getBoundingClientRect(), moth)),
     };
   }, sheet);
+
+async function choicesCutShort(page, scope) {
+  const cut = [];
+  const boxes = page.locator(`${scope} .dq-choice`);
+  for (let i = 0; i < (await boxes.count()); i++) {
+    const box = boxes.nth(i);
+    if (!(await box.isVisible())) continue;
+    const select = box.locator('select');
+    const was = await select.inputValue();
+    for (const value of await select.evaluate((s) => [...s.options].map((o) => o.value))) {
+      await select.selectOption(value);
+      const shown = await box.evaluate((b) => {
+        const s = b.querySelector('.dq-choice-shown');
+        const range = document.createRange();
+        range.selectNodeContents(s);
+        const [r, q, cs] = [range.getBoundingClientRect(), s.getBoundingClientRect(), getComputedStyle(s)];
+        const [left, right] = [q.left + parseFloat(cs.paddingLeft) - 1, q.right - parseFloat(cs.paddingRight) + 1];
+        const inside = r.left >= left && r.right <= right;
+        return inside && s.textContent === s.nextElementSibling.selectedOptions[0].text ? '' : s.textContent;
+      });
+      if (shown) cut.push(`"${shown.slice(0, 24)}"`);
+    }
+    await select.selectOption(was);
+  }
+  return cut;
+}
+
+async function softBreaks(page, pixelReader, scope = 'body') {
+  const { count, pastOwnHyphen } = await page.evaluate((scope) => {
+    const screenReaderOnly = (e) => !!e.closest('.dq-sr') || getComputedStyle(e).clipPath === 'inset(50%)';
+    const lines = (t) => {
+      const range = document.createRange();
+      range.selectNodeContents(t);
+      return [...range.getClientRects()];
+    };
+    const marks = [...document.querySelectorAll(`${scope} dq-shy`)].filter((s) => {
+      if (!s.parentElement.checkVisibility() || screenReaderOnly(s.parentElement)) return false;
+      const [a, b] = [lines(s.previousSibling).at(-1), lines(s.nextSibling)[0]];
+      return !!a && !!b && b.top > a.top + a.height / 2;
+    });
+    const movedByScrollIntoView = new Set([document.scrollingElement]);
+    const scrolls = (e) => e.scrollHeight > e.clientHeight || e.scrollWidth > e.clientWidth;
+    for (const s of marks) {
+      for (let p = s.parentElement; p; p = p.parentElement) if (scrolls(p)) movedByScrollIntoView.add(p);
+    }
+    window.__marks = { marks, scrollsToRestore: [...movedByScrollIntoView].map((e) => [e, e.scrollTop, e.scrollLeft]) };
+    const ownHyphenOnLine = (s) => {
+      const line = lines(s.previousSibling).at(-1);
+      const before = s.closest('dq-words') ?? s.parentElement;
+      const walk = document.createTreeWalker(before, NodeFilter.SHOW_TEXT);
+      let hyphen = null;
+      for (let n; (n = walk.nextNode()) && s.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_PRECEDING; ) {
+        for (let i = 0; i < n.data.length; i++) {
+          if (/\s/.test(n.data[i])) hyphen = null;
+          else if (n.data[i] === '-') hyphen = [n, i];
+        }
+      }
+      if (!hyphen) return false;
+      const range = document.createRange();
+      range.setStart(hyphen[0], hyphen[1]);
+      range.setEnd(hyphen[0], hyphen[1] + 1);
+      const at = range.getClientRects()[0];
+      return !!at && Math.abs(at.top - line.top) < line.height / 2;
+    };
+    const word = (s) => `${s.previousSibling.textContent}|${s.nextSibling.textContent}`;
+    return { count: marks.length, pastOwnHyphen: marks.filter(ownHyphenOnLine).map(word) };
+  }, scope);
+  const out = [];
+  const shown = (i, clear) =>
+    page.evaluate(
+      async ([i, clear]) => {
+        window.__marks.marks[i].style.color = clear ? 'transparent' : '';
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      },
+      [i, clear],
+    );
+  for (let i = 0; i < count && out.length < 6; i++) {
+    const strokeArea = await page.evaluate(async (i) => {
+      const s = window.__marks.marks[i];
+      s.scrollIntoView({ block: 'center', behavior: 'instant' });
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const r = s.getBoundingClientRect();
+      const size = parseFloat(getComputedStyle(s).fontSize);
+      const [x, y] = [Math.max(r.left - size / 2, 0), Math.max(r.top, 0)];
+      const width = Math.min(r.right + size, innerWidth) - x;
+      const height = Math.min(r.bottom, innerHeight) - y;
+      return { x, y, width, height, size, word: `${s.previousSibling.textContent}|${s.nextSibling.textContent}` };
+    }, i);
+    let ink = 0;
+    if (strokeArea.width >= 1 && strokeArea.height >= 1) {
+      const clip = { x: strokeArea.x, y: strokeArea.y, width: strokeArea.width, height: strokeArea.height };
+      const marked = (await page.screenshot({ clip })).toString('base64');
+      await shown(i, true);
+      const clear = (await page.screenshot({ clip })).toString('base64');
+      await shown(i, false);
+      ink = await pixelReader.evaluate(areaThatDiffers, [marked, clear]);
+    }
+    const thinnestHyphen = strokeArea.size * 0.03;
+    const shortestHyphen = strokeArea.size * 0.25;
+    if (ink < thinnestHyphen * shortestHyphen) out.push(`"${strokeArea.word}" at ${strokeArea.size}px`);
+  }
+  await page.evaluate(() => {
+    for (const [e, top, left] of window.__marks.scrollsToRestore) e.scrollTo(left, top);
+    delete window.__marks;
+  });
+  return { unseen: out, pastOwnHyphen };
+}
+
+async function areaThatDiffers(pngs) {
+  const [a, b] = await Promise.all(
+    pngs.map(async (png) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${png}`;
+      await img.decode();
+      const g = new OffscreenCanvas(img.width, img.height).getContext('2d');
+      g.drawImage(img, 0, 0);
+      return g.getImageData(0, 0, img.width, img.height).data;
+    }),
+  );
+  let n = 0;
+  for (let k = 0; k < a.length; k += 4) {
+    if (Math.max(Math.abs(a[k] - b[k]), Math.abs(a[k + 1] - b[k + 1]), Math.abs(a[k + 2] - b[k + 2])) > 40) n++;
+  }
+  return n / devicePixelRatio ** 2;
+}
+
+async function weekKeyboardReach(page) {
+  const regions = await page.getByRole('region', { name: 'Past 7 days', exact: true }).count();
+  if (regions !== 1) return 'is not a region named Past 7 days';
+  const before = await page.evaluate(() => {
+    const stops = [...document.querySelectorAll('a[href], button, input, select, textarea, [tabindex]')].filter(
+      (e) => e.tabIndex >= 0 && !e.disabled && e.checkVisibility(),
+    );
+    const at = stops.indexOf(document.querySelector('.dq-week'));
+    if (at > 0) stops[at - 1].focus();
+    return at > 0;
+  });
+  if (!before) return 'is no stop for the keyboard';
+  await page.keyboard.press('Tab');
+  return page.evaluate(() => {
+    const e = document.activeElement;
+    const name = (el) => `${el?.tagName.toLowerCase()}.${[...(el?.classList ?? [])].join('.')}`;
+    if (!e?.matches('.dq-week')) return `is skipped: Tab lands on ${name(e)}`;
+    const cs = getComputedStyle(e);
+    const ring = parseFloat(cs.outlineWidth);
+    const noRing = !e.matches(':focus-visible') || cs.outlineStyle === 'none' || ring < 2;
+    if (noRing) return `shows no focus ring (${cs.outlineStyle} ${cs.outlineWidth})`;
+    e.scrollIntoView({ block: 'center', behavior: 'instant' });
+    const r = e.getBoundingClientRect();
+    const out = ring + parseFloat(cs.outlineOffset);
+    const outer = { left: r.left - out, right: r.right + out, top: r.top - out, bottom: r.bottom + out };
+    const edges = (b) => [b.left, b.right, b.top, b.bottom].map(Math.round);
+    for (let p = e.parentElement; p && p !== document.body; p = p.parentElement) {
+      const ps = getComputedStyle(p);
+      const q = p.getBoundingClientRect();
+      const cutsSides = ps.overflowX !== 'visible' && (outer.left < q.left - 0.5 || outer.right > q.right + 0.5);
+      const cutsEnds = /hidden|clip/.test(ps.overflowY) && (outer.top < q.top - 0.5 || outer.bottom > q.bottom + 0.5);
+      if (cutsSides || cutsEnds) return `has its focus ring cut by ${name(p)} (${edges(outer)} in ${edges(q)})`;
+    }
+    return '';
+  });
+}
 
 /**
  * Why the control `sel` names (or `sel` itself, an element) is out of reach, or '' if it isn't: it is at least 44 px each
@@ -165,27 +351,46 @@ const reach = (page, sel, { below = true, optional = false } = {}) =>
     { sel, below, optional },
   );
 
-/** Every screen, and the sheets, on one phone at 200% zoom. */
-function sweep(phone) {
+/** Every screen, and the sheets, on one phone at 200% zoom or with its text at 200%. */
+function sweep(phone, { textAt200 = false } = {}) {
   return async (h) => {
     const failed = [];
-    const size = `${phone.width}x${phone.height} at 200%`;
-    const zoomed = { width: phone.width / 2, height: phone.height / 2 };
+    const size = `${phone.width}x${phone.height} ${textAt200 ? 'with its text at 200%' : 'at 200%'}`;
+    const zoomed = textAt200 ? phone : { width: phone.width / 2, height: phone.height / 2 };
     const now = Date.now();
     const save = fullSave(now);
     const you = JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: save.created, companionAt: save.created });
-    const { ctx, page, errors } = await h.open({ [h.SAVE]: JSON.stringify(save), [h.YOU]: you, 'dbt.app.v1': h.SEEN }, '?mute', zoomed);
+    const stored = { [h.SAVE]: JSON.stringify(save), [h.YOU]: you, 'dbt.app.v1': h.SEEN };
+    const phoneLike = textAt200 ? { isMobile: true, hasTouch: true } : {};
+    const { ctx, page, errors } = await h.open(stored, '?mute', zoomed, undefined, phoneLike);
+    const pixelReader = await ctx.newPage();
     try {
       await h.reachHub(page);
       await seedStores(page, h.SAVE, now);
+      await page.evaluate(async ([key, names, title]) => {
+        const { artStore } = await import('/src/daily/artstore.ts');
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        for (const [id, name] of Object.entries(names)) await artStore(key).setLabels(id, { name });
+        const story = await storyStore(key).story('tale-1');
+        await storyStore(key).saveStory({ ...story, title }, [story.rev]);
+      }, [h.SAVE, LONG_DRAWING_NAMES, LONG_STORY_TITLE]);
       await page.reload();
       await h.reachHub(page);
+      if (textAt200) await scaleText(page);
       const check = async (where, { words = true, sheet = null, close = null } = {}) => {
         await settle(page);
         const w = await width(page, sheet);
         const bad = [];
         if (w.doc !== w.vw) bad.push(`the page is ${w.doc} px wide`);
         if (w.dq > 0) bad.push(`the companion scrolls ${w.dq} px sideways`);
+        if (w.past.length) bad.push('something reaches past the edge');
+        if (w.cutAtSide.length) bad.push(`words cut at the side: ${w.cutAtSide.join(', ')}`);
+        const choices = await choicesCutShort(page, sheet ?? '#dq-main');
+        if (choices.length) bad.push(`choices cut short: ${choices.join(', ')}`);
+        const breaks = await softBreaks(page, pixelReader, sheet ?? 'body');
+        if (breaks.unseen.length) bad.push(`words broken with no hyphen to see: ${breaks.unseen.join(', ')}`);
+        const past = breaks.pastOwnHyphen;
+        if (past.length) bad.push(`words broken past their own hyphen: ${past.join(', ')}`);
         const safe = await reach(page, '.dq-top .dq-safe', { below: false, optional: true });
         if (safe) bad.push(`the Safe Zone button is out of reach: ${safe}`);
         if (w.inner.length) bad.push(`inside the sheet: ${w.inner.join(', ')}`);
@@ -197,29 +402,43 @@ function sweep(phone) {
         if (w.moth) bad.push('the moth is over the badge');
         if (bad.length) failed.push(`${size} ${where}: ${bad.join('; ')} on a ${w.vw} px screen; past the edge: ${w.past.join(', ') || 'nothing found'}`);
         if (words) for (const f of await cutShort(page, { scope: sheet ? `${sheet} *` : '#dq-main *' })) failed.push(`${size} ${where}: ${f}`);
-        await h.shot(page, `wide-${phone.width}x${phone.height}-${where.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`);
+        const slug = where.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+        await h.shot(page, `wide-${phone.width}x${phone.height}${textAt200 ? '-text' : ''}-${slug}`);
       };
-      for (const [where, route] of SCREENS) {
+      const go = async (route) => {
         await page.evaluate((r) => window.__daily.go(r), route);
         await page.waitForFunction((n) => window.__daily.route.name === n, route.name, { timeout: 10000 });
+      };
+      for (const [where, route] of SCREENS) {
+        await go(route);
         // a skill opened at one of its parts shows its intro first; that part is the screen to check
         if (route.entry) {
           await page.locator('.dq-step-body .dq-intro').waitFor({ timeout: 10000 });
           await page.locator('.dq-step-body .dq-actions .dq-btn--primary').first().click();
         }
         await check(where, { words: route.name !== 'skill' && route.name !== 'safe' });
+        if (route.name === 'diary') {
+          const week = await weekKeyboardReach(page);
+          if (week) failed.push(`${size} Diary: the week that scrolls sideways ${week}`);
+        }
       }
       // Night Watch at the phone's own size, where its cards keep their words whole at their own sizes too
-      await page.setViewportSize(phone);
-      await page.evaluate(() => window.__daily.go({ name: 'shadows' }));
-      await page.waitForFunction(() => window.__daily.route.name === 'shadows', null, { timeout: 10000 });
-      await check('Night Watch, unzoomed');
-      await page.setViewportSize(zoomed);
+      if (!textAt200) {
+        await page.setViewportSize(phone);
+        await page.evaluate(() => window.__daily.go({ name: 'shadows' }));
+        await page.waitForFunction(() => window.__daily.route.name === 'shadows', null, { timeout: 10000 });
+        await check('Night Watch, unzoomed');
+        await page.setViewportSize(zoomed);
+      }
       // Home once the check-in is answered with a feeling that asks how strong it is
       await page.evaluate(() => window.__daily.go({ name: 'hub' }));
       await page.locator('.dq-feels .dq-opt').filter({ hasText: 'Tired' }).click({ timeout: 10000 });
       await page.locator('.dq-level [role=radiogroup]').waitFor({ timeout: 10000 });
       await check('Home, How strong');
+      await page.evaluate(() => window.__daily.go({ name: 'settings' }));
+      await page.locator('.w2-wopt:enabled[aria-checked="false"]').first().click({ timeout: 10000 });
+      await page.locator('.w2-try').waitFor({ timeout: 10000 });
+      await check('Wardrobe, a look tried on');
 
       // the sheets opened from the drawing page and the story editor
       // each sheet opens at the phone's own size, where the page can be drawn on, and is checked once zoomed to 200%
@@ -230,8 +449,10 @@ function sweep(phone) {
         } catch (e) {
           return failed.push(`${size} ${where}: could not open it: ${String(e.message).split('\n')[0]}`);
         }
-        await check(`${where}, unzoomed`, { sheet: panel, close });
-        await page.setViewportSize(zoomed);
+        if (!textAt200) {
+          await check(`${where}, unzoomed`, { sheet: panel, close });
+          await page.setViewportSize(zoomed);
+        }
         await check(where, { sheet: panel, close });
         // the close check itself: a close the sheet cuts at its edge, by 10 px and by half, is out of reach though its centre
         // may still take the tap
@@ -301,6 +522,32 @@ function sweep(phone) {
         await page.keyboard.press('Escape');
         await page.locator('.w2-camp-card').waitFor({ state: 'hidden', timeout: 10000 });
       }
+      await page.evaluate(async () => {
+        const drop = IDBFactory.prototype.deleteDatabase;
+        IDBFactory.prototype.deleteDatabase = function (name) {
+          if (!name.endsWith('.story')) return drop.call(this, name);
+          IDBFactory.prototype.deleteDatabase = drop;
+          const held = new EventTarget();
+          window.__failHeldDelete = () => {
+            held.error = new DOMException('failed', 'UnknownError');
+            const failed = new Event('error');
+            held.dispatchEvent(failed);
+            held.onerror?.(failed);
+          };
+          return held;
+        };
+        (await (await import('/src/core/cleared.ts')).holdAll()).clear();
+        void (await import('/src/daily/clear.ts')).clearGame();
+      });
+      const cleared = (title) => page.locator('.dq-cleared-h', { hasText: title }).waitFor({ timeout: 30000 });
+      await cleared('Clearing');
+      await check('Clearing');
+      await page.evaluate(() => window.__failHeldDelete());
+      await cleared('Not finished');
+      await check('Not finished');
+      await page.locator('.dq-cleared .dq-actions button').click();
+      await cleared('All clear');
+      await check('All clear');
       if (errors.length) failed.push(`${size}: ${errors.join(' | ')}`);
     } finally {
       await ctx.close();
@@ -439,7 +686,93 @@ function steps(phone) {
   };
 }
 
+async function emptySlot(h) {
+  const failed = [];
+  for (const phone of SIZES.slice(0, 2)) {
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', phone, undefined, { isMobile: true });
+    try {
+      await h.reachHub(page);
+      await page.evaluate(() => window.__daily.go({ name: 'shadows' }));
+      const slot = page.locator('.w2-inv [data-item="empty"]');
+      await slot.waitFor({ timeout: 10000 });
+      const beside = await slot.evaluate((e) => {
+        const art = e.querySelector('.w2-item-art').getBoundingClientRect();
+        const words = e.querySelector('.w2-item-l').getBoundingClientRect();
+        return words.left >= art.right && words.top < art.bottom;
+      });
+      if (!beside) failed.push(`${phone.width}x${phone.height}: the empty slot's words are not beside its box`);
+      await scaleText(page);
+      await settle(page);
+      const w = await width(page);
+      const cut = [...w.past, ...w.cutAtSide];
+      const where = `${phone.width}x${phone.height}`;
+      if (w.doc !== w.vw || cut.length) failed.push(`${where} with its text at 200%: ${cut.join(', ') || 'too wide'}`);
+      await h.shot(page, `empty-slot-${phone.width}x${phone.height}-text`);
+      if (errors.length) failed.push(`${phone.width}x${phone.height}: ${errors.join(' | ')}`);
+    } finally {
+      await ctx.close();
+    }
+  }
+  h.expect(!failed.length, failed.join('\n'));
+}
+
+const NARROW_SCREENS = [
+  ['A quiet minute', { name: 'ease' }, ['.dq-ease-panel']],
+  ['Art room', { name: 'art' }, ['.dq-artentries', '.dq-art-pages']],
+  ['Library', { name: 'library' }, ['.dq-libresults', '.dq-libfind']],
+];
+
+async function narrowLayouts(h) {
+  const failed = [];
+  const countLoops = (ctx) =>
+    ctx.addInitScript(() => {
+      window.__resizeLoops = [];
+      addEventListener('error', (e) => /ResizeObserver/.test(e.message) && window.__resizeLoops.push(e.message));
+    });
+  const phone = SIZES[0];
+  const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', phone, countLoops, { isMobile: true });
+  const narrowIn = async (where, selectors, want) => {
+    const states = await page.evaluate(
+      (s) => [...document.querySelectorAll(s.join(', '))].map((e) => e.hasAttribute('data-narrow')),
+      selectors,
+    );
+    const wrong = !states.length || states.some((n) => n !== want);
+    if (wrong) failed.push(`${where}: narrow should be ${want}, is ${states}`);
+  };
+  const visit = async ([where, route, selectors], want) => {
+    await page.evaluate((r) => window.__daily.go(r), route);
+    await page.locator(selectors[0]).first().waitFor({ timeout: 10000 });
+    await settle(page);
+    await narrowIn(`${where} at ${want ? '200%' : 'normal'} text`, selectors, want);
+  };
+  try {
+    await h.reachHub(page);
+    for (const screen of NARROW_SCREENS) await visit(screen, false);
+    await scaleText(page);
+    await settle(page);
+    await narrowIn('Library once the text grows while it is open', NARROW_SCREENS[2][2], true);
+    for (const screen of NARROW_SCREENS) await visit(screen, true);
+    await page.evaluate(() => {
+      const scaled = (s) => s.textContent.includes('text-size-adjust: 200%');
+      [...document.querySelectorAll('style')].filter(scaled).forEach((s) => s.remove());
+    });
+    await settle(page);
+    await narrowIn('Library once the text is back to normal', NARROW_SCREENS[2][2], false);
+    const loops = await page.evaluate(() => window.__resizeLoops);
+    if (loops.length) failed.push(`resize loops: ${loops.join(' | ')}`);
+    if (errors.length) failed.push(errors.join(' | '));
+  } finally {
+    await ctx.close();
+  }
+  h.expect(!failed.length, failed.join('\n'));
+}
+
 export const scenarios = Object.fromEntries([
-  ...SIZES.map((phone) => [`no-sideways-overflow-${phone.width}x${phone.height}`, sweep(phone)]),
+  ['no-sideways-overflow-empty-slot', emptySlot],
+  ['no-sideways-overflow-narrow-layouts', narrowLayouts],
+  ...SIZES.flatMap((phone) => [
+    [`no-sideways-overflow-${phone.width}x${phone.height}`, sweep(phone)],
+    [`no-sideways-overflow-${phone.width}x${phone.height}-text-200`, sweep(phone, { textAt200: true })],
+  ]),
   ...STEP_SIZES.map((phone) => [`no-sideways-overflow-steps-${phone.width}x${phone.height}`, steps(phone)]),
 ]);

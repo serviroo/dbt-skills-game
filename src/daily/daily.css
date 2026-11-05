@@ -568,10 +568,15 @@ dq-word {
   display: inline-block;
   width: max-content;
   max-width: 100%;
+  text-wrap: wrap;
 }
 /* a skill's window lets its rows narrow past a word, as it always has: there the word asks only for its widest piece */
 .dq-skill dq-word {
   width: auto;
+}
+dq-shy {
+  font-family: var(--font-ui);
+  line-height: 0;
 }
 dq-shy::before {
   content: '\AD';
@@ -1581,7 +1586,7 @@ textarea.dq-input {
   flex-direction: column;
   padding: 20px 20px 18px;
   background:
-    radial-gradient(90% 50% at 50% 0%, rgba(79, 184, 255, 0.16), transparent 70%),
+    radial-gradient(90% 50% at 50% 0%, rgba(79, 184, 255, 0.12), transparent 70%),
     linear-gradient(180deg, #0d1f37, #071222 70%, #060e1c);
 }
 .dq-cardface--front::after {
@@ -2962,6 +2967,7 @@ textarea.dq-input {
   flex: 1 1 var(--share);
   display: flex;
   flex-wrap: wrap;
+  max-width: 100%;
 }
 .dq-cardcell::after {
   content: '';
@@ -2969,6 +2975,7 @@ textarea.dq-input {
 }
 .dq-cardcell > .dq-cardbtn {
   flex: 1 1 calc(var(--share) - 1px);
+  max-width: 100%;
 }
 /* a phone zoomed to 200% (260 CSS pixels wide or less): one card a row, reaching only as far as the page's own 10 px
    padding, with narrower sides (below), so a name's longest word fits its line */
@@ -3137,7 +3144,7 @@ textarea.dq-input {
 }
 .dq-libf {
   display: grid;
-  grid-template-columns: 3.6em minmax(0, 1fr);
+  grid-template-columns: 6ch minmax(0, 1fr);
   align-items: center;
   column-gap: 12px;
 }
@@ -3250,40 +3257,6 @@ textarea.dq-input {
 }
 .dq-libsec--fav .dq-libsec-ic {
   color: var(--mint);
-}
-/* a phone at 200% zoom, held either way (300 CSS pixels wide or less): a skill's names take the whole row, its minutes
-   and arrow the line under them, and its pin a strip under the row, so no name is squeezed narrower than its words */
-@media (max-width: 300px) {
-  .dq-libitem {
-    flex-wrap: wrap;
-  }
-  .dq-libitem .dq-librow {
-    flex-basis: 100%;
-    grid-template-columns: minmax(0, 1fr) 20px;
-    padding: 11px 10px;
-  }
-  .dq-librow-n,
-  .dq-librow-r {
-    grid-column: 1 / -1;
-  }
-  .dq-librow-r {
-    letter-spacing: 0.06em;
-  }
-  .dq-librow-m {
-    grid-column: 1;
-    grid-row: 3;
-  }
-  .dq-librow-c {
-    grid-column: 2;
-    grid-row: 3;
-  }
-  .dq-libpin {
-    width: 100%;
-    justify-items: end;
-    padding: 0 10px;
-    border-left: 0;
-    border-top: 1px solid rgba(62, 100, 133, 0.3);
-  }
 }
 
 .dq-diary-grid,
@@ -3446,7 +3419,7 @@ textarea.dq-input {
   font-weight: 400;
   line-height: 1.2;
   color: var(--t-body);
-  max-width: 9em;
+  max-width: 14ch;
   hyphens: auto;
 }
 .dq-table td {
@@ -4023,7 +3996,7 @@ textarea.dq-input {
     padding: 6px 2px;
   }
   .dq-table tbody th {
-    max-width: 6.6em;
+    max-width: 10.5ch;
     padding-right: 6px;
   }
 }
@@ -4836,20 +4809,6 @@ textarea.dq-input {
   width: 92px;
   height: auto;
 }
-/* a phone zoomed to 200% (260 CSS pixels wide or less): each entry's picture gets a row of its own above its words, and
-   the unfinished drawing's picture sits above its words and buttons */
-@media (max-width: 260px) {
-  .dq-artentry {
-    grid-template-columns: minmax(0, 1fr) 20px;
-  }
-  .dq-artentry-art {
-    grid-column: 1 / -1;
-  }
-  .dq-art-draft {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-}
 .dq-artentry-txt {
   display: flex;
   flex-direction: column;
@@ -4880,6 +4839,7 @@ textarea.dq-input {
 }
 .dq-art-draft {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 16px;
   padding: 12px 14px;
@@ -4894,6 +4854,9 @@ textarea.dq-input {
 }
 .dq-art-draft-img .dq-thumb {
   height: auto;
+}
+.dq-art-draft-txt {
+  flex: 1 1 0;
 }
 .dq-art-draft .dq-actions {
   margin-top: 10px;
@@ -5918,6 +5881,7 @@ textarea.dq-input {
   }
   .dq-piece-body {
     flex-direction: row;
+    flex-wrap: wrap;
     align-items: flex-start;
     gap: 40px;
   }
@@ -5925,6 +5889,7 @@ textarea.dq-input {
     flex: none;
   }
   .dq-piece-side {
+    flex: 1 1 0;
     padding-top: 12px;
   }
 }

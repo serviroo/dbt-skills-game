@@ -18,7 +18,8 @@ import { match, spans, terms, type Span } from './storyfind';
 import { creditStory, STORY_CAP, storyStore, type Card, type CardMode, type Chapter, type Story } from './storystore';
 import { storyFromText, storyToText, type StoryText } from './storytext';
 import { keepTextSize, textSize } from './text-size';
-import { breakable, btn, h, p, segmented, shareOrSave, typo } from './ui';
+import { breakable, btn, h, keptWhole, p, segmented, shareOrSave, typo } from './ui';
+import { storyHead, wholeText } from './page-head';
 
 export const STORY = {
   title: 'Story Room',
@@ -127,9 +128,6 @@ const marked = (text: string, at: Span[], place?: Span, shown = (from: number, t
   return out;
 };
 const SEARCH_IC = '<svg class="dq-ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="5.5"/><path d="M14.6 14.6l4.6 4.6"/></svg>';
-
-const pageHead = (title: string, sub: string, extra?: HTMLElement | null) =>
-  h('header', { class: 'dq-pagehead st-head' }, h('div', { class: 'st-head-row' }, h('h1', { class: 'dq-h1', 'data-focus': '', text: title }), extra ?? null), p(sub, 'dq-text dq-pagesub'));
 
 // ---------------- the shelf ----------------
 export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut {
@@ -274,7 +272,7 @@ export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut 
   const el = h(
     'div',
     { class: 'dq-page st-page st-shelfpage' },
-    pageHead(STORY.title, STORY.sub, xp ? h('span', { class: 'dq-xp st-xp', text: `+${xp} XP` }) : null),
+    storyHead(STORY.title, STORY.sub, xp ? h('span', { class: 'dq-xp st-xp', text: `+${xp} XP` }) : null),
     top,
     fileIn,
     bringBox,
@@ -1223,7 +1221,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
                   'button',
                   { type: 'button', class: 'st-pick', 'data-piece': m.id, 'aria-current': m.id === placed ? 'true' : null, onclick: () => void placeDrawing(at, m.id) },
                   h('span', { class: `st-pick-img st-pic--${m.kind}` }, drawingImg(app, m, '')),
-                  h('span', { class: 'st-pick-t', text: drawingName(m) }),
+                  keptWhole(h('span', { class: 'st-pick-t', text: drawingName(m) })),
                 ),
               ),
             )
@@ -2027,13 +2025,13 @@ export function readScreen(app: App, route: Route): ScreenOut {
     const s = await ss.story(r.id);
     if (!alive) return;
     if (!s || s.removed) {
-      title.textContent = STORY.title;
+      wholeText(title, STORY.title);
       titled();
       tools.remove();
       body.replaceChildren(h('p', { class: 'st-read-empty', text: STORY_READ.gone }));
       return;
     }
-    title.textContent = shownTitle(s.title);
+    wholeText(title, shownTitle(s.title));
     sub.textContent = storyMeta(app, s);
     titled();
     // what this copy holds but couldn't store yet reads as it is in the editor
