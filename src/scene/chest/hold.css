@@ -211,15 +211,3 @@
   rotate: 45deg;
   box-shadow: 0 0 6px rgba(249, 197, 140, 0.7);
 }
-
-.ch-haptic {
-  position: fixed;
-  left: 0;
-  top: 0;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  opacity: 0;
-  pointer-events: none;
-  z-index: -1;
-}

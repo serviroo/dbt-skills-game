@@ -4,7 +4,7 @@
 // survives a reload.
 
 import { appears, playing } from './beat.mjs';
-import { gone } from './harness.mjs';
+import { gone, until } from './harness.mjs';
 import { tapWhereItIs } from './taps.mjs';
 
 const START = JSON.stringify([40]);
@@ -93,6 +93,20 @@ async function wiseMind(h, page) {
   await tap(page, 'Begin');
   await tap(page, 'Next');
   await timer(page).waitFor({ timeout: 5000 });
+}
+
+async function holdChestToFull(page, url) {
+  await page.goto(url + '/?shot=chest&mute&nopost&msaa=0');
+  await page.locator('.title-screen').click();
+  const target = '.chest-hold .ch-target';
+  await until(page, (sel) => !!document.querySelector(sel)?.checkVisibility(), target, { timeout: 60000 });
+  const box = await page.locator(target).boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await until(page, () => !!document.querySelector('.chest-hold.is-full'), null, { timeout: 30000 });
+  const nativeSwitches = await page.locator('input[switch]').count();
+  await page.mouse.up();
+  return { buzzes: await buzzes(page), nativeSwitches };
 }
 
 export const scenarios = {
@@ -357,10 +371,18 @@ export const scenarios = {
     await ctx.close();
   },
 
-  /** the intro never buzzes, even with the switch on */
+  /** the intro never buzzes, the chest's hold included, with the switch off or on, and has no native switch to tick */
   async 'vibration-not-in-intro'(h) {
     const { ctx, page, errors } = await open(h, { clock: false });
-    await turnOn(h, page);
+    for (const setting of ['off', 'on']) {
+      if (setting === 'on') {
+        await page.goto(h.server.url + '/?mute');
+        await turnOn(h, page);
+      }
+      const chest = await holdChestToFull(page, h.server.url);
+      const quiet = chest.buzzes === none && !chest.nativeSwitches;
+      h.expect(quiet, `the chest buzzed with the switch ${setting}: ${JSON.stringify(chest)}`);
+    }
     await page.goto(h.server.url + '/?fresh&mute');
     await page.locator('.title-screen').click({ timeout: 20000 });
     const name = page.locator('#np-name');

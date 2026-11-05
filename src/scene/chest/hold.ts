@@ -27,54 +27,6 @@ export interface HoldOpts {
   until?: Promise<unknown>;
 }
 
-// ---------------------------------------------------------------------------------------------------------------
-// Haptics.
-// iOS Safari has no Vibration API. Since Safari 17.4 / iOS 18 a native <input type="checkbox" switch> plays the
-// system haptic when toggled, and a programmatic label.click() on its label toggles it too (the cobalt.tools /
-// ios-haptics trick). Reported limits: it is a non-standard quirk; WebKit may close it (one tester reports the
-// programmatic path patched in iOS 26.5 while a real tap on a real switch still ticks). So we do both: a hidden
-// label we click programmatically (start, 50 %, 100 %), and the real hit area of the overlay IS a switch, so their own
-// tap toggles it natively (a tick on release, which survives the patch). Elsewhere: navigator.vibrate when present.
-
-const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-let hapticLabel: HTMLLabelElement | null = null;
-
-function hapticEl() {
-  if (hapticLabel) return hapticLabel;
-  const id = 'chest-haptic-switch';
-  const input = document.createElement('input');
-  input.type = 'checkbox';
-  input.setAttribute('switch', '');
-  input.id = id;
-  input.tabIndex = -1;
-  input.setAttribute('aria-hidden', 'true');
-  const label = document.createElement('label');
-  label.htmlFor = id;
-  label.setAttribute('aria-hidden', 'true');
-  label.className = 'ch-haptic';
-  label.append(input);
-  // the synthetic clicks must never reach app-level tap handlers
-  label.addEventListener('click', (e) => e.stopPropagation());
-  document.body.append(label);
-  hapticLabel = label;
-  return label;
-}
-
-export function haptic(kind: 'tick' | 'full' = 'tick') {
-  if (params.capture) return;
-  try {
-    if (typeof navigator.vibrate === 'function' && !isIOS) {
-      navigator.vibrate(kind === 'full' ? [18, 40, 26] : 10);
-      return;
-    }
-    if (isIOS) hapticEl().click();
-  } catch {
-    /* haptics are a nicety; never let them break the hold */
-  }
-}
-
-// ---------------------------------------------------------------------------------------------------------------
-
 const R = 54;
 const CIRC = 2 * Math.PI * R;
 /** the falling star's head (viewBox units) and its trail angle (up-left, the way it came from) */
@@ -87,7 +39,7 @@ const star4 = (cx: number, cy: number, h: number, w: number, k: number) =>
 
 function markup(label: string) {
   return `
-  <input class="ch-hit" type="checkbox" switch tabindex="-1" aria-hidden="true">
+  <div class="ch-hit" aria-hidden="true"></div>
   <div class="ch-dock">
     <div class="ch-target" role="button" tabindex="0" aria-label="${label}. Press and hold, or hold Space.">
       <div class="ch-bloom"></div>
@@ -172,7 +124,6 @@ export function holdToCharge(opts: HoldOpts): Promise<void> {
   const root = el('div', 'chest-hold') as HTMLDivElement;
   root.innerHTML = markup(label);
   (opts.parent ?? document.getElementById('ui') ?? document.body).append(root);
-  const hit = root.querySelector<HTMLInputElement>('.ch-hit')!;
   const target = root.querySelector<HTMLDivElement>('.ch-target')!;
   const fill = root.querySelector<SVGCircleElement>('.ch-fill')!;
   const head = root.querySelector<SVGPathElement>('.ch-head')!;
@@ -187,7 +138,6 @@ export function holdToCharge(opts: HoldOpts): Promise<void> {
   let level = 0; // charge at the last event
   let since = uiNow(); // time of the last event
   let pressed = false;
-  let crossedHalf = false;
   let done = false;
   let lastC = -1;
   const drainDur = (c: number) => 0.3 + 0.1 * c;
@@ -205,8 +155,6 @@ export function holdToCharge(opts: HoldOpts): Promise<void> {
     pressed = down;
     root.classList.toggle('is-pressed', down);
     if (down) {
-      crossedHalf = level >= 0.5;
-      haptic('tick');
       opts.onStart?.();
     } else {
       opts.onRelease?.();
@@ -292,8 +240,6 @@ export function holdToCharge(opts: HoldOpts): Promise<void> {
   window.addEventListener('keyup', onKeyUp);
   window.addEventListener('blur', onBlur);
   document.addEventListener('visibilitychange', onVis);
-  // keep the native switch from scrolling or zooming; its toggle is only there for the haptic
-  hit.addEventListener('click', (e) => e.stopPropagation());
 
   // ---- scripted presses (QA): applied at their exact times, so seeking stays correct
   const script = (opts.script ?? []).flatMap(([a, b]) => [{ t: a, down: true }, { t: b, down: false }]).sort((x, y) => x.t - y.t);
@@ -339,7 +285,6 @@ export function holdToCharge(opts: HoldOpts): Promise<void> {
     pressed = false;
     root.classList.remove('is-pressed');
     root.classList.add('is-full');
-    haptic('full');
     chestSounds.full?.();
     opts.onProgress(1);
     render(1, at);
@@ -379,13 +324,6 @@ export function holdToCharge(opts: HoldOpts): Promise<void> {
     // exact full time while pressed
     if (pressed) {
       const fullAt = since + (1 - level) * dur;
-      if (!crossedHalf) {
-        const halfAt = since + (0.5 - level) * dur;
-        if (now >= halfAt) {
-          crossedHalf = true;
-          haptic('tick');
-        }
-      }
       if (now >= fullAt) {
         finish(fullAt);
         return;
