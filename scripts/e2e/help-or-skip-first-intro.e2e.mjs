@@ -5,6 +5,7 @@
 // Leave goes straight to Home. Skip goes straight to Home with everything a watched intro gives. One press leaves the
 // intro once: the window under it never moves on, and a double tap or a held Enter lands nowhere else.
 import { installAudioRecorder, audioReady, audioRecorded, audioHeard } from './audio-recorder.mjs';
+import { mothGone, mothOnCard } from './companion-moth.e2e.mjs';
 import { until } from './harness.mjs';
 
 const PHONE = { width: 390, height: 844 };
@@ -298,10 +299,13 @@ async function leaveAt(h, at, way, tag = `${way === 'safe' ? 'Safe Zone' : 'Skip
   const { ctx, page, errors } = await visit(h, STAGES[at].query);
   try {
     await STAGES[at].reach(page);
+    const moth = at === 'rewards';
+    if (moth) await mothOnCard(h, page, tag);
     const release = at === 'chest' ? await partCharge(page) : null;
     await tap(page, way === 'safe' ? '.ui-safe' : '.ui-skip');
     if (way === 'safe') await safeZoneAtOnce(h, page, tag);
     else await homeAtOnce(h, page, tag);
+    if (moth) await mothGone(h, page, tag);
     if (release) {
       await release();
       await h.frames(page, 30);
