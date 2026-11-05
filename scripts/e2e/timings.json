@@ -533,6 +533,7 @@
   "no-sideways-overflow-steps-568x320": [107, 89],
   "no-sideways-overflow-steps-844x390": [120, 121],
   "no-webgl": [33, 33],
+  "nothing-is-cut-while-audible": [41],
   "offline-every-screen": [285, 408],
   "old-crystal-unknown-choice": [11, 7],
   "old-save": [3, 3],
