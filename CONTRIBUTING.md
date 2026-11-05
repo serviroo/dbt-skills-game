@@ -47,6 +47,7 @@ drawings, skill answers and co-writer cards are included. Thumbnails are not; a 
 ```sh
 npm ci
 npx tsc --noEmit -p .
+npm run lint
 node scripts/e2e-scope-check.mjs
 npm run build
 node scripts/pwa-verify.mjs --check
@@ -55,6 +56,9 @@ node scripts/pwa-csp-sweep.mjs --check
 node scripts/e2e.mjs
 node scripts/e2e-runner-check.mjs
 ```
+
+`npm run lint` runs Oxlint and stylelint, then fails a line over 120 characters, or a file over 1,000 lines that is
+new or grows, counting only what your branch changes since `origin/main`.
 
 The PWA checks test the build in `dist/`. `pwa-verify` runs in both Chromium and WebKit; on a machine where WebKit
 can't run, add `--browser=chromium`.

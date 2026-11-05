@@ -1,0 +1,6 @@
+.dq-map-v {
+  word-break: break-word;
+}
+.dq-map-c {
+  overflow-wrap: break-word;
+}

@@ -207,7 +207,7 @@ async function closingCards(page, sleep) {
 async function startIntro(page, sleep) {
   await page.locator('.title-screen').waitFor({ timeout: 20000 });
   await sleep(1500);
-  await page.mouse.click(195, 500);
+  await page.locator('.title-screen').click();
   await page.getByRole('button', { name: 'Skip', exact: true }).click({ timeout: 20000 });
 }
 

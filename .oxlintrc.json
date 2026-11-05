@@ -1,0 +1,31 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": { "correctness": "off" },
+  "jsPlugins": ["./scripts/lint/rules.mjs"],
+  "ignorePatterns": ["scripts/lint/fixtures/**"],
+  "overrides": [
+    {
+      "files": ["src/**"],
+      "rules": {
+        "lantern/audio-times-from-soon": "error",
+        "lantern/animations-share-start-time": "error",
+        "lantern/follow-device-preferences": "error",
+        "lantern/no-soft-hyphen-characters": "error",
+        "lantern/stored-writes-go-through-cleared": "error",
+        "lantern/handle-lost-gpu-context": "error"
+      }
+    },
+    {
+      "files": ["src/ui/anim.ts"],
+      "rules": { "lantern/animations-share-start-time": "off" }
+    },
+    {
+      "files": ["src/core/cleared.ts", "src/daily/store.ts", "src/daily/clear.ts", "src/labs/**"],
+      "rules": { "lantern/stored-writes-go-through-cleared": "off" }
+    },
+    {
+      "files": ["scripts/**"],
+      "rules": { "lantern/tap-elements-not-points": "error" }
+    }
+  ]
+}

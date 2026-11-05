@@ -18,9 +18,15 @@ const DPR_FINE = 2;
  */
 export const deviceDpr = { now: NaN, tooSlow: Infinity };
 
+export interface Borrower {
+  evict(): void;
+  lost(): void;
+  restored(): void;
+}
+
 interface Shared {
   renderer: THREE.WebGLRenderer;
-  holder: { evict: () => void } | null;
+  holder: Borrower | null;
   idle: number;
 }
 let shared: Shared | null = null;
@@ -33,7 +39,7 @@ export interface Lease {
   release(): void;
 }
 
-function create(): THREE.WebGLRenderer {
+function create(): Shared {
   const canvas = document.createElement('canvas');
   // asked for here first, so a device without WebGL 2 is a quiet "no" instead of an error from three.js
   const context = canvas.getContext('webgl2', { alpha: false, antialias: true, depth: true, stencil: false, premultipliedAlpha: true, preserveDrawingBuffer: false, powerPreference: 'default' });
@@ -43,7 +49,10 @@ function create(): THREE.WebGLRenderer {
   renderer.toneMapping = THREE.AgXToneMapping;
   renderer.setClearColor(0x07080f, 1);
   sceneStats.contexts++;
-  return renderer;
+  const s: Shared = { renderer, holder: null, idle: 0 };
+  canvas.addEventListener('webglcontextlost', () => s.holder?.lost());
+  canvas.addEventListener('webglcontextrestored', () => s.holder?.restored());
+  return s;
 }
 
 function drop(s: Shared) {
@@ -60,10 +69,10 @@ function free() {
 }
 
 /**
- * Lends the renderer to `host`. A scene still holding it is told to stop through its `onEvict`. Throws when this device
+ * Lends the renderer to `host`. A scene still holding it is told to stop through its `evict`. Throws when this device
  * can't make a WebGL context.
  */
-export function lendRenderer(host: HTMLElement, onEvict: () => void): Lease {
+export function lendRenderer(host: HTMLElement, borrower: Borrower): Lease {
   // a lost context is never lent: a scene still holding it stops, and a new renderer takes its place
   if (shared?.renderer.getContext().isContextLost()) {
     const s = shared;
@@ -73,12 +82,11 @@ export function lendRenderer(host: HTMLElement, onEvict: () => void): Lease {
     before?.evict();
     drop(s);
   }
-  shared ??= { renderer: create(), holder: null, idle: 0 };
+  shared ??= create();
   const s = shared;
   window.clearTimeout(s.idle);
   const before = s.holder;
-  const me = { evict: onEvict };
-  s.holder = me;
+  s.holder = borrower;
   before?.evict();
   const { renderer } = s;
   const canvas = renderer.domElement;
@@ -89,7 +97,7 @@ export function lendRenderer(host: HTMLElement, onEvict: () => void): Lease {
     canvas,
     maxDpr: Math.min(window.devicePixelRatio || 1, touch ? DPR_TOUCH : DPR_FINE),
     release() {
-      if (s.holder !== me) return;
+      if (s.holder !== borrower) return;
       s.holder = null;
       canvas.remove();
       renderer.renderLists.dispose();
