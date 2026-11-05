@@ -4,6 +4,7 @@
 // row as it moves into Your favourites, and a skill's pin as it moves back out.
 import { returning } from './skill-check.e2e.mjs';
 import { control, openLibrary } from './find-skills.e2e.mjs';
+import { scaleText } from './safe-zone-reach.e2e.mjs';
 
 const PHONE = { width: 390, height: 844 };
 
@@ -18,7 +19,46 @@ const focused = (page) =>
   });
 const top = (loc) => loc.evaluate((e) => Math.round(e.getBoundingClientRect().top));
 
+const AT_200 = [
+  ['200% zoom', { width: 160, height: 284 }, false],
+  ['text at 200%', { width: 320, height: 568 }, true],
+];
+
 export const scenarios = {
+  async 'library-keeps-place-at-200'(h) {
+    const failed = [];
+    for (const [where, viewport, bigText] of AT_200) {
+      const phoneLike = { isMobile: true, hasTouch: true };
+      const { ctx, page, errors } = await h.open(returning(h), '?mute', viewport, undefined, phoneLike);
+      try {
+        await h.reachHub(page);
+        if (bigText) await scaleText(page);
+        await openLibrary(h, page);
+        await h.until(page, () => {
+          const screen = document.querySelector('.dq-library');
+          return !screen.getAnimations().some((a) => a.playState === 'running');
+        });
+        const tenth = page.locator('.dq-libsec:not(.dq-libsec--fav) .dq-libitem').nth(9);
+        const id = await tenth.getAttribute('data-skill');
+        const pin = page.locator(`.dq-libitem[data-skill="${id}"] .dq-libpin`);
+        await pin.evaluate((e) => e.scrollIntoView({ block: 'center', behavior: 'instant' }));
+        for (const [step, pressed] of [['pin', 'true'], ['unpin', 'false']]) {
+          const was = await top(pin);
+          await pin.click();
+          const landed = (v) => v === pressed;
+          await h.poll(page, () => pin.getAttribute('aria-pressed'), landed, `${where}: the ${step} never landed`);
+          await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+          const now = await top(pin);
+          const moved = `${where}: the ${step} moved from ${was} px to ${now} px down the screen`;
+          if (Math.abs(now - was) > 1) failed.push(moved);
+        }
+        if (errors.length) failed.push(`${where}: ${errors.join(' | ')}`);
+      } finally {
+        await ctx.close();
+      }
+    }
+    h.expect(!failed.length, failed.join('\n'));
+  },
   async 'library-focus'(h) {
     const { ctx, page: a, errors } = await h.open(returning(h), '?mute', PHONE);
     try {

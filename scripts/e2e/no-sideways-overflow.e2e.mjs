@@ -719,7 +719,7 @@ async function emptySlot(h) {
 const NARROW_SCREENS = [
   ['A quiet minute', { name: 'ease' }, ['.dq-ease-panel']],
   ['Art room', { name: 'art' }, ['.dq-artentries', '.dq-art-pages']],
-  ['Library', { name: 'library' }, ['.dq-liblist', '.dq-libfind']],
+  ['Library', { name: 'library' }, ['.dq-libresults', '.dq-libfind']],
 ];
 
 async function narrowLayouts(h) {

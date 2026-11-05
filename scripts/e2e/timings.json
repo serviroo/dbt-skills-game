@@ -481,6 +481,7 @@
   "leaving-and-reopening-stops-hum": [8],
   "legacy-sound-off-silences-hum": [3, 3],
   "library-focus": [6],
+  "library-keeps-place-at-200": [3],
   "line-history-holds-view": [13, 13],
   "live-check-reports-renderer-failure": [33, 33],
   "live-names": [20, 21],

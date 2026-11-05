@@ -20,30 +20,30 @@
 .dq-art-pages[data-narrow] .dq-gallery {
   grid-template-columns: minmax(0, 1fr);
 }
-.dq-liblist[data-narrow] .dq-libitem {
+.dq-libresults[data-narrow] .dq-libitem {
   flex-wrap: wrap;
 }
-.dq-liblist[data-narrow] .dq-libitem .dq-librow {
+.dq-libresults[data-narrow] .dq-libitem .dq-librow {
   flex-basis: 100%;
   grid-template-columns: minmax(0, 1fr) 20px;
   padding: 11px 10px;
 }
-.dq-liblist[data-narrow] .dq-librow-n,
-.dq-liblist[data-narrow] .dq-librow-r {
+.dq-libresults[data-narrow] .dq-librow-n,
+.dq-libresults[data-narrow] .dq-librow-r {
   grid-column: 1 / -1;
 }
-.dq-liblist[data-narrow] .dq-librow-r {
+.dq-libresults[data-narrow] .dq-librow-r {
   letter-spacing: 0.06em;
 }
-.dq-liblist[data-narrow] .dq-librow-m {
+.dq-libresults[data-narrow] .dq-librow-m {
   grid-column: 1;
   grid-row: 3;
 }
-.dq-liblist[data-narrow] .dq-librow-c {
+.dq-libresults[data-narrow] .dq-librow-c {
   grid-column: 2;
   grid-row: 3;
 }
-.dq-liblist[data-narrow] .dq-libpin {
+.dq-libresults[data-narrow] .dq-libpin {
   width: 100%;
   justify-items: end;
   padding: 0 10px;
@@ -82,4 +82,8 @@
 .dq-choice:focus-within > .dq-choice-shown {
   border-color: var(--blue);
   box-shadow: 0 0 0 1px rgba(79, 184, 255, 0.45);
+}
+:root[data-dq-accent]:not([data-dq-accent='blue']) .dq-choice:focus-within > .dq-choice-shown {
+  border-color: var(--acc-b);
+  box-shadow: 0 0 0 1px rgba(var(--acc-rgb), 0.45);
 }

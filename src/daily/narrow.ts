@@ -3,7 +3,7 @@ const NARROW_AT: [selector: string, ch: number][] = [
   ['.dq-libfind', 20],
   ['.dq-artentries', 24],
   ['.dq-art-pages', 24],
-  ['.dq-liblist', 27],
+  ['.dq-libresults', 27],
 ];
 const NARROWS = NARROW_AT.map(([selector]) => selector).join(', ');
 
