@@ -157,7 +157,7 @@ export class Voice {
   open(at: number) {
     const held = this.held ?? [];
     this.release(at);
-    held.sort((a, b) => a.cancelsBefore - b.cancelsBefore || a.t - b.t);
+    held.sort((a, b) => a.cancelsBefore - b.cancelsBefore || a.t + at - (b.t + at));
     for (const h of held) h.place(at);
   }
 
