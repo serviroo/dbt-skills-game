@@ -40,3 +40,9 @@
   --t-dim: var(--t-title);
   --accent: var(--t-title);
 }
+:root[data-dq-contrast='high'] .dq-skill::after {
+  z-index: 4;
+}
+:root[data-dq-contrast='high'] .dq-skill .dq-stepbox {
+  z-index: 5;
+}

@@ -171,7 +171,7 @@ export const ratio = (a, b) => {
 };
 
 // the bubbles drift on their own clock, so the pictures leave them out
-const NO_BUBBLES = '.dq-bubbles { visibility: hidden !important; }';
+export const NO_BUBBLES = '.dq-bubbles { visibility: hidden !important; }';
 const NOT_TYPED = '[type=checkbox], [type=radio], [type=range], [type=file], [type=hidden]';
 export const FIELDS = `select, textarea, input:not(${NOT_TYPED})`;
 const CLEAR_TEXT = [

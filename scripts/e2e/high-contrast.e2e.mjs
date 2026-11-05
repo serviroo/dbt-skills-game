@@ -1,5 +1,5 @@
 import { boot, SAFE_AT, settle } from './layout-fit.e2e.mjs';
-import { capture, contrast, FIELDS, NO_TEXT, px, ratio } from './home-sky.e2e.mjs';
+import { capture, contrast, FIELDS, NO_BUBBLES, NO_TEXT, px, ratio } from './home-sky.e2e.mjs';
 
 const SWITCH = 'Higher contrast';
 const TEXT_MIN = 7;
@@ -144,6 +144,18 @@ function weak({ text, edge }) {
   return [...new Set(lines)];
 }
 
+async function drawnWords(page, words) {
+  const b = await words.boundingBox();
+  const shown = await capture(page, NO_BUBBLES);
+  const bare = await capture(page, NO_TEXT);
+  const rows = Array.from({ length: Math.round(b.height * DPR) }, (_, i) => b.y * DPR + i);
+  const cols = (from, to) => Array.from({ length: Math.round((to - from) * DPR) }, (_, i) => from * DPR + i);
+  const glyph = (x, y) => ratio(px(shown, x, y), px(bare, x, y));
+  const best = Math.max(...rows.flatMap((y) => cols(b.x, b.x + b.width).map((x) => glyph(x, y))));
+  const gutter = rows.flatMap((y) => cols(0, Math.max(1, b.x - 24)).map((x) => ratio(px(bare, x, y), [0, 0, 0])));
+  return { words: Math.round(best * 100) / 100, gutter: gutter.reduce((s, v) => s + v, 0) / gutter.length };
+}
+
 async function walk(h, looks) {
   const problems = [];
   const table = {};
@@ -267,6 +279,37 @@ export const scenarios = {
     ];
     h.expect(!overwritten.length, `switching between tabs changed other choices: ${overwritten.join(', ')}`);
     await h.shot(other, 'high-contrast-follows-other-tab');
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
+  async 'high-contrast-dim-keeps-words'(h) {
+    const edit = (s) => {
+      s.settings.highContrast = true;
+    };
+    const { ctx, page, errors } = await boot(h, { width: 390, height: 844 }, { edit });
+    await go(page, { name: 'skill', id: 'lie-low' });
+    await page.getByRole('button', { name: 'Begin' }).click();
+    const words = page.getByText('Lie low. The ring does the counting.');
+    await words.waitFor({ timeout: 10000 });
+    await settle(page);
+    const cardOverVeil = () =>
+      page.evaluate(() => {
+        const skill = document.querySelector('.dq-skill');
+        const veil = Number(getComputedStyle(skill, '::after').zIndex);
+        return Number(getComputedStyle(skill.querySelector('.dq-stepbox')).zIndex) > veil;
+      });
+    h.expect(await cardOverVeil(), 'the dim would fade in or out over the card, not under it');
+    const lit = await drawnWords(page, words);
+    await page.getByRole('button', { name: 'Dim and start' }).click();
+    await page.locator('.dq-skill.is-dim').waitFor({ timeout: 10000 });
+    await settle(page);
+    h.expect(await cardOverVeil(), 'the dim lies over the card, not under it');
+    const dim = await drawnWords(page, words);
+    await h.shot(page, 'high-contrast-lie-low-dim');
+    console.log(JSON.stringify({ lit, dim }));
+    h.expect(dim.gutter < lit.gutter, 'Dim and start no longer dims the screen with Higher contrast on');
+    h.expect(dim.words >= TEXT_MIN, `with the screen dimmed, Lie Low's words show at ${dim.words}:1`);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },
