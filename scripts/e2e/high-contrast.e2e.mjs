@@ -7,8 +7,16 @@ const EDGE_MIN = 3;
 const DPR = 2;
 const FIRST_SAVE = 'e2e-first-save';
 
+const foilCard = (page) =>
+  page.evaluate(async () => {
+    const { foilDay, foilLayer } = await import('/src/daily/wave2.ts');
+    const day = Array.from({ length: 31 }, (_, i) => `2026-01-${String(i + 1).padStart(2, '0')}`).find(foilDay);
+    const front = document.querySelector('.dq-quest .dq-cardface--front');
+    if (!front.classList.contains('is-foil')) foilLayer(window.__daily, front, day);
+  });
 const SCREENS = [
   ['home', { name: 'hub' }],
+  ['home-foil', { name: 'hub' }, false, foilCard],
   ['settings', { name: 'settings' }],
   ['skill', { name: 'skill', id: 'check-facts' }],
   ['library', { name: 'library' }],
@@ -33,7 +41,9 @@ const SCREENS = [
   ['safe-lit-talk', { name: 'safe', at: 'talk' }, true],
 ];
 const ZOOMED = ['home', 'settings', 'night-watch', 'safe-start', 'safe-talk', 'safe-lit-start'];
-const THEMED = ['home', 'settings', 'skill', 'safe-check', 'safe-lit-start', 'safe-lit-check', 'safe-lit-talk'];
+const THEMED = [
+  'home', 'home-foil', 'settings', 'skill', 'safe-check', 'safe-lit-start', 'safe-lit-check', 'safe-lit-talk',
+];
 const LOOKS = [
   [{ width: 390, height: 844 }, null, { theme: 'classic', accent: 'blue' }],
   [{ width: 195, height: 422 }, ZOOMED, { theme: 'mint', accent: 'green' }],
@@ -146,9 +156,10 @@ async function walk(h, looks) {
     };
     const { ctx, page, errors } = await boot(h, vp, { edit });
     h.expect((await shown(page)) === 'high', `${size}: a save with Higher contrast on opened without it`);
-    for (const [id, route, lit] of SCREENS) {
+    for (const [id, route, lit, prep] of SCREENS) {
       if (which && !which.includes(id)) continue;
       await go(page, route);
+      await prep?.(page);
       if (lit && !(await page.locator('.dq-safezone.is-lit').count())) {
         await page.locator('.ca-sz-light').click();
         await page.locator('.dq-safezone.is-lit').waitFor({ timeout: 10000 });

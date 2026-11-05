@@ -36,3 +36,7 @@
 :where(:root[data-dq-contrast='high']) :is(.dq-tile, .dq-artentry) {
   border-color: var(--edge);
 }
+:root[data-dq-contrast='high'] .dq-cardface.is-foil {
+  --t-dim: var(--t-title);
+  --accent: var(--t-title);
+}
