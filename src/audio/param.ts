@@ -30,3 +30,14 @@ export function soon(ctx: BaseAudioContext) {
   if (ctx.state !== 'running') return ctx.currentTime;
   return ctx.currentTime + Math.max(SCORE.leadSec, ((ctx as AudioContext).baseLatency || 0) + 1 / FPS);
 }
+
+export function glide(p: AudioParam, v: number, ramp: number, at: number) {
+  p.cancelScheduledValues(at);
+  p.setTargetAtTime(v, at, Math.max(0.003, ramp / 4));
+}
+
+export function renderedTo(ctx: BaseAudioContext) {
+  if (ctx.state !== 'running') return () => -Infinity;
+  const lag = (ctx as AudioContext).baseLatency || 0;
+  return () => ctx.currentTime + lag;
+}

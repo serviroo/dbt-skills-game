@@ -8,6 +8,7 @@
       "files": ["src/**"],
       "rules": {
         "lantern/audio-times-from-soon": "error",
+        "lantern/late-opens-build-again": "error",
         "lantern/animations-share-start-time": "error",
         "lantern/follow-device-preferences": "error",
         "lantern/no-soft-hyphen-characters": "error",

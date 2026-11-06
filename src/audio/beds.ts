@@ -124,26 +124,22 @@ export function buildBed(lib: Lib, name: BedName, dest: AudioNode, level: number
   fade.setValueAtTime(0, 0);
   fade.setTargetAtTime(level, 0, Math.max(0.003, fadeIn / 4));
   def.fn(v, 0, lvl);
-  return {
-    open(at: number): BedHandle {
-      v.open(at);
-      return {
-        name,
-        level(x, ramp = 0.5, at = soon(lib.ctx)) {
-          if (v.isStopped) return;
-          lvl.gain.cancelScheduledValues(at);
-          lvl.gain.setTargetAtTime(Math.max(0, x), at, Math.max(0.003, ramp / 4));
-        },
-        stop(ramp = 0.5, at = soon(lib.ctx)) {
-          v.stop(at, ramp);
-        },
-        get stopped() {
-          return v.isStopped;
-        },
-        voice: v,
-      };
+  const handle: BedHandle = {
+    name,
+    level(x, ramp = 0.5, at = soon(lib.ctx)) {
+      if (v.isStopped) return;
+      lvl.gain.cancelScheduledValues(at);
+      lvl.gain.setTargetAtTime(Math.max(0, x), at, Math.max(0.003, ramp / 4));
     },
+    stop(ramp = 0.5, at = soon(lib.ctx)) {
+      v.stop(at, ramp);
+    },
+    get stopped() {
+      return v.isStopped;
+    },
+    voice: v,
   };
+  return { voice: v, handle };
 }
 
 export interface ChargeHandle {
@@ -222,22 +218,18 @@ export function buildCharge(lib: Lib, dest: AudioNode, seed: number) {
     hum.gain.setTargetAtTime(1 - 0.8 * c, at, tau);
   };
   let stopped = false;
-  return {
-    open(at: number): ChargeHandle {
-      v.open(at);
-      return {
-        set(c, at = soon(lib.ctx)) {
-          if (!stopped) apply(c, at, 0.03);
-        },
-        release(at = soon(lib.ctx)) {
-          if (!stopped) apply(0, at, 0.09);
-        },
-        stop(at = soon(lib.ctx), ramp = 0.03) {
-          stopped = true;
-          v.stop(at, ramp);
-        },
-        voice: v,
-      };
+  const handle: ChargeHandle = {
+    set(c, at = soon(lib.ctx)) {
+      if (!stopped) apply(c, at, 0.03);
     },
+    release(at = soon(lib.ctx)) {
+      if (!stopped) apply(0, at, 0.09);
+    },
+    stop(at = soon(lib.ctx), ramp = 0.03) {
+      stopped = true;
+      v.stop(at, ramp);
+    },
+    voice: v,
   };
+  return { voice: v, handle };
 }
