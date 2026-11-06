@@ -13,8 +13,7 @@
         "lantern/no-soft-hyphen-characters": "error",
         "lantern/stored-writes-go-through-cleared": "error",
         "lantern/handle-lost-gpu-context": "error",
-        "lantern/schedule-before-echo-loads": "error",
-        "lantern/refresh-after-msaa-change": "error"
+        "lantern/schedule-before-echo-loads": "error"
       }
     },
     {

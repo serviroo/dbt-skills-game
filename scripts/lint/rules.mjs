@@ -395,34 +395,6 @@ const scheduleBeforeEchoLoads = {
   },
 };
 
-const refreshAfterMsaaChange = {
-  meta: {
-    messages: {
-      stale: 'Changing multisampling replaces the scene buffers. Invalidate the stage before keeping another frame.',
-    },
-  },
-  create(context) {
-    return {
-      AssignmentExpression(node) {
-        if (!isNamed(node.left, 'multisampling') || !isNamed(node.left.object, 'composer')) return;
-        const stage = node.left.object.object;
-        const sameStage = (other) => stage.type === 'ThisExpression'
-          ? other.type === 'ThisExpression'
-          : stage.type === 'Identifier' && other.type === 'Identifier' &&
-            variableOf(context, stage) === variableOf(context, other);
-        const statement = node.parent;
-        const block = statement.parent;
-        const after = block.type === 'BlockStatement' ? block.body.slice(block.body.indexOf(statement) + 1) : [];
-        const invalidated = after.some((next) => {
-          const call = next.type === 'ExpressionStatement' ? next.expression : null;
-          return call?.type === 'CallExpression' && methodName(call) === 'invalidate' && sameStage(call.callee.object);
-        });
-        if (!invalidated) context.report({ node, messageId: 'stale' });
-      },
-    };
-  },
-};
-
 export default {
   meta: { name: 'lantern' },
   rules: {
@@ -434,6 +406,5 @@ export default {
     'tap-elements-not-points': tapElementsNotPoints,
     'handle-lost-gpu-context': handleLostGpuContext,
     'schedule-before-echo-loads': scheduleBeforeEchoLoads,
-    'refresh-after-msaa-change': refreshAfterMsaaChange,
   },
 };

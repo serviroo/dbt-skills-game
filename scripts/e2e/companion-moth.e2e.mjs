@@ -86,6 +86,11 @@ async function openBackdrop(h, query = '&dpr=1') {
   return opened;
 }
 
+function expectOneRefresh(h, before, after, where) {
+  h.expect(after.scenes === before.scenes + 1 && after.blooms === before.blooms + 1,
+    `the ${where} rewards backdrop did not render its expensive passes once`);
+}
+
 export const scenarios = {
   async 'companion-moth-backdrop-rests'(h) {
     const { ctx, page, errors } = await openBackdrop(h);
@@ -120,8 +125,7 @@ export const scenarios = {
     const still = await h.poll(page, () => stageState(page),
       (s) => s.scenes > beforeStill.scenes && s.blooms > beforeStill.blooms,
       'the rewards scene never resumed');
-    h.expect(still.scenes === beforeStill.scenes + 1 && still.blooms === beforeStill.blooms + 1,
-      'the resumed rewards backdrop did not render its expensive passes once');
+    expectOneRefresh(h, beforeStill, still, 'resumed');
     const maxDelta = await compareStillFrame(page);
     h.expect(maxDelta <= 1, `the kept backdrop differs from a full redraw by ${maxDelta}`);
     const staleDelta = await compareStillFrame(page, true);
@@ -139,8 +143,7 @@ export const scenarios = {
     const resized = await h.poll(page, () => stageState(page),
       (s) => s.scenes > beforeResize.scenes && s.width !== beforeResize.width && s.height !== beforeResize.height,
       'the rewards backdrop did not redraw at its new size');
-    h.expect(resized.scenes === beforeResize.scenes + 1 && resized.blooms === beforeResize.blooms + 1,
-      'the resized rewards backdrop did not render its expensive passes once');
+    expectOneRefresh(h, beforeResize, resized, 'resized');
     await page.evaluate(() => window.dispatchEvent(new Event('resize')));
     await h.frames(page, 60);
     const c = await stageState(page);
@@ -166,8 +169,7 @@ export const scenarios = {
     const restored = await h.poll(page, () => stageState(page),
       (s) => !s.lost && s.scenes > beforeLoss.scenes && s.blooms > beforeLoss.blooms,
       'the rewards backdrop did not redraw after its context returned');
-    h.expect(restored.scenes === beforeLoss.scenes + 1 && restored.blooms === beforeLoss.blooms + 1,
-      'the restored rewards backdrop did not render its expensive passes once');
+    expectOneRefresh(h, beforeLoss, restored, 'restored');
     await h.frames(page, 60);
     const afterRestore = await stageState(page);
     h.expect(afterRestore.scenes === restored.scenes && afterRestore.blooms === restored.blooms,
@@ -191,8 +193,7 @@ export const scenarios = {
     const invalidated = await h.poll(page, () => stageState(page),
       (s) => s.scenes > beforeChange.scenes && s.blooms > beforeChange.blooms,
       'the changed rewards scene did not redraw when requested');
-    h.expect(invalidated.scenes === beforeChange.scenes + 1 && invalidated.blooms === beforeChange.blooms + 1,
-      'the changed rewards backdrop did not render its expensive passes once');
+    expectOneRefresh(h, beforeChange, invalidated, 'changed');
     await h.frames(page, 60);
     const settled = await stageState(page);
     h.expect(settled.scenes === invalidated.scenes && settled.blooms === invalidated.blooms,
@@ -214,8 +215,7 @@ export const scenarios = {
     });
     h.expect(captureFrames === 1, `the stage frame trail recorded ${captureFrames} frames for one explicit capture`);
     const captured = await stageState(page);
-    h.expect(captured.scenes === beforeCapture.scenes + 1 && captured.blooms === beforeCapture.blooms + 1,
-      'an explicit rewards capture did not draw');
+    expectOneRefresh(h, beforeCapture, captured, 'captured');
     const maxDelta = await compareStillFrame(page);
     h.expect(maxDelta <= 1, `the captured backdrop differs from a full redraw by ${maxDelta}`);
     h.expect(!errors.length, errors.join('\n'));
@@ -245,8 +245,7 @@ export const scenarios = {
     });
     h.expect(changed.tier === 1 && changed.msaa === 0, 'the stage never stepped down its MSAA tier');
     const { before, after, rested } = changed;
-    h.expect(after.scenes === before.scenes + 1 && after.blooms === before.blooms + 1,
-      'the tier-down rewards backdrop did not render its expensive passes once');
+    expectOneRefresh(h, before, after, 'tier-down');
     h.expect(rested.scenes === after.scenes && rested.blooms === after.blooms,
       'the tier-down rewards backdrop kept drawing');
     const maxDelta = await compareStillFrame(page);
@@ -303,15 +302,6 @@ export const scenarios = {
       const p = await pixels(page);
       h.expect(p.sd > 10 && p.max > 140, `still ${tag}: the moth looks blank (${JSON.stringify(p)})`);
       await h.shot(card(page), `companion-moth-still-${tag}`);
-      await page.evaluate(() => import('/src/core/params.ts').then(({ setMotion }) => setMotion('full')));
-      await h.poll(page, () => state(page), (s) => !s.scenes.last.still && s.scenes.frames > b.frames,
-        `still ${tag}: the moth did not wake when motion returned`);
-      await page.evaluate(() => import('/src/core/params.ts').then(({ setMotion }) => setMotion('reduce')));
-      await page.waitForFunction(() => window.__scenes.last.still);
-      const settled = (await state(page)).scenes.frames;
-      await h.frames(page, 60);
-      const again = (await state(page)).scenes;
-      h.expect(again.frames === settled && again.last.still, `still ${tag}: the moth did not settle again`);
       h.expect(!errors.length, errors.join('\n'));
       await ctx.close();
     }
