@@ -664,6 +664,8 @@ export class AudioEngine {
    *  the cutscene): what plays next starts in an empty echo. Under the Safe Zone's quiet the echo is closed already, and
    *  leaving the quiet brings the empty one (see quiet). */
   stopAll(fade = 0.4, at = soon(this.ctx)) {
+    const old = this.echo;
+    if (!this.isQuiet) for (const e of [old, ...this.closing.keys()]) this.closeEcho(e, at, fade);
     this.charge?.stop(at, fade);
     const voices = [...this.active, ...[...this.beds.values()].map((b) => b.voice), ...this.fading];
     this.release([...voices, ...this.stopHush(at, fade)], at, fade);
@@ -674,8 +676,6 @@ export class AudioEngine {
     // what plays from here on gets an empty echo with sends of its own at once. What was stopped keeps the old one, whose
     // return closes as they fade, until they are silent and it is dropped, timed on the audio clock, which stands still
     // while the page is hidden: none of their fade rings on, in the old echo or the new
-    const old = this.echo;
-    for (const e of [old, ...this.closing.keys()]) this.closeEcho(e, at, fade);
     const sends = this.makeSends(old.sends);
     this.echo = this.makeEcho(sends, old.room.buffer!, old.hall.buffer!);
     Object.assign(this.lib, { room: sends.sfxRoom, hall: sends.sfxHall });
