@@ -7,6 +7,7 @@
 import { installAudioRecorder, audioReady, audioRecorded, audioHeard } from './audio-recorder.mjs';
 import { mothGone, mothOnCard } from './companion-moth.e2e.mjs';
 import { until } from './harness.mjs';
+import { slowEchoLoadsFromPress } from './slow-echo.mjs';
 
 const PHONE = { width: 390, height: 844 };
 const SMALL = { width: 320, height: 568 };
@@ -19,6 +20,7 @@ const light = ({ width, height }) => `&nopost&msaa=0&dpr=${Math.min(1, Math.sqrt
 // silent at the speakers: a peak below one step of 16-bit audio and RMS below -100 dBFS, as in safe-zone-quiet
 const SILENT_PEAK = 2 ** -15;
 const SILENT_RMS = 1e-5;
+const SLOW_PHONE_ECHO_LOAD_MS = 100;
 /** what the intro puts on the page */
 const INTRO = '.title-screen, .ui-ways, .rw, .letter-wrap, .endcard, .chest-hold, .lb, .awaken-word, .sw';
 
@@ -611,6 +613,7 @@ export const scenarios = {
           ...CUE_NAMES.map((n) => [n, (e) => e.play(n, { at: 0 })]),
           ...BED_NAMES.map((n) => [n, (e) => void e.bed(n, { at: 0, fadeIn: 0.3 })]),
           ...SECTIONS.map((n) => [`the ${n} score`, (e) => void e.music.to(n, 0.3, { at: 0 })]),
+          ['the hush before the hit', (e) => void e.hush(0)],
         ];
         const render = (play, len, stopAt) => {
           const c = new OfflineAudioContext(2, Math.ceil(len * rate), rate);
@@ -672,8 +675,10 @@ export const scenarios = {
       ['letter', 'letter_open', 'rewards'],
       ['end card', 'endcard', 'letter'],
       ['end card', 'endcard', 'letter', 'hidden'],
+      ['end card', 'endcard', 'letter', 'slow'],
     ];
-    for (const [screen, sound, from, hidden] of cases) {
+    for (const [screen, sound, from, way] of cases) {
+      const hidden = way === 'hidden';
       const { ctx, page, errors } = await visit(h, '?shot=rewards', PHONE, {
         seed: { 'dbt.audio.v1': levels },
         prepare: async (c) => {
@@ -689,9 +694,11 @@ export const scenarios = {
                 document.dispatchEvent(new Event('visibilitychange'));
               };
             });
+          if (way === 'slow') await slowEchoLoadsFromPress(c, SLOW_PHONE_ECHO_LOAD_MS);
         },
       });
-      const tag = `Skip as the ${screen} opens${hidden ? ', the page hidden right after' : ''}`;
+      const ways = { hidden: ', the page hidden right after', slow: ' on a slow phone' };
+      const tag = `Skip as the ${screen} opens${ways[way] ?? ''}`;
       const open = { title: async () => {}, rewards: (page) => tap(page, '.rw .sw-btn'), letter: (page) => tap(page, '.letter .sw-btn') }[from];
       try {
         if (from === 'title') await page.locator('.title-screen').click();
@@ -734,6 +741,8 @@ export const scenarios = {
         // the cue sounding as the press lands, ten times over silence (the letter's opening swells in from soft)
         h.expect(before.rms > 10 * SILENT_RMS, `${tag}: the intro was not audible at the press (RMS ${before.rms}), so silence proves nothing`);
         h.expect(after.cover >= 0.9, `${tag}: the recorder read only ${Math.round(after.cover * 100)}% of the time after the press`);
+        const stalls = await page.evaluate(() => window.__echoStalls ?? 0);
+        h.expect(way !== 'slow' || stalls > 0, `${tag}: no echo loaded after the press, so nothing was slow`);
         h.expect(after.peak < SILENT_PEAK && after.rms < SILENT_RMS, `${tag}: the intro played on over Home (peak ${after.peak}, RMS ${after.rms})`);
         await homeAtOnce(h, page, tag);
         h.expect(!errors.length, errors.join('\n'));

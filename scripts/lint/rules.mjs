@@ -272,6 +272,129 @@ const handleLostGpuContext = {
   },
 };
 
+const LOADS_ECHO = new Set(['createConvolver', 'makeIR', 'ConvolverNode']);
+
+const calleeName = (call) => methodName(call) ?? (call.callee.type === 'Identifier' ? call.callee.name : null);
+
+function nameOf(fn) {
+  const p = fn.parent;
+  if (fn.type === 'FunctionDeclaration') return fn.id?.name ?? null;
+  if (p?.type === 'MethodDefinition' || p?.type === 'Property') return p.computed ? null : p.key.name;
+  if (p?.type === 'VariableDeclarator' && p.id.type === 'Identifier') return p.id.name;
+  return null;
+}
+
+function ownCalls(node, calls = []) {
+  if (node.type === 'CallExpression' || node.type === 'NewExpression') calls.push(node);
+  for (const child of children(node)) if (!FUNCTIONS.has(child.type)) ownCalls(child, calls);
+  return calls;
+}
+
+const callsSoon = (node) => !!node && !FUNCTIONS.has(node.type) && (
+  (node.type === 'CallExpression' && calleeName(node) === 'soon') || children(node).some(callsSoon));
+
+function bindsTime(node) {
+  if (node.type === 'VariableDeclarator') return [node.id, node.init];
+  if (node.type === 'AssignmentExpression' && node.operator === '=') return [node.left, node.right];
+  return [null, null];
+}
+
+function ownNodes(node, found = []) {
+  for (const child of children(node)) {
+    if (FUNCTIONS.has(child.type)) continue;
+    found.push(child);
+    ownNodes(child, found);
+  }
+  return found;
+}
+
+function soonTimes(context, fn, before) {
+  const times = new Set();
+  const add = (id) => {
+    const v = id?.type === 'Identifier' ? variableOf(context, id) : null;
+    if (v) times.add(v);
+  };
+  for (const p of fn.params) {
+    if (p.type === 'AssignmentPattern' && (callsSoon(p.right) || mentions(context, p.right, times))) add(p.left);
+  }
+  for (const node of ownNodes(fn.body)) {
+    const [id, value] = bindsTime(node);
+    if (id && (callsSoon(value) ? node.range[1] <= before : mentions(context, value, times))) add(id);
+  }
+  return times;
+}
+
+function refreshed(context, fn, from, to) {
+  const fresh = new Set();
+  for (const node of ownNodes(fn.body)) {
+    const [id, value] = bindsTime(node);
+    const inside = node.range[0] >= from && node.range[1] <= to;
+    if (inside && id?.type === 'Identifier' && callsSoon(value)) fresh.add(variableOf(context, id));
+  }
+  return fresh;
+}
+
+function mentions(context, node, times) {
+  if (!node) return false;
+  if (node.type === 'Identifier') return times.has(variableOf(context, node) ?? node);
+  if (node.type === 'MemberExpression' && !node.computed) return mentions(context, node.object, times);
+  if (node.type === 'Property' && !node.computed) return mentions(context, node.value, times);
+  return children(node).some((child) => mentions(context, child, times));
+}
+
+function loadsEcho(call, loads) {
+  const name = calleeName(call);
+  if (LOADS_ECHO.has(name)) return true;
+  const { callee } = call;
+  const own = callee.type === 'Identifier' || callee.object?.type === 'ThisExpression';
+  return own && loads.has(name);
+}
+
+const logs = (call) => call.callee.object?.type === 'Identifier' && call.callee.object.name === 'console';
+
+const scheduleBeforeEchoLoads = {
+  meta: {
+    messages: {
+      late:
+        'Loading an echo\'s response holds a slow phone for longer than soon() looks ahead, so this time has ' +
+        'already played when it is set: schedule it before the echo loads.',
+    },
+  },
+  create(context) {
+    const fns = [];
+    return {
+      ':function'(node) {
+        if (node.body) fns.push(node);
+      },
+      'Program:exit'() {
+        const loads = new Set(LOADS_ECHO);
+        for (let grew = true; grew; ) {
+          grew = false;
+          for (const fn of fns) {
+            const name = nameOf(fn);
+            if (!name || loads.has(name) || !ownCalls(fn.body).some((c) => loadsEcho(c, loads))) continue;
+            loads.add(name);
+            grew = true;
+          }
+        }
+        for (const fn of fns) {
+          const calls = ownCalls(fn.body).sort((a, b) => a.range[0] - b.range[0]);
+          const loaded = calls.filter((c) => loadsEcho(c, loads));
+          for (const c of calls) {
+            const load = loaded.findLast((l) => l !== c && l.range[1] <= c.range[1]);
+            if (!load || logs(c)) continue;
+            const fresh = refreshed(context, fn, load.range[1], c.range[0]);
+            const times = new Set([...soonTimes(context, fn, load.range[0])].filter((v) => !fresh.has(v)));
+            const passed = c.arguments.some((a) => mentions(context, a, times));
+            const inside = mentions(context, functionOf(context, c.callee)?.body, times);
+            if (passed || inside) context.report({ node: c, messageId: 'late' });
+          }
+        }
+      },
+    };
+  },
+};
+
 export default {
   meta: { name: 'lantern' },
   rules: {
@@ -282,5 +405,6 @@ export default {
     'stored-writes-go-through-cleared': storedWritesGoThroughCleared,
     'tap-elements-not-points': tapElementsNotPoints,
     'handle-lost-gpu-context': handleLostGpuContext,
+    'schedule-before-echo-loads': scheduleBeforeEchoLoads,
   },
 };
