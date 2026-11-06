@@ -62,6 +62,16 @@ function readsAudioClock(context, node, seen = new Set()) {
   return children(node).some((child) => readsAudioClock(context, child, seen));
 }
 
+function anchorsLinearRamp(node) {
+  if (methodName(node) !== 'setValueAtTime' || node.callee.object.type !== 'ThisExpression') return false;
+  for (let at = node.parent; at; at = at.parent) {
+    if (FUNCTIONS.has(at.type)) {
+      return at.parent?.type === 'MethodDefinition' && nameOf(at) === 'linearRampToValueAtTime';
+    }
+  }
+  return false;
+}
+
 const audioTimesFromSoon = {
   meta: {
     messages: {
@@ -75,7 +85,9 @@ const audioTimesFromSoon = {
       CallExpression(node) {
         const at = AUDIO_TIME_ARG.get(methodName(node));
         const time = at === undefined ? null : node.arguments[at];
-        if (time && readsAudioClock(context, time)) context.report({ node: time, messageId: 'clock' });
+        if (time && !anchorsLinearRamp(node) && readsAudioClock(context, time)) {
+          context.report({ node: time, messageId: 'clock' });
+        }
       },
     };
   },
@@ -395,10 +407,59 @@ const scheduleBeforeEchoLoads = {
   },
 };
 
+const PARAM_NAMES = new Set([
+  'gain', 'frequency', 'detune', 'offset', 'pan', 'Q', 'delayTime', 'playbackRate',
+  'threshold', 'knee', 'ratio', 'attack', 'release',
+]);
+
+function audioParam(context, node, seen = new Set()) {
+  if (!node || seen.has(node)) return false;
+  seen.add(node);
+  if (node.type === 'MemberExpression' && !node.computed) return PARAM_NAMES.has(node.property.name);
+  if (node.type !== 'Identifier') return false;
+  const variable = variableOf(context, node);
+  const typed = variable?.defs.some((def) => def.name?.typeAnnotation?.typeAnnotation?.typeName?.name === 'AudioParam');
+  return typed || audioParam(context, declaredAs(context, node), seen);
+}
+
+function readsParamValue(context, node, seen = new Set()) {
+  if (!node || seen.has(node) || FUNCTIONS.has(node.type)) return false;
+  seen.add(node);
+  if (isNamed(node, 'value') && audioParam(context, node.object)) return true;
+  if (node.type === 'Identifier') return readsParamValue(context, declaredAs(context, node), seen);
+  return children(node).some((child) => readsParamValue(context, child, seen));
+}
+
+const holdReadsTheScheduledCurve = {
+  meta: {
+    messages: {
+      curve: 'Hold and copy the scheduled curve at the change time: the value getter is an earlier rendered value.',
+    },
+  },
+  create(context) {
+    return {
+      MemberExpression(node) {
+        if (isNamed(node, 'cancelAndHoldAtTime')) context.report({ node, messageId: 'curve' });
+      },
+      CallExpression(node) {
+        if (!AUDIO_TIME_ARG.has(methodName(node))) return;
+        for (const arg of node.arguments) {
+          if (readsParamValue(context, arg)) context.report({ node: arg, messageId: 'curve' });
+        }
+      },
+      AssignmentExpression(node) {
+        if (isNamed(node.left, 'value') && audioParam(context, node.left.object)
+          && readsParamValue(context, node.right)) context.report({ node, messageId: 'curve' });
+      },
+    };
+  },
+};
+
 export default {
   meta: { name: 'lantern' },
   rules: {
     'audio-times-from-soon': audioTimesFromSoon,
+    'hold-reads-the-scheduled-curve': holdReadsTheScheduledCurve,
     'animations-share-start-time': animationsShareStartTime,
     'follow-device-preferences': followDevicePreferences,
     'no-soft-hyphen-characters': noSoftHyphenCharacters,

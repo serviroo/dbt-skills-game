@@ -6,6 +6,7 @@
  */
 import { animate } from '../ui/anim';
 import { SCORE, WINDOW } from '../motion/tokens';
+import { trackParam } from '../audio/curve';
 import { holdAt, silentAfter, soon, taper } from '../audio/param';
 import type { VolumeCtrl } from '../audio/prefs';
 import { type Next } from '../content/dbt';
@@ -109,10 +110,12 @@ function lowHum(level: () => number, volume?: VolumeCtrl) {
   // three gains in a row, one writer each: the breath slowly swells `breath`, the player's levels glide `vol`, and
   // `wake` fades the hum out before the page sleeps and back in from silence when it wakes
   const breath = ctx.createGain();
-  breath.gain.value = 0;
+  const breathGain = trackParam(breath.gain, ctx);
+  breathGain.value = 0;
   const vol = ctx.createGain();
   vol.gain.value = level();
   const wake = ctx.createGain();
+  const wakeGain = trackParam(wake.gain, ctx);
   const lp = ctx.createBiquadFilter();
   lp.type = 'lowpass';
   lp.frequency.value = 360;
@@ -133,7 +136,7 @@ function lowHum(level: () => number, volume?: VolumeCtrl) {
     o.start();
     return o;
   });
-  breath.gain.setTargetAtTime(0.05, soon(ctx), 0.8);
+  breathGain.setTargetAtTime(0.05, soon(ctx), 0.8);
   let end = Infinity;
   let open = true;
   let nap: ConstantSourceNode | undefined;
@@ -152,19 +155,19 @@ function lowHum(level: () => number, volume?: VolumeCtrl) {
   const paused = () => {
     if (ctx.state === 'running') return;
     const t = soon(ctx);
-    wake.gain.cancelScheduledValues(0);
-    wake.gain.setValueAtTime(0, t);
-    wake.gain.setTargetAtTime(1, t, WAKE_TAU);
+    wakeGain.cancelScheduledValues(0);
+    wakeGain.setValueAtTime(0, t);
+    wakeGain.setTargetAtTime(1, t, WAKE_TAU);
   };
   const seen = () => {
     noNap();
     // already paused: `paused` has set where it comes back from
     if (ctx.state !== 'running') return resume();
     const t = soon(ctx);
-    holdAt(wake.gain, t);
-    if (!document.hidden) return void wake.gain.setTargetAtTime(1, t, WAKE_TAU);
+    holdAt(wakeGain, t);
+    if (!document.hidden) return void wakeGain.setTargetAtTime(1, t, WAKE_TAU);
     // hidden: fade out, then pause like the rest of the app's sound (a phone may pause it sooner; see `paused`)
-    wake.gain.setTargetAtTime(0, t, SLEEP_TAU);
+    wakeGain.setTargetAtTime(0, t, SLEEP_TAU);
     nap = ctx.createConstantSource();
     nap.offset.value = 0;
     nap.connect(ctx.destination);
@@ -207,7 +210,7 @@ function lowHum(level: () => number, volume?: VolumeCtrl) {
     breathe(s: number) {
       if (end !== Infinity) return;
       const t = soon(ctx);
-      breath.gain.setTargetAtTime(0.035 + s * 0.03, t, 0.25);
+      breathGain.setTargetAtTime(0.035 + s * 0.03, t, 0.25);
       lp.frequency.setTargetAtTime(300 + s * 140, t, 0.3);
     },
     /** A soft fade of about a second, or exact silence `ramp` seconds from now (the Safe Zone opening). */
@@ -219,9 +222,9 @@ function lowHum(level: () => number, volume?: VolumeCtrl) {
       const first = end === Infinity;
       end = at;
       if (ramp !== undefined) {
-        holdAt(breath.gain, t);
-        breath.gain.linearRampToValueAtTime(0, at);
-      } else breath.gain.setTargetAtTime(0, t, OFF_TAU);
+        holdAt(breathGain, t);
+        breathGain.linearRampToValueAtTime(0, at);
+      } else breathGain.setTargetAtTime(0, t, OFF_TAU);
       oscs.forEach((o) => o.stop(at));
       if (!first) return;
       unlisten();

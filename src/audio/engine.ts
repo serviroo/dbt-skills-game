@@ -7,6 +7,7 @@ import { CUES } from './cues';
 import { BED_NAMES, buildBed, buildCharge, type BedHandle, type BedName, type ChargeHandle } from './beds';
 import { AHEAD, Music, SECTIONS, type Section, type SectionOpts } from './music';
 import { clipCurve, makeCrackle, makeIR, makeNoise, dB, type Ctx } from './dsp';
+import { trackParam } from './curve';
 import { holdAt, soon, taper } from './param';
 import { Voice, stoppedBy, type Lib } from './voice';
 
@@ -171,6 +172,7 @@ export class AudioEngine {
     this.volume = C.createGain();
     this.volume.gain.value = this.masterTarget();
     this.safe = C.createGain();
+    trackParam(this.safe.gain, C);
     pre.connect(hp).connect(lim).connect(undo).connect(clip).connect(this.safe).connect(this.volume).connect(C.destination);
 
     this.duckG = C.createGain();
@@ -380,10 +382,16 @@ export class AudioEngine {
     this.isMuted = !!l.muted;
     this.volume.gain.setTargetAtTime(this.masterTarget(), t, tau);
     const m = taper(l.music);
-    for (const g of [this.musUser, this.echo.sends.musRoom, this.echo.sends.musHall]) g.gain.setTargetAtTime(m, t, tau);
+    this.musUser.gain.setTargetAtTime(m, t, tau);
+    for (const g of [this.echo.sends.musRoom, this.echo.sends.musHall]) {
+      trackParam(g.gain, this.ctx).setTargetAtTime(m, t, tau);
+    }
     const s = taper(l.sfx);
     this.sendLevels = { sfx: s, mus: m, tau };
-    for (const g of [this.sfxUser, this.bedUser, this.echo.sends.sfxRoom, this.echo.sends.sfxHall]) g.gain.setTargetAtTime(s, t, tau);
+    for (const g of [this.sfxUser, this.bedUser]) g.gain.setTargetAtTime(s, t, tau);
+    for (const g of [this.echo.sends.sfxRoom, this.echo.sends.sfxHall]) {
+      trackParam(g.gain, this.ctx).setTargetAtTime(s, t, tau);
+    }
   }
 
   /** Current output gains (QA): master after scene level and mute, the Music / Effects levels, and the Safe Zone's gate. */
@@ -568,7 +576,9 @@ export class AudioEngine {
    */
   quiet(on: boolean, sec: number, at = soon(this.ctx)) {
     this.isQuiet = on;
-    for (const p of on ? [this.safe.gain, ...this.echo.out.map((g) => g.gain)] : [this.safe.gain]) {
+    const params = on ? [this.safe.gain, ...this.echo.out.map((g) => g.gain)] : [this.safe.gain];
+    for (const param of params) {
+      const p = trackParam(param, this.ctx);
       holdAt(p, at);
       if (on) p.linearRampToValueAtTime(0, at + sec);
       else p.setTargetAtTime(1, at, Math.max(0.003, sec / 4));
@@ -593,10 +603,12 @@ export class AudioEngine {
    *  on to where setUser last sent them, so a level still on its way gets there in the new sends too. */
   private makeSends(from?: Sends): Sends {
     const { sfx, mus, tau } = this.sendLevels;
+    const at = soon(this.ctx);
     const level = (to: number, was?: GainNode) => {
       const g = this.ctx.createGain();
-      g.gain.value = was?.gain.value ?? to;
-      if (was) g.gain.setTargetAtTime(to, soon(this.ctx), tau);
+      const p = trackParam(g.gain, this.ctx);
+      p.value = was ? trackParam(was.gain, this.ctx).valueAt(at) : to;
+      if (was) p.setTargetAtTime(to, at, tau);
       return g;
     };
     return { sfxRoom: level(sfx, from?.sfxRoom), sfxHall: level(sfx, from?.sfxHall), musRoom: level(mus, from?.musRoom), musHall: level(mus, from?.musHall) };
@@ -609,6 +621,7 @@ export class AudioEngine {
       c.normalize = false;
       c.buffer = ir;
       const out = this.ctx.createGain();
+      trackParam(out.gain, this.ctx);
       for (const g of from) g.connect(c);
       c.connect(out).connect(hush);
       return { c, out };
@@ -693,8 +706,9 @@ export class AudioEngine {
     const was = this.closing.get(e);
     if (was && was.by <= at + fade) return;
     for (const g of e.out) {
-      holdAt(g.gain, at);
-      g.gain.linearRampToValueAtTime(0, at + fade);
+      const p = trackParam(g.gain, this.ctx);
+      holdAt(p, at);
+      p.linearRampToValueAtTime(0, at + fade);
     }
     const silent = was?.silent ?? this.ctx.createConstantSource();
     if (!was) {

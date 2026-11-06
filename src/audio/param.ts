@@ -1,3 +1,4 @@
+import type { Curve } from './curve';
 import { FPS, SCORE } from '../motion/tokens';
 
 /** Slider position (0..1) to gain: a squared taper, so the middle of the slider sounds like the middle. */
@@ -10,13 +11,12 @@ const SILENT_DB = -90;
 export const silentAfter = (tau: number, from = 1) => tau * Math.log(from * 10 ** (-SILENT_DB / 20));
 
 /** Cancels what is scheduled from `t` on and holds the value automation gives at `t`, so a new ramp starts there. */
-export function holdAt(p: AudioParam, t: number) {
-  if (p.cancelAndHoldAtTime) p.cancelAndHoldAtTime(t);
-  else {
-    // without cancelAndHoldAtTime (Firefox): the getter's value, as of the last rendered block
-    p.cancelScheduledValues(t);
-    p.setValueAtTime(p.value, t);
-  }
+export function holdAt(p: Curve, t: number) {
+  const value = p.valueAt(t);
+  const linear = p.rampsThrough(t);
+  p.cancelScheduledValues(t);
+  if (linear) p.linearRampToValueAtTime(value, t);
+  else p.setValueAtTime(value, t);
 }
 
 /**
