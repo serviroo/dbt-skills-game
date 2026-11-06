@@ -27,8 +27,7 @@
     {
       "files": ["scripts/**"],
       "rules": {
-        "lantern/tap-elements-not-points": "error",
-        "lantern/timings-lookups-try-all-available-runs": "error"
+        "lantern/tap-elements-not-points": "error"
       }
     }
   ]

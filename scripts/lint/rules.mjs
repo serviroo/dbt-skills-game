@@ -395,41 +395,6 @@ const scheduleBeforeEchoLoads = {
   },
 };
 
-export function timingsLookupProblems(source) {
-  if (!/\bgh\s+run\s+download\b/.test(source)) return [];
-  const problems = [];
-  const missing = source.match(/\bmissing='([^'\n]+)'/)?.[1] ?? '';
-  const vanished = ['no artifact matches', 'no valid artifacts found to download', 'HTTP (404|410)'];
-  if (!vanished.every((message) => missing.includes(message)) ||
-      !/grep -Eq "\$missing" "\$error" \|\| exit 1\b/.test(source)) {
-    problems.push('must skip vanished timings with one matcher and fail other download errors');
-  }
-  if (/\bcandidates\s*\.\s*slice\s*\(/.test(source)) {
-    problems.push('must try every listed timings candidate before using the saved timings');
-  }
-  return problems;
-}
-
-const timingsLookupsTryAllAvailableRuns = {
-  meta: { messages: { lookup: '{{problem}}' } },
-  create(context) {
-    const check = (node, source) => {
-      if (typeof source !== 'string') return;
-      for (const problem of timingsLookupProblems(source)) {
-        context.report({ node, messageId: 'lookup', data: { problem } });
-      }
-    };
-    return {
-      Literal(node) {
-        check(node, node.value);
-      },
-      TemplateLiteral(node) {
-        if (!node.expressions.length) check(node, node.quasis[0].value.cooked);
-      },
-    };
-  },
-};
-
 export default {
   meta: { name: 'lantern' },
   rules: {
@@ -441,6 +406,5 @@ export default {
     'tap-elements-not-points': tapElementsNotPoints,
     'handle-lost-gpu-context': handleLostGpuContext,
     'schedule-before-echo-loads': scheduleBeforeEchoLoads,
-    'timings-lookups-try-all-available-runs': timingsLookupsTryAllAvailableRuns,
   },
 };

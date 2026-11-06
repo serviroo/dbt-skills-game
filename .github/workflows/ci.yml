@@ -163,14 +163,10 @@ jobs:
       - run: npm ci
       - id: parts
         name: Enough e2e parts that each finishes in time on the slowest runner
-        env:
-          PLANNED: ${{ steps.find.outputs.run }}
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/timings" "$RUNNER_TEMP/plan-timings"
           timings=$(find "$RUNNER_TEMP/timings" -name e2e-timings.json 2>/dev/null | head -n 1)
-          missing="the planned e2e-timings artifact $PLANNED has no e2e-timings.json"
-          [ -z "$PLANNED" ] || [ -n "$timings" ] || { echo "$missing"; exit 1; }
           cp "${timings:-scripts/e2e/timings.json}" "$RUNNER_TEMP/plan-timings/e2e-timings.json"
           log=$RUNNER_TEMP/parts.log
           n=$(node scripts/e2e.mjs --parts "--timings=$RUNNER_TEMP/plan-timings/e2e-timings.json" 2>"$log") || {

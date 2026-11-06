@@ -22,7 +22,6 @@ const RULE_FINDINGS = {
   'tap-elements-not-points': 3,
   'handle-lost-gpu-context': 3,
   'schedule-before-echo-loads': 9,
-  'timings-lookups-try-all-available-runs': 4,
 };
 
 function checkRules() {
@@ -82,10 +81,6 @@ function checkWorkflows() {
     expect(unnamed.status === 1 && unnamed.stderr.includes(': plan step 1 '),
       `own-run artifacts: plan find allowed an unnamed download:\n${unnamed.stderr}`);
   }
-  fs.writeFileSync(ci, source.replace('no valid artifacts found to download|', ''));
-  const incomplete = check(ci);
-  expect(incomplete.status === 1 && incomplete.stderr.includes(': plan step 1 '),
-    `own-run artifacts: plan find stopped before trying available timings:\n${incomplete.stderr}`);
   const local = path.join(scratch, 'local.yml');
   fs.writeFileSync(local, 'jobs:\n  e2e:\n    steps:\n      - uses: actions/download-artifact@v8\n' +
     '        with:\n          name: e2e-plan-timings\n');

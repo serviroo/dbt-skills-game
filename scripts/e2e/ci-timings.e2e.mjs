@@ -85,9 +85,7 @@ async function plan(mode, expect) {
       GITHUB_REPOSITORY: 'fixture/game',
       GITHUB_REPOSITORY_ID: '7',
     };
-    const shell = (code, more = {}) => exec('bash', ['-e', '-o', 'pipefail', '-c', code], {
-      env: { ...env, ...more },
-    });
+    const shell = (code) => exec('bash', ['-e', '-o', 'pipefail', '-c', code], { env });
     if (['denied', 'unavailable', 'network', 'api-denied', 'malformed'].includes(mode)) {
       let failed = false;
       try {
@@ -114,7 +112,7 @@ async function plan(mode, expect) {
     const run = output.match(/^run=(\d+)$/m)?.[1] ?? '';
     const expectedRun = fallback ? '' : mode === 'sixth' ? '500' : mode.startsWith('gone-') ? '504' : '505';
     expect(run === expectedRun, `${mode}: the plan selected run ${run} instead of ${expectedRun}`);
-    await shell(parts.run, { PLANNED: run });
+    await shell(parts.run);
     const saved = fs.readFileSync(path.join(scratch, 'plan-timings/e2e-timings.json'), 'utf8');
     const expected = fallback ? fs.readFileSync('scripts/e2e/timings.json', 'utf8') : JSON.stringify(selected);
     expect(saved === expected, `${mode}: the plan saved different timings from the file it downloaded`);
