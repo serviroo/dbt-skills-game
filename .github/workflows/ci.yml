@@ -134,7 +134,7 @@ jobs:
               const candidates = artifacts.filter((a) => a.name === "e2e-timings" && !a.expired &&
                 a.workflow_run.head_repository_id === Number(process.env.GITHUB_REPOSITORY_ID));
               candidates.sort((a, b) => b.created_at.localeCompare(a.created_at));
-              for (const a of candidates.slice(0, 5)) console.log(a.workflow_run.id);
+              for (const a of candidates) console.log(a.workflow_run.id);
             });')
           while read -r run; do
             [[ $run =~ ^[0-9]+$ ]] || continue
@@ -149,7 +149,8 @@ jobs:
               exit 0
             fi
             cat "$error" >&2
-            grep -Eq 'no artifact matches|HTTP (404|410)' "$error" || exit 1
+            missing='no artifact matches|no valid artifacts found to download|HTTP (404|410)'
+            grep -Eq "$missing" "$error" || exit 1
           done <<< "$runs"
           echo "::notice::No e2e-timings available: parts split by scripts/e2e/timings.json"
       - uses: actions/checkout@v7

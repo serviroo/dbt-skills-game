@@ -8,6 +8,15 @@ import { load } from 'js-yaml';
 const exec = promisify(execFile);
 const workflowFile = process.env.E2E_TIMINGS_WORKFLOW ?? '.github/workflows/ci.yml';
 const selected = { 'ci-plan-downloads-timings-before-setup': [42] };
+const downloadErrors = {
+  'gone-name': 'no artifact matches any of the names or patterns provided',
+  'gone-empty': 'no valid artifacts found to download',
+  'gone-404': 'error fetching artifacts: HTTP 404: Not Found',
+  'gone-410': 'error downloading e2e-timings: HTTP 410: Gone',
+  denied: 'error fetching artifacts: HTTP 403: Resource not accessible by integration',
+  unavailable: 'error downloading e2e-timings: HTTP 503: Service Unavailable',
+  network: 'error fetching artifacts: dial tcp: lookup api.github.com: no such host',
+};
 const boundary = `
 gh() {
   if [[ $1 == api ]]; then
@@ -22,17 +31,13 @@ gh() {
   [[ $1 == run && $2 == download && $4 == --repo && $6 == -n && $7 == e2e-timings && $8 == -D ]] || return 2
   echo "$3" >> "$CASE/downloads"
   mkdir -p "\${9}"
-  if [[ $MODE == denied ]]; then
-    echo 'HTTP 403: Resource not accessible' >&2
+  if [[ $MODE == denied || $MODE == unavailable || $MODE == network ]]; then
+    printf '%s\\n' "$DOWNLOAD_ERROR" >&2
     return 1
   fi
-  if [[ $MODE == bounded || ( $MODE == gone* && $3 == 505 ) ]]; then
+  if [[ $MODE == exhausted || ( $MODE == sixth && $3 != 500 ) || ( $MODE == gone-* && $3 == 505 ) ]]; then
     echo '{}' > "\${9}/e2e-timings.json"
-    if [[ $MODE == gone-http ]]; then
-      echo 'HTTP 410: Artifact has expired' >&2
-    else
-      echo 'no artifact matches any of the names or patterns provided' >&2
-    fi
+    printf '%s\\n' "$DOWNLOAD_ERROR" >&2
     return 1
   fi
   [[ $MODE != malformed ]] || return 0
@@ -74,6 +79,7 @@ async function plan(mode, expect) {
       BASH_ENV: path.join(scratch, 'boundary.sh'),
       CASE: scratch,
       MODE: mode,
+      DOWNLOAD_ERROR: downloadErrors[mode] ?? downloadErrors['gone-name'],
       RUNNER_TEMP: scratch,
       GITHUB_OUTPUT: path.join(scratch, 'output'),
       GITHUB_REPOSITORY: 'fixture/game',
@@ -82,7 +88,7 @@ async function plan(mode, expect) {
     const shell = (code, more = {}) => exec('bash', ['-e', '-o', 'pipefail', '-c', code], {
       env: { ...env, ...more },
     });
-    if (['denied', 'api-denied', 'malformed'].includes(mode)) {
+    if (['denied', 'unavailable', 'network', 'api-denied', 'malformed'].includes(mode)) {
       let failed = false;
       try {
         await shell(find.run);
@@ -90,18 +96,24 @@ async function plan(mode, expect) {
         failed = true;
       }
       expect(failed && !find['continue-on-error'], `${mode}: the plan hid a failed timings download`);
+      const attempts = fs.readFileSync(path.join(scratch, 'downloads'), 'utf8');
+      expect(attempts === (mode === 'api-denied' ? '' : '505\n'), `${mode}: the plan retried a failed lookup`);
       return;
     }
     await shell(find.run);
-    const fallback = mode === 'empty' || mode === 'bounded';
+    const fallback = mode === 'empty' || mode === 'exhausted';
     const downloaded = path.join(scratch, 'timings/e2e-timings.json');
     expect(fallback || fs.existsSync(downloaded), `${mode}: setup began before timings were downloaded`);
-    const wanted = mode.startsWith('gone') ? '505\n504\n' : fallback ? '' : '505\n';
+    const all = '505\n504\n503\n502\n501\n500\n';
+    const wanted = ['exhausted', 'sixth'].includes(mode) ? all :
+      mode.startsWith('gone-') ? '505\n504\n' : fallback ? '' : '505\n';
     const attempts = fs.readFileSync(path.join(scratch, 'downloads'), 'utf8');
-    expect(attempts === (mode === 'bounded' ? '505\n504\n503\n502\n501\n' : wanted),
+    expect(attempts === wanted,
       `${mode}: downloads did not try the newest available runs in order: ${attempts}`);
     const output = fs.readFileSync(path.join(scratch, 'output'), 'utf8');
     const run = output.match(/^run=(\d+)$/m)?.[1] ?? '';
+    const expectedRun = fallback ? '' : mode === 'sixth' ? '500' : mode.startsWith('gone-') ? '504' : '505';
+    expect(run === expectedRun, `${mode}: the plan selected run ${run} instead of ${expectedRun}`);
     await shell(parts.run, { PLANNED: run });
     const saved = fs.readFileSync(path.join(scratch, 'plan-timings/e2e-timings.json'), 'utf8');
     const expected = fallback ? fs.readFileSync('scripts/e2e/timings.json', 'utf8') : JSON.stringify(selected);
@@ -116,9 +128,14 @@ async function plan(mode, expect) {
 
 export const scenarios = {
   async 'ci-plan-downloads-timings-before-setup'({ expect }) {
-    for (const mode of ['replaced', 'gone', 'gone-http', 'empty', 'bounded']) await plan(mode, expect);
+    for (const mode of ['replaced', 'gone-name', 'gone-404', 'gone-410', 'empty', 'exhausted', 'sixth']) {
+      await plan(mode, expect);
+    }
+  },
+  async 'ci-plan-continues-after-the-last-artifact-disappears'({ expect }) {
+    await plan('gone-empty', expect);
   },
   async 'ci-plan-keeps-download-errors-visible'({ expect }) {
-    for (const mode of ['denied', 'api-denied', 'malformed']) await plan(mode, expect);
+    for (const mode of ['denied', 'unavailable', 'network', 'api-denied', 'malformed']) await plan(mode, expect);
   },
 };

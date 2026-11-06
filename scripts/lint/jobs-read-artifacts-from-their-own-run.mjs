@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { load } from 'js-yaml';
+import { timingsLookupProblems } from './rules.mjs';
 
 const dir = '.github/workflows';
 const gh = String.raw`\bgh(?:\s+(?:-R|--repo|--hostname)(?:=|\s+)\S+)*\s+`;
@@ -26,6 +27,7 @@ for (const file of files) {
       }
       const find = path.resolve(file) === path.resolve(dir, 'ci.yml') && job === 'plan' && step.id === 'find';
       const shell = String(step.run ?? '').replace(/\\\r?\n/g, ' ');
+      if (find) problems.push(...timingsLookupProblems(shell).map((problem) => `${at} ${problem}`));
       const downloads = shell.match(new RegExp(gh + String.raw`run\s+download\b[^\n]*`, 'g')) ?? [];
       const queries = shell.match(new RegExp(gh + String.raw`api\b[^\n]*/artifacts\b[^\n]*`, 'g')) ?? [];
       for (const command of downloads) {
