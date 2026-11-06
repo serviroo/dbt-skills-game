@@ -129,7 +129,7 @@ export class AudioEngine {
   private session: 'playback' | 'ambient';
   private cleanup: (() => void)[] = [];
   private hushV: Voice | null = null;
-  private hushLifts = 0;
+  private hushHeldUntil = 0;
   /** The level window's low-end lift is on until the next window closes or the next section starts. */
   private lifted = false;
   /** Cue handles named by schedule() events (opts.id), kept across calls so a later batch can stop them. */
@@ -540,7 +540,7 @@ export class AudioEngine {
     for (const p of [this.hushBeds.gain, this.hushMusic.gain, this.hushHall.gain, this.hushRoom.gain]) {
       p.cancelScheduledValues(at);
       p.setTargetAtTime(0.008, at, 0.007);
-      if (to !== undefined) p.setTargetAtTime(1, to, 0.0015);
+      if (to !== undefined) p.setTargetAtTime(1, Math.max(to, this.hushHeldUntil), 0.0015);
     }
     this.release(this.takeHush(), at, 0.02);
     v.open(at);
@@ -555,7 +555,7 @@ export class AudioEngine {
 
   /** End an open-ended hush (awaken_hit does this itself). */
   unhush(at = soon(this.ctx)) {
-    this.release(this.endHush(at, at, 0.0015), at, 0.02);
+    this.release(this.endHush(at, 0.0015), at, 0.02);
   }
 
   /**
@@ -572,8 +572,7 @@ export class AudioEngine {
       else p.setTargetAtTime(1, at, Math.max(0.003, sec / 4));
     }
     if (on) {
-      const hushed = this.endHush(at, stoppedBy(at, sec), Math.max(0.003, sec / 4));
-      this.release([...this.active, ...this.fading, ...hushed], at, sec);
+      this.release([...this.active, ...this.fading, ...this.stopHush(at, sec)], at, sec);
       this.active.clear();
       for (const c of this.named.values()) c.stop(at, sec);
       this.named.clear();
@@ -630,11 +629,15 @@ export class AudioEngine {
     this.duckG.gain.setTargetAtTime(dB(db), at, Math.max(0.003, ramp / 4));
   }
 
-  private endHush(at: number, lift: number, tau: number) {
-    this.hushLifts = Math.max(lift, this.hushLifts);
+  private stopHush(at: number, fade: number) {
+    this.hushHeldUntil = Math.max(this.hushHeldUntil, stoppedBy(at, fade));
+    return this.endHush(at, Math.max(0.003, fade / 4));
+  }
+
+  private endHush(at: number, tau: number) {
     for (const g of [this.hushBeds.gain, this.hushMusic.gain, this.hushHall.gain, this.hushRoom.gain]) {
       holdAt(g, at);
-      g.setTargetAtTime(1, this.hushLifts, tau);
+      g.setTargetAtTime(1, Math.max(at, this.hushHeldUntil), tau);
     }
     return this.takeHush();
   }
@@ -663,7 +666,7 @@ export class AudioEngine {
   stopAll(fade = 0.4, at = soon(this.ctx)) {
     this.charge?.stop(at, fade);
     const voices = [...this.active, ...[...this.beds.values()].map((b) => b.voice), ...this.fading];
-    this.release([...voices, ...this.endHush(at, stoppedBy(at, fade), Math.max(0.003, fade / 4))], at, fade);
+    this.release([...voices, ...this.stopHush(at, fade)], at, fade);
     this.active.clear();
     this.beds.clear();
     this.music.stop(fade, at);

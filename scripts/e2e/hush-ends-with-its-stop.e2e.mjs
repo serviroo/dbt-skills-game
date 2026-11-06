@@ -15,6 +15,17 @@ export const scenarios = {
             e.bed('gate_hum', { at: 0, level: 20, fadeIn: 0.05 });
             e.hush(0);
             e.stopAll(SCORE.leaveSec, press);
+            e.unhush(press + 0.01);
+          },
+          'Skip in a hush with its end set': (e) => {
+            e.bed('gate_hum', { at: 0, level: 20, fadeIn: 0.05 });
+            e.hush(0, 1);
+            e.stopAll(SCORE.leaveSec, press);
+          },
+          'Skip before an unhush set for later': (e) => {
+            e.hush(0);
+            e.unhush(1.5);
+            e.stopAll(SCORE.leaveSec, press);
           },
           'the Safe Zone': (e) => {
             e.hush(0);
@@ -43,7 +54,7 @@ export const scenarios = {
             return { peak, rms: Math.sqrt(ss / n) };
           };
           const [held, fade] = [read(0.1, press), read(press, press + 0.15)];
-          return { held, fade, between: read(0.5, 0.8), bed: read(1.2, 2) };
+          return { held, fade, between: read(0.5, 0.8), bed: read(1, 1.45) };
         };
         const ways = {};
         for (const [way, stop] of Object.entries(stops)) ways[way] = await render(stop);

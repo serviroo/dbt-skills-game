@@ -59,6 +59,16 @@ export class Engine {
     this.out.gain.linearRampToValueAtTime(0, end);
   }
 
+  nested(at = soon(this.ctx)) {
+    const shadow = (at: number) => this.out.gain.setValueAtTime(1, at);
+    this.fade(at, this.makeEcho());
+    shadow(2);
+  }
+
+  fade(at: number, e: ConvolverNode) {
+    this.out.gain.setTargetAtTime(0, at + e.channelCount, 0.01);
+  }
+
   twice() {
     this.echo = this.makeEcho();
     const at = soon(this.ctx);

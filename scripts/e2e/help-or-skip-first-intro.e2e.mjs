@@ -614,7 +614,6 @@ export const scenarios = {
           ...BED_NAMES.map((n) => [n, (e) => void e.bed(n, { at: 0, fadeIn: 0.3 })]),
           ...SECTIONS.map((n) => [`the ${n} score`, (e) => void e.music.to(n, 0.3, { at: 0 })]),
           ['the hush before the hit', (e) => void e.hush(0)],
-          ['a hush with its end set', (e) => void e.hush(0, 1)],
         ];
         const render = (play, len, stopAt) => {
           const c = new OfflineAudioContext(2, Math.ceil(len * rate), rate);

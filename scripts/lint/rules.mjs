@@ -322,6 +322,11 @@ function mentions(node, names) {
   return children(node).some((child) => mentions(child, names));
 }
 
+function unshadowed(fn, names) {
+  const own = new Set((fn?.params ?? []).map((p) => (p.type === 'AssignmentPattern' ? p.left : p).name));
+  return new Set([...names].filter((name) => !own.has(name)));
+}
+
 const scheduleBeforeEchoLoads = {
   meta: {
     messages: {
@@ -351,11 +356,12 @@ const scheduleBeforeEchoLoads = {
           const calls = ownCalls(fn.body).sort((a, b) => a.range[0] - b.range[0]);
           const loaded = calls.filter((c) => loads.has(calleeName(c)));
           for (const c of calls) {
-            const load = loaded.findLast((l) => l.range[1] <= c.range[0]);
+            const load = loaded.findLast((l) => l !== c && l.range[1] <= c.range[1]);
             if (!load) continue;
             const times = soonTimes(fn, load.range[0]);
             const passed = c.arguments.some((a) => mentions(a, times));
-            const inside = mentions(functionOf(context, c.callee), times);
+            const fnOf = functionOf(context, c.callee);
+            const inside = mentions(fnOf?.body, unshadowed(fnOf, times));
             if (passed || inside) context.report({ node: c, messageId: 'late' });
           }
         }
