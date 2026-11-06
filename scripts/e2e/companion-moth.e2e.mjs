@@ -1,5 +1,6 @@
 import sharp from 'sharp';
 import { screenshot } from './harness.mjs';
+import { watchStage, stageState, compareStillFrame } from './still-stage.mjs';
 
 const SIZES = { 390: { width: 390, height: 844 }, 320: { width: 320, height: 568 } };
 const FOLDED = 1.45;
@@ -120,28 +121,8 @@ export const scenarios = {
     const { ctx, page, errors } = await h.open({}, REWARDS + '&reduced&dpr=1', SIZES[390]);
     await mothOnCard(h, page, 'backdrop');
     await shown(h, page, 'backdrop');
-    await page.evaluate(() => {
-      const s = window.__stage;
-      const counts = window.__backdropCounts = { scenes: 0, blooms: 0 };
-      const render = s.renderer.render.bind(s.renderer);
-      s.renderer.render = (scene, camera) => {
-        if (scene === s.scene) counts.scenes++;
-        return render(scene, camera);
-      };
-      const blur = s.bloom.mipmapBlurPass;
-      const bloom = blur.render.bind(blur);
-      blur.render = (...args) => {
-        counts.blooms++;
-        return bloom(...args);
-      };
-    });
-    const backdrop = () => page.evaluate(() => ({
-      ...window.__backdropCounts,
-      time: window.__stage.time,
-      width: document.getElementById('gl').width,
-      height: document.getElementById('gl').height,
-      lost: window.__stage.lost,
-    }));
+    await watchStage(page);
+    const backdrop = () => stageState(page);
     const a = await backdrop();
     await h.frames(page, 60);
     const b = await backdrop();
@@ -153,6 +134,9 @@ export const scenarios = {
       `the rested grain changed ${stillGrain}, continuous rendering changed ${movingGrain}`);
     h.expect(b.scenes === a.scenes && b.blooms === a.blooms,
       `the unchanged rewards backdrop kept drawing (${JSON.stringify([a, b])}; grain ${stillGrain}, ${movingGrain})`);
+    h.expect(b.frames - a.frames >= 60 && b.frames - a.frames === b.loopFrames - a.loopFrames,
+      `the stage frame trail missed live frames (${JSON.stringify([a, b])})`);
+    h.expect(b.lastFrameAgo !== null, 'the stage frame trail lost its last frame');
     const beforeStill = await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => {
       const counts = { ...window.__backdropCounts };
       window.__stage.sceneStill = true;
@@ -163,12 +147,17 @@ export const scenarios = {
       'the rewards scene never resumed');
     h.expect(still.scenes === beforeStill.scenes + 1 && still.blooms === beforeStill.blooms + 1,
       'the resumed rewards backdrop did not render its expensive passes once');
+    const maxDelta = await compareStillFrame(page);
+    h.expect(maxDelta <= 1, `the kept backdrop differs from a full redraw by ${maxDelta}`);
+    const staleDelta = await compareStillFrame(page, true);
+    h.expect(staleDelta > 1, `the image check accepted a stale backdrop (${staleDelta})`);
+    const beforeResize = await backdrop();
     await h.frames(page, 1);
     await page.setViewportSize(SIZES[320]);
     const resized = await h.poll(page, backdrop,
-      (s) => s.scenes > still.scenes && s.width !== still.width && s.height !== still.height,
+      (s) => s.scenes > beforeResize.scenes && s.width !== still.width && s.height !== still.height,
       'the rewards backdrop did not redraw at its new size');
-    h.expect(resized.scenes === still.scenes + 1 && resized.blooms === still.blooms + 1,
+    h.expect(resized.scenes === beforeResize.scenes + 1 && resized.blooms === beforeResize.blooms + 1,
       'the resized rewards backdrop did not render its expensive passes once');
     await page.evaluate(() => window.dispatchEvent(new Event('resize')));
     await h.frames(page, 60);
@@ -176,6 +165,9 @@ export const scenarios = {
     h.expect(c.scenes === resized.scenes && c.blooms === resized.blooms,
       'the unchanged-size rewards backdrop redrew');
     h.expect(await grain(page) > 0.2, 'the resized rewards backdrop lost its grain');
+    const resizedDelta = await compareStillFrame(page);
+    h.expect(resizedDelta <= 1, `the resized backdrop differs from a full redraw by ${resizedDelta}`);
+    const beforeLoss = await backdrop();
     await shown(h, page, 'resized backdrop');
     await page.evaluate(() => {
       window.__backdropContext = window.__stage.renderer.getContext().getExtension('WEBGL_lose_context');
@@ -183,36 +175,48 @@ export const scenarios = {
     });
     await page.waitForFunction(() => window.__stage.lost);
     await page.evaluate(() => window.__backdropContext.restoreContext());
-    const restored = await h.poll(page, backdrop, (s) => !s.lost && s.scenes > c.scenes && s.blooms > c.blooms,
+    const restored = await h.poll(page, backdrop,
+      (s) => !s.lost && s.scenes > beforeLoss.scenes && s.blooms > beforeLoss.blooms,
       'the rewards backdrop did not redraw after its context returned');
-    h.expect(restored.scenes === c.scenes + 1 && restored.blooms === c.blooms + 1,
+    h.expect(restored.scenes === beforeLoss.scenes + 1 && restored.blooms === beforeLoss.blooms + 1,
       'the restored rewards backdrop did not render its expensive passes once');
     await h.frames(page, 60);
     const afterRestore = await backdrop();
     h.expect(afterRestore.scenes === restored.scenes && afterRestore.blooms === restored.blooms,
       'the restored rewards backdrop kept drawing');
     h.expect(await grain(page) > 0.2, 'the restored rewards backdrop lost its grain');
+    const restoredDelta = await compareStillFrame(page);
+    h.expect(restoredDelta <= 1, `the restored backdrop differs from a full redraw by ${restoredDelta}`);
+    const beforeChange = await backdrop();
     await page.evaluate(() => {
       const s = window.__stage;
       s.camera.position.x += 1;
       s.invalidate();
     });
     const invalidated = await h.poll(page, backdrop,
-      (s) => s.scenes > afterRestore.scenes && s.blooms > afterRestore.blooms,
+      (s) => s.scenes > beforeChange.scenes && s.blooms > beforeChange.blooms,
       'the changed rewards scene did not redraw when requested');
-    h.expect(invalidated.scenes === afterRestore.scenes + 1 && invalidated.blooms === afterRestore.blooms + 1,
+    h.expect(invalidated.scenes === beforeChange.scenes + 1 && invalidated.blooms === beforeChange.blooms + 1,
       'the changed rewards backdrop did not render its expensive passes once');
     await h.frames(page, 60);
     const settled = await backdrop();
     h.expect(settled.scenes === invalidated.scenes && settled.blooms === invalidated.blooms,
       'the invalidated rewards backdrop kept drawing');
-    await page.evaluate(() => window.__stage.step(0));
+    const invalidatedDelta = await compareStillFrame(page);
+    h.expect(invalidatedDelta <= 1, `the changed backdrop differs from a full redraw by ${invalidatedDelta}`);
+    const beforeCapture = await backdrop();
+    const captureFrames = await page.evaluate(() => {
+      const frames = window.__e2eTrail.frames;
+      window.__stage.step(0);
+      return window.__e2eTrail.frames - frames;
+    });
+    h.expect(captureFrames === 1, `the stage frame trail recorded ${captureFrames} frames for one explicit capture`);
     const captured = await backdrop();
-    h.expect(captured.scenes > settled.scenes && captured.blooms > settled.blooms,
+    h.expect(captured.scenes > beforeCapture.scenes && captured.blooms > beforeCapture.blooms,
       'an explicit rewards capture did not draw');
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
-    return { stillGrain, movingGrain, restored, invalidated };
+    return { stillGrain, movingGrain, a, b, maxDelta, staleDelta, resizedDelta, restoredDelta, invalidatedDelta };
   },
 
   async 'companion-moth'(h) {

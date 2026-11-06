@@ -22,7 +22,6 @@ const RULE_FINDINGS = {
   'tap-elements-not-points': 3,
   'handle-lost-gpu-context': 3,
   'schedule-before-echo-loads': 9,
-  'keep-frame-effects-running': 7,
 };
 
 function checkRules() {

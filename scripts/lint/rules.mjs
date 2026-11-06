@@ -395,49 +395,6 @@ const scheduleBeforeEchoLoads = {
   },
 };
 
-const keepFrameEffectsRunning = {
-  meta: {
-    messages: {
-      frozen: 'Cache the scene and its bloom, and keep the per-frame effects rendering while the scene is still.',
-    },
-  },
-  create(context) {
-    const renderState = (node) => {
-      if (!node) return false;
-      if (node.type === 'Identifier' && /^(renderOnDemand|sceneStill|needsRender)$/.test(node.name)) return true;
-      return children(node).some(renderState);
-    };
-    const drawsFrame = (node) => ownCalls(node).some((call) =>
-      ['step', 'draw'].includes(methodName(call)) ||
-      (methodName(call) === 'render' && isNamed(call.callee.object, 'composer')),
-    );
-    const returns = (node) => node.type === 'ReturnStatement' ||
-      children(node).some((child) => !FUNCTIONS.has(child.type) && returns(child));
-    const drawsLater = (node) => {
-      for (let at = node; at.parent && !FUNCTIONS.has(at.parent.type); at = at.parent) {
-        if (at.parent.type !== 'BlockStatement') continue;
-        const body = at.parent.body;
-        if (body.slice(body.indexOf(at) + 1).some(drawsFrame)) return true;
-      }
-      return false;
-    };
-    const check = (node) => {
-      if (!renderState(node.test)) return;
-      const branches = [node.consequent, node.alternate].filter(Boolean);
-      if (branches.some(drawsFrame) || (branches.some(returns) && drawsLater(node))) {
-        context.report({ node, messageId: 'frozen' });
-      }
-    };
-    return {
-      IfStatement: check,
-      ConditionalExpression: check,
-      LogicalExpression(node) {
-        if (renderState(node.left) && drawsFrame(node.right)) context.report({ node, messageId: 'frozen' });
-      },
-    };
-  },
-};
-
 export default {
   meta: { name: 'lantern' },
   rules: {
@@ -449,6 +406,5 @@ export default {
     'tap-elements-not-points': tapElementsNotPoints,
     'handle-lost-gpu-context': handleLostGpuContext,
     'schedule-before-echo-loads': scheduleBeforeEchoLoads,
-    'keep-frame-effects-running': keepFrameEffectsRunning,
   },
 };

@@ -49,7 +49,6 @@ export function windowLab(stage: Stage) {
   stage.scene.add(env.group);
   stage.camera.position.set(0, 1.4, 4);
   stage.camera.lookAt(0, 1.6, -10);
-  stage.invalidate();
   const kind = q.get('kind') ?? 'notification';
   if (['title', 'awaken', 'rewards', 'letter', 'endcard', 'hold'].includes(kind)) {
     env.skyMat.uniforms.uGlow.value = 0.25;
