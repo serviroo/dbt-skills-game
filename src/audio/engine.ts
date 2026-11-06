@@ -574,12 +574,12 @@ export class AudioEngine {
       else p.setTargetAtTime(1, at, Math.max(0.003, sec / 4));
     }
     if (on) {
+      this.charge?.stop(at, sec);
       const voices = [...this.active, ...this.fading, ...this.takeHush()];
       this.release(voices, at, sec);
       this.active.clear();
       for (const c of this.named.values()) c.stop(at, sec);
       this.named.clear();
-      this.charge?.stop(at, sec);
       for (const e of [...this.closing.keys()]) this.closeEcho(e, at, sec);
       this.stopHush(at, sec, voices);
       return;
@@ -634,8 +634,7 @@ export class AudioEngine {
   }
 
   private stopHush(at: number, fade: number, stopped: Voice[]) {
-    const others = [...this.music.live.map((s) => s.voice), ...(this.charge ? [this.charge.voice] : [])];
-    const ends = [...stopped, ...others].map((v) => v.silentAt).filter(Number.isFinite);
+    const ends = [...stopped, ...this.music.live.map((s) => s.voice)].map((v) => v.silentAt).filter(Number.isFinite);
     const echoes = [...this.closing.values()].map((c) => c.by);
     this.hushHeldUntil = Math.max(at, ...ends, ...echoes);
     this.endHush(at, Math.max(0.003, fade / 4));
