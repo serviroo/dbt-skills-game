@@ -293,7 +293,7 @@ function ownCalls(node, calls = []) {
 const callsSoon = (node) => !!node && (
   (node.type === 'CallExpression' && calleeName(node) === 'soon') || children(node).some(callsSoon));
 
-function soonTimes(fn) {
+function soonTimes(fn, before) {
   const names = new Set();
   for (const p of fn.params) {
     if (p.type === 'AssignmentPattern' && p.left.type === 'Identifier' && callsSoon(p.right)) names.add(p.left.name);
@@ -301,7 +301,8 @@ function soonTimes(fn) {
   const visit = (node) => {
     for (const child of children(node)) {
       if (FUNCTIONS.has(child.type)) continue;
-      if (child.type === 'VariableDeclarator' && child.id.type === 'Identifier' && callsSoon(child.init)) {
+      const early = child.range[1] <= before;
+      if (early && child.type === 'VariableDeclarator' && child.id.type === 'Identifier' && callsSoon(child.init)) {
         names.add(child.id.name);
       }
       visit(child);
@@ -313,6 +314,13 @@ function soonTimes(fn) {
 
 const mentions = (node, names) => !!node && (
   (node.type === 'Identifier' && names.has(node.name)) || children(node).some((child) => mentions(child, names)));
+
+function localFunction(context, callee) {
+  if (callee.type !== 'Identifier') return null;
+  const def = variableOf(context, callee)?.defs[0]?.node;
+  const fn = def?.type === 'VariableDeclarator' ? def.init : def;
+  return FUNCTIONS.has(fn?.type) ? fn : null;
+}
 
 const scheduleBeforeEchoLoads = {
   meta: {
@@ -340,16 +348,15 @@ const scheduleBeforeEchoLoads = {
           }
         }
         for (const fn of fns) {
-          const times = soonTimes(fn);
-          if (!times.size) continue;
           const calls = ownCalls(fn.body).sort((a, b) => a.range[0] - b.range[0]);
           const load = calls.find((c) => loads.has(calleeName(c)));
           if (!load) continue;
-          const local = (c) => c.callee.type === 'Identifier' && FUNCTIONS.has(declaredAs(context, c.callee)?.type);
+          const times = soonTimes(fn, load.range[0]);
+          if (!times.size) continue;
           for (const c of calls) {
             if (c.range[0] < load.range[1]) continue;
             const passed = c.arguments.some((a) => mentions(a, times));
-            const inside = local(c) && mentions(declaredAs(context, c.callee), times);
+            const inside = mentions(localFunction(context, c.callee), times);
             if (passed || inside) context.report({ node: c, messageId: 'late' });
           }
         }

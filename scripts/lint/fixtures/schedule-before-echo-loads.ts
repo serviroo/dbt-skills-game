@@ -24,7 +24,17 @@ export class Engine {
   reset() {
     const at = soon(this.ctx);
     const level = (v: number) => this.out.gain.setTargetAtTime(v, at, 0.01);
+    function rise(gain: GainNode) {
+      gain.gain.setTargetAtTime(1, at, 0.01);
+    }
     this.stopFirst(at);
     level(1);
+    rise(this.out);
+  }
+
+  swap() {
+    this.echo = this.makeEcho();
+    const at = soon(this.ctx);
+    this.out.gain.setTargetAtTime(1, at, 0.01);
   }
 }

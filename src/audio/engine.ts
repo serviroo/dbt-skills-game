@@ -646,10 +646,12 @@ export class AudioEngine {
    *  leaving the quiet brings the empty one (see quiet). */
   stopAll(fade = 0.4, at = soon(this.ctx)) {
     this.charge?.stop(at, fade);
-    for (const v of [...this.active, ...[...this.beds.values()].map((b) => b.voice), ...this.fading]) {
+    const hush = this.hushV ? [this.hushV] : [];
+    for (const v of [...this.active, ...[...this.beds.values()].map((b) => b.voice), ...this.fading, ...hush]) {
       v.stop(at, fade);
       this.letGo(v);
     }
+    this.hushV = null;
     this.active.clear();
     this.beds.clear();
     this.music.stop(fade, at);
@@ -702,11 +704,6 @@ export class AudioEngine {
     set(this.yieldG.gain, 1);
     this.lifted = false;
     for (const g of [this.hushBeds.gain, this.hushMusic.gain, this.hushHall.gain, this.hushRoom.gain]) set(g, 1);
-    if (this.hushV) {
-      this.hushV.stop(at, fade);
-      this.letGo(this.hushV);
-    }
-    this.hushV = null;
     this.stopAll(fade, at);
   }
 
