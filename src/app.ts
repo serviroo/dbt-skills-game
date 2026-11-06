@@ -9,7 +9,8 @@ import { INTRO, NEW_VERSION, REWARDS } from './content/intro';
 import type { VolumeCtrl } from './audio/prefs';
 import { volumeButton, type VolumeButton } from './ui/volume';
 import { readYou } from './core/you';
-import { APP_KEY } from './core/stored-names';
+import { APP_KEY, REPLAY_KEY } from './core/stored-names';
+import type { Entry } from './daily/history';
 import { setStored, write } from './core/cleared';
 import { SCORE } from './motion/tokens';
 
@@ -109,6 +110,8 @@ async function sealedUntil(): Promise<void> {
 
 /** `stage` is the 3D stage when boot made one up front (labs, captures); `makeStage` makes it, null without WebGL. */
 export async function runApp(stage: Stage | null, makeStage: () => Stage | null) {
+  if (!replaying()) markReturn();
+  const replay = replaying() ? leaveReplayAddress() : null;
   await sealedUntil();
   const state = load();
   if (params.fresh) state.seenCutscene = false;
@@ -130,15 +133,15 @@ export async function runApp(stage: Stage | null, makeStage: () => Stage | null)
       })
       .catch(() => undefined);
 
-  const wantCutscene = !state.seenCutscene || !!params.shot || params.cutscene;
+  const wantCutscene = !state.seenCutscene || !!params.shot || (!!replay && !replay.aborted);
   let help = false;
   // only the intro draws on the 3D stage: the companion is DOM only (its small scenes bring their own renderer), so a
   // returning player never sets up WebGL for it
   if (wantCutscene) {
     stage ??= makeStage();
-    help = await intro(stage, audio, state);
+    help = await intro(stage, audio, state, replay);
   }
-  await enterDaily(stage, audio, state, help);
+  await enterDaily(stage, audio, state, help, replay);
 }
 
 /**
@@ -146,12 +149,12 @@ export async function runApp(stage: Stage | null, makeStage: () => Stage | null)
  * left for help, even while a load is pending or the graphics fail), it ends here: it counts as seen, and the companion
  * opens next. True when the player left it for the Safe Zone.
  */
-async function intro(stage: Stage | null, audio: AppAudio | null, state: AppState): Promise<boolean> {
+async function intro(stage: Stage | null, audio: AppAudio | null, state: AppState, replay: AbortSignal | null) {
   mountCutsceneVolume(audio);
   const left = new AbortController();
   let offWays = () => {};
   const way = new Promise<Way>((resolve) => {
-    offWays = introWays((w) => {
+    const take = (w: Way) => {
       // the sound goes first, before anything else of the intro, however long the rest takes on a slow phone. Help is
       // silent from the press on, while the companion loads too, as the Safe Zone is: its gate closes under every sound
       // and echo at once. Skip lets what plays fade. Either way none of the intro sounds on after it: every cue still
@@ -160,17 +163,79 @@ async function intro(stage: Stage | null, audio: AppAudio | null, state: AppStat
       audio?.engine?.stopAll(w === 'safe' ? SCORE.safeOutSec : SCORE.leaveSec);
       left.abort();
       resolve(w);
-    });
+    };
+    const offButtons = introWays(take);
+    const back = () => take('skip');
+    replay?.addEventListener('abort', back);
+    offWays = () => {
+      offButtons();
+      replay?.removeEventListener('abort', back);
+    };
   });
   const end = await Promise.race([stage ? playIntro(stage, audio, left.signal) : playWithoutStage(audio, left.signal), way]);
   offWays();
   state.seenCutscene = true;
   save(state);
   if (end === 'replay') {
-    location.search = '?cutscene=1';
+    const write = () => history.replaceState(history.state, '', address(true));
+    reloadReplaying(write, { here: keptReplay()?.here ?? null, replay: history.state }, 'replace');
     await new Promise(() => undefined);
   }
   return end === 'safe';
+}
+
+interface Kept {
+  here: Entry | null;
+  replay: unknown;
+}
+
+const replaying = () => new URLSearchParams(location.search).has('cutscene');
+const byHistory = () => {
+  const [load] = performance.getEntriesByType('navigation') as PerformanceNavigationTiming[];
+  return load?.type === 'back_forward';
+};
+
+function leaveReplayAddress() {
+  history.replaceState(history.state ?? keptReplay()?.replay ?? null, '', address(false));
+  if (byHistory()) return null;
+  const back = new AbortController();
+  addEventListener('popstate', () => back.abort(), { once: true });
+  addEventListener('pageshow', (e) => e.persisted && back.abort());
+  return back.signal;
+}
+
+function address(replay: boolean) {
+  const q = location.search.slice(1).split('&').filter((p) => p && !new URLSearchParams(p).has('cutscene'));
+  if (replay) q.push('cutscene=1');
+  return location.pathname + (q.length ? `?${q.join('&')}` : '') + location.hash;
+}
+
+function markReturn() {
+  const here = keptReplay()?.here;
+  const s = history.state as Entry | null;
+  if (!here || !byHistory() || s?.key !== here.key || s.i !== here.i) return;
+  history.replaceState(here, '');
+  sessionStorage.removeItem(REPLAY_KEY);
+}
+
+function reloadReplaying(write: () => void, kept: Kept, open: 'assign' | 'replace') {
+  try {
+    write();
+    location.reload();
+  } catch {
+    try {
+      sessionStorage.setItem(REPLAY_KEY, JSON.stringify(kept));
+    } catch {}
+    location[open](address(true));
+  }
+}
+
+function keptReplay(): Kept | null {
+  try {
+    return JSON.parse(sessionStorage.getItem(REPLAY_KEY) ?? 'null');
+  } catch {
+    return null;
+  }
 }
 
 /** The speaker on every cutscene beat, from the title screen to the end card (none without Web Audio or in captures). */
@@ -226,7 +291,13 @@ async function playIntro(stage: Stage, audio: AppAudio | null, left: AbortSignal
   }
 }
 
-async function enterDaily(stage: Stage | null, audio: AppAudio | null, state: AppState, help: boolean) {
+async function enterDaily(
+  stage: Stage | null,
+  audio: AppAudio | null,
+  state: AppState,
+  help: boolean,
+  back: AbortSignal | null,
+) {
   // the companion is DOM only: stop the WebGL loop to save battery and keep UI timing on the page clock
   useRealClock();
   if (stage && !params.capture) stage.stop();
@@ -241,12 +312,18 @@ async function enterDaily(stage: Stage | null, audio: AppAudio | null, state: Ap
   const k = Object.keys(dailyMods)[0];
   if (!k) return;
   const m = (await dailyMods[k]().catch(offerReload)) as { mountDaily:(r: HTMLElement, o: unknown) => { unmount(): void; settled: Promise<void>; route(): string } };
+  const helpLeft = help && !!back?.aborted;
+  if (helpLeft) audio?.engine?.quiet(false, SCORE.safeBackSec);
   const daily = m.mountDaily(root, {
-    help,
-    onReplay: () => {
+    help: help && !helpLeft,
+    onReplay: (here: Entry, replay: unknown) => {
+      if (replaying()) return;
       state.seenCutscene = true;
       save(state);
-      location.search = '?cutscene=1';
+      reloadReplaying(() => {
+        history.replaceState(here, '');
+        history.pushState(replay, '', address(true));
+      }, { here, replay }, 'assign');
     },
     sound: audio
       ? {

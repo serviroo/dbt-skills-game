@@ -4,14 +4,24 @@
  * its two databases each, the offline worker's caches and the worker registered for this app's own scope. Nothing
  * else the site or browser holds is touched. Every open copy stops writing first (core/cleared), so nothing comes back.
  */
-import { APP_KEY, AUDIO_KEY, BESIDE, CARE_KEY, COWRITER_KEY, INSTALL_HINT_KEY, LAB_SAVE_KEY, SAVE_KEY, SW_CACHE, TAB_KEY, YOU_KEY } from '../core/stored-names';
+import {
+  APP_KEY,
+  AUDIO_KEY,
+  BESIDE,
+  COWRITER_KEY,
+  INSTALL_HINT_KEY,
+  LAB_SAVE_KEY,
+  SAVE_KEY,
+  SESSION_KEYS,
+  SW_CACHE,
+  YOU_KEY,
+} from '../core/stored-names';
 import { noteClear, setClearStatus } from '../core/cleared';
 import { siteUrl } from '../core/base';
 
 const SAVES = [SAVE_KEY, LAB_SAVE_KEY];
 const KEYS = [APP_KEY, YOU_KEY, AUDIO_KEY, COWRITER_KEY, INSTALL_HINT_KEY];
 const DATABASES = SAVES.flatMap((s) => [`${s}${BESIDE.art}`, `${s}${BESIDE.story}`]);
-const SESSION = [TAB_KEY, CARE_KEY];
 
 /** A localStorage key this game wrote: its own keys, each save, and what is kept beside a save under its name. */
 function gameKey(k: string) {
@@ -35,7 +45,7 @@ function dropKeys() {
   localStorage.removeItem(SAVE_KEY);
   noteClear();
   for (const k of storedKeys(localStorage).filter(gameKey)) localStorage.removeItem(k);
-  for (const k of SESSION) sessionStorage.removeItem(k);
+  for (const k of SESSION_KEYS) sessionStorage.removeItem(k);
 }
 
 /** Resolves once the database is gone (true) or deleting it failed (false); waiting() runs while an open copy holds it. */
@@ -89,7 +99,8 @@ async function dropCaches() {
 
 /** What of this game is still on this device; empty when clearing finished. */
 export async function leftOnDevice(): Promise<string[]> {
-  const left = [...storedKeys(localStorage).filter(gameKey), ...storedKeys(sessionStorage).filter((k) => SESSION.includes(k))];
+  const session = storedKeys(sessionStorage).filter((k) => SESSION_KEYS.includes(k));
+  const left = [...storedKeys(localStorage).filter(gameKey), ...session];
   if (typeof indexedDB !== 'undefined' && typeof indexedDB.databases === 'function')
     for (const { name } of await indexedDB.databases()) if (name && DATABASES.includes(name)) left.push(name);
   if (typeof caches !== 'undefined') left.push(...(await caches.keys()).filter(gameCache));

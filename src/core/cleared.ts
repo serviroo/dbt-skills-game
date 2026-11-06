@@ -7,7 +7,7 @@
  * with the record where it was is another open copy's, and is folded in as usual. Every write to this device goes
  * through write() or mayWrite().
  */
-import { AFTER_CLEAR, CARE_KEY, CLEARED_KEY, SAVE_KEY, TAB_KEY } from './stored-names';
+import { AFTER_CLEAR, CLEARED_KEY, SAVE_KEY, SESSION_KEYS } from './stored-names';
 
 /** What a cleared page shows: its own clear's progress, or one from another copy of the app. */
 export type ClearStatus = 'clearing' | 'waiting' | 'done' | 'failed' | 'elsewhere' | 'elsewhere-done' | 'elsewhere-failed';
@@ -248,7 +248,7 @@ function stop() {
   clearTimeout(holdTimer);
   queued.length = 0;
   waiting.splice(0).forEach((w) => w(false));
-  for (const k of [TAB_KEY, CARE_KEY])
+  for (const k of SESSION_KEYS)
     try {
       sessionStorage.removeItem(k);
     } catch {

@@ -12,6 +12,7 @@ import { Bubbles, scratchTexture } from './bubbles';
 import { Sky } from './sky';
 import { wait } from './clock';
 import { silenceHums } from './moment';
+import { HOME, isEntry, REPLAYED, type Entry } from './history';
 import type { InkPad } from './ink';
 import { dayDiff, Store, type State } from './store';
 import { h, typo } from './ui';
@@ -85,20 +86,6 @@ export interface ScreenOut {
 }
 export type ScreenFn = (app: App, route: Route, visit: Visit) => ScreenOut;
 
-/** One of the companion's entries in the browser's history: a route and a place, never anything typed. */
-interface Entry {
-  dq: 1;
-  /** position from the companion's first entry, which is always Home */
-  i: number;
-  /** one visit to a screen; its places and anything open over it share the key */
-  key: string;
-  route: Route;
-  place?: Place;
-  /** a window, sheet, menu or panel open over the screen */
-  sheet?: true;
-}
-const HOME: Entry = { dq: 1, i: 0, key: 'home', route: { name: 'hub' } };
-const isEntry = (s: unknown): s is Entry => !!s && typeof s === 'object' && (s as Entry).dq === 1 && Number.isInteger((s as Entry).i) && !!(s as Entry).route;
 /** Rooms a move goes back to when they are already behind the player, so moving around never grows history. */
 const ROOMS = new Set<Route['name']>(['library', 'art', 'stories', 'shadows', 'settings', 'diary', 'comfort', 'lines', 'safe', 'rest']);
 const same = (a: Route, b: Route) => JSON.stringify(a) === JSON.stringify(b);
@@ -115,7 +102,7 @@ const buzzLeft = (pattern: readonly number[], ms: number) => {
 };
 
 export interface DailyOpts {
-  onReplay(): void;
+  onReplay(here: unknown, replay: unknown): void;
   /** The player asked for help in the intro: the companion opens on the Safe Zone, with Home's entry behind it. */
   help?: boolean;
   sound?: { play(cue: string): void; setMuted?(muted: boolean): void; quiet?(on: boolean): void };
@@ -369,16 +356,24 @@ export class App {
       this.store.openDay();
       this.lastDay = this.store.today();
     }
-    // Home is always the companion's first history entry. Opened again on a later one (a reload, the intro replayed),
+    // Home is always the companion's first history entry. Opened again on a later one (a reload),
     // it goes back to that first entry: the page opens on Home and nothing is credited again.
     const s: unknown = history.state;
-    if (isEntry(s) && s.i > 0) {
+    const from = isEntry(s) && s.replayed && s.i > 0 && this.known(s.route) ? s : null;
+    let to = from ? 1 : 0;
+    if (from && help) to = from.i;
+    if (isEntry(s) && s.i > to) {
       this.travelling = true;
       try {
-        history.go(-s.i);
+        history.go(to - s.i);
       } catch {
         this.travelling = false;
       }
+    }
+    if (from) {
+      const route: Route = help ? { name: 'safe' } : from.route;
+      const key = this.write('replace', { dq: 1, i: to, key: this.newKey(), route }).key;
+      return this.show(route, { again: false, key, hand: help ? undefined : REPLAYED });
     }
     this.write('replace', HOME);
     if (help) return this.show({ name: 'safe' }, { again: false, key: this.write('push', { dq: 1, i: 1, key: this.newKey(), route: { name: 'safe' } }).key });
@@ -946,6 +941,11 @@ export class App {
     } catch {
       /* sound is optional */
     }
+  }
+
+  replay() {
+    const e: Entry = { ...this.trail[this.at], replayed: true };
+    this.later(() => this.opts.onReplay(e, { ...e, i: e.i + 1, key: this.newKey(), sheet: true }));
   }
 
   /** The Lantern button, a moment's Done, a removed story: back to where the player was before this visit. */

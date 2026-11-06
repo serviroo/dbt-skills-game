@@ -21,6 +21,7 @@ import { STEALTH, STEALTH_LINES } from '../content/stealth-lines';
 import { Slime } from './bubbles';
 import { inventorySection, rosterSection, brambleNap } from './roster';
 import { wardrobePanel } from './wardrobe';
+import { introPanel } from './intro-panel';
 import { DEFAULT_COMPANION, DEFAULT_NAME, readYou } from '../core/you';
 import { BESIDE, READ_SIZES, type ReadSize } from '../core/stored-names';
 import { mayMentionTherapist } from '../core/session';
@@ -1344,7 +1345,7 @@ function welcomeNote(app: App) {
   return app.window({ kind: 'notification', title: LETTER.title, html: `${note}<p class="sys">${LETTER.signoff}</p>${gifts}`, tapToContinue: true }, true);
 }
 
-export function settingsScreen(app: App): ScreenOut {
+export function settingsScreen(app: App, _route: Route, visit: Visit): ScreenOut {
   if (cleared()) return clearedScreen();
   const st = app.store;
   const s = st.state;
@@ -1353,6 +1354,7 @@ export function settingsScreen(app: App): ScreenOut {
   const notSaving = p("This device isn't saving right now (storage may be full or private browsing). Your progress is safe for this visit; a Save Crystal keeps a copy.", `dq-small${st.saving ? ' is-hidden' : ''}`);
   const keeps = browserKeeps();
   const restoreBtn = btn('Restore', () => file.click(), { kind: 'quiet', ic: 'import' });
+  const intro = introPanel(app, visit, () => void welcomeNote(app));
   /** Each choice as it is now: brought back by a Save Crystal, or made in another open copy. */
   const showChoices = () => {
     app.root.querySelectorAll('.dq-settings [aria-label="Motion"] [role="radio"]').forEach((b, i) => b.setAttribute('aria-checked', String(['system', 'reduce', 'full'][i] === s.settings.motion)));
@@ -1733,11 +1735,7 @@ export function settingsScreen(app: App): ScreenOut {
       ),
       panel({ title: 'Crisis lines', ic: icon('phone') }, regionPicker(app, undefined, SAFE.settings)),
       robe.el,
-      panel(
-        { title: 'Intro', ic: icon('replay') },
-        p('The cutscene, the shadows and the chest. As many times as you like.', 'dq-text'),
-        h('div', { class: 'dq-actions' }, btn('Replay cutscene', () => app.opts.onReplay(), { kind: 'quiet', ic: 'replay' }), btn(LETTER.title, () => void welcomeNote(app), { kind: 'quiet', ic: 'book' })),
-      ),
+      intro.el,
       panel(
         { title: 'Your data', ic: icon('export') },
         p('**Saved only on this device.** No account, no tracking.', 'dq-text'),
@@ -1776,6 +1774,7 @@ export function settingsScreen(app: App): ScreenOut {
     title: 'Settings',
     mode: 'sub',
     foot: robe.bar,
+    after: intro.after,
     leave: () => {
       robe.leave();
       offSaving();
