@@ -1,6 +1,11 @@
 jobs:
   plan:
     steps:
+      - id: find
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=e2e-timings&per_page=50"
+          gh run download "$run" -n e2e-timings -D "$RUNNER_TEMP/timings"
+      - run: gh run download 123 -n e2e-timings
       - uses: actions/download-artifact@v8
         with:
           artifact-ids: ${{ steps.find.outputs.artifact }}
@@ -22,6 +27,19 @@ jobs:
       - uses: actions/download-artifact@0123456789012345678901234567890123456789
         with:
           artifact-ids: ''
+  shell_download:
+    steps:
+      - run: gh run download 123 -n e2e-timings
+      - run: gh --repo fixture/game run download 123 -n e2e-timings
+  shell_api:
+    steps:
+      - run: gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/123/zip"
+      - run: gh --hostname github.com api "repos/$GITHUB_REPOSITORY/actions/artifacts/123/zip"
+  multiline_api:
+    steps:
+      - run: |
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts?name=e2e-timings"
   local:
     steps:
       - uses: actions/download-artifact@v8
