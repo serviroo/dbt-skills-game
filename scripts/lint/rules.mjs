@@ -293,39 +293,64 @@ function ownCalls(node, calls = []) {
 const callsSoon = (node) => !!node && !FUNCTIONS.has(node.type) && (
   (node.type === 'CallExpression' && calleeName(node) === 'soon') || children(node).some(callsSoon));
 
-function soonTimes(fn, before) {
-  const names = new Set();
-  for (const p of fn.params) {
-    const timed = p.type === 'AssignmentPattern' && (callsSoon(p.right) || mentions(p.right, names));
-    if (timed && p.left.type === 'Identifier') names.add(p.left.name);
+function bindsTime(node) {
+  if (node.type === 'VariableDeclarator') return [node.id, node.init];
+  if (node.type === 'AssignmentExpression' && node.operator === '=') return [node.left, node.right];
+  return [null, null];
+}
+
+function ownNodes(node, found = []) {
+  for (const child of children(node)) {
+    if (FUNCTIONS.has(child.type)) continue;
+    found.push(child);
+    ownNodes(child, found);
   }
-  const visit = (node) => {
-    for (const child of children(node)) {
-      if (FUNCTIONS.has(child.type)) continue;
-      const early = child.range[1] <= before;
-      const declared = child.type === 'VariableDeclarator' && child.id.type === 'Identifier';
-      if (declared && (callsSoon(child.init) ? early : mentions(child.init, names))) {
-        names.add(child.id.name);
-      }
-      visit(child);
-    }
+  return found;
+}
+
+function soonTimes(context, fn, before) {
+  const times = new Set();
+  const add = (id) => {
+    const v = id?.type === 'Identifier' ? variableOf(context, id) : null;
+    if (v) times.add(v);
   };
-  visit(fn.body);
-  return names;
+  for (const p of fn.params) {
+    if (p.type === 'AssignmentPattern' && (callsSoon(p.right) || mentions(context, p.right, times))) add(p.left);
+  }
+  for (const node of ownNodes(fn.body)) {
+    const [id, value] = bindsTime(node);
+    if (id && (callsSoon(value) ? node.range[1] <= before : mentions(context, value, times))) add(id);
+  }
+  return times;
 }
 
-function mentions(node, names) {
+function refreshed(context, fn, from, to) {
+  const fresh = new Set();
+  for (const node of ownNodes(fn.body)) {
+    const [id, value] = bindsTime(node);
+    const inside = node.range[0] >= from && node.range[1] <= to;
+    if (inside && id?.type === 'Identifier' && callsSoon(value)) fresh.add(variableOf(context, id));
+  }
+  return fresh;
+}
+
+function mentions(context, node, times) {
   if (!node) return false;
-  if (node.type === 'Identifier') return names.has(node.name);
-  if (node.type === 'MemberExpression' && !node.computed) return mentions(node.object, names);
-  if (node.type === 'Property' && !node.computed) return mentions(node.value, names);
-  return children(node).some((child) => mentions(child, names));
+  if (node.type === 'Identifier') return times.has(variableOf(context, node) ?? node);
+  if (node.type === 'MemberExpression' && !node.computed) return mentions(context, node.object, times);
+  if (node.type === 'Property' && !node.computed) return mentions(context, node.value, times);
+  return children(node).some((child) => mentions(context, child, times));
 }
 
-function unshadowed(fn, names) {
-  const own = new Set((fn?.params ?? []).map((p) => (p.type === 'AssignmentPattern' ? p.left : p).name));
-  return new Set([...names].filter((name) => !own.has(name)));
+function loadsEcho(call, loads) {
+  const name = calleeName(call);
+  if (LOADS_ECHO.has(name)) return true;
+  const { callee } = call;
+  const own = callee.type === 'Identifier' || callee.object?.type === 'ThisExpression';
+  return own && loads.has(name);
 }
+
+const logs = (call) => call.callee.object?.type === 'Identifier' && call.callee.object.name === 'console';
 
 const scheduleBeforeEchoLoads = {
   meta: {
@@ -347,21 +372,21 @@ const scheduleBeforeEchoLoads = {
           grew = false;
           for (const fn of fns) {
             const name = nameOf(fn);
-            if (!name || loads.has(name) || !ownCalls(fn.body).some((c) => loads.has(calleeName(c)))) continue;
+            if (!name || loads.has(name) || !ownCalls(fn.body).some((c) => loadsEcho(c, loads))) continue;
             loads.add(name);
             grew = true;
           }
         }
         for (const fn of fns) {
           const calls = ownCalls(fn.body).sort((a, b) => a.range[0] - b.range[0]);
-          const loaded = calls.filter((c) => loads.has(calleeName(c)));
+          const loaded = calls.filter((c) => loadsEcho(c, loads));
           for (const c of calls) {
             const load = loaded.findLast((l) => l !== c && l.range[1] <= c.range[1]);
-            if (!load) continue;
-            const times = soonTimes(fn, load.range[0]);
-            const passed = c.arguments.some((a) => mentions(a, times));
-            const fnOf = functionOf(context, c.callee);
-            const inside = mentions(fnOf?.body, unshadowed(fnOf, times));
+            if (!load || logs(c)) continue;
+            const fresh = refreshed(context, fn, load.range[1], c.range[0]);
+            const times = new Set([...soonTimes(context, fn, load.range[0])].filter((v) => !fresh.has(v)));
+            const passed = c.arguments.some((a) => mentions(context, a, times));
+            const inside = mentions(context, functionOf(context, c.callee)?.body, times);
             if (passed || inside) context.report({ node: c, messageId: 'late' });
           }
         }

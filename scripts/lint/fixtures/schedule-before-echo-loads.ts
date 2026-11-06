@@ -69,6 +69,40 @@ export class Engine {
     this.out.gain.setTargetAtTime(0, at + e.channelCount, 0.01);
   }
 
+  peer = { reset() {} };
+
+  assigned() {
+    let at = 0;
+    at = soon(this.ctx);
+    this.echo = this.makeEcho();
+    this.out.gain.setTargetAtTime(0, at, 0.01);
+  }
+
+  refreshedAfter(at = soon(this.ctx)) {
+    this.echo = this.makeEcho();
+    at = soon(this.ctx);
+    this.out.gain.setTargetAtTime(0, at, 0.01);
+  }
+
+  blockLocal(at = soon(this.ctx)) {
+    this.out.gain.setTargetAtTime(0, at, 0.01);
+    this.echo = this.makeEcho();
+    {
+      const at = soon(this.ctx);
+      this.out.gain.setTargetAtTime(1, at, 0.01);
+    }
+  }
+
+  unrelated(at = soon(this.ctx)) {
+    this.peer.reset();
+    this.out.gain.setTargetAtTime(0, at, 0.01);
+  }
+
+  logged(at = soon(this.ctx)) {
+    this.echo = this.makeEcho();
+    console.debug(at);
+  }
+
   twice() {
     this.echo = this.makeEcho();
     const at = soon(this.ctx);

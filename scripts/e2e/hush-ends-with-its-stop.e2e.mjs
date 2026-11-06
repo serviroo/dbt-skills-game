@@ -27,6 +27,22 @@ export const scenarios = {
             e.reset(0.6, press);
             e.stopAll(SCORE.leaveSec, press + 0.1);
           },
+          'a slower stop after Skip': (e) => {
+            e.hush(0);
+            e.stopAll(SCORE.leaveSec, press);
+            e.stopAll(0.6, press + 0.05);
+          },
+          'Skip without cancelAndHoldAtTime': (e) => {
+            const hold = AudioParam.prototype.cancelAndHoldAtTime;
+            delete AudioParam.prototype.cancelAndHoldAtTime;
+            try {
+              e.bed('gate_hum', { at: 0, level: 20, fadeIn: 0.05 });
+              e.hush(0);
+              e.stopAll(SCORE.leaveSec, press);
+            } finally {
+              AudioParam.prototype.cancelAndHoldAtTime = hold;
+            }
+          },
           'Skip before an unhush set for later': (e) => {
             e.hush(0);
             e.unhush(1.5);

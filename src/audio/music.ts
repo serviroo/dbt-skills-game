@@ -1111,7 +1111,7 @@ export const AHEAD = 0.7;
 
 /** The score. Sections crossfade; notes are scheduled ahead in windows (live) or all at once (offline). */
 export class Music {
-  private live: Live[] = [];
+  live: Live[] = [];
   current: Section | null = null;
   constructor(
     private host: MusicHost,

@@ -555,7 +555,9 @@ export class AudioEngine {
 
   /** End an open-ended hush (awaken_hit does this itself). */
   unhush(at = soon(this.ctx)) {
-    this.release(this.endHush(at, 0.0015), at, 0.02);
+    const open = this.takeHush();
+    this.endHush(at, 0.0015);
+    this.release(open, at, 0.02);
   }
 
   /**
@@ -572,12 +574,14 @@ export class AudioEngine {
       else p.setTargetAtTime(1, at, Math.max(0.003, sec / 4));
     }
     if (on) {
-      this.release([...this.active, ...this.fading, ...this.stopHush(at, sec)], at, sec);
+      const voices = [...this.active, ...this.fading, ...this.takeHush()];
+      this.release(voices, at, sec);
       this.active.clear();
       for (const c of this.named.values()) c.stop(at, sec);
       this.named.clear();
       this.charge?.stop(at, sec);
       for (const e of [...this.closing.keys()]) this.closeEcho(e, at, sec);
+      this.stopHush(at, sec, voices);
       return;
     }
     const old = this.echo;
@@ -629,17 +633,19 @@ export class AudioEngine {
     this.duckG.gain.setTargetAtTime(dB(db), at, Math.max(0.003, ramp / 4));
   }
 
-  private stopHush(at: number, fade: number) {
-    this.hushHeldUntil = stoppedBy(at, fade);
-    return this.endHush(at, Math.max(0.003, fade / 4));
+  private stopHush(at: number, fade: number, stopped: Voice[]) {
+    const others = [...this.music.live.map((s) => s.voice), ...(this.charge ? [this.charge.voice] : [])];
+    const ends = [...stopped, ...others].map((v) => v.silentAt).filter(Number.isFinite);
+    const echoes = [...this.closing.values()].map((c) => c.by);
+    this.hushHeldUntil = Math.max(at, ...ends, ...echoes);
+    this.endHush(at, Math.max(0.003, fade / 4));
   }
 
   private endHush(at: number, tau: number) {
     for (const g of [this.hushBeds.gain, this.hushMusic.gain, this.hushHall.gain, this.hushRoom.gain]) {
-      holdAt(g, at);
+      g.cancelScheduledValues(at);
       g.setTargetAtTime(1, Math.max(at, this.hushHeldUntil), tau);
     }
-    return this.takeHush();
   }
 
   private release(voices: Voice[], at: number, ramp: number) {
@@ -668,10 +674,12 @@ export class AudioEngine {
     if (!this.isQuiet) for (const e of [old, ...this.closing.keys()]) this.closeEcho(e, at, fade);
     this.charge?.stop(at, fade);
     const voices = [...this.active, ...[...this.beds.values()].map((b) => b.voice), ...this.fading];
-    this.release([...voices, ...this.stopHush(at, fade)], at, fade);
+    const stopped = [...voices, ...this.takeHush()];
+    this.release(stopped, at, fade);
     this.active.clear();
     this.beds.clear();
     this.music.stop(fade, at);
+    this.stopHush(at, fade, stopped);
     if (this.isQuiet) return;
     // what plays from here on gets an empty echo with sends of its own at once. What was stopped keeps the old one, whose
     // return closes as they fade, until they are silent and it is dropped, timed on the audio clock, which stands still
