@@ -349,12 +349,11 @@ const scheduleBeforeEchoLoads = {
         }
         for (const fn of fns) {
           const calls = ownCalls(fn.body).sort((a, b) => a.range[0] - b.range[0]);
-          const load = calls.find((c) => loads.has(calleeName(c)));
-          if (!load) continue;
-          const times = soonTimes(fn, load.range[0]);
-          if (!times.size) continue;
+          const loaded = calls.filter((c) => loads.has(calleeName(c)));
           for (const c of calls) {
-            if (c.range[0] < load.range[1]) continue;
+            const load = loaded.findLast((l) => l.range[1] <= c.range[0]);
+            if (!load) continue;
+            const times = soonTimes(fn, load.range[0]);
             const passed = c.arguments.some((a) => mentions(a, times));
             const inside = mentions(localFunction(context, c.callee), times);
             if (passed || inside) context.report({ node: c, messageId: 'late' });

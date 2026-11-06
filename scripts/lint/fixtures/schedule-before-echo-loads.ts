@@ -32,6 +32,13 @@ export class Engine {
     rise(this.out);
   }
 
+  twice() {
+    this.echo = this.makeEcho();
+    const at = soon(this.ctx);
+    this.echo = this.makeEcho();
+    this.out.gain.setTargetAtTime(1, at, 0.01);
+  }
+
   swap() {
     this.echo = this.makeEcho();
     const at = soon(this.ctx);

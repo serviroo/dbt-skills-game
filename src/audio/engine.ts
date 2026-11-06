@@ -547,6 +547,7 @@ export class AudioEngine {
       g.gain.setValueAtTime(0.065, to - 0.01);
       g.gain.linearRampToValueAtTime(0, to + 0.02);
       v.stop(to + 0.02, 0.02);
+      this.letGo(v);
     }
     this.hushV = to === undefined ? v : null;
     this.music.onHush(at);
@@ -646,8 +647,8 @@ export class AudioEngine {
    *  leaving the quiet brings the empty one (see quiet). */
   stopAll(fade = 0.4, at = soon(this.ctx)) {
     this.charge?.stop(at, fade);
-    const hush = this.hushV ? [this.hushV] : [];
-    for (const v of [...this.active, ...[...this.beds.values()].map((b) => b.voice), ...this.fading, ...hush]) {
+    const open = this.hushV ? [this.hushV] : [];
+    for (const v of [...this.active, ...[...this.beds.values()].map((b) => b.voice), ...this.fading, ...open]) {
       v.stop(at, fade);
       this.letGo(v);
     }
