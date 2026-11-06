@@ -44,6 +44,8 @@ Both are self-hosted and subset by `scripts/fonts.mjs`.
 
 - The river stone in Wise Mind's calm scene (`public/models/stone.glb`): modelled, textured and baked in Blender for
   this game, then packed with its colour, roughness and normal maps as WebP.
+- The companion moth on its reward card (`public/models/moth.glb`): modelled, its wings patterned and its fur shaded in
+  Blender by `scripts/build-moth.py`, baked to one texture set and packed for the web by `scripts/build-moth.mjs`.
 
 ## Skies
 

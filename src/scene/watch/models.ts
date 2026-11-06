@@ -8,7 +8,6 @@ import { siteUrl } from '../../core/base';
  * wings as their own nodes. Loaded once a visit, before the first camp is built; a failed load is tried again the next
  * time the camp opens.
  */
-let loading: Promise<void> | null = null;
 let nodes: Map<string, THREE.Object3D> | null = null;
 
 /** Where each part of each watcher sits once loaded, in its figure's space, as min and max x, y, z: for the E2E checks. */
@@ -17,30 +16,42 @@ interface WatchHook {
 }
 const hook: WatchHook = ((window as unknown as { __watch?: WatchHook }).__watch ??= { parts: {} });
 
-export function loadWatch(): Promise<void> {
-  loading ??= new GLTFLoader()
-    .loadAsync(siteUrl('models/watch.glb'))
-    .then((g) => {
-      g.scene.updateMatrixWorld(true);
-      const made = new Map<string, THREE.BufferGeometry>();
-      const box = new THREE.Box3();
-      for (const fig of g.scene.children) {
-        for (const part of fig.children) {
-          settle(part, made);
-          part.updateMatrixWorld(true);
-          box.setFromObject(part);
-          hook.parts[part.name] = [...box.min.toArray(), ...box.max.toArray()];
-        }
-      }
-      nodes = new Map(g.scene.children.map((c) => [c.name, c]));
-    })
-    // a throw while settling the parts counts as a failed load too, so the next camp tries again
-    .catch((err: unknown) => {
-      loading = null;
-      throw err;
-    });
-  return loading;
+export function loadOnce(load: () => Promise<void>): () => Promise<void> {
+  let loading: Promise<void> | null = null;
+  return () =>
+    (loading ??= load()
+      // a throw while settling the parts counts as a failed load too, so the next camp tries again
+      .catch((err: unknown) => {
+        loading = null;
+        throw err;
+      }));
 }
+
+export async function loadFigures(
+  file: string,
+  boxes: Record<string, number[]>,
+  figures = (scene: THREE.Object3D) => scene.children,
+): Promise<THREE.Object3D[]> {
+  const g = await new GLTFLoader().loadAsync(siteUrl(file));
+  g.scene.updateMatrixWorld(true);
+  const made = new Map<string, THREE.BufferGeometry>();
+  const box = new THREE.Box3();
+  const figs = figures(g.scene);
+  for (const fig of figs) {
+    for (const part of fig.children) {
+      settle(part, made);
+      part.updateMatrixWorld(true);
+      box.setFromObject(part);
+      boxes[part.name] = [...box.min.toArray(), ...box.max.toArray()];
+    }
+  }
+  return figs;
+}
+
+export const loadWatch = loadOnce(async () => {
+  const figs = await loadFigures('models/watch.glb', hook.parts);
+  nodes = new Map(figs.map((c) => [c.name, c]));
+});
 
 /**
  * The file's positions are quantized, each part scaled back into place by its node. That goes into a copy of the

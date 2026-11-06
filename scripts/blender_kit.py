@@ -585,7 +585,7 @@ def glow(name, color, strength):
     return m
 
 
-def metaball(coll, name, elements, material, res, fur=0.0, decimate=None):
+def metaball(coll, name, elements, material, res, fur=0.0, grain=0.045, decimate=None):
     """a smooth organic body from metaball elements (each: co, surface radius r, size s, rotation);
     returns the object"""
     mb = bpy.data.metaballs.new(name)
@@ -597,7 +597,7 @@ def metaball(coll, name, elements, material, res, fur=0.0, decimate=None):
         el.co = B(V(e['co']))
         # stiff elements blend only where they nearly touch, so masses stay distinct: alone, one meets the threshold at
         # 0.78 of its radius (stiffness 10, threshold 0.6)
-        el.stiffness = 10.0
+        el.stiffness = e.get('stiff', 10.0)
         el.radius = e['r'] / 0.78
         sx, sy, sz = e.get('s', (1, 1, 1))
         el.size_x, el.size_y, el.size_z = sx, sz, sy
@@ -618,7 +618,7 @@ def metaball(coll, name, elements, material, res, fur=0.0, decimate=None):
     if fur:
         # shaggy fur in the silhouette: clumps a few centimetres across
         tex = bpy.data.textures.new(f'{name}-furtex', 'CLOUDS')
-        tex.noise_scale = 0.045
+        tex.noise_scale = grain
         tex.noise_depth = 2
         d = o.modifiers.new('fur', 'DISPLACE')
         d.texture = tex
@@ -671,21 +671,22 @@ def assemble(coll, f, group=lambda role: role):
     return root
 
 
-def slim(parts, target):
+def slim(parts, target, big=160, delimit=('NORMAL', 'SHARP'), slims=lambda role: True):
     """collapses the bigger pieces evenly so the figure comes in near its triangle budget;
     small pieces keep their shape"""
-    count = lambda o: sum(len(p.vertices) - 2 for p in o.data.polygons)
-    sizes = [(o, count(o)) for o, _ in parts]
-    big = sum(n for _, n in sizes if n > 160)
-    small = sum(n for _, n in sizes if n <= 160)
-    r = max(0.2, min(1.0, (target - small) / max(1, big)))
+    def count(o):
+        return sum(len(p.vertices) - 2 for p in o.data.polygons)
+    sizes = [(o, count(o) if slims(role) else 0) for o, role in parts]
+    heavy = sum(n for _, n in sizes if n > big)
+    small = sum(count(o) for o, _ in parts) - heavy
+    r = max(0.2, min(1.0, (target - small) / max(1, heavy)))
     if r >= 0.999:
         return
     for o, n in sizes:
-        if n > 160:
+        if n > big:
             d = o.modifiers.new('slim', 'DECIMATE')
             d.ratio = r
-            d.delimit = {'NORMAL', 'SHARP'}
+            d.delimit = set(delimit)
             apply_mods(o)
 
 
