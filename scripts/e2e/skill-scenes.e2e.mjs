@@ -15,6 +15,7 @@ import sharp from 'sharp';
 import { deviceMotion } from './device-motion.e2e.mjs';
 import { gone, screenshot, until as pageUntil } from './harness.mjs';
 import { after, scenes, showsStopped, steps } from './scene-clock.mjs';
+import { holdSceneFences } from './scene-fences.mjs';
 
 export { after, scenes, showsStopped, steps };
 
@@ -238,21 +239,8 @@ export function inStep(h, { s, num }, where) {
  */
 async function oneSlowFrame(h, hz) {
   const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
-  await ctx.addInitScript(() => {
-    window.__blank = 0;
-    const P = WebGL2RenderingContext.prototype;
-    const make = P.fenceSync, get = P.getSyncParameter;
-    let first = null;
-    P.fenceSync = function (...args) {
-      const f = make.apply(this, args);
-      if (!first && this.canvas.closest?.('.dq-scene')) first = { f, at: performance.now() };
-      return f;
-    };
-    P.getSyncParameter = function (f, pname) {
-      if (first && f === first.f && pname === this.SYNC_STATUS && performance.now() - first.at < 600) return this.UNSIGNALED;
-      return get.call(this, f, pname);
-    };
-  });
+  await ctx.addInitScript(() => (window.__blank = 0));
+  await holdSceneFences(ctx, ({ n, at }) => n === 0 && performance.now() - at < 600);
   await page.clock.install();
   await page.reload();
   await home(h, page);
@@ -310,7 +298,7 @@ async function oneSlowFrame(h, hz) {
  */
 export async function slowGpu(h, { late = false, vp = DESK, reach = toStone, more = 2, cost = [60000, 1000], tag = late ? 'slow-gpu-late-desk' : 'slow-gpu-desk' } = {}) {
   const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
-  await ctx.addInitScript(([late, [free, perMs]]) => {
+  await ctx.addInitScript(([free, perMs]) => {
     window.__gpuMs = 0;
     // frames whose added work went over the scene's 30 fps budget
     window.__overBudget = 0;
@@ -334,20 +322,9 @@ export async function slowGpu(h, { late = false, vp = DESK, reach = toStone, mor
         return r;
       };
     }
-    if (!late) return;
-    const make = P.fenceSync, get = P.getSyncParameter;
-    let first = null;
-    P.fenceSync = function (...args) {
-      const f = make.apply(this, args);
-      if (!first && this.canvas.closest?.('.dq-scene')) first = f;
-      return f;
-    };
-    // the first frame is done once the countdown shows 3 s left
-    P.getSyncParameter = function (f, pname) {
-      if (f === first && pname === this.SYNC_STATUS && Number(document.querySelector('.dq-timer-num')?.textContent) > 3) return this.UNSIGNALED;
-      return get.call(this, f, pname);
-    };
-  }, [late, cost]);
+  }, cost);
+  // the first frame is done once the countdown shows 3 s left
+  if (late) await holdSceneFences(ctx, ({ n }) => n === 0 && +document.querySelector('.dq-timer-num')?.textContent > 3);
   await page.reload();
   await reach(h, page);
   // held that long, the first frame outlasts live()'s wait
@@ -967,20 +944,9 @@ export const scenarios = {
   async 'scene-flat-handoff'(h) {
     for (const k of [{ kind: 'drift', id: 'wise-mind', entry: 'stone' }, ...KINDS]) {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
-      await ctx.addInitScript(() => {
-        // each scene's first frame stays undrawn until the scenario lets it through, however long the page took to get here
-        const P = WebGL2RenderingContext.prototype, make = P.fenceSync, get = P.getSyncParameter, held = new WeakSet();
-        window.__holdFirstFrame = true;
-        P.fenceSync = function (...args) {
-          const f = make.apply(this, args);
-          if (this.canvas.closest?.('.dq-scene')) held.add(f);
-          return f;
-        };
-        P.getSyncParameter = function (f, pname) {
-          if (window.__holdFirstFrame && held.has(f) && pname === this.SYNC_STATUS) return this.UNSIGNALED;
-          return get.call(this, f, pname);
-        };
-      });
+      // each scene's first frame stays undrawn until the scenario lets it through, however long the page took to get here
+      await ctx.addInitScript(() => (window.__holdFirstFrame = true));
+      await holdSceneFences(ctx, () => window.__holdFirstFrame);
       await page.clock.install();
       await page.reload();
       await toStep(h, page, k.id, k.entry, { pause: true });

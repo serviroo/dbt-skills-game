@@ -44,8 +44,11 @@ async function stepWhenDrawn(page, stage) {
  * time then starts from where it first shows, however long the GPU took, and moves only when a check moves it.
  */
 export async function showsStopped(h, page, where, stage = '.dq-timer-stage') {
-  const live = async () =>
-    (await page.locator(`${stage}.is-scene-live`).count()) > 0 || (await stepWhenDrawn(page, stage), false);
+  const live = async () => {
+    if ((await page.locator(`${stage}.is-scene-live`).count()) > 0) return true;
+    await stepWhenDrawn(page, stage);
+    return false;
+  };
   const missing = `${where}: the 3D scene never came on screen`;
   await h.poll(page, live, Boolean, missing, { timeout: 30000, polling: 0 }).catch(async (e) => {
     await h.shot(page, `fail-${where.replace(/\W+/g, '-')}`);

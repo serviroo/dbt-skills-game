@@ -34,6 +34,7 @@ import {
   toSkill,
   until,
 } from './skill-scenes.e2e.mjs';
+import { holdSceneFences } from './scene-fences.mjs';
 
 const SMALL = { width: 320, height: 568 };
 /** the sizes reduced motion, a lost context and a slow GPU are checked at */
@@ -153,15 +154,14 @@ export const scenarios = {
 
   async 'hands-slow-first-frame'(h) {
     const { ctx, page, errors } = await h.open(seed(h), '?mute', DESK);
-    await ctx.addInitScript(([stallMs, busyMs]) => {
+    await ctx.addInitScript((stallMs) => {
       const P = WebGL2RenderingContext.prototype;
       const realNow = performance.now.bind(performance);
-      const slow = (window.__slowFirstFrame = { stalled: false, busyUntil: 0 });
-      const inScene = (gl) => !!gl.canvas.closest?.('.dq-scene');
+      const slow = (window.__slowFirstFrame = { stalled: false, busyUntil: 0, now: realNow });
       for (const name of ['drawArrays', 'drawElements', 'drawArraysInstanced', 'drawElementsInstanced']) {
         const draw = P[name];
         P[name] = function (...args) {
-          if (!slow.stalled && inScene(this)) {
+          if (!slow.stalled && this.canvas.closest?.('.dq-scene')) {
             slow.stalled = true;
             const until = realNow() + stallMs;
             while (realNow() < until);
@@ -169,13 +169,12 @@ export const scenarios = {
           return draw.apply(this, args);
         };
       }
-      const status = P.getSyncParameter;
-      P.getSyncParameter = function (fence, name) {
-        if (name !== this.SYNC_STATUS || !inScene(this)) return status.call(this, fence, name);
-        slow.busyUntil ||= realNow() + busyMs;
-        return realNow() < slow.busyUntil ? this.UNSIGNALED : status.call(this, fence, name);
-      };
-    }, [2000, 6000]);
+    }, 2000);
+    await holdSceneFences(ctx, () => {
+      const slow = window.__slowFirstFrame;
+      slow.busyUntil ||= slow.now() + 6000;
+      return slow.now() < slow.busyUntil;
+    });
     await openStopped(h, page, toHands, 'hands slow first frame');
     const slow = await page.evaluate(() => window.__slowFirstFrame);
     h.expect(slow.stalled && slow.busyUntil > 0, `hands slow first frame: no slow GPU: ${JSON.stringify(slow)}`);

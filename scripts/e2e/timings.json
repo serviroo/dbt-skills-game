@@ -347,7 +347,7 @@
   "hands-context-loss": [51, 27],
   "hands-no-webgl": [17, 22],
   "hands-scene": [122, 147],
-  "hands-slow-first-frame": [10],
+  "hands-slow-first-frame": [20],
   "hands-slow-gpu": [38, 32],
   "hands-steps": [50, 51],
   "hands-still": [123, 71],
