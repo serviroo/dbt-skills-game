@@ -272,7 +272,7 @@ const handleLostGpuContext = {
   },
 };
 
-const LOADS_ECHO = new Set(['createConvolver', 'makeIR']);
+const LOADS_ECHO = new Set(['createConvolver', 'makeIR', 'ConvolverNode']);
 
 const calleeName = (call) => methodName(call) ?? (call.callee.type === 'Identifier' ? call.callee.name : null);
 
@@ -285,12 +285,12 @@ function nameOf(fn) {
 }
 
 function ownCalls(node, calls = []) {
-  if (node.type === 'CallExpression') calls.push(node);
+  if (node.type === 'CallExpression' || node.type === 'NewExpression') calls.push(node);
   for (const child of children(node)) if (!FUNCTIONS.has(child.type)) ownCalls(child, calls);
   return calls;
 }
 
-const callsSoon = (node) => !!node && (
+const callsSoon = (node) => !!node && !FUNCTIONS.has(node.type) && (
   (node.type === 'CallExpression' && calleeName(node) === 'soon') || children(node).some(callsSoon));
 
 function soonTimes(fn, before) {
@@ -314,14 +314,12 @@ function soonTimes(fn, before) {
   return names;
 }
 
-const mentions = (node, names) => !!node && (
-  (node.type === 'Identifier' && names.has(node.name)) || children(node).some((child) => mentions(child, names)));
-
-function localFunction(context, callee) {
-  if (callee.type !== 'Identifier') return null;
-  const def = variableOf(context, callee)?.defs[0]?.node;
-  const fn = def?.type === 'VariableDeclarator' ? def.init : def;
-  return FUNCTIONS.has(fn?.type) ? fn : null;
+function mentions(node, names) {
+  if (!node) return false;
+  if (node.type === 'Identifier') return names.has(node.name);
+  if (node.type === 'MemberExpression' && !node.computed) return mentions(node.object, names);
+  if (node.type === 'Property' && !node.computed) return mentions(node.value, names);
+  return children(node).some((child) => mentions(child, names));
 }
 
 const scheduleBeforeEchoLoads = {
@@ -357,7 +355,7 @@ const scheduleBeforeEchoLoads = {
             if (!load) continue;
             const times = soonTimes(fn, load.range[0]);
             const passed = c.arguments.some((a) => mentions(a, times));
-            const inside = mentions(localFunction(context, c.callee), times);
+            const inside = mentions(functionOf(context, c.callee), times);
             if (passed || inside) context.report({ node: c, messageId: 'late' });
           }
         }

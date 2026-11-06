@@ -21,7 +21,7 @@ const RULE_FINDINGS = {
   'stored-writes-go-through-cleared': 2,
   'tap-elements-not-points': 3,
   'handle-lost-gpu-context': 3,
-  'schedule-before-echo-loads': 5,
+  'schedule-before-echo-loads': 6,
 };
 
 function checkRules() {

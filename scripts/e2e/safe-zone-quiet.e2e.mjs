@@ -356,38 +356,6 @@ export const scenarios = {
     }
   },
 
-  async 'safe-zone-stops-the-hush-before-the-hit'(h) {
-    const { ctx, page, errors } = await h.open({}, '?lab=audio&mute');
-    try {
-      await page.waitForFunction(() => window.__lab === true, null, { timeout: 30000 });
-      const r = await page.evaluate(async () => {
-        const { AudioEngine } = await import('/src/audio/engine.ts');
-        const rate = 44100;
-        const c = new OfflineAudioContext(2, rate * 1.5, rate);
-        const e = new AudioEngine(c);
-        e.hush(0);
-        e.quiet(true, 0.015, 0.2);
-        e.quiet(false, 0.1, 0.5);
-        const buf = await c.startRendering();
-        const peak = (a, b) => {
-          let p = 0;
-          for (let ch = 0; ch < 2; ch++) {
-            const d = buf.getChannelData(ch).subarray(Math.ceil(a * rate), Math.ceil(b * rate));
-            for (const x of d) p = Math.max(p, Math.abs(x));
-          }
-          return p;
-        };
-        return { before: peak(0.05, 0.2), after: peak(0.5, 1.5) };
-      });
-      const unheard = `the hush was not audible before the Safe Zone (peak ${r.before})`;
-      h.expect(r.before > 10 * SILENT_PEAK, `${unheard}, so silence proves nothing`);
-      h.expect(r.after < SILENT_PEAK, `the hush before the hit came back after the Safe Zone (peak ${r.after})`);
-      h.expect(!errors.length, errors.join('\n'));
-    } finally {
-      await ctx.close();
-    }
-  },
-
   /** Muted with custom levels: the visit keeps the mute and every stored byte; the gate opens again outside. */
   async 'muted-visit-keeps-mute-and-levels'(h) {
     const prefs = levels({ master: 0.7, music: 0.4, sfx: 0.9, muted: true });

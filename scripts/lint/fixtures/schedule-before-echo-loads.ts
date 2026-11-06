@@ -38,6 +38,21 @@ export class Engine {
     this.out.gain.linearRampToValueAtTime(0, end);
   }
 
+  keyed(at = soon(this.ctx)) {
+    this.out.gain.setTargetAtTime(0, at, 0.01);
+    this.echo = this.makeEcho();
+    this.note({ at: 0 }, this.echo);
+  }
+
+  note(o: { at: number }, e: ConvolverNode) {
+    return o.at + e.channelCount;
+  }
+
+  built(at = soon(this.ctx)) {
+    this.echo = new ConvolverNode(this.ctx);
+    this.out.gain.setTargetAtTime(0, at, 0.01);
+  }
+
   twice() {
     this.echo = this.makeEcho();
     const at = soon(this.ctx);

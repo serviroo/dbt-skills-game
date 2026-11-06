@@ -541,7 +541,10 @@ export class AudioEngine {
       p.setTargetAtTime(0.008, at, 0.007);
       if (to !== undefined) p.setTargetAtTime(1, to, 0.0015);
     }
-    this.hushV?.stop(at, 0.02);
+    for (const old of this.takeHush()) {
+      old.stop(at, 0.02);
+      this.letGo(old);
+    }
     v.open(at);
     if (to !== undefined) {
       g.gain.setValueAtTime(0.065, to - 0.01);
@@ -555,12 +558,10 @@ export class AudioEngine {
 
   /** End an open-ended hush (awaken_hit does this itself). */
   unhush(at = soon(this.ctx)) {
-    for (const g of [this.hushBeds.gain, this.hushMusic.gain, this.hushHall.gain, this.hushRoom.gain]) {
-      g.cancelScheduledValues(at);
-      g.setTargetAtTime(1, at, 0.0015);
+    for (const v of this.endHush(at, 0.0015)) {
+      v.stop(at, 0.02);
+      this.letGo(v);
     }
-    this.hushV?.stop(at, 0.02);
-    this.hushV = null;
   }
 
   /**
@@ -577,7 +578,7 @@ export class AudioEngine {
       else p.setTargetAtTime(1, at, Math.max(0.003, sec / 4));
     }
     if (on) {
-      for (const v of [...this.active, ...this.fading, ...this.takeHush()]) {
+      for (const v of [...this.active, ...this.fading, ...this.endHush(at, Math.max(0.003, sec / 4))]) {
         v.stop(at, sec);
         this.letGo(v);
       }
@@ -637,6 +638,14 @@ export class AudioEngine {
     this.duckG.gain.setTargetAtTime(dB(db), at, Math.max(0.003, ramp / 4));
   }
 
+  private endHush(at: number, tau: number) {
+    for (const g of [this.hushBeds.gain, this.hushMusic.gain, this.hushHall.gain, this.hushRoom.gain]) {
+      g.cancelScheduledValues(at);
+      g.setTargetAtTime(1, at, tau);
+    }
+    return this.takeHush();
+  }
+
   private takeHush() {
     const v = this.hushV;
     this.hushV = null;
@@ -654,7 +663,7 @@ export class AudioEngine {
   stopAll(fade = 0.4, at = soon(this.ctx)) {
     this.charge?.stop(at, fade);
     const voices = [...this.active, ...[...this.beds.values()].map((b) => b.voice), ...this.fading];
-    for (const v of [...voices, ...this.takeHush()]) {
+    for (const v of [...voices, ...this.endHush(at, Math.max(0.003, fade / 4))]) {
       v.stop(at, fade);
       this.letGo(v);
     }
@@ -709,7 +718,6 @@ export class AudioEngine {
     set(this.focus.gain, 1);
     set(this.yieldG.gain, 1);
     this.lifted = false;
-    for (const g of [this.hushBeds.gain, this.hushMusic.gain, this.hushHall.gain, this.hushRoom.gain]) set(g, 1);
     this.stopAll(fade, at);
   }
 
