@@ -15,7 +15,7 @@ const expect = (ok, message) => ok || failures.push(message);
 
 const RULE_FINDINGS = {
   'audio-times-from-soon': 2,
-  'hold-reads-the-scheduled-curve': 8,
+  'hold-reads-the-scheduled-curve': 26,
   'held-times-are-clamped': 4,
   'animations-share-start-time': 1,
   'follow-device-preferences': 1,

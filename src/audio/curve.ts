@@ -10,13 +10,9 @@ export class Curve {
   private events: Event[] = [];
   private initial: number;
 
-  constructor(private param: AudioParam, private ctx: BaseAudioContext, initial = param.value) {
+  constructor(private param: AudioParam, private ctx: BaseAudioContext, initial: number) {
     this.param.value = initial;
     this.initial = Math.fround(initial);
-  }
-
-  get size() {
-    return this.events.length;
   }
 
   valueAt(t: number) {
@@ -25,6 +21,11 @@ export class Curve {
 
   clampTime(t: number) {
     return Math.max(t, this.ctx.currentTime);
+  }
+
+  private rampStart(event: Event, previous?: Event) {
+    return previous?.kind === 'target'
+      ? Math.max(previous.time, event.calledAt) : previous?.time ?? event.calledAt;
   }
 
   private compact() {
@@ -48,9 +49,7 @@ export class Curve {
     };
     for (const event of events) {
       if (event.kind === 'linear' && t < event.time) {
-        const start = previous?.kind === 'target'
-          ? Math.max(previous.time, event.calledAt)
-          : previous?.time ?? event.calledAt;
+        const start = this.rampStart(event, previous);
         if (t < start) return targetAt(t);
         const from = previous?.kind === 'target' && start === previous.time ? value : targetAt(start);
         return from + (event.value - from) * (t - start) / (event.time - start);
@@ -66,9 +65,7 @@ export class Curve {
     let previous: Event | undefined;
     for (const [index, event] of this.events.entries()) {
       if (event.time >= t) {
-        const start = previous?.kind === 'target'
-          ? Math.max(previous.time, event.calledAt)
-          : previous?.time ?? event.calledAt;
+        const start = this.rampStart(event, previous);
         if (event.kind === 'linear' && start < t) return this.evaluate(t, this.events.slice(0, index + 1));
         return undefined;
       }
@@ -101,7 +98,22 @@ export class Curve {
 
   setTargetAtTime(value: number, t: number, tau: number) {
     this.param.setTargetAtTime(value, t, tau);
-    return this.record('target', value, t, tau);
+    const time = this.clampTime(t);
+    const repeated = this.events.some((event) => event.kind === 'target' && event.time === time);
+    if (!repeated) return this.record('target', value, t, tau);
+    this.events = this.events.flatMap((event): Event[] => {
+      if (event.kind !== 'target' || event.time !== time) return [event];
+      return event.tau === 0 ? [{ ...event, kind: 'set' }] : [];
+    });
+    this.record('target', value, t, tau);
+    this.param.cancelScheduledValues(time);
+    for (const event of this.events) {
+      if (event.time < time) continue;
+      if (event.kind === 'set') this.param.setValueAtTime(event.value, event.time);
+      else if (event.kind === 'linear') this.param.linearRampToValueAtTime(event.value, event.time);
+      else this.param.setTargetAtTime(event.value, event.time, event.tau);
+    }
+    return this;
   }
 
   cancelScheduledValues(t: number) {
@@ -134,13 +146,19 @@ export class Curve {
   }
 }
 
-const curves = new WeakMap<AudioParam, Curve>();
+const tracked = new WeakSet<AudioParam>();
 
-export function trackParam(param: AudioParam, ctx: BaseAudioContext, initial?: number) {
-  let curve = curves.get(param);
-  if (!curve) {
-    curve = new Curve(param, ctx, initial);
-    curves.set(param, curve);
-  }
+export function trackParam(param: AudioParam, ctx: BaseAudioContext, initial: number) {
+  if (initial === undefined) throw new Error('Tracking requires an explicit initial value');
+  if (tracked.has(param)) throw new Error('The parameter already has a tracked curve');
+  const curve = new Curve(param, ctx, initial);
+  tracked.add(param);
   return curve;
+}
+
+export type TrackedGain = GainNode & { curve: Curve };
+
+export function trackedGain(ctx: BaseAudioContext, initial: number): TrackedGain {
+  const gain = ctx.createGain();
+  return Object.assign(gain, { curve: trackParam(gain.gain, ctx, initial) });
 }

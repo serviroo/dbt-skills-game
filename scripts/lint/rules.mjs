@@ -13,11 +13,15 @@ const AUDIO_TIME_ARG = new Map([
 const SKIPPED_KEYS = new Set(['parent', 'loc', 'range']);
 const FUNCTIONS = new Set(['FunctionExpression', 'ArrowFunctionExpression', 'FunctionDeclaration']);
 
-const isNamed = (node, name) =>
-  node?.type === 'MemberExpression' && !node.computed && node.property.name === name;
+function memberName(node) {
+  if (node?.type !== 'MemberExpression') return null;
+  if (!node.computed) return node.property.name;
+  return typeof node.property.value === 'string' ? node.property.value : null;
+}
 
-const methodName = (call) =>
-  call.callee.type === 'MemberExpression' && !call.callee.computed ? call.callee.property.name : null;
+const isNamed = (node, name) => memberName(node) === name;
+
+const methodName = (call) => memberName(call.callee);
 
 const isGlobal = (node, name) => node?.type === 'Identifier' ? node.name === name : isNamed(node, name);
 
@@ -441,9 +445,12 @@ function paramPath(context, node, seen = new Set()) {
     while (scope.upper && scope.type !== 'class') scope = scope.upper;
     return [scope];
   }
-  if (node.type === 'MemberExpression' && !node.computed) {
+  if (memberName(node)) {
     const parent = paramPath(context, node.object, seen);
-    return parent && [...parent, node.property.name];
+    return parent && [...parent, memberName(node)];
+  }
+  if (node.type === 'CallExpression' && AUDIO_TIME_ARG.has(methodName(node))) {
+    return paramPath(context, node.callee.object, seen);
   }
   return null;
 }
@@ -453,6 +460,7 @@ const holdReadsTheScheduledCurve = {
     messages: {
       curve: 'Hold and copy the scheduled curve at the change time: the value getter is an earlier rendered value.',
       write: 'Give trackParam its initial value and schedule later changes through the curve.',
+      schedule: 'Schedule and cancel tracked parameters through their curve.',
     },
   },
   create(context) {
@@ -467,7 +475,17 @@ const holdReadsTheScheduledCurve = {
           const param = paramPath(context, node.arguments[0]);
           if (param) tracked.push(param);
         }
+        if (calleeName(node) === 'trackedGain') {
+          const owner = node.parent.type === 'VariableDeclarator' ? node.parent.id
+            : node.parent.type === 'AssignmentExpression' ? node.parent.left : null;
+          const gain = paramPath(context, owner);
+          if (gain) tracked.push([...gain, 'gain']);
+        }
         if (!AUDIO_TIME_ARG.has(methodName(node))) return;
+        if (!['start', 'stop', 'cancelAndHoldAtTime'].includes(methodName(node))) {
+          const param = paramPath(context, node.callee.object);
+          if (param) writes.push({ node, param, messageId: 'schedule' });
+        }
         for (const arg of node.arguments) {
           if (readsParamValue(context, arg)) context.report({ node: arg, messageId: 'curve' });
         }
@@ -482,9 +500,9 @@ const holdReadsTheScheduledCurve = {
         }
       },
       'Program:exit'() {
-        for (const { node, param } of writes) {
+        for (const { node, param, messageId = 'write' } of writes) {
           if (tracked.some((path) => path.length === param.length && path.every((part, i) => part === param[i]))) {
-            context.report({ node, messageId: 'write' });
+            context.report({ node, messageId });
           }
         }
       },

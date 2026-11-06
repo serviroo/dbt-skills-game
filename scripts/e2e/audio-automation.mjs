@@ -15,6 +15,34 @@ export async function renderedAutomation() {
       p.setValueAtTime(0.9, 2);
       return schedules.sameTime(p);
     },
+    repeatedTargetsAtEnd: (p) => {
+      p.setValueAtTime(1, 0);
+      p.linearRampToValueAtTime(0.9, 0.125);
+      holdAt(p, 0.125);
+      p.setValueAtTime(0.74, 0.125);
+      p.setTargetAtTime(0.4, 0.125, 0.1);
+      p.setTargetAtTime(0.74, 0.125, 0.01);
+      return { at: 0.1265, held: Math.fround(0.74) };
+    },
+    repeatedTargetsBeforeFuture: (p) => {
+      const checks = schedules.repeatedTargetsAtEnd(p);
+      p.setValueAtTime(0.6, 2);
+      p.setTargetAtTime(0.3, 2.5, 0.25);
+      p.linearRampToValueAtTime(0.5, 2.75);
+      p.setTargetAtTime(0.74, 0.125, 0.01);
+      return checks;
+    },
+    repeatedTargetsAfterSet: (p) => {
+      p.setTargetAtTime(0.4, 0.125, 0.1);
+      p.setValueAtTime(0.74, 0.125);
+      p.setTargetAtTime(0.74, 0.125, 0.01);
+      return { at: 0.1265, held: Math.fround(0.74) };
+    },
+    repeatedInstantTarget: (p) => {
+      p.setTargetAtTime(0, 0.125, 0);
+      p.setTargetAtTime(1, 0.125, 0.25);
+      p.setValueAtTime(0.5, 0.75);
+    },
     instantRamp: (p) => p.linearRampToValueAtTime(0.4, 0),
     instantTargetRamp: (p) => {
       p.setTargetAtTime(0, 0.5, 0.25);
@@ -100,7 +128,7 @@ export async function renderedAutomation() {
     const source = c.createConstantSource();
     source.connect(gain);
     source.start();
-    const p = trackParam(gain.gain, clock, name === 'sets' ? 0.75 : undefined);
+    const p = trackParam(gain.gain, clock, name === 'sets' ? 0.75 : 1);
     const expected = [];
     let nextSample = 0;
     const sampleUntil = (end) => {
@@ -143,7 +171,7 @@ export async function repeatedTargets() {
     const gain = c.createGain();
     source.connect(gain);
     gain.connect(merger, 0, channel);
-    const p = trackParam(gain.gain, clock);
+    const p = trackParam(gain.gain, clock, 1);
     p.setTargetAtTime(0, 0, 0.25);
     return p;
   });
@@ -151,7 +179,7 @@ export async function repeatedTargets() {
   const holdFrames = [30, 907, 1815, 3583];
   const holdSamples = [];
   let nextSample = 0;
-  let retained = 0;
+  let evaluationWork = 0;
   let compactionError = 0;
   const sampleUntil = (end) => {
     for (; nextSample < Math.round(end * sr); nextSample++) {
@@ -166,7 +194,15 @@ export async function repeatedTargets() {
       const before = p.valueAt(at);
       p.setTargetAtTime(frame % 2 ? 0.3 : 0.7, at + 0.01, 0.25);
       compactionError = Math.max(compactionError, Math.abs(p.valueAt(at) - before));
-      retained = Math.max(retained, p.size);
+      const exp = Math.exp;
+      let calls = 0;
+      Math.exp = (value) => { calls++; return exp(value); };
+      try {
+        p.valueAt(at);
+      } finally {
+        Math.exp = exp;
+      }
+      evaluationWork = Math.max(evaluationWork, calls);
     }
     if (holdFrames.includes(frame)) {
       const heldAt = at + 0.007;
@@ -186,6 +222,6 @@ export async function repeatedTargets() {
     const holds = channel === 0 ? [] : holdSamples.map((i) => ({
       at: i / sr, relativeStep: Math.abs(data[i] - data[i - 1]) / Math.abs(data[i - 1]),
     }));
-    return { channel, seconds, targets: 3601, maxRelativeError, holds, retained, compactionError };
+    return { channel, seconds, targets: 3601, maxRelativeError, holds, evaluationWork, compactionError };
   });
 }

@@ -28,7 +28,7 @@ export const scenarios = {
         const source = c.createConstantSource();
         source.connect(gain);
         source.start();
-        const p = trackParam(gain.gain, c);
+        const p = trackParam(gain.gain, c, 1);
         p.setValueAtTime(1, 0);
         p.linearRampToValueAtTime(0, 1);
         if (kind === 'set' || kind === 'set-target') p.setValueAtTime(0.5, 1);
@@ -175,7 +175,29 @@ export const scenarios = {
   async 'tracked-values-match-rendering-within-float-precision'(h) {
     return checkAutomation(h, repeatedTargets, (r) => r.maxRelativeError < 1e-3
       && r.holds.every((hold) => hold.relativeStep < 1e-3)
-      && r.retained <= 2 && r.compactionError === 0);
+      && r.evaluationWork <= 2 && r.compactionError === 0);
+  },
+
+  async 'tracking-requires-a-known-start-and-one-owner'(h) {
+    return checkAutomation(h, async () => {
+      const { trackParam, trackedGain } = await import('/src/audio/curve.ts');
+      const c = new OfflineAudioContext(1, 48000, 48000);
+      const gain = c.createGain();
+      gain.gain.setTargetAtTime(0, 0.1, 0.25);
+      const rejected = (run) => {
+        try {
+          run();
+          return false;
+        } catch (error) {
+          return error instanceof Error;
+        }
+      };
+      const missing = rejected(() => trackParam(gain.gain, c));
+      const owned = trackedGain(c, 0.5);
+      owned.curve.linearRampToValueAtTime(0, 1);
+      const duplicate = rejected(() => trackParam(owned.gain, c, 1));
+      return [{ missing, duplicate, middle: owned.curve.valueAt(0.5) }];
+    }, (r) => r.missing && r.duplicate && r.middle === 0.25);
   },
 
   async 'replacement-echo-keeps-the-gliding-send-levels'({ open, expect }) {

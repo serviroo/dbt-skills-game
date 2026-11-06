@@ -6,7 +6,7 @@
  */
 import { animate } from '../ui/anim';
 import { SCORE, WINDOW } from '../motion/tokens';
-import { trackParam } from '../audio/curve';
+import { trackedGain } from '../audio/curve';
 import { holdAt, silentAfter, soon, taper } from '../audio/param';
 import type { VolumeCtrl } from '../audio/prefs';
 import { type Next } from '../content/dbt';
@@ -109,12 +109,12 @@ function lowHum(level: () => number, volume?: VolumeCtrl) {
   void ctx.resume?.();
   // three gains in a row, one writer each: the breath slowly swells `breath`, the player's levels glide `vol`, and
   // `wake` fades the hum out before the page sleeps and back in from silence when it wakes
-  const breath = ctx.createGain();
-  const breathGain = trackParam(breath.gain, ctx, 0);
+  const breath = trackedGain(ctx, 0);
+  const breathGain = breath.curve;
   const vol = ctx.createGain();
   vol.gain.value = level();
-  const wake = ctx.createGain();
-  const wakeGain = trackParam(wake.gain, ctx);
+  const wake = trackedGain(ctx, 1);
+  const wakeGain = wake.curve;
   const lp = ctx.createBiquadFilter();
   lp.type = 'lowpass';
   lp.frequency.value = 360;
