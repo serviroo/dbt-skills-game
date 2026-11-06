@@ -296,13 +296,15 @@ const callsSoon = (node) => !!node && (
 function soonTimes(fn, before) {
   const names = new Set();
   for (const p of fn.params) {
-    if (p.type === 'AssignmentPattern' && p.left.type === 'Identifier' && callsSoon(p.right)) names.add(p.left.name);
+    const timed = p.type === 'AssignmentPattern' && (callsSoon(p.right) || mentions(p.right, names));
+    if (timed && p.left.type === 'Identifier') names.add(p.left.name);
   }
   const visit = (node) => {
     for (const child of children(node)) {
       if (FUNCTIONS.has(child.type)) continue;
       const early = child.range[1] <= before;
-      if (early && child.type === 'VariableDeclarator' && child.id.type === 'Identifier' && callsSoon(child.init)) {
+      const declared = early && child.type === 'VariableDeclarator' && child.id.type === 'Identifier';
+      if (declared && (callsSoon(child.init) || mentions(child.init, names))) {
         names.add(child.id.name);
       }
       visit(child);

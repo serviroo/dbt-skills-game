@@ -577,7 +577,7 @@ export class AudioEngine {
       else p.setTargetAtTime(1, at, Math.max(0.003, sec / 4));
     }
     if (on) {
-      for (const v of [...this.active, ...this.fading]) {
+      for (const v of [...this.active, ...this.fading, ...this.takeHush()]) {
         v.stop(at, sec);
         this.letGo(v);
       }
@@ -637,6 +637,12 @@ export class AudioEngine {
     this.duckG.gain.setTargetAtTime(dB(db), at, Math.max(0.003, ramp / 4));
   }
 
+  private takeHush() {
+    const v = this.hushV;
+    this.hushV = null;
+    return v ? [v] : [];
+  }
+
   private letGo(v: Voice) {
     for (const f of this.fading) if (f.end <= this.ctx.currentTime) this.fading.delete(f);
     this.fading.add(v);
@@ -647,12 +653,11 @@ export class AudioEngine {
    *  leaving the quiet brings the empty one (see quiet). */
   stopAll(fade = 0.4, at = soon(this.ctx)) {
     this.charge?.stop(at, fade);
-    const open = this.hushV ? [this.hushV] : [];
-    for (const v of [...this.active, ...[...this.beds.values()].map((b) => b.voice), ...this.fading, ...open]) {
+    const voices = [...this.active, ...[...this.beds.values()].map((b) => b.voice), ...this.fading];
+    for (const v of [...voices, ...this.takeHush()]) {
       v.stop(at, fade);
       this.letGo(v);
     }
-    this.hushV = null;
     this.active.clear();
     this.beds.clear();
     this.music.stop(fade, at);

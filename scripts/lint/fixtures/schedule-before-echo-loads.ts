@@ -32,6 +32,12 @@ export class Engine {
     rise(this.out);
   }
 
+  derived(at = soon(this.ctx)) {
+    const end = at + 0.04;
+    this.echo = this.makeEcho();
+    this.out.gain.linearRampToValueAtTime(0, end);
+  }
+
   twice() {
     this.echo = this.makeEcho();
     const at = soon(this.ctx);
