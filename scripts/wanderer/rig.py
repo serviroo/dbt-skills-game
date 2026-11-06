@@ -1,7 +1,7 @@
 import re
 
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 from blender_kit import B
 
@@ -110,15 +110,17 @@ class Rig:
     def near(self, p, bones, soft=0.004, posed=False):
         return {b: 1.0 / (self.seg_dist(p, b, posed) ** 2 + soft ** 2) ** 2 for b in bones}
 
-    def deform(self, p, ws):
-        q = B(p)
-        out = Vector((0, 0, 0))
+    def pose_matrix(self, ws):
+        m = Matrix.Diagonal((0.0, 0.0, 0.0, 0.0))
         for b, x in top4(ws).items():
-            out += (self.delta[b] @ q) * x
-        return P(out)
+            m += self.delta[b] * x
+        return m
 
-    def unpose(self, q, bone):
-        return P(self.delta[bone].inverted() @ B(q))
+    def deform(self, p, ws):
+        return P(self.pose_matrix(ws) @ B(p))
+
+    def unpose(self, q, ws):
+        return P(self.pose_matrix(ws).inverted() @ B(q))
 
     def to_rest(self):
         self.arm.animation_data.action = None

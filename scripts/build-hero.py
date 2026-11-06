@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from blender_kit import B, V, bake, light, shipping, stage, start, unwrap  # noqa: E402
 from wanderer.cloth import coat, head, hood, legs, mantle, mask_and_scarf, sleeves  # noqa: E402
 from wanderer.figure import Figure  # noqa: E402
+from wanderer.gear import gear  # noqa: E402
 from wanderer.hands import hands  # noqa: E402
 from wanderer.rig import Rig  # noqa: E402
 
@@ -30,11 +31,12 @@ PREVIEW_SHOTS = [('idle-front', (0.35, 1.2, 4.6), (0, 0.95, 0), 40),
 def build(fig):
     head(fig)
     mask_and_scarf(fig)
-    mantle(fig, hood(fig))
-    coat(fig)
+    mantle_mesh = mantle(fig, hood(fig))
+    torso, skirt = coat(fig)
     sleeves(fig)
     hands(fig)
     legs(fig)
+    gear(fig, mantle_mesh, torso, skirt)
 
 
 def triangles(o):

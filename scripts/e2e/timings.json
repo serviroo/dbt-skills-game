@@ -351,6 +351,8 @@
   "hands-slow-gpu": [38, 32],
   "hands-steps": [50, 51],
   "hands-still": [123, 71],
+  "hero-build-binds-a-cubic-idle-at-its-first-key": [1],
+  "hero-build-keeps-the-skeletons-scene": [1],
   "hidden-button-press": [28, 33],
   "high-contrast-dim-keeps-words": [9],
   "high-contrast-every-screen": [110],
