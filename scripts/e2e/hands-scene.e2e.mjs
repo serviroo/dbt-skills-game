@@ -151,6 +151,41 @@ export const scenarios = {
     }
   },
 
+  async 'hands-slow-first-frame'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute', DESK);
+    await ctx.addInitScript(([stallMs, busyMs]) => {
+      const P = WebGL2RenderingContext.prototype;
+      const realNow = performance.now.bind(performance);
+      const slow = (window.__slowFirstFrame = { stalled: false, busyUntil: 0 });
+      const inScene = (gl) => !!gl.canvas.closest?.('.dq-scene');
+      for (const name of ['drawArrays', 'drawElements', 'drawArraysInstanced', 'drawElementsInstanced']) {
+        const draw = P[name];
+        P[name] = function (...args) {
+          if (!slow.stalled && inScene(this)) {
+            slow.stalled = true;
+            const until = realNow() + stallMs;
+            while (realNow() < until);
+          }
+          return draw.apply(this, args);
+        };
+      }
+      const status = P.getSyncParameter;
+      P.getSyncParameter = function (fence, name) {
+        if (name !== this.SYNC_STATUS || !inScene(this)) return status.call(this, fence, name);
+        slow.busyUntil ||= realNow() + busyMs;
+        return realNow() < slow.busyUntil ? this.UNSIGNALED : status.call(this, fence, name);
+      };
+    }, [2000, 6000]);
+    await openStopped(h, page, toHands, 'hands slow first frame');
+    const slow = await page.evaluate(() => window.__slowFirstFrame);
+    h.expect(slow.stalled && slow.busyUntil > 0, `hands slow first frame: no slow GPU: ${JSON.stringify(slow)}`);
+    const { e } = (await scenes(page)).last;
+    const moved = `hands slow first frame: the countdown moved on ${e.toFixed(2)} s while the GPU drew the first frame`;
+    h.expect(e < 0.25, moved);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
   /** Radical Acceptance's open hands, and Willing Hands' and Willingness's steps that wait for Start, show the hands too */
   async 'hands-steps'(h) {
     for (const [id, entry, start] of [['radical-acceptance', 'open-hands', null], ['willing-hands', 'think-of-it', 'Start 30 s'], ['willingness', 'hands', 'Start 20 s']]) {

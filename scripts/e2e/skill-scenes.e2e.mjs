@@ -14,9 +14,9 @@ import fs from 'node:fs';
 import sharp from 'sharp';
 import { deviceMotion } from './device-motion.e2e.mjs';
 import { gone, screenshot, until as pageUntil } from './harness.mjs';
-import { after, scenes, steps } from './scene-clock.mjs';
+import { after, scenes, showsStopped, steps } from './scene-clock.mjs';
 
-export { after, scenes, steps };
+export { after, scenes, showsStopped, steps };
 
 /** how long a scene's stage hides its flat picture while the scene loads (SCENE.waitMs) */
 const WAIT_MS = Number(/\bwaitMs:\s*(\d+)/.exec(fs.readFileSync(new URL('../../src/motion/tokens.ts', import.meta.url), 'utf8'))?.[1]);
@@ -106,14 +106,19 @@ export async function toSkill(h, page, id, entry) {
   }
 }
 
+async function stopAtHome(h, page) {
+  await h.reachHub(page);
+  await h.pauseClock(page);
+}
+
 /**
- * Home, then straight to one timer step of a skill. With `pause` the page clock stops the moment the step shows, so a
- * check can see the step's first seconds however slowly the page draws.
+ * Home, then straight to one timer step of a skill. With `pause` the page clock stops on an idle Home, before the step
+ * is tapped open, so a check can see the step's first seconds however slowly the page draws.
  */
 async function toStep(h, page, id, entry, { pause = false } = {}) {
+  if (pause) await stopAtHome(h, page);
   await toSkill(h, page, id, entry);
   await page.locator('.dq-timer-stage').waitFor({ timeout: 10000 });
-  if (pause) await h.pauseClock(page);
   await page.locator('.dq-timer-stage').scrollIntoViewIfNeeded();
 }
 
@@ -399,28 +404,15 @@ export async function looks(h, page, tag, kind, vp, stage = '.dq-timer-stage', {
 }
 
 /**
- * Waits, with the page clock stopped, until the scene shows: it shows once its first frame is drawn, which it looks for
- * on animation frames, so the clock is stepped a frame at a time until then. The scene's time then starts from where it
- * first shows, however long the GPU took, and moves only when a check moves it.
- */
-export async function showsStopped(h, page, where, stage = '.dq-timer-stage') {
-  const live = async () => (await page.locator(`${stage}.is-scene-live`).count()) > 0 || (await page.clock.runFor(16), false);
-  await h.poll(page, live, Boolean, `${where}: the 3D scene never came on screen`, { timeout: 30000, polling: 0 }).catch(async (e) => {
-    await h.shot(page, `fail-${where.replace(/\W+/g, '-')}`);
-    throw e;
-  });
-}
-
-/**
- * Reloads with the page clock installed, goes to a scene's step with `reach`, stops the clock there and waits until the
- * scene shows (see showsStopped). However long the GPU takes to build it, the countdown has moved on only by the frames
- * the clock was stepped while it looked, a few seconds at most.
+ * Reloads with the page clock installed, stops it once Home is idle, goes to a scene's step with `reach` and waits
+ * until the scene shows (see showsStopped). However long the GPU takes to build it, the countdown has moved on only by
+ * the few frames the clock was stepped once the GPU had drawn them.
  */
 export async function openStopped(h, page, reach, where) {
   await page.clock.install();
   await page.reload();
+  await stopAtHome(h, page);
   await reach(h, page);
-  await h.pauseClock(page);
   await showsStopped(h, page, where);
 }
 
