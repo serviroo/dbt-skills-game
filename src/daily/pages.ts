@@ -6,7 +6,7 @@ import { CRISIS_CHECKED } from '../content/crisis-lines';
 import { LETTER, REWARDS } from '../content/intro';
 import { ABOUT, CLEAR_COPY, CRYSTAL_COPY, KEEP_COPY, PEEK_COPY } from '../content/daily-lines';
 import type { App, Route, ScreenOut, Visit } from './app';
-import { glyph, icon, mothSVG } from './art';
+import { fishSVG, glyph, icon, lurkCatSVG, mothSVG, seaweedSVG, sharkFinSVG, sharkTailSVG } from './art';
 import { skillCard } from './hub';
 import { regionPicker, telHref, smsHref } from './safe';
 import { allyCard, allyName, cardOf, favFirst, focusBack, refill } from './artroom';
@@ -18,7 +18,6 @@ import { btn, copyText, field, focusWhole, h, md, p, panel, place, quotes, redra
 import type { KeepStatus } from '../pwa/register';
 import { volumeSliders } from '../ui/volume';
 import { STEALTH, STEALTH_LINES } from '../content/stealth-lines';
-import { fishSVG, lurkCatSVG, seaweedSVG, sharkFinSVG, sharkTailSVG } from './art';
 import { Slime } from './bubbles';
 import { inventorySection, rosterSection, brambleNap } from './roster';
 import { wardrobePanel } from './wardrobe';
@@ -34,6 +33,7 @@ import { supportListsCopy } from './support-lists';
 import { keepTextSize, textSize } from './text-size';
 import { pageHead, restHead, wholeText } from './page-head';
 import { choose, wholeChoice } from './choice';
+import { contrastSwitch } from './contrast';
 
 // ---------------- Stealth room (the Rest room) ----------------
 /** The Stealth title is never stored separately: any rest event means it is unlocked. The first one carries its id. */
@@ -1668,7 +1668,6 @@ export function settingsScreen(app: App): ScreenOut {
     });
     return h('div', { class: 'dq-setting dq-setting--col' }, h('label', { for: id, class: 'dq-setting-l' }, h('span', { class: 'dq-setting-t', text: label }), h('span', { class: 'dq-setting-h', text: hint })), input);
   };
-  const motionLabels = ['Auto', 'Reduced', 'Full'];
   // no switch at all where the browser can't vibrate
   const vibrate = app.canBuzz()
     ? toggle('Vibrate when a timer starts or ends', s.settings.vibrate, (v) => {
@@ -1721,7 +1720,7 @@ export function settingsScreen(app: App): ScreenOut {
             st.touch('motion');
             st.save();
             app.applyMotion();
-          }, { labels: motionLabels, cls: 'dq-seg--3' }),
+          }, { labels: ['Auto', 'Reduced', 'Full'], cls: 'dq-seg--3' }),
         ),
         h(
           'div',
@@ -1729,6 +1728,7 @@ export function settingsScreen(app: App): ScreenOut {
           h('span', { class: 'dq-setting-l' }, h('span', { class: 'dq-setting-t', text: 'Text size' }), h('span', { class: 'dq-setting-h', text: 'Bigger words in the Safe Zone and when you read a story.' })),
           segmented('Text size', [...READ_SIZES], textSize(app), (v) => keepTextSize(app, v as ReadSize), { labels: ['Regular', 'Larger', 'Largest'], cls: 'dq-seg--3' }),
         ),
+        contrastSwitch(app),
         vibrate,
       ),
       panel({ title: 'Crisis lines', ic: icon('phone') }, regionPicker(app, undefined, SAFE.settings)),

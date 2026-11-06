@@ -139,7 +139,7 @@
   color: #eaf6ff;
 }
 .dq :focus-visible {
-  outline: 2px solid #a8dcff;
+  outline: 2px solid var(--focus, #a8dcff);
   outline-offset: 3px;
 }
 .dq [tabindex='-1']:focus {
@@ -613,7 +613,7 @@ dq-shy::before {
   color: var(--mint) !important;
 }
 .dq-a {
-  color: #a9d6f7;
+  color: var(--link, #a9d6f7);
   text-decoration: underline;
   text-underline-offset: 3px;
   text-decoration-color: rgba(169, 214, 247, 0.45);
@@ -687,7 +687,7 @@ dq-shy::before {
   text-align: center;
   text-decoration: none;
   color: var(--t-title);
-  border: 1px solid rgba(125, 150, 197, 0.55);
+  border: 1px solid var(--edge, rgba(125, 150, 197, 0.55));
   border-radius: 2px;
   background: transparent;
   cursor: pointer;
@@ -836,7 +836,7 @@ dq-shy::before {
   letter-spacing: 0.01em;
   text-align: center;
   color: #d3e5f6;
-  border: 1px solid rgba(125, 150, 197, 0.42);
+  border: 1px solid var(--edge, rgba(125, 150, 197, 0.42));
   border-radius: 2px;
   background: linear-gradient(180deg, rgba(14, 32, 56, 0.72), rgba(8, 20, 36, 0.72));
   cursor: pointer;
@@ -867,7 +867,7 @@ dq-shy::before {
 .dq-seg {
   display: inline-flex;
   flex-wrap: nowrap;
-  border: 1px solid rgba(125, 150, 197, 0.45);
+  border: 1px solid var(--edge, rgba(125, 150, 197, 0.45));
   border-radius: 2px;
   background: rgba(6, 16, 30, 0.6);
 }
@@ -881,7 +881,7 @@ dq-shy::before {
   color: var(--t-body);
   background: transparent;
   border: 0;
-  border-left: 1px solid rgba(125, 150, 197, 0.22);
+  border-left: 1px solid var(--edge-soft, rgba(125, 150, 197, 0.22));
   cursor: pointer;
   transition:
     background 0.18s,
@@ -976,7 +976,7 @@ dq-shy::before {
   color: #e6f1ff;
   caret-color: var(--blue);
   background: rgba(4, 12, 24, 0.78);
-  border: 1px solid rgba(125, 150, 197, 0.5);
+  border: 1px solid var(--edge, rgba(125, 150, 197, 0.5));
   border-radius: 2px;
   resize: vertical;
   -webkit-user-select: text;
@@ -986,7 +986,7 @@ dq-shy::before {
     box-shadow 0.18s;
 }
 .dq-input::placeholder {
-  color: #8199b8;
+  color: var(--hint, #8199b8);
   opacity: 1;
 }
 .dq-input:focus {
@@ -1083,7 +1083,7 @@ textarea.dq-input {
   width: 52px;
   height: 28px;
   border-radius: 14px;
-  border: 1px solid rgba(125, 150, 197, 0.6);
+  border: 1px solid var(--edge, rgba(125, 150, 197, 0.6));
   background: rgba(6, 16, 30, 0.8);
   transition:
     background 0.2s,
@@ -1097,7 +1097,7 @@ textarea.dq-input {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: #8ea8c6;
+  background: var(--knob, #8ea8c6);
   transition:
     transform 0.25s var(--ease-out),
     background 0.2s;
@@ -3228,7 +3228,7 @@ textarea.dq-input {
   color: var(--t-dim);
   background: none;
   border: 0;
-  border-left: 1px solid rgba(62, 100, 133, 0.3);
+  border-left: 1px solid var(--edge-soft, rgba(62, 100, 133, 0.3));
   cursor: pointer;
   transition:
     background 0.18s,
@@ -4612,8 +4612,8 @@ textarea.dq-input {
   text-align: left;
   font: inherit;
   color: inherit;
-  border: 1px solid rgba(125, 150, 197, 0.3);
-  border-left: 2px solid rgba(79, 184, 255, 0.4);
+  border: 1px solid var(--edge, rgba(125, 150, 197, 0.3));
+  border-left: 2px solid var(--edge-accent, rgba(79, 184, 255, 0.4));
   border-radius: 2px;
   background: linear-gradient(180deg, rgba(12, 28, 50, 0.62), rgba(7, 17, 31, 0.62));
   cursor: pointer;

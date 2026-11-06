@@ -88,6 +88,7 @@ export interface Settings {
   motion: (typeof MOTIONS)[number];
   /** A soft buzz when a skill timer starts or ends, on its own switch (Mute is about sound). Off until turned on. */
   vibrate: boolean;
+  highContrast: boolean;
   emotionRows: string[];
   urgeRows: string[];
   theme: ThemeId;
@@ -125,14 +126,14 @@ export interface Flags {
 }
 /** Choices one copy can change and another must take whole: the later change wins. */
 export type NameKey = `name:${ShadowId}`;
-export type SetKey = 'sound' | 'motion' | 'vibrate' | 'emotionRows' | 'urgeRows' | 'safeCredit' | 'region' | 'theme' | 'accent' | 'cardBack' | 'plate' | 'title' | 'playerName' | 'companion' | NameKey;
+export type SetKey = Exclude<keyof Settings, 'names'> | 'safeCredit' | NameKey;
+/** How this device plays: a Save Crystal brings them only where this device still has its defaults. */
+const DEVICE_SET_KEYS: SetKey[] = ['sound', 'motion', 'vibrate', 'highContrast'];
 /** The choices round 9 stores in settings and setAt. */
-const BASE_SET_KEYS: SetKey[] = ['sound', 'motion', 'vibrate', 'emotionRows', 'urgeRows', 'safeCredit'];
+const BASE_SET_KEYS: SetKey[] = [...DEVICE_SET_KEYS, 'emotionRows', 'urgeRows', 'safeCredit'];
 /** Wave 2 choices. Stored in the top-level profile (with titlesSeen), which a round 9 copy keeps whole instead of dropping. */
 const PROFILE_SET_KEYS: SetKey[] = ['region', 'theme', 'accent', 'cardBack', 'plate', 'title', 'playerName', 'companion', ...SHADOW_IDS.map((id): NameKey => `name:${id}`)];
 const SET_KEYS: SetKey[] = [...BASE_SET_KEYS, ...PROFILE_SET_KEYS];
-/** How this device plays: a Save Crystal brings them only where this device still has its defaults. */
-const DEVICE_SET_KEYS: SetKey[] = ['sound', 'motion', 'vibrate'];
 const ROW_SET_KEYS: SetKey[] = ['emotionRows', 'urgeRows'];
 export { cleanName };
 const LIST_KEYS = ['comfort', 'activities', 'reasons', 'people'] as const;
@@ -205,6 +206,7 @@ export function freshState(now = Date.now()): State {
       sound: true,
       motion: 'system',
       vibrate: false,
+      highContrast: false,
       emotionRows: ['Sadness', 'Fear or anxiety', 'Anger', 'Shame', 'Joy'],
       urgeRows: ['Urge to give up on today'],
       theme: 'classic',
@@ -313,6 +315,7 @@ const REGION = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const USABLE: Partial<Record<SetKey, (v: unknown) => boolean>> = {
   sound: (v) => typeof v === 'boolean',
   vibrate: (v) => typeof v === 'boolean',
+  highContrast: (v) => typeof v === 'boolean',
   motion: (v) => (MOTIONS as readonly unknown[]).includes(v),
   theme: (v) => (THEME_IDS as readonly unknown[]).includes(v),
   accent: (v) => (ACCENT_IDS as readonly unknown[]).includes(v),
@@ -329,7 +332,6 @@ function stored(s: State) {
   const { theme, accent, cardBack, plate, title, playerName, companion, names, region, ...settings } = s.settings;
   const { titlesSeen, ...flags } = s.flags;
   const k = s[KEPT];
-  const as = <T>(key: SetKey, v: T) => (k && own(k.raw, key) ? k.raw[key] : v);
   const setAt: Record<string, unknown> = { ...k?.setAt };
   const profileAt: Record<string, unknown> = { ...k?.profileAt };
   for (const [key, t] of Object.entries(s.setAt)) if (typeof t === 'number') putOwn((PROFILE_SET_KEYS as string[]).includes(key) ? profileAt : setAt, key, t);
@@ -349,20 +351,21 @@ function stored(s: State) {
     maps: back(s.maps, k?.dropped.maps),
     lines: back(s.lines, k?.dropped.lines),
     skillPins: { ...k?.pins, ...Object.fromEntries(Object.entries(s.skillPins).map(([id, p]) => [id, asStored(p)])) },
-    settings: { ...settings, emotionRows: asStored(settings.emotionRows), urgeRows: asStored(settings.urgeRows), sound: as('sound', settings.sound), motion: as('motion', settings.motion), vibrate: as('vibrate', settings.vibrate) },
+    settings: { ...settings, emotionRows: asStored(settings.emotionRows), urgeRows: asStored(settings.urgeRows),
+      ...Object.fromEntries(DEVICE_SET_KEYS.map((key) => [key, getSet(s, key)])) },
     flags,
     setAt,
     profile: {
       ...k?.profile,
-      theme: as('theme', theme),
-      accent: as('accent', accent),
-      cardBack: as('cardBack', cardBack),
-      plate: as('plate', plate),
-      title: as('title', title),
+      theme: getSet(s, 'theme'),
+      accent: getSet(s, 'accent'),
+      cardBack: getSet(s, 'cardBack'),
+      plate: getSet(s, 'plate'),
+      title: getSet(s, 'title'),
       playerName,
       companion,
       names: { ...k?.names, ...names },
-      region: as('region', region),
+      region: getSet(s, 'region'),
       titlesSeen: k?.titles.length ? [...titlesSeen, ...k.titles] : titlesSeen,
       setAt: profileAt,
     },
@@ -638,8 +641,6 @@ function putSet(s: State, k: SetKey, v: SetVal) {
     if (typeof v === 'string' && v) s.settings.names[id] = v;
     else delete s.settings.names[id];
   } else if (k === 'safeCredit') s.flags.safeCredit = v as boolean;
-  else if (k === 'sound') s.settings.sound = v as boolean;
-  else if (k === 'motion') s.settings.motion = v as Settings['motion'];
   else if (k === 'emotionRows' || k === 'urgeRows') s.settings[k].splice(0, s.settings[k].length, ...(v as string[]));
   else (s.settings as unknown as Record<string, SetVal>)[k] = v;
 }
@@ -967,7 +968,7 @@ export function normalize(raw: unknown): State | null {
   }
   if (isObj(raw.settings)) {
     const s = raw.settings;
-    for (const k of ['sound', 'motion', 'vibrate'] as const) if (own(s, k) && s[k] !== undefined) putSet(base, k, s[k] as SetVal);
+    for (const k of DEVICE_SET_KEYS) if (own(s, k) && s[k] !== undefined) putSet(base, k, s[k] as SetVal);
     if (Array.isArray(s.emotionRows)) base.settings.emotionRows = twin(s.emotionRows.map((r) => str(r, 60)).filter(Boolean).slice(0, ROW_CAP.emotions), s.emotionRows, newer);
     if (Array.isArray(s.urgeRows)) base.settings.urgeRows = twin(s.urgeRows.map((r) => str(r, 60)).filter(Boolean).slice(0, ROW_CAP.urges), s.urgeRows, newer);
     keepRest(base.settings, s, SETTINGS_KEYS);
@@ -1713,7 +1714,6 @@ export class Store {
     bring(this.state.maps, other.maps);
     adoptRaw(this.state, other, { newer, now: this.now() });
     const now = this.now();
-    const blank = freshState(0);
     // a choice either copy holds as a value this build can't use came from a newer build: like any field it doesn't
     // read, the newer save version's value wins, with its change time
     const raws = new Set<SetKey>();
@@ -1732,11 +1732,11 @@ export class Store {
     }
     for (const k of [...DEVICE_SET_KEYS, ...ROW_SET_KEYS, ...PROFILE_SET_KEYS]) {
       if (own(this.state.setAt, k) || raws.has(k)) continue;
-      if (!PROFILE_SET_KEYS.includes(k) && !sameSet(getSet(this.state, k), getSet(blank, k))) continue;
+      if (!PROFILE_SET_KEYS.includes(k) && !sameSet(getSet(this.state, k), getSet(BLANK, k))) continue;
       const ov = getSet(other, k);
       const ft = own(other.setAt, k) ? other.setAt[k] : undefined;
       const timed = typeof ft === 'number' && ft > 0;
-      if (!timed && sameSet(ov, getSet(blank, k))) continue;
+      if (!timed && sameSet(ov, getSet(BLANK, k))) continue;
       takeSet(this.state, k, ov);
       this.state.setAt[k] = timed ? Math.min(ft, now) : now;
     }

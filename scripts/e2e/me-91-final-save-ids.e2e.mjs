@@ -64,10 +64,17 @@ export function fullSave(now) {
     },
     maps: [{ id: 'map-1', t: t0, urge: 'Quit', p1: 'Rest', c1: 'Guilt', p2: 'Pride', c2: 'Tired', choice: 'Wait', at: t0 }],
     lines: ids.line.map((id, i) => ({ day: dayOf(t0 + i * DAY), id, tag: 'STATUS', text: `Line ${id}`, t: t0 + i * DAY })),
-    settings: { sound: false, motion: 'reduce', vibrate: true, emotionRows: ['Sadness', 'Joy'], urgeRows: ['Urge to give up on today'] },
+    settings: {
+      sound: false,
+      motion: 'reduce',
+      vibrate: true,
+      highContrast: false,
+      emotionRows: ['Sadness', 'Joy'],
+      urgeRows: ['Urge to give up on today'],
+    },
     flags: { rankSeen: 5, wardenSeen: true, giftDay: today, cardDay: today, greetDay: today, safeCredit: false, therapistLineShown: true, checkinDay: today },
     gone: { 'c-old': t0 },
-    setAt: { sound: t0, motion: t0, vibrate: t0, emotionRows: t0, urgeRows: t0, safeCredit: t0 },
+    setAt: { sound: t0, motion: t0, vibrate: t0, highContrast: t0, emotionRows: t0, urgeRows: t0, safeCredit: t0 },
     skillPins: { [ids.skill[0]]: { pinned: true, at: t0 }, [ids.skill[1]]: { pinned: false, at: t0 } },
     profile: {
       theme: last(ids.theme),
@@ -233,6 +240,7 @@ export const scenarios = {
     const save = fullSave(now);
     save.settings.emotionRows = ['Joy', 'Calm'];
     save.settings.urgeRows = [];
+    save.settings.highContrast = true;
     const audio = JSON.stringify({ v: 1, master: 0.5, music: 0.25, sfx: 0.75, hum: 0, muted: true });
     const beside = {
       'dbt.audio.v1': audio,
@@ -265,6 +273,7 @@ export const scenarios = {
     expect(same(kept.profile.names, save.profile.names), 'a shadow name was dropped: ' + JSON.stringify(kept.profile.names));
     expect(ids.title.every((x) => kept.profile.titlesSeen.includes(x)), 'a title was dropped: ' + kept.profile.titlesSeen);
     expect(kept.settings.motion === 'reduce' && kept.settings.sound === false && kept.settings.vibrate === true, 'sound, motion or vibration reset');
+    expect(kept.settings.highContrast === true, 'Higher contrast reset on load');
     expect(same(kept.lines.map((l) => l.id).sort(), [...ids.line].sort()), 'a line id was dropped');
     expect((await ls(a.page, 'dbt.audio.v1')) === audio, 'audio levels reset');
     expect((await youOf(a.page))?.name === 'Kit', 'names mirror lost');
@@ -310,6 +319,8 @@ export const scenarios = {
     const blank = await exportCrystal(b.page, openSettings, path.join(out, 'me91-crystal-blank.json'));
     await b.page.goto(server.url + '/?mute');
     const said = await restoreCrystal(b.page, openSettings, fileX);
+    const lookB = await b.page.evaluate(() => document.documentElement.dataset.dqContrast);
+    expect(lookB === 'high', 'restoring the Save Crystal did not turn Higher contrast on: ' + lookB);
     expect(/drawings/.test(said) && /stories/.test(said), 'restore did not bring drawings and stories: ' + said);
     const shadowsB = await shadowCounts(b.page, reachHub, server.url);
     await shot(b.page, 'me91-03-restored-shadows');
