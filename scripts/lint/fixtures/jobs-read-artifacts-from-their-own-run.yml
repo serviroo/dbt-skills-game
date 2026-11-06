@@ -1,0 +1,35 @@
+jobs:
+  plan:
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ steps.find.outputs.artifact }}
+          run-id: ${{ steps.find.outputs.run }}
+  e2e:
+    steps:
+      - uses: actions/download-artifact@v8
+        if: needs.plan.outputs.artifact != ''
+        with:
+          artifact-ids: ${{ needs.plan.outputs.artifact }}
+          run-id: ${{ needs.plan.outputs.run }}
+          github-token: ${{ github.token }}
+  timings:
+    steps:
+      - with: {run-id: 123}
+        uses: 'actions/download-artifact@v8'
+  by_id:
+    steps:
+      - uses: actions/download-artifact@0123456789012345678901234567890123456789
+        with:
+          artifact-ids: ''
+  local:
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: e2e-plan-timings
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: e2e-times-*
+      - run: 'echo "run-id: 123"'
+  reusable:
+    uses: ./.github/workflows/other.yml

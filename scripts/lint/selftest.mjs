@@ -51,6 +51,22 @@ function checkStyles() {
   expect(lines.join() === '2', `word-break: expected a finding on line 2 only, got ${lines.join() || 'none'}`);
 }
 
+function checkWorkflows() {
+  const script = path.join(root, 'scripts/jobs-read-artifacts-from-their-own-run.mjs');
+  const fixture = path.join(fixtures, 'jobs-read-artifacts-from-their-own-run.yml');
+  const run = spawnSync('node', [script, fixture], { cwd: root, encoding: 'utf8' });
+  const found = run.stderr.trim().split('\n');
+  expect(run.status === 1 && found.length === 3, `own-run artifacts: expected 3 findings:\n${run.stderr}`);
+  for (const job of ['e2e', 'timings', 'by_id']) {
+    expect(found.some((line) => line.includes(`: ${job} step 1 uses `)), `own-run artifacts: missed ${job}`);
+  }
+  const local = path.join(scratch, 'local.yml');
+  fs.writeFileSync(local, 'jobs:\n  e2e:\n    steps:\n      - uses: actions/download-artifact@v8\n' +
+    '        with:\n          name: e2e-plan-timings\n');
+  const allowed = spawnSync('node', [script, local], { cwd: root, encoding: 'utf8' });
+  expect(allowed.status === 0, `own-run artifacts: a same-run download failed:\n${allowed.stderr}`);
+}
+
 function checkDiffLimits() {
   const repo = path.join(scratch, 'repo');
   fs.mkdirSync(repo);
@@ -113,6 +129,7 @@ function checkDiffLimits() {
 try {
   checkRules();
   checkStyles();
+  checkWorkflows();
   checkDiffLimits();
 } finally {
   fs.rmSync(scratch, { recursive: true, force: true });
