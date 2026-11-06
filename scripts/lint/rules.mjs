@@ -411,13 +411,30 @@ const keepFrameEffectsRunning = {
       ['step', 'draw'].includes(methodName(call)) ||
       (methodName(call) === 'render' && isNamed(call.callee.object, 'composer')),
     );
+    const returns = (node) => node.type === 'ReturnStatement' ||
+      children(node).some((child) => !FUNCTIONS.has(child.type) && returns(child));
+    const drawsLater = (node) => {
+      for (let at = node; at.parent && !FUNCTIONS.has(at.parent.type); at = at.parent) {
+        if (at.parent.type !== 'BlockStatement') continue;
+        const body = at.parent.body;
+        if (body.slice(body.indexOf(at) + 1).some(drawsFrame)) return true;
+      }
+      return false;
+    };
     const check = (node) => {
       if (!renderState(node.test)) return;
-      if (drawsFrame(node.consequent) || (node.alternate && drawsFrame(node.alternate))) {
+      const branches = [node.consequent, node.alternate].filter(Boolean);
+      if (branches.some(drawsFrame) || (branches.some(returns) && drawsLater(node))) {
         context.report({ node, messageId: 'frozen' });
       }
     };
-    return { IfStatement: check, ConditionalExpression: check };
+    return {
+      IfStatement: check,
+      ConditionalExpression: check,
+      LogicalExpression(node) {
+        if (renderState(node.left) && drawsFrame(node.right)) context.report({ node, messageId: 'frozen' });
+      },
+    };
   },
 };
 

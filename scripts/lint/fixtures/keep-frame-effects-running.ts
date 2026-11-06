@@ -9,3 +9,20 @@ export function moving(stage: any, dt: number) {
   if (!stage.sceneStill || stage.needsRender) stage.renderer.render(stage.scene, stage.camera);
   stage.composer.render(dt);
 }
+
+export function earlyReturn(stage: any, dt: number) {
+  if (stage.sceneStill) return;
+  stage.composer.render(dt);
+}
+
+export function earlyBlock(stage: any, dt: number) {
+  if (!stage.needsRender) {
+    return;
+  }
+  stage.draw(dt);
+}
+
+export function shortCircuit(stage: any, dt: number) {
+  stage.needsRender && stage.step(dt);
+  stage.sceneStill || stage.composer.render(dt);
+}

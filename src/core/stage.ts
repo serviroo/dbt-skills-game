@@ -171,6 +171,7 @@ export class Stage {
     this.camera = cam;
     this.renderPass.mainCamera = cam;
     this.composer.setMainCamera(cam);
+    this.invalidate();
     this.resize();
   }
 
@@ -205,12 +206,13 @@ export class Stage {
   }
 
   resize() {
-    this.invalidate();
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
+    const changed = w !== this.width || h !== this.height || this.renderer.getPixelRatio() !== this.dpr;
     // a screen with no area (a window sized to nothing) has no shape to frame for: the stage keeps its last size, and the
     // camera that size's aspect, until it has one again
-    if (w > 0 && h > 0) {
+    if (w > 0 && h > 0 && changed) {
+      this.invalidate();
       this.width = w;
       this.height = h;
       this.renderer.setPixelRatio(this.dpr);

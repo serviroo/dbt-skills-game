@@ -84,9 +84,9 @@ async function grain(page) {
     const pass = s.composer.passes.at(-1);
     const scale = pass.timeScale;
     const time = pass.fullscreenMaterial.time;
-    let frame = 0;
+    let grainFrame = 0;
     pass.timeScale = 0;
-    const off = s.onUpdate(() => { pass.fullscreenMaterial.time = 0.5 + frame++ / 60; });
+    const off = s.onUpdate(() => { pass.fullscreenMaterial.time = 0.5 + grainFrame++ / 60; });
     const sample = async () => {
       await new Promise((done) => requestAnimationFrame(done));
       const pixels = new Uint8Array(s.canvas.width * s.canvas.height * 4);
@@ -153,17 +153,28 @@ export const scenarios = {
       `the rested grain changed ${stillGrain}, continuous rendering changed ${movingGrain}`);
     h.expect(b.scenes === a.scenes && b.blooms === a.blooms,
       `the unchanged rewards backdrop kept drawing (${JSON.stringify([a, b])}; grain ${stillGrain}, ${movingGrain})`);
-    await page.evaluate(() => { window.__stage.sceneStill = true; });
-    const still = await h.poll(page, backdrop, (s) => s.scenes > b.scenes, 'the rewards scene never resumed');
+    const beforeStill = await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => {
+      const counts = { ...window.__backdropCounts };
+      window.__stage.sceneStill = true;
+      done(counts);
+    })));
+    const still = await h.poll(page, backdrop,
+      (s) => s.scenes > beforeStill.scenes && s.blooms > beforeStill.blooms,
+      'the rewards scene never resumed');
+    h.expect(still.scenes === beforeStill.scenes + 1 && still.blooms === beforeStill.blooms + 1,
+      'the resumed rewards backdrop did not render its expensive passes once');
+    await h.frames(page, 1);
     await page.setViewportSize(SIZES[320]);
     const resized = await h.poll(page, backdrop,
       (s) => s.scenes > still.scenes && s.width !== still.width && s.height !== still.height,
       'the rewards backdrop did not redraw at its new size');
     h.expect(resized.scenes === still.scenes + 1 && resized.blooms === still.blooms + 1,
       'the resized rewards backdrop did not render its expensive passes once');
+    await page.evaluate(() => window.dispatchEvent(new Event('resize')));
     await h.frames(page, 60);
     const c = await backdrop();
-    h.expect(c.scenes === resized.scenes && c.blooms === resized.blooms, 'the resized rewards backdrop kept drawing');
+    h.expect(c.scenes === resized.scenes && c.blooms === resized.blooms,
+      'the unchanged-size rewards backdrop redrew');
     h.expect(await grain(page) > 0.2, 'the resized rewards backdrop lost its grain');
     await shown(h, page, 'resized backdrop');
     await page.evaluate(() => {
