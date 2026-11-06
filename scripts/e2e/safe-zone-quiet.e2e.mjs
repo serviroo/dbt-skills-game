@@ -477,7 +477,7 @@ export const scenarios = {
         const a = await enter(page);
         const inside = await probe(page);
         await h.shot(page, `q5-race-${kind}-2-safe`);
-        await page.evaluate(() => window.__daily.toast('A toast from outside'));
+        await page.evaluate(() => window.__daily.toast(window.__daily.showing, 'A toast from outside'));
         await heardInside(h, page, a);
         const b = await leave(page);
         await until(page, 0, b.at[0] + 2 + 0.05);

@@ -1132,7 +1132,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
       }
       await refreshStory();
       if (sheet) await render();
-      app.toast('Chapter removed.', {
+      visit.toast('Chapter removed.', {
         label: 'Undo',
         run: async () => {
           await ss.putBackChapter(storyId, id, index);
@@ -1335,8 +1335,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const removeStory = async () => {
     await flushAll();
     await ss.remove(storyId);
-    app.back();
-    app.toast('Story removed.', { label: 'Undo', run: () => void ss.putBack(storyId) });
+    visit.back({ text: 'Story removed.', action: { label: 'Undo', run: () => void ss.putBack(storyId) } });
   };
 
   // ---------- selection ----------
@@ -1398,7 +1397,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     say(STORY.full);
     if (!fullToast) {
       fullToast = true;
-      app.toast(STORY.full);
+      visit.toast(STORY.full);
     }
   };
   /** Room left for an insertion that replaces the current selection. */
@@ -1711,7 +1710,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     }
     const at = prev.length;
     const added = next.slice(at);
-    app.toast(STORY.addedNotes, { label: 'Undo', run: () => void takeBackNotes(at, added, next) });
+    visit.toast(STORY.addedNotes, { label: 'Undo', run: () => void takeBackNotes(at, added, next) });
     return 'ok';
   };
   const takeBackNotes = async (at: number, added: string, next: string) => {
@@ -1740,7 +1739,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   };
   const afterChange = (msg: string, next: string) => {
     if (cwOpen) closeCw();
-    app.toast(msg, {
+    visit.toast(msg, {
       label: 'Undo',
       run: () => {
         if (cur && tab === 'page' && ta.value === next) undo();
@@ -1834,7 +1833,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
       cards.splice(i, 1);
       persistCards();
       renderCards(false);
-      app.toast('Tossed.', {
+      visit.toast('Tossed.', {
         label: 'Undo',
         run: () => {
           cards.splice(Math.min(i, cards.length), 0, c);
