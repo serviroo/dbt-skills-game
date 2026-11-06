@@ -5,7 +5,8 @@ export function slowEchoLoadsFromPress(ctx, ms) {
       ...buffer,
       set(b) {
         const end = performance.now() + ms;
-        while (window.__pressAt !== undefined && performance.now() < end);
+        if (window.__pressAt !== undefined) window.__echoStalls = (window.__echoStalls ?? 0) + 1;
+      while (window.__pressAt !== undefined && performance.now() < end);
         buffer.set.call(this, b);
       },
     });

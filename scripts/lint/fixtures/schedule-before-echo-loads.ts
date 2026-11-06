@@ -53,6 +53,12 @@ export class Engine {
     this.out.gain.setTargetAtTime(0, at, 0.01);
   }
 
+  later(at = soon(this.ctx)) {
+    this.echo = this.makeEcho();
+    const end = at + 0.04;
+    this.out.gain.linearRampToValueAtTime(0, end);
+  }
+
   twice() {
     this.echo = this.makeEcho();
     const at = soon(this.ctx);

@@ -742,6 +742,8 @@ export const scenarios = {
         // the cue sounding as the press lands, ten times over silence (the letter's opening swells in from soft)
         h.expect(before.rms > 10 * SILENT_RMS, `${tag}: the intro was not audible at the press (RMS ${before.rms}), so silence proves nothing`);
         h.expect(after.cover >= 0.9, `${tag}: the recorder read only ${Math.round(after.cover * 100)}% of the time after the press`);
+        const stalls = await page.evaluate(() => window.__echoStalls ?? 0);
+        h.expect(way !== 'slow' || stalls > 0, `${tag}: no echo loaded after the press, so nothing was slow`);
         h.expect(after.peak < SILENT_PEAK && after.rms < SILENT_RMS, `${tag}: the intro played on over Home (peak ${after.peak}, RMS ${after.rms})`);
         await homeAtOnce(h, page, tag);
         h.expect(!errors.length, errors.join('\n'));

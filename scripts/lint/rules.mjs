@@ -303,8 +303,8 @@ function soonTimes(fn, before) {
     for (const child of children(node)) {
       if (FUNCTIONS.has(child.type)) continue;
       const early = child.range[1] <= before;
-      const declared = early && child.type === 'VariableDeclarator' && child.id.type === 'Identifier';
-      if (declared && (callsSoon(child.init) || mentions(child.init, names))) {
+      const declared = child.type === 'VariableDeclarator' && child.id.type === 'Identifier';
+      if (declared && (callsSoon(child.init) ? early : mentions(child.init, names))) {
         names.add(child.id.name);
       }
       visit(child);

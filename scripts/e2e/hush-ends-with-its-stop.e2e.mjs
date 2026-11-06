@@ -9,20 +9,24 @@ export const scenarios = {
         const { AudioEngine } = await import('/src/audio/engine.ts');
         const { SCORE } = await import('/src/motion/tokens.ts');
         const rate = 44100;
+        const press = 0.2;
         const stops = {
-          Skip: (e) => e.stopAll(SCORE.leaveSec, 0.2),
+          Skip: (e) => {
+            e.bed('gate_hum', { at: 0, level: 20, fadeIn: 0.05 });
+            e.hush(0);
+            e.stopAll(SCORE.leaveSec, press);
+          },
           'the Safe Zone': (e) => {
-            e.quiet(true, SCORE.safeOutSec, 0.2);
+            e.hush(0);
+            e.quiet(true, SCORE.safeOutSec, press);
+            e.stopAll(SCORE.safeOutSec, press);
             e.quiet(false, SCORE.safeOutSec, 0.5);
           },
         };
         const render = async (stop) => {
           const c = new OfflineAudioContext(2, rate * 2, rate);
           const e = new AudioEngine(c);
-          if (stop) {
-            e.hush(0);
-            stop(e);
-          }
+          stop?.(e);
           e.bed('ambient', { at: 0.8, fadeIn: 0.1 });
           const buf = await c.startRendering();
           const read = (a, b) => {
@@ -38,7 +42,8 @@ export const scenarios = {
             }
             return { peak, rms: Math.sqrt(ss / n) };
           };
-          return { room: read(0.05, 0.2), between: read(0.5, 0.8), bed: read(1.2, 2) };
+          const [held, fade] = [read(0.1, press), read(press, press + 0.15)];
+          return { held, fade, between: read(0.5, 0.8), bed: read(1.2, 2) };
         };
         const ways = {};
         for (const [way, stop] of Object.entries(stops)) ways[way] = await render(stop);
@@ -46,11 +51,12 @@ export const scenarios = {
       });
       h.expect(r.clean.rms > 10 * SILENT_PEAK, `the bed was not audible on its own (RMS ${r.clean.rms})`);
       for (const [way, w] of Object.entries(r.ways)) {
-        const { room, between } = w;
-        h.expect(room.peak > 10 * SILENT_PEAK, `${way}: the hush was silent (peak ${room.peak})`);
+        const { held, fade, between } = w;
+        h.expect(held.peak > 10 * SILENT_PEAK, `${way}: the hush was silent (peak ${held.peak})`);
+        h.expect(fade.peak <= held.peak, `${way}: the hush swelled from ${held.peak} to ${fade.peak} as it stopped`);
         h.expect(between.peak < SILENT_PEAK, `${way}: the hush played on after it (peak ${between.peak})`);
-        const level = (w.bed.rms / r.clean.rms).toFixed(3);
-        h.expect(level > 0.7, `${way}: a bed started after it plays at ${level} of its level: the hush holds it down`);
+        const level = w.bed.rms / r.clean.rms;
+        h.expect(level > 0.7, `${way}: a bed after it plays at ${level.toFixed(3)} of its level`);
       }
       h.expect(!errors.length, errors.join('\n'));
       return { clean: r.clean.rms, ways: Object.fromEntries(Object.entries(r.ways).map(([k, w]) => [k, w.bed.rms])) };
