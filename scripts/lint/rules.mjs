@@ -395,6 +395,32 @@ const scheduleBeforeEchoLoads = {
   },
 };
 
+const keepFrameEffectsRunning = {
+  meta: {
+    messages: {
+      frozen: 'Cache the scene and its bloom, and keep the per-frame effects rendering while the scene is still.',
+    },
+  },
+  create(context) {
+    const renderState = (node) => {
+      if (!node) return false;
+      if (node.type === 'Identifier' && /^(renderOnDemand|sceneStill|needsRender)$/.test(node.name)) return true;
+      return children(node).some(renderState);
+    };
+    const drawsFrame = (node) => ownCalls(node).some((call) =>
+      ['step', 'draw'].includes(methodName(call)) ||
+      (methodName(call) === 'render' && isNamed(call.callee.object, 'composer')),
+    );
+    const check = (node) => {
+      if (!renderState(node.test)) return;
+      if (drawsFrame(node.consequent) || (node.alternate && drawsFrame(node.alternate))) {
+        context.report({ node, messageId: 'frozen' });
+      }
+    };
+    return { IfStatement: check, ConditionalExpression: check };
+  },
+};
+
 export default {
   meta: { name: 'lantern' },
   rules: {
@@ -406,5 +432,6 @@ export default {
     'tap-elements-not-points': tapElementsNotPoints,
     'handle-lost-gpu-context': handleLostGpuContext,
     'schedule-before-echo-loads': scheduleBeforeEchoLoads,
+    'keep-frame-effects-running': keepFrameEffectsRunning,
   },
 };

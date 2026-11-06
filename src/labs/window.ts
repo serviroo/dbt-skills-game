@@ -41,7 +41,7 @@ const SAMPLES: Record<string, ConstructorParameters<typeof LanternWindow>[1]> = 
 };
 
 export function windowLab(stage: Stage) {
-  stage.renderOnDemand = true;
+  stage.sceneStill = true;
   const q = new URLSearchParams(location.search);
   const env = buildVoid();
   env.skyMat.uniforms.uGlow.value = 0.25;
@@ -49,6 +49,7 @@ export function windowLab(stage: Stage) {
   stage.scene.add(env.group);
   stage.camera.position.set(0, 1.4, 4);
   stage.camera.lookAt(0, 1.6, -10);
+  stage.invalidate();
   const kind = q.get('kind') ?? 'notification';
   if (['title', 'awaken', 'rewards', 'letter', 'endcard', 'hold'].includes(kind)) {
     env.skyMat.uniforms.uGlow.value = 0.25;

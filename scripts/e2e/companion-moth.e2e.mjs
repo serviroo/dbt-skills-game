@@ -77,13 +77,66 @@ async function seamless(h, page, where) {
   h.expect(whole, `${where}: the moth is cut off at its window's side (${sides}, ${beside})`);
 }
 
+async function grain(page) {
+  return page.evaluate(async () => {
+    const s = window.__stage;
+    const gl = s.renderer.getContext();
+    const pass = s.composer.passes.at(-1);
+    const scale = pass.timeScale;
+    const time = pass.fullscreenMaterial.time;
+    let frame = 0;
+    pass.timeScale = 0;
+    const off = s.onUpdate(() => { pass.fullscreenMaterial.time = 0.5 + frame++ / 60; });
+    const sample = async () => {
+      await new Promise((done) => requestAnimationFrame(done));
+      const pixels = new Uint8Array(s.canvas.width * s.canvas.height * 4);
+      gl.readPixels(0, 0, s.canvas.width, s.canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+      return pixels;
+    };
+    try {
+      let previous = await sample();
+      let changed = 0;
+      let samples = 0;
+      for (let frame = 0; frame < 3; frame++) {
+        const next = await sample();
+        for (let i = 0; i < next.length; i++) {
+          if (i % 4 === 3) continue;
+          changed += Number(previous[i] !== next[i]);
+          samples++;
+        }
+        previous = next;
+      }
+      return changed / samples;
+    } finally {
+      off();
+      pass.timeScale = scale;
+      pass.fullscreenMaterial.time = time;
+    }
+  });
+}
+
 export const scenarios = {
   async 'companion-moth-backdrop-rests'(h) {
-    const { ctx, page, errors } = await h.open({}, REWARDS + '&reduced', SIZES[390]);
+    const { ctx, page, errors } = await h.open({}, REWARDS + '&reduced&dpr=1', SIZES[390]);
     await mothOnCard(h, page, 'backdrop');
     await shown(h, page, 'backdrop');
+    await page.evaluate(() => {
+      const s = window.__stage;
+      const counts = window.__backdropCounts = { scenes: 0, blooms: 0 };
+      const render = s.renderer.render.bind(s.renderer);
+      s.renderer.render = (scene, camera) => {
+        if (scene === s.scene) counts.scenes++;
+        return render(scene, camera);
+      };
+      const blur = s.bloom.mipmapBlurPass;
+      const bloom = blur.render.bind(blur);
+      blur.render = (...args) => {
+        counts.blooms++;
+        return bloom(...args);
+      };
+    });
     const backdrop = () => page.evaluate(() => ({
-      frames: window.__stage.renderer.info.render.frame,
+      ...window.__backdropCounts,
       time: window.__stage.time,
       width: document.getElementById('gl').width,
       height: document.getElementById('gl').height,
@@ -93,14 +146,25 @@ export const scenarios = {
     await h.frames(page, 60);
     const b = await backdrop();
     h.expect(b.time > a.time, 'the rewards clock stopped with its backdrop');
-    h.expect(b.frames === a.frames, `the unchanged rewards backdrop kept drawing (${a.frames}, ${b.frames})`);
+    const stillGrain = await grain(page);
+    await page.evaluate(() => { window.__stage.sceneStill = false; });
+    const movingGrain = await grain(page);
+    h.expect(stillGrain > 0.2 && Math.abs(stillGrain - movingGrain) < 0.03,
+      `the rested grain changed ${stillGrain}, continuous rendering changed ${movingGrain}`);
+    h.expect(b.scenes === a.scenes && b.blooms === a.blooms,
+      `the unchanged rewards backdrop kept drawing (${JSON.stringify([a, b])}; grain ${stillGrain}, ${movingGrain})`);
+    await page.evaluate(() => { window.__stage.sceneStill = true; });
+    const still = await h.poll(page, backdrop, (s) => s.scenes > b.scenes, 'the rewards scene never resumed');
     await page.setViewportSize(SIZES[320]);
     const resized = await h.poll(page, backdrop,
-      (s) => s.frames > b.frames && s.width !== b.width && s.height !== b.height,
+      (s) => s.scenes > still.scenes && s.width !== still.width && s.height !== still.height,
       'the rewards backdrop did not redraw at its new size');
+    h.expect(resized.scenes === still.scenes + 1 && resized.blooms === still.blooms + 1,
+      'the resized rewards backdrop did not render its expensive passes once');
     await h.frames(page, 60);
     const c = await backdrop();
-    h.expect(c.frames === resized.frames, 'the resized rewards backdrop kept drawing');
+    h.expect(c.scenes === resized.scenes && c.blooms === resized.blooms, 'the resized rewards backdrop kept drawing');
+    h.expect(await grain(page) > 0.2, 'the resized rewards backdrop lost its grain');
     await shown(h, page, 'resized backdrop');
     await page.evaluate(() => {
       window.__backdropContext = window.__stage.renderer.getContext().getExtension('WEBGL_lose_context');
@@ -108,14 +172,36 @@ export const scenarios = {
     });
     await page.waitForFunction(() => window.__stage.lost);
     await page.evaluate(() => window.__backdropContext.restoreContext());
-    const restored = await h.poll(page, backdrop, (s) => !s.lost && s.frames > 0,
+    const restored = await h.poll(page, backdrop, (s) => !s.lost && s.scenes > c.scenes && s.blooms > c.blooms,
       'the rewards backdrop did not redraw after its context returned');
+    h.expect(restored.scenes === c.scenes + 1 && restored.blooms === c.blooms + 1,
+      'the restored rewards backdrop did not render its expensive passes once');
     await h.frames(page, 60);
-    h.expect((await backdrop()).frames === restored.frames, 'the restored rewards backdrop kept drawing');
+    const afterRestore = await backdrop();
+    h.expect(afterRestore.scenes === restored.scenes && afterRestore.blooms === restored.blooms,
+      'the restored rewards backdrop kept drawing');
+    h.expect(await grain(page) > 0.2, 'the restored rewards backdrop lost its grain');
+    await page.evaluate(() => {
+      const s = window.__stage;
+      s.camera.position.x += 1;
+      s.invalidate();
+    });
+    const invalidated = await h.poll(page, backdrop,
+      (s) => s.scenes > afterRestore.scenes && s.blooms > afterRestore.blooms,
+      'the changed rewards scene did not redraw when requested');
+    h.expect(invalidated.scenes === afterRestore.scenes + 1 && invalidated.blooms === afterRestore.blooms + 1,
+      'the changed rewards backdrop did not render its expensive passes once');
+    await h.frames(page, 60);
+    const settled = await backdrop();
+    h.expect(settled.scenes === invalidated.scenes && settled.blooms === invalidated.blooms,
+      'the invalidated rewards backdrop kept drawing');
     await page.evaluate(() => window.__stage.step(0));
-    h.expect((await backdrop()).frames > restored.frames, 'an explicit rewards capture did not draw');
+    const captured = await backdrop();
+    h.expect(captured.scenes > settled.scenes && captured.blooms > settled.blooms,
+      'an explicit rewards capture did not draw');
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
+    return { stillGrain, movingGrain, restored, invalidated };
   },
 
   async 'companion-moth'(h) {
