@@ -383,12 +383,14 @@ export class AudioEngine {
     const m = taper(l.music);
     this.musUser.gain.setTargetAtTime(m, t, tau);
     for (const g of [this.echo.sends.musRoom, this.echo.sends.musHall]) {
+      g.curve.cancelScheduledValues(t);
       g.curve.setTargetAtTime(m, t, tau);
     }
     const s = taper(l.sfx);
     this.sendLevels = { sfx: s, mus: m, tau };
     for (const g of [this.sfxUser, this.bedUser]) g.gain.setTargetAtTime(s, t, tau);
     for (const g of [this.echo.sends.sfxRoom, this.echo.sends.sfxHall]) {
+      g.curve.cancelScheduledValues(t);
       g.curve.setTargetAtTime(s, t, tau);
     }
   }

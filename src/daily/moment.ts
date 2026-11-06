@@ -209,6 +209,7 @@ function lowHum(level: () => number, volume?: VolumeCtrl) {
     breathe(s: number) {
       if (end !== Infinity) return;
       const t = soon(ctx);
+      breathGain.cancelScheduledValues(t);
       breathGain.setTargetAtTime(0.035 + s * 0.03, t, 0.25);
       lp.frequency.setTargetAtTime(300 + s * 140, t, 0.3);
     },
@@ -220,8 +221,8 @@ function lowHum(level: () => number, volume?: VolumeCtrl) {
       if (at >= end) return;
       const first = end === Infinity;
       end = at;
+      holdAt(breathGain, t);
       if (ramp !== undefined) {
-        holdAt(breathGain, t);
         breathGain.linearRampToValueAtTime(0, at);
       } else breathGain.setTargetAtTime(0, t, OFF_TAU);
       oscs.forEach((o) => o.stop(at));

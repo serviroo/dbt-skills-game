@@ -10,6 +10,7 @@
         "lantern/audio-times-from-soon": "error",
         "lantern/hold-reads-the-scheduled-curve": "error",
         "lantern/held-times-are-clamped": "error",
+        "lantern/tracked-events-are-validated": "error",
         "lantern/animations-share-start-time": "error",
         "lantern/follow-device-preferences": "error",
         "lantern/no-soft-hyphen-characters": "error",

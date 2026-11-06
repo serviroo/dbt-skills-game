@@ -75,45 +75,52 @@ export class Curve {
   }
 
   setValueAtTime(value: number, t: number) {
+    this.checkEvent('set', t);
     this.param.setValueAtTime(value, t);
     return this.record('set', value, t);
   }
 
   linearRampToValueAtTime(value: number, t: number) {
+    this.checkEvent('linear', t);
     const now = this.ctx.currentTime;
-    const end = Math.max(t, now);
-    let index = this.events.length - 1;
-    while (index >= 0 && this.events[index].time > end) index--;
-    const previous = this.events[index];
-    this.param.linearRampToValueAtTime(value, t);
+    const end = this.clampTime(t);
+    const previous = this.events[this.events.length - 1];
     if (!previous && end > now) this.setValueAtTime(this.initial, now);
     else if (previous?.kind === 'target') {
       const start = Math.max(now, previous.time);
       const from = start === previous.time
-        ? this.evaluate(start, this.events.slice(0, index)) : this.valueAt(start);
-      if (start < end) this.setValueAtTime(from, start);
+        ? this.evaluate(start, this.events.slice(0, -1)) : this.valueAt(start);
+      if (start < end) {
+        this.param.setValueAtTime(from, start);
+        this.record('set', from, start);
+      }
     }
+    this.param.linearRampToValueAtTime(value, t);
     return this.record('linear', value, t);
   }
 
   setTargetAtTime(value: number, t: number, tau: number) {
+    this.checkEvent('target', t);
     this.param.setTargetAtTime(value, t, tau);
+    return this.record('target', value, t, tau);
+  }
+
+  private checkEvent(kind: Event['kind'], t: number) {
     const time = this.clampTime(t);
-    const repeated = this.events.some((event) => event.kind === 'target' && event.time === time);
-    if (!repeated) return this.record('target', value, t, tau);
-    this.events = this.events.flatMap((event): Event[] => {
-      if (event.kind !== 'target' || event.time !== time) return [event];
-      return event.tau === 0 ? [{ ...event, kind: 'set' }] : [];
-    });
-    this.record('target', value, t, tau);
-    this.param.cancelScheduledValues(time);
-    for (const event of this.events) {
-      if (event.time < time) continue;
-      if (event.kind === 'set') this.param.setValueAtTime(event.value, event.time);
-      else if (event.kind === 'linear') this.param.linearRampToValueAtTime(event.value, event.time);
-      else this.param.setTargetAtTime(event.value, event.time, event.tau);
+    const previous = this.events[this.events.length - 1];
+    if (!previous) return;
+    if (time < previous.time) {
+      throw new Error('Tracked automation must be scheduled in time order; cancel or hold the future first.');
     }
-    return this;
+    if (time !== previous.time) return;
+    const sameTime = this.events.slice(-3).filter((event) => event.time === time);
+    const followsAnchor = sameTime.length === 1 && previous.kind !== 'target'
+      && (kind !== 'set' || previous.kind === 'linear');
+    const followsHeldStep = sameTime.length === 2 && sameTime[0].kind === 'linear'
+      && previous.kind === 'set' && kind !== 'set';
+    if (!followsAnchor && !followsHeldStep) {
+      throw new Error('Unsupported same-time tracked automation; cancel or hold before scheduling another change.');
+    }
   }
 
   cancelScheduledValues(t: number) {
@@ -135,12 +142,7 @@ export class Curve {
   private record(kind: Event['kind'], value: number, t: number, tau = 0) {
     const time = this.clampTime(t);
     const event = { kind, value: Math.fround(value), time, tau, calledAt: this.ctx.currentTime };
-    if (!this.events.length || this.events[this.events.length - 1].time <= time) {
-      this.events.push(event);
-    } else {
-      const index = this.events.findIndex((e) => e.time > time);
-      this.events.splice(index, 0, event);
-    }
+    this.events.push(event);
     this.compact();
     return this;
   }

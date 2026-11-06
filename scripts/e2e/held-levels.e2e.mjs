@@ -1,4 +1,4 @@
-import { renderedAutomation, repeatedTargets } from './audio-automation.mjs';
+import { renderedAutomation, repeatedTargets, rejectedAutomation } from './audio-automation.mjs';
 
 async function checkAutomation({ open, expect }, render, passes) {
   const { ctx, page, errors } = await open({}, '?lab=audio&mute');
@@ -21,7 +21,7 @@ export const scenarios = {
       const { holdAt } = await import('/src/audio/param.ts');
       const sr = 48000;
       const out = [];
-      for (const kind of ['set', 'target', 'instant-target', 'set-target', 'target-set']) {
+      for (const kind of ['set', 'target', 'instant-target', 'set-target']) {
         const c = new OfflineAudioContext(1, 2 * sr, sr);
         const gain = c.createGain();
         gain.connect(c.destination);
@@ -33,7 +33,6 @@ export const scenarios = {
         p.linearRampToValueAtTime(0, 1);
         if (kind === 'set' || kind === 'set-target') p.setValueAtTime(0.5, 1);
         if (kind !== 'set') p.setTargetAtTime(0.75, 1, kind === 'instant-target' ? 0 : 0.25);
-        if (kind === 'target-set') p.setValueAtTime(0.5, 1);
         const held = kind === 'target' ? 0 : kind === 'instant-target' ? 0.75 : 0.5;
         holdAt(p, 1);
         holdAt(p, 1.25);
@@ -169,7 +168,12 @@ export const scenarios = {
 
   async 'tracked-values-match-the-rendered-automation'(h) {
     return checkAutomation(h, renderedAutomation, (r) => !r.outsideSample.length
+      && Number.isFinite(r.error) && r.error <= r.maxStep + 2e-7
       && (r.held === undefined || Math.abs(r.actual - r.held) <= 1e-6));
+  },
+
+  async 'unsupported-automation-throws-before-changing-the-curve'(h) {
+    return checkAutomation(h, rejectedAutomation, (r) => r.rejected && r.unchanged && r.error < 1e-5);
   },
 
   async 'tracked-values-match-rendering-within-float-precision'(h) {
@@ -209,6 +213,7 @@ export const scenarios = {
         const sr = 48000;
         const c = new OfflineAudioContext(6, sr, sr);
         const eng = new AudioEngine(c);
+        eng.setUser({ master: 1, music: 0.5, sfx: 0.75, muted: false }, 4);
         eng.setUser({ master: 1, music: 0.25, sfx: 0.5, muted: false }, 4);
         const paused = c.suspend(0.5);
         const rendering = c.startRendering();

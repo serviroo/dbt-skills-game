@@ -7,45 +7,43 @@ export async function renderedAutomation() {
     sameTime: (p) => {
       p.setValueAtTime(0.8, 0.5);
       p.setTargetAtTime(0, 0.5, 0.25);
-      p.setValueAtTime(0.6, 0.5);
       holdAt(p, 1.25);
-      return { at: 1.25, held: Math.fround(0.6) };
+      return { at: 1.25, held: Math.fround(0.8) * Math.exp(-3) };
     },
-    sameTimeBeforeFuture: (p) => {
-      p.setValueAtTime(0.9, 2);
-      return schedules.sameTime(p);
+    setRamp: (p) => {
+      p.setValueAtTime(0.8, 0.5);
+      p.linearRampToValueAtTime(0.4, 0.5);
     },
-    repeatedTargetsAtEnd: (p) => {
+    cancelledTarget: (p) => {
+      p.setTargetAtTime(0, 0.5, 0.25);
+      p.cancelScheduledValues(0.5);
+      p.setTargetAtTime(0.5, 0.5, 0.25);
+      holdAt(p, 1.25);
+    },
+    heldRampTarget: (p) => {
       p.setValueAtTime(1, 0);
       p.linearRampToValueAtTime(0.9, 0.125);
       holdAt(p, 0.125);
-      p.setValueAtTime(0.74, 0.125);
-      p.setTargetAtTime(0.4, 0.125, 0.1);
-      p.setTargetAtTime(0.74, 0.125, 0.01);
-      return { at: 0.1265, held: Math.fround(0.74) };
+      p.setTargetAtTime(0, 0.125, 0.1);
+      holdAt(p, 0.75);
     },
-    repeatedTargetsBeforeFuture: (p) => {
-      const checks = schedules.repeatedTargetsAtEnd(p);
-      p.setValueAtTime(0.6, 2);
-      p.setTargetAtTime(0.3, 2.5, 0.25);
-      p.linearRampToValueAtTime(0.5, 2.75);
-      p.setTargetAtTime(0.74, 0.125, 0.01);
-      return checks;
+    heldStepRamp: (p) => {
+      p.linearRampToValueAtTime(0.9, 0.5);
+      p.setTargetAtTime(0.75, 0.5, 0);
+      holdAt(p, 0.5);
+      p.linearRampToValueAtTime(0, 0.5);
     },
-    repeatedTargetsAfterSet: (p) => {
-      p.setTargetAtTime(0.4, 0.125, 0.1);
-      p.setValueAtTime(0.74, 0.125);
-      p.setTargetAtTime(0.74, 0.125, 0.01);
-      return { at: 0.1265, held: Math.fround(0.74) };
-    },
-    repeatedInstantTarget: (p) => {
-      p.setTargetAtTime(0, 0.125, 0);
-      p.setTargetAtTime(1, 0.125, 0.25);
-      p.setValueAtTime(0.5, 0.75);
+    heldStepTarget: (p) => {
+      p.linearRampToValueAtTime(0.9, 0.5);
+      p.setTargetAtTime(0.75, 0.5, 0);
+      holdAt(p, 0.5);
+      p.setTargetAtTime(0, 0.5, 0.1);
+      holdAt(p, 1);
     },
     instantRamp: (p) => p.linearRampToValueAtTime(0.4, 0),
-    instantTargetRamp: (p) => {
-      p.setTargetAtTime(0, 0.5, 0.25);
+    heldRampRamp: (p) => {
+      p.linearRampToValueAtTime(0.6, 0.5);
+      holdAt(p, 0.5);
       p.linearRampToValueAtTime(0.2, 0.5);
       holdAt(p, 1.25);
       return { at: 1.25, held: Math.fround(0.2) };
@@ -77,11 +75,12 @@ export async function renderedAutomation() {
     sets: (p) => {
       p.setValueAtTime(0.25, 0.25);
       p.setValueAtTime(0.5, 1);
-      p.setValueAtTime(0.625, 1);
+      p.setValueAtTime(0.625, 1.5);
     },
     ordered: (p) => {
       p.setValueAtTime(1, 0);
       p.linearRampToValueAtTime(0, 2);
+      holdAt(p, 1);
       p.setValueAtTime(0.5, 1);
     },
     targets: (p) => {
@@ -91,7 +90,7 @@ export async function renderedAutomation() {
     },
     zeroTarget: (p) => {
       p.setTargetAtTime(0, 0.25, 0);
-      p.setTargetAtTime(0.75, 0.25, 0);
+      p.setTargetAtTime(0.75, 0.5, 0);
     },
     zeroTargetRamp: (p) => {
       p.setTargetAtTime(0, 0.25, 0);
@@ -141,19 +140,87 @@ export async function renderedAutomation() {
     };
     const checks = schedule(p, advance);
     sampleUntil(3 * sr);
+    expected.push([3 * sr - 1, p.valueAt((3 * sr - 1) / sr)]);
     const data = (await c.startRendering()).getChannelData(0);
     const error = Math.max(...expected.map(([i, value]) => Math.abs(data[i] - value)));
+    let maxStep = 0;
     const outsideSample = expected.filter(([i, value]) => {
       const step = Math.max(Math.abs(data[i] - data[Math.max(0, i - 1)]),
-        Math.abs(data[i + 1] - data[i]));
-      return Math.abs(data[i] - value) > step + 2e-7;
+        Math.abs(data[Math.min(data.length - 1, i + 1)] - data[i]));
+      maxStep = Math.max(maxStep, step);
+      return !Number.isFinite(step) || Math.abs(data[i] - value) > step + 2e-7;
     });
     const held = checks?.held;
     const actual = held === undefined ? undefined : data[Math.round(checks.at * sr)];
     const samples = outsideSample.slice(0, 3).map(([i, expected]) => ({ i, expected, actual: data[i] }));
-    out.push({ name, error, outsideSample: samples, held, actual });
+    out.push({ name, error, maxStep, outsideSample: samples, held, actual });
   }
   return out;
+}
+
+export async function rejectedAutomation() {
+  const { trackParam } = await import('/src/audio/curve.ts');
+  const { holdAt } = await import('/src/audio/param.ts');
+  const methods = ['setValueAtTime', 'linearRampToValueAtTime', 'setTargetAtTime'];
+  const schedules = [];
+  for (const method of methods) for (const tau of [0, 0.1]) schedules.push({
+    name: `out-of-order-${method}-${tau}`, message: 'time order',
+    before: (p) => { p.setValueAtTime(1, 0); p.linearRampToValueAtTime(0, 1); },
+    reject: (p) => p[method](0.5, 0.5, tau),
+  });
+  for (const tau of [0, 0.1]) schedules.push({
+    name: `target-ramp-target-${tau}`, message: 'same-time',
+    before: (p) => { p.setValueAtTime(1, 0); p.setTargetAtTime(0.6, 0.5, tau); },
+    reject: (p) => p.linearRampToValueAtTime(0.2, 0.5),
+  });
+  schedules.push({
+    name: 'earlier-co-timed-sequence', message: 'same-time',
+    before: (p) => {
+      p.setValueAtTime(1, 0);
+      p.linearRampToValueAtTime(0.9, 0.125);
+      holdAt(p, 0.125);
+      p.setValueAtTime(0.74, 0.125);
+      p.setTargetAtTime(0.4, 0.125, 0.1);
+    },
+    reject: (p) => p.setTargetAtTime(0.74, 0.125, 0.01),
+  });
+  for (const first of methods) for (const next of methods) {
+    if (first !== 'setTargetAtTime' && (next !== 'setValueAtTime' || first === 'linearRampToValueAtTime')) continue;
+    schedules.push({
+      name: `${first}-${next}`, message: 'same-time',
+      before: (p) => p[first](0.6, 0.5, 0.1),
+      reject: (p) => p[next](0.4, 0.5, 0.1),
+    });
+  }
+  for (const first of methods.slice(0, 2)) for (const next of methods.slice(1)) schedules.push({
+    name: `${first}-${next}-target`, message: 'same-time',
+    before: (p) => { p[first](0.6, 0.5); p[next](0.4, 0.5, 0.1); },
+    reject: (p) => p.setTargetAtTime(0, 0.5, 0.1),
+  });
+  const results = [];
+  for (const schedule of schedules) {
+    const c = new OfflineAudioContext(1, 48000, 48000);
+    const gain = c.createGain();
+    gain.connect(c.destination);
+    const source = c.createConstantSource();
+    source.connect(gain);
+    source.start();
+    const p = trackParam(gain.gain, c, 1);
+    schedule.before(p);
+    const samples = [0.25, 0.75, 0.99];
+    const before = samples.map((at) => p.valueAt(at));
+    let message = '';
+    try {
+      schedule.reject(p);
+    } catch (error) {
+      message = error.message;
+    }
+    const unchanged = samples.every((at, i) => p.valueAt(at) === before[i]);
+    const data = (await c.startRendering()).getChannelData(0);
+    const error = Math.max(...samples.map((at, i) => Math.abs(data[Math.round(at * 48000)] - before[i])));
+    results.push({ name: schedule.name, rejected: message.includes(schedule.message), unchanged, error });
+  }
+  return results;
 }
 
 export async function repeatedTargets() {
