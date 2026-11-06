@@ -81,6 +81,26 @@ const audioTimesFromSoon = {
   },
 };
 
+const lateOpensBuildAgain = {
+  meta: {
+    messages: {
+      dropped:
+        'openInTime() drops a held sound unheard when the audio clock reaches it before it is all placed. Open it ' +
+        'with openBuilt, which builds it again for a later time, or use what openInTime returns.',
+    },
+  },
+  create(context) {
+    return {
+      ExpressionStatement(node) {
+        const call = node.expression.type === 'UnaryExpression' ? node.expression.argument : node.expression;
+        if (call.type === 'CallExpression' && methodName(call) === 'openInTime') {
+          context.report({ node: call, messageId: 'dropped' });
+        }
+      },
+    };
+  },
+};
+
 const animationsShareStartTime = {
   meta: {
     messages: {
@@ -276,6 +296,7 @@ export default {
   meta: { name: 'lantern' },
   rules: {
     'audio-times-from-soon': audioTimesFromSoon,
+    'late-opens-build-again': lateOpensBuildAgain,
     'animations-share-start-time': animationsShareStartTime,
     'follow-device-preferences': followDevicePreferences,
     'no-soft-hyphen-characters': noSoftHyphenCharacters,

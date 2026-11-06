@@ -263,6 +263,7 @@
   "every-bed-and-the-charge-loop-start-on-time-however-slow-their-build": [39],
   "every-cue-plays-whole-and-on-time-on-a-busy-page": [107, 103],
   "every-cue-reads-on-a-phone-speaker": [29, 20],
+  "every-cue-starts-on-time-however-slow-its-build": [21],
   "every-fade-ends-in-silence": [20],
   "every-score-part-opens-on-time-on-a-busy-page": [38],
   "every-score-section-and-the-hush-open-on-time-however-slow-their-build": [84],

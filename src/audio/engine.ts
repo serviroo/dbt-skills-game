@@ -7,8 +7,8 @@ import { CUES } from './cues';
 import { BED_NAMES, buildBed, buildCharge, type BedHandle, type BedName, type ChargeHandle } from './beds';
 import { AHEAD, Music, SECTIONS, type Section, type SectionOpts } from './music';
 import { clipCurve, makeCrackle, makeIR, makeNoise, dB, type Ctx } from './dsp';
-import { holdAt, soon, taper } from './param';
-import { Voice, stoppedBy, type Lib } from './voice';
+import { glide, holdAt, soon, taper } from './param';
+import { Voice, openBuilt, stoppedBy, type Lib } from './voice';
 
 export type { BedHandle, BedName, ChargeHandle, Section, SectionOpts };
 export { BED_NAMES, SECTIONS };
@@ -253,7 +253,7 @@ export class AudioEngine {
         seed: () => this.nextSeed(),
         onSection: (name, at) => {
           if (this.lifted) {
-            this.music.lift(0, 0.3, at);
+            this.music.lift(0, 0.3, this.when(at));
             this.lifted = false;
           }
           // the gate hum and the aura belong to the dark world: they leave when the score lifts into D major
@@ -409,15 +409,18 @@ export class AudioEngine {
     if (this.isQuiet) return { stop() {}, end: this.when(opts.at) };
     const detune = opts.detune ?? (opts.index !== undefined ? opts.index * 50 : 0);
     // built first and held, then timed: however long building it takes, no part of it can land in the past
-    const v = new Voice(this.lib, 0, this.sfx, { gain: (opts.gain ?? 1) * dB(def.gainDb ?? 0), pan: opts.pan, detune, room: def.room, hall: def.hall, held: true }, this.nextSeed());
-    try {
-      def.fn(v, { dur: opts.dur });
-    } catch (err) {
-      console.warn('[audio] cue failed', cue, err);
-    }
-    if (cue === "awaken_hit") this.music.armHit();
-    const at = this.when(opts.at);
-    v.open(at);
+    const gain = (opts.gain ?? 1) * dB(def.gainDb ?? 0);
+    const vo = { gain, pan: opts.pan, detune, room: def.room, hall: def.hall, held: true };
+    const { voice: v, at } = openBuilt(this.ctx, opts.at, () => {
+      const voice = new Voice(this.lib, 0, this.sfx, vo, this.nextSeed());
+      try {
+        def.fn(voice, { dur: opts.dur });
+      } catch (err) {
+        console.warn('[audio] cue failed', cue, err);
+      }
+      if (cue === "awaken_hit") this.music.armHit(voice);
+      return { voice };
+    });
     if (UI_DUCK.has(cue)) {
       const g = this.uiDuck.gain;
       g.setTargetAtTime(dB(-3), at, 0.012);
@@ -465,8 +468,8 @@ export class AudioEngine {
       return cur;
     }
     if (cur) this.letGo(cur.voice);
-    const built = buildBed(this.lib, name, this.bedBus, o.level ?? 1, o.fadeIn ?? 0.5, this.nextSeed());
-    const h = built.open(this.when(o.at));
+    const bed = () => buildBed(this.lib, name, this.bedBus, o.level ?? 1, o.fadeIn ?? 0.5, this.nextSeed());
+    const { handle: h } = openBuilt(this.ctx, o.at, bed);
     this.beds.set(name, h);
     return h;
   }
@@ -494,9 +497,7 @@ export class AudioEngine {
    *  score steps back (-2 dB idle, -9 dB at full charge); after stop() it swells back in behind the burst. */
   chargeLoop(o: { at?: number } = {}): ChargeHandle {
     if (this.charge) return this.charge;
-    const built = buildCharge(this.lib, this.sfx, this.nextSeed());
-    const t0 = this.when(o.at);
-    const h = built.open(t0);
+    const { handle: h, at: t0 } = openBuilt(this.ctx, o.at, () => buildCharge(this.lib, this.sfx, this.nextSeed()));
     const self = this;
     this.toFocus(dB(-2), t0, 0.4);
     this.charge = {
@@ -528,26 +529,29 @@ export class AudioEngine {
    * holds until unhush() or the next awaken_hit. An open-ended awaken section cuts its build here.
    */
   hush(from?: number, to?: number) {
-    const v = new Voice(this.lib, 0, this.sfx, { held: true }, this.nextSeed());
-    const g = v.gain(0, v.dry);
-    v.at(g.gain).setValueAtTime(0, 0);
-    v.at(g.gain).linearRampToValueAtTime(0.065, 0.03);
-    const end = 120;
-    v.noise("brown", 0, end + 0.05, v.filt("lowpass", 240, 0.7, g));
-    v.noise("pink", 0, end + 0.05, v.gain(0.08, v.filt("highpass", 1800, 0.7, g)));
-    const at = from ?? soon(this.ctx);
+    const len = to === undefined ? undefined : to - (from ?? soon(this.ctx));
+    const { voice: v, at } = openBuilt(this.ctx, from, () => {
+      const voice = new Voice(this.lib, 0, this.sfx, { held: true }, this.nextSeed());
+      const g = voice.gain(0, voice.dry);
+      voice.at(g.gain).setValueAtTime(0, 0);
+      voice.at(g.gain).linearRampToValueAtTime(0.065, 0.03);
+      const end = 120;
+      voice.noise("brown", 0, end + 0.05, voice.filt("lowpass", 240, 0.7, g));
+      voice.noise("pink", 0, end + 0.05, voice.gain(0.08, voice.filt("highpass", 1800, 0.7, g)));
+      if (len !== undefined) {
+        voice.at(g.gain).setValueAtTime(0.065, len - 0.01);
+        voice.at(g.gain).linearRampToValueAtTime(0, len + 0.02);
+      }
+      return { voice };
+    });
+    const back = len === undefined ? undefined : at + len;
     for (const p of [this.hushBeds.gain, this.hushMusic.gain, this.hushHall.gain, this.hushRoom.gain]) {
       p.cancelScheduledValues(at);
       p.setTargetAtTime(0.008, at, 0.007);
-      if (to !== undefined) p.setTargetAtTime(1, to, 0.0015);
+      if (back !== undefined) p.setTargetAtTime(1, back, 0.0015);
     }
     this.hushV?.stop(at, 0.02);
-    v.open(at);
-    if (to !== undefined) {
-      g.gain.setValueAtTime(0.065, to - 0.01);
-      g.gain.linearRampToValueAtTime(0, to + 0.02);
-      v.stop(to + 0.02, 0.02);
-    }
+    if (back !== undefined) v.stop(back + 0.02, 0.02);
     this.hushV = to === undefined ? v : null;
     this.music.onHush(at);
   }
@@ -665,7 +669,8 @@ export class AudioEngine {
     for (const e of [old, ...this.closing.keys()]) this.closeEcho(e, at, fade);
   }
 
-  private closeEcho(e: Echo, at: number, fade: number) {
+  private closeEcho(e: Echo, asked: number, fade: number) {
+    const at = Math.max(asked, soon(this.ctx));
     const was = this.closing.get(e);
     if (was && was.by <= at + fade) return;
     for (const g of e.out) {
@@ -690,10 +695,7 @@ export class AudioEngine {
   /** Stop everything and restore the score controls (level, low-pass, lift, duck, hush) for a clean replay. */
   reset(fade = 0.3, at = soon(this.ctx)) {
     this.stopAll(fade, at);
-    const set = (p: AudioParam, v: number) => {
-      p.cancelScheduledValues(at);
-      p.setTargetAtTime(v, at, Math.max(0.003, fade / 4));
-    };
+    const set = (p: AudioParam, v: number) => glide(p, v, fade, Math.max(at, soon(this.ctx)));
     set(this.mlevel.gain, 1);
     set(this.mlp.frequency, 20000);
     set(this.shelf.gain, 0);
