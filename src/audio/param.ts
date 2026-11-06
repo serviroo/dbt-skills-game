@@ -12,11 +12,12 @@ export const silentAfter = (tau: number, from = 1) => tau * Math.log(from * 10 *
 
 /** Cancels what is scheduled from `t` on and holds the value automation gives at `t`, so a new ramp starts there. */
 export function holdAt(p: Curve, t: number) {
-  const value = p.valueAt(t);
-  const linear = p.rampsThrough(t);
-  p.cancelScheduledValues(t);
-  if (linear) p.linearRampToValueAtTime(value, t);
-  else p.setValueAtTime(value, t);
+  const time = p.clampTime(t);
+  const value = p.valueAt(time);
+  const linear = p.rampsThrough(time);
+  p.cancelScheduledValues(time);
+  if (linear) p.linearRampToValueAtTime(value, time);
+  else p.setValueAtTime(value, time);
 }
 
 /**

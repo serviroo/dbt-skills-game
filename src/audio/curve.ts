@@ -24,6 +24,21 @@ export class Curve {
     return this.evaluate(t, this.events);
   }
 
+  clampTime(t: number) {
+    return Math.max(t, this.ctx.currentTime);
+  }
+
+  private compact() {
+    const now = this.ctx.currentTime;
+    let latest = this.events.length - 1;
+    while (latest >= 0 && this.events[latest].time >= now) latest--;
+    if (latest <= 0) return;
+    const event = this.events[latest];
+    this.initial = event.kind === 'target'
+      ? this.evaluate(event.time, this.events.slice(0, latest)) : event.value;
+    this.events.splice(0, latest);
+  }
+
   private evaluate(t: number, events: Event[]) {
     let value = this.initial;
     let previous: Event | undefined;
@@ -71,16 +86,15 @@ export class Curve {
     const now = this.ctx.currentTime;
     const end = Math.max(t, now);
     let index = this.events.length - 1;
-    while (index >= 0 && (this.events[index].time > end
-      || (this.events[index].time === end && this.events[index].kind === 'linear'))) index--;
+    while (index >= 0 && this.events[index].time > end) index--;
     const previous = this.events[index];
     this.param.linearRampToValueAtTime(value, t);
-    if (!previous) this.setValueAtTime(this.initial, now);
-    else if (previous.kind === 'target') {
+    if (!previous && end > now) this.setValueAtTime(this.initial, now);
+    else if (previous?.kind === 'target') {
       const start = Math.max(now, previous.time);
       const from = start === previous.time
         ? this.evaluate(start, this.events.slice(0, index)) : this.valueAt(start);
-      this.setValueAtTime(from, start);
+      if (start < end) this.setValueAtTime(from, start);
     }
     return this.record('linear', value, t);
   }
@@ -91,8 +105,10 @@ export class Curve {
   }
 
   cancelScheduledValues(t: number) {
-    this.param.cancelScheduledValues(t);
-    this.events = this.events.filter((event) => event.time < t);
+    const time = this.clampTime(t);
+    this.param.cancelScheduledValues(time);
+    this.events = this.events.filter((event) => event.time < time);
+    this.compact();
     return this;
   }
 
@@ -105,16 +121,15 @@ export class Curve {
   }
 
   private record(kind: Event['kind'], value: number, t: number, tau = 0) {
-    const time = Math.max(t, this.ctx.currentTime);
+    const time = this.clampTime(t);
     const event = { kind, value: Math.fround(value), time, tau, calledAt: this.ctx.currentTime };
-    if (!this.events.length || this.events[this.events.length - 1].time < time) {
+    if (!this.events.length || this.events[this.events.length - 1].time <= time) {
       this.events.push(event);
-      return this;
+    } else {
+      const index = this.events.findIndex((e) => e.time > time);
+      this.events.splice(index, 0, event);
     }
-    const index = this.events.findIndex((e) => e.time > time || (e.time === time && e.kind === kind));
-    if (index === -1) this.events.push(event);
-    else if (this.events[index].time === time && this.events[index].kind === kind) this.events[index] = event;
-    else this.events.splice(index, 0, event);
+    this.compact();
     return this;
   }
 }

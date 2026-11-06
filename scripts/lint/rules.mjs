@@ -455,11 +455,42 @@ const holdReadsTheScheduledCurve = {
   },
 };
 
+function clampedTime(context, node, receiver) {
+  if (node?.type === 'Identifier') return clampedTime(context, declaredAs(context, node), receiver);
+  return node?.type === 'CallExpression' && methodName(node) === 'clampTime'
+    && context.sourceCode.getText(node.callee.object) === receiver;
+}
+
+const heldTimesAreClamped = {
+  meta: {
+    messages: { past: 'Clamp the hold or cancel time before reading or changing the scheduled curve.' },
+  },
+  create(context) {
+    return {
+      ':function'(fn) {
+        if (!fn.body) return;
+        const calls = ownCalls(fn.body);
+        const cancels = calls.filter((call) => methodName(call) === 'cancelScheduledValues');
+        const receiverOf = (call) => context.sourceCode.getText(call.callee.object);
+        const reads = calls.filter((call) => ['valueAt', 'rampsThrough'].includes(methodName(call))
+          && cancels.some((cancel) => receiverOf(cancel) === receiverOf(call)));
+        const wrapper = fn.parent?.type === 'MethodDefinition' && nameOf(fn) === 'cancelScheduledValues';
+        for (const call of [...reads, ...cancels]) {
+          if (!wrapper && !reads.some((read) => receiverOf(read) === receiverOf(call))) continue;
+          const receiver = wrapper ? 'this' : receiverOf(call);
+          if (!clampedTime(context, call.arguments[0], receiver)) context.report({ node: call, messageId: 'past' });
+        }
+      },
+    };
+  },
+};
+
 export default {
   meta: { name: 'lantern' },
   rules: {
     'audio-times-from-soon': audioTimesFromSoon,
     'hold-reads-the-scheduled-curve': holdReadsTheScheduledCurve,
+    'held-times-are-clamped': heldTimesAreClamped,
     'animations-share-start-time': animationsShareStartTime,
     'follow-device-preferences': followDevicePreferences,
     'no-soft-hyphen-characters': noSoftHyphenCharacters,

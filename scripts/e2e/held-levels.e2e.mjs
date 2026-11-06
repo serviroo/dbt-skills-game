@@ -1,3 +1,19 @@
+import { renderedAutomation, repeatedTargets } from './audio-automation.mjs';
+
+async function checkAutomation({ open, expect }, render, passes) {
+  const { ctx, page, errors } = await open({}, '?lab=audio&mute');
+  try {
+    await page.waitForFunction(() => window.__lab === true);
+    const results = await page.evaluate(render);
+    const failed = results.filter((result) => !passes(result));
+    expect(!failed.length, JSON.stringify(failed));
+    expect(!errors.length, errors.join('\n'));
+    return results;
+  } finally {
+    await ctx.close();
+  }
+}
+
 export const scenarios = {
   async 'safe-zone-leaves-earlier-bed-and-score-unchanged'({ open, expect }) {
     const { ctx, page, errors } = await open({}, '?lab=audio&mute');
@@ -117,96 +133,15 @@ export const scenarios = {
     }
   },
 
-  async 'tracked-values-match-the-rendered-automation'({ open, expect }) {
-    const { ctx, page, errors } = await open({}, '?lab=audio&mute');
-    try {
-      await page.waitForFunction(() => window.__lab === true);
-      const results = await page.evaluate(async () => {
-        const { trackParam } = await import('/src/audio/curve.ts');
-        const { holdAt } = await import('/src/audio/param.ts');
-        const sr = 48000;
-        const out = [];
-        const schedules = {
-          implicit: (p) => p.linearRampToValueAtTime(0, 2),
-          sets: (p) => {
-            p.value = 0.75;
-            p.setValueAtTime(0.25, 0.25);
-            p.setValueAtTime(0.5, 1);
-            p.setValueAtTime(0.625, 1);
-          },
-          ordered: (p) => {
-            p.setValueAtTime(1, 0);
-            p.linearRampToValueAtTime(0, 2);
-            p.setValueAtTime(0.5, 1);
-          },
-          targets: (p) => {
-            p.setTargetAtTime(0, 0.25, 0.5);
-            p.setTargetAtTime(1, 0.75, 0.25);
-            p.setValueAtTime(0.25, 1.5);
-          },
-          zeroTarget: (p) => {
-            p.setTargetAtTime(0, 0.25, 0);
-            p.setTargetAtTime(0.75, 0.25, 0);
-          },
-          zeroTargetRamp: (p) => {
-            p.setTargetAtTime(0, 0.25, 0);
-            p.linearRampToValueAtTime(0.25, 1.5);
-          },
-          startedTargetRamp: async (p, c) => {
-            p.setTargetAtTime(0, 0.25, 0.5);
-            const paused = c.suspend(0.75);
-            const rendering = c.startRendering();
-            await paused;
-            p.linearRampToValueAtTime(0.25, 1.5);
-            holdAt(p, 1.25);
-            return { rendering };
-          },
-          targetRamp: (p) => {
-            p.setTargetAtTime(0, 0.25, 0.5);
-            p.linearRampToValueAtTime(0.25, 1.5);
-          },
-          cancelled: (p) => {
-            p.setValueAtTime(0.5, 0);
-            p.linearRampToValueAtTime(0, 1);
-            p.setTargetAtTime(1, 1.5, 0.25);
-            p.cancelScheduledValues(0.75);
-          },
-          held: (p) => {
-            p.setValueAtTime(1, 0.25);
-            p.linearRampToValueAtTime(0, 2.25);
-            holdAt(p, 1.25);
-            holdAt(p, 1.75);
-          },
-        };
-        for (const [name, schedule] of Object.entries(schedules)) {
-          const c = new OfflineAudioContext(1, 3 * sr, sr);
-          const gain = c.createGain();
-          gain.connect(c.destination);
-          const source = c.createConstantSource();
-          source.connect(gain);
-          source.start();
-          const p = trackParam(gain.gain, c);
-          const pending = await schedule(p, c);
-          const expected = [];
-          for (let i = 0; i < 3 * sr; i += 97) expected.push([i, p.valueAt(i / sr)]);
-          if (pending?.rendering) await c.resume();
-          const data = (await (pending?.rendering ?? c.startRendering())).getChannelData(0);
-          const error = Math.max(...expected.map(([i, value]) => Math.abs(data[i] - value)));
-          const outsideSample = expected.filter(([i, value]) => {
-            const step = Math.max(Math.abs(data[i] - data[Math.max(0, i - 1)]),
-              Math.abs(data[i + 1] - data[i]));
-            return Math.abs(data[i] - value) > step + 2e-7;
-          });
-          out.push({ name, error, outsideSample: outsideSample.slice(0, 3) });
-        }
-        return out;
-      });
-      for (const r of results) expect(!r.outsideSample.length, JSON.stringify(r));
-      expect(!errors.length, errors.join('\n'));
-      return results;
-    } finally {
-      await ctx.close();
-    }
+  async 'tracked-values-match-the-rendered-automation'(h) {
+    return checkAutomation(h, renderedAutomation, (r) => !r.outsideSample.length
+      && (r.held === undefined || Math.abs(r.actual - r.held) <= 1e-6));
+  },
+
+  async 'tracked-values-match-rendering-within-float-precision'(h) {
+    return checkAutomation(h, repeatedTargets, (r) => r.maxRelativeError < 1e-3
+      && r.holds.every((hold) => hold.relativeStep < 1e-3)
+      && r.retained <= 2 && r.compactionError === 0);
   },
 
   async 'replacement-echo-keeps-the-gliding-send-levels'({ open, expect }) {
