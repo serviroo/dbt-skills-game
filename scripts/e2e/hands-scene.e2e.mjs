@@ -34,6 +34,7 @@ import {
   toSkill,
   until,
 } from './skill-scenes.e2e.mjs';
+import { holdSceneFences } from './scene-fences.mjs';
 
 const SMALL = { width: 320, height: 568 };
 /** the sizes reduced motion, a lost context and a slow GPU are checked at */
@@ -149,6 +150,39 @@ export const scenarios = {
       h.expect(!errors.length, errors.join('\n'));
       await ctx.close();
     }
+  },
+
+  async 'hands-slow-first-frame'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute', DESK);
+    await ctx.addInitScript((stallMs) => {
+      const P = WebGL2RenderingContext.prototype;
+      const realNow = performance.now.bind(performance);
+      const slow = (window.__slowFirstFrame = { stalled: false, busyUntil: 0, now: realNow });
+      for (const name of ['drawArrays', 'drawElements', 'drawArraysInstanced', 'drawElementsInstanced']) {
+        const draw = P[name];
+        P[name] = function (...args) {
+          if (!slow.stalled && this.canvas.closest?.('.dq-scene')) {
+            slow.stalled = true;
+            const until = realNow() + stallMs;
+            while (realNow() < until);
+          }
+          return draw.apply(this, args);
+        };
+      }
+    }, 2000);
+    await holdSceneFences(ctx, () => {
+      const slow = window.__slowFirstFrame;
+      slow.busyUntil ||= slow.now() + 6000;
+      return slow.now() < slow.busyUntil;
+    });
+    await openStopped(h, page, toHands, 'hands slow first frame');
+    const slow = await page.evaluate(() => window.__slowFirstFrame);
+    h.expect(slow.stalled && slow.busyUntil > 0, `hands slow first frame: no slow GPU: ${JSON.stringify(slow)}`);
+    const { e } = (await scenes(page)).last;
+    const moved = `hands slow first frame: the countdown moved on ${e.toFixed(2)} s while the GPU drew the first frame`;
+    h.expect(e < 0.25, moved);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
   },
 
   /** Radical Acceptance's open hands, and Willing Hands' and Willingness's steps that wait for Start, show the hands too */

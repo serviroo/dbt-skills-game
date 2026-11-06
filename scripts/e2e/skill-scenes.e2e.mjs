@@ -14,9 +14,10 @@ import fs from 'node:fs';
 import sharp from 'sharp';
 import { deviceMotion } from './device-motion.e2e.mjs';
 import { gone, screenshot, until as pageUntil } from './harness.mjs';
-import { after, scenes, steps } from './scene-clock.mjs';
+import { after, scenes, showsStopped, steps } from './scene-clock.mjs';
+import { holdSceneFences } from './scene-fences.mjs';
 
-export { after, scenes, steps };
+export { after, scenes, showsStopped, steps };
 
 /** how long a scene's stage hides its flat picture while the scene loads (SCENE.waitMs) */
 const WAIT_MS = Number(/\bwaitMs:\s*(\d+)/.exec(fs.readFileSync(new URL('../../src/motion/tokens.ts', import.meta.url), 'utf8'))?.[1]);
@@ -106,14 +107,19 @@ export async function toSkill(h, page, id, entry) {
   }
 }
 
+async function stopAtHome(h, page) {
+  await h.reachHub(page);
+  await h.pauseClock(page);
+}
+
 /**
- * Home, then straight to one timer step of a skill. With `pause` the page clock stops the moment the step shows, so a
- * check can see the step's first seconds however slowly the page draws.
+ * Home, then straight to one timer step of a skill. With `pause` the page clock stops on an idle Home, before the step
+ * is tapped open, so a check can see the step's first seconds however slowly the page draws.
  */
 async function toStep(h, page, id, entry, { pause = false } = {}) {
+  if (pause) await stopAtHome(h, page);
   await toSkill(h, page, id, entry);
   await page.locator('.dq-timer-stage').waitFor({ timeout: 10000 });
-  if (pause) await h.pauseClock(page);
   await page.locator('.dq-timer-stage').scrollIntoViewIfNeeded();
 }
 
@@ -233,21 +239,8 @@ export function inStep(h, { s, num }, where) {
  */
 async function oneSlowFrame(h, hz) {
   const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
-  await ctx.addInitScript(() => {
-    window.__blank = 0;
-    const P = WebGL2RenderingContext.prototype;
-    const make = P.fenceSync, get = P.getSyncParameter;
-    let first = null;
-    P.fenceSync = function (...args) {
-      const f = make.apply(this, args);
-      if (!first && this.canvas.closest?.('.dq-scene')) first = { f, at: performance.now() };
-      return f;
-    };
-    P.getSyncParameter = function (f, pname) {
-      if (first && f === first.f && pname === this.SYNC_STATUS && performance.now() - first.at < 600) return this.UNSIGNALED;
-      return get.call(this, f, pname);
-    };
-  });
+  await ctx.addInitScript(() => (window.__blank = 0));
+  await holdSceneFences(ctx, ({ n, at }) => n === 0 && performance.now() - at < 600);
   await page.clock.install();
   await page.reload();
   await home(h, page);
@@ -305,7 +298,7 @@ async function oneSlowFrame(h, hz) {
  */
 export async function slowGpu(h, { late = false, vp = DESK, reach = toStone, more = 2, cost = [60000, 1000], tag = late ? 'slow-gpu-late-desk' : 'slow-gpu-desk' } = {}) {
   const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
-  await ctx.addInitScript(([late, [free, perMs]]) => {
+  await ctx.addInitScript(([free, perMs]) => {
     window.__gpuMs = 0;
     // frames whose added work went over the scene's 30 fps budget
     window.__overBudget = 0;
@@ -329,20 +322,9 @@ export async function slowGpu(h, { late = false, vp = DESK, reach = toStone, mor
         return r;
       };
     }
-    if (!late) return;
-    const make = P.fenceSync, get = P.getSyncParameter;
-    let first = null;
-    P.fenceSync = function (...args) {
-      const f = make.apply(this, args);
-      if (!first && this.canvas.closest?.('.dq-scene')) first = f;
-      return f;
-    };
-    // the first frame is done once the countdown shows 3 s left
-    P.getSyncParameter = function (f, pname) {
-      if (f === first && pname === this.SYNC_STATUS && Number(document.querySelector('.dq-timer-num')?.textContent) > 3) return this.UNSIGNALED;
-      return get.call(this, f, pname);
-    };
-  }, [late, cost]);
+  }, cost);
+  // the first frame is done once the countdown shows 3 s left
+  if (late) await holdSceneFences(ctx, ({ n }) => n === 0 && +document.querySelector('.dq-timer-num')?.textContent > 3);
   await page.reload();
   await reach(h, page);
   // held that long, the first frame outlasts live()'s wait
@@ -399,28 +381,15 @@ export async function looks(h, page, tag, kind, vp, stage = '.dq-timer-stage', {
 }
 
 /**
- * Waits, with the page clock stopped, until the scene shows: it shows once its first frame is drawn, which it looks for
- * on animation frames, so the clock is stepped a frame at a time until then. The scene's time then starts from where it
- * first shows, however long the GPU took, and moves only when a check moves it.
- */
-export async function showsStopped(h, page, where, stage = '.dq-timer-stage') {
-  const live = async () => (await page.locator(`${stage}.is-scene-live`).count()) > 0 || (await page.clock.runFor(16), false);
-  await h.poll(page, live, Boolean, `${where}: the 3D scene never came on screen`, { timeout: 30000, polling: 0 }).catch(async (e) => {
-    await h.shot(page, `fail-${where.replace(/\W+/g, '-')}`);
-    throw e;
-  });
-}
-
-/**
- * Reloads with the page clock installed, goes to a scene's step with `reach`, stops the clock there and waits until the
- * scene shows (see showsStopped). However long the GPU takes to build it, the countdown has moved on only by the frames
- * the clock was stepped while it looked, a few seconds at most.
+ * Reloads with the page clock installed, stops it once Home is idle, goes to a scene's step with `reach` and waits
+ * until the scene shows (see showsStopped). However long the GPU takes to build it, the countdown has moved on only by
+ * the few frames the clock was stepped once the GPU had drawn them.
  */
 export async function openStopped(h, page, reach, where) {
   await page.clock.install();
   await page.reload();
+  await stopAtHome(h, page);
   await reach(h, page);
-  await h.pauseClock(page);
   await showsStopped(h, page, where);
 }
 
@@ -975,20 +944,10 @@ export const scenarios = {
   async 'scene-flat-handoff'(h) {
     for (const k of [{ kind: 'drift', id: 'wise-mind', entry: 'stone' }, ...KINDS]) {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
-      await ctx.addInitScript(() => {
-        // each scene's first frame stays undrawn until the scenario lets it through, however long the page took to get here
-        const P = WebGL2RenderingContext.prototype, make = P.fenceSync, get = P.getSyncParameter, held = new WeakSet();
-        window.__holdFirstFrame = true;
-        P.fenceSync = function (...args) {
-          const f = make.apply(this, args);
-          if (this.canvas.closest?.('.dq-scene')) held.add(f);
-          return f;
-        };
-        P.getSyncParameter = function (f, pname) {
-          if (window.__holdFirstFrame && held.has(f) && pname === this.SYNC_STATUS) return this.UNSIGNALED;
-          return get.call(this, f, pname);
-        };
-      });
+      // each scene's first frame stays undrawn until the scenario lets it through,
+      // however long the page took to get here
+      await ctx.addInitScript(() => (window.__holdFirstFrame = true));
+      await holdSceneFences(ctx, () => window.__holdFirstFrame);
       await page.clock.install();
       await page.reload();
       await toStep(h, page, k.id, k.entry, { pause: true });
