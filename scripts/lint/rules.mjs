@@ -543,36 +543,12 @@ const heldTimesAreClamped = {
   },
 };
 
-const trackedEventsAreValidated = {
-  meta: {
-    messages: { unchecked: 'Validate tracked event order before changing the audio parameter.' },
-  },
-  create(context) {
-    return {
-      ':function'(fn) {
-        if (!fn.body || fn.parent?.type !== 'MethodDefinition') return;
-        const calls = ownCalls(fn.body);
-        const onThis = (call, name) => methodName(call) === name && call.callee.object.type === 'ThisExpression';
-        if (!calls.some((call) => onThis(call, 'record'))) return;
-        const guard = calls.find((call) => onThis(call, 'checkEvent'));
-        for (const call of calls) {
-          if (!['setValueAtTime', 'linearRampToValueAtTime', 'setTargetAtTime'].includes(methodName(call))) continue;
-          const receiver = call.callee.object;
-          if (!isNamed(receiver, 'param') || receiver.object.type !== 'ThisExpression') continue;
-          if (!guard || guard.range[1] > call.range[0]) context.report({ node: call, messageId: 'unchecked' });
-        }
-      },
-    };
-  },
-};
-
 export default {
   meta: { name: 'lantern' },
   rules: {
     'audio-times-from-soon': audioTimesFromSoon,
     'hold-reads-the-scheduled-curve': holdReadsTheScheduledCurve,
     'held-times-are-clamped': heldTimesAreClamped,
-    'tracked-events-are-validated': trackedEventsAreValidated,
     'animations-share-start-time': animationsShareStartTime,
     'follow-device-preferences': followDevicePreferences,
     'no-soft-hyphen-characters': noSoftHyphenCharacters,

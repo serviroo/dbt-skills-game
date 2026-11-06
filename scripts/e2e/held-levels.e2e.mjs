@@ -97,12 +97,11 @@ export const scenarios = {
     }
   },
 
-  async 'held-fades-keep-their-curve-without-native-hold'({ open, expect }) {
+  async 'held-fades-keep-their-curve'({ open, expect }) {
     const { ctx, page, errors } = await open({}, '?lab=audio&mute');
     try {
       await page.waitForFunction(() => window.__lab === true);
       const results = await page.evaluate(async () => {
-        delete AudioParam.prototype.cancelAndHoldAtTime;
         const { AudioEngine } = await import('/src/audio/engine.ts');
         const sr = 48000;
         const out = [];

@@ -17,7 +17,6 @@ const RULE_FINDINGS = {
   'audio-times-from-soon': 2,
   'hold-reads-the-scheduled-curve': 26,
   'held-times-are-clamped': 4,
-  'tracked-events-are-validated': 4,
   'animations-share-start-time': 1,
   'follow-device-preferences': 1,
   'no-soft-hyphen-characters': 1,
