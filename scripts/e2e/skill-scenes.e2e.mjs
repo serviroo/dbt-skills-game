@@ -944,7 +944,8 @@ export const scenarios = {
   async 'scene-flat-handoff'(h) {
     for (const k of [{ kind: 'drift', id: 'wise-mind', entry: 'stone' }, ...KINDS]) {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
-      // each scene's first frame stays undrawn until the scenario lets it through, however long the page took to get here
+      // each scene's first frame stays undrawn until the scenario lets it through,
+      // however long the page took to get here
       await ctx.addInitScript(() => (window.__holdFirstFrame = true));
       await holdSceneFences(ctx, () => window.__holdFirstFrame);
       await page.clock.install();
