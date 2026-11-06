@@ -1,6 +1,6 @@
 import sharp from 'sharp';
 import { screenshot } from './harness.mjs';
-import { watchStage, stageState, compareStillFrame } from './still-stage.mjs';
+import { watchStage, stageState, compareStillFrame, grain } from './still-stage.mjs';
 
 const SIZES = { 390: { width: 390, height: 844 }, 320: { width: 320, height: 568 } };
 const FOLDED = 1.45;
@@ -78,54 +78,20 @@ async function seamless(h, page, where) {
   h.expect(whole, `${where}: the moth is cut off at its window's side (${sides}, ${beside})`);
 }
 
-async function grain(page) {
-  return page.evaluate(async () => {
-    const s = window.__stage;
-    const gl = s.renderer.getContext();
-    const pass = s.composer.passes.at(-1);
-    const scale = pass.timeScale;
-    const time = pass.fullscreenMaterial.time;
-    let grainFrame = 0;
-    pass.timeScale = 0;
-    const off = s.onUpdate(() => { pass.fullscreenMaterial.time = 0.5 + grainFrame++ / 60; });
-    const sample = async () => {
-      await new Promise((done) => requestAnimationFrame(done));
-      const pixels = new Uint8Array(s.canvas.width * s.canvas.height * 4);
-      gl.readPixels(0, 0, s.canvas.width, s.canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-      return pixels;
-    };
-    try {
-      let previous = await sample();
-      let changed = 0;
-      let samples = 0;
-      for (let frame = 0; frame < 3; frame++) {
-        const next = await sample();
-        for (let i = 0; i < next.length; i++) {
-          if (i % 4 === 3) continue;
-          changed += Number(previous[i] !== next[i]);
-          samples++;
-        }
-        previous = next;
-      }
-      return changed / samples;
-    } finally {
-      off();
-      pass.timeScale = scale;
-      pass.fullscreenMaterial.time = time;
-    }
-  });
+async function openBackdrop(h, query = '&dpr=1') {
+  const opened = await h.open({}, REWARDS + '&reduced' + query, SIZES[390]);
+  await mothOnCard(h, opened.page, 'backdrop');
+  await shown(h, opened.page, 'backdrop');
+  await watchStage(opened.page);
+  return opened;
 }
 
 export const scenarios = {
   async 'companion-moth-backdrop-rests'(h) {
-    const { ctx, page, errors } = await h.open({}, REWARDS + '&reduced&dpr=1', SIZES[390]);
-    await mothOnCard(h, page, 'backdrop');
-    await shown(h, page, 'backdrop');
-    await watchStage(page);
-    const backdrop = () => stageState(page);
-    const a = await backdrop();
+    const { ctx, page, errors } = await openBackdrop(h);
+    const a = await stageState(page);
     await h.frames(page, 60);
-    const b = await backdrop();
+    const b = await stageState(page);
     h.expect(b.time > a.time, 'the rewards clock stopped with its backdrop');
     const stillGrain = await grain(page);
     await page.evaluate(() => { window.__stage.sceneStill = false; });
@@ -137,12 +103,21 @@ export const scenarios = {
     h.expect(b.frames - a.frames >= 60 && b.frames - a.frames === b.loopFrames - a.loopFrames,
       `the stage frame trail missed live frames (${JSON.stringify([a, b])})`);
     h.expect(b.lastFrameAgo !== null, 'the stage frame trail lost its last frame');
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+    return { a, b, stillGrain, movingGrain };
+  },
+
+  async 'companion-moth-backdrop-resume'(h) {
+    const { ctx, page, errors } = await openBackdrop(h);
+    await page.evaluate(() => { window.__stage.sceneStill = false; });
+    await h.frames(page, 1);
     const beforeStill = await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => {
       const counts = { ...window.__backdropCounts };
       window.__stage.sceneStill = true;
       done(counts);
     })));
-    const still = await h.poll(page, backdrop,
+    const still = await h.poll(page, () => stageState(page),
       (s) => s.scenes > beforeStill.scenes && s.blooms > beforeStill.blooms,
       'the rewards scene never resumed');
     h.expect(still.scenes === beforeStill.scenes + 1 && still.blooms === beforeStill.blooms + 1,
@@ -151,72 +126,134 @@ export const scenarios = {
     h.expect(maxDelta <= 1, `the kept backdrop differs from a full redraw by ${maxDelta}`);
     const staleDelta = await compareStillFrame(page, true);
     h.expect(staleDelta > 1, `the image check accepted a stale backdrop (${staleDelta})`);
-    const beforeResize = await backdrop();
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+    return { maxDelta, staleDelta };
+  },
+
+  async 'companion-moth-backdrop-resize'(h) {
+    const { ctx, page, errors } = await openBackdrop(h);
+    const beforeResize = await stageState(page);
     await h.frames(page, 1);
     await page.setViewportSize(SIZES[320]);
-    const resized = await h.poll(page, backdrop,
-      (s) => s.scenes > beforeResize.scenes && s.width !== still.width && s.height !== still.height,
+    const resized = await h.poll(page, () => stageState(page),
+      (s) => s.scenes > beforeResize.scenes && s.width !== beforeResize.width && s.height !== beforeResize.height,
       'the rewards backdrop did not redraw at its new size');
     h.expect(resized.scenes === beforeResize.scenes + 1 && resized.blooms === beforeResize.blooms + 1,
       'the resized rewards backdrop did not render its expensive passes once');
     await page.evaluate(() => window.dispatchEvent(new Event('resize')));
     await h.frames(page, 60);
-    const c = await backdrop();
+    const c = await stageState(page);
     h.expect(c.scenes === resized.scenes && c.blooms === resized.blooms,
       'the unchanged-size rewards backdrop redrew');
     h.expect(await grain(page) > 0.2, 'the resized rewards backdrop lost its grain');
     const resizedDelta = await compareStillFrame(page);
     h.expect(resizedDelta <= 1, `the resized backdrop differs from a full redraw by ${resizedDelta}`);
-    const beforeLoss = await backdrop();
-    await shown(h, page, 'resized backdrop');
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+    return { resizedDelta };
+  },
+
+  async 'companion-moth-backdrop-restore'(h) {
+    const { ctx, page, errors } = await openBackdrop(h);
+    const beforeLoss = await stageState(page);
     await page.evaluate(() => {
       window.__backdropContext = window.__stage.renderer.getContext().getExtension('WEBGL_lose_context');
       window.__backdropContext.loseContext();
     });
     await page.waitForFunction(() => window.__stage.lost);
     await page.evaluate(() => window.__backdropContext.restoreContext());
-    const restored = await h.poll(page, backdrop,
+    const restored = await h.poll(page, () => stageState(page),
       (s) => !s.lost && s.scenes > beforeLoss.scenes && s.blooms > beforeLoss.blooms,
       'the rewards backdrop did not redraw after its context returned');
     h.expect(restored.scenes === beforeLoss.scenes + 1 && restored.blooms === beforeLoss.blooms + 1,
       'the restored rewards backdrop did not render its expensive passes once');
     await h.frames(page, 60);
-    const afterRestore = await backdrop();
+    const afterRestore = await stageState(page);
     h.expect(afterRestore.scenes === restored.scenes && afterRestore.blooms === restored.blooms,
       'the restored rewards backdrop kept drawing');
     h.expect(await grain(page) > 0.2, 'the restored rewards backdrop lost its grain');
     const restoredDelta = await compareStillFrame(page);
     h.expect(restoredDelta <= 1, `the restored backdrop differs from a full redraw by ${restoredDelta}`);
-    const beforeChange = await backdrop();
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+    return { restoredDelta };
+  },
+
+  async 'companion-moth-backdrop-invalidate'(h) {
+    const { ctx, page, errors } = await openBackdrop(h);
+    const beforeChange = await stageState(page);
     await page.evaluate(() => {
       const s = window.__stage;
       s.camera.position.x += 1;
       s.invalidate();
     });
-    const invalidated = await h.poll(page, backdrop,
+    const invalidated = await h.poll(page, () => stageState(page),
       (s) => s.scenes > beforeChange.scenes && s.blooms > beforeChange.blooms,
       'the changed rewards scene did not redraw when requested');
     h.expect(invalidated.scenes === beforeChange.scenes + 1 && invalidated.blooms === beforeChange.blooms + 1,
       'the changed rewards backdrop did not render its expensive passes once');
     await h.frames(page, 60);
-    const settled = await backdrop();
+    const settled = await stageState(page);
     h.expect(settled.scenes === invalidated.scenes && settled.blooms === invalidated.blooms,
       'the invalidated rewards backdrop kept drawing');
     const invalidatedDelta = await compareStillFrame(page);
     h.expect(invalidatedDelta <= 1, `the changed backdrop differs from a full redraw by ${invalidatedDelta}`);
-    const beforeCapture = await backdrop();
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+    return { invalidatedDelta };
+  },
+
+  async 'companion-moth-backdrop-capture'(h) {
+    const { ctx, page, errors } = await openBackdrop(h);
+    const beforeCapture = await stageState(page);
     const captureFrames = await page.evaluate(() => {
       const frames = window.__e2eTrail.frames;
       window.__stage.step(0);
       return window.__e2eTrail.frames - frames;
     });
     h.expect(captureFrames === 1, `the stage frame trail recorded ${captureFrames} frames for one explicit capture`);
-    const captured = await backdrop();
-    h.expect(captured.scenes > beforeCapture.scenes && captured.blooms > beforeCapture.blooms,
+    const captured = await stageState(page);
+    h.expect(captured.scenes === beforeCapture.scenes + 1 && captured.blooms === beforeCapture.blooms + 1,
       'an explicit rewards capture did not draw');
+    const maxDelta = await compareStillFrame(page);
+    h.expect(maxDelta <= 1, `the captured backdrop differs from a full redraw by ${maxDelta}`);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
-    return { stillGrain, movingGrain, a, b, maxDelta, staleDelta, resizedDelta, restoredDelta, invalidatedDelta };
+    return { captureFrames, captured, maxDelta };
+  },
+
+  async 'companion-moth-backdrop-tier-down'(h) {
+    const { ctx, page, errors } = await openBackdrop(h, '');
+    const changed = await page.evaluate(() => {
+      const s = window.__stage;
+      s.stop();
+      s.dpr = s.minDpr;
+      s.resize();
+      s.tier = 0;
+      s.composer.multisampling = 4;
+      s.changed();
+      s.invalidate();
+      s.draw(0);
+      const before = { ...window.__backdropCounts };
+      let frames = 0;
+      while (s.tier === 0 && frames++ < 20) s.adapt(0.25);
+      s.draw(0);
+      const after = { ...window.__backdropCounts };
+      for (let i = 0; i < 60; i++) s.draw(0);
+      return { before, after, rested: { ...window.__backdropCounts }, tier: s.tier, msaa: s.composer.multisampling };
+    });
+    h.expect(changed.tier === 1 && changed.msaa === 0, 'the stage never stepped down its MSAA tier');
+    const { before, after, rested } = changed;
+    h.expect(after.scenes === before.scenes + 1 && after.blooms === before.blooms + 1,
+      'the tier-down rewards backdrop did not render its expensive passes once');
+    h.expect(rested.scenes === after.scenes && rested.blooms === after.blooms,
+      'the tier-down rewards backdrop kept drawing');
+    const maxDelta = await compareStillFrame(page);
+    h.expect(maxDelta <= 1, `the tier-down backdrop differs from a full redraw by ${maxDelta}`);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+    return { changed, maxDelta };
   },
 
   async 'companion-moth'(h) {

@@ -670,11 +670,11 @@ function pageTrail() {
           return f.apply(this, a);
         };
       }
-      const draw = s.draw;
-      s.draw = function (...a) {
+      const frame = s.frame;
+      s.frame = function (...a) {
         const t = performance.now();
         try {
-          return draw.apply(this, a);
+          return frame.apply(this, a);
         } finally {
           const ms = performance.now() - t;
           trail.lastFrame = t;

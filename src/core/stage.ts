@@ -244,6 +244,10 @@ export class Stage {
   /** Advance the world by dt seconds and render one frame. */
   step(dt: number) {
     this.invalidate();
+    this.frame(dt);
+  }
+
+  private frame(dt: number) {
     this.draw(this.advance(dt));
   }
 
@@ -258,7 +262,7 @@ export class Stage {
     // the clock and the updates go on (the DOM parts of the intro follow them); a lost context gets no frames
     if (this.lost) return;
     if (params.nopost) {
-      if (!this.sceneStill || this.renderPass.dirty) this.renderer.render(this.scene, this.camera);
+      if (this.renderPass.needsRender) this.renderer.render(this.scene, this.camera);
       this.renderPass.dirty = false;
     } else this.composer.render(dt);
   }
@@ -272,8 +276,7 @@ export class Stage {
       this.last = now;
       // quality follows the real frame time; the world never moves more than 0.1 s in one frame
       this.adapt(frame);
-      const dt = Math.min(frame, 0.1);
-      this.draw(this.advance(dt));
+      this.frame(Math.min(frame, 0.1));
     };
     this.raf = requestAnimationFrame(loop);
   }

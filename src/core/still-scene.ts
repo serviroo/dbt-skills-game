@@ -6,6 +6,10 @@ export class ScenePass extends RenderPass {
   dirty = true;
   refreshed = false;
 
+  get needsRender() {
+    return !this.still || this.dirty;
+  }
+
   override render(
     renderer: WebGLRenderer,
     input: WebGLRenderTarget | null,
@@ -13,7 +17,7 @@ export class ScenePass extends RenderPass {
     deltaTime?: number,
     stencilTest?: boolean,
   ) {
-    this.refreshed = !this.still || this.dirty;
+    this.refreshed = this.needsRender;
     if (!this.refreshed) return;
     super.render(renderer, input, output, deltaTime, stencilTest);
     this.dirty = false;
