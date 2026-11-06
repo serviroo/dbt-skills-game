@@ -570,26 +570,26 @@ export class AudioEngine {
    */
   quiet(on: boolean, sec: number, at = soon(this.ctx)) {
     this.isQuiet = on;
-    if (!on) {
-      const old = this.echo;
-      this.echo = this.makeEcho(old.sends, old.room.buffer!, old.hall.buffer!);
-      this.dropEcho(old);
-    }
     for (const p of on ? [this.safe.gain, ...this.echo.out.map((g) => g.gain)] : [this.safe.gain]) {
       holdAt(p, at);
       if (on) p.linearRampToValueAtTime(0, at + sec);
       else p.setTargetAtTime(1, at, Math.max(0.003, sec / 4));
     }
-    if (!on) return;
-    for (const v of [...this.active, ...this.fading]) {
-      v.stop(at, sec);
-      this.letGo(v);
+    if (on) {
+      for (const v of [...this.active, ...this.fading]) {
+        v.stop(at, sec);
+        this.letGo(v);
+      }
+      this.active.clear();
+      for (const c of this.named.values()) c.stop(at, sec);
+      this.named.clear();
+      this.charge?.stop(at, sec);
+      for (const e of [...this.closing.keys()]) this.closeEcho(e, at, sec);
+      return;
     }
-    this.active.clear();
-    for (const c of this.named.values()) c.stop(at, sec);
-    this.named.clear();
-    this.charge?.stop(at, sec);
-    for (const e of [...this.closing.keys()]) this.closeEcho(e, at, sec);
+    const old = this.echo;
+    this.echo = this.makeEcho(old.sends, old.room.buffer!, old.hall.buffer!);
+    this.dropEcho(old);
   }
 
   /** Effects' and Music's sends into an echo, at their levels; made in place of `from`, they start where those are and go
@@ -658,11 +658,11 @@ export class AudioEngine {
     // return closes as they fade, until they are silent and it is dropped, timed on the audio clock, which stands still
     // while the page is hidden: none of their fade rings on, in the old echo or the new
     const old = this.echo;
+    for (const e of [old, ...this.closing.keys()]) this.closeEcho(e, at, fade);
     const sends = this.makeSends(old.sends);
     this.echo = this.makeEcho(sends, old.room.buffer!, old.hall.buffer!);
     Object.assign(this.lib, { room: sends.sfxRoom, hall: sends.sfxHall });
     Object.assign(this.libMusic, { room: sends.musRoom, hall: sends.musHall });
-    for (const e of [old, ...this.closing.keys()]) this.closeEcho(e, at, fade);
   }
 
   private closeEcho(e: Echo, at: number, fade: number) {
@@ -689,7 +689,6 @@ export class AudioEngine {
 
   /** Stop everything and restore the score controls (level, low-pass, lift, duck, hush) for a clean replay. */
   reset(fade = 0.3, at = soon(this.ctx)) {
-    this.stopAll(fade, at);
     const set = (p: AudioParam, v: number) => {
       p.cancelScheduledValues(at);
       p.setTargetAtTime(v, at, Math.max(0.003, fade / 4));
@@ -708,6 +707,7 @@ export class AudioEngine {
       this.letGo(this.hushV);
     }
     this.hushV = null;
+    this.stopAll(fade, at);
   }
 
   /** Full charge reached: cut the charge loop, 200 ms hush, then the gold burst (visual leads by 1-2 frames). */

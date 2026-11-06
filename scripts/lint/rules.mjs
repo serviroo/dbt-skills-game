@@ -272,6 +272,92 @@ const handleLostGpuContext = {
   },
 };
 
+const LOADS_ECHO = new Set(['createConvolver', 'makeIR']);
+
+const calleeName = (call) => methodName(call) ?? (call.callee.type === 'Identifier' ? call.callee.name : null);
+
+function nameOf(fn) {
+  const p = fn.parent;
+  if (fn.type === 'FunctionDeclaration') return fn.id?.name ?? null;
+  if (p?.type === 'MethodDefinition' || p?.type === 'Property') return p.computed ? null : p.key.name;
+  if (p?.type === 'VariableDeclarator' && p.id.type === 'Identifier') return p.id.name;
+  return null;
+}
+
+function ownCalls(node, calls = []) {
+  if (node.type === 'CallExpression') calls.push(node);
+  for (const child of children(node)) if (!FUNCTIONS.has(child.type)) ownCalls(child, calls);
+  return calls;
+}
+
+const callsSoon = (node) => !!node && (
+  (node.type === 'CallExpression' && calleeName(node) === 'soon') || children(node).some(callsSoon));
+
+function soonTimes(fn) {
+  const names = new Set();
+  for (const p of fn.params) {
+    if (p.type === 'AssignmentPattern' && p.left.type === 'Identifier' && callsSoon(p.right)) names.add(p.left.name);
+  }
+  const visit = (node) => {
+    for (const child of children(node)) {
+      if (FUNCTIONS.has(child.type)) continue;
+      if (child.type === 'VariableDeclarator' && child.id.type === 'Identifier' && callsSoon(child.init)) {
+        names.add(child.id.name);
+      }
+      visit(child);
+    }
+  };
+  visit(fn.body);
+  return names;
+}
+
+const mentions = (node, names) => !!node && (
+  (node.type === 'Identifier' && names.has(node.name)) || children(node).some((child) => mentions(child, names)));
+
+const scheduleBeforeEchoLoads = {
+  meta: {
+    messages: {
+      late:
+        'Loading an echo\'s response holds a slow phone for longer than soon() looks ahead, so this time has ' +
+        'already played when it is set: schedule it before the echo loads.',
+    },
+  },
+  create(context) {
+    const fns = [];
+    return {
+      ':function'(node) {
+        if (node.body) fns.push(node);
+      },
+      'Program:exit'() {
+        const loads = new Set(LOADS_ECHO);
+        for (let grew = true; grew; ) {
+          grew = false;
+          for (const fn of fns) {
+            const name = nameOf(fn);
+            if (!name || loads.has(name) || !ownCalls(fn.body).some((c) => loads.has(calleeName(c)))) continue;
+            loads.add(name);
+            grew = true;
+          }
+        }
+        for (const fn of fns) {
+          const times = soonTimes(fn);
+          if (!times.size) continue;
+          const calls = ownCalls(fn.body).sort((a, b) => a.range[0] - b.range[0]);
+          const load = calls.find((c) => loads.has(calleeName(c)));
+          if (!load) continue;
+          const local = (c) => c.callee.type === 'Identifier' && FUNCTIONS.has(declaredAs(context, c.callee)?.type);
+          for (const c of calls) {
+            if (c.range[0] < load.range[1]) continue;
+            const passed = c.arguments.some((a) => mentions(a, times));
+            const inside = local(c) && mentions(declaredAs(context, c.callee), times);
+            if (passed || inside) context.report({ node: c, messageId: 'late' });
+          }
+        }
+      },
+    };
+  },
+};
+
 export default {
   meta: { name: 'lantern' },
   rules: {
@@ -282,5 +368,6 @@ export default {
     'stored-writes-go-through-cleared': storedWritesGoThroughCleared,
     'tap-elements-not-points': tapElementsNotPoints,
     'handle-lost-gpu-context': handleLostGpuContext,
+    'schedule-before-echo-loads': scheduleBeforeEchoLoads,
   },
 };
