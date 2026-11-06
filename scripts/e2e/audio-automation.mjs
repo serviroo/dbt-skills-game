@@ -47,7 +47,6 @@ export async function renderedAutomation() {
     },
     implicit: (p) => p.linearRampToValueAtTime(0, 2),
     sets: (p) => {
-      p.value = 0.75;
       p.setValueAtTime(0.25, 0.25);
       p.setValueAtTime(0.5, 1);
       p.setValueAtTime(0.625, 1);
@@ -101,7 +100,7 @@ export async function renderedAutomation() {
     const source = c.createConstantSource();
     source.connect(gain);
     source.start();
-    const p = trackParam(gain.gain, clock);
+    const p = trackParam(gain.gain, clock, name === 'sets' ? 0.75 : undefined);
     const expected = [];
     let nextSample = 0;
     const sampleUntil = (end) => {
@@ -167,7 +166,7 @@ export async function repeatedTargets() {
       const before = p.valueAt(at);
       p.setTargetAtTime(frame % 2 ? 0.3 : 0.7, at + 0.01, 0.25);
       compactionError = Math.max(compactionError, Math.abs(p.valueAt(at) - before));
-      retained = Math.max(retained, p.events.length);
+      retained = Math.max(retained, p.size);
     }
     if (holdFrames.includes(frame)) {
       const heldAt = at + 0.007;

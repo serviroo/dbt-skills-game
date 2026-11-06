@@ -10,14 +10,13 @@ export class Curve {
   private events: Event[] = [];
   private initial: number;
 
-  constructor(private param: AudioParam, private ctx: BaseAudioContext) {
-    this.initial = param.value;
+  constructor(private param: AudioParam, private ctx: BaseAudioContext, initial = param.value) {
+    this.param.value = initial;
+    this.initial = Math.fround(initial);
   }
 
-  set value(value: number) {
-    if (this.events.length) throw new Error('Set a scheduled value while automation exists');
-    this.param.value = value;
-    this.initial = Math.fround(value);
+  get size() {
+    return this.events.length;
   }
 
   valueAt(t: number) {
@@ -63,18 +62,19 @@ export class Curve {
     return targetAt(t);
   }
 
-  rampsThrough(t: number) {
+  rampValueAt(t: number) {
     let previous: Event | undefined;
-    for (const event of this.events) {
+    for (const [index, event] of this.events.entries()) {
       if (event.time >= t) {
         const start = previous?.kind === 'target'
           ? Math.max(previous.time, event.calledAt)
           : previous?.time ?? event.calledAt;
-        return event.kind === 'linear' && start < t;
+        if (event.kind === 'linear' && start < t) return this.evaluate(t, this.events.slice(0, index + 1));
+        return undefined;
       }
       previous = event;
     }
-    return false;
+    return undefined;
   }
 
   setValueAtTime(value: number, t: number) {
@@ -136,10 +136,10 @@ export class Curve {
 
 const curves = new WeakMap<AudioParam, Curve>();
 
-export function trackParam(param: AudioParam, ctx: BaseAudioContext) {
+export function trackParam(param: AudioParam, ctx: BaseAudioContext, initial?: number) {
   let curve = curves.get(param);
   if (!curve) {
-    curve = new Curve(param, ctx);
+    curve = new Curve(param, ctx, initial);
     curves.set(param, curve);
   }
   return curve;

@@ -15,6 +15,40 @@ async function checkAutomation({ open, expect }, render, passes) {
 }
 
 export const scenarios = {
+  async 'holding-at-a-fade-end-keeps-earlier-samples'(h) {
+    return checkAutomation(h, async () => {
+      const { trackParam } = await import('/src/audio/curve.ts');
+      const { holdAt } = await import('/src/audio/param.ts');
+      const sr = 48000;
+      const out = [];
+      for (const kind of ['set', 'target', 'instant-target', 'set-target', 'target-set']) {
+        const c = new OfflineAudioContext(1, 2 * sr, sr);
+        const gain = c.createGain();
+        gain.connect(c.destination);
+        const source = c.createConstantSource();
+        source.connect(gain);
+        source.start();
+        const p = trackParam(gain.gain, c);
+        p.setValueAtTime(1, 0);
+        p.linearRampToValueAtTime(0, 1);
+        if (kind === 'set' || kind === 'set-target') p.setValueAtTime(0.5, 1);
+        if (kind !== 'set') p.setTargetAtTime(0.75, 1, kind === 'instant-target' ? 0 : 0.25);
+        if (kind === 'target-set') p.setValueAtTime(0.5, 1);
+        const held = kind === 'target' ? 0 : kind === 'instant-target' ? 0.75 : 0.5;
+        holdAt(p, 1);
+        holdAt(p, 1.25);
+        const curve = [p.valueAt(0.5), p.valueAt(1), p.valueAt(1.5)];
+        const data = (await c.startRendering()).getChannelData(0);
+        let earlierError = 0;
+        for (let i = 0; i < sr; i++) earlierError = Math.max(earlierError, Math.abs(data[i] - (1 - i / sr)));
+        out.push({ kind, held, earlierError, middle: data[sr / 2], at: data[sr], after: data[1.5 * sr], curve });
+      }
+      return out;
+    }, (r) => r.earlierError < 1e-6 && Math.abs(r.middle - 0.5) < 1e-6
+      && [r.at, r.after, ...r.curve.slice(1)].every((value) => Math.abs(value - r.held) < 1e-6)
+      && Math.abs(r.curve[0] - 0.5) < 1e-6);
+  },
+
   async 'safe-zone-leaves-earlier-bed-and-score-unchanged'({ open, expect }) {
     const { ctx, page, errors } = await open({}, '?lab=audio&mute');
     try {

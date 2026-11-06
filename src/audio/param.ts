@@ -14,10 +14,10 @@ export const silentAfter = (tau: number, from = 1) => tau * Math.log(from * 10 *
 export function holdAt(p: Curve, t: number) {
   const time = p.clampTime(t);
   const value = p.valueAt(time);
-  const linear = p.rampsThrough(time);
+  const linear = p.rampValueAt(time);
   p.cancelScheduledValues(time);
-  if (linear) p.linearRampToValueAtTime(value, time);
-  else p.setValueAtTime(value, time);
+  if (linear !== undefined) p.linearRampToValueAtTime(linear, time);
+  if (linear === undefined || linear !== value) p.setValueAtTime(value, time);
 }
 
 /**

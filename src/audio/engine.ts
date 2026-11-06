@@ -606,8 +606,7 @@ export class AudioEngine {
     const at = soon(this.ctx);
     const level = (to: number, was?: GainNode) => {
       const g = this.ctx.createGain();
-      const p = trackParam(g.gain, this.ctx);
-      p.value = was ? trackParam(was.gain, this.ctx).valueAt(at) : to;
+      const p = trackParam(g.gain, this.ctx, was ? trackParam(was.gain, this.ctx).valueAt(at) : to);
       if (was) p.setTargetAtTime(to, at, tau);
       return g;
     };

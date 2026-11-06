@@ -1,6 +1,6 @@
 export function oldHold(p, t) {
   const value = p.valueAt(t);
-  const linear = p.rampsThrough(t);
+  const linear = p.rampValueAt(t);
   p.cancelScheduledValues(t);
   return { value, linear };
 }
@@ -16,7 +16,7 @@ export function hold(p, t) {
   const time = p.clampTime(t);
   const alias = time;
   const value = p.valueAt(alias);
-  p.rampsThrough(alias);
+  p.rampValueAt(alias);
   p.cancelScheduledValues(alias);
   return value;
 }

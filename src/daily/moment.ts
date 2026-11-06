@@ -110,8 +110,7 @@ function lowHum(level: () => number, volume?: VolumeCtrl) {
   // three gains in a row, one writer each: the breath slowly swells `breath`, the player's levels glide `vol`, and
   // `wake` fades the hum out before the page sleeps and back in from silence when it wakes
   const breath = ctx.createGain();
-  const breathGain = trackParam(breath.gain, ctx);
-  breathGain.value = 0;
+  const breathGain = trackParam(breath.gain, ctx, 0);
   const vol = ctx.createGain();
   vol.gain.value = level();
   const wake = ctx.createGain();

@@ -430,26 +430,63 @@ function readsParamValue(context, node, seen = new Set()) {
   return children(node).some((child) => readsParamValue(context, child, seen));
 }
 
+function paramPath(context, node, seen = new Set()) {
+  if (!node || seen.has(node)) return null;
+  seen.add(node);
+  if (node.type === 'Identifier') {
+    return paramPath(context, declaredAs(context, node), seen) ?? [variableOf(context, node) ?? node.name];
+  }
+  if (node.type === 'ThisExpression') {
+    let scope = context.sourceCode.getScope(node);
+    while (scope.upper && scope.type !== 'class') scope = scope.upper;
+    return [scope];
+  }
+  if (node.type === 'MemberExpression' && !node.computed) {
+    const parent = paramPath(context, node.object, seen);
+    return parent && [...parent, node.property.name];
+  }
+  return null;
+}
+
 const holdReadsTheScheduledCurve = {
   meta: {
     messages: {
       curve: 'Hold and copy the scheduled curve at the change time: the value getter is an earlier rendered value.',
+      write: 'Give trackParam its initial value and schedule later changes through the curve.',
     },
   },
   create(context) {
+    const tracked = [];
+    const writes = [];
     return {
       MemberExpression(node) {
         if (isNamed(node, 'cancelAndHoldAtTime')) context.report({ node, messageId: 'curve' });
       },
       CallExpression(node) {
+        if (calleeName(node) === 'trackParam') {
+          const param = paramPath(context, node.arguments[0]);
+          if (param) tracked.push(param);
+        }
         if (!AUDIO_TIME_ARG.has(methodName(node))) return;
         for (const arg of node.arguments) {
           if (readsParamValue(context, arg)) context.report({ node: arg, messageId: 'curve' });
         }
       },
       AssignmentExpression(node) {
-        if (isNamed(node.left, 'value') && audioParam(context, node.left.object)
-          && readsParamValue(context, node.right)) context.report({ node, messageId: 'curve' });
+        if (!isNamed(node.left, 'value')) return;
+        if (audioParam(context, node.left.object) && readsParamValue(context, node.right)) {
+          context.report({ node, messageId: 'curve' });
+        } else {
+          const param = paramPath(context, node.left.object);
+          if (param) writes.push({ node, param });
+        }
+      },
+      'Program:exit'() {
+        for (const { node, param } of writes) {
+          if (tracked.some((path) => path.length === param.length && path.every((part, i) => part === param[i]))) {
+            context.report({ node, messageId: 'write' });
+          }
+        }
       },
     };
   },
@@ -472,7 +509,7 @@ const heldTimesAreClamped = {
         const calls = ownCalls(fn.body);
         const cancels = calls.filter((call) => methodName(call) === 'cancelScheduledValues');
         const receiverOf = (call) => context.sourceCode.getText(call.callee.object);
-        const reads = calls.filter((call) => ['valueAt', 'rampsThrough'].includes(methodName(call))
+        const reads = calls.filter((call) => ['valueAt', 'rampValueAt'].includes(methodName(call))
           && cancels.some((cancel) => receiverOf(cancel) === receiverOf(call)));
         const wrapper = fn.parent?.type === 'MethodDefinition' && nameOf(fn) === 'cancelScheduledValues';
         for (const call of [...reads, ...cancels]) {
