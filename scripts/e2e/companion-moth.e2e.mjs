@@ -78,6 +78,46 @@ async function seamless(h, page, where) {
 }
 
 export const scenarios = {
+  async 'companion-moth-backdrop-rests'(h) {
+    const { ctx, page, errors } = await h.open({}, REWARDS + '&reduced', SIZES[390]);
+    await mothOnCard(h, page, 'backdrop');
+    await shown(h, page, 'backdrop');
+    const backdrop = () => page.evaluate(() => ({
+      frames: window.__stage.renderer.info.render.frame,
+      time: window.__stage.time,
+      width: document.getElementById('gl').width,
+      height: document.getElementById('gl').height,
+      lost: window.__stage.lost,
+    }));
+    const a = await backdrop();
+    await h.frames(page, 60);
+    const b = await backdrop();
+    h.expect(b.time > a.time, 'the rewards clock stopped with its backdrop');
+    h.expect(b.frames === a.frames, `the unchanged rewards backdrop kept drawing (${a.frames}, ${b.frames})`);
+    await page.setViewportSize(SIZES[320]);
+    const resized = await h.poll(page, backdrop,
+      (s) => s.frames > b.frames && s.width !== b.width && s.height !== b.height,
+      'the rewards backdrop did not redraw at its new size');
+    await h.frames(page, 60);
+    const c = await backdrop();
+    h.expect(c.frames === resized.frames, 'the resized rewards backdrop kept drawing');
+    await shown(h, page, 'resized backdrop');
+    await page.evaluate(() => {
+      window.__backdropContext = window.__stage.renderer.getContext().getExtension('WEBGL_lose_context');
+      window.__backdropContext.loseContext();
+    });
+    await page.waitForFunction(() => window.__stage.lost);
+    await page.evaluate(() => window.__backdropContext.restoreContext());
+    const restored = await h.poll(page, backdrop, (s) => !s.lost && s.frames > 0,
+      'the rewards backdrop did not redraw after its context returned');
+    await h.frames(page, 60);
+    h.expect((await backdrop()).frames === restored.frames, 'the restored rewards backdrop kept drawing');
+    await page.evaluate(() => window.__stage.step(0));
+    h.expect((await backdrop()).frames > restored.frames, 'an explicit rewards capture did not draw');
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
+  },
+
   async 'companion-moth'(h) {
     for (const [tag, vp] of Object.entries(SIZES)) {
       const { ctx, page, errors } = await h.open({}, REWARDS, vp);
@@ -125,6 +165,15 @@ export const scenarios = {
       const p = await pixels(page);
       h.expect(p.sd > 10 && p.max > 140, `still ${tag}: the moth looks blank (${JSON.stringify(p)})`);
       await h.shot(card(page), `companion-moth-still-${tag}`);
+      await page.evaluate(() => import('/src/core/params.ts').then(({ setMotion }) => setMotion('full')));
+      await h.poll(page, () => state(page), (s) => !s.scenes.last.still && s.scenes.frames > b.frames,
+        `still ${tag}: the moth did not wake when motion returned`);
+      await page.evaluate(() => import('/src/core/params.ts').then(({ setMotion }) => setMotion('reduce')));
+      await page.waitForFunction(() => window.__scenes.last.still);
+      const settled = (await state(page)).scenes.frames;
+      await h.frames(page, 60);
+      const again = (await state(page)).scenes;
+      h.expect(again.frames === settled && again.last.still, `still ${tag}: the moth did not settle again`);
       h.expect(!errors.length, errors.join('\n'));
       await ctx.close();
     }

@@ -81,6 +81,8 @@ export class Stage {
   time = 0;
   timeScale = 1;
   paused = false;
+  renderOnDemand = false;
+  private needsRender = true;
   dpr: number;
   readonly maxDpr: number;
   minDpr: number;
@@ -121,6 +123,7 @@ export class Stage {
     });
     canvas.addEventListener('webglcontextrestored', () => {
       this.lost = false;
+      this.needsRender = true;
       canvas.style.visibility = '';
     });
 
@@ -190,6 +193,7 @@ export class Stage {
   }
 
   resize() {
+    this.needsRender = true;
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
     // a screen with no area (a window sized to nothing) has no shape to frame for: the stage keeps its last size, and the
@@ -225,13 +229,22 @@ export class Stage {
 
   /** Advance the world by dt seconds and render one frame. */
   step(dt: number) {
+    this.draw(this.advance(dt));
+  }
+
+  private advance(dt: number) {
     if (this.loads) dt = 0;
     if (!this.paused) this.time += dt * this.timeScale;
     for (const f of this.updates) f(this.time, dt * this.timeScale);
+    return dt;
+  }
+
+  private draw(dt: number) {
     // the clock and the updates go on (the DOM parts of the intro follow them); a lost context gets no frames
     if (this.lost) return;
     if (params.nopost) this.renderer.render(this.scene, this.camera);
     else this.composer.render(dt);
+    this.needsRender = false;
   }
 
   start() {
@@ -242,8 +255,10 @@ export class Stage {
       const frame = (now - this.last) / 1000;
       this.last = now;
       // quality follows the real frame time; the world never moves more than 0.1 s in one frame
-      this.adapt(frame);
-      this.step(Math.min(frame, 0.1));
+      if (!this.renderOnDemand) this.adapt(frame);
+      const dt = Math.min(frame, 0.1);
+      if (!this.renderOnDemand || this.needsRender) this.step(dt);
+      else this.advance(dt);
     };
     this.raf = requestAnimationFrame(loop);
   }
