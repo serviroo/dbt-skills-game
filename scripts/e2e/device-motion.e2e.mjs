@@ -390,7 +390,7 @@ export const scenarios = {
     // a change another tab made while this one was in the page cache or out of sight sent no event this tab heard: a
     // write from this same tab sends it none either, so it stands in for one. Back from the page cache, or back in
     // view, the title follows what is stored
-    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?cutscene=1&mute', PHONE);
+    const { ctx, page, errors } = await h.open({}, '?mute', PHONE);
     await page.locator('.title-screen').waitFor({ timeout: 30000 });
     const moving = (n) => endlessReach(page, '.title-screen', n);
     const stored = (motion, back) =>
