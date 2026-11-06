@@ -630,7 +630,7 @@ export class AudioEngine {
   }
 
   private stopHush(at: number, fade: number) {
-    this.hushHeldUntil = Math.max(this.hushHeldUntil, stoppedBy(at, fade));
+    this.hushHeldUntil = stoppedBy(at, fade);
     return this.endHush(at, Math.max(0.003, fade / 4));
   }
 

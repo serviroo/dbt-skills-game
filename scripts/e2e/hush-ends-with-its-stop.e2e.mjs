@@ -22,6 +22,11 @@ export const scenarios = {
             e.hush(0, 1);
             e.stopAll(SCORE.leaveSec, press);
           },
+          'Skip after a slower stop': (e) => {
+            e.hush(0);
+            e.reset(0.6, press);
+            e.stopAll(SCORE.leaveSec, press + 0.1);
+          },
           'Skip before an unhush set for later': (e) => {
             e.hush(0);
             e.unhush(1.5);
