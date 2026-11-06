@@ -1,4 +1,7 @@
 jobs:
+  null_job: ~
+  scalar_job: invalid
+  array_job: []
   plan:
     steps:
       - id: find

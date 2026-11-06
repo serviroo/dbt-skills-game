@@ -16,6 +16,10 @@ for (const file of files) {
     continue;
   }
   for (const [job, config] of Object.entries(workflow.jobs)) {
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      problems.push(`${file}: ${job}: expected a job mapping`);
+      continue;
+    }
     for (const [index, step] of (config.steps ?? []).entries()) {
       const at = `${file}: ${job} step ${index + 1}`;
       if (Object.hasOwn(step.with ?? {}, 'artifact-ids')) {

@@ -131,8 +131,9 @@ jobs:
             process.stdin.on("data", (chunk) => json += chunk);
             process.stdin.on("end", () => {
               const { artifacts } = JSON.parse(json);
-              const candidates = artifacts.filter((a) => a.name === "e2e-timings" && !a.expired &&
-                a.workflow_run.head_repository_id === Number(process.env.GITHUB_REPOSITORY_ID));
+              const candidates = artifacts.filter((a) => a?.name === "e2e-timings" && !a.expired &&
+                typeof a.created_at === "string" &&
+                a.workflow_run?.head_repository_id === Number(process.env.GITHUB_REPOSITORY_ID));
               candidates.sort((a, b) => b.created_at.localeCompare(a.created_at));
               for (const a of candidates) console.log(a.workflow_run.id);
             });')
@@ -145,7 +146,6 @@ jobs:
               mkdir -p "$RUNNER_TEMP/timings"
               mv "$dir/e2e-timings.json" "$RUNNER_TEMP/timings/e2e-timings.json"
               echo "::notice title=E2E timings::Parts split by the e2e-timings of run $run"
-              echo "run=$run" >> "$GITHUB_OUTPUT"
               exit 0
             fi
             cat "$error" >&2
@@ -165,9 +165,10 @@ jobs:
         name: Enough e2e parts that each finishes in time on the slowest runner
         shell: bash
         run: |
-          mkdir -p "$RUNNER_TEMP/timings" "$RUNNER_TEMP/plan-timings"
-          timings=$(find "$RUNNER_TEMP/timings" -name e2e-timings.json 2>/dev/null | head -n 1)
-          cp "${timings:-scripts/e2e/timings.json}" "$RUNNER_TEMP/plan-timings/e2e-timings.json"
+          mkdir -p "$RUNNER_TEMP/plan-timings"
+          timings="$RUNNER_TEMP/timings/e2e-timings.json"
+          [ -f "$timings" ] || timings=scripts/e2e/timings.json
+          cp "$timings" "$RUNNER_TEMP/plan-timings/e2e-timings.json"
           log=$RUNNER_TEMP/parts.log
           n=$(node scripts/e2e.mjs --parts "--timings=$RUNNER_TEMP/plan-timings/e2e-timings.json" 2>"$log") || {
             cat "$log"

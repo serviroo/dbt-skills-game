@@ -26,9 +26,7 @@
     },
     {
       "files": ["scripts/**"],
-      "rules": {
-        "lantern/tap-elements-not-points": "error"
-      }
+      "rules": { "lantern/tap-elements-not-points": "error" }
     }
   ]
 }

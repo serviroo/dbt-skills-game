@@ -7,7 +7,7 @@ import { load } from 'js-yaml';
 
 const exec = promisify(execFile);
 const workflowFile = process.env.E2E_TIMINGS_WORKFLOW ?? '.github/workflows/ci.yml';
-const selected = { 'ci-plan-downloads-timings-before-setup': [42] };
+const selected = (run) => ({ 'ci-plan-downloads-timings-before-setup': [run - 499] });
 const downloadErrors = {
   'gone-name': 'no artifact matches any of the names or patterns provided',
   'gone-empty': 'no valid artifacts found to download',
@@ -21,27 +21,37 @@ const boundary = `
 gh() {
   if [[ $1 == api ]]; then
     [[ $MODE != api-denied ]] || return 1
-    if [[ "$*" == *--jq* ]]; then
-      echo '5040 504'
-    else
-      cat "$CASE/artifacts.json"
-    fi
+    cat "$CASE/artifacts.json"
     return
   fi
-  [[ $1 == run && $2 == download && $4 == --repo && $6 == -n && $7 == e2e-timings && $8 == -D ]] || return 2
-  echo "$3" >> "$CASE/downloads"
-  mkdir -p "\${9}"
+  [[ $1 == run && $2 == download ]] || return 2
+  shift 2
+  local run= name= dir=
+  while (( $# )); do
+    case "$1" in
+      --repo|-R) shift 2 ;;
+      --name|-n) name=$2; shift 2 ;;
+      --dir|-D) dir=$2; shift 2 ;;
+      --repo=*) shift ;;
+      --name=*) name=\${1#*=}; shift ;;
+      --dir=*) dir=\${1#*=}; shift ;;
+      *) [[ $1 =~ ^[0-9]+$ ]] || return 2; run=$1; shift ;;
+    esac
+  done
+  [[ -n $run && $name == e2e-timings && -n $dir ]] || return 2
+  echo "$run" >> "$CASE/downloads"
+  mkdir -p "$dir"
   if [[ $MODE == denied || $MODE == unavailable || $MODE == network ]]; then
     printf '%s\\n' "$DOWNLOAD_ERROR" >&2
     return 1
   fi
-  if [[ $MODE == exhausted || ( $MODE == sixth && $3 != 500 ) || ( $MODE == gone-* && $3 == 505 ) ]]; then
-    echo '{}' > "\${9}/e2e-timings.json"
+  if [[ $MODE == exhausted || ( $MODE == sixth && $run != 500 ) || ( $MODE == gone-* && $run == 505 ) ]]; then
+    echo '{}' > "$dir/e2e-timings.json"
     printf '%s\\n' "$DOWNLOAD_ERROR" >&2
     return 1
   fi
   [[ $MODE != malformed ]] || return 0
-  cp "$CASE/current.json" "\${9}/e2e-timings.json"
+  cp "$CASE/$run.json" "$dir/e2e-timings.json"
 }
 `;
 
@@ -58,7 +68,7 @@ async function plan(mode, expect) {
       id: run * 10,
       name: 'e2e-timings',
       expired: false,
-      created_at: `2026-11-0${run - 499}T12:00:00Z`,
+      created_at: `2026-11-${String(run - 499).padStart(2, '0')}T12:00:00Z`,
       workflow_run: { id: run, head_repository_id: 7 },
       ...extra,
     });
@@ -68,14 +78,18 @@ async function plan(mode, expect) {
       artifact(508, { name: 'unrelated' }),
       artifact(503), artifact(502), artifact(501), artifact(500),
     ];
+    if (mode === 'nullable') {
+      artifacts.unshift(null, artifact(509, { workflow_run: null }), artifact(510, { created_at: null }));
+    }
     const write = (file, value) => fs.writeFileSync(path.join(scratch, file), value);
     write('artifacts.json', JSON.stringify({ artifacts }));
-    write('current.json', JSON.stringify(selected));
+    for (let run = 500; run <= 505; run++) write(`${run}.json`, JSON.stringify(selected(run)));
     write('boundary.sh', boundary);
     write('output', '');
     write('downloads', '');
     const env = {
       ...process.env,
+      SHLVL: '1',
       BASH_ENV: path.join(scratch, 'boundary.sh'),
       CASE: scratch,
       MODE: mode,
@@ -108,13 +122,11 @@ async function plan(mode, expect) {
     const attempts = fs.readFileSync(path.join(scratch, 'downloads'), 'utf8');
     expect(attempts === wanted,
       `${mode}: downloads did not try the newest available runs in order: ${attempts}`);
-    const output = fs.readFileSync(path.join(scratch, 'output'), 'utf8');
-    const run = output.match(/^run=(\d+)$/m)?.[1] ?? '';
-    const expectedRun = fallback ? '' : mode === 'sixth' ? '500' : mode.startsWith('gone-') ? '504' : '505';
-    expect(run === expectedRun, `${mode}: the plan selected run ${run} instead of ${expectedRun}`);
+    const expectedRun = mode === 'sixth' ? 500 : mode.startsWith('gone-') ? 504 : 505;
     await shell(parts.run);
     const saved = fs.readFileSync(path.join(scratch, 'plan-timings/e2e-timings.json'), 'utf8');
-    const expected = fallback ? fs.readFileSync('scripts/e2e/timings.json', 'utf8') : JSON.stringify(selected);
+    const expected = fallback ? fs.readFileSync('scripts/e2e/timings.json', 'utf8') :
+      JSON.stringify(selected(expectedRun));
     expect(saved === expected, `${mode}: the plan saved different timings from the file it downloaded`);
     expect(/^parts=[1-9]\d*$/m.test(fs.readFileSync(path.join(scratch, 'output'), 'utf8')),
       `${mode}: the saved timings did not produce a shard plan`);
@@ -126,7 +138,7 @@ async function plan(mode, expect) {
 
 export const scenarios = {
   async 'ci-plan-downloads-timings-before-setup'({ expect }) {
-    for (const mode of ['replaced', 'gone-name', 'gone-404', 'gone-410', 'empty', 'exhausted', 'sixth']) {
+    for (const mode of ['replaced', 'nullable', 'gone-name', 'gone-404', 'gone-410', 'empty', 'exhausted', 'sixth']) {
       await plan(mode, expect);
     }
   },

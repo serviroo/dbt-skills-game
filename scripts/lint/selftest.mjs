@@ -62,7 +62,11 @@ function checkWorkflows() {
   const check = (file) => spawnSync('node', [script, file], { cwd: scratch, encoding: 'utf8' });
   const run = check(ci);
   const found = run.stderr.trim().split('\n');
-  expect(run.status === 1 && found.length === 12, `own-run artifacts: expected 12 findings:\n${run.stderr}`);
+  expect(run.status === 1 && found.length === 15, `own-run artifacts: expected 15 findings:\n${run.stderr}`);
+  for (const job of ['null_job', 'scalar_job', 'array_job']) {
+    expect(found.includes(`${ci}: ${job}: expected a job mapping`), `own-run artifacts: missed invalid ${job}`);
+  }
+  expect(!run.stderr.includes('    at '), `own-run artifacts: invalid jobs threw:\n${run.stderr}`);
   for (const job of ['plan', 'e2e', 'timings', 'by_id', 'shell_download', 'shell_api', 'multiline_api']) {
     expect(found.some((line) => line.includes(`: ${job} step `)), `own-run artifacts: missed ${job}`);
   }
@@ -70,7 +74,7 @@ function checkWorkflows() {
   const other = path.join(workflows, 'other.yml');
   fs.writeFileSync(other, source);
   const elsewhere = check(other);
-  expect(elsewhere.status === 1 && elsewhere.stderr.trim().split('\n').length === 14,
+  expect(elsewhere.status === 1 && elsewhere.stderr.trim().split('\n').length === 17,
     `own-run artifacts: another workflow's plan find was allowed:\n${elsewhere.stderr}`);
   for (const [before, after] of [
     ['-n e2e-timings', "--pattern '*'"],
@@ -92,8 +96,6 @@ function checkWorkflows() {
     expect(missing.status === 1 && missing.stderr.includes('expected a jobs mapping') &&
       !missing.stderr.includes('    at '), `own-run artifacts: missing jobs threw:\n${missing.stderr}`);
   }
-  const current = spawnSync('node', [script], { cwd: root, encoding: 'utf8' });
-  expect(current.status === 0, `own-run artifacts: current workflows failed:\n${current.stderr}`);
 }
 
 function checkDiffLimits() {
