@@ -9,6 +9,7 @@ import { AHEAD, Music, SECTIONS, type Section, type SectionOpts } from './music'
 import { clipCurve, makeCrackle, makeIR, makeNoise, dB, type Ctx } from './dsp';
 import { trackedGain, type TrackedGain } from './curve';
 import { holdAt, soon, taper } from './param';
+import { BusLevels } from './bus-levels';
 import { Voice, stoppedBy, type Lib } from './voice';
 
 export type { BedHandle, BedName, ChargeHandle, Section, SectionOpts };
@@ -100,18 +101,18 @@ export class AudioEngine {
   private closing = new Map<Echo, { by: number; silent: ConstantSourceNode }>();
   private userMaster = 1;
   private bedBus: GainNode;
-  private hushBeds: GainNode;
-  private hushMusic: GainNode;
+  private hushBeds: TrackedGain;
+  private hushMusic: TrackedGain;
   /** The score dips ~3 dB for a Lantern chime (the window speaks, the music makes room). */
-  private uiDuck: GainNode;
+  private uiDuck: TrackedGain;
   /** The score steps back while the player is doing something: paced breathing (-5 dB) or holding the chest (-2 dB idle,
    *  down to -9 dB at full charge, so the charge tone and then the burst own the moment). */
-  private focus: GainNode;
-  private hushHall: GainNode;
-  private hushRoom: GainNode;
-  private duckG: GainNode;
+  private focus: TrackedGain;
+  private hushHall: TrackedGain;
+  private hushRoom: TrackedGain;
+  private duckG: TrackedGain;
   /** Beds and score step back for a cue that must read inside the roar (soldier ignition, the stand-up swell). */
-  private yieldG: GainNode;
+  private yieldG: TrackedGain;
   private volume: GainNode;
   readonly limiter: DynamicsCompressorNode;
   private beds = new Map<BedName, BedHandle>();
@@ -130,7 +131,7 @@ export class AudioEngine {
   private session: 'playback' | 'ambient';
   private cleanup: (() => void)[] = [];
   private hushV: Voice | null = null;
-  private hushHeldUntil = 0;
+  private busLevels: BusLevels;
   /** The level window's low-end lift is on until the next window closes or the next section starts. */
   private lifted = false;
   /** Cue handles named by schedule() events (opts.id), kept across calls so a later batch can stop them. */
@@ -139,6 +140,7 @@ export class AudioEngine {
   constructor(ctx?: BaseAudioContext, opts: EngineOpts = {}) {
     const C = ctx ?? new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)({ latencyHint: 'interactive' });
     this.ctx = C;
+    this.busLevels = new BusLevels(C);
     this.live = typeof OfflineAudioContext === 'undefined' || !(C instanceof OfflineAudioContext);
     this.seedN = opts.seed ?? 20261020;
     this.vol = opts.volume ?? 1;
@@ -174,8 +176,8 @@ export class AudioEngine {
     this.safe = trackedGain(C, 1);
     pre.connect(hp).connect(lim).connect(undo).connect(clip).connect(this.safe).connect(this.volume).connect(C.destination);
 
-    this.duckG = C.createGain();
-    this.yieldG = C.createGain();
+    this.duckG = trackedGain(C, 1);
+    this.yieldG = trackedGain(C, 1);
     this.duckG.connect(this.yieldG).connect(pre);
     const sfxLevel = taper(opts.user?.sfx ?? 1);
     const musLevel = taper(opts.user?.music ?? 1);
@@ -191,8 +193,8 @@ export class AudioEngine {
     this.sfx = C.createGain();
     this.sfx.connect(this.sfxUser).connect(pre);
 
-    this.hushRoom = C.createGain();
-    this.hushHall = C.createGain();
+    this.hushRoom = trackedGain(C, 1);
+    this.hushHall = trackedGain(C, 1);
     this.hushRoom.connect(pre);
     this.hushHall.connect(pre);
     this.echo = this.makeEcho(
@@ -202,7 +204,7 @@ export class AudioEngine {
     );
 
     this.bedBus = C.createGain();
-    this.hushBeds = C.createGain();
+    this.hushBeds = trackedGain(C, 1);
     this.bedBus.connect(this.hushBeds).connect(this.bedUser).connect(this.duckG);
 
     const musicIn = C.createGain();
@@ -221,12 +223,12 @@ export class AudioEngine {
     air.frequency.value = 5000;
     air.gain.value = 4;
     const mlevel = C.createGain();
-    this.hushMusic = C.createGain();
+    this.hushMusic = trackedGain(C, 1);
     this.mlevel = mlevel;
     this.mlp = mlp;
     this.shelf = shelf;
-    this.uiDuck = C.createGain();
-    this.focus = C.createGain();
+    this.uiDuck = trackedGain(C, 1);
+    this.focus = trackedGain(C, 1);
     musicIn.connect(mlp).connect(shelf).connect(air).connect(mlevel).connect(this.uiDuck).connect(this.focus).connect(this.hushMusic).connect(this.musUser).connect(this.duckG);
 
     this.lib = {
@@ -429,9 +431,9 @@ export class AudioEngine {
     const at = this.when(opts.at);
     v.open(at);
     if (UI_DUCK.has(cue)) {
-      const g = this.uiDuck.gain;
-      g.setTargetAtTime(dB(-3), at, 0.012);
-      g.setTargetAtTime(1, at + 0.28, 0.16);
+      const g = this.uiDuck.curve;
+      this.busLevels.set(g, dB(-3), at, 0.012);
+      this.busLevels.set(g, 1, at + 0.28, 0.16, false);
     }
     // paced breathing: the score steps back for the whole exercise (each cue extends the dip; it lifts after the last)
     if (cue === 'breath_in' || cue === 'breath_out') this.toFocus(dB(-6.5), at, 0.3, at + Math.max(opts.dur ?? 0, 10) + 0.4);
@@ -486,18 +488,16 @@ export class AudioEngine {
   }
 
   private makeRoom(at: number, db: number, tau: number, back: number, tauBack: number) {
-    const g = this.yieldG.gain;
-    g.cancelScheduledValues(at);
-    g.setTargetAtTime(dB(db), at, tau);
-    g.setTargetAtTime(1, back, tauBack);
+    const g = this.yieldG.curve;
+    this.busLevels.set(g, dB(db), at, tau);
+    this.busLevels.set(g, 1, back, tauBack, false);
   }
 
   /** Move the focus dip to `v` from `at` (time constant tau); with `back`, return to full level from then. */
   private toFocus(v: number, at: number, tau: number, back?: number) {
-    const g = this.focus.gain;
-    g.cancelScheduledValues(at);
-    g.setTargetAtTime(v, at, tau);
-    if (back !== undefined) g.setTargetAtTime(1, back, 0.8);
+    const g = this.focus.curve;
+    this.busLevels.set(g, v, at, tau);
+    if (back !== undefined) this.busLevels.set(g, 1, back, 0.8, false);
   }
 
   /** The hold-to-charge loop (idle hum at c=0). One at a time; calling again returns the running one. While it runs the
@@ -546,10 +546,9 @@ export class AudioEngine {
     v.noise("brown", 0, end + 0.05, v.filt("lowpass", 240, 0.7, g));
     v.noise("pink", 0, end + 0.05, v.gain(0.08, v.filt("highpass", 1800, 0.7, g)));
     const at = from ?? soon(this.ctx);
-    for (const p of [this.hushBeds.gain, this.hushMusic.gain, this.hushHall.gain, this.hushRoom.gain]) {
-      p.cancelScheduledValues(at);
-      p.setTargetAtTime(0.008, at, 0.007);
-      if (to !== undefined) p.setTargetAtTime(1, Math.max(to, this.hushHeldUntil), 0.0015);
+    for (const p of [this.hushBeds.curve, this.hushMusic.curve, this.hushHall.curve, this.hushRoom.curve]) {
+      this.busLevels.set(p, 0.008, at, 0.007);
+      if (to !== undefined) this.busLevels.set(p, 1, to, 0.0015, false);
     }
     this.release(this.takeHush(), at, 0.02);
     v.open(at);
@@ -577,11 +576,12 @@ export class AudioEngine {
    */
   quiet(on: boolean, sec: number, at = soon(this.ctx)) {
     this.isQuiet = on;
-    for (const { curve: p } of on ? [this.safe, ...this.echo.out] : [this.safe]) {
+    for (const { curve: p } of on ? this.echo.out : []) {
       holdAt(p, at);
-      if (on) p.linearRampToValueAtTime(0, at + sec);
-      else p.setTargetAtTime(1, at, Math.max(0.003, sec / 4));
+      p.linearRampToValueAtTime(0, at + sec);
     }
+    if (on) this.busLevels.ramp(this.safe.curve, 0, at, at + sec);
+    else this.busLevels.set(this.safe.curve, 1, at, Math.max(0.003, sec / 4));
     if (on) {
       this.charge?.stop(at, sec);
       const voices = [...this.active, ...this.fading, ...this.takeHush()];
@@ -638,21 +638,19 @@ export class AudioEngine {
 
   /** Duck beds + score together (e.g. -3 dB as the gate dims for the first window). */
   duck(db: number, ramp = 0.4, at = soon(this.ctx)) {
-    this.duckG.gain.cancelScheduledValues(at);
-    this.duckG.gain.setTargetAtTime(dB(db), at, Math.max(0.003, ramp / 4));
+    this.busLevels.set(this.duckG.curve, dB(db), at, Math.max(0.003, ramp / 4));
   }
 
   private stopHush(at: number, fade: number, stopped: Voice[]) {
     const ends = [...stopped, ...this.music.live.map((s) => s.voice)].map((v) => v.silentAt).filter(Number.isFinite);
     const echoes = [...this.closing.values()].map((c) => c.by);
-    this.hushHeldUntil = Math.max(at, ...ends, ...echoes);
+    this.busLevels.hold(at, Math.max(at, ...ends, ...echoes));
     this.endHush(at, Math.max(0.003, fade / 4));
   }
 
   private endHush(at: number, tau: number) {
-    for (const g of [this.hushBeds.gain, this.hushMusic.gain, this.hushHall.gain, this.hushRoom.gain]) {
-      g.cancelScheduledValues(at);
-      g.setTargetAtTime(1, Math.max(at, this.hushHeldUntil), tau);
+    for (const g of [this.hushBeds.curve, this.hushMusic.curve, this.hushHall.curve, this.hushRoom.curve]) {
+      this.busLevels.set(g, 1, at, tau);
     }
   }
 
@@ -722,18 +720,18 @@ export class AudioEngine {
 
   /** Stop everything and restore the score controls (level, low-pass, lift, duck, hush) for a clean replay. */
   reset(fade = 0.3, at = soon(this.ctx)) {
+    const tau = Math.max(0.003, fade / 4);
     const set = (p: AudioParam, v: number) => {
       p.cancelScheduledValues(at);
-      p.setTargetAtTime(v, at, Math.max(0.003, fade / 4));
+      p.setTargetAtTime(v, at, tau);
     };
     set(this.mlevel.gain, 1);
     set(this.mlp.frequency, 20000);
     set(this.shelf.gain, 0);
-    set(this.duckG.gain, 1);
-    set(this.uiDuck.gain, 1);
-    set(this.focus.gain, 1);
-    set(this.yieldG.gain, 1);
     this.lifted = false;
+    for (const g of [this.duckG, this.uiDuck, this.focus, this.yieldG]) {
+      this.busLevels.set(g.curve, 1, at, tau);
+    }
     this.stopAll(fade, at);
   }
 

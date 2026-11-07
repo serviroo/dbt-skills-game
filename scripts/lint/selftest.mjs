@@ -24,6 +24,10 @@ const RULE_FINDINGS = {
   'tap-elements-not-points': 3,
   'handle-lost-gpu-context': 3,
   'schedule-before-echo-loads': 9,
+  'bus-rises-wait-for-stops': 14,
+  'bus-levels-use-tracked-curves': 5,
+  'held-buses-use-current-anchors': 2,
+  'bus-targets-replace-held-anchors': 3,
 };
 
 function checkRules() {
