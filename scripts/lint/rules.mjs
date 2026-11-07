@@ -954,6 +954,111 @@ const noCrossRenderPeakEquality = {
   },
 };
 
+const SHARED_BUSES = new Set([
+  'duckG', 'yieldG', 'focus', 'uiDuck', 'hushBeds', 'hushMusic', 'hushHall', 'hushRoom', 'safe',
+]);
+
+function busAlias(context, node) {
+  const declaration = declaratorOf(context, node);
+  const loop = declaration?.parent?.parent;
+  return declaration?.init ?? (loop?.type === 'ForOfStatement' ? loop.right : null);
+}
+
+function sharedBus(context, node, param, seen = new Set()) {
+  if (!node || seen.has(node)) return false;
+  const next = new Set(seen).add(node);
+  if (node.type === 'Identifier') return sharedBus(context, busAlias(context, node), param, next);
+  if (node.type === 'ArrayExpression') return node.elements.some((e) => sharedBus(context, e, param, next));
+  if (node.type === 'ConditionalExpression') {
+    return sharedBus(context, node.consequent, param, next) || sharedBus(context, node.alternate, param, next);
+  }
+  if (param) return ['gain', 'curve'].some((name) => isNamed(node, name))
+    && sharedBus(context, node.object, false, next);
+  return node.type === 'MemberExpression' && node.object.type === 'ThisExpression' &&
+    SHARED_BUSES.has(node.computed ? node.property.value : node.property.name);
+}
+
+const busRisesWaitForStops = {
+  meta: {
+    messages: {
+      rise: 'Schedule shared bus levels through busLevels.set, so a rise waits until stopped sounds are silent.',
+    },
+  },
+  create(context) {
+    return {
+      CallExpression(node) {
+        const object = node.callee.type === 'MemberExpression' ? node.callee.object : null;
+        const helper = isNamed(object, 'busLevels') && object.object.type === 'ThisExpression';
+        if (helper && methodName(node) === 'set') return;
+        if (helper && methodName(node) === 'ramp' && node.arguments[1]?.value === 0) return;
+        const writes = AUDIO_TIME_ARG.has(methodName(node)) && sharedBus(context, object, true);
+        const passes = node.arguments.some((a) => sharedBus(context, a, true));
+        if (writes || passes) context.report({ node, messageId: 'rise' });
+      },
+    };
+  },
+};
+
+const busLevelsUseTrackedCurves = {
+  meta: { messages: { curve: 'Create shared buses with trackedGain and pass their curves to busLevels.' } },
+  create(context) {
+    return {
+      AssignmentExpression(node) {
+        if (sharedBus(context, node.left, false) && calleeName(node.right) !== 'trackedGain') {
+          context.report({ node, messageId: 'curve' });
+        }
+      },
+      CallExpression(node) {
+        const object = node.callee.type === 'MemberExpression' ? node.callee.object : null;
+        if (!isNamed(object, 'busLevels') || !['set', 'ramp'].includes(methodName(node))) return;
+        if (audioParam(context, node.arguments[0])) context.report({ node, messageId: 'curve' });
+      },
+    };
+  },
+};
+
+const heldBusesUseCurrentAnchors = {
+  meta: {
+    messages: { stale: 'Compare a held bus event with its current curve, not its original scheduled anchor.' },
+  },
+  create(context) {
+    return {
+      MemberExpression(node) {
+        if (!isNamed(node, 'from')) return;
+        for (let parent = node.parent; parent; parent = parent.parent) {
+          if (parent.type === 'ClassDeclaration' && parent.id?.name === 'BusLevels') {
+            context.report({ node, messageId: 'stale' });
+            return;
+          }
+        }
+      },
+    };
+  },
+};
+
+const busTargetsReplaceHeldAnchors = {
+  meta: { messages: { anchor: 'Hold a bus curve at its target time before replacing the target.' } },
+  create(context) {
+    return {
+      CallExpression(node) {
+        if (methodName(node) !== 'setTargetAtTime') return;
+        let owner = node.parent;
+        while (owner && owner.type !== 'ClassDeclaration') owner = owner.parent;
+        if (owner?.id?.name !== 'BusLevels') return;
+        let statement = node;
+        while (statement.parent && statement.parent.type !== 'BlockStatement') statement = statement.parent;
+        const body = statement.parent?.body;
+        const previous = Array.isArray(body) ? body[body.indexOf(statement) - 1]?.expression : null;
+        const text = (n) => n ? context.sourceCode.getText(n) : '';
+        const held = previous?.type === 'CallExpression' && calleeName(previous) === 'holdAt'
+          && text(previous.arguments[0]) === text(node.callee.object)
+          && text(previous.arguments[1]) === text(node.arguments[1]);
+        if (!held) context.report({ node, messageId: 'anchor' });
+      },
+    };
+  },
+};
+
 export default {
   meta: { name: 'lantern' },
   rules: {
@@ -972,5 +1077,9 @@ export default {
     'graph-swaps-wait-for-their-time': graphSwapsWaitForTheirTime,
     'cue-tracking-includes-offline': cueTrackingIncludesOffline,
     'cue-cleanup-shares-one-clock': cueCleanupSharesOneClock,
+    'bus-rises-wait-for-stops': busRisesWaitForStops,
+    'bus-levels-use-tracked-curves': busLevelsUseTrackedCurves,
+    'held-buses-use-current-anchors': heldBusesUseCurrentAnchors,
+    'bus-targets-replace-held-anchors': busTargetsReplaceHeldAnchors,
   },
 };

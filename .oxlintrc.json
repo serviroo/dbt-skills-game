@@ -15,7 +15,11 @@
         "lantern/no-soft-hyphen-characters": "error",
         "lantern/stored-writes-go-through-cleared": "error",
         "lantern/handle-lost-gpu-context": "error",
-        "lantern/schedule-before-echo-loads": "error"
+        "lantern/schedule-before-echo-loads": "error",
+        "lantern/bus-rises-wait-for-stops": "error",
+        "lantern/bus-levels-use-tracked-curves": "error",
+        "lantern/held-buses-use-current-anchors": "error",
+        "lantern/bus-targets-replace-held-anchors": "error"
       }
     },
     {

@@ -1,10 +1,11 @@
 import { renderedAutomation, repeatedTargets, rejectedAutomation } from './audio-automation.mjs';
+import { renderedBusDips, renderedHorizonCollisions } from './bus-stop-automation.mjs';
 
-async function checkAutomation({ open, expect }, render, passes) {
+async function checkAutomation({ open, expect }, render, passes, input) {
   const { ctx, page, errors } = await open({}, '?lab=audio&mute');
   try {
     await page.waitForFunction(() => window.__lab === true);
-    const results = await page.evaluate(render);
+    const results = await page.evaluate(render, input);
     const failed = results.filter((result) => !passes(result));
     expect(!failed.length, JSON.stringify(failed));
     expect(!errors.length, errors.join('\n'));
@@ -15,6 +16,81 @@ async function checkAutomation({ open, expect }, render, passes) {
 }
 
 export const scenarios = {
+  async 'skip-keeps-a-later-duck-dip-falling'(h) {
+    return checkAutomation(h, renderedBusDips, (r) => r.rise < 1e-6 && r.held > 0.1, ['duckG']);
+  },
+
+  async 'skip-keeps-every-later-bus-dip-falling'(h) {
+    return checkAutomation(h, renderedBusDips, (r) => r.rise < 1e-6 && r.held > 0.1);
+  },
+
+  async 'skip-merges-level-changes-at-the-silence-horizon'(h) {
+    return checkAutomation(h, renderedHorizonCollisions,
+      (r) => !r.error && r.dipKept && r.rise < 1e-6 && Math.abs(r.end - r.expected) < 1e-6);
+  },
+
+  async 'held-buses-keep-targets-before-linear-fades'(h) {
+    return checkAutomation(h, async () => {
+      const { AudioEngine } = await import('/src/audio/engine.ts');
+      const sr = 48000;
+      const render = async (held) => {
+        const c = new OfflineAudioContext(1, 3 * sr, sr);
+        const eng = new AudioEngine(c, { volume: 0 });
+        const gain = eng.safe;
+        gain.disconnect();
+        gain.connect(c.destination);
+        const source = c.createConstantSource();
+        source.connect(gain);
+        source.start();
+        eng.busLevels.set(gain.curve, 0.5, 0.5, 0.1);
+        eng.busLevels.ramp(gain.curve, 0, 1, 2);
+        if (held) eng.busLevels.hold(0.25, 2.5);
+        return (await c.startRendering()).getChannelData(0);
+      };
+      const twin = await render(false);
+      const held = await render(true);
+      let error = 0;
+      for (let i = 0; i < twin.length; i++) error = Math.max(error, Math.abs(twin[i] - held[i]));
+      return [{ error, middle: held[0.75 * sr], expected: 0.5 + 0.5 * Math.exp(-2.5), end: held[2 * sr] }];
+    }, (r) => r.error < 1e-6 && Math.abs(r.middle - r.expected) < 1e-6 && r.end === 0);
+  },
+
+  async 'quick-safe-zone-exits-never-raise-a-fading-gate'(h) {
+    return checkAutomation(h, async () => {
+      const { AudioEngine } = await import('/src/audio/engine.ts');
+      const { stoppedBy } = await import('/src/audio/voice.ts');
+      const sr = 48000;
+      const hold = Object.getOwnPropertyDescriptor(AudioParam.prototype, 'cancelAndHoldAtTime');
+      const out = [];
+      for (const firefox of [false, true]) {
+        if (firefox) delete AudioParam.prototype.cancelAndHoldAtTime;
+        try {
+          const c = new OfflineAudioContext(1, 8 * sr, sr);
+          const eng = new AudioEngine(c, { volume: 0 });
+          eng.bed('gate_hum', { at: 0, level: 0 });
+          const gain = eng.safe;
+          gain.disconnect();
+          gain.connect(c.destination);
+          const source = c.createConstantSource();
+          source.connect(gain);
+          source.start();
+          eng.quiet(true, 1, 1);
+          eng.stopAll(1, 1);
+          eng.quiet(false, 1, 1.005);
+          const data = (await c.startRendering()).getChannelData(0);
+          const first = Math.round(1.005 * sr);
+          const end = Math.floor(stoppedBy(1, 1) * sr);
+          let rise = 0;
+          for (let i = first; i < end; i++) rise = Math.max(rise, data[i] - data[i - 1]);
+          out.push({ firefox, rise, held: data[first], end: data[end - 1], restored: data.at(-1) });
+        } finally {
+          if (hold) Object.defineProperty(AudioParam.prototype, 'cancelAndHoldAtTime', hold);
+        }
+      }
+      return out;
+    }, (r) => r.rise < 1e-6 && Math.abs(r.held - 0.995) < 1e-6 && r.end === 0 && r.restored > 0.99);
+  },
+
   async 'holding-at-a-fade-end-keeps-earlier-samples'(h) {
     return checkAutomation(h, async () => {
       const { trackParam } = await import('/src/audio/curve.ts');
