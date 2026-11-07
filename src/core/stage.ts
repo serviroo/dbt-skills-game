@@ -6,12 +6,12 @@ import {
   EffectComposer,
   EffectPass,
   NoiseEffect,
-  RenderPass,
   ToneMappingEffect,
   ToneMappingMode,
   VignetteEffect,
 } from 'postprocessing';
 import { params } from './params';
+import { ScenePass, SceneBloomEffect } from './still-scene';
 
 const gradeFrag = /* glsl */ `
 uniform vec3 lift;
@@ -74,7 +74,7 @@ export class Stage {
   readonly vignette: VignetteEffect;
   readonly noise: NoiseEffect;
   readonly toneMapping: ToneMappingEffect;
-  private renderPass: RenderPass;
+  private renderPass: ScenePass;
   private updates: UpdateFn[] = [];
   private raf = 0;
   private last = 0;
@@ -121,6 +121,7 @@ export class Stage {
     });
     canvas.addEventListener('webglcontextrestored', () => {
       this.lost = false;
+      this.invalidate();
       canvas.style.visibility = '';
     });
 
@@ -137,10 +138,10 @@ export class Stage {
       frameBufferType: halfFloat ? THREE.HalfFloatType : THREE.UnsignedByteType,
       multisampling: params.msaa ?? (isMobile ? 4 : 4),
     });
-    this.renderPass = new RenderPass(this.scene, this.camera);
+    this.renderPass = new ScenePass(this.scene, this.camera);
     this.composer.addPass(this.renderPass);
 
-    this.bloom = new BloomEffect({
+    this.bloom = new SceneBloomEffect(this.renderPass, {
       mipmapBlur: true,
       luminanceThreshold: 0.82,
       luminanceSmoothing: 0.18,
@@ -170,7 +171,22 @@ export class Stage {
     this.camera = cam;
     this.renderPass.mainCamera = cam;
     this.composer.setMainCamera(cam);
+    this.invalidate();
     this.resize();
+  }
+
+  get sceneStill() {
+    return this.renderPass.still;
+  }
+
+  set sceneStill(still: boolean) {
+    if (still === this.renderPass.still) return;
+    this.renderPass.still = still;
+    this.invalidate();
+  }
+
+  invalidate() {
+    this.renderPass.dirty = true;
   }
 
   onUpdate(fn: UpdateFn) {
@@ -192,9 +208,11 @@ export class Stage {
   resize() {
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
+    const changed = w !== this.width || h !== this.height || this.renderer.getPixelRatio() !== this.dpr;
     // a screen with no area (a window sized to nothing) has no shape to frame for: the stage keeps its last size, and the
     // camera that size's aspect, until it has one again
-    if (w > 0 && h > 0) {
+    if (w > 0 && h > 0 && changed) {
+      this.invalidate();
       this.width = w;
       this.height = h;
       this.renderer.setPixelRatio(this.dpr);
@@ -225,13 +243,28 @@ export class Stage {
 
   /** Advance the world by dt seconds and render one frame. */
   step(dt: number) {
+    this.invalidate();
+    this.frame(dt);
+  }
+
+  private frame(dt: number) {
+    this.draw(this.advance(dt));
+  }
+
+  private advance(dt: number) {
     if (this.loads) dt = 0;
     if (!this.paused) this.time += dt * this.timeScale;
     for (const f of this.updates) f(this.time, dt * this.timeScale);
+    return dt;
+  }
+
+  private draw(dt: number) {
     // the clock and the updates go on (the DOM parts of the intro follow them); a lost context gets no frames
     if (this.lost) return;
-    if (params.nopost) this.renderer.render(this.scene, this.camera);
-    else this.composer.render(dt);
+    if (params.nopost) {
+      if (this.renderPass.needsRender) this.renderer.render(this.scene, this.camera);
+      this.renderPass.dirty = false;
+    } else this.composer.render(dt);
   }
 
   start() {
@@ -243,7 +276,7 @@ export class Stage {
       this.last = now;
       // quality follows the real frame time; the world never moves more than 0.1 s in one frame
       this.adapt(frame);
-      this.step(Math.min(frame, 0.1));
+      this.frame(Math.min(frame, 0.1));
     };
     this.raf = requestAnimationFrame(loop);
   }
@@ -292,8 +325,10 @@ export class Stage {
       this.resize();
     } else if (this.badFor > 1.2 && this.dpr <= this.minDpr && this.tier < 2) {
       this.tier++;
-      if (this.tier === 1) this.composer.multisampling = 0;
-      else this.minDpr = Math.max(0.75, this.minDpr - 0.25);
+      if (this.tier === 1) {
+        this.composer.multisampling = 0;
+        this.invalidate();
+      } else this.minDpr = Math.max(0.75, this.minDpr - 0.25);
       this.changed();
     } else if (this.goodFor > 4 && this.dpr < this.maxDpr) {
       this.dpr = Math.min(this.maxDpr, this.dpr + 0.1);

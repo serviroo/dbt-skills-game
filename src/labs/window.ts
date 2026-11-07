@@ -41,6 +41,7 @@ const SAMPLES: Record<string, ConstructorParameters<typeof LanternWindow>[1]> = 
 };
 
 export function windowLab(stage: Stage) {
+  stage.sceneStill = true;
   const q = new URLSearchParams(location.search);
   const env = buildVoid();
   env.skyMat.uniforms.uGlow.value = 0.25;
