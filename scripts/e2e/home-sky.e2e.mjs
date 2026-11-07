@@ -10,6 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { frames, screenshot } from './harness.mjs';
+import * as pageClock from './clock.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -107,7 +108,7 @@ function returning(h, time) {
 
 async function home(h, time, query = '?mute', viewport, seed = { 'dbt.app.v1': h.SEEN }) {
   const r = await h.open(seed, query, viewport, async (ctx) => {
-    await ctx.clock.install({ time });
+    await pageClock.install(ctx, { time });
     await ctx.addInitScript(trackTimers);
     await ctx.addInitScript(skyReader);
   });
@@ -355,8 +356,8 @@ async function crossEight(h, page) {
   // the clock jumps to 08:00 as if the phone lay still, then runs on a second at a time until the open Home's next
   // look sees the new hour. Jumping well past that look would replay every frame callback of the extra time in one
   // go after the drift had started, and on a slow machine that eats the real seconds the drift is measured in.
-  await page.clock.fastForward(left);
-  for (let i = 0; i < 40 && (await skyOf(page)).mood !== 'day'; i++) await page.clock.fastForward(1000);
+  await pageClock.fastForward(page, left);
+  for (let i = 0; i < 40 && (await skyOf(page)).mood !== 'day'; i++) await pageClock.fastForward(page, 1000);
 }
 
 const isNight = (s) => s.mood === null && !s.fading && s.layers.night === 1 && DAYTIME.every((m) => s.layers[m] === 0);
@@ -577,7 +578,7 @@ export const scenarios = {
     let s = await skyOf(page);
     expect(isNight(s), 'Settings did not get the night sky back: ' + JSON.stringify(s));
     // hours pass on Settings: nothing wakes up and the sky stays night
-    await page.clock.fastForward(5 * 60 * 60 * 1000);
+    await pageClock.fastForward(page, 5 * 60 * 60 * 1000);
     s = await skyOf(page);
     expect((await live()) === 0 && s.mood === null && !s.fading, 'the sky woke up on Settings: ' + JSON.stringify(s));
     // back on Home (now dusk) the watch starts again; the Safe Zone then takes the night sky without a fade

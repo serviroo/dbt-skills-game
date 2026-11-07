@@ -33,6 +33,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { addDays, dayOf, returning, route } from './first-actions.e2e.mjs';
 import { audit, boot, PAGE, settle, SKIP } from './layout-fit.e2e.mjs';
+import * as pageClock from './clock.mjs';
 
 const URGE = 'Urge to give up on today';
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -56,7 +57,7 @@ const COUNTING = /miss|skip|streak|in a row|gap|XP|level|rank|score|average|tren
 
 /** Every page in a scenario reads one fixed time, and the print window only notes that it was asked for. */
 const prepared = (now) => async (ctx) => {
-  await ctx.clock.setFixedTime(new Date(now));
+  await pageClock.setFixedTime(ctx, new Date(now));
   await ctx.addInitScript(() => {
     window.__printed = 0;
     window.print = () => window.__printed++;
@@ -393,7 +394,7 @@ export const scenarios = {
       const before = await sheet(page);
       h.expect(before.week === span(addDays(today, -6), today) && JSON.stringify(before.buttons) === JSON.stringify(['Print or save as PDF']), `before the day turns: ${before.week}, ${JSON.stringify(before.buttons)}`);
       // the phone is put down overnight and picked up the next day
-      await ctx.clock.setFixedTime(new Date(now + 86400e3));
+      await pageClock.setFixedTime(ctx, new Date(now + 86400e3));
       await comeBack(page);
       const turned = await h.poll(page, () => sheet(page), (s) => JSON.stringify(s.buttons) === JSON.stringify(['Later week', 'This week', 'Print or save as PDF']), (s) => `once the day turned with the page open, its buttons: ${JSON.stringify(s?.buttons)}`, { timeout: 5000 });
       h.expect(turned.week === before.week && JSON.stringify(turned.meta) === JSON.stringify(before.meta), `the page left its week as the day turned: ${turned.week}, ${JSON.stringify(turned.meta)}`);
@@ -420,7 +421,9 @@ export const scenarios = {
       [2, { width: 320, height: 568 }],
     ]) {
       const size = `${vp.width}x${vp.height}${zoom === 2 ? '-200' : ''}`;
-      const { ctx, page, errors } = await boot(h, { width: vp.width / zoom, height: vp.height / zoom }, { prepare: (ctx) => ctx.clock.setFixedTime(new Date(now)) });
+      const bounds = { width: vp.width / zoom, height: vp.height / zoom };
+      const prepare = (ctx) => pageClock.setFixedTime(ctx, new Date(now));
+      const { ctx, page, errors } = await boot(h, bounds, { prepare });
       try {
         await page.evaluate(() => window.__daily.go({ name: 'diary' }));
         await route(page, 'diary');
@@ -477,7 +480,9 @@ export const scenarios = {
       [2, { width: 844, height: 390 }],
     ]) {
       const size = `${vp.width}x${vp.height}${zoom === 2 ? '-200' : ''}`;
-      const { ctx, page, errors } = await boot(h, { width: vp.width / zoom, height: vp.height / zoom }, { prepare: (ctx) => ctx.clock.setFixedTime(new Date(now)) });
+      const bounds = { width: vp.width / zoom, height: vp.height / zoom };
+      const prepare = (ctx) => pageClock.setFixedTime(ctx, new Date(now));
+      const { ctx, page, errors } = await boot(h, bounds, { prepare });
       try {
         // the longest name the game keeps, in its widest letters
         await page.evaluate(([k, v]) => localStorage.setItem(k, v), [h.YOU, JSON.stringify({ name: 'W'.repeat(24), companion: 'Lumen', nameAt: now, companionAt: now })]);

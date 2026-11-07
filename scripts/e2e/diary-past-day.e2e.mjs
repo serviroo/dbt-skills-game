@@ -18,6 +18,7 @@
 import { addDays, dayOf, returning, route } from './first-actions.e2e.mjs';
 import { audit, boot, PAGE, settle, SKIP } from './layout-fit.e2e.mjs';
 import { crystal, restore } from './newer-save-safety.e2e.mjs';
+import * as pageClock from './clock.mjs';
 
 const URGE = 'Urge to give up on today';
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -28,7 +29,7 @@ const label = (day) => {
 };
 
 /** Every page in a scenario reads one fixed time, so today can't turn over between the seed, the screen and a check. */
-const at = (now) => (ctx) => ctx.clock.setFixedTime(new Date(now));
+const at = (now) => (ctx) => pageClock.setFixedTime(ctx, new Date(now));
 /** A returning save with today's and yesterday's cards filled in, yesterday's on a row the card no longer has. */
 function seeded(h) {
   const now = Date.now();

@@ -28,7 +28,14 @@
     },
     {
       "files": ["scripts/**"],
-      "rules": { "lantern/tap-elements-not-points": "error" }
+      "rules": {
+        "lantern/tap-elements-not-points": "error",
+        "lantern/clock-calls-go-through-clock-module": "error"
+      }
+    },
+    {
+      "files": ["scripts/e2e/clock.mjs"],
+      "rules": { "lantern/clock-calls-go-through-clock-module": "off" }
     }
   ]
 }

@@ -228,6 +228,49 @@ const tapElementsNotPoints = {
   },
 };
 
+const IN_PAGE_ARGUMENT = new Map([
+  ['evaluate', 0], ['evaluateHandle', 0], ['evaluateAll', 0], ['addInitScript', 0], ['waitForFunction', 0],
+  ['$eval', 1], ['$$eval', 1],
+]);
+
+function runsInPage(node) {
+  for (let at = node.parent; at; at = at.parent) {
+    const call = at.parent;
+    if (!FUNCTIONS.has(at.type) || call?.type !== 'CallExpression') continue;
+    if (call.arguments[IN_PAGE_ARGUMENT.get(methodName(call))] === at) return true;
+  }
+  return false;
+}
+
+function staticKey(key, computed) {
+  if (!computed && key.type === 'Identifier') return key.name;
+  if (key.type === 'Literal') return key.value;
+  return key.type === 'TemplateLiteral' && !key.expressions.length ? key.quasis[0].value.cooked : null;
+}
+
+const clockCallsGoThroughClockModule = {
+  meta: {
+    messages: {
+      clock:
+        'Move the page clock through scripts/e2e/clock.mjs, whose pauseClock(page) pauses where the clock stands: ' +
+        'a time passed to clock.pauseAt may be past by the time the call lands on a running page.',
+    },
+  },
+  create(context) {
+    const isClockKey = (p) => p.type === 'Property' && staticKey(p.key, p.computed) === 'clock';
+    return {
+      MemberExpression(node) {
+        if (staticKey(node.property, node.computed) !== 'clock' || runsInPage(node)) return;
+        context.report({ node, messageId: 'clock' });
+      },
+      ObjectPattern(node) {
+        if (runsInPage(node)) return;
+        for (const p of node.properties.filter(isClockKey)) context.report({ node: p, messageId: 'clock' });
+      },
+    };
+  },
+};
+
 const LOST_EVENT = 'webglcontextlost';
 
 function canvasOf(context, node) {
@@ -675,6 +718,7 @@ export default {
     'no-soft-hyphen-characters': noSoftHyphenCharacters,
     'stored-writes-go-through-cleared': storedWritesGoThroughCleared,
     'tap-elements-not-points': tapElementsNotPoints,
+    'clock-calls-go-through-clock-module': clockCallsGoThroughClockModule,
     'handle-lost-gpu-context': handleLostGpuContext,
     'schedule-before-echo-loads': scheduleBeforeEchoLoads,
   },
