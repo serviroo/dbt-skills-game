@@ -21,7 +21,7 @@ const tap = async (page, selector, to) => {
 async function leaveStealth(h, page, by, to, { credit = false } = {}) {
   await tile(page, 'Stealth');
   await route(page, 'rest');
-  await h.pauseClock(page);
+  await pageClock.pauseClock(page);
   if (credit) await page.evaluate(() => (window.__daily.store.state.flags.safeCredit = true));
   await tap(page, by, to);
 }

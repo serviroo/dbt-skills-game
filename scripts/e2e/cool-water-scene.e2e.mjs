@@ -112,7 +112,7 @@ export const scenarios = {
       h.expect(before.whole && before.clear && before.apart, `cool ${tag}: the caution is not whole on screen and clear of the scene: ${JSON.stringify(before)}`);
       await h.shot(page, `cool-${tag}`);
 
-      await h.pauseClock(page);
+      await pageClock.pauseClock(page);
       await pick(page, 'Cool air');
       await showsStopped(h, page, `cool ${tag}`);
       await looks(h, page, tag, 'cold', vp, undefined, { stopped: true });

@@ -63,7 +63,7 @@ export const scenarios = {
         // The page clock stands still while a timer is checked and only moves when told to, so the countdown can't
         // move between a tap and a reading however slow the machine is. Every reading lands half a second into a
         // second, away from the edge where the display ticks over.
-        await h.pauseClock(page);
+        await pageClock.pauseClock(page);
         await openAt(page, t.skill, t.step);
         const timer = page.locator('.dq-step-body .dq-timer');
         await timer.waitFor({ timeout: 5000 });

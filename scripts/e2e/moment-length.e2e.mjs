@@ -99,7 +99,7 @@ export const scenarios = {
   async 'one-minute-ends'(h) {
     const { ctx, page, errors, dialogs } = await openMoment(h);
     // time stands still between steps, so 59 s means 59 s after the choice
-    await h.pauseClock(page);
+    await pageClock.pauseClock(page);
     await radio(page, '1 minute').check();
     h.expect((await h.ls(page, KEPT_LENGTH)) === '1', 'the 1 minute choice was not kept on this device');
     await pageClock.fastForward(page, 5000);
@@ -136,7 +136,7 @@ export const scenarios = {
     await page.reload();
     await h.reachHub(page);
     // the kept 3 minutes start as the moment opens, so time stands still from before it opens
-    await h.pauseClock(page);
+    await pageClock.pauseClock(page);
     await page.getByRole('button', { name: 'Give me a moment', exact: true }).click();
     await page.locator('.dq-moment').waitFor({ timeout: 15000 });
     h.expect(await radio(page, '3 minutes').isChecked(), 'the 3 minutes choice did not survive a reload');
@@ -233,7 +233,7 @@ export const scenarios = {
   /** once a timed moment ends, the fading Low hum and How long can't be tapped, and Done stays where it was */
   async 'ended-controls-out-of-reach'(h) {
     const { ctx, page, errors } = await openMoment(h);
-    await h.pauseClock(page);
+    await pageClock.pauseClock(page);
     await radio(page, '1 minute').check();
     await settled(page, '.dq-mo-foot');
     const doneAt = await page.locator('.dq-mo-done').boundingBox();
@@ -303,7 +303,7 @@ export const scenarios = {
   /** choosing a length while a line promises no timing takes that line down at once, not at the next line */
   async 'timed-drops-open-line'(h) {
     const { ctx, page, errors } = await openMoment(h);
-    await h.pauseClock(page);
+    await pageClock.pauseClock(page);
     await pageClock.fastForward(page, 37000);
     await pageClock.runFor(page, 100);
     h.expect(/Nothing here is timed/.test(await line(page)), 'the open-ended line did not show 37 s in: ' + (await line(page)));
@@ -317,7 +317,7 @@ export const scenarios = {
   /** with reduced motion a timed moment's end goes to its finished state with only a short soft fade, the ring too */
   async 'reduced-motion-end'(h) {
     const { ctx, page, errors } = await openMoment(h, {}, undefined, '?mute&reduced');
-    await h.pauseClock(page);
+    await pageClock.pauseClock(page);
     await radio(page, '1 minute').check();
     await pageClock.fastForward(page, 61000);
     await page.locator('.dq-mo-line', { hasText: END }).waitFor({ timeout: 5000 });

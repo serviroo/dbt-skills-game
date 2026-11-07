@@ -11,7 +11,6 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfigFromFile, parseAst } from 'vite';
 import { glArgs, checkRenderer } from '../gl.mjs';
-import { pauseClock } from './clock.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -1082,7 +1081,11 @@ export async function startHarness(flags = {}) {
   })());
 
   const shared = {};
-  const lane = (browser) => ({ browser, server, out, flags, shared, renderer, throttleErrors, zone: ZONE, open: opener(browser), evidence, evidenceAll: allEvidence(browser), note, leaves, gone, poll, stopwatch, quick, untimed, shot, ls, youOf, deepFind, deepDrop, expect, sleep, frames, settled, until, pauseClock, reachHub, openSettings, SAVE, YOU, SEEN, stop, more });
+  const lane = (browser) => ({
+    browser, server, out, flags, shared, renderer, throttleErrors, zone: ZONE, open: opener(browser), evidence,
+    evidenceAll: allEvidence(browser), note, leaves, gone, poll, stopwatch, quick, untimed, shot, ls, youOf, deepFind,
+    deepDrop, expect, sleep, frames, settled, until, reachHub, openSettings, SAVE, YOU, SEEN, stop, more,
+  });
   /** Another browser on the same dev server, so scenarios can run side by side: its own profiles, the same `shared`. */
   async function more() {
     if (stopping) throw new Error('the harness is stopping');

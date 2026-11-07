@@ -327,7 +327,7 @@ export const scenarios = {
       await other.page.locator('.dq-moment').waitFor();
       await watch(page);
       const how = (p, name) => p.getByRole('radiogroup', { name: 'How long' }).getByRole('radio', { name });
-      await h.pauseClock(page);
+      await pageClock.pauseClock(page);
       await how(page, '1 minute').check();
       await page.getByRole('switch', { name: 'Low hum', exact: true }).check();
       await page.getByRole('button', { name: 'Done' }).focus();

@@ -399,7 +399,7 @@ export const scenarios = {
     await page.locator('.dq-libsec.dq-mod-dt .dq-librow').filter({ has: page.locator('.dq-librow-n', { hasText: /^Trade Places$/ }) }).click();
     // The page clock stands still from here and only moves when told to, so no time slips in between a tap and a
     // reading however slow the machine is, and every reading lands half a second into a second.
-    await h.pauseClock(page);
+    await pageClock.pauseClock(page);
     for (const name of ['Begin', 'Thoughts', 'Count blue things in the room', '1 min']) await tap(name)(page);
     await page.locator('.dq-step-body', { hasText: 'Your break can go on as long as you like.' }).waitFor({ timeout: 5000 });
     const num = page.locator('.dq-timer-num');

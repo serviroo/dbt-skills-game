@@ -7,10 +7,12 @@ export async function stopTime(page, ctx) {
   const { clock } = ctx;
   const { clock: kept = held } = page;
   await page.context().clock.install();
+  const { 'clock': quoted } = ctx;
+  await page[`clock`].resume();
   await pageClock.pauseClock(page);
   await pageClock.runFor(page, 300);
   const video = page.locator('video');
   await video.pauseAt(300);
   const { clockwork, ...rest } = page;
-  return [clock, kept, clockwork, rest, { clock: false }];
+  return [clock, kept, quoted, clockwork, rest, { clock: false }];
 }

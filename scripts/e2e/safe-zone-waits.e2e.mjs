@@ -73,7 +73,7 @@ export const scenarios = {
     /** A first open, left by `leave` before the welcome comes: it comes 0.7 s after Home, and the clock stops here. */
     const firstOpen = async (tag, leave, viewport = PHONE) => {
       const { ctx, page, errors } = await open(h, { viewport });
-      await h.pauseClock(page);
+      await pageClock.pauseClock(page);
       const early = await opened(page);
       if (!nothing(early)) problems.push(`${tag}: the welcome came before Home could be left: ${JSON.stringify(early)}`);
       await leave(page);

@@ -481,7 +481,7 @@ export const scenarios = {
     await listen(page, '.dq-safezone');
     const said = () => heard(page);
     const run = (ms) => pageClock.runFor(page, ms);
-    await h.pauseClock(page);
+    await pageClock.pauseClock(page);
     await page.locator('.dq-top .dq-safe').click();
     await run(300);
     if (!(await page.evaluate(() => window.__daily.route.name === 'safe'))) problems.push('the Safe Zone did not open');
@@ -528,7 +528,7 @@ export const scenarios = {
     // Wise Mind's 20 second stone timer starts by itself after the breathing step
     await page.evaluate(() => window.__daily.go({ name: 'skill', id: 'wise-mind' }));
     await page.getByRole('button', { name: 'Begin' }).click();
-    await h.pauseClock(page);
+    await pageClock.pauseClock(page);
     await page.getByRole('button', { name: 'Next', exact: true }).click();
     await pageClock.runFor(page, 1000);
     const timerSaid = async () => (await heard(page)).filter((s) => /second|minute|^Done/.test(s.text)).map((s) => `${s.text} (${s.how})`);

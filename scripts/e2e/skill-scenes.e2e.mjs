@@ -110,7 +110,7 @@ export async function toSkill(h, page, id, entry) {
 
 async function stopAtHome(h, page) {
   await h.reachHub(page);
-  await h.pauseClock(page);
+  await pageClock.pauseClock(page);
 }
 
 /**
@@ -247,7 +247,7 @@ async function oneSlowFrame(h, hz) {
   await page.evaluate(() => window.__daily.go({ name: 'skill', id: 'wise-mind', entry: 'stone' }));
   await page.locator('.dq-skill').getByRole('button', { name: 'Begin', exact: true }).first().click({ timeout: 10000 });
   await page.locator('.dq-scene canvas').waitFor({ state: 'attached', timeout: 15000 });
-  await h.pauseClock(page);
+  await pageClock.pauseClock(page);
   // a page held to 30 frames a second: every animation frame callback waits for the frame after the one it asked for
   if (hz === 30) {
     await page.evaluate(() => {
@@ -440,7 +440,7 @@ async function comesBack(page, b) {
 
 /** The page freezes and comes back: the scene picks up in step with the countdown. Then leaving frees it. */
 export async function keepsTime(h, page, kind) {
-  await h.pauseClock(page);
+  await pageClock.pauseClock(page);
   await h.sleep(1200);
   const b = await pair(page);
   const c = await comesBack(page, b);
@@ -606,7 +606,7 @@ export const scenarios = {
     inStep(h, await pair(page), 'running');
 
     // the page freezes (its clock and its frames stop together, as in a background tab), then comes back
-    await h.pauseClock(page);
+    await pageClock.pauseClock(page);
     await h.sleep(1500);
     const b = await pair(page);
     const c = await comesBack(page, b);
@@ -1161,7 +1161,7 @@ export const scenarios = {
     await live(h, page, 'moment end', '.dq-mo-stage');
     // chosen while time runs: a welcome that leaving Home closed takes taps until its collapse ends
     await page.getByRole('radiogroup', { name: 'How long' }).getByRole('radio', { name: '1 minute' }).check();
-    await h.pauseClock(page);
+    await pageClock.pauseClock(page);
     await pageClock.runFor(page, 2000);
     const on = await scenes(page);
     h.expect(on.last.probe.breath > 0.05, `moment end: the light was not breathing before the end (${JSON.stringify(on.last)})`);

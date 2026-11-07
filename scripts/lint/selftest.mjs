@@ -22,7 +22,7 @@ const RULE_FINDINGS = {
   'no-soft-hyphen-characters': 1,
   'stored-writes-go-through-cleared': 2,
   'tap-elements-not-points': 3,
-  'clock-calls-go-through-clock-module': 6,
+  'clock-calls-go-through-clock-module': 8,
   'handle-lost-gpu-context': 3,
   'schedule-before-echo-loads': 102,
 };

@@ -71,13 +71,13 @@ async function intro(h, beat, reduced = false, hiddenStart = false) {
     opened.timeline = await opened.ctx.newCDPSession(page);
     await opened.timeline.send('Animation.setPlaybackRate', { playbackRate: 0 });
   }
-  if (beat === 'windows') await h.pauseClock(page);
+  if (beat === 'windows') await pageClock.pauseClock(page);
   await page.locator('.title-screen').press('Enter');
   await page.locator('.ui-skip').waitFor({ timeout: 60000 });
   const cue = { silhouette: 'whoosh', awaken: 'hush', chest: 'chest_rise', windows: 'ui_open' }[beat];
   await page.waitForFunction((cue) => window.__introCues.some((c) => c.cue === cue), cue, { timeout: 60000, polling: 50 });
   if (beat === 'windows') await pageClock.fastForward(page, 30);
-  else await h.pauseClock(page);
+  else await pageClock.pauseClock(page);
   return opened;
 }
 

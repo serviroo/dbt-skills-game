@@ -134,7 +134,7 @@ const steady = (page) => page.waitForFunction(() => document.getAnimations().eve
  */
 export async function holdToast(h, page, tap) {
   await pageClock.install(page);
-  await h.pauseClock(page);
+  await pageClock.pauseClock(page);
   await tap();
   await pageClock.runFor(page, 1000);
 }
@@ -184,7 +184,7 @@ export const scenarios = {
     const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', PHONES[0], async (ctx) => {
       await pageClock.install(ctx);
       await ctx.route('**/src/daily/index.ts*', async (route) => {
-        await h.pauseClock(route.request().frame().page());
+        await pageClock.pauseClock(route.request().frame().page());
         paused = true;
         await route.fallback();
       });

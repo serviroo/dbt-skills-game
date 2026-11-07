@@ -79,7 +79,7 @@ async function turnOn(h, page) {
  * it is for a player, and a timer's start pulse plays on its own.
  */
 async function standStill(h, page) {
-  await h.pauseClock(page);
+  await pageClock.pauseClock(page);
   await pageClock.runFor(page, 1000);
 }
 

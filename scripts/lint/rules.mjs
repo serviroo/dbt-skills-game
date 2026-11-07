@@ -228,6 +228,12 @@ const tapElementsNotPoints = {
   },
 };
 
+function staticKey(key, computed) {
+  if (!computed && key.type === 'Identifier') return key.name;
+  if (key.type === 'Literal') return key.value;
+  return key.type === 'TemplateLiteral' && !key.expressions.length ? key.quasis[0].value.cooked : null;
+}
+
 const clockCallsGoThroughClockModule = {
   meta: {
     messages: {
@@ -237,10 +243,10 @@ const clockCallsGoThroughClockModule = {
     },
   },
   create(context) {
-    const isClockKey = (p) => p.type === 'Property' && (p.computed ? p.key.value : p.key.name) === 'clock';
+    const isClockKey = (p) => p.type === 'Property' && staticKey(p.key, p.computed) === 'clock';
     return {
       MemberExpression(node) {
-        if (memberName(node) === 'clock') context.report({ node, messageId: 'clock' });
+        if (staticKey(node.property, node.computed) === 'clock') context.report({ node, messageId: 'clock' });
       },
       ObjectPattern(node) {
         for (const p of node.properties.filter(isClockKey)) context.report({ node: p, messageId: 'clock' });
