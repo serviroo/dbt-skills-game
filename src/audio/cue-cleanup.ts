@@ -14,7 +14,7 @@ export class CueCleanup {
   }
 
   private arm() {
-    const next = Math.min(...this.pending.values());
+    const next = Math.max(Math.min(...this.pending.values()), soon(this.ctx));
     if (!this.clock) {
       const clock = this.ctx.createConstantSource();
       this.clock = clock;
