@@ -8,6 +8,8 @@
       "files": ["src/**"],
       "rules": {
         "lantern/audio-times-from-soon": "error",
+        "lantern/controls-wait-for-opening": "error",
+        "lantern/late-opens-build-again": "error",
         "lantern/hold-reads-the-scheduled-curve": "error",
         "lantern/held-times-are-clamped": "error",
         "lantern/animations-share-start-time": "error",

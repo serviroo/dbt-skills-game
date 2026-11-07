@@ -1,6 +1,9 @@
 import { mulberry32, type Rng } from '../core/math';
 import { tanhCurve, type Ctx } from './dsp';
-import { silentAfter } from './param';
+import { SCORE } from '../motion/tokens';
+import { renderedTo, silentAfter, soon } from './param';
+
+export const LONG = 6 * 3600;
 
 /** Shared, engine-owned resources every voice can draw on. */
 export interface Lib {
@@ -39,6 +42,8 @@ export interface Timed {
 interface Source {
   n: AudioScheduledSourceNode;
   started: boolean;
+  start: number;
+  transient: boolean;
   stop: number;
   asked: number;
   span: { b: number } | null;
@@ -52,8 +57,57 @@ const clockOf = new WeakMap<GainNode, Voice>();
 const silentFrom = new WeakMap<GainNode, { last: number; at: number; peak: number }>();
 const SAME = 1e-9;
 const through = new WeakMap<GainNode, Source[]>();
+const ownerOf = new WeakMap<AudioNode, Voice>();
+
+export interface ControlledBuild {
+  voice: Voice;
+  handle?: {
+    name?: string;
+    stop?(at: number, ramp?: number): void;
+    level?(v: number, ramp?: number, at?: number): void;
+    set?(v: number, at?: number): void;
+    release?(at?: number): void;
+  };
+}
+
+type Control = {
+  order: number;
+  voice: Voice;
+  at: number;
+  apply(at: number): void;
+  replay?(built: ControlledBuild, at: number): void;
+};
+type Pending = Control | { build(at: number): void };
+
+const orderedControls = (list: Pending[]) => list.filter((control): control is Control => 'apply' in control)
+  .sort((a, b) => a.at - b.at || a.order - b.order);
+
+let bindBuild: ((built: ControlledBuild) => void) | undefined;
+let controlOrder = 0;
+let buildingControls: ((built: ControlledBuild) => void)[] = [];
+
+export function withControls(
+  controls: typeof buildingControls, run: () => ControlledBuild | void, bind?: typeof bindBuild,
+) {
+  const previous = buildingControls;
+  const previousBind = bindBuild;
+  buildingControls = controls;
+  bindBuild = bind;
+  try {
+    const built = run();
+    if (buildingControls === controls && built) {
+      bind?.(built);
+      for (const control of controls) control(built);
+    }
+    return built;
+  } finally {
+    buildingControls = previous;
+    bindBuild = previousBind;
+  }
+}
 
 export interface VoiceOpts {
+  group?: Voice;
   gain?: number;
   pan?: number;
   detune?: number;
@@ -69,12 +123,15 @@ export const stoppedBy = (at: number, ramp: number) => at + silentAfter(Math.max
 interface Placing {
   t: number;
   cancelsBefore: number;
+  skipWhenLate: boolean;
   place(at: number): void;
 }
 
-function keep(held: Placing[], t: number, place: (at: number) => void, cancels = false) {
+function keep(held: Placing[], time: number | (() => number), place: (at: number) => void,
+  cancels = false, skipWhenLate = typeof time === "function",
+) {
   const cancelsBefore = (held[held.length - 1]?.cancelsBefore ?? 0) + (cancels ? 1 : 0);
-  held.push({ t, cancelsBefore, place });
+  held.push({ get t() { return typeof time === "number" ? time : time(); }, cancelsBefore, place, skipWhenLate });
 }
 
 /**
@@ -100,18 +157,29 @@ export class Voice {
   /** When its stop() has silenced it and its sources have ended (Infinity until then): a stop is final, and nothing it
    *  is given later, such as a held part opened after it, sounds past it. */
   private killAt = Infinity;
+  private stopCommitted = false;
   private children: Voice[] = [];
-  private parent: Voice | null = null;
   private parts: Voice[] = [];
   private clock: Voice = this;
   private zero = 0;
+  private doors: { to: AudioNode; input: number; g: GainNode }[] = [];
+  private gate: ConstantSourceNode | null = null;
+  private joined: Voice[] = [this];
+  private riders: Voice[] = [];
+  private openedAt = 0;
+  private opened = false;
+  private stopAsked: { at: number; ramp: number } | undefined;
+  private pending: { list: Pending[] | null };
 
-  constructor(readonly lib: Lib, t: number, dest: AudioNode, o: VoiceOpts = {}, seed = 1) {
+  constructor(readonly lib: Lib, t: number, dest: AudioNode, o: VoiceOpts = {}, seed = 1, parent: Voice | null = null) {
     const ctx = lib.ctx;
     this.ctx = ctx;
     this.t = t;
     this.end = t;
-    this.held = o.held ? [] : null;
+    this.held = o.held && !parent ? [] : null;
+    this.pending = parent?.clock.pending ?? o.group?.pending ?? { list: this.held ? [] : null };
+    this.gate = o.group?.gateSource() ?? null;
+    if (parent) [this.killAt, this.clock, this.stopCommitted] = [parent.killAt, parent.clock, parent.stopCommitted];
     this.cents = o.detune ?? 0;
     this.rng = mulberry32(seed);
     this.out = ctx.createGain();
@@ -126,21 +194,23 @@ export class Voice {
     this.hallSend = ctx.createGain();
     this.roomSend.gain.value = o.room ?? 0;
     this.hallSend.gain.value = o.hall ?? 0;
-    this.wet.connect(this.roomSend).connect(lib.room);
-    this.wet.connect(this.hallSend).connect(lib.hall);
+    this.wet.connect(this.roomSend);
+    this.wet.connect(this.hallSend);
+    let outlet: AudioNode = this.out;
     if (o.pan && (ctx as AudioContext).createStereoPanner) {
       const p = ctx.createStereoPanner();
       p.pan.value = Math.max(-1, Math.min(1, o.pan));
-      this.out.connect(p).connect(dest);
-    } else this.out.connect(dest);
+      outlet = this.out.connect(p);
+    }
+    for (const n of [this.out, this.wet, this.dry, this.roomSend, this.hallSend]) ownerOf.set(n, this.clock);
+    this.link(outlet, dest);
+    this.link(this.roomSend, lib.room);
+    this.link(this.hallSend, lib.hall);
   }
 
   /** A sub-voice feeding this one, stopped with it (or on its own). */
   child(dest: AudioNode = this.wet, seed = 7) {
-    const c = new Voice(this.lib, this.t, dest, {}, seed);
-    c.parent = this;
-    c.killAt = this.killAt;
-    c.clock = this.clock;
+    const c = new Voice(this.lib, this.t, dest, {}, seed, this);
     this.children.push(c);
     return c;
   }
@@ -149,16 +219,185 @@ export class Voice {
   part(dest: AudioNode = this.wet, seed = 7) {
     const c = new Voice(this.lib, this.t, dest, { held: true }, seed);
     c.killAt = this.killAt;
+    c.stopCommitted = this.stopCommitted;
     this.parts.push(c);
     return c;
   }
 
   /** Starts and sets what this held voice and its children were given, `at` later; from then on times are the clock's. */
-  open(at: number) {
-    const held = this.held ?? [];
-    this.release(at);
-    held.sort((a, b) => a.cancelsBefore - b.cancelsBefore || a.t + at - (b.t + at));
-    for (const h of held) h.place(at);
+  private openInTime(
+    asked = 0, extra = 0, deadline = Infinity, prepare?: (at: number) => void, continuing = false,
+  ) {
+    const voices = [this, ...this.riders.splice(0)];
+    deadline = Math.min(deadline, ...voices.map((v) => v.stopAsked?.at ?? Infinity));
+    const at = Math.max(asked, soon(this.ctx)) + extra;
+    if (at >= deadline) return this.drop(voices);
+    prepare?.(at);
+    for (const control of this.pending.list ?? []) if ('build' in control) control.build(at);
+    const held = voices.flatMap((v) => v.held ?? []);
+    const gate = this.gateSource();
+    this.joined = voices;
+    for (const v of voices.slice(1)) v.share(gate, voices);
+    for (const v of voices) v.release(at);
+    held.sort((a, b) => a.cancelsBefore - b.cancelsBefore || a.t - b.t);
+    const rendered = renderedTo(this.ctx);
+    const first = at + held.reduce((t, h) => Math.min(t, h.t), 0);
+    if (!Number.isFinite(first)) throw new RangeError(`a held voice can't open at ${first}`);
+    for (const h of held) {
+      if (!continuing && first <= rendered()) return this.drop(voices);
+      const missed = at + h.t <= rendered();
+      if (missed && h.skipWhenLate) continue;
+      h.place(missed ? Math.max(at, soon(this.ctx) - h.t) : at);
+    }
+    if (!continuing && first <= rendered()) return this.drop(voices);
+    this.settle(continuing ? soon(this.ctx) : first);
+    for (let room = 0; ; room = 2 * room + SCORE.leadSec) {
+      const openedAt = continuing ? soon(this.ctx) + room : first;
+      if (continuing) for (const v of voices) v.discardBefore(openedAt);
+      const stop = Math.min(...voices.map((v) => v.stopAsked?.at ?? Infinity));
+      if (Math.max(openedAt, soon(this.ctx)) >= Math.min(deadline, stop)) return this.drop(voices);
+      if (openedAt <= rendered()) {
+        if (continuing) continue;
+        return this.drop(voices);
+      }
+      gate.offset.setValueAtTime(1, openedAt);
+      for (const v of voices) {
+        v.openedAt = openedAt;
+        v.opened = true;
+      }
+      return true;
+    }
+  }
+
+  ride(part: Voice, prepare?: (at: number) => void) {
+    if (!part.isHeld) return;
+    if (part.pending !== this.pending) {
+      this.pending.list?.push(...part.pending.list ?? []);
+      part.pending = this.pending;
+    }
+    part.share(this.gateSource(), [this, part]);
+    this.riders.push(part);
+    if (prepare) this.pending.list?.push({ build: prepare });
+  }
+
+  control(at: number, apply: Control['apply'], replay?: Control['replay']) {
+    const list = this.clock.pending.list;
+    if (list) list.push({ order: controlOrder++, voice: this.clock, at, apply, replay });
+    else apply(Math.max(at, soon(this.ctx)));
+  }
+
+  private settle(at: number) {
+    const list = this.pending.list ?? [];
+    this.pending.list = null;
+    for (const control of orderedControls(list)) control.apply(Math.max(control.at, at));
+  }
+
+  static openBuilt<T extends ControlledBuild & { prepare?: (at: number) => void }>(
+    asked: number | undefined,
+    nextSeed: () => number,
+    build: (seed: () => number) => T,
+    kind: 'once' | 'continuous' = 'once',
+    sound = 'sound',
+  ) {
+    const seeds: number[] = [];
+    let deadline: number | undefined;
+    let requested = asked;
+    const controls = buildingControls;
+    const bind = bindBuild;
+    buildingControls = [];
+    bindBuild = undefined;
+    let pending: Pending[] | undefined;
+    let owners: Voice[] = [];
+    for (let extra = 0; ; extra = 2 * extra + SCORE.leadSec) {
+      let index = 0;
+      const built = build(() => seeds[index++] ??= nextSeed());
+      bind?.(built);
+      requested ??= soon(built.voice.ctx);
+      const targets = [built.voice, ...built.voice.riders];
+      if (pending) {
+        for (const c of orderedControls(pending)) if (c.replay) {
+          const voice = targets[owners.indexOf(c.voice)];
+          if (!voice) throw new Error('A rebuilt sound lost a pending control target');
+          c.replay({ ...built, voice }, c.at);
+        }
+      } else {
+        for (const control of controls) control(built);
+      }
+      const until = built.voice.stopAsked?.at ?? Infinity;
+      deadline = Math.min(deadline ?? (asked ?? soon(built.voice.ctx)) + SCORE.lateSec, until);
+      const continuing = kind === 'continuous' && Math.max(asked ?? 0, soon(built.voice.ctx)) + extra >= deadline;
+      const by = continuing ? until : deadline;
+      pending = built.voice.pending.list ?? [];
+      owners = targets;
+      const opened = built.voice.openInTime(asked, continuing ? 0 : extra, by, built.prepare, continuing);
+      if (opened || continuing || kind === 'once' && soon(built.voice.ctx) + 2 * extra + SCORE.leadSec > deadline) {
+        if (!opened) {
+          const lateMs = Math.max(0, soon(built.voice.ctx) - requested) * 1000;
+          const reason = built.voice.stopAsked ? 'stopped before opening'
+            : asked === undefined ? 'opening deadline passed' : 'asked time passed';
+          console.warn('[audio] sound dropped', sound, lateMs, lateMs > 0 ? 'ms late:' : 'ms:', reason);
+        }
+        return { ...built, at: opened ? built.voice.openedAt : built.voice.t };
+      }
+    }
+  }
+
+  private drop(voices: Voice[]) {
+    for (const v of voices) {
+      for (const w of [v, ...v.parts]) for (const d of w.doors.splice(0)) d.g.disconnect();
+      const stop = v.stopAsked;
+      for (const w of [v, ...v.parts]) w.pending.list = null;
+      v.stop(soon(this.ctx), 0);
+      v.stopAsked = stop;
+    }
+    return false;
+  }
+
+  private discardBefore(at: number) {
+    for (const c of this.children) c.discardBefore(at);
+    this.sources = this.sources.filter((s) => {
+      if (!s.transient || s.start >= at) return true;
+      const stoppedAt = Math.min(s.stop + this.clock.zero, this.ctx.currentTime);
+      s.n.stop();
+      s.n.disconnect();
+      s.stop = stoppedAt - this.clock.zero;
+      if (s.span) s.span.b = Math.max(stoppedAt, s.start);
+      return false;
+    });
+  }
+
+  private gateSource() {
+    if (!this.gate) {
+      this.gate = this.ctx.createConstantSource();
+      this.gate.offset.value = 0;
+      this.gate.start();
+    }
+    return this.gate;
+  }
+
+  private share(gate: ConstantSourceNode, voices: Voice[]) {
+    if (this.gate !== gate) this.gate?.stop();
+    this.gate = gate;
+    this.joined = voices;
+    for (const d of this.doors) gate.connect(d.g.gain);
+  }
+
+  private door(to: AudioNode, input: number) {
+    let d = this.doors.find((x) => x.to === to && x.input === input);
+    if (!d) {
+      const g = this.ctx.createGain();
+      g.gain.value = 0;
+      this.gateSource().connect(g.gain);
+      g.connect(to, 0, input);
+      this.doors.push((d = { to, input, g }));
+    }
+    return d.g;
+  }
+
+  private link(from: AudioNode, to: AudioNode, input = 0) {
+    ownerOf.set(from, this.clock);
+    if (this.isHeld && ownerOf.get(to) !== this.clock) from.connect(this.clock.door(to, input));
+    else from.connect(to, 0, input);
   }
 
   private release(at: number) {
@@ -170,19 +409,23 @@ export class Voice {
   }
 
   /** `p`'s timed automation, in this voice's time: set at once, or kept while the voice is held and set by open(). */
-  at(p: AudioParam): Timed {
-    const held = this.holding();
+  at(p: AudioParam, absolute = false): Timed {
+    const time = (t: number) => absolute ? () => t - this.clock.zero : t;
+    const when = (t: number, d: number) => absolute ? t : t + d;
+    const param = () => absolute ? this.at(p) : p;
+    const held = this.clock.held;
     const set: Timed = held
       ? {
-          setValueAtTime: (v, t) => keep(held, t, (d) => p.setValueAtTime(v, t + d)),
-          linearRampToValueAtTime: (v, t) => keep(held, t, (d) => p.linearRampToValueAtTime(v, t + d)),
-          exponentialRampToValueAtTime: (v, t) => keep(held, t, (d) => p.exponentialRampToValueAtTime(v, t + d)),
-          setTargetAtTime: (v, t, tau) => keep(held, t, (d) => p.setTargetAtTime(v, t + d, tau)),
-          cancelScheduledValues: (t) => keep(held, t, (d) => p.cancelScheduledValues(t + d), true),
+          setValueAtTime: (v, t) => keep(held, time(t), (d) => param().setValueAtTime(v, when(t, d))),
+          linearRampToValueAtTime: (v, t) => keep(held, time(t), (d) => param().linearRampToValueAtTime(v, when(t, d))),
+          exponentialRampToValueAtTime: (v, t) =>
+            keep(held, time(t), (d) => param().exponentialRampToValueAtTime(v, when(t, d))),
+          setTargetAtTime: (v, t, tau) => keep(held, time(t), (d) => param().setTargetAtTime(v, when(t, d), tau)),
+          cancelScheduledValues: (t) => keep(held, time(t), (d) => param().cancelScheduledValues(when(t, d)), true),
         }
       : p;
     const g = gainOf.get(p);
-    return g && clockOf.get(g) === this.clock ? this.envelope(set, g) : set;
+    return g && clockOf.get(g) === this.clock && (!absolute || !held) ? this.envelope(set, g) : set;
   }
 
   private envelope(set: Timed, g: GainNode): Timed {
@@ -239,12 +482,20 @@ export class Voice {
     for (let x: AudioNode | undefined = into; x; x = feeds.get(x)) {
       if (x instanceof GainNode && clockOf.get(x) === this.clock) gains.push(x);
     }
-    const s: Source = { n, started: false, stop: 0, asked: t1 - this.clock.zero, span: null, gains, voice: this };
+    const s: Source = { n, started: false, start: Infinity, transient: t1 < LONG,
+      stop: 0, asked: t1 - this.clock.zero, span: null, gains, voice: this };
     s.stop = this.until(s);
     for (const g of gains) this.pass(g, s);
-    const held = this.holding();
-    if (held) keep(held, t0, (d) => this.place(s, t0 + d, offset));
-    else this.place(s, t0, offset);
+    const held = this.clock.held;
+    const stop = () => { if (s.started) s.n.stop(Math.max(s.stop + this.clock.zero, soon(this.ctx))); };
+    if (held) {
+      keep(held, t0, (d) => {
+        const b = n instanceof AudioBufferSourceNode ? n : null;
+        this.place(s, t0 + d, b?.buffer ? (offset + (d - this.t) * b.playbackRate.value) % b.buffer.duration : offset);
+      }, false, t1 < LONG);
+      keep(held, () => Math.min(s.stop, this.killAt - this.clock.zero), stop, false, false);
+    } else this.place(s, t0, offset);
+    if (!held && s.started) s.n.stop(s.stop + this.clock.zero);
     return n;
   }
 
@@ -255,7 +506,7 @@ export class Voice {
     s.stop = t1 - zero;
     if (s.n instanceof AudioBufferSourceNode) s.n.start(t0, offset);
     else s.n.start(t0);
-    s.n.stop(t1);
+    s.start = t0;
     s.started = true;
     s.span = this.lib.track(t0, t1);
     this.sources.push(s);
@@ -302,7 +553,7 @@ export class Voice {
     else o.setPeriodicWave(type);
     o.frequency.value = freq;
     if (this.cents) o.detune.value = this.cents;
-    o.connect(dest, 0, input);
+    this.link(o, dest, input);
     return this.reg(o, t0, t1, dest);
   }
 
@@ -312,7 +563,7 @@ export class Voice {
     s.buffer = b;
     s.loop = true;
     s.playbackRate.value = rate;
-    s.connect(dest);
+    this.link(s, dest);
     return this.reg(s, t0, t1, dest, this.rng() * (b.duration - 0.1));
   }
 
@@ -321,7 +572,7 @@ export class Voice {
     const s = this.ctx.createBufferSource();
     s.buffer = b;
     s.loop = true;
-    s.connect(dest);
+    this.link(s, dest);
     return this.reg(s, t0, t1, dest);
   }
 
@@ -329,7 +580,7 @@ export class Voice {
     const s = this.ctx.createBufferSource();
     s.buffer = b;
     s.playbackRate.value = rate;
-    s.connect(dest);
+    this.link(s, dest);
     return this.reg(s, t0, t0 + b.duration / rate + 0.01, dest);
   }
 
@@ -339,7 +590,7 @@ export class Voice {
     gainOf.set(g.gain, g);
     clockOf.set(g, this.clock);
     if (dest instanceof AudioParam) g.connect(dest);
-    else g.connect(dest);
+    else this.link(g, dest);
     const next = dest instanceof AudioParam ? gainOf.get(dest) : dest;
     if (next) feeds.set(g, next);
     return g;
@@ -353,7 +604,7 @@ export class Voice {
     if (gainDb) b.gain.value = gainDb;
     if (this.cents) b.detune.value = this.cents;
     kRate(b.frequency, b.Q, b.gain, b.detune);
-    b.connect(dest);
+    this.link(b, dest);
     feeds.set(b, dest);
     return b;
   }
@@ -362,7 +613,7 @@ export class Voice {
     const w = this.ctx.createWaveShaper();
     w.curve = tanhCurve(drive) as Float32Array<ArrayBuffer>;
     w.oversample = oversample;
-    w.connect(dest);
+    this.link(w, dest);
     feeds.set(w, dest);
     return w;
   }
@@ -372,7 +623,7 @@ export class Voice {
     const n = this.ctx.createStereoPanner();
     n.pan.value = p;
     kRate(n.pan);
-    n.connect(dest);
+    this.link(n, dest);
     feeds.set(n, dest);
     return n;
   }
@@ -404,7 +655,7 @@ export class Voice {
     const o = this.ctx.createOscillator();
     o.type = type;
     o.frequency.value = rate;
-    o.connect(g);
+    this.link(o, g);
     return this.reg(o, t0, t1, g);
   }
 
@@ -449,46 +700,74 @@ export class Voice {
     return end;
   }
 
+  private commitStop() {
+    this.stopCommitted = true;
+    for (const child of [...this.children, ...this.parts]) child.commitStop();
+  }
+
   /** Fade this voice out from `at` over `ramp` seconds and stop its sources. */
-  stop(at: number, ramp = 0.03) {
-    const kill = stoppedBy(at, ramp);
-    if (kill >= this.killAt) return false;
+  stop(at: number, ramp = 0.03, reserve = false) {
+    if (!this.stopAsked || at < this.stopAsked.at) this.stopAsked = { at, ramp };
+    if (this.clock.pending.list) {
+      this.control(at, (time) => this.stop(time, ramp, reserve),
+        this === this.clock ? (built, time) => built.voice.stop(time, ramp, reserve) : undefined);
+      return true;
+    }
+    const committed = !reserve && !this.stopCommitted;
+    if (!reserve) this.commitStop();
+    const t = Math.max(at, soon(this.ctx));
+    const kill = at <= this.openedAt ? t : stoppedBy(t, ramp);
+    if (kill >= this.killAt) return committed;
     this.killAt = kill;
-    for (const c of [...this.children, ...this.parts]) c.stop(at, ramp);
+    if (at <= this.openedAt) for (const d of this.doors.splice(0)) d.g.disconnect();
     const tau = Math.max(0.002, ramp / 4);
     for (const g of [this.out.gain, this.roomSend.gain, this.hallSend.gain]) {
-      g.cancelScheduledValues(at);
-      g.setTargetAtTime(0, at, tau);
+      const p = this.at(g, true);
+      p.cancelScheduledValues(t);
+      p.setTargetAtTime(0, t, tau);
+    }
+    for (const c of [...this.children, ...this.parts]) {
+      c.pending.list = null;
+      c.stop(at, ramp, reserve);
     }
     const zero = this.clock.zero;
     for (const s of this.sources) {
       if (s.stop + zero > kill) {
+        const end = Math.max(kill, soon(this.ctx));
         try {
-          s.n.stop(kill);
-          s.stop = kill - zero;
-          if (s.span) s.span.b = kill;
+          s.n.stop(end);
+          s.stop = end - zero;
+          if (s.span) s.span.b = end;
         } catch {
           /* already stopped */
         }
       }
     }
     this.end = Math.min(this.end, kill);
+    const last = Math.max(...this.joined.map((v) => v.killAt));
+    if (Number.isFinite(last)) this.gate?.stop(Math.max(last, soon(this.ctx)));
     return true;
   }
 
-  get isHeld() {
-    return this.holding() !== null;
+  discard() {
+    this.drop([this]);
   }
 
-  private holding(): Placing[] | null {
-    return this.parent ? this.parent.holding() : this.held;
+  get isHeld() {
+    return this.clock.held !== null;
+  }
+
+  get isDropped() {
+    return !this.opened && this.isStopped;
   }
 
   get isStopped() {
-    return this.killAt !== Infinity;
+    return this.stopCommitted;
   }
 
   get silentAt() {
     return this.killAt;
   }
 }
+
+export const openBuilt = Voice.openBuilt;

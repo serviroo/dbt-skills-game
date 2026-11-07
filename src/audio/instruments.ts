@@ -1,7 +1,6 @@
 import { midi } from './dsp';
-import { Voice, kRate } from './voice';
-
-export const LONG = 6 * 3600;
+import { Voice, kRate, LONG } from './voice';
+export { LONG } from './voice';
 
 const waveCache = new WeakMap<BaseAudioContext, Map<string, PeriodicWave>>();
 /**

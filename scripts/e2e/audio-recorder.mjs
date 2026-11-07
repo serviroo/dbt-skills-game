@@ -205,3 +205,19 @@ export function cutOf(m, i = 0) {
   if (!(cut.at >= m.at[i] && cut.placed <= cut.latest)) throw new Error(`the cut on tap ${i} was placed ${((cut.at - m.at[i]) * 1000).toFixed(1)} ms after the tap, ${((cut.placed - cut.latest) * 1000).toFixed(3)} ms past where the engine places every sound`);
   return cut.at;
 }
+
+export async function captureEngine(page) {
+  await page.evaluate(async () => {
+    const { AudioEngine } = await import('/src/audio/engine.ts');
+    const play = AudioEngine.prototype.play;
+    AudioEngine.prototype.play = function (...args) {
+      window.__engine = this;
+      return play.apply(this, args);
+    };
+    try {
+      window.__daily.sound('ui_tap');
+    } finally {
+      AudioEngine.prototype.play = play;
+    }
+  });
+}
