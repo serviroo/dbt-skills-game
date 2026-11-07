@@ -17,6 +17,8 @@ export async function stopTime(page, ctx, h) {
   await page.evaluate(() => window.__audio.clock.now());
   await page.route('**', async () => page.clock.runFor(1));
   await h.evaluate(page, async () => page.clock.resume());
+  await page.$$eval('video', (all) => all.map((v) => v.clock));
+  await page.$eval('video', (v) => v.clock);
   await ctx.addInitScript(function () {
     const { clock: time } = window.__audio;
     window.__start = this.clock ?? time;

@@ -230,7 +230,7 @@ const tapElementsNotPoints = {
 
 const IN_PAGE_ARGUMENT = new Map([
   ['evaluate', 0], ['evaluateHandle', 0], ['evaluateAll', 0], ['addInitScript', 0], ['waitForFunction', 0],
-  ['$eval', 1], ['$eval', 1],
+  ['$eval', 1], ['$$eval', 1],
 ]);
 
 function runsInPage(node) {
