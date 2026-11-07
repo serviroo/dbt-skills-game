@@ -228,6 +228,24 @@ const tapElementsNotPoints = {
   },
 };
 
+const clocksPauseWhereTheyStand = {
+  meta: {
+    messages: {
+      pauseAt:
+        'Pause with pauseClock(page) from the harness: a running page clock may pass the time given to pauseAt ' +
+        'before the call lands, and then the pause throws.',
+    },
+  },
+  create(context) {
+    return {
+      CallExpression(node) {
+        const clock = node.callee.type === 'MemberExpression' ? node.callee.object : null;
+        if (methodName(node) === 'pauseAt' && isNamed(clock, 'clock')) context.report({ node, messageId: 'pauseAt' });
+      },
+    };
+  },
+};
+
 const LOST_EVENT = 'webglcontextlost';
 
 function canvasOf(context, node) {
@@ -675,6 +693,7 @@ export default {
     'no-soft-hyphen-characters': noSoftHyphenCharacters,
     'stored-writes-go-through-cleared': storedWritesGoThroughCleared,
     'tap-elements-not-points': tapElementsNotPoints,
+    'clocks-pause-where-they-stand': clocksPauseWhereTheyStand,
     'handle-lost-gpu-context': handleLostGpuContext,
     'schedule-before-echo-loads': scheduleBeforeEchoLoads,
   },

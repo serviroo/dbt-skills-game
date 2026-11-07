@@ -183,7 +183,7 @@ export const scenarios = {
     const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', PHONES[0], async (ctx) => {
       await ctx.clock.install();
       await ctx.route('**/src/daily/index.ts*', async (route) => {
-        await ctx.clock.pauseAt((await route.request().frame().evaluate(() => Date.now())) + 1000);
+        await h.pauseClock(route.request().frame().page());
         paused = true;
         await route.fallback();
       });
