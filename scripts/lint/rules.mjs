@@ -228,6 +228,19 @@ const tapElementsNotPoints = {
   },
 };
 
+const IN_PAGE_METHODS = new Set([
+  'evaluate', 'evaluateHandle', 'evaluateAll', 'addInitScript', 'waitForFunction', '$eval', '$$eval',
+]);
+
+function runsInPage(node) {
+  for (let at = node.parent; at; at = at.parent) {
+    const call = at.parent;
+    const passed = FUNCTIONS.has(at.type) && call?.type === 'CallExpression' && call.arguments.includes(at);
+    if (passed && IN_PAGE_METHODS.has(methodName(call))) return true;
+  }
+  return false;
+}
+
 function staticKey(key, computed) {
   if (!computed && key.type === 'Identifier') return key.name;
   if (key.type === 'Literal') return key.value;
@@ -246,9 +259,11 @@ const clockCallsGoThroughClockModule = {
     const isClockKey = (p) => p.type === 'Property' && staticKey(p.key, p.computed) === 'clock';
     return {
       MemberExpression(node) {
-        if (staticKey(node.property, node.computed) === 'clock') context.report({ node, messageId: 'clock' });
+        if (staticKey(node.property, node.computed) !== 'clock' || runsInPage(node)) return;
+        context.report({ node, messageId: 'clock' });
       },
       ObjectPattern(node) {
+        if (runsInPage(node)) return;
         for (const p of node.properties.filter(isClockKey)) context.report({ node: p, messageId: 'clock' });
       },
     };

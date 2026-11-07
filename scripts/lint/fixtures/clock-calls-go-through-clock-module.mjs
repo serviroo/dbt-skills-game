@@ -14,5 +14,10 @@ export async function stopTime(page, ctx) {
   const video = page.locator('video');
   await video.pauseAt(300);
   const { clockwork, ...rest } = page;
+  await page.evaluate(() => window.__audio.clock.now());
+  await ctx.addInitScript(function () {
+    const { clock: time } = window.__audio;
+    window.__start = this.clock ?? time;
+  });
   return [clock, kept, quoted, clockwork, rest, { clock: false }];
 }
