@@ -22,9 +22,8 @@ export class Curve {
   scheduledFrom(t: number) {
     const time = this.clampTime(t);
     const active = this.events.filter((event) => event.time <= time).at(-1);
-    const future = this.events.flatMap((event, index) => event.time > time
-      ? [{ ...event, from: this.evaluate(event.time, this.events.slice(0, index)) }] : []);
-    return active?.kind === 'target' ? [{ ...active, time, from: this.valueAt(time) }, ...future] : future;
+    const future = this.events.filter((event) => event.time > time).map((event) => ({ ...event }));
+    return active?.kind === 'target' ? [{ ...active, time }, ...future] : future;
   }
 
   clampTime(t: number) {
