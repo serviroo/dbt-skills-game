@@ -228,6 +228,16 @@ const tapElementsNotPoints = {
   },
 };
 
+function isPageClock(context, node, seen = new Set()) {
+  if (isNamed(node, 'clock')) return true;
+  if (node?.type !== 'Identifier' || seen.has(node.name)) return false;
+  seen.add(node.name);
+  const bound = variableOf(context, node)?.defs[0]?.name?.parent;
+  const named = bound?.type === 'Property' && !bound.computed && bound.key.name === 'clock';
+  if (node.name === 'clock' || named) return true;
+  return isPageClock(context, declaredAs(context, node), seen);
+}
+
 const clocksPauseWhereTheyStand = {
   meta: {
     messages: {
@@ -240,7 +250,7 @@ const clocksPauseWhereTheyStand = {
     return {
       CallExpression(node) {
         const clock = node.callee.type === 'MemberExpression' ? node.callee.object : null;
-        if (methodName(node) === 'pauseAt' && isNamed(clock, 'clock')) context.report({ node, messageId: 'pauseAt' });
+        if (methodName(node) === 'pauseAt' && isPageClock(context, clock)) context.report({ node, messageId: 'pauseAt' });
       },
     };
   },
