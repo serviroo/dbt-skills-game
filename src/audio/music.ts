@@ -408,6 +408,7 @@ const FACTORIES: Record<Section, Factory> = {
     // Timing: with hitAt known (offline renders) everything is scheduled now. Live, the build runs until the
     // director calls hush() (build cuts dead) and plays awaken_hit (the roar starts on that exact moment).
     const hitIn = o.at !== undefined && o.hitAt !== undefined ? o.hitAt - o.at : Infinity;
+    let spare = hitIn === Infinity ? roarParts(v, roar) : null;
     const nominal = hitIn !== Infinity ? Math.max(0.5, hitIn - 0.78) : 4.08;
     v.ramp(dr.gain, 0, 0.03, 0.1, nominal);
     v.ramp(dlp.frequency, 0, 260, 2600, nominal);
@@ -470,7 +471,7 @@ const FACTORIES: Record<Section, Factory> = {
           if (hitPlayed) return;
           roarTo = -Infinity;
           if (!R.rp.isHeld && !R.rp.isStopped) R.rp.stop(soon(host.lib.ctx), 0);
-          if (R.rp.isStopped) [R, armed] = [roarParts(v, roar), false];
+          if (R.rp.isStopped) [R, armed, spare] = [spare ?? roarParts(v, roar), false, null];
           if (cue) cue.ride(R.rp, placeFirstChord);
           return R.rp;
         },
@@ -479,6 +480,10 @@ const FACTORIES: Record<Section, Factory> = {
           hitPlayed = !dropped;
           cut(dropped ? at : Math.max(at, soon(host.lib.ctx)));
           if (dropped) R.rp.stop(at, 0);
+          if (hitPlayed && spare) {
+            spare.rp.stop(at, 0);
+            spare = null;
+          }
           [hitAt, roarTo] = [dropped ? Infinity : at, dropped ? Infinity : at + BEAT / 4];
         },
         tick(from, to) {
