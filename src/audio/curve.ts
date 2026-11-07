@@ -19,6 +19,13 @@ export class Curve {
     return this.evaluate(t, this.events);
   }
 
+  scheduledFrom(t: number) {
+    const time = this.clampTime(t);
+    const active = this.events.filter((event) => event.time <= time).at(-1);
+    const future = this.events.filter((event) => event.time > time).map((event) => ({ ...event }));
+    return active?.kind === 'target' ? [{ ...active, time }, ...future] : future;
+  }
+
   clampTime(t: number) {
     return Math.max(t, this.ctx.currentTime);
   }

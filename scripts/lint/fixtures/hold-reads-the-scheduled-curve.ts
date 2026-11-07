@@ -51,19 +51,19 @@ export function scheduled(gain: GainNode, ctx: BaseAudioContext, at: number) {
 }
 
 class Stored {
-  safe: GainNode;
+  echoReturn: GainNode;
   constructor(ctx: BaseAudioContext) {
-    this.safe = ctx.createGain();
-    trackParam(this.safe.gain, ctx, 1);
+    this.echoReturn = ctx.createGain();
+    trackParam(this.echoReturn.gain, ctx, 1);
   }
   change(at: number) {
-    this.safe.gain.setValueAtTime(0.2, at);
-    this.safe.gain.linearRampToValueAtTime(0.2, at);
-    this.safe.gain.exponentialRampToValueAtTime(0.2, at);
-    this.safe.gain.setTargetAtTime(0.5, at, 0.1);
-    this.safe.gain.setValueCurveAtTime([0.2, 0.5], at, 1);
-    this.safe.gain.cancelScheduledValues(at);
-    this.safe.gain.cancelAndHoldAtTime(at);
+    this.echoReturn.gain.setValueAtTime(0.2, at);
+    this.echoReturn.gain.linearRampToValueAtTime(0.2, at);
+    this.echoReturn.gain.exponentialRampToValueAtTime(0.2, at);
+    this.echoReturn.gain.setTargetAtTime(0.5, at, 0.1);
+    this.echoReturn.gain.setValueCurveAtTime([0.2, 0.5], at, 1);
+    this.echoReturn.gain.cancelScheduledValues(at);
+    this.echoReturn.gain.cancelAndHoldAtTime(at);
   }
 }
 

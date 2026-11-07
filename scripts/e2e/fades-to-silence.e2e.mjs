@@ -38,6 +38,246 @@ const FADES = [
 const RATES = [44100, 48000];
 
 export const scenarios = {
+  async 'safe-zone-return-waits-for-stopped-sounds'({ open, expect }) {
+    const { ctx, page, errors } = await open({}, '?lab=audio&mute');
+    try {
+      await page.waitForFunction(() => window.__lab === true, null, { timeout: 30000 });
+      const got = await page.evaluate(async (rates) => {
+        const { AudioEngine } = await import('/src/audio/engine.ts');
+        const { stoppedBy } = await import('/src/audio/voice.ts');
+        const { SCORE } = await import('/src/motion/tokens.ts');
+        const entry = 2;
+        const out = [];
+        const rms = (d, a, b) => {
+          let sum = 0;
+          for (let i = a; i < b; i++) sum += d[i] ** 2;
+          return Math.sqrt(sum / (b - a));
+        };
+        const hold = Object.getOwnPropertyDescriptor(AudioParam.prototype, 'cancelAndHoldAtTime');
+        for (const firefox of [false, true]) {
+          if (firefox) delete AudioParam.prototype.cancelAndHoldAtTime;
+          try {
+            for (const sr of rates) {
+              for (const visit of [0.005, 0.02]) {
+                for (const sound of ['bed', 'score', 'bed-score-cue', 'daily-score']) {
+                  const end = entry + visit + SCORE.safeBackSec;
+                  const c = new OfflineAudioContext(2, Math.ceil(end * sr), sr);
+                  const eng = new AudioEngine(c);
+                  eng.hushRoom.disconnect();
+                  eng.hushHall.disconnect();
+                  if (sound.includes('bed')) eng.bed('vortex_roar', { at: 0.02 });
+                  if (sound.includes('score')) eng.music.to('windows', 0.5, { at: 0.02 });
+                  if (sound.includes('cue')) {
+                    eng.schedule([{ t: 0.02, cue: 'breath_out', opts: { dur: 8, id: 'long-cue' } }], 0);
+                  }
+                  eng.music.scheduleUntil(entry);
+                  eng.quiet(true, SCORE.safeOutSec, entry);
+                  if (sound !== 'daily-score') eng.stopAll(SCORE.safeOutSec, entry);
+                  eng.quiet(false, SCORE.safeBackSec, entry + visit);
+                  eng.music.scheduleUntil(end);
+                  const rendered = await c.startRendering();
+                  const d = rendered.getChannelData(0);
+                  const level = rms(d, Math.floor((entry - 0.5) * sr), Math.floor(entry * sr));
+                  let peak = 0;
+                  for (let ch = 0; ch < rendered.numberOfChannels; ch++) {
+                    const samples = rendered.getChannelData(ch);
+                    for (let i = Math.ceil(stoppedBy(entry, SCORE.safeOutSec) * sr); i < samples.length; i++) {
+                      peak = Math.max(peak, Math.abs(samples[i]));
+                    }
+                  }
+                  const early = rms(d, Math.ceil((entry + visit + 0.01) * sr),
+                    Math.floor((entry + visit + 0.03) * sr));
+                  out.push({ firefox, sr, visit, sound, level, tail: 20 * Math.log10(peak), early: early / level });
+                }
+              }
+            }
+          } finally {
+            if (hold) Object.defineProperty(AudioParam.prototype, 'cancelAndHoldAtTime', hold);
+          }
+        }
+        return out;
+      }, RATES);
+      expect(got.length === 32, `rendered ${got.length} of 32 Safe Zone visits`);
+      for (const g of got) {
+        const name = `${g.firefox ? 'Firefox path' : 'native'}, ${g.sound}, ${g.visit * 1000} ms visit, ${g.sr} Hz`;
+        expect(g.level > 1e-4, `${name}: too quiet to measure`);
+        if (g.sound === 'daily-score') {
+          expect(g.early > 0.005, `${name}: the daily score did not start coming straight back (${g.early})`);
+        } else {
+          expect(g.tail < TWIN_DB, `${name}: the stopped dry sound returns at ${g.tail.toFixed(1)} dBFS`);
+        }
+      }
+      expect(!errors.length, errors.join('\n'));
+      return got;
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'skip-and-replay-never-lift-a-ducked-fade'({ open, expect }) {
+    const { ctx, page, errors } = await open({}, '?lab=audio&mute');
+    try {
+      await page.waitForFunction(() => window.__lab === true, null, { timeout: 30000 });
+      const got = await page.evaluate(async (rates) => {
+        const { AudioEngine } = await import('/src/audio/engine.ts');
+        const { stoppedBy } = await import('/src/audio/voice.ts');
+        const { soon } = await import('/src/audio/param.ts');
+        const { SCORE } = await import('/src/motion/tokens.ts');
+        const out = [];
+        const hold = Object.getOwnPropertyDescriptor(AudioParam.prototype, 'cancelAndHoldAtTime');
+        for (const firefox of [false, true]) {
+          if (firefox) delete AudioParam.prototype.cancelAndHoldAtTime;
+          try {
+            for (const sr of rates) {
+              for (const stop of ['Skip', 'reset']) {
+                for (const db of [-18, -22]) {
+                  const fade = stop === 'Skip' ? SCORE.leaveSec : 0.3;
+                  const press = 1.1;
+                  const end = stoppedBy(press, fade);
+                  const render = async (stopped) => {
+                    const c = new OfflineAudioContext(4, Math.ceil((end + 0.1) * sr), sr);
+                    const e = new AudioEngine(c);
+                    const probe = c.createChannelMerger(4);
+                    e.duckG.connect(probe, 0, 2);
+                    probe.connect(c.destination);
+                    const bed = e.bed('gate_hum', { at: 0, fadeIn: 0.05 });
+                    e.music.to('windows', 0.05, { at: 0 });
+                    e.music.scheduleUntil(end + 0.1);
+                    e.duck(db, 0.05, 1);
+                    const pause = c.suspend(press);
+                    const rendered = c.startRendering();
+                    await pause;
+                    const at = soon(c);
+                    if (stopped) {
+                      if (stop === 'reset') e.reset(fade, at);
+                      else {
+                        e.stopAll(fade, at);
+                        bed.stop(0.04, at);
+                        e.music.stop(0.04, at);
+                        e.unhush(at);
+                        e.duck(0, 0.03, at);
+                      }
+                    }
+                    await c.resume();
+                    return rendered;
+                  };
+                  const cut = await render(true);
+                  const twin = await render(false);
+                  const rms = (d, a, b) => {
+                    let sum = 0;
+                    for (let i = a; i < b; i++) sum += d[i] ** 2;
+                    return Math.sqrt(sum / (b - a));
+                  };
+                  const width = Math.round(sr * 0.002);
+                  const d = cut.getChannelData(2);
+                  const ref = twin.getChannelData(2);
+                  const first = Math.ceil(press * sr / 128) * 128;
+                  const last = Math.ceil(end * sr);
+                  const level = rms(d, first - width, first);
+                  let peak = 0;
+                  for (let i = first; i + width <= last; i += width) {
+                    peak = Math.max(peak, rms(d, i, i + width) / rms(ref, i, i + width));
+                  }
+                  const tails = [0, 2].map((ch) => {
+                    const stopped = cut.getChannelData(ch);
+                    const held = twin.getChannelData(ch);
+                    return 20 * Math.log10(rms(stopped, last, stopped.length) / rms(held, last, held.length));
+                  });
+                  let dryPeak = 0;
+                  for (let i = last; i < d.length; i++) dryPeak = Math.max(dryPeak, Math.abs(d[i]));
+                  out.push({ firefox, sr, stop, db, level, rise: 20 * Math.log10(peak),
+                    tail: Math.max(...tails), dryTail: 20 * Math.log10(dryPeak) });
+                }
+              }
+            }
+          } finally {
+            if (hold) Object.defineProperty(AudioParam.prototype, 'cancelAndHoldAtTime', hold);
+          }
+        }
+        return out;
+      }, RATES);
+      for (const g of got) {
+        const name = `${g.firefox ? 'Firefox path' : 'native'}, ${g.stop} at ${g.db} dB, ${g.sr} Hz`;
+        expect(g.level > 1e-5, `${name}: too quiet to measure`);
+        expect(g.rise < 0.01, `${name}: rose ${g.rise.toFixed(2)} dB during its fade`);
+        expect(g.tail < FLOOR_DB, `${name}: still sounds at ${g.tail.toFixed(1)} dB after its stop`);
+        expect(g.dryTail < TWIN_DB, `${name}: dry tail at ${g.dryTail.toFixed(1)} dBFS after its stop`);
+      }
+      expect(!errors.length, errors.join('\n'));
+      return got;
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'all-shared-bus-rises-wait-for-stopped-sounds'({ open, expect }) {
+    const { ctx, page, errors } = await open({}, '?lab=audio&mute');
+    try {
+      await page.waitForFunction(() => window.__lab === true, null, { timeout: 30000 });
+      const got = await page.evaluate(async () => {
+        const { AudioEngine } = await import('/src/audio/engine.ts');
+        const { stoppedBy } = await import('/src/audio/voice.ts');
+        const sr = 48000;
+        const buses = ['duckG', 'uiDuck', 'focus', 'yieldG', 'hushBeds', 'hushMusic', 'hushHall', 'hushRoom'];
+        const out = [];
+        for (const bus of buses) {
+          for (const press of bus.startsWith('hush') ? [0.1, 0.282] : [0.1, 0.4]) {
+            for (const stop of ['stopAll', 'reset']) {
+              const end = stoppedBy(press, 0.3);
+              const c = new OfflineAudioContext(4, Math.ceil((end + 4) * sr), sr);
+              const e = new AudioEngine(c, { volume: 0 });
+              e.bed('gate_hum', { at: 0, level: 0 });
+              const node = e[bus];
+              node.disconnect();
+              const probe = c.createChannelMerger(4);
+              node.connect(probe, 0, 2);
+              probe.connect(c.destination);
+              const constant = c.createConstantSource();
+              constant.connect(node);
+              constant.start();
+              if (bus === 'duckG') {
+                e.duck(-18, 0.05, 0);
+                e.duck(0, 0.8, 0.28);
+              } else if (bus === 'uiDuck') e.play('ui_open', { at: 0, gain: 0 });
+              else if (bus === 'focus') e.toFocus(0.2, 0, 0.01, 0.28);
+              else if (bus === 'yieldG') e.makeRoom(0, -6, 0.01, 0.28, 0.2);
+              else e.hush(0, 0.28);
+              const pause = c.suspend(press);
+              const rendered = c.startRendering();
+              await pause;
+              const at = c.currentTime;
+              e[stop](0.3, at);
+              await c.resume();
+              const d = (await rendered).getChannelData(2);
+              const first = Math.round(at * sr);
+              const last = Math.floor(stoppedBy(at, 0.3) * sr);
+              const before = d[first];
+              let peak = 0;
+              for (let i = first; i < last; i++) peak = Math.max(peak, d[i]);
+              out.push({ bus, press, stop, before, rise: peak - before, restored: d.at(-1) });
+            }
+          }
+        }
+        return out;
+      });
+      expect(got.length === 32, `rendered ${got.length} of 32 bus restores`);
+      const failures = [];
+      for (const g of got) {
+        const name = `${g.bus}, ${g.stop} at ${g.press} s`;
+        if (!(g.before > 0.005 && g.before < 0.99)) failures.push(`${name}: the bus was not dipped (${g.before})`);
+        if (!(g.rise < 1e-5)) failures.push(`${name}: rose ${g.rise} before stopped sounds were silent`);
+        if (!(g.restored > 0.99)) {
+          failures.push(`${name}: stayed dipped after stopped sounds were silent (${g.restored})`);
+        }
+      }
+      expect(!failures.length, failures.join('\n'));
+      expect(!errors.length, errors.join('\n'));
+      return got;
+    } finally {
+      await ctx.close();
+    }
+  },
+
   async 'every-fade-ends-in-silence'({ open, expect }) {
     const { ctx, page, errors } = await open({}, '?lab=audio&mute');
     await page.waitForFunction(() => window.__lab === true, null, { timeout: 30000 });
