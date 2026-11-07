@@ -118,25 +118,41 @@ jobs:
       actions: read
       contents: read
     outputs:
-      artifact: ${{ steps.find.outputs.artifact }}
-      run: ${{ steps.find.outputs.run }}
       parts: ${{ steps.parts.outputs.parts }}
       shards: ${{ steps.parts.outputs.shards }}
     steps:
       - id: find
-        continue-on-error: true
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          found=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=e2e-timings&per_page=50" --jq \
-            "[.artifacts[] | select((.expired | not) and .workflow_run.head_repository_id == $GITHUB_REPOSITORY_ID)][0]
-             | select(.) | \"\(.id) \(.workflow_run.id)\"")
-          read -r artifact run <<< "$found"
-          [[ $artifact =~ ^[0-9]+$ && $run =~ ^[0-9]+$ ]] || { echo "::notice::No e2e-timings yet: parts split by scripts/e2e/timings.json"; exit 0; }
-          echo "::notice title=E2E timings::Parts split by the e2e-timings of run $run"
-          echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
-          echo "run=$run" >> "$GITHUB_OUTPUT"
+          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=e2e-timings&per_page=50" | node -e '
+            let json = "";
+            process.stdin.on("data", (chunk) => json += chunk);
+            process.stdin.on("end", () => {
+              const { artifacts } = JSON.parse(json);
+              const candidates = artifacts.filter((a) => a?.name === "e2e-timings" && !a.expired &&
+                typeof a.created_at === "string" &&
+                a.workflow_run?.head_repository_id === Number(process.env.GITHUB_REPOSITORY_ID));
+              candidates.sort((a, b) => b.created_at.localeCompare(a.created_at));
+              for (const a of candidates) console.log(a.workflow_run.id);
+            });')
+          while read -r run; do
+            [[ $run =~ ^[0-9]+$ ]] || continue
+            dir=$(mktemp -d "$RUNNER_TEMP/e2e-timings.XXXXXX")
+            error="$dir/download.log"
+            if gh run download "$run" --repo "$GITHUB_REPOSITORY" -n e2e-timings -D "$dir" 2>"$error"; then
+              test -f "$dir/e2e-timings.json"
+              mkdir -p "$RUNNER_TEMP/timings"
+              mv "$dir/e2e-timings.json" "$RUNNER_TEMP/timings/e2e-timings.json"
+              echo "::notice title=E2E timings::Parts split by the e2e-timings of run $run"
+              exit 0
+            fi
+            cat "$error" >&2
+            missing='no artifact matches|no valid artifacts found to download|HTTP (404|410)'
+            grep -Eq "$missing" "$error" || exit 1
+          done <<< "$runs"
+          echo "::notice::No e2e-timings available: parts split by scripts/e2e/timings.json"
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -145,28 +161,30 @@ jobs:
           node-version: 20.x
           cache: npm
       - run: npm ci
-      - uses: actions/download-artifact@v8
-        if: steps.find.outputs.artifact != ''
-        with:
-          artifact-ids: ${{ steps.find.outputs.artifact }}
-          run-id: ${{ steps.find.outputs.run }}
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/timings
       - id: parts
         name: Enough e2e parts that each finishes in time on the slowest runner
-        env:
-          PLANNED: ${{ steps.find.outputs.artifact }}
         shell: bash
         run: |
-          timings=$(find "$RUNNER_TEMP/timings" -name e2e-timings.json 2>/dev/null | head -n 1)
-          missing="the planned e2e-timings artifact $PLANNED has no e2e-timings.json"
-          [ -z "$PLANNED" ] || [ -n "$timings" ] || { echo "$missing"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/plan-timings"
+          timings="$RUNNER_TEMP/timings/e2e-timings.json"
+          [ -f "$timings" ] || timings=scripts/e2e/timings.json
+          cp "$timings" "$RUNNER_TEMP/plan-timings/e2e-timings.json"
           log=$RUNNER_TEMP/parts.log
-          n=$(node scripts/e2e.mjs --parts ${timings:+"--timings=$timings"} 2>"$log") || { cat "$log"; exit 1; }
+          n=$(node scripts/e2e.mjs --parts "--timings=$RUNNER_TEMP/plan-timings/e2e-timings.json" 2>"$log") || {
+            cat "$log"
+            exit 1
+          }
           [[ $n =~ ^[1-9][0-9]*$ ]] || { cat "$log"; echo "--parts printed '$n', not a part count"; exit 1; }
           echo "::notice title=E2E parts::$(cat "$log")"
           echo "parts=$n" >> "$GITHUB_OUTPUT"
           echo "shards=[$(seq -s, 1 "$n")]" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: e2e-plan-timings
+          path: ${{ runner.temp }}/plan-timings/e2e-timings.json
+          retention-days: 30
+          if-no-files-found: error
+          overwrite: true
 
   e2e:
     needs: [proven, plan]
@@ -196,20 +214,13 @@ jobs:
       - name: Browsers come from the container
         run: test "$(npx playwright --version)" = "Version 1.64.1" || { echo "package-lock has $(npx playwright --version); set the same version in the container image above"; exit 1; }
       - uses: actions/download-artifact@v8
-        if: needs.plan.outputs.artifact != ''
         with:
-          artifact-ids: ${{ needs.plan.outputs.artifact }}
-          run-id: ${{ needs.plan.outputs.run }}
-          github-token: ${{ github.token }}
+          name: e2e-plan-timings
           path: ${{ runner.temp }}/timings
       - name: E2E part ${{ matrix.shard }} of ${{ needs.plan.outputs.parts }}
-        env:
-          PLANNED: ${{ needs.plan.outputs.artifact }}
         run: |
-          timings=$(find "$RUNNER_TEMP/timings" -name e2e-timings.json 2>/dev/null | head -n 1)
-          [ -z "$PLANNED" ] || [ -n "$timings" ] || { echo "the planned e2e-timings artifact $PLANNED has no e2e-timings.json"; exit 1; }
           shard=${{ matrix.shard }}/${{ needs.plan.outputs.parts }}
-          node scripts/e2e.mjs --software --shard="$shard" ${timings:+"--timings=$timings"}
+          node scripts/e2e.mjs --software --shard="$shard" "--timings=$RUNNER_TEMP/timings/e2e-timings.json"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -231,9 +242,6 @@ jobs:
     if: ${{ always() && needs.e2e.result != 'skipped' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    permissions:
-      actions: read
-      contents: read
     steps:
       - uses: actions/checkout@v7
         with:
@@ -248,17 +256,13 @@ jobs:
           pattern: e2e-times-*
           path: ${{ runner.temp }}/times
       - uses: actions/download-artifact@v8
-        if: needs.plan.outputs.artifact != ''
         with:
-          artifact-ids: ${{ needs.plan.outputs.artifact }}
-          run-id: ${{ needs.plan.outputs.run }}
-          github-token: ${{ github.token }}
+          name: e2e-plan-timings
           path: ${{ runner.temp }}/planned
       - name: Add this run's times
         run: |
           mkdir -p "$RUNNER_TEMP/out"
-          planned=$(find "$RUNNER_TEMP/planned" -name e2e-timings.json 2>/dev/null | head -n 1)
-          cp "${planned:-scripts/e2e/timings.json}" "$RUNNER_TEMP/out/e2e-timings.json"
+          cp "$RUNNER_TEMP/planned/e2e-timings.json" "$RUNNER_TEMP/out/e2e-timings.json"
           find "$RUNNER_TEMP/times" -name report.json -print0 | xargs -0 -r node scripts/e2e-timings.mjs --file="$RUNNER_TEMP/out/e2e-timings.json"
       - uses: actions/upload-artifact@v7
         with:

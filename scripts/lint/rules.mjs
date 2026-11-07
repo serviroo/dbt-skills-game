@@ -13,11 +13,15 @@ const AUDIO_TIME_ARG = new Map([
 const SKIPPED_KEYS = new Set(['parent', 'loc', 'range']);
 const FUNCTIONS = new Set(['FunctionExpression', 'ArrowFunctionExpression', 'FunctionDeclaration']);
 
-const isNamed = (node, name) =>
-  node?.type === 'MemberExpression' && !node.computed && node.property.name === name;
+function memberName(node) {
+  if (node?.type !== 'MemberExpression') return null;
+  if (!node.computed) return node.property.name;
+  return typeof node.property.value === 'string' ? node.property.value : null;
+}
 
-const methodName = (call) =>
-  call.callee.type === 'MemberExpression' && !call.callee.computed ? call.callee.property.name : null;
+const isNamed = (node, name) => memberName(node) === name;
+
+const methodName = (call) => memberName(call.callee);
 
 const isGlobal = (node, name) => node?.type === 'Identifier' ? node.name === name : isNamed(node, name);
 
@@ -62,6 +66,19 @@ function readsAudioClock(context, node, seen = new Set()) {
   return children(node).some((child) => readsAudioClock(context, child, seen));
 }
 
+function anchorsLinearRamp(node) {
+  if (methodName(node) !== 'setValueAtTime') return false;
+  const receiver = node.callee.object;
+  if (receiver.type !== 'ThisExpression' && !(isNamed(receiver, 'param')
+    && receiver.object.type === 'ThisExpression')) return false;
+  for (let at = node.parent; at; at = at.parent) {
+    if (FUNCTIONS.has(at.type)) {
+      return at.parent?.type === 'MethodDefinition' && nameOf(at) === 'linearRampToValueAtTime';
+    }
+  }
+  return false;
+}
+
 const audioTimesFromSoon = {
   meta: {
     messages: {
@@ -75,7 +92,9 @@ const audioTimesFromSoon = {
       CallExpression(node) {
         const at = AUDIO_TIME_ARG.get(methodName(node));
         const time = at === undefined ? null : node.arguments[at];
-        if (time && readsAudioClock(context, time)) context.report({ node: time, messageId: 'clock' });
+        if (time && !anchorsLinearRamp(node) && readsAudioClock(context, time)) {
+          context.report({ node: time, messageId: 'clock' });
+        }
       },
     };
   },
@@ -395,10 +414,141 @@ const scheduleBeforeEchoLoads = {
   },
 };
 
+const PARAM_NAMES = new Set([
+  'gain', 'frequency', 'detune', 'offset', 'pan', 'Q', 'delayTime', 'playbackRate',
+  'threshold', 'knee', 'ratio', 'attack', 'release',
+]);
+
+function audioParam(context, node, seen = new Set()) {
+  if (!node || seen.has(node)) return false;
+  seen.add(node);
+  if (node.type === 'MemberExpression' && !node.computed) return PARAM_NAMES.has(node.property.name);
+  if (node.type !== 'Identifier') return false;
+  const variable = variableOf(context, node);
+  const typed = variable?.defs.some((def) => def.name?.typeAnnotation?.typeAnnotation?.typeName?.name === 'AudioParam');
+  return typed || audioParam(context, declaredAs(context, node), seen);
+}
+
+function readsParamValue(context, node, seen = new Set()) {
+  if (!node || seen.has(node) || FUNCTIONS.has(node.type)) return false;
+  seen.add(node);
+  if (isNamed(node, 'value') && audioParam(context, node.object)) return true;
+  if (node.type === 'Identifier') return readsParamValue(context, declaredAs(context, node), seen);
+  return children(node).some((child) => readsParamValue(context, child, seen));
+}
+
+function paramPath(context, node, seen = new Set()) {
+  if (!node || seen.has(node)) return null;
+  seen.add(node);
+  if (node.type === 'Identifier') {
+    return paramPath(context, declaredAs(context, node), seen) ?? [variableOf(context, node) ?? node.name];
+  }
+  if (node.type === 'ThisExpression') {
+    let scope = context.sourceCode.getScope(node);
+    while (scope.upper && scope.type !== 'class') scope = scope.upper;
+    return [scope];
+  }
+  if (memberName(node)) {
+    const parent = paramPath(context, node.object, seen);
+    return parent && [...parent, memberName(node)];
+  }
+  if (node.type === 'CallExpression' && AUDIO_TIME_ARG.has(methodName(node))) {
+    return paramPath(context, node.callee.object, seen);
+  }
+  return null;
+}
+
+const holdReadsTheScheduledCurve = {
+  meta: {
+    messages: {
+      curve: 'Hold and copy the scheduled curve at the change time: the value getter is an earlier rendered value.',
+      write: 'Give trackParam its initial value and schedule later changes through the curve.',
+      schedule: 'Schedule and cancel tracked parameters through their curve.',
+    },
+  },
+  create(context) {
+    const tracked = [];
+    const writes = [];
+    return {
+      MemberExpression(node) {
+        if (isNamed(node, 'cancelAndHoldAtTime')) context.report({ node, messageId: 'curve' });
+      },
+      CallExpression(node) {
+        if (calleeName(node) === 'trackParam') {
+          const param = paramPath(context, node.arguments[0]);
+          if (param) tracked.push(param);
+        }
+        if (calleeName(node) === 'trackedGain') {
+          const owner = node.parent.type === 'VariableDeclarator' ? node.parent.id
+            : node.parent.type === 'AssignmentExpression' ? node.parent.left : null;
+          const gain = paramPath(context, owner);
+          if (gain) tracked.push([...gain, 'gain']);
+        }
+        if (!AUDIO_TIME_ARG.has(methodName(node))) return;
+        if (!['start', 'stop', 'cancelAndHoldAtTime'].includes(methodName(node))) {
+          const param = paramPath(context, node.callee.object);
+          if (param) writes.push({ node, param, messageId: 'schedule' });
+        }
+        for (const arg of node.arguments) {
+          if (readsParamValue(context, arg)) context.report({ node: arg, messageId: 'curve' });
+        }
+      },
+      AssignmentExpression(node) {
+        if (!isNamed(node.left, 'value')) return;
+        if (audioParam(context, node.left.object) && readsParamValue(context, node.right)) {
+          context.report({ node, messageId: 'curve' });
+        } else {
+          const param = paramPath(context, node.left.object);
+          if (param) writes.push({ node, param });
+        }
+      },
+      'Program:exit'() {
+        for (const { node, param, messageId = 'write' } of writes) {
+          if (tracked.some((path) => path.length === param.length && path.every((part, i) => part === param[i]))) {
+            context.report({ node, messageId });
+          }
+        }
+      },
+    };
+  },
+};
+
+function clampedTime(context, node, receiver) {
+  if (node?.type === 'Identifier') return clampedTime(context, declaredAs(context, node), receiver);
+  return node?.type === 'CallExpression' && methodName(node) === 'clampTime'
+    && context.sourceCode.getText(node.callee.object) === receiver;
+}
+
+const heldTimesAreClamped = {
+  meta: {
+    messages: { past: 'Clamp the hold or cancel time before reading or changing the scheduled curve.' },
+  },
+  create(context) {
+    return {
+      ':function'(fn) {
+        if (!fn.body) return;
+        const calls = ownCalls(fn.body);
+        const cancels = calls.filter((call) => methodName(call) === 'cancelScheduledValues');
+        const receiverOf = (call) => context.sourceCode.getText(call.callee.object);
+        const reads = calls.filter((call) => ['valueAt', 'rampValueAt'].includes(methodName(call))
+          && cancels.some((cancel) => receiverOf(cancel) === receiverOf(call)));
+        const wrapper = fn.parent?.type === 'MethodDefinition' && nameOf(fn) === 'cancelScheduledValues';
+        for (const call of [...reads, ...cancels]) {
+          if (!wrapper && !reads.some((read) => receiverOf(read) === receiverOf(call))) continue;
+          const receiver = wrapper ? 'this' : receiverOf(call);
+          if (!clampedTime(context, call.arguments[0], receiver)) context.report({ node: call, messageId: 'past' });
+        }
+      },
+    };
+  },
+};
+
 export default {
   meta: { name: 'lantern' },
   rules: {
     'audio-times-from-soon': audioTimesFromSoon,
+    'hold-reads-the-scheduled-curve': holdReadsTheScheduledCurve,
+    'held-times-are-clamped': heldTimesAreClamped,
     'animations-share-start-time': animationsShareStartTime,
     'follow-device-preferences': followDevicePreferences,
     'no-soft-hyphen-characters': noSoftHyphenCharacters,

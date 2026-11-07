@@ -12,3 +12,14 @@ export function fine(ctx: AudioContext, duck: GainNode, soon: (c: AudioContext) 
   duck.gain.setTargetAtTime(0.7, start, 0.012);
   return document.timeline.currentTime;
 }
+
+export class Curve {
+  constructor(private param: AudioParam, private ctx: AudioContext) {}
+  setValueAtTime(value: number, at: number) {
+    this.param.setValueAtTime(value, at);
+  }
+  linearRampToValueAtTime(value: number, end: number) {
+    this.setValueAtTime(1, this.ctx.currentTime);
+    this.param.linearRampToValueAtTime(value, end);
+  }
+}
