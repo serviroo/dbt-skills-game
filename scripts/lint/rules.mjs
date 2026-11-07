@@ -228,15 +228,16 @@ const tapElementsNotPoints = {
   },
 };
 
-const IN_PAGE_METHODS = new Set([
-  'evaluate', 'evaluateHandle', 'evaluateAll', 'addInitScript', 'waitForFunction', '$eval', '$$eval',
+const IN_PAGE_ARGUMENT = new Map([
+  ['evaluate', 0], ['evaluateHandle', 0], ['evaluateAll', 0], ['addInitScript', 0], ['waitForFunction', 0],
+  ['$eval', 1], ['$eval', 1],
 ]);
 
 function runsInPage(node) {
   for (let at = node.parent; at; at = at.parent) {
     const call = at.parent;
-    const passed = FUNCTIONS.has(at.type) && call?.type === 'CallExpression' && call.arguments.includes(at);
-    if (passed && IN_PAGE_METHODS.has(methodName(call))) return true;
+    if (!FUNCTIONS.has(at.type) || call?.type !== 'CallExpression') continue;
+    if (call.arguments[IN_PAGE_ARGUMENT.get(methodName(call))] === at) return true;
   }
   return false;
 }
