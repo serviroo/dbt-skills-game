@@ -40,6 +40,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { boot, settle } from './layout-fit.e2e.mjs';
 import { fits } from './move-like-an-app.e2e.mjs';
+import * as pageClock from './clock.mjs';
 
 const PHONE = { width: 390, height: 844 };
 const AT = ['start', 'moment', 'breathe', 'squeeze', 'cold', 'check', 'stop', 'reasons', 'comfort', 'people', 'talk', 'close'];
@@ -475,11 +476,11 @@ export const scenarios = {
     const problems = [];
     const t = Date.now() - 86400e3;
     const seed = { [h.YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: Date.now() - 1000, companionAt: Date.now() - 1000 }), 'dbt.app.v1': h.SEEN, [h.SAVE]: JSON.stringify({ v: 1, created: t, events: [] }) };
-    const { ctx, page, errors } = await h.open(seed, '?mute', PHONE, (c) => c.clock.install());
+    const { ctx, page, errors } = await h.open(seed, '?mute', PHONE, (c) => pageClock.install(c));
     await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
     await listen(page, '.dq-safezone');
     const said = () => heard(page);
-    const run = (ms) => page.clock.runFor(ms);
+    const run = (ms) => pageClock.runFor(page, ms);
     await h.pauseClock(page);
     await page.locator('.dq-top .dq-safe').click();
     await run(300);
@@ -521,7 +522,7 @@ export const scenarios = {
     const problems = [];
     const t = Date.now() - 86400e3;
     const seed = { [h.YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: Date.now() - 1000, companionAt: Date.now() - 1000 }), 'dbt.app.v1': h.SEEN, [h.SAVE]: JSON.stringify({ v: 1, created: t, events: [] }) };
-    const { ctx, page, errors } = await h.open(seed, '?mute', PHONE, (c) => c.clock.install());
+    const { ctx, page, errors } = await h.open(seed, '?mute', PHONE, (c) => pageClock.install(c));
     await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
     await listen(page, '#dq-main');
     // Wise Mind's 20 second stone timer starts by itself after the breathing step
@@ -529,18 +530,18 @@ export const scenarios = {
     await page.getByRole('button', { name: 'Begin' }).click();
     await h.pauseClock(page);
     await page.getByRole('button', { name: 'Next', exact: true }).click();
-    await page.clock.runFor(1000);
+    await pageClock.runFor(page, 1000);
     const timerSaid = async () => (await heard(page)).filter((s) => /second|minute|^Done/.test(s.text)).map((s) => `${s.text} (${s.how})`);
     const start = await timerSaid();
     if (JSON.stringify(start) !== JSON.stringify(['20 seconds, starting now. (polite)'])) problems.push(`as it started the timer said ${JSON.stringify(start)}`);
     for (let i = 1; i <= 2; i++) {
       await page.getByRole('button', { name: '+15 s' }).click();
-      await page.clock.runFor(500);
+      await pageClock.runFor(page, 500);
       const more = await timerSaid();
       if (JSON.stringify(more) !== JSON.stringify(['15 seconds more. (polite)'])) problems.push(`more time, press ${i}, said ${JSON.stringify(more)}`);
     }
     // 20 s and twice 15 more: it ends 50 s after it started
-    await page.clock.runFor(50000);
+    await pageClock.runFor(page, 50000);
     const end = await timerSaid();
     if (JSON.stringify(end) !== JSON.stringify(['Done. (polite)'])) problems.push(`running to its end the timer said ${JSON.stringify(end)}`);
     h.expect(!problems.length && !errors.length, [...problems, ...errors].join('\n'));

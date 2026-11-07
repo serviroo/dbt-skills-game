@@ -1,3 +1,5 @@
+import * as pageClock from './clock.mjs';
+
 // What comes due while the Safe Zone is open waits until the player leaves it, and nothing opens inside it:
 //   safe-zone-welcome-waits  the first open's welcome when Home is left before it comes. For the Safe Zone, at 390x844
 //                            and 320x568: nothing over the Safe Zone, the welcome kept in the save and a Save Crystal,
@@ -33,7 +35,7 @@ function returning(xp = 0) {
 async function open(h, { save, device, viewport = PHONE, init } = {}) {
   const seed = { [h.YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: Date.now() - 1000, companionAt: Date.now() - 1000 }), 'dbt.app.v1': h.SEEN, ...(save ? { [h.SAVE]: save } : {}) };
   const prepare = async (c) => {
-    await c.clock.install();
+    await pageClock.install(c);
     if (init) await c.addInitScript(init, h.SAVE);
   };
   const { ctx, page, errors } = await h.open(seed, '?mute', viewport, prepare, device);
@@ -75,7 +77,7 @@ export const scenarios = {
       const early = await opened(page);
       if (!nothing(early)) problems.push(`${tag}: the welcome came before Home could be left: ${JSON.stringify(early)}`);
       await leave(page);
-      await page.clock.runFor(3000);
+      await pageClock.runFor(page, 3000);
       return { ctx, page, errors };
     };
     const toSafe = (page) => page.locator('.dq-top .dq-safe').click();
@@ -85,7 +87,7 @@ export const scenarios = {
       const { ctx, page, errors } = await firstOpen(tag, toSafe, viewport);
       const inside = await opened(page);
       if ((await screen(page)) !== 'safe' || !nothing(inside)) problems.push(`${tag}: in the Safe Zone: ${await screen(page)}, ${JSON.stringify(inside)}`);
-      await page.clock.resume();
+      await pageClock.resume(page);
       const kept = await page.evaluate(async () => {
         const { makeCrystal, readCrystal } = await import('/src/daily/crystal.ts');
         const { json } = await makeCrystal(window.__daily.store);
@@ -104,7 +106,7 @@ export const scenarios = {
     {
       const { ctx, page, errors } = await firstOpen('Settings', (p) => p.locator('.dq-tile').filter({ hasText: 'Settings' }).click());
       if ((await screen(page)) !== 'settings' || !nothing(await opened(page))) problems.push(`Settings: something opened over Settings: ${JSON.stringify(await opened(page))}`);
-      await page.clock.resume();
+      await pageClock.resume(page);
       await page.locator('header .dq-back').click();
       if (!(await welcome(page))) problems.push(`Settings: back on Home the welcome did not come: ${JSON.stringify(await opened(page))}`);
       problems.push(...errors.map((e) => `Settings: ${e}`));
@@ -112,7 +114,7 @@ export const scenarios = {
     }
     {
       const { ctx, page, errors } = await firstOpen('reload', toSafe);
-      await page.clock.resume();
+      await pageClock.resume(page);
       await page.reload();
       await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile'), null, { timeout: 30000 });
       if (!(await welcome(page))) problems.push(`reload: the owed welcome did not come on Home: ${JSON.stringify(await opened(page))}`);
@@ -126,7 +128,7 @@ export const scenarios = {
       if (queued.windows.length !== 1 || !/Daily gift/.test(queued.windows[0])) problems.push(`gift: the gift is not the one window open: ${JSON.stringify(queued)}`);
       if (!(await owed(page))) problems.push('gift: the welcome waiting behind the gift is no longer owed');
       await toSafe(page);
-      await page.clock.resume();
+      await pageClock.resume(page);
       await page.locator('.dq-top .dq-back').click();
       if (!(await welcome(page))) problems.push(`gift: back on Home the welcome did not come: ${JSON.stringify(await opened(page))}`);
       problems.push(...errors.map((e) => `gift: ${e}`));
@@ -154,7 +156,7 @@ export const scenarios = {
     {
       // shown in another open copy while this one is in the Safe Zone: this one doesn't show it again
       const { ctx, page, errors } = await firstOpen('two copies', toSafe);
-      await page.clock.resume();
+      await pageClock.resume(page);
       const other = await ctx.newPage();
       await other.goto(page.url());
       if (!(await welcome(other))) problems.push(`two copies: the other copy did not show the owed welcome: ${JSON.stringify(await opened(other))}`);
@@ -170,7 +172,7 @@ export const scenarios = {
   async 'safe-zone-new-day-waits'(h) {
     const problems = [];
     const { ctx, page, errors } = await open(h, { save: returning() });
-    const tomorrow = () => page.evaluate(() => Date.now() + 86400e3).then((t) => page.clock.setSystemTime(t));
+    const tomorrow = () => page.evaluate(() => Date.now() + 86400e3).then((t) => pageClock.setSystemTime(page, t));
     // the phone comes back to the page, as when it is unlocked
     const shown = () => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
     const before = await counted(page);
@@ -210,11 +212,11 @@ export const scenarios = {
         window.__daily.store.save();
       });
       await page.waitForFunction(() => window.__daily.store.derived().rank === 1, null, { timeout: 10000 });
-      await page.clock.runFor(3000);
+      await pageClock.runFor(page, 3000);
       const inside = await opened(page);
       if (!nothing(inside)) problems.push(`a rank-up from another copy opened in the Safe Zone: ${JSON.stringify(inside)}`);
       await page.locator('.dq-top .dq-back').click();
-      await page.clock.runFor(2000);
+      await pageClock.runFor(page, 2000);
       const home = await opened(page);
       if (!home.windows.length) problems.push(`the rank-up did not show on Home after leaving: ${JSON.stringify(home)}`);
       problems.push(...errors);
@@ -224,13 +226,13 @@ export const scenarios = {
       // the note comes 1.5 s after Home on iPhone Safari: first on Home, to show it is due, then with the Safe Zone open
       const { ctx, page, errors } = await open(h, { save: returning(), device: { userAgent: SAFARI } });
       if (!safe) {
-        await page.clock.runFor(5000);
+        await pageClock.runFor(page, 5000);
         if (!(await opened(page)).note) problems.push('on Home the Home Screen note never came, so the Safe Zone check proves nothing');
         await ctx.close();
         continue;
       }
       await page.locator('.dq-top .dq-safe').click();
-      await page.clock.runFor(5000);
+      await pageClock.runFor(page, 5000);
       const inside = await opened(page);
       if ((await screen(page)) !== 'safe' || !nothing(inside)) problems.push(`the Home Screen note opened in the Safe Zone: ${JSON.stringify(inside)}`);
       if ((await h.ls(page, HINT)) !== null) problems.push('the Home Screen note was put away as read while the Safe Zone was open');

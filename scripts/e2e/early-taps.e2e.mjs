@@ -1,3 +1,5 @@
+import * as pageClock from './clock.mjs';
+
 // A tap on a Lantern window's button while the window still types itself in is the player's answer: it is never
 // dropped for having come before the window finished opening. The new-version notice opens on its own, with no tap in
 // flight to complete its typing, and the page clock stands still from just before it opens until after the tap, so
@@ -8,7 +10,7 @@ export const scenarios = {
   async 'reload-while-opening'({ open, expect, pauseClock }) {
     let left = null;
     const { ctx, page, errors } = await open({}, '?mute', undefined, async (c) => {
-      await c.clock.install();
+      await pageClock.install(c);
       // the scene's code is gone, as after a new version replaced it: the intro offers a reload in its place. The
       // notice waits on this file, so the page clock stops before the notice starts opening, and the opening (timed on
       // page timers) cannot end until the clock moves again
@@ -44,7 +46,7 @@ export const scenarios = {
     await reload.click();
     // the close (330 ms) runs on the page clock too: one step past it fires its timer once, and no 3D frames drawn in
     // software pile up behind the reload while the page unloads
-    await page.clock.fastForward(1000);
+    await pageClock.fastForward(page, 1000);
     const ok = await reloaded;
     expect(left > 0, `the tap came after the notice had opened (${left} ms of the opening left)`);
     expect(ok, `Reload, tapped with ${Math.round(left)} ms of the opening to go, never reloaded the page`);
@@ -76,7 +78,8 @@ export const scenarios = {
     for (const reducedMotion of ['no-preference', 'reduce']) {
       for (const second of ['look', 'safe', 'safe alone']) {
         const where = `${reducedMotion}, ${second === 'safe alone' ? 'Safe Zone while the welcome waits' : `second tap on ${second}`}`;
-        const { ctx, page, errors } = await open({ 'dbt.app.v1': SEEN }, '?mute', undefined, (c) => c.clock.install(), { reducedMotion });
+        const setup = (c) => pageClock.install(c);
+        const { ctx, page, errors } = await open({ 'dbt.app.v1': SEEN }, '?mute', undefined, setup, { reducedMotion });
         await page.locator('.dq-sw').waitFor({ timeout: 20000 });
         await page.waitForFunction(() => Number(getComputedStyle(document.querySelector('.dq-sw .sw-next')).opacity) > 0, null, { timeout: 20000 });
         // the close runs on the page clock, which stands still from before the first tap, so the second always lands
@@ -96,7 +99,7 @@ export const scenarios = {
           closing = await page.evaluate(() => !!document.querySelector('.dq-sw') && !document.querySelector('.dq-scrim.is-on'));
         }
         await page.mouse.click(...to);
-        await page.clock.resume();
+        await pageClock.resume(page);
         await page.waitForFunction(() => !document.querySelector('.dq-sw'), null, { timeout: 10000 });
         const screen = await page.evaluate(() => document.querySelector('.dq').dataset.screen);
         expect(closing, `${where}: the second tap did not come while the welcome closed`);

@@ -1,3 +1,5 @@
+import * as pageClock from './clock.mjs';
+
 // The harness waits for layout to rest, including delayed entrances and animated parents, without waiting on paint, and
 // counts its deadline in the time the page could run.
 
@@ -47,7 +49,7 @@ export const scenarios = {
     try {
       const page = await ctx.newPage();
       await page.setContent('<style>section { transform:translateY(50px); transition:transform 300ms } section.on { transform:translateY(0) }</style><section><button>One</button></section>');
-      await page.clock.install();
+      await pageClock.install(page);
       await h.pauseClock(page);
       const paused = await page.evaluate(() => Date.now());
       await page.locator('section').evaluate((el) => { el.getBoundingClientRect(); el.classList.add('on'); });

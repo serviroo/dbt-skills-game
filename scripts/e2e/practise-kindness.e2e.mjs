@@ -9,6 +9,7 @@
 // kindness-sizes: every screen at 390x844, 320x568, 844x390 and 1280x800, with a long name and long own words: nothing
 // sticks out sideways or clips, the wish shows in full, and the Safe Zone button stays on screen.
 import { credits, returning, toHub } from './skill-check.e2e.mjs';
+import * as pageClock from './clock.mjs';
 
 const ID = 'loving-kindness';
 const NAME = 'Kind Light';
@@ -224,8 +225,7 @@ export const scenarios = {
 
   async 'kindness-timer'(h) {
     const { ctx, page, errors } = await h.open(returning(h), '?mute', PHONE);
-    await page.clock.install();
-    await page.reload();
+    await pageClock.reloadOnFakeClock(page);
     await h.reachHub(page);
     const had = await credits(h, page, ID);
     // The page clock stands still and moves only when told to, so a reading can't drift between a tap and a check.
@@ -236,13 +236,13 @@ export const scenarios = {
     const shows = async () => plain(await num.textContent());
     h.expect((await shows()) === '20', `the first timer shows ${await shows()} before it starts, not 20`);
     await startTimer(page);
-    await page.clock.runFor(2500);
+    await pageClock.runFor(page, 2500);
     h.expect((await shows()) === '18', `2.5 s in, the timer shows ${await shows()}, not 18`);
     const more = page.locator('.dq-step-body .dq-timer button', { hasText: /^\+\d+ s$/ });
     h.expect((await more.count()) === 1 && plain(await more.textContent()) === '+15 s', 'the running timer does not offer "+15 s"');
     await more.click();
     // the countdown redraws on its next tick: 20 s - 3.5 s + 15 s leaves 31.5 s
-    await page.clock.runFor(1000);
+    await pageClock.runFor(page, 1000);
     h.expect((await shows()) === '32', `1 s after "+15 s" the timer shows ${await shows()}, not 32`);
     const next = page.locator('.dq-step-body > .dq-actions > button', { hasText: /^Next$/ });
     h.expect((await next.isVisible()) && (await next.isEnabled()), 'the running timer has no Next to skip it');

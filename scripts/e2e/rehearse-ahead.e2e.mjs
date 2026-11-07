@@ -7,6 +7,7 @@
 // cope-sizes: every screen at 390x844, 320x568, 844x390 and 1280x800 with long answers, nothing clipped.
 import { credits, returning, toHub } from './skill-check.e2e.mjs';
 import { ended, leave, look, openFromList, peopleFirst, plain, sees, SIZES, tap, toggle } from './choose-ask-refusal-strength.e2e.mjs';
+import * as pageClock from './clock.mjs';
 
 const ID = 'cope-ahead';
 const NAME = 'Ready the Path';
@@ -20,8 +21,7 @@ const num = async (page) => plain(await page.locator('.dq-step-body .dq-timer-nu
 export const scenarios = {
   async 'cope-walk'(h) {
     const { ctx, page, errors } = await h.open(returning(h), '?mute', PHONE);
-    await page.clock.install();
-    await page.reload();
+    await pageClock.reloadOnFakeClock(page);
     await h.reachHub(page);
     const had = await credits(h, page, ID);
     await openFromList(h, page, NAME, REAL, MOD);
@@ -42,9 +42,9 @@ export const scenarios = {
     h.expect((await num(page)) === '30', `the first rehearsal shows ${await num(page)}, not 30`);
     await h.pauseClock(page);
     await startTimer(page);
-    await page.clock.runFor(2500);
+    await pageClock.runFor(page, 2500);
     await page.locator('.dq-step-body .dq-timer button', { hasText: /^\+15 s$/ }).click();
-    await page.clock.runFor(1000);
+    await pageClock.runFor(page, 1000);
     h.expect((await num(page)) === '42', `after +15 s the rehearsal shows ${await num(page)}, not 42`);
     await tap(page, 'Next');
     await sees(h, page, 'snag', { text: 'Now add one snag.' });

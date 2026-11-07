@@ -9,6 +9,7 @@
 // any opening) at the part the player opened; a quiet "not this time" end doesn't offer it.
 // skill-answers-rotate: what the player typed or picked stays through turning the phone sideways and back.
 import { credits, returning, toHub, walk } from './skill-check.e2e.mjs';
+import * as pageClock from './clock.mjs';
 
 const PHONE = { width: 390, height: 844 };
 const SIDEWAYS = { width: 844, height: 390 };
@@ -40,8 +41,7 @@ const countdown = (left) => {
 export const scenarios = {
   async 'skill-timers'(h) {
     const { ctx, page, errors } = await h.open(returning(h), '?mute', PHONE);
-    await page.clock.install();
-    await page.reload();
+    await pageClock.reloadOnFakeClock(page);
     await h.reachHub(page);
     const timers = await page.evaluate(async () =>
       (await import('/src/content/dbt.ts')).SKILLS.flatMap((sk) =>
@@ -80,20 +80,20 @@ export const scenarios = {
         } else {
           const n = Number(/\d+/.exec(await more.first().textContent())[0]);
           if (n !== (len <= 30 ? 15 : 30)) bad.push(`${where}: its ${len} s timer offers "+${n} s"; up to 30 s it's +15 s, above that +30 s`);
-          await page.clock.runFor(2500);
+          await pageClock.runFor(page, 2500);
           const ran = await shows();
           if (ran !== countdown(len - 2.5)) bad.push(`${where}: 2.5 s into its ${len} s the timer shows ${ran}, not ${countdown(len - 2.5)}`);
           await more.first().click();
-          await page.clock.runFor(1000);
+          await pageClock.runFor(page, 1000);
           const now = await shows();
           if (now !== countdown(len + n - 3.5)) bad.push(`${where}: "+${n} s" while running shows ${now} a second later, not ${countdown(len + n - 3.5)}`);
           // well past Done, so a tap that only added to the time already used up would show far less than N
-          await page.clock.fastForward((len + n - 3.5 + 5) * 1000);
+          await pageClock.fastForward(page, (len + n - 3.5 + 5) * 1000);
           const done = (await shows()) === 'Done';
           if (!done) bad.push(`${where}: the timer shows ${await shows()}, not Done, 5 s after its ${len + n} s`);
           else {
             await more.first().click();
-            await page.clock.runFor(500);
+            await pageClock.runFor(page, 500);
             const again = await shows();
             if (again !== countdown(n - 0.5)) bad.push(`${where}: "+${n} s" after Done shows ${again} half a second later, not ${countdown(n - 0.5)}`);
             if (t.dim && !(await page.locator('.dq-skill.is-dim').count())) bad.push(`${where}: running again after Done, the screen didn't dim the way it does at the start`);
@@ -101,13 +101,13 @@ export const scenarios = {
           if (!(await next.isVisible())) bad.push(`${where}: Next is gone after "+${n} s"`);
           if (!(await timer.count())) bad.push(`${where}: "+${n} s" left the timer screen`);
         }
-        await page.clock.resume();
+        await pageClock.resume(page);
         await toHub(h, page);
         const now = await credits(h, page, t.skill);
         if (now - before !== 1) bad.push(`${where}: opening it and using the timer credited it ${now - before} times, not once`);
       } catch (e) {
         bad.push(`${where}: the check could not finish: ${String(e?.message ?? e).split('\n')[0]}`);
-        await page.clock.resume();
+        await pageClock.resume(page);
         await page.goto(h.server.url + '/?mute');
         await h.reachHub(page);
       }

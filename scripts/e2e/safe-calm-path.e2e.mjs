@@ -4,6 +4,7 @@
 // Every way into its moment stays flat, without creating a WebGL context; the moment outside still has its scene.
 
 import { gone } from './harness.mjs';
+import * as pageClock from './clock.mjs';
 
 const PHONE = { width: 390, height: 844 };
 const DESK = { width: 1440, height: 900 };
@@ -21,7 +22,7 @@ function returning() {
 /** Home on a returning save. Every quiet() the score gets and every cue asked for is noted, not played. */
 async function boot(h, viewport, { reduced = false, webgl = true } = {}) {
   const ctx = await h.browser.newContext({ viewport, deviceScaleFactor: 2, serviceWorkers: 'block', locale: 'en-US', reducedMotion: reduced ? 'reduce' : 'no-preference' });
-  await ctx.clock.install();
+  await pageClock.install(ctx);
   await ctx.addInitScript((webgl) => {
     window.__safeGL = 0;
     const get = HTMLCanvasElement.prototype.getContext;
@@ -143,7 +144,7 @@ export const scenarios = {
         await flat('reopened after Back');
 
         await page.getByRole('radio', { name: '1 minute', exact: true }).check();
-        await page.clock.fastForward(61000);
+        await pageClock.fastForward(page, 61000);
         await page.locator('.dq-mo-line', { hasText: /That.s your moment/ }).waitFor();
         await flat('timer end');
         await page.locator('.dq-mo-done').click();
@@ -162,7 +163,7 @@ export const scenarios = {
           await flat(`route ${at}`);
         }
         await page.getByRole('button', { name: 'Cool air', exact: true }).click();
-        await page.clock.fastForward(31000);
+        await pageClock.fastForward(page, 31000);
         await gone(page.locator('.dq-timer'), 30000);
         await flat('cold timer end');
 
@@ -222,7 +223,7 @@ export const scenarios = {
 
           await page.getByRole('radio', { name: '1 minute', exact: true }).check();
           await h.pauseClock(page);
-          await page.clock.fastForward(61000);
+          await pageClock.fastForward(page, 61000);
           const ended = await inside(page);
           ok(/^That[’']s your moment\./.test(ended.line), `${tag}: the timed moment did not end (${ended.line})`);
           ok(ended.done, `${tag}: Done is missing or covered after the timer ends`);
@@ -230,7 +231,7 @@ export const scenarios = {
           ok(!ended.quiet.includes(false) && !ended.cues.length && ended.hum === 0, `${tag}: sound returned when the timer ended (quiet ${ended.quiet}, cues ${ended.cues})`);
           ok(ended.bubbles === 0, `${tag}: effects returned when the timer ended`);
           ok(ended.xp === was.xp && ended.events === was.events, `${tag}: the timer credited something (XP ${was.xp} -> ${ended.xp}, events ${was.events} -> ${ended.events})`);
-          await page.clock.resume();
+          await pageClock.resume(page);
           if (size === '390x844' && from === 'Home') {
             await page.locator('.dq-mo-line').evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
             const settled = await inside(page);

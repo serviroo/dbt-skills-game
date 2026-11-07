@@ -228,29 +228,22 @@ const tapElementsNotPoints = {
   },
 };
 
-function isPageClock(context, node, seen = new Set()) {
-  if (isNamed(node, 'clock')) return true;
-  if (node?.type !== 'Identifier' || seen.has(node.name)) return false;
-  seen.add(node.name);
-  const bound = variableOf(context, node)?.defs[0]?.name?.parent;
-  const named = bound?.type === 'Property' && !bound.computed && bound.key.name === 'clock';
-  if (node.name === 'clock' || named) return true;
-  return isPageClock(context, declaredAs(context, node), seen);
-}
-
-const clocksPauseWhereTheyStand = {
+const clockCallsGoThroughClockModule = {
   meta: {
     messages: {
-      pauseAt:
-        'Pause with pauseClock(page) from the harness: a running page clock may pass the time given to pauseAt ' +
-        'before the call lands, and then the pause throws.',
+      clock:
+        'Move the page clock through scripts/e2e/clock.mjs, whose pauseClock(page) pauses where the clock stands: ' +
+        'a time passed to clock.pauseAt may be past by the time the call lands on a running page.',
     },
   },
   create(context) {
+    const isClockKey = (p) => p.type === 'Property' && (p.computed ? p.key.value : p.key.name) === 'clock';
     return {
-      CallExpression(node) {
-        const clock = node.callee.type === 'MemberExpression' ? node.callee.object : null;
-        if (methodName(node) === 'pauseAt' && isPageClock(context, clock)) context.report({ node, messageId: 'pauseAt' });
+      MemberExpression(node) {
+        if (memberName(node) === 'clock') context.report({ node, messageId: 'clock' });
+      },
+      ObjectPattern(node) {
+        for (const p of node.properties.filter(isClockKey)) context.report({ node: p, messageId: 'clock' });
       },
     };
   },
@@ -703,7 +696,7 @@ export default {
     'no-soft-hyphen-characters': noSoftHyphenCharacters,
     'stored-writes-go-through-cleared': storedWritesGoThroughCleared,
     'tap-elements-not-points': tapElementsNotPoints,
-    'clocks-pause-where-they-stand': clocksPauseWhereTheyStand,
+    'clock-calls-go-through-clock-module': clockCallsGoThroughClockModule,
     'handle-lost-gpu-context': handleLostGpuContext,
     'schedule-before-echo-loads': scheduleBeforeEchoLoads,
   },

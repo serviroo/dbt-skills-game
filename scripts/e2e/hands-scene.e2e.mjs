@@ -35,6 +35,7 @@ import {
   until,
 } from './skill-scenes.e2e.mjs';
 import { holdSceneFences } from './scene-fences.mjs';
+import * as pageClock from './clock.mjs';
 
 const SMALL = { width: 320, height: 568 };
 /** the sizes reduced motion, a lost context and a slow GPU are checked at */
@@ -137,7 +138,7 @@ export const scenarios = {
       console.log(`  hands ${tag}: curl ${curls.join(' > ')}; ${said.join('; ')}`);
       if (tag === 'phone') {
         // more time after Done carries on from the open hands: nothing closes again
-        await page.clock.resume();
+        await pageClock.resume(page);
         const done = curls[curls.length - 1];
         const { frames } = await scenes(page);
         await page.locator('.dq-timer').getByRole('button', { name: '+15 s', exact: true }).click();
@@ -288,8 +289,7 @@ export const scenarios = {
         return /webgl/i.test(String(type)) ? null : get.call(this, type, ...rest);
       };
     });
-    await page.clock.install();
-    await page.reload();
+    await pageClock.reloadOnFakeClock(page);
     await h.reachHub(page);
     const before = await handsRuns(h, page);
     await toHands(h, page);
@@ -299,7 +299,7 @@ export const scenarios = {
     const shown = await flat(page);
     h.expect(shown.length === 2 && shown.every(Boolean), `no WebGL: the flat drawing is hidden (${JSON.stringify(shown)})`);
     await h.shot(page, 'hands-no-webgl-phone');
-    await page.clock.fastForward(21000);
+    await pageClock.fastForward(page, 21000);
     await page.locator('.dq-timer-num', { hasText: 'Done' }).waitFor({ timeout: 5000 });
     const tap = (name) => page.locator('.dq-skill').getByRole('button', { name, exact: true }).first().click();
     await tap('Next');

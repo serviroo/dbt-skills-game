@@ -1,5 +1,6 @@
 import { returning, route } from './first-actions.e2e.mjs';
 import { holdStorage } from './story-reading.e2e.mjs';
+import * as pageClock from './clock.mjs';
 
 const SMALL = { width: 320, height: 568 };
 const REST = '[Rest complete. Fatigue cleared.]';
@@ -54,26 +55,26 @@ const chaptersLeft = (page, button, n) =>
 
 export const scenarios = {
   async 'rest-notice-moves-on'(h) {
-    const { ctx, page, errors } = await h.open(returning(h, 3), '?mute', SMALL, (c) => c.clock.install());
+    const { ctx, page, errors } = await h.open(returning(h, 3), '?mute', SMALL, (c) => pageClock.install(c));
     await h.reachHub(page);
     await leaveStealth(h, page, '.dq-top .dq-back', 'hub');
     await tile(page, 'Diary card');
     await route(page, 'diary');
     await page.locator('.dq-today .dq-daynav').getByRole('button', { name: 'Pick a day', exact: true }).click();
     await route(page, 'days');
-    await page.clock.runFor(1000);
+    await pageClock.runFor(page, 1000);
     const onDays = await notice(page);
     await h.shot(page, 'rest-notice-moves-on-days-320x568');
     await tap(page, '.dq-top .dq-back', 'diary');
     await tap(page, '.dq-top .dq-back', 'hub');
-    await page.clock.runFor(8000);
-    await page.clock.resume();
+    await pageClock.runFor(page, 8000);
+    await pageClock.resume(page);
     await leaveStealth(h, page, '.dq-top .dq-back', 'hub', { credit: true });
-    await page.clock.runFor(1000);
+    await pageClock.runFor(page, 1000);
     const credited = await notice(page);
     await tap(page, '.dq-top .dq-safe', 'safe');
     await tap(page, '.dq-top .dq-back', 'hub');
-    await page.clock.runFor(6000);
+    await pageClock.runFor(page, 6000);
     const homeAgain = await notice(page);
     await ctx.close();
     h.expect(onDays === '', `the rest notice from Home came onto Pick a day: ${onDays}`);
@@ -83,26 +84,26 @@ export const scenarios = {
   },
 
   async 'rest-notice-on-landing'(h) {
-    const { ctx, page, errors } = await h.open(returning(h, 3), '?mute', SMALL, (c) => c.clock.install());
+    const { ctx, page, errors } = await h.open(returning(h, 3), '?mute', SMALL, (c) => pageClock.install(c));
     await h.reachHub(page);
     await leaveStealth(h, page, '.dq-top .dq-back', 'hub');
-    await page.clock.runFor(1000);
+    await pageClock.runFor(page, 1000);
     const onHome = await notice(page);
     await h.shot(page, 'rest-notice-on-home-320x568');
-    await page.clock.runFor(8000);
-    await page.clock.resume();
+    await pageClock.runFor(page, 8000);
+    await pageClock.resume(page);
     await leaveStealth(h, page, '.dq-top .dq-back', 'hub', { credit: true });
-    await page.clock.runFor(1000);
+    await pageClock.runFor(page, 1000);
     const credited = await notice(page);
-    await page.clock.runFor(5000);
+    await pageClock.runFor(page, 5000);
     const afterCredit = await notice(page);
-    await page.clock.runFor(8000);
-    await page.clock.resume();
+    await pageClock.runFor(page, 8000);
+    await pageClock.resume(page);
     await leaveStealth(h, page, '.dq-top .dq-safe', 'safe');
-    await page.clock.runFor(1000);
+    await pageClock.runFor(page, 1000);
     const inSafe = await notice(page);
     await tap(page, '.dq-top .dq-back', 'hub');
-    await page.clock.runFor(1000);
+    await pageClock.runFor(page, 1000);
     const afterSafe = await notice(page);
     await ctx.close();
     h.expect(onHome === REST, `staying on Home after Stealth, the rest notice is "${onHome}"`);
@@ -114,7 +115,7 @@ export const scenarios = {
   },
 
   async 'toast-after-a-slow-save'(h) {
-    const { ctx, page, errors } = await h.open(returning(h, 3), '?mute', SMALL, (c) => c.clock.install());
+    const { ctx, page, errors } = await h.open(returning(h, 3), '?mute', SMALL, (c) => pageClock.install(c));
     await h.reachHub(page);
     const id = await threeChapters(page);
     await page.evaluate((r) => window.__daily.go(r), { name: 'write', id });
@@ -141,7 +142,7 @@ export const scenarios = {
   },
 
   async 'story-removed-after-leaving'(h) {
-    const { ctx, page, errors } = await h.open(returning(h, 3), '?mute', SMALL, (c) => c.clock.install());
+    const { ctx, page, errors } = await h.open(returning(h, 3), '?mute', SMALL, (c) => pageClock.install(c));
     await h.reachHub(page);
     const removeStory = async () => {
       const id = await threeChapters(page);

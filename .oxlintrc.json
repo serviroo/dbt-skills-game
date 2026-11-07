@@ -30,12 +30,12 @@
       "files": ["scripts/**"],
       "rules": {
         "lantern/tap-elements-not-points": "error",
-        "lantern/clocks-pause-where-they-stand": "error"
+        "lantern/clock-calls-go-through-clock-module": "error"
       }
     },
     {
-      "files": ["scripts/e2e/harness.mjs"],
-      "rules": { "lantern/clocks-pause-where-they-stand": "off" }
+      "files": ["scripts/e2e/clock.mjs"],
+      "rules": { "lantern/clock-calls-go-through-clock-module": "off" }
     }
   ]
 }

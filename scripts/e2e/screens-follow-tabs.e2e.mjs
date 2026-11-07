@@ -37,6 +37,7 @@
 //   line-history-holds-view   with the view partway down an open line history and nothing focused, a line picked in
 //                             another tab joins the top of the history and the rows in view stay where they were
 import { another, focusOn, go, until } from './safe-zone-tabs.e2e.mjs';
+import * as pageClock from './clock.mjs';
 
 const SIZES = [
   ['390x844', { width: 390, height: 844 }],
@@ -304,7 +305,7 @@ export const scenarios = {
     const END = /That.s your moment/;
     for (const [tag, viewport] of SIZES) {
       const { ctx, page, errors } = await open(h, viewport, async (c) => {
-        await c.clock.install();
+        await pageClock.install(c);
         // the low hum's own tones starting and stopping
         await c.addInitScript(() => {
           window.__hum = { started: 0, stopped: 0 };
@@ -330,14 +331,14 @@ export const scenarios = {
       await how(page, '1 minute').check();
       await page.getByRole('switch', { name: 'Low hum', exact: true }).check();
       await page.getByRole('button', { name: 'Done' }).focus();
-      await page.clock.fastForward(20000);
+      await pageClock.fastForward(page, 20000);
       const hum = await page.evaluate(() => ({ ...window.__hum }));
       await h.shot(page, `moment-before-${tag}`);
       await how(other.page, '3 minutes').check();
       // time stands still here, so these waits are Playwright's own
       const shows = await page.locator('.dq-mo-len input[value="3"]:checked').waitFor({ timeout: 10000 }).then(() => true, () => false);
       if (!shows) problems.push(`${tag}: 3 minutes chosen in another tab does not show on the running moment`);
-      await page.clock.fastForward(45000);
+      await pageClock.fastForward(page, 45000);
       const line = (await page.locator('.dq-mo-line').textContent()) ?? '';
       if (END.test(line)) problems.push(`${tag}: the moment ended at its old minute after 3 minutes was chosen in another tab`);
       const still = await page.evaluate(() => ({ ...window.__hum }));
@@ -345,14 +346,14 @@ export const scenarios = {
       problems.push(...(await focusOn(page.getByRole('button', { name: 'Done' }), `${tag} Done on the running moment`)));
       await h.shot(page, `moment-after-${tag}`);
       // three minutes from the change, not from the start or from the first choice
-      await page.clock.fastForward(133000);
+      await pageClock.fastForward(page, 133000);
       if (END.test((await page.locator('.dq-mo-line').textContent()) ?? '')) problems.push(`${tag}: the moment ended before 3 minutes had passed since the change`);
-      await page.clock.fastForward(3000);
+      await pageClock.fastForward(page, 3000);
       const ends = await page.locator('.dq-mo-line', { hasText: END }).waitFor({ timeout: 5000 }).then(() => true, () => false);
       if (!ends) problems.push(`${tag}: the moment did not end 3 minutes after the change`);
       const fx = await page.evaluate(() => window.__fx);
       if (fx.length) problems.push(`${tag}: the moment played or showed this for another tab's doings: ${fx.join('; ')}`);
-      await page.clock.resume();
+      await pageClock.resume(page);
       problems.push(...[errors, other.errors].flat().map((e) => `${tag}: ${e}`));
       await ctx.close();
     }

@@ -27,6 +27,7 @@
 // Each scenario runs on one fixed time, so today never turns over partway.
 import { addDays, dayOf, returning, route } from './first-actions.e2e.mjs';
 import { audit, PAGE, settle, SKIP } from './layout-fit.e2e.mjs';
+import * as pageClock from './clock.mjs';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTH = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -40,7 +41,7 @@ const monthOf = (day) => `${MONTH[Number(day.slice(5, 7)) - 1]} ${day.slice(0, 4
 /** Words that count days or point at the ones without anything on them. */
 const COUNTING = /miss|skip|streak|gap|in a row|\bago\b|count|empty|nothing|\d+\s*(days|entries)/i;
 
-const at = (now) => (ctx) => ctx.clock.setFixedTime(new Date(now));
+const at = (now) => (ctx) => pageClock.setFixedTime(ctx, new Date(now));
 const skill = (id, day, now, n) => ({ id: `pk-s${n}`, k: 'skill', xp: 20, t: now - 86400e3, day, stat: 'sense', skill: id });
 
 /**
