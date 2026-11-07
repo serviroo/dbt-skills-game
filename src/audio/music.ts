@@ -404,11 +404,11 @@ const FACTORIES: Record<Section, Factory> = {
     const lb = new Pad(bv, 0, 3, { wave: 'brass', detune: 6, cutoff: 320, q: 1.0, level: 0, dest: build, vib: 3, drive: 1.6 });
     const roar = v.gain(1, v.filt('lowshelf', 160, 0.7, v.filt('peaking', 1300, 0.9, v.wet, -2.5), 3));
     let R = roarParts(v, roar);
+    let spare: ReturnType<typeof roarParts> | null = null;
     const grooveOffs = groove.map(([s]) => (s * BEAT) / 4);
     // Timing: with hitAt known (offline renders) everything is scheduled now. Live, the build runs until the
     // director calls hush() (build cuts dead) and plays awaken_hit (the roar starts on that exact moment).
     const hitIn = o.at !== undefined && o.hitAt !== undefined ? o.hitAt - o.at : Infinity;
-    let spare = hitIn === Infinity ? roarParts(v, roar) : null;
     const nominal = hitIn !== Infinity ? Math.max(0.5, hitIn - 0.78) : 4.08;
     v.ramp(dr.gain, 0, 0.03, 0.1, nominal);
     v.ramp(dlp.frequency, 0, 260, 2600, nominal);
@@ -466,6 +466,7 @@ const FACTORIES: Record<Section, Factory> = {
         opened: (until: number) => {
           if (o.at !== undefined && o.hitAt !== undefined) host.hush(o.hitAt - 0.78, o.hitAt);
           roarTick(soon(host.lib.ctx), until);
+          if (hitIn === Infinity && !hitPlayed) spare ??= roarParts(v, roar);
         },
         arm(cue?: Voice) {
           if (hitPlayed) return;
@@ -481,7 +482,7 @@ const FACTORIES: Record<Section, Factory> = {
           cut(dropped ? at : Math.max(at, soon(host.lib.ctx)));
           if (dropped) R.rp.stop(at, 0);
           if (hitPlayed && spare) {
-            spare.rp.stop(at, 0);
+            spare.rp.discard();
             spare = null;
           }
           [hitAt, roarTo] = [dropped ? Infinity : at, dropped ? Infinity : at + BEAT / 4];

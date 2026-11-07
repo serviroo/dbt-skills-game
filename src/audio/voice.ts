@@ -749,6 +749,10 @@ export class Voice {
     return true;
   }
 
+  discard() {
+    this.drop([this]);
+  }
+
   get isHeld() {
     return this.clock.held !== null;
   }
