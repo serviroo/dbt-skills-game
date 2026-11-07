@@ -1,11 +1,11 @@
 import { midi } from './dsp';
 import { soon } from './param';
-import { Voice, kRate, type Lib } from './voice';
+import { Voice, kRate, type Lib, LONG } from './voice';
 
 export type BedName = 'gate_hum' | 'aura_bed' | 'vortex_roar' | 'ambient';
 export const BED_NAMES: BedName[] = ['gate_hum', 'aura_bed', 'vortex_roar', 'ambient'];
 
-export const LONG = 6 * 3600;
+export { LONG } from './voice';
 
 type BedFn = (v: Voice, t: number, lvl: GainNode) => void;
 
@@ -125,23 +125,23 @@ export function buildBed(lib: Lib, name: BedName, dest: AudioNode, level: number
   fade.setTargetAtTime(level, 0, Math.max(0.003, fadeIn / 4));
   def.fn(v, 0, lvl);
   return {
-    open(at: number): BedHandle {
-      v.open(at);
-      return {
-        name,
-        level(x, ramp = 0.5, at = soon(lib.ctx)) {
-          if (v.isStopped) return;
-          lvl.gain.cancelScheduledValues(at);
-          lvl.gain.setTargetAtTime(Math.max(0, x), at, Math.max(0.003, ramp / 4));
-        },
-        stop(ramp = 0.5, at = soon(lib.ctx)) {
-          v.stop(at, ramp);
-        },
-        get stopped() {
-          return v.isStopped;
-        },
-        voice: v,
-      };
+    voice: v,
+    handle: {
+      name,
+      level(x: number, ramp = 0.5, at = soon(lib.ctx)) {
+        if (v.isStopped) return;
+        v.control(at, (time) => {
+          lvl.gain.cancelScheduledValues(time);
+          lvl.gain.setTargetAtTime(Math.max(0, x), time, Math.max(0.003, ramp / 4));
+        }, (built, time) => built.handle?.level?.(x, ramp, time));
+      },
+      stop(ramp = 0.5, at = soon(lib.ctx)) {
+        v.stop(at, ramp);
+      },
+      get stopped() {
+        return v.isStopped;
+      },
+      voice: v,
     },
   };
 }
@@ -223,21 +223,23 @@ export function buildCharge(lib: Lib, dest: AudioNode, seed: number) {
   };
   let stopped = false;
   return {
-    open(at: number): ChargeHandle {
-      v.open(at);
-      return {
-        set(c, at = soon(lib.ctx)) {
-          if (!stopped) apply(c, at, 0.03);
-        },
-        release(at = soon(lib.ctx)) {
-          if (!stopped) apply(0, at, 0.09);
-        },
-        stop(at = soon(lib.ctx), ramp = 0.03) {
-          stopped = true;
-          v.stop(at, ramp);
-        },
-        voice: v,
-      };
+    voice: v,
+    handle: {
+      set(c: number, at = soon(lib.ctx)) {
+        if (!stopped && !v.isStopped) {
+          v.control(at, (time) => apply(c, time, 0.03), (built, time) => built.handle?.set?.(c, time));
+        }
+      },
+      release(at = soon(lib.ctx)) {
+        if (!stopped && !v.isStopped) {
+          v.control(at, (time) => apply(0, time, 0.09), (built, time) => built.handle?.release?.(time));
+        }
+      },
+      stop(at = soon(lib.ctx), ramp = 0.03) {
+        stopped = true;
+        v.stop(at, ramp);
+      },
+      voice: v,
     },
   };
 }

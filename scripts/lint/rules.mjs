@@ -100,6 +100,35 @@ const audioTimesFromSoon = {
   },
 };
 
+const lateOpensBuildAgain = {
+  meta: {
+    messages: {
+      dropped: 'Open held sounds with openBuilt so a missed placement is rebuilt or dropped before its doors open.',
+    },
+  },
+  create(context) {
+    const usesVoice = context.sourceCode.ast.body.some((node) =>
+      node.type === 'ImportDeclaration'
+        ? node.specifiers.some((s) => s.imported?.name === 'Voice')
+        : (node.declaration ?? node).id?.name === 'Voice');
+    return {
+      CallExpression(node) {
+        const callee = node.callee;
+        const method = callee.type === 'MemberExpression'
+          ? callee.computed ? callee.property.value : callee.property.name
+          : null;
+        if (method !== 'open' && method !== 'openInTime') return;
+        if (method === 'open' && !usesVoice) return;
+        let parent = node.parent;
+        while (parent && parent.type !== 'MethodDefinition') parent = parent.parent;
+        const checked = parent?.static && parent.key.name === 'openBuilt' &&
+          parent.parent.parent.id?.name === 'Voice';
+        if (method === 'open' || !checked) context.report({ node, messageId: 'dropped' });
+      },
+    };
+  },
+};
+
 const animationsShareStartTime = {
   meta: {
     messages: {
@@ -535,6 +564,123 @@ const scheduleBeforeEchoLoads = {
   },
 };
 
+const droppedSoundsAreReported = {
+  meta: {
+    messages: { silent: 'Report a dropped sound with console.warn so missed audio is visible outside tests.' },
+  },
+  create(context) {
+    return {
+      MethodDefinition(node) {
+        if (node.key.name !== 'openBuilt' || node.parent.parent.id?.name !== 'Voice') return;
+        const warned = ownCalls(node.value.body).some((call) => logs(call) && methodName(call) === 'warn');
+        if (!warned) context.report({ node, messageId: 'silent' });
+      },
+    };
+  },
+};
+
+const gatesRecheckAfterControls = {
+  meta: {
+    messages: { stale: 'Read the gate opening time after settling queued controls, which can advance the clock.' },
+  },
+  create(context) {
+    return {
+      MethodDefinition(node) {
+        if (node.key.name !== 'openInTime') return;
+        const calls = ownCalls(node.value.body);
+        const settle = calls.find((call) => methodName(call) === 'settle');
+        if (!settle) return;
+        for (const call of calls) {
+          if (methodName(call) !== 'setValueAtTime' || call.arguments[0]?.value !== 1) continue;
+          if (!isNamed(call.callee.object, 'offset')) continue;
+          const time = call.arguments[1];
+          const declared = time?.type === 'Identifier' ? declaratorOf(context, time) : null;
+          if (declared && declared.range[0] < settle.range[1]) context.report({ node: time, messageId: 'stale' });
+        }
+      },
+    };
+  },
+};
+
+const gatesDropStartedAttacks = {
+  meta: {
+    messages: { missed: 'Discard placed attacks at the final gate opening time, after queued controls have settled.' },
+  },
+  create(context) {
+    return {
+      MethodDefinition(node) {
+        if (node.key.name !== 'openInTime') return;
+        const calls = ownCalls(node.value.body);
+        const settle = calls.findLast((call) => methodName(call) === 'settle');
+        for (const call of calls) {
+          if (methodName(call) !== 'setValueAtTime' || call.arguments[0]?.value !== 1) continue;
+          if (!isNamed(call.callee.object, 'offset')) continue;
+          const time = call.arguments[1];
+          const checked = calls.some((discard) => methodName(discard) === 'discardBefore'
+            && discard.range[0] >= (settle?.range[1] ?? 0) && discard.range[1] <= call.range[0]
+            && time?.type === 'Identifier' && discard.arguments[0]?.type === 'Identifier'
+            && variableOf(context, discard.arguments[0]) === variableOf(context, time));
+          if (!checked) context.report({ node: call, messageId: 'missed' });
+        }
+      },
+    };
+  },
+};
+
+const gatesOpenRightAfterClockCheck = {
+  meta: {
+    messages: { stale: 'Finish cleanup before the final clock check, then open the gate immediately.' },
+  },
+  create(context) {
+    return {
+      MethodDefinition(node) {
+        if (node.key.name !== 'openInTime') return;
+        for (const call of ownCalls(node.value.body)) {
+          if (methodName(call) !== 'setValueAtTime' || call.arguments[0]?.value !== 1) continue;
+          if (!isNamed(call.callee.object, 'offset')) continue;
+          const statement = call.parent;
+          const statements = statement.parent?.body;
+          const previous = Array.isArray(statements) ? statements[statements.indexOf(statement) - 1] : null;
+          const checked = previous?.type === 'IfStatement'
+            && (callsSoon(previous.test) || readsAudioClock(context, previous.test)
+              || ownCalls(previous.test).some((check) => calleeName(check) === 'rendered'))
+            && [previous.consequent, ...ownNodes(previous.consequent)].some((part) =>
+              part.type === 'ReturnStatement' || part.type === 'ContinueStatement');
+          if (!checked) context.report({ node: call, messageId: 'stale' });
+        }
+      },
+    };
+  },
+};
+
+const controlsWaitForOpening = {
+  meta: {
+    messages: { early: 'Queue held sound controls with voice.control before changing their parameters.' },
+  },
+  create(context) {
+    const changesParameter = (call, seen = new Set()) => {
+      const method = methodName(call);
+      if (method === 'control') return false;
+      if (AUDIO_TIME_ARG.has(method) && method !== 'stop' && method !== 'start') return true;
+      const fn = functionOf(context, call.callee);
+      if (!fn || seen.has(fn)) return false;
+      seen.add(fn);
+      return ownCalls(fn.body).some((next) => changesParameter(next, seen));
+    };
+    return {
+      Property(node) {
+        if (node.key.name !== 'handle' || node.value.type !== 'ObjectExpression') return;
+        for (const method of node.value.properties) {
+          if (!['level', 'set', 'release'].includes(method.key?.name) || !FUNCTIONS.has(method.value?.type)) continue;
+          if (ownCalls(method.value.body).some((call) => changesParameter(call))) {
+            context.report({ node: method, messageId: 'early' });
+          }
+        }
+      },
+    };
+  },
+};
+
 const PARAM_NAMES = new Set([
   'gain', 'frequency', 'detune', 'offset', 'pan', 'Q', 'delayTime', 'playbackRate',
   'threshold', 'knee', 'ratio', 'attack', 'release',
@@ -668,6 +814,12 @@ export default {
   meta: { name: 'lantern' },
   rules: {
     'audio-times-from-soon': audioTimesFromSoon,
+    'gates-recheck-after-controls': gatesRecheckAfterControls,
+    'gates-drop-started-attacks': gatesDropStartedAttacks,
+    'gates-open-right-after-clock-check': gatesOpenRightAfterClockCheck,
+    'controls-wait-for-opening': controlsWaitForOpening,
+    'late-opens-build-again': lateOpensBuildAgain,
+    'dropped-sounds-are-reported': droppedSoundsAreReported,
     'hold-reads-the-scheduled-curve': holdReadsTheScheduledCurve,
     'held-times-are-clamped': heldTimesAreClamped,
     'animations-share-start-time': animationsShareStartTime,

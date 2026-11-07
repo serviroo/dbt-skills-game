@@ -1,3 +1,8 @@
+import { finalControlDeadline, globalControlOrder } from './cue-final-control-checks.mjs';
+import {
+  pendingStops, pendingHandleStops, explicitHitGate, slowCueStop, pendingLevels, riderStop, existingStops,
+} from './cue-pending-checks.mjs';
+import { continuedSounds, missedAttacks, stoppedParts } from './cue-continuation-checks.mjs';
 // Every cue plays whole and on time, even on a busy page. A cue is built before its start is read, then placed a stated
 // lead past the audio clock (soon() in src/audio/param.ts), so neither a slow main thread building it nor the audio
 // thread rendering ahead can push its start, attack or stop behind what has already been rendered. The companion's short cues play through its real sound path
@@ -8,6 +13,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { installAudioRecorder, audioReady, audioRecorded, audioHeard } from './audio-recorder.mjs';
+import { doorPath, stalledDoorPath, independentStops, repeatedMisses } from './cue-door-checks.mjs';
+import { timedHush, lastSourceStall, expiredEnds, fixedScoreTimes } from './cue-end-checks.mjs';
+import { expiredBuilds } from './cue-deadline-checks.mjs';
+import { droppedRelease, checkedRoar, unownedDoor } from './cue-release-checks.mjs';
 
 /** What each check measured, in the run's artifacts. */
 const note = (h, name, o) => fs.appendFileSync(path.join(h.out, 'cues-on-time.jsonl'), JSON.stringify({ name, ...o }) + '\n');
@@ -23,6 +32,7 @@ const PER = 5;
 const RATES = [4, 10, 20];
 // visuals lead their sound by 1 or 2 frames (DESIGN.md)
 const LEAD = 2 / 60;
+const STALL = 3 * LEAD;
 // its first quanta above a twentieth of its loudest where it rings louder than what still sounds from the cues before it
 const ONSET = 6;
 // and the rest of it through its tail, in parts by how much of its energy has come: to half, 90%, 99% and 99.9%
@@ -63,25 +73,46 @@ async function boot(h, levels) {
     const tap = window.__taps.findIndex((t) => t.from === 'GainNode');
     const clock = window.__taps[tap].context;
     window.__behind = [];
+    window.__scheduled = [];
     window.__watch = false;
+    window.__stall = null;
+    window.__stalls = [];
     const behind = (what, t) => {
-      if (window.__watch && t > 0 && t < clock.currentTime) window.__behind.push([what, clock.currentTime - t]);
+      if (!window.__watch || !(t > 0)) return;
+      window.__scheduled.push(t);
+      if (t < clock.currentTime) window.__behind.push([what, clock.currentTime - t]);
+    };
+    const stall = (what) => {
+      if (!window.__watch || window.__stall?.after !== what) return;
+      if (window.__stall.nth && --window.__stall.nth > 0) return;
+      const from = clock.currentTime;
+      const until = from + window.__stall.by;
+      window.__stall = null;
+      while (clock.currentTime < until);
+      window.__stalls.push({ what, from, to: clock.currentTime });
     };
     const P = AudioParam.prototype;
     for (const [m, i] of [['setValueAtTime', 1], ['linearRampToValueAtTime', 1], ['exponentialRampToValueAtTime', 1], ['setTargetAtTime', 1], ['cancelScheduledValues', 0], ['cancelAndHoldAtTime', 0]]) {
       const f = P[m];
       P[m] = function (...a) {
         behind(m, a[i]);
-        return f.apply(this, a);
+        const r = f.apply(this, a);
+        stall(m);
+        return r;
       };
     }
-    const S = AudioScheduledSourceNode.prototype;
-    for (const m of ['start', 'stop']) {
-      const f = S[m];
-      S[m] = function (...a) {
-        behind(m, a[0]);
-        return f.apply(this, a);
-      };
+    const buffers = AudioBufferSourceNode.prototype;
+    const sources = [[AudioScheduledSourceNode.prototype, ['start', 'stop']], [buffers, ['start']]];
+    for (const [S, ms] of sources) {
+      for (const m of ms) {
+        const f = S[m];
+        S[m] = function (...a) {
+          behind(m, a[0]);
+          const r = f.apply(this, a);
+          if (!(this instanceof ConstantSourceNode)) stall(m);
+          return r;
+        };
+      }
     }
     return tap;
   });
@@ -90,16 +121,33 @@ async function boot(h, levels) {
 
 async function recordOpens() {
   const { Voice } = await import('/src/audio/voice.ts');
-  const open = Voice.prototype.open;
+  const { soon } = await import('/src/audio/param.ts');
+  const { SCORE } = await import('/src/motion/tokens.ts');
   window.__opens = [];
-  Voice.prototype.open = function (at) {
-    if (window.__watch) window.__opens.push(at);
-    return open.call(this, at);
+  window.__extras = [];
+  window.__drops = [];
+  window.__late = SCORE.lateSec;
+  const open = Voice.prototype.openInTime;
+  Voice.prototype.openInTime = function (...args) {
+    const riders = [this, ...this.riders];
+    const earliest = Math.max(args[0] ?? 0, soon(this.ctx)) + args[1];
+    const kept = open.apply(this, args);
+    if (window.__watch && kept) {
+      window.__opens.push(...riders.map((v) => v.openedAt));
+      window.__extras.push(...riders.map(() => args[1]));
+    }
+    if (window.__watch && !kept) {
+      const released = riders.every((v) => v.isStopped && !v.doors.length && v.parts.every((p) => p.isStopped));
+      window.__drops.push({ deadline: args[2], returned: this.ctx.currentTime, earliest, released,
+        nextAt: soon(this.ctx) + 2 * args[1] + SCORE.leadSec });
+    }
+    return kept;
   };
 }
 
 const SLOW_BUILDS = {
   beds: { levels: { music: 0, sfx: 1 }, hold: 0.6, what: 'beds and charge loops' },
+  cues: { levels: { music: 0, sfx: 1 }, hold: 0.6, what: 'cues' },
   score: { levels: { music: 1, sfx: 1 }, hold: 1.15, what: 'score sections and hushes' },
 };
 
@@ -131,7 +179,7 @@ async function startsOnTimeHoweverSlowItsBuild(h, kind) {
     const started = [];
     for (const rate of RATES) {
       await cdp.send('Emulation.setCPUThrottlingRate', { rate });
-      started.push(...(await page.evaluate(async ([kind, hold, rate, LEAD, tap, Q]) => {
+      started.push(...(await page.evaluate(async ([kind, hold, rate, LEAD, STALL, tap, Q]) => {
         const { BED_NAMES } = await import('/src/audio/beds.ts');
         const { SECTIONS } = await import('/src/audio/music.ts');
         const { stoppedBy } = await import('/src/audio/voice.ts');
@@ -154,29 +202,52 @@ async function startsOnTimeHoweverSlowItsBuild(h, kind) {
           }
         };
         const reach = (t) => until(() => clock.currentTime >= t, `the audio clock reaching ${t.toFixed(3)} s`);
-        const silence = () => {
+        const silence = (level = 3e-5) => {
           const from = clock.currentTime;
           const heard = () => rec.end !== undefined && ((rec.end - 31) * Q) / clock.sampleRate > from;
-          return until(() => heard() && recent() < 3e-5, 'silence before the next opening');
+          return until(() => heard() && recent() < level, 'silence before the next opening');
         };
         const out = [];
-        const play = async (name, start, stop) => {
-          await silence();
+        const watched = (after, fn) => {
           const was = window.__behind.length;
+          window.__stall = { after, by: STALL };
+          window.__watch = true;
+          const r = fn();
+          window.__watch = false;
+          const stalled = window.__stall === null;
+          window.__stall = null;
+          return { r, stalled, behind: window.__behind.slice(was) };
+        };
+        const play = async (name, start, stop, span = hold) => {
+          await silence(name === 'awaken_voice' ? 1e-7 : 3e-5);
           const opened = window.__opens.length;
+          const missed = window.__drops.length;
           const ask = clock.currentTime;
           const t0 = performance.now();
-          window.__watch = true;
-          const handle = start();
-          window.__watch = false;
+          const { r: handle, stalled, behind } = watched('start', () => start(ask));
+          const dropped = window.__opens.length === opened
+            ? { from: ask, to: clock.currentTime + span, attempts: window.__drops.slice(missed) } : null;
           const ms = performance.now() - t0;
           const opens = window.__opens.slice(opened);
-          out.push({ name, rate, ask, done: clock.currentTime, ms, behind: window.__behind.slice(was), opens });
-          await reach(Math.max(ask, ...opens) + hold);
+          const extra = window.__extras[opened];
+          const deadline = ask + window.__late;
+          const s = { name, rate, ask, deadline, done: clock.currentTime, ms, behind, stalled,
+            opens, extra, dropped, span };
+          out.push(s);
+          await reach(dropped ? dropped.to : Math.max(ask, ...opens) + span);
           const at = clock.currentTime + LEAD;
-          stop(handle, at);
+          const ended = watched('stop', () => stop(handle, at));
+          Object.assign(s, { stopBehind: ended.behind, stopStalled: ended.stalled });
           await reach(stoppedBy(at, 0.05));
         };
+        if (kind === 'cues') {
+          const { CUE_NAMES, cueLength } = await import('/src/audio/engine.ts');
+          for (const cue of CUE_NAMES) {
+            await play(cue, (at) => engine.play(cue, { at }),
+              (h, at) => h.stop(at, 0.05), cueLength(cue));
+          }
+          return out;
+        }
         if (kind === 'beds') {
           for (const name of BED_NAMES) {
             await play(name, () => engine.bed(name, { level: 0.5 }), (bed, at) => bed.stop(0.05, at));
@@ -190,31 +261,62 @@ async function startsOnTimeHoweverSlowItsBuild(h, kind) {
         }
         await play('hush', () => engine.hush(), (_, at) => engine.unhush(at));
         return out;
-      }, [kind, hold, rate, LEAD, tap, Q])));
+      }, [kind, hold, rate, LEAD, STALL, tap, Q])));
     }
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
     await audioRecorded(page, tap, Math.max(...started.map((s) => Math.max(s.ask, ...s.opens))) + hold);
     const bad = [];
     for (const s of started) {
-      const at = Math.min(...s.opens);
-      const lag = Math.max(...s.opens) - at;
-      const { rms } = await audioHeard(page, tap, at + 0.2, at + hold - 0.05, [0, 0]);
-      const before = (await audioHeard(page, tap, at - 0.1, at - 0.01, [0, 0])).rms;
+      const at = s.opens.length ? Math.min(...s.opens) : s.ask;
+      const lag = s.opens.length ? Math.max(...s.opens) - at : 0;
+      const { rms } = await audioHeard(page, tap, at + Math.min(0.2, s.span / 10), at + s.span * 0.9, [0, 0]);
+      const before = (await audioHeard(page, tap, Math.min(at - 0.1, s.ask), at - 0.01, [0, 0])).rms;
       const worstMs = s.behind.length ? Math.max(...s.behind.map((b) => b[1])) * 1000 : 0;
       const leadMs = +((at - s.done) * 1000).toFixed(1);
       const buildMs = +s.ms.toFixed(1);
-      note(h, kind, { part: s.name, rate: s.rate, buildMs, behind: s.behind.length, worstMs, leadMs, rms, before });
+      const { stalled, stopStalled } = s;
+      const behind = s.behind.length;
+      const part = s.name;
+      note(h, kind, {
+        part, rate: s.rate, buildMs, behind, worstMs, leadMs, rms, before, stalled, stopStalled, dropped: s.dropped,
+      });
       const why = [];
-      if (s.behind.length) {
-        const where = [...new Set(s.behind.map((b) => b[0]))].join(', ');
-        const worst = worstMs.toFixed(1);
-        why.push(`${s.behind.length} of its parts were placed up to ${worst} ms behind the clock (${where})`);
+      if (s.dropped) {
+        if (kind !== 'cues') why.push('the stalled long sound was dropped');
+        const { from, to, attempts } = s.dropped;
+        const lost = await audioHeard(page, tap, from, to, [0, 0]);
+        if (lost.cover !== 1 || lost.rms >= 1e-4) why.push(`a dropped build was heard (RMS ${lost.rms})`);
+        const last = attempts.at(-1);
+        if (!last || !Number.isFinite(last.deadline) || Math.max(last.earliest, last.nextAt) < last.deadline) {
+          why.push(`a build was dropped before its deadline: ${JSON.stringify(attempts)}`);
+        }
+        if (!attempts.every((a) => a.released)) why.push('a dropped build kept its holds');
       }
-      if (!s.opens.length) why.push('it never opened');
-      else if (at < s.ask - 1e-4 || at > s.done + LEAD + 1e-4) why.push(`it opens ${leadMs} ms past the clock`);
+      const placed = [[s.behind, 'of its parts were placed'], [s.stopBehind, 'parts of its stop were placed']];
+      for (const [list, what] of placed) {
+        if (!list.length) continue;
+        const where = [...new Set(list.map((b) => b[0]))].join(', ');
+        const worst = (Math.max(...list.map((b) => b[1])) * 1000).toFixed(1);
+        why.push(`${list.length} ${what} up to ${worst} ms behind the clock (${where})`);
+      }
+      const silent = kind === 'cues' && s.name === 'awaken_voice';
+      const firstAttempt = s.dropped?.attempts[0];
+      const expiredBeforePlacement = firstAttempt && firstAttempt.earliest >= firstAttempt.deadline;
+      if (!stalled && !silent && !expiredBeforePlacement) {
+        why.push('the page never stalled while it was placed, so the stall was not tested');
+      }
+      const untested = 'the page never stalled while it was stopped, so that stall was not tested';
+      if (kind !== 'cues' && !stopStalled) why.push(untested);
+      if (!s.opens.length && !s.dropped) why.push('it never opened');
+      else if (at < s.ask - 1e-4 || at - s.extra > s.done + LEAD + 1e-4) {
+        why.push(`it opens ${leadMs} ms past the clock with ${s.extra * 1000} ms of retry lead`);
+      }
+      if (!s.dropped && kind === 'cues' && at > s.deadline) {
+        why.push(`it opened at ${at}, past the deadline ${s.deadline}`);
+      }
       if (lag > 1e-6) why.push(`its parts opened ${(lag * 1000).toFixed(1)} ms apart`);
       if (!(before < 1e-4)) why.push(`something still sounded as it opened (RMS ${before})`);
-      if (!(rms > 3e-4)) why.push(`it was not heard (RMS ${rms})`);
+      if (!s.dropped && (silent ? rms >= 1e-6 : rms <= 3e-4)) why.push(`its level was wrong (RMS ${rms})`);
       if (why.length) bad.push(`${s.name} at CPU x${s.rate} (built in ${s.ms.toFixed(1)} ms): ${why.join(', ')}`);
     }
     h.expect(!bad.length, `${bad.length} of ${started.length} ${what} did not start on time: ${bad.join('; ')}`);
@@ -226,16 +328,73 @@ async function startsOnTimeHoweverSlowItsBuild(h, kind) {
 }
 
 export const scenarios = {
-  /**
-   * The companion's short cues, played through its sound path again and again while the page stalls for 5 to 45 ms at a
-   * time and the CPU is slowed: every one starts no more than two frames after it was asked for, nothing of it is placed
-   * behind the audio clock, and the output holds all of it, attack first.
-   */
+  'stopping-an-opened-voice-ends-unopened-part-gates': stoppedParts,
+  'cleanup-stalls-never-open-a-score-gate-behind-the-clock': async (h) =>
+    missedAttacks(h, await boot(h, { music: 1, sfx: 1 }), true),
+  'a-late-score-opening-drops-attacks-that-already-started': async (h) =>
+    missedAttacks(h, await boot(h, { music: 1, sfx: 1 })),
+  'the-last-queued-control-rechecks-every-opening-deadline': async (h) =>
+    finalControlDeadline(h, await boot(h, { music: 1, sfx: 1 })),
+  'score-controls-keep-their-order-across-reset-and-new-sections': async (h) =>
+    globalControlOrder(h, await boot(h, { music: 1, sfx: 1 })),
+  'existing-sounds-keep-their-stops-while-an-unrelated-sound-builds': async (h) =>
+    existingStops(h, await boot(h, { music: 1, sfx: 1 })),
+  'a-rebuilt-pair-keeps-the-stop-on-the-sound-that-asked-for-it': async (h) =>
+    riderStop(h, await boot(h, { music: 0, sfx: 1 })),
+  'held-sounds-keep-level-filter-lift-and-release-controls': async (h) =>
+    pendingLevels(h, await boot(h, { music: 1, sfx: 1 })),
+  'a-cue-stopped-during-its-build-never-sounds': async (h) =>
+    slowCueStop(h, await boot(h, { music: 0, sfx: 1 })),
+  'pending-bed-and-charge-handles-keep-their-stops-across-retries': async (h) =>
+    pendingHandleStops(h, await boot(h, { music: 0, sfx: 1 })),
+  'pending-beds-and-charge-honour-separate-stop-events': async (h) =>
+    pendingStops(h, await boot(h, { music: 1, sfx: 1 })),
+  'an-explicit-hit-and-roar-share-the-gate-before-either-build': async (h) =>
+    explicitHitGate(h, await boot(h, { music: 1, sfx: 1 }), 'gate'),
+  'an-explicit-hit-and-roar-drop-together-and-the-next-hit-rebuilds': async (h) =>
+    explicitHitGate(h, await boot(h, { music: 1, sfx: 1 })),
+  'late-long-sounds-continue-and-end-the-outgoing-section': async (h) =>
+    continuedSounds(h, await boot(h, { music: 1, sfx: 1 })),
+  'retries-drop-sounds-that-have-already-ended': async (h) =>
+    expiredEnds(h, await boot(h, { music: 0, sfx: 1 })),
+  'a-retried-score-keeps-the-asked-hit-and-stand-times': async (h) =>
+    fixedScoreTimes(h, await boot(h, { music: 1, sfx: 1 })),
+  'a-retried-hush-keeps-its-asked-end': async (h) =>
+    timedHush(h, await boot(h, { music: 1, sfx: 1 })),
+  'a-stall-after-the-last-source-start-keeps-every-time-ahead': async (h) =>
+    lastSourceStall(h, await boot(h, { music: 0, sfx: 1 })),
+  'a-dropped-hit-releases-the-music-and-beds': async (h) =>
+    droppedRelease(h, await boot(h, { music: 1, sfx: 1 })),
+  'a-dropped-close-releases-the-score-lift': async (h) =>
+    droppedRelease(h, await boot(h, { music: 1, sfx: 1 }), 'close'),
+  'a-dropped-timed-hush-releases-the-hush-it-replaces': async (h) =>
+    droppedRelease(h, await boot(h, { music: 1, sfx: 1 }), 'hush'),
+  'a-stand-time-without-a-hit-time-opens-the-roar-checked': async (h) =>
+    checkedRoar(h, await boot(h, { music: 1, sfx: 1 })),
+  'held-sounds-door-unowned-destinations-too': async (h) =>
+    unownedDoor(h, await boot(h, { music: 0, sfx: 1 })),
+  'the-door-path-changes-no-sample': doorPath,
+  'a-long-stall-after-opening-leaves-the-door-path-unchanged': async (h) =>
+    stalledDoorPath(h, await boot(h, { music: 0, sfx: 1 })),
+  'the-hit-and-roar-stop-independently': independentStops,
+  'two-placement-misses-keep-the-sound-and-open-on-the-next-try': async (h) =>
+    repeatedMisses(h, await boot(h, { music: 0, sfx: 1 }), 2 * LEAD),
+  'placement-stalls-past-the-deadline-drop-the-sound-unheard': async (h) =>
+    expiredBuilds(h, await boot(h, { music: 0, sfx: 1 })),
   async 'every-cue-plays-whole-and-on-time-on-a-busy-page'(h) {
     const { ctx, page, errors, tap } = await boot(h, { music: 0, sfx: 1 });
     try {
       await page.evaluate(async () => {
         const { AudioEngine } = await import('/src/audio/engine.ts');
+        const { Voice } = await import('/src/audio/voice.ts');
+        const { soon } = await import('/src/audio/param.ts');
+        const open = Voice.prototype.openInTime;
+        let attempts = [];
+        Voice.prototype.openInTime = function (...args) {
+          const kept = open.apply(this, args);
+          attempts.push({ kept, extra: args[1], deadline: args[2] });
+          return kept;
+        };
         const play = AudioEngine.prototype.play;
         window.__plays = [];
         AudioEngine.prototype.play = function (cue, o) {
@@ -243,9 +402,14 @@ export const scenarios = {
           const t0 = performance.now();
           const was = window.__behind.length;
           window.__watch = true;
+          attempts = [];
           try {
             const hd = play.call(this, cue, o);
-            window.__plays.push({ cue, ask, done: this.ctx.currentTime, ms: performance.now() - t0, end: hd.end, behind: window.__behind.length - was });
+            const opened = attempts.findLast((a) => a.kept);
+            const latest = opened ? soon(this.ctx) + opened.extra : null;
+            window.__plays.push({ cue, ask, latest, deadline: opened?.deadline,
+              done: this.ctx.currentTime, ms: performance.now() - t0, end: hd.end,
+              behind: window.__behind.length - was });
             return hd;
           } finally {
             window.__watch = false;
@@ -364,7 +528,9 @@ export const scenarios = {
         const why = [];
         if (onset.length < 3) why.push(`only ${onset.length} quanta of it ring over the cues before it, too few to judge`);
         if (blocks.some((b) => !Number.isFinite(b[0]))) why.push('the recording has a hole');
-        if (start < p.ask - 1e-4 || start > p.done + LEAD + 1e-4) why.push(`it starts ${v.leadMs} ms after it was asked for`);
+        if (!Number.isFinite(p.latest) || start < p.ask - 1e-4 || start > p.latest + 1e-4 || start >= p.deadline) {
+          why.push(`it starts ${v.leadMs} ms after it was asked for, outside its checked placement window`);
+        }
         if (p.behind) why.push(`${p.behind} of its parts were placed behind the audio clock`);
         // a late start leaves its first quanta empty; a dropped cue leaves all of them
         if (!(v.first >= 0.5)) why.push(`its first quanta hold ${(v.first * 100).toFixed(0)}% of their energy`);
@@ -413,27 +579,30 @@ export const scenarios = {
       const opened = [];
       for (const rate of RATES) {
         await cdp.send('Emulation.setCPUThrottlingRate', { rate });
-        opened.push(...(await page.evaluate(async ([sections, rate]) => {
+        opened.push(...(await page.evaluate(async ([sections, rate, STALL]) => {
           const clock = window.__taps.find((t) => t.from === 'GainNode').context;
           const out = [];
-          const watched = (name, fn) => {
+          const watched = (name, fn, stall) => {
             const was = window.__behind.length;
             const opened = window.__opens.length;
             const ask = clock.currentTime;
             const t0 = performance.now();
+            window.__stall = stall ? { after: 'start', by: STALL } : null;
             window.__watch = true;
             fn();
             window.__watch = false;
+            const stalled = window.__stall === null;
+            window.__stall = null;
             const opens = window.__opens.slice(opened);
             const ms = performance.now() - t0;
-            return { name, rate, ask, done: clock.currentTime, ms, behind: window.__behind.slice(was), opens };
+            return { name, rate, ask, done: clock.currentTime, ms, behind: window.__behind.slice(was), opens, stalled };
           };
           for (const name of sections) {
             const o = watched(name, () => window.__music.to(name, 0.3));
             out.push({ ...o, start: window.__music.live.at(-1).start });
             if (name === 'awaken') {
               await new Promise((done) => setTimeout(done, 600));
-              out.push({ ...watched('awaken hit', () => window.__daily.sound('awaken_hit')), hit: true });
+              out.push({ ...watched('awaken hit', () => window.__daily.sound('awaken_hit'), true), hit: true });
             }
             await new Promise((done) => setTimeout(done, 1200));
           }
@@ -442,10 +611,11 @@ export const scenarios = {
           await new Promise((done) => setTimeout(done, 600));
           const until = clock.currentTime + 1.3;
           while (clock.currentTime < until);
-          out.push({ ...watched('awaken hit after a stall', () => window.__daily.sound('awaken_hit')), hit: true });
+          const late = watched('awaken hit after a stall', () => window.__daily.sound('awaken_hit'), true);
+          out.push({ ...late, hit: true });
           await new Promise((done) => setTimeout(done, 1200));
           return out;
-        }, [SECTIONS, rate])));
+        }, [SECTIONS, rate, STALL])));
       }
       await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
       await audioRecorded(page, tap, Math.max(...opened.map((o) => o.start ?? o.done)) + 1.2);
@@ -467,6 +637,7 @@ export const scenarios = {
         if (!o.hit && late) why.push(`it starts ${v.leadMs} ms past the clock once it is built`);
         if (!(level > 3e-4)) why.push(`it was not heard (RMS ${level})`);
         const roarLag = o.hit ? Math.max(...o.opens) - Math.min(...o.opens) : 0;
+        if (o.hit && !o.stalled) why.push('the page never stalled while it was placed, so the stall was not tested');
         if (o.hit && !(o.opens.length >= 2 && roarLag < 1e-6)) {
           why.push(`its roar opened ${(roarLag * 1000).toFixed(1)} ms after the hit (${o.opens.length} parts opened)`);
         }
@@ -484,6 +655,8 @@ export const scenarios = {
 
   'every-bed-and-the-charge-loop-start-on-time-however-slow-their-build': (h) =>
     startsOnTimeHoweverSlowItsBuild(h, 'beds'),
+
+  'every-cue-starts-on-time-however-slow-its-build': (h) => startsOnTimeHoweverSlowItsBuild(h, 'cues'),
 
   'every-score-section-and-the-hush-open-on-time-however-slow-their-build': (h) =>
     startsOnTimeHoweverSlowItsBuild(h, 'score'),
@@ -580,13 +753,26 @@ export const scenarios = {
       await page.waitForFunction(() => window.__lab === true, null, { timeout: 30000 });
       const r = await page.evaluate(async () => {
         const { renderOffline } = await import('/src/audio/engine.ts');
-        const { stoppedBy } = await import('/src/audio/voice.ts');
+        const { Voice, stoppedBy } = await import('/src/audio/voice.ts');
+        const { Music } = await import('/src/audio/music.ts');
         const placed = new Map();
+        const musicSources = new WeakSet();
+        let musicLib;
+        const to = Music.prototype.to;
+        const place = Voice.prototype.place;
+        Music.prototype.to = function (...args) {
+          musicLib = this.host.lib;
+          return to.apply(this, args);
+        };
+        Voice.prototype.place = function (source, ...args) {
+          if (this.lib === musicLib) musicSources.add(source.n);
+          return place.call(this, source, ...args);
+        };
         const S = AudioScheduledSourceNode.prototype;
         const start = S.start;
         const stop = S.stop;
         S.start = function (t, ...a) {
-          placed.set(this, { start: t, stop: Infinity });
+          if (musicSources.has(this)) placed.set(this, { start: t, stop: Infinity });
           return start.call(this, t, ...a);
         };
         S.stop = function (t) {
@@ -596,10 +782,16 @@ export const scenarios = {
         };
         const [hit, cut, fadeOut] = [1, 1.5, 0.04];
         try {
-          await renderOffline([{ t: 0.1, cue: 'music', opts: { section: 'awaken', fade: 0.3, hitAt: hit } }, { t: cut, cue: 'music', opts: { section: 'reward', fade: 3.5, fadeOut } }], 2.5, 48000);
+          await renderOffline([
+            { t: 0.1, cue: 'music', opts: { section: 'awaken', fade: 0.3, hitAt: hit } },
+            { t: hit, cue: 'awaken_hit' },
+            { t: cut, cue: 'music', opts: { section: 'reward', fade: 3.5, fadeOut } },
+          ], 2.5, 48000);
         } finally {
           S.start = start;
           S.stop = stop;
+          Music.prototype.to = to;
+          Voice.prototype.place = place;
         }
         const silent = stoppedBy(cut, fadeOut);
         // what AWAKEN started once its stop was asked for: the roar at the hit and the notes after it, before the cut
@@ -624,17 +816,17 @@ export const scenarios = {
       const opens = await page.evaluate(async ([at, hit]) => {
         const { renderOffline } = await import('/src/audio/engine.ts');
         const { Voice } = await import('/src/audio/voice.ts');
-        const open = Voice.prototype.open;
+        const open = Voice.prototype.openInTime;
         const opens = [];
-        Voice.prototype.open = function (t) {
-          opens.push(t);
-          return open.call(this, t);
+        Voice.prototype.openInTime = function (...args) {
+          opens.push(args[0]);
+          return open.apply(this, args);
         };
         try {
           const awaken = { t: at, cue: 'music', opts: { section: 'awaken', fade: 0.3, hitAt: hit } };
-          await renderOffline([awaken], hit + 0.05, 48000);
+          await renderOffline([awaken, { t: hit, cue: 'awaken_hit' }], hit + 0.05, 48000);
         } finally {
-          Voice.prototype.open = open;
+          Voice.prototype.openInTime = open;
         }
         return opens;
       }, [at, hit]);
