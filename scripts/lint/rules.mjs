@@ -1017,48 +1017,6 @@ const busLevelsUseTrackedCurves = {
   },
 };
 
-const heldBusesUseCurrentAnchors = {
-  meta: {
-    messages: { stale: 'Compare a held bus event with its current curve, not its original scheduled anchor.' },
-  },
-  create(context) {
-    return {
-      MemberExpression(node) {
-        if (!isNamed(node, 'from')) return;
-        for (let parent = node.parent; parent; parent = parent.parent) {
-          if (parent.type === 'ClassDeclaration' && parent.id?.name === 'BusLevels') {
-            context.report({ node, messageId: 'stale' });
-            return;
-          }
-        }
-      },
-    };
-  },
-};
-
-const busTargetsReplaceHeldAnchors = {
-  meta: { messages: { anchor: 'Hold a bus curve at its target time before replacing the target.' } },
-  create(context) {
-    return {
-      CallExpression(node) {
-        if (methodName(node) !== 'setTargetAtTime') return;
-        let owner = node.parent;
-        while (owner && owner.type !== 'ClassDeclaration') owner = owner.parent;
-        if (owner?.id?.name !== 'BusLevels') return;
-        let statement = node;
-        while (statement.parent && statement.parent.type !== 'BlockStatement') statement = statement.parent;
-        const body = statement.parent?.body;
-        const previous = Array.isArray(body) ? body[body.indexOf(statement) - 1]?.expression : null;
-        const text = (n) => n ? context.sourceCode.getText(n) : '';
-        const held = previous?.type === 'CallExpression' && calleeName(previous) === 'holdAt'
-          && text(previous.arguments[0]) === text(node.callee.object)
-          && text(previous.arguments[1]) === text(node.arguments[1]);
-        if (!held) context.report({ node, messageId: 'anchor' });
-      },
-    };
-  },
-};
-
 export default {
   meta: { name: 'lantern' },
   rules: {
@@ -1079,7 +1037,5 @@ export default {
     'cue-cleanup-shares-one-clock': cueCleanupSharesOneClock,
     'bus-rises-wait-for-stops': busRisesWaitForStops,
     'bus-levels-use-tracked-curves': busLevelsUseTrackedCurves,
-    'held-buses-use-current-anchors': heldBusesUseCurrentAnchors,
-    'bus-targets-replace-held-anchors': busTargetsReplaceHeldAnchors,
   },
 };

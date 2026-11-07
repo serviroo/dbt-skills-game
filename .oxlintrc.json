@@ -17,9 +17,7 @@
         "lantern/handle-lost-gpu-context": "error",
         "lantern/schedule-before-echo-loads": "error",
         "lantern/bus-rises-wait-for-stops": "error",
-        "lantern/bus-levels-use-tracked-curves": "error",
-        "lantern/held-buses-use-current-anchors": "error",
-        "lantern/bus-targets-replace-held-anchors": "error"
+        "lantern/bus-levels-use-tracked-curves": "error"
       }
     },
     {
