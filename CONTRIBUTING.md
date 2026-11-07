@@ -125,9 +125,11 @@ prints it as held out and lists it in `report.json`, and only `--scenario=<name>
   Use this for an observation window, and a drawn-frame count for a scene's progress. Intentional endless motion keeps
   playing; measure its layout box or a still parent when testing layout. Keep separate performance deadlines such as
   900 ms.
-- `pauseClock(page)`: stop the page clock where it is, after `page.clock.install()`, so time moves only with
-  `runFor` or `fastForward`. Use it instead of `page.clock.pauseAt` with a time read from the page: a running clock
-  on a slow page can pass that time before the call lands, and the pause then fails.
+- `scripts/e2e/clock.mjs` is the only way to move the page clock; a lint rule flags `.clock` anywhere else. `install`,
+  `runFor`, `fastForward`, `resume`, `setFixedTime` and `setSystemTime` take the page or context first, and
+  `reloadOnFakeClock(page)` installs the clock and reloads. `pauseClock(page)` stops the clock where it is, so time
+  moves only with `runFor` or `fastForward`. There is no `pauseAt`: a running clock on a slow page can pass the time
+  it is given before the call lands, and the pause then fails.
 - `until(page, check, arg?, { timeout = 10000, polling = 100 } = {})`: wait for a check in the page that awaits
   something, such as a database read. `page.waitForFunction` counts the promise an async check returns as true, so
   it returns at once.

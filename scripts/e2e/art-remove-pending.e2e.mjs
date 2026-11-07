@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { holdToast } from './art-rename-favourite.e2e.mjs';
 import { pause } from './device-motion.e2e.mjs';
+import * as pageClock from './clock.mjs';
 
 const line = (x, y, i = 1) => ({ i, w: 25, p: [x, y, x + 300, y + 80, x + 520, y + 20] });
 const records = (page) => page.evaluate(async () => (await (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).exportAll()).records);
@@ -212,7 +213,7 @@ export const scenarios = {
     await steady(b);
     await h.shot(b, 'other-tab-hides-320');
     await a.locator('.dq-toast').getByRole('button', { name: 'Undo', exact: true }).click();
-    await a.clock.resume();
+    await pageClock.resume(a);
     await h.poll(b, () => order(b), (o) => o.includes('pg-b'), 'Undo did not bring the page back in the other tab', { timeout: 12000 });
     h.expect(!(await goneMarks(a)), 'Undo left the removal stored');
     h.expect(!errors.length, errors.join('\n'));

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { asideView, content, progress, returning, route } from './first-actions.e2e.mjs';
+import * as pageClock from './clock.mjs';
 
 const DAY = 86400e3;
 const vis = (vi) => (c) => c.rotation.findIndex((q, i) => i >= vi && !q.special);
@@ -175,7 +176,7 @@ export const scenarios = {
       const today = await a.evaluate(() => window.__daily.store.today());
       const flags = async (page) => (await h.ls(page, h.SAVE).then(JSON.parse)).flags;
 
-      await ctx.clock.setFixedTime(new Date(T + DAY));
+      await pageClock.setFixedTime(ctx, new Date(T + DAY));
       await a.reload();
       await h.reachHub(a);
       const ahead = await a.evaluate(() => window.__daily.store.today());
@@ -186,7 +187,7 @@ export const scenarios = {
       await openIn(a);
       const late = await flags(a);
 
-      await ctx.clock.setFixedTime(new Date(T));
+      await pageClock.setFixedTime(ctx, new Date(T));
       await a.reload();
       await h.reachHub(a);
       let v = await asideView(a);
@@ -219,7 +220,7 @@ export const scenarios = {
       h.expect(x.flags?.questAsideDay === today && x.flags?.questAsideAt > T, `the Save Crystal holds ${JSON.stringify({ day: x.flags?.questAsideDay, at: x.flags?.questAsideAt })}`);
       const fresh = await h.open({ 'dbt.app.v1': h.SEEN });
       try {
-        await fresh.ctx.clock.setFixedTime(new Date(T));
+        await pageClock.setFixedTime(fresh.ctx, new Date(T));
         await fresh.page.reload();
         await h.openSettings(fresh.page);
         await fresh.page.locator('input[type=file]').setInputFiles(file);

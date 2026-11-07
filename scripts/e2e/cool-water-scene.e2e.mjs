@@ -11,6 +11,7 @@
 import sharp from 'sharp';
 import { screenshot } from './harness.mjs';
 import { after, DESK, drawn, flat, inStep, keepsTime, live, looks, losesContext, moonOf, openStopped, pair, PHONE, sceneShot, scenes, seed, showsStopped, SIDE, slowGpu, toSkill, until } from './skill-scenes.e2e.mjs';
+import * as pageClock from './clock.mjs';
 
 const SMALL = { width: 320, height: 568 };
 /** the sizes reduced motion, a lost context and a slow GPU are checked at */
@@ -102,8 +103,7 @@ export const scenarios = {
   async 'cool-water-scene'(h) {
     for (const [tag, vp] of [...SIZES, ['desk', DESK]]) {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
-      await page.clock.install();
-      await page.reload();
+      await pageClock.reloadOnFakeClock(page);
       await toCool(h, page);
       await live(h, page, `cool ${tag}`);
       await moonShows(h, page, `cool ${tag}`);
@@ -112,7 +112,7 @@ export const scenarios = {
       h.expect(before.whole && before.clear && before.apart, `cool ${tag}: the caution is not whole on screen and clear of the scene: ${JSON.stringify(before)}`);
       await h.shot(page, `cool-${tag}`);
 
-      await h.pauseClock(page);
+      await pageClock.pauseClock(page);
       await pick(page, 'Cool air');
       await showsStopped(h, page, `cool ${tag}`);
       await looks(h, page, tag, 'cold', vp, undefined, { stopped: true });
@@ -254,8 +254,7 @@ export const scenarios = {
           return /webgl/i.test(String(type)) ? null : get.call(this, type, ...rest);
         };
       });
-      await page.clock.install();
-      await page.reload();
+      await pageClock.reloadOnFakeClock(page);
       await h.reachHub(page);
       // TIPP counts from its first screen, so its runs are counted before it starts
       const runs = async () => JSON.parse((await h.ls(page, h.SAVE)) ?? '{"events":[]}').events.filter((e) => e.k === 'skill' && e.skill === 'tipp').length;
@@ -272,7 +271,7 @@ export const scenarios = {
       await h.sleep(700);
       h.expect(t0 !== (await ripple.getAttribute('transform')), 'no WebGL: the flat bowl\'s ripples do not drift');
       await h.shot(page, 'cool-no-webgl-phone');
-      await page.clock.fastForward(31000);
+      await pageClock.fastForward(page, 31000);
       await page.locator('.dq-timer-num', { hasText: 'Done' }).waitFor({ timeout: 5000 });
       await page.locator('.dq-skill').getByRole('button', { name: 'Next', exact: true }).click();
       await page.locator('.dq-skill').getByRole('button', { name: 'Lower', exact: true }).click();

@@ -9,6 +9,7 @@
 // placed, at phone, sideways and desktop sizes.
 import sharp from 'sharp';
 import { screenshot } from './harness.mjs';
+import * as pageClock from './clock.mjs';
 
 const PHONE = { width: 390, height: 844 };
 const SIDE = { width: 844, height: 390 };
@@ -34,7 +35,8 @@ function save(now) {
 
 /** Opens the camp with the page's clock at `time`, the clock running on from there. */
 async function campAt(h, time, viewport, device = STILL) {
-  const { ctx, page, errors } = await h.open({ [h.SAVE]: save(time), 'dbt.app.v1': h.SEEN }, '?mute', viewport, (c) => c.clock.install({ time }), device);
+  const seed = { [h.SAVE]: save(time), 'dbt.app.v1': h.SEEN };
+  const { ctx, page, errors } = await h.open(seed, '?mute', viewport, (c) => pageClock.install(c, { time }), device);
   await h.reachHub(page);
   await h.sleep(1500);
   await h.reachHub(page);
@@ -200,7 +202,7 @@ export const scenarios = {
       for (const [hh, mm] of [[18, 45], [20, 0], [22, 0], [26, 30], [29, 0], [30, 45]]) hours.push([`${hh % 24}:${String(mm).padStart(2, '0')}`, at(2026, 3, 3, hh, mm)]);
       for (const [name, time] of hours) {
         if (time !== first) {
-          await page.clock.setSystemTime(time);
+          await pageClock.setSystemTime(page, time);
           await reopen(h, page);
         }
         const sky = await skyOf(page);
@@ -241,7 +243,7 @@ export const scenarios = {
       throw new Error(`the stars of the open camp never turned (${JSON.stringify(await skyOf(page))})`);
     });
     h.expect(Math.abs(a.p - 3 / 15) < 0.01, `the camp opened at 20:00 shows the night at ${a.p}`);
-    await page.clock.setSystemTime(at(2026, 3, 3, 22, 0));
+    await pageClock.setSystemTime(page, at(2026, 3, 3, 22, 0));
     await page.waitForFunction((p) => window.__camp.sky && window.__camp.sky.p > p + 0.1, a.p, { timeout: 10000 }).catch(async (e) => {
       if (e.name !== 'TimeoutError') throw e;
       throw new Error(`two hours on, the open camp still shows ${JSON.stringify(await skyOf(page))}`);
@@ -261,7 +263,7 @@ export const scenarios = {
     const first = Date.UTC(2026, 2, 29, 0, 58);
     const { ctx, page, errors } = await campAt(h, first, PHONE, { timezoneId: 'Europe/London' });
     const a = await skyOf(page);
-    await page.clock.setSystemTime(Date.UTC(2026, 2, 29, 1, 2));
+    await pageClock.setSystemTime(page, Date.UTC(2026, 2, 29, 1, 2));
     await page.waitForFunction((p) => window.__camp.sky && window.__camp.sky.p > p, a.p, { timeout: 10000 }).catch(async (e) => {
       if (e.name !== 'TimeoutError') throw e;
       throw new Error(`after the clocks changed, the open camp still shows ${JSON.stringify(await skyOf(page))}`);
@@ -285,7 +287,7 @@ export const scenarios = {
       const read = {};
       for (const [mood, time] of [['dusk', first], ['night', at(2026, 3, 25, 22, 30)], ['dawn', at(2026, 3, 26, 6, 45)]]) {
         if (time !== first) {
-          await page.clock.setSystemTime(time);
+          await pageClock.setSystemTime(page, time);
           await reopen(h, page);
         }
         const sky = await skyOf(page);
@@ -295,7 +297,7 @@ export const scenarios = {
         await h.shot(page, `glow-${tag}-${mood}`);
       }
       // a quarter hour into dusk its glow is half up: the hour changes the sky gently, not at once
-      await page.clock.setSystemTime(at(2026, 3, 26, 17, 15));
+      await pageClock.setSystemTime(page, at(2026, 3, 26, 17, 15));
       await reopen(h, page);
       const early = await skyOf(page);
       h.expect(early.mood === 'dusk' && early.glow > 0.4 && early.glow < 0.6, `${tag}: at 17:15 the dusk glow is at ${early.glow}`);

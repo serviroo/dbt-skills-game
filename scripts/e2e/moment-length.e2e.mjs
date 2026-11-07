@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { settled } from './harness.mjs';
 import { crystal, restore } from './newer-save-safety.e2e.mjs';
+import * as pageClock from './clock.mjs';
 
 const KEPT_LENGTH = 'dbt.lantern.v1.moment-length';
 const END = /That.s your moment/;
@@ -41,7 +42,7 @@ const RETURNING = JSON.stringify({ v: 1, created: 946684800000, events: [{ id: '
 
 async function openMoment(h, seed = {}, viewport, query = '?mute') {
   const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN, [h.SAVE]: RETURNING, ...seed }, query, viewport, async (c) => {
-    await c.clock.install();
+    await pageClock.install(c);
     await c.addInitScript(listenForHum);
   });
   const dialogs = [];
@@ -98,19 +99,19 @@ export const scenarios = {
   async 'one-minute-ends'(h) {
     const { ctx, page, errors, dialogs } = await openMoment(h);
     // time stands still between steps, so 59 s means 59 s after the choice
-    await h.pauseClock(page);
+    await pageClock.pauseClock(page);
     await radio(page, '1 minute').check();
     h.expect((await h.ls(page, KEPT_LENGTH)) === '1', 'the 1 minute choice was not kept on this device');
-    await page.clock.fastForward(5000);
+    await pageClock.fastForward(page, 5000);
     const foot = await page.locator('.dq-mo-foot').innerText();
     await noCountdown(h, page, '5 s in');
-    await page.clock.fastForward(54000);
+    await pageClock.fastForward(page, 54000);
     await noCountdown(h, page, '59 s in');
     h.expect((await page.locator('.dq-mo-foot').innerText()) === foot, 'the moment changed its controls while it ran (a count?)');
     h.expect(!(await ended(page)), 'the 1 minute moment ended before its time (59 s)');
-    await page.clock.fastForward(2000);
+    await pageClock.fastForward(page, 2000);
     await page.locator('.dq-mo-line', { hasText: END }).waitFor({ timeout: 5000 });
-    await page.clock.runFor(3000);
+    await pageClock.runFor(page, 3000);
     await h.sleep(1600);
     h.expect(await page.getByRole('button', { name: 'Done' }).isVisible(), 'no way back after the moment ended');
     h.expect(!(await group(page).isVisible()), 'the How long choice is still up after the moment ended');
@@ -118,9 +119,9 @@ export const scenarios = {
     await noCountdown(h, page, 'ended');
     await h.shot(page, '03-one-minute-ended');
     // it stays ended: no more lines come
-    await page.clock.fastForward(30000);
+    await pageClock.fastForward(page, 30000);
     h.expect(await ended(page), 'the lines started again after the end');
-    await page.clock.resume();
+    await pageClock.resume(page);
     await page.getByRole('button', { name: 'Done' }).click();
     await page.locator('.dq-tile').first().waitFor({ timeout: 10000 });
     h.expect(!dialogs.length, 'leaving asked: ' + dialogs.join(' | '));
@@ -135,16 +136,16 @@ export const scenarios = {
     await page.reload();
     await h.reachHub(page);
     // the kept 3 minutes start as the moment opens, so time stands still from before it opens
-    await h.pauseClock(page);
+    await pageClock.pauseClock(page);
     await page.getByRole('button', { name: 'Give me a moment', exact: true }).click();
     await page.locator('.dq-moment').waitFor({ timeout: 15000 });
     h.expect(await radio(page, '3 minutes').isChecked(), 'the 3 minutes choice did not survive a reload');
-    await page.clock.fastForward(65000);
+    await pageClock.fastForward(page, 65000);
     h.expect(!(await ended(page)), 'the 3 minute moment ended at 1 minute');
-    await page.clock.fastForward(114000);
+    await pageClock.fastForward(page, 114000);
     await noCountdown(h, page, '179 s in');
     h.expect(!(await ended(page)), 'the 3 minute moment ended before its time (179 s)');
-    await page.clock.fastForward(2000);
+    await pageClock.fastForward(page, 2000);
     await page.locator('.dq-mo-line', { hasText: END }).waitFor({ timeout: 5000 });
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
@@ -155,7 +156,7 @@ export const scenarios = {
     const { ctx, page, errors } = await openMoment(h);
     const seen = new Set();
     for (let m = 0; m < 20; m++) {
-      await page.clock.fastForward(60000);
+      await pageClock.fastForward(page, 60000);
       h.expect(!(await ended(page)), `until I'm ready ended on its own after ${m + 1} minutes`);
       seen.add(await line(page));
     }
@@ -172,14 +173,14 @@ export const scenarios = {
     h.expect((await restToday(h, page)) === 1, 'opening the moment did not credit rest once');
     h.expect(await safeOneTap(page), 'the Safe Zone button is not one tap away in the moment');
     await radio(page, '1 minute').check();
-    await page.clock.fastForward(10000);
+    await pageClock.fastForward(page, 10000);
     await page.getByRole('button', { name: 'Done' }).click();
     await page.locator('.dq-tile').first().waitFor({ timeout: 10000 });
     h.expect(!dialogs.length && !(await page.getByText(/are you sure/i).count()), 'leaving early asked first');
     await page.getByRole('button', { name: 'Give me a moment', exact: true }).click();
     await page.locator('.dq-moment').waitFor({ timeout: 15000 });
     await radio(page, /Until I.m ready/).check();
-    await page.clock.fastForward(70000);
+    await pageClock.fastForward(page, 70000);
     h.expect((await restToday(h, page)) === 1, 'rest was credited more than once today: ' + (await restToday(h, page)));
     await page.locator('.dq-top').getByRole('button', { name: /Safe Zone/ }).click();
     await page.getByRole('button', { name: /Talk to someone now/ }).first().waitFor({ timeout: 10000 });
@@ -193,12 +194,12 @@ export const scenarios = {
     const { ctx, page, errors } = await openMoment(h);
     await radio(page, '1 minute').check();
     await page.getByRole('switch', { name: 'Low hum', exact: true }).check();
-    await page.clock.runFor(500);
+    await pageClock.runFor(page, 500);
     const on = await page.evaluate(() => ({ ...window.__hum }));
     h.expect(on.started >= 4 && on.stopped === 0, 'the hum did not start: ' + JSON.stringify(on));
-    await page.clock.fastForward(61000);
+    await pageClock.fastForward(page, 61000);
     await page.locator('.dq-mo-line', { hasText: END }).waitFor({ timeout: 5000 });
-    await page.clock.runFor(2000);
+    await pageClock.runFor(page, 2000);
     await humClosed(page);
     const off = await page.evaluate(() => ({ ...window.__hum }));
     h.expect(off.stopped >= on.started && off.closed >= 1, 'the hum kept playing after the moment ended: ' + JSON.stringify(off));
@@ -212,15 +213,15 @@ export const scenarios = {
     const { ctx, page, errors } = await openMoment(h);
     await radio(page, '1 minute').check();
     await page.getByRole('switch', { name: 'Low hum', exact: true }).check();
-    await page.clock.runFor(500);
+    await pageClock.runFor(page, 500);
     const on = await page.evaluate(() => {
       window.requestAnimationFrame = () => 0;
       return { ...window.__hum };
     });
     h.expect(on.started >= 4 && on.stopped === 0, 'the hum did not start: ' + JSON.stringify(on));
-    await page.clock.runFor(1000);
-    await page.clock.fastForward(61000);
-    await page.clock.runFor(2000);
+    await pageClock.runFor(page, 1000);
+    await pageClock.fastForward(page, 61000);
+    await pageClock.runFor(page, 2000);
     await humClosed(page);
     const off = await page.evaluate(() => ({ ...window.__hum, line: document.querySelector('.dq-mo-line')?.textContent }));
     h.expect(off.stopped >= on.started && off.closed >= 1, 'with no frames the hum kept playing past its time: ' + JSON.stringify(off));
@@ -232,20 +233,20 @@ export const scenarios = {
   /** once a timed moment ends, the fading Low hum and How long can't be tapped, and Done stays where it was */
   async 'ended-controls-out-of-reach'(h) {
     const { ctx, page, errors } = await openMoment(h);
-    await h.pauseClock(page);
+    await pageClock.pauseClock(page);
     await radio(page, '1 minute').check();
     await settled(page, '.dq-mo-foot');
     const doneAt = await page.locator('.dq-mo-done').boundingBox();
     const sw = await page.locator('.dq-mo-hum .dq-switch').boundingBox();
     const three = await page.locator('.dq-mo-len-o').nth(1).boundingBox();
-    await page.clock.fastForward(61000);
+    await pageClock.fastForward(page, 61000);
     await page.locator('.dq-mo-line', { hasText: END }).waitFor({ timeout: 5000 });
     // the fade has only begun: tap where the switch and 3 minutes still show, and try the switch from script too
     const reach = await page.evaluate(() => ({ len: document.querySelector('.dq-mo-len').inert, hum: document.querySelector('.dq-mo-hum').inert }));
     await page.mouse.click(sw.x + sw.width / 2, sw.y + sw.height / 2);
     await page.mouse.click(three.x + three.width / 2, three.y + three.height / 2);
     await page.evaluate(() => document.querySelector('.dq-mo-hum input')?.click());
-    await page.clock.runFor(1500);
+    await pageClock.runFor(page, 1500);
     await h.sleep(1200);
     const hum = await page.evaluate(() => ({ ...window.__hum }));
     h.expect(reach.len && reach.hum, 'the ended controls can still be reached: ' + JSON.stringify(reach));
@@ -302,12 +303,12 @@ export const scenarios = {
   /** choosing a length while a line promises no timing takes that line down at once, not at the next line */
   async 'timed-drops-open-line'(h) {
     const { ctx, page, errors } = await openMoment(h);
-    await h.pauseClock(page);
-    await page.clock.fastForward(37000);
-    await page.clock.runFor(100);
+    await pageClock.pauseClock(page);
+    await pageClock.fastForward(page, 37000);
+    await pageClock.runFor(page, 100);
     h.expect(/Nothing here is timed/.test(await line(page)), 'the open-ended line did not show 37 s in: ' + (await line(page)));
     await radio(page, '1 minute').check();
-    await page.clock.runFor(100);
+    await pageClock.runFor(page, 100);
     h.expect(!/Nothing here is timed|Stay as long/.test(await line(page)), 'a timed moment still says nothing is timed: ' + (await line(page)));
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
@@ -316,9 +317,9 @@ export const scenarios = {
   /** with reduced motion a timed moment's end goes to its finished state with only a short soft fade, the ring too */
   async 'reduced-motion-end'(h) {
     const { ctx, page, errors } = await openMoment(h, {}, undefined, '?mute&reduced');
-    await h.pauseClock(page);
+    await pageClock.pauseClock(page);
     await radio(page, '1 minute').check();
-    await page.clock.fastForward(61000);
+    await pageClock.fastForward(page, 61000);
     await page.locator('.dq-mo-line', { hasText: END }).waitFor({ timeout: 5000 });
     const long = await page.evaluate(() =>
       [...document.querySelectorAll('.dq-moment, .dq-moment *')].flatMap((e) => e.getAnimations().map((a) => [e.className.baseVal ?? e.className, a.effect.getComputedTiming().duration])).filter(([, ms]) => ms > 200),
@@ -359,7 +360,7 @@ export const scenarios = {
     for (const [w, ht] of [[390, 844], [320, 568], [844, 390], [1280, 800]]) {
       const where = `${w}x${ht}`;
       const { ctx, page, errors } = await openMoment(h, {}, { width: w, height: ht });
-      await page.clock.fastForward(9000);
+      await pageClock.fastForward(page, 9000);
       await settled(page, '.dq-mo-foot');
       await h.shot(page, `sizes-${where}-running`);
       const fit = await page.evaluate(() => {
@@ -376,9 +377,9 @@ export const scenarios = {
       if (fit.page > fit.vw) problems.push(`${where}: the page scrolls sideways`);
       if (await radio(page, '1 minute').count()) {
         await radio(page, '1 minute').check();
-        await page.clock.fastForward(61000);
+        await pageClock.fastForward(page, 61000);
         await page.locator('.dq-mo-line', { hasText: END }).waitFor({ timeout: 5000 });
-        await page.clock.runFor(3000);
+        await pageClock.runFor(page, 3000);
         await settled(page, '.dq-mo-done');
         await h.shot(page, `sizes-${where}-ended`);
         if (!(await page.getByRole('button', { name: 'Done' }).isVisible())) problems.push(`${where}: Done is not visible after the end`);

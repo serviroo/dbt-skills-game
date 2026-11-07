@@ -1,4 +1,5 @@
 import { deviceMotion } from './device-motion.e2e.mjs';
+import * as pageClock from './clock.mjs';
 import {
   DESK,
   drawn,
@@ -372,14 +373,13 @@ export const scenarios = {
           return /webgl/i.test(String(type)) ? null : get.call(this, type, ...rest);
         };
       });
-      await page.clock.install();
-      await page.reload();
+      await pageClock.reloadOnFakeClock(page);
       await h.reachHub(page);
       const save = async () => JSON.parse((await h.ls(page, h.SAVE)) ?? '{"events":[]}');
       const keys = async () => page.evaluate(() => Object.keys(localStorage).sort());
       const [before, storedBefore] = [await save(), await keys()];
       await toThoughts(h, page, pic);
-      await page.clock.runFor(1500);
+      await pageClock.runFor(page, 1500);
       await h.sleep(800);
       const s = await scenes(page);
       h.expect(
@@ -408,18 +408,18 @@ export const scenarios = {
         `no WebGL ${pic}: a thought has no shape of its own (${JSON.stringify(drawn)})`,
       );
       const a = await look();
-      await page.clock.runFor(2000);
+      await pageClock.runFor(page, 2000);
       const b = await look();
       h.expect(a !== b, `no WebGL ${pic}: the flat picture's thoughts do not move (${a})`);
       await page.emulateMedia({ reducedMotion: 'reduce' });
       await h.sleep(500);
-      await page.clock.runFor(100);
+      await pageClock.runFor(page, 100);
       const c = await look();
-      await page.clock.runFor(2000);
+      await pageClock.runFor(page, 2000);
       h.expect(c === (await look()), `no WebGL ${pic}, reduced motion: the flat picture's thoughts still move (${c})`);
       await page.emulateMedia({ reducedMotion: 'no-preference' });
       await h.shot(page, `thoughts-no-webgl-${pic}`);
-      await page.clock.fastForward(61000);
+      await pageClock.fastForward(page, 61000);
       await page.locator('.dq-timer-num', { hasText: 'Done' }).waitFor({ timeout: 5000 });
       await tap(page, 'Next');
       await tap(page, 'Next');
