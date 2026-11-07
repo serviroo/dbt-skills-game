@@ -19,6 +19,14 @@
       }
     },
     {
+      "files": ["src/audio/**"],
+      "rules": {
+        "lantern/graph-swaps-wait-for-their-time": "error",
+        "lantern/cue-tracking-includes-offline": "error",
+        "lantern/cue-cleanup-shares-one-clock": "error"
+      }
+    },
+    {
       "files": ["src/ui/anim.ts"],
       "rules": { "lantern/animations-share-start-time": "off" }
     },
@@ -30,7 +38,8 @@
       "files": ["scripts/**"],
       "rules": {
         "lantern/tap-elements-not-points": "error",
-        "lantern/clock-calls-go-through-clock-module": "error"
+        "lantern/clock-calls-go-through-clock-module": "error",
+        "lantern/no-cross-render-peak-equality": "error"
       }
     },
     {

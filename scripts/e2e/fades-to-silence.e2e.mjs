@@ -38,6 +38,188 @@ const FADES = [
 const RATES = [44100, 48000];
 
 export const scenarios = {
+  async 'safe-zone-offline-leaves-no-old-sound'({ open, expect }) {
+    const { ctx, page, errors } = await open({}, '?lab=audio&mute');
+    try {
+      await page.waitForFunction(() => window.__lab === true, null, { timeout: 30000 });
+      const got = await page.evaluate(async (rates) => {
+        const { AudioEngine } = await import('/src/audio/engine.ts');
+        const { stoppedBy } = await import('/src/audio/voice.ts');
+        const { SCORE } = await import('/src/motion/tokens.ts');
+        const { recordAudioSchedule } = await import('/scripts/e2e/audio-schedule.mjs');
+        const entry = 2;
+        const gaps = [0.005, 0.02, 1];
+        const duration = entry + Math.max(...gaps) + SCORE.safeBackSec + 1;
+        const out = [];
+        for (const sr of rates) {
+          for (const name of ['bed', 'score', 'bed+score+cue']) {
+            const render = async (gap) => {
+              const c = new OfflineAudioContext(6, Math.ceil(duration * sr), sr);
+              const schedule = recordAudioSchedule(c);
+              try {
+                const eng = new AudioEngine(c);
+                const probe = c.createChannelMerger(6);
+                probe.connect(c.destination);
+                for (const [i, node] of [eng.hushRoom, eng.hushHall].entries()) {
+                  const stereo = c.createChannelSplitter(2);
+                  node.connect(stereo);
+                  stereo.connect(probe, 0, 2 + i * 2);
+                  stereo.connect(probe, 1, 3 + i * 2);
+                }
+                if (name !== 'score') eng.bed(name === 'bed' ? 'gate_hum' : 'ambient', { at: 0.02 });
+                if (name !== 'bed') eng.music.to('windows', 0.5, { at: 0.02 });
+                if (name === 'bed+score+cue') {
+                  eng.schedule([{ t: 0.02, cue: 'breath_out', opts: { id: 'long', dur: 6 } }], 0);
+                }
+                eng.music.scheduleUntil(duration);
+                eng.quiet(true, SCORE.safeOutSec, entry);
+                eng.stopAll(SCORE.safeOutSec, entry);
+                if (gap !== null) eng.quiet(false, SCORE.safeBackSec, entry + gap);
+                const data = await c.startRendering();
+                return { data, calls: schedule.calls.filter((call) => call.time < entry) };
+              } finally {
+                schedule.stop();
+              }
+            };
+            const held = await render(null);
+            for (const gap of gaps) {
+              const returned = await render(gap);
+              const before = [0, 0, 0];
+              const peak = [0, 0, 0];
+              const atExit = [0, 0, 0];
+              const echoClosed = [0, 0, 0];
+              const from = Math.ceil(stoppedBy(entry, SCORE.safeOutSec) * sr);
+              for (let ch = 0; ch < returned.data.numberOfChannels; ch++) {
+                const d = returned.data.getChannelData(ch);
+                const pair = Math.floor(ch / 2);
+                for (let i = sr; i < entry * sr; i++) {
+                  before[pair] = Math.max(before[pair], Math.abs(d[i]));
+                }
+                for (let i = from; i < d.length; i++) peak[pair] = Math.max(peak[pair], Math.abs(d[i]));
+                for (let i = Math.ceil((entry + gap) * sr); i < d.length; i++) {
+                  atExit[pair] = Math.max(atExit[pair], Math.abs(d[i]));
+                }
+                for (let i = Math.ceil((entry + gap + SCORE.safeOutSec) * sr); i < d.length; i++) {
+                  echoClosed[pair] = Math.max(echoClosed[pair], Math.abs(d[i]));
+                }
+              }
+              const db = (x) => x > 0 ? 20 * Math.log10(x) : -Infinity;
+              const levels = ['speakers', 'room', 'hall'].map((bus, i) => ({
+                bus, before: db(before[i]), after: db(peak[i]), atExit: db(atExit[i]), closed: db(echoClosed[i]),
+              }));
+              out.push({ name, sr, gap, levels, scheduled: held.calls.length,
+                sameSchedule: JSON.stringify(held.calls) === JSON.stringify(returned.calls) });
+            }
+          }
+        }
+        return out;
+      }, RATES);
+      expect(got.length === RATES.length * 9, `rendered ${got.length} of ${RATES.length * 9} visits`);
+      for (const g of got) {
+        const at = `${g.name} (${g.sr} Hz, leave after ${g.gap * 1000} ms)`;
+        expect(g.scheduled > 0 && g.sameSchedule, `${at}: leaving early changed scheduling before entry`);
+        for (const level of g.levels) {
+          const where = `${at}, ${level.bus}`;
+          if (level.bus !== 'room' || g.name === 'bed+score+cue') {
+            expect(level.before > -60, `${where}: no audible sound before the visit (${level.before} dB)`);
+          }
+          if (level.bus !== 'speakers' && g.gap < 1) {
+            expect(level.atExit <= level.before,
+              `${where}: echo rises from the exit at ${level.atExit.toFixed(1)} dB`);
+            expect(level.closed < TWIN_DB,
+              `${where}: old echo survives its exit fade at ${level.closed.toFixed(1)} dB`);
+          }
+          if (level.bus !== 'speakers' || g.gap === 1) {
+            expect(level.after < TWIN_DB,
+              `${where}: old sound returns after the visit at ${level.after.toFixed(1)} dB`);
+          }
+        }
+      }
+      expect(!errors.length, errors.join('\n'));
+      return got;
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'safe-zone-hub-hall-refills-from-the-exit'({ open, expect }) {
+    const { ctx, page, errors } = await open({}, '?lab=audio&mute');
+    try {
+      await page.waitForFunction(() => window.__lab === true, null, { timeout: 30000 });
+      const got = await page.evaluate(async (rates) => {
+        const { AudioEngine } = await import('/src/audio/engine.ts');
+        const { SCORE } = await import('/src/motion/tokens.ts');
+        const entry = 2;
+        const duration = 7;
+        const out = [];
+        for (const sr of rates) {
+          const render = async (gap, hallFrom = null) => {
+            const c = new OfflineAudioContext(4, duration * sr, sr);
+            const eng = new AudioEngine(c);
+            if (hallFrom !== null) {
+              const input = eng.echo.sends.musHall.gain;
+              input.cancelScheduledValues(0);
+              input.setValueAtTime(0, 0);
+              input.setValueAtTime(0, hallFrom);
+              input.linearRampToValueAtTime(1, hallFrom + SCORE.safeOutSec);
+            }
+            const probe = c.createChannelMerger(4);
+            probe.connect(c.destination);
+            const stereo = c.createChannelSplitter(2);
+            eng.hushHall.connect(stereo);
+            stereo.connect(probe, 0, 2);
+            stereo.connect(probe, 1, 3);
+            eng.music.to('windows', 0.5, { at: 0.02 });
+            eng.music.scheduleUntil(1);
+            eng.music.to('calm', 2, { at: 1 });
+            eng.music.scheduleUntil(duration);
+            if (gap !== null) {
+              eng.quiet(true, SCORE.safeOutSec, entry);
+              eng.quiet(false, SCORE.safeBackSec, entry + gap);
+            }
+            return c.startRendering();
+          };
+          const twin = await render(null);
+          for (const gap of [0.005, 1]) {
+            const returned = await render(gap);
+            const exit = entry + gap;
+            const empty = await render(null, exit);
+            const windows = [[exit, exit + 1]];
+            for (let from = exit + 1; from + 1 <= duration; from++) windows.push([from, from + 1]);
+            for (const [from, to] of windows) {
+              let level = 0;
+              let reference = 0;
+              for (const ch of [2, 3]) {
+                const d = returned.getChannelData(ch);
+                const t = (from === exit ? empty : twin).getChannelData(ch);
+                for (let i = Math.ceil(from * sr); i < Math.ceil(to * sr); i++) {
+                  level += d[i] ** 2;
+                  reference += t[i] ** 2;
+                }
+              }
+              const samples = 2 * (Math.ceil(to * sr) - Math.ceil(from * sr));
+              out.push({ sr, gap, from, atExit: from === exit,
+                reference: 10 * Math.log10(reference / samples),
+                apart: 10 * Math.log10(level / reference) });
+            }
+          }
+        }
+        return out;
+      }, RATES);
+      expect(got.length === RATES.length * 8, `measured ${got.length} of ${RATES.length * 8} hall windows`);
+      for (const g of got) {
+        const at = `${g.sr} Hz, ${g.gap * 1000} ms visit, ${g.from.toFixed(3)} s`;
+        const reference = g.atExit ? 'an empty hall from the exit' : 'no visit';
+        expect(g.reference > -60, `${at}: no audible hall in ${reference} (${g.reference.toFixed(1)} dB)`);
+        expect(Math.abs(g.apart) < 0.1, `${at}: hall differs from ${reference} by ${g.apart.toFixed(2)} dB`);
+      }
+      expect(!errors.length, errors.join('\n'));
+      return got;
+    } finally {
+      await ctx.close();
+    }
+  },
+
   async 'every-fade-ends-in-silence'({ open, expect }) {
     const { ctx, page, errors } = await open({}, '?lab=audio&mute');
     await page.waitForFunction(() => window.__lab === true, null, { timeout: 30000 });
