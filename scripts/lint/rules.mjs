@@ -180,6 +180,15 @@ const storedWritesGoThroughCleared = {
 
 const POINTER_METHODS = new Set(['click', 'dblclick', 'move', 'tap']);
 
+const EXPRESSION_WRAPPERS = new Set([
+  'TSAsExpression', 'TSTypeAssertion', 'TSNonNullExpression', 'TSSatisfiesExpression', 'ParenthesizedExpression',
+]);
+
+function unwrapped(node) {
+  while (EXPRESSION_WRAPPERS.has(node?.type)) node = node.expression;
+  return node;
+}
+
 function isFixedNumber(context, node, resolving = new Set()) {
   switch (node?.type) {
     case 'Literal':
@@ -338,19 +347,128 @@ function soonTimes(context, fn, before) {
   }
   for (const node of ownNodes(fn.body)) {
     const [id, value] = bindsTime(node);
-    if (id && (callsSoon(value) ? node.range[1] <= before : mentions(context, value, times))) add(id);
+    if (id && ((callsSoon(value) && node.range[1] <= before) || mentions(context, value, times))) add(id);
   }
   return times;
 }
 
-function refreshed(context, fn, from, to) {
-  const fresh = new Set();
-  for (const node of ownNodes(fn.body)) {
-    const [id, value] = bindsTime(node);
-    const inside = node.range[0] >= from && node.range[1] <= to;
-    if (inside && id?.type === 'Identifier' && callsSoon(value)) fresh.add(variableOf(context, id));
+function straightBlock(node) {
+  const statement = node.parent;
+  if (node.type === 'AssignmentExpression') {
+    if (statement.type !== 'ExpressionStatement') return null;
+  } else if (statement.type !== 'VariableDeclaration' || !['let', 'const'].includes(statement.kind)) {
+    return null;
   }
-  return fresh;
+  let block = statement.parent;
+  if (block?.type !== 'BlockStatement') return null;
+  while (block.parent?.type === 'BlockStatement') block = block.parent;
+  return block;
+}
+
+const contains = (block, node) => block && block.range[0] <= node.range[0] && node.range[1] <= block.range[1];
+
+function timeWrites(context, fn, from) {
+  const variables = new Set();
+  for (const node of ownNodes(fn.body)) {
+    const id = node.type === 'AssignmentExpression' ? node.left : bindsTime(node)[0];
+    if (id?.type === 'Identifier') variables.add(variableOf(context, id));
+  }
+  return [...variables].filter(Boolean).flatMap((variable) =>
+    variable.references.filter((r) => r.isWrite())
+      .map((r) => ({ variable, id: r.identifier, captured: r.from.variableScope.block !== fn }))
+      .filter(({ id, captured }) => captured || id.range[0] >= from));
+}
+
+const NUMBER_OPERATORS = {
+  '+': (a, b) => a + b, '-': (a, b) => a - b, '*': (a, b) => a * b,
+  '/': (a, b) => a / b, '%': (a, b) => a % b, '**': (a, b) => a ** b,
+};
+const fixedNumbers = new WeakMap();
+
+function fixedNumber(context, node) {
+  node = unwrapped(node);
+  if (!node) return NaN;
+  if (fixedNumbers.has(node)) return fixedNumbers.get(node);
+  fixedNumbers.set(node, NaN);
+  let value = NaN;
+  if (node.type === 'Literal' && typeof node.value === 'number') value = node.value;
+  if (node.type === 'Identifier') value = fixedNumber(context, constantOf(context, node));
+  if (node.type === 'UnaryExpression' && node.operator === '-') value = -fixedNumber(context, node.argument);
+  if (node.type === 'BinaryExpression') {
+    value = NUMBER_OPERATORS[node.operator]?.(fixedNumber(context, node.left), fixedNumber(context, node.right)) ?? NaN;
+  }
+  fixedNumbers.set(node, value);
+  return value;
+}
+
+function writeIsFresh(context, variable, id, from, fresh, memo) {
+  const node = id.parent;
+  const [bound, value] = bindsTime(node);
+  const compound = node.type === 'AssignmentExpression' && node.left === id &&
+    node.operator === '+=' && fixedNumber(context, node.right) >= 0 && freshAt(fresh, variable, id);
+  return compound || (bound === id && freshValue(context, value, from, fresh, memo));
+}
+
+function refreshed(context, fn, from, memo) {
+  const writes = timeWrites(context, fn, from);
+  const fresh = new Map();
+  for (const { variable, id, captured } of writes) {
+    const node = id.parent;
+    const block = straightBlock(node);
+    if (captured || !block || bindsTime(node)[0] !== id) continue;
+    if (!fresh.has(variable)) fresh.set(variable, []);
+    fresh.get(variable).push({ node, block });
+  }
+  for (;;) {
+    let changed = false;
+    for (const [variable, refreshes] of fresh) {
+      const kept = refreshes.filter(({ node }) =>
+        freshValue(context, bindsTime(node)[1], from, fresh, memo) && writes.every((write) =>
+          write.variable !== variable || (!write.captured && write.id.range[0] <= node.range[0]) ||
+          writeIsFresh(context, variable, write.id, from, fresh, memo)));
+      if (kept.length === refreshes.length) continue;
+      fresh.set(variable, kept);
+      changed = true;
+    }
+    memo.clear();
+    if (!changed) return fresh;
+  }
+}
+
+const freshAt = (fresh, variable, at) => fresh.get(variable)?.some(({ node, block }) =>
+  node.range[1] <= at.range[0] && contains(block, at)) ?? false;
+
+function freshValue(context, node, from, fresh, memo) {
+  node = unwrapped(node);
+  if (node?.type === 'CallExpression' && !node.optional) {
+    if (calleeName(node) === 'soon') return true;
+    if (node.callee.object?.type === 'Identifier' && node.callee.object.name === 'Math' &&
+      !variableOf(context, node.callee.object)?.defs.length && ['max', 'min'].includes(methodName(node))) {
+      const isFresh = (arg) => freshValue(context, arg, from, fresh, memo);
+      if (methodName(node) === 'min') return node.arguments.length > 0 && node.arguments.every(isFresh);
+      return node.arguments.every((arg) => !Number.isNaN(fixedNumber(context, arg)) || isFresh(arg)) &&
+        node.arguments.some(isFresh);
+    }
+  }
+  if (node?.type === 'BinaryExpression' && node.operator === '+') {
+    return (freshValue(context, node.left, from, fresh, memo) && fixedNumber(context, node.right) >= 0) ||
+      (fixedNumber(context, node.left) >= 0 && freshValue(context, node.right, from, fresh, memo));
+  }
+  if (node?.type !== 'Identifier') return false;
+  const variable = variableOf(context, node);
+  return freshAt(fresh, variable, node) || freshConst(context, variable, from, node, fresh, memo);
+}
+
+function freshConst(context, variable, from, at, fresh, memo) {
+  const def = variable?.defs[0]?.node;
+  if (def?.type !== 'VariableDeclarator' || def.id.type !== 'Identifier' ||
+    def.parent.kind !== 'const' || def.range[0] < from || def.range[1] > at.range[0] ||
+    !contains(straightBlock(def), at)) return false;
+  if (memo.has(variable)) return memo.get(variable);
+  memo.set(variable, false);
+  const value = freshValue(context, def.init, from, fresh, memo);
+  memo.set(variable, value);
+  return value;
 }
 
 function mentions(context, node, times) {
@@ -402,8 +520,11 @@ const scheduleBeforeEchoLoads = {
           for (const c of calls) {
             const load = loaded.findLast((l) => l !== c && l.range[1] <= c.range[1]);
             if (!load || logs(c)) continue;
-            const fresh = refreshed(context, fn, load.range[1], c.range[0]);
-            const times = new Set([...soonTimes(context, fn, load.range[0])].filter((v) => !fresh.has(v)));
+            const memo = new Map();
+            const fresh = refreshed(context, fn, load.range[1], memo);
+            const times = new Set([...soonTimes(context, fn, load.range[0])].filter((v) =>
+              !freshAt(fresh, v, c) &&
+              !freshConst(context, v, load.range[1], c, fresh, memo)));
             const passed = c.arguments.some((a) => mentions(context, a, times));
             const inside = mentions(context, functionOf(context, c.callee)?.body, times);
             if (passed || inside) context.report({ node: c, messageId: 'late' });
