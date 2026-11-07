@@ -59,7 +59,8 @@ async function boot(h, levels) {
   await h.reachHub(page);
   // the engine's output tap, and a count of every time something is placed behind the audio clock while `window.__watch`
   // is set: such a part has already been rendered past, so it starts late, cuts in or never plays
-  const tap = await page.evaluate(() => {
+  const tap = await page.evaluate(async () => {
+    const { tapAudioSchedule } = await import('/scripts/e2e/audio-schedule.mjs');
     const tap = window.__taps.findIndex((t) => t.from === 'GainNode');
     const clock = window.__taps[tap].context;
     window.__behind = [];
@@ -67,22 +68,7 @@ async function boot(h, levels) {
     const behind = (what, t) => {
       if (window.__watch && t > 0 && t < clock.currentTime) window.__behind.push([what, clock.currentTime - t]);
     };
-    const P = AudioParam.prototype;
-    for (const [m, i] of [['setValueAtTime', 1], ['linearRampToValueAtTime', 1], ['exponentialRampToValueAtTime', 1], ['setTargetAtTime', 1], ['cancelScheduledValues', 0], ['cancelAndHoldAtTime', 0]]) {
-      const f = P[m];
-      P[m] = function (...a) {
-        behind(m, a[i]);
-        return f.apply(this, a);
-      };
-    }
-    const S = AudioScheduledSourceNode.prototype;
-    for (const m of ['start', 'stop']) {
-      const f = S[m];
-      S[m] = function (...a) {
-        behind(m, a[0]);
-        return f.apply(this, a);
-      };
-    }
+    tapAudioSchedule((_, method, args, time) => behind(method, time));
     return tap;
   });
   return { ctx, page, errors, tap };
