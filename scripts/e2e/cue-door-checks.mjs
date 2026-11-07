@@ -267,3 +267,60 @@ export async function independentStops(h) {
     await ctx.close();
   }
 }
+
+export async function spareRoarGoes(h) {
+  const { ctx, page, errors } = await h.open({}, '?lab=audio&mute');
+  try {
+    await page.waitForFunction(() => window.__lab === true);
+    const r = await page.evaluate(async () => {
+      const { AudioEngine } = await import('/src/audio/engine.ts');
+      const { Voice } = await import('/src/audio/voice.ts');
+      const c = new OfflineAudioContext(2, 2.6 * 48000, 48000);
+      const e = new AudioEngine(c);
+      const parts = [];
+      const part = Voice.prototype.part;
+      Voice.prototype.part = function (...args) {
+        const p = part.apply(this, args);
+        parts.push(p);
+        return p;
+      };
+      try {
+        e.music.to('awaken', 0.01, { at: 0.1 });
+      } finally {
+        Voice.prototype.part = part;
+      }
+      const spare = parts.at(-1);
+      const ride = Voice.prototype.ride;
+      const stop = AudioScheduledSourceNode.prototype.stop;
+      const stops = [];
+      let roar;
+      Voice.prototype.ride = function (part, ...args) {
+        roar = part;
+        return ride.call(this, part, ...args);
+      };
+      AudioScheduledSourceNode.prototype.stop = function (at) {
+        if (this === spare.gate) stops.push(at);
+        return stop.call(this, at);
+      };
+      try {
+        e.play('awaken_hit', { at: 0.8 });
+      } finally {
+        Voice.prototype.ride = ride;
+        AudioScheduledSourceNode.prototype.stop = stop;
+      }
+      await c.startRendering();
+      return { distinct: spare !== roar, roarOpened: roar.opened, stopped: spare.isStopped,
+        cleared: spare.pending.list === null, stops, spareOpened: spare.opened };
+    });
+    const detail = JSON.stringify(r);
+    h.expect(r.distinct && r.roarOpened, `the hit did not open a separate roar: ${detail}`);
+    h.expect(r.stopped && r.cleared, `a played hit left its unused spare roar holding on: ${detail}`);
+    h.expect(r.stops.length > 0 && r.stops.every((at) => at <= 0.805),
+      `the unused spare roar's gate did not stop by the hit: ${detail}`);
+    h.expect(!r.spareOpened, `the unused spare roar opened: ${detail}`);
+    h.expect(!errors.length, errors.join('\n'));
+    return r;
+  } finally {
+    await ctx.close();
+  }
+}

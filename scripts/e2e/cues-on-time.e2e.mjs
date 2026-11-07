@@ -13,7 +13,7 @@ import { continuedSounds, missedAttacks, stoppedParts } from './cue-continuation
 import fs from 'node:fs';
 import path from 'node:path';
 import { installAudioRecorder, audioReady, audioRecorded, audioHeard } from './audio-recorder.mjs';
-import { doorPath, stalledDoorPath, independentStops, repeatedMisses } from './cue-door-checks.mjs';
+import { doorPath, stalledDoorPath, independentStops, spareRoarGoes, repeatedMisses } from './cue-door-checks.mjs';
 import { timedHush, lastSourceStall, expiredEnds, fixedScoreTimes } from './cue-end-checks.mjs';
 import { expiredBuilds } from './cue-deadline-checks.mjs';
 import { droppedRelease, checkedRoar, unownedDoor } from './cue-release-checks.mjs';
@@ -377,6 +377,7 @@ export const scenarios = {
   'a-long-stall-after-opening-leaves-the-door-path-unchanged': async (h) =>
     stalledDoorPath(h, await boot(h, { music: 0, sfx: 1 })),
   'the-hit-and-roar-stop-independently': independentStops,
+  'a-played-hit-lets-the-spare-roar-go': spareRoarGoes,
   'two-placement-misses-keep-the-sound-and-open-on-the-next-try': async (h) =>
     repeatedMisses(h, await boot(h, { music: 0, sfx: 1 }), 2 * LEAD),
   'placement-stalls-past-the-deadline-drop-the-sound-unheard': async (h) =>

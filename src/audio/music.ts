@@ -466,7 +466,7 @@ const FACTORIES: Record<Section, Factory> = {
         opened: (until: number) => {
           if (o.at !== undefined && o.hitAt !== undefined) host.hush(o.hitAt - 0.78, o.hitAt);
           roarTick(soon(host.lib.ctx), until);
-          if (hitIn === Infinity && !hitPlayed) spare ??= roarParts(v, roar);
+          if (hitIn === Infinity) spare = roarParts(v, roar);
         },
         arm(cue?: Voice) {
           if (hitPlayed) return;
