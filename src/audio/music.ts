@@ -721,7 +721,7 @@ export class Music {
     if (voice.isDropped) return;
     const impl = score(voice.t);
     impl.opened?.(at + AHEAD);
-    this.live.push({ name, voice, impl, start: voice.t, end: Infinity, until: at + AHEAD });
+    this.live.push({ name, voice, impl, start: voice.t, end: Infinity, until: voice.t + AHEAD });
     this.current = name;
     this.host.onSection?.(name, at);
   }

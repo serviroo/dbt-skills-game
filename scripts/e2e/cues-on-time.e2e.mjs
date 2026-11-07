@@ -2,7 +2,9 @@ import { finalControlDeadline, globalControlOrder } from './cue-final-control-ch
 import {
   pendingStops, pendingHandleStops, explicitHitGate, slowCueStop, pendingLevels, riderStop, existingStops,
 } from './cue-pending-checks.mjs';
-import { continuedSounds, missedAttacks, stoppedParts } from './cue-continuation-checks.mjs';
+import {
+  continuedSounds, missedAttacks, stoppedParts, slowCleanupOpens, lateSectionKeepsItsWindow, expiredNoteStaysSilent,
+} from './cue-continuation-checks.mjs';
 // Every cue plays whole and on time, even on a busy page. A cue is built before its start is read, then placed a stated
 // lead past the audio clock (soon() in src/audio/param.ts), so neither a slow main thread building it nor the audio
 // thread rendering ahead can push its start, attack or stop behind what has already been rendered. The companion's short cues play through its real sound path
@@ -329,6 +331,10 @@ async function startsOnTimeHoweverSlowItsBuild(h, kind) {
 
 export const scenarios = {
   'stopping-an-opened-voice-ends-unopened-part-gates': stoppedParts,
+  'slow-cleanups-still-open-a-late-continuing-sound': slowCleanupOpens,
+  'a-late-section-schedules-on-from-its-first-window': async (h) =>
+    lateSectionKeepsItsWindow(h, await boot(h, { music: 1, sfx: 0 })),
+  'a-note-placed-after-its-end-stays-silent': expiredNoteStaysSilent,
   'cleanup-stalls-never-open-a-score-gate-behind-the-clock': async (h) =>
     missedAttacks(h, await boot(h, { music: 1, sfx: 1 }), true),
   'a-late-score-opening-drops-attacks-that-already-started': async (h) =>
@@ -595,8 +601,10 @@ export const scenarios = {
             const stalled = window.__stall === null;
             window.__stall = null;
             const opens = window.__opens.slice(opened);
+            const extra = Math.max(0, ...window.__extras.slice(opened));
             const ms = performance.now() - t0;
-            return { name, rate, ask, done: clock.currentTime, ms, behind: window.__behind.slice(was), opens, stalled };
+            return { name, rate, ask, done: clock.currentTime, ms, behind: window.__behind.slice(was),
+              opens, extra, stalled };
           };
           for (const name of sections) {
             const o = watched(name, () => window.__music.to(name, 0.3));
@@ -634,7 +642,7 @@ export const scenarios = {
         levels[`${o.name} ${o.rate}`] = level;
         const why = [];
         if (v.behind) why.push(`${v.behind} of its parts were placed up to ${v.worstMs} ms behind the audio clock (${[...new Set(o.behind.map((b) => b[0]))].join(', ')})`);
-        const late = o.start < o.ask - 1e-4 || o.start > o.done + LEAD + 1e-4;
+        const late = o.start < o.ask - 1e-4 || o.start > o.done + LEAD + o.extra + 1e-4;
         if (!o.hit && late) why.push(`it starts ${v.leadMs} ms past the clock once it is built`);
         if (!(level > 3e-4)) why.push(`it was not heard (RMS ${level})`);
         const roarLag = o.hit ? Math.max(...o.opens) - Math.min(...o.opens) : 0;

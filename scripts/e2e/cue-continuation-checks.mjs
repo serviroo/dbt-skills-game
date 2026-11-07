@@ -156,6 +156,119 @@ export async function stoppedParts(h) {
   }
 }
 
+export async function slowCleanupOpens(h) {
+  const { ctx, page, errors } = await h.open({}, '?lab=audio&mute');
+  try {
+    await page.waitForFunction(() => window.__lab === true, null, { timeout: 30000 });
+    const r = await page.evaluate(async () => {
+      const { AudioEngine } = await import('/src/audio/engine.ts');
+      const { Voice, LONG } = await import('/src/audio/voice.ts');
+      const { SCORE } = await import('/src/motion/tokens.ts');
+      const c = new AudioContext();
+      const e = new AudioEngine(c);
+      try {
+        await c.resume();
+        const voice = new Voice(e.lib, 0, c.destination, { held: true });
+        voice.osc('sine', 440, 0, LONG, voice.wet);
+        const discard = Voice.prototype.discardBefore;
+        let passes = 0;
+        Voice.prototype.discardBefore = function (at) {
+          if (this === voice && passes < 40) {
+            passes++;
+            const until = c.currentTime + SCORE.leadSec + 0.01;
+            while (c.currentTime < until);
+          }
+          return discard.call(this, at);
+        };
+        try {
+          Voice.openBuilt(c.currentTime - 1, () => 1, () => ({ voice }), 'continuous');
+          return { opened: voice.opened, dropped: voice.isDropped, passes };
+        } finally {
+          Voice.prototype.discardBefore = discard;
+        }
+      } finally {
+        e.dispose();
+      }
+    });
+    h.expect(r.opened && !r.dropped && r.passes > 0 && r.passes <= 5,
+      `slow cleanups prevented a continuing sound from opening: ${JSON.stringify(r)}`);
+    h.expect(!errors.length, errors.join('\n'));
+    return r;
+  } finally {
+    await ctx.close();
+  }
+}
+
+export async function lateSectionKeepsItsWindow(h, { ctx, page, errors }) {
+  try {
+    await captureEngine(page);
+    const r = await page.evaluate(async () => {
+      const { AHEAD } = await import('/src/audio/music.ts');
+      const { SCORE } = await import('/src/motion/tokens.ts');
+      const e = window.__engine;
+      const stalls = window.__stalls.length;
+      window.__watch = true;
+      window.__stall = { after: 'start', by: SCORE.leadSec + 0.01 };
+      try {
+        e.music.to('calm', 0.3, { at: e.ctx.currentTime - 1 });
+      } finally {
+        window.__watch = false;
+        window.__stall = null;
+      }
+      const s = e.music.live.at(-1);
+      return { ahead: AHEAD, window: s.until - s.start, dropped: s.voice.isDropped,
+        opened: s.voice.opened, late: s.voice.openedAt > s.start, stalls: window.__stalls.length - stalls };
+    });
+    h.expect(r.opened && !r.dropped && r.late && r.stalls > 0,
+      `the section never opened late in continuing mode: ${JSON.stringify(r)}`);
+    h.expect(Math.abs(r.window - r.ahead) < 1e-9,
+      `a late section skipped the end of its first window: ${JSON.stringify(r)}`);
+    h.expect(!errors.length, errors.join('\n'));
+    return r;
+  } finally {
+    await ctx.close();
+  }
+}
+
+export async function expiredNoteStaysSilent(h) {
+  const { ctx, page, errors } = await h.open({}, '?lab=audio&mute');
+  try {
+    await page.waitForFunction(() => window.__lab === true, null, { timeout: 30000 });
+    const r = await page.evaluate(async () => {
+      const { AudioEngine } = await import('/src/audio/engine.ts');
+      const { Voice } = await import('/src/audio/voice.ts');
+      const c = new AudioContext();
+      const e = new AudioEngine(c);
+      try {
+        await c.resume();
+        await new Promise((done) => setTimeout(done, 1100));
+        const start = c.currentTime - 1;
+        const voice = new Voice(e.lib, start, c.destination);
+        const stop = AudioScheduledSourceNode.prototype.stop;
+        const stops = [];
+        AudioScheduledSourceNode.prototype.stop = function (at) {
+          if (this instanceof OscillatorNode && this.context === c) stops.push({ at, now: c.currentTime });
+          return stop.call(this, at);
+        };
+        try {
+          voice.osc('sine', 440, start, start + 0.5, voice.wet);
+        } finally {
+          AudioScheduledSourceNode.prototype.stop = stop;
+        }
+        return { start, stops };
+      } finally {
+        e.dispose();
+      }
+    });
+    h.expect(r.stops.length === 1 && r.stops.every((s) => s.at <= s.now),
+      `an expired note was stopped after the audio clock: ${JSON.stringify(r)}`);
+    h.expect(!errors.length, errors.join('\n'));
+    return r;
+  } finally {
+    await ctx.close();
+  }
+}
+
 export async function continuedSounds(h, { ctx, page, errors, tap }) {
   try {
     await captureEngine(page);

@@ -251,8 +251,8 @@ export class Voice {
     }
     if (!continuing && first <= rendered()) return this.drop(voices);
     this.settle(continuing ? soon(this.ctx) : first);
-    for (;;) {
-      const openedAt = continuing ? soon(this.ctx) : first;
+    for (let room = 0; ; room = 2 * room + SCORE.leadSec) {
+      const openedAt = continuing ? soon(this.ctx) + room : first;
       if (continuing) for (const v of voices) v.discardBefore(openedAt);
       const stop = Math.min(...voices.map((v) => v.stopAsked?.at ?? Infinity));
       if (Math.max(openedAt, soon(this.ctx)) >= Math.min(deadline, stop)) return this.drop(voices);
@@ -361,7 +361,7 @@ export class Voice {
       s.n.stop();
       s.n.disconnect();
       s.stop = stoppedAt - this.clock.zero;
-      if (s.span) s.span.b = stoppedAt;
+      if (s.span) s.span.b = Math.max(stoppedAt, s.start);
       return false;
     });
   }
@@ -495,7 +495,7 @@ export class Voice {
       }, false, t1 < LONG);
       keep(held, () => Math.min(s.stop, this.killAt - this.clock.zero), stop, false, false);
     } else this.place(s, t0, offset);
-    if (!held) stop();
+    if (!held && s.started) s.n.stop(s.stop + this.clock.zero);
     return n;
   }
 
