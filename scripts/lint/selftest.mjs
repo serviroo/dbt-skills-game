@@ -51,6 +51,53 @@ function checkStyles() {
   expect(lines.join() === '2', `word-break: expected a finding on line 2 only, got ${lines.join() || 'none'}`);
 }
 
+function checkWorkflows() {
+  const script = path.join(here, 'jobs-read-artifacts-from-their-own-run.mjs');
+  const fixture = path.join(fixtures, 'jobs-read-artifacts-from-their-own-run.yml');
+  const workflows = path.join(scratch, '.github/workflows');
+  fs.mkdirSync(workflows, { recursive: true });
+  const ci = path.join(workflows, 'ci.yml');
+  const source = fs.readFileSync(fixture, 'utf8');
+  fs.writeFileSync(ci, source);
+  const check = (file) => spawnSync('node', [script, file], { cwd: scratch, encoding: 'utf8' });
+  const run = check(ci);
+  const found = run.stderr.trim().split('\n');
+  expect(run.status === 1 && found.length === 15, `own-run artifacts: expected 15 findings:\n${run.stderr}`);
+  for (const job of ['null_job', 'scalar_job', 'array_job']) {
+    expect(found.includes(`${ci}: ${job}: expected a job mapping`), `own-run artifacts: missed invalid ${job}`);
+  }
+  expect(!run.stderr.includes('    at '), `own-run artifacts: invalid jobs threw:\n${run.stderr}`);
+  for (const job of ['plan', 'e2e', 'timings', 'by_id', 'shell_download', 'shell_api', 'multiline_api']) {
+    expect(found.some((line) => line.includes(`: ${job} step `)), `own-run artifacts: missed ${job}`);
+  }
+  expect(!found.some((line) => line.includes(': plan step 1 ')), 'own-run artifacts: plan find was rejected');
+  const other = path.join(workflows, 'other.yml');
+  fs.writeFileSync(other, source);
+  const elsewhere = check(other);
+  expect(elsewhere.status === 1 && elsewhere.stderr.trim().split('\n').length === 17,
+    `own-run artifacts: another workflow's plan find was allowed:\n${elsewhere.stderr}`);
+  for (const [before, after] of [
+    ['-n e2e-timings', "--pattern '*'"],
+    ['?name=e2e-timings&per_page=50', '/123/zip'],
+  ]) {
+    fs.writeFileSync(ci, source.replace(before, after));
+    const unnamed = check(ci);
+    expect(unnamed.status === 1 && unnamed.stderr.includes(': plan step 1 '),
+      `own-run artifacts: plan find allowed an unnamed download:\n${unnamed.stderr}`);
+  }
+  const local = path.join(scratch, 'local.yml');
+  fs.writeFileSync(local, 'jobs:\n  e2e:\n    steps:\n      - uses: actions/download-artifact@v8\n' +
+    '        with:\n          name: e2e-plan-timings\n');
+  const allowed = check(local);
+  expect(allowed.status === 0, `own-run artifacts: a same-run download failed:\n${allowed.stderr}`);
+  for (const source of ['', 'name: no jobs\n', 'jobs: []\n']) {
+    fs.writeFileSync(local, source);
+    const missing = check(local);
+    expect(missing.status === 1 && missing.stderr.includes('expected a jobs mapping') &&
+      !missing.stderr.includes('    at '), `own-run artifacts: missing jobs threw:\n${missing.stderr}`);
+  }
+}
+
 function checkDiffLimits() {
   const repo = path.join(scratch, 'repo');
   fs.mkdirSync(repo);
@@ -113,6 +160,7 @@ function checkDiffLimits() {
 try {
   checkRules();
   checkStyles();
+  checkWorkflows();
   checkDiffLimits();
 } finally {
   fs.rmSync(scratch, { recursive: true, force: true });

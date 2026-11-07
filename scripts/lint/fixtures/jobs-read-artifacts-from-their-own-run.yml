@@ -1,0 +1,56 @@
+jobs:
+  null_job: ~
+  scalar_job: invalid
+  array_job: []
+  plan:
+    steps:
+      - id: find
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=e2e-timings&per_page=50"
+          gh run download "$run" -n e2e-timings -D "$RUNNER_TEMP/timings"
+      - run: gh run download 123 -n e2e-timings
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ steps.find.outputs.artifact }}
+          run-id: ${{ steps.find.outputs.run }}
+  e2e:
+    steps:
+      - uses: actions/download-artifact@v8
+        if: needs.plan.outputs.artifact != ''
+        with:
+          artifact-ids: ${{ needs.plan.outputs.artifact }}
+          run-id: ${{ needs.plan.outputs.run }}
+          github-token: ${{ github.token }}
+  timings:
+    steps:
+      - with: {run-id: 123}
+        uses: 'actions/download-artifact@v8'
+  by_id:
+    steps:
+      - uses: actions/download-artifact@0123456789012345678901234567890123456789
+        with:
+          artifact-ids: ''
+  shell_download:
+    steps:
+      - run: gh run download 123 -n e2e-timings
+      - run: gh --repo fixture/game run download 123 -n e2e-timings
+  shell_api:
+    steps:
+      - run: gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/123/zip"
+      - run: gh --hostname github.com api "repos/$GITHUB_REPOSITORY/actions/artifacts/123/zip"
+  multiline_api:
+    steps:
+      - run: |
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts?name=e2e-timings"
+  local:
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: e2e-plan-timings
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: e2e-times-*
+      - run: 'echo "run-id: 123"'
+  reusable:
+    uses: ./.github/workflows/other.yml
