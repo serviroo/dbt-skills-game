@@ -46,7 +46,7 @@ export async function missedAttacks(h, { ctx, page, errors }, cleanup = false) {
           return disconnect.apply(this, args);
         };
         AudioParam.prototype.setValueAtTime = function (value, at) {
-          if (gates.has(this) && value === 1) openings.push({ at, clock: e.now });
+          if (gates.has(this) && value === 1) openings.push({ at, now: e.now });
           return set.call(this, value, at);
         };
         const stall = (until) => { while (e.now < until); };
@@ -108,7 +108,7 @@ export async function missedAttacks(h, { ctx, page, errors }, cleanup = false) {
     for (const r of rows) {
       h.expect(r.built && r.stalled && r.continuing && r.opened > r.started + (cleanup ? 0 : 0.12),
         `the windows score never opened past a placed attack: ${JSON.stringify(r)}`);
-      h.expect(r.openings.length === 1 && r.openings.every((o) => o.at >= o.clock),
+      h.expect(r.openings.length === 1 && r.openings.every((o) => o.at >= o.now),
         `the windows gate opened behind the clock: ${JSON.stringify(r)}`);
       h.expect(r.heard.cover === 1 && r.heard.peak < 1e-6,
         `a missed windows attack sounded through the late opening: ${JSON.stringify(r)}`);
