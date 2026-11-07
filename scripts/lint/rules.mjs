@@ -251,6 +251,12 @@ function lossListenerTarget(context, call) {
 }
 
 function functionOf(context, callee) {
+  if (callee.type === 'MemberExpression' && !callee.computed && callee.object.type === 'ThisExpression') {
+    let body = callee.parent;
+    while (body && body.type !== 'ClassBody') body = body.parent;
+    const method = body?.body.find((p) => !p.computed && p.key?.name === callee.property.name)?.value;
+    return FUNCTIONS.has(method?.type) ? method : null;
+  }
   const def = callee.type === 'Identifier' ? variableOf(context, callee)?.defs[0]?.node : null;
   if (def?.type === 'FunctionDeclaration') return def;
   return def?.type === 'VariableDeclarator' && FUNCTIONS.has(def.init?.type) ? def.init : null;
@@ -535,6 +541,217 @@ const scheduleBeforeEchoLoads = {
   },
 };
 
+function passedAsAudioTime(context, node, times) {
+  if (node.type === 'CallExpression') {
+    const index = AUDIO_TIME_ARG.get(calleeName(node));
+    if (index !== undefined && mentions(context, node.arguments[index], times)) return true;
+  }
+  return children(node).some((child) => passedAsAudioTime(context, child, times));
+}
+
+function graphTimes(context, functions, calls) {
+  const times = new Set();
+  for (const fn of functions) {
+    for (const variable of soonTimes(context, fn, Infinity)) times.add(variable);
+    for (const param of fn.params) {
+      const id = param.type === 'AssignmentPattern' ? param.left : param;
+      if (id.type !== 'Identifier') continue;
+      const variable = variableOf(context, id);
+      if (passedAsAudioTime(context, fn.body, new Set([variable]))) times.add(variable);
+    }
+  }
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const fn of functions) {
+      for (const node of ownNodes(fn.body)) {
+        const [id, value] = bindsTime(node);
+        const variable = id?.type === 'Identifier' ? variableOf(context, id) : null;
+        if (!variable || times.has(variable) || !(callsSoon(value) || mentions(context, value, times))) continue;
+        times.add(variable);
+        grew = true;
+      }
+    }
+    for (const call of calls) {
+      const fn = functionOf(context, call.callee);
+      if (!fn) continue;
+      call.arguments.forEach((arg, i) => {
+        const param = fn.params[i];
+        const id = param?.type === 'AssignmentPattern' ? param.left : param;
+        if (id?.type !== 'Identifier' || !(callsSoon(arg) || mentions(context, arg, times))) return;
+        const variable = variableOf(context, id);
+        if (times.has(variable)) return;
+        times.add(variable);
+        grew = true;
+      });
+    }
+  }
+  return times;
+}
+
+function audioNode(context, node, seen = new Set()) {
+  if (!node || seen.has(node)) return null;
+  seen.add(node);
+  if (node.type === 'Identifier') return audioNode(context, declaredAs(context, node), seen);
+  if (node.type === 'CallExpression' && /^create[A-Z]/.test(methodName(node) ?? '')) return node;
+  if (node.type === 'NewExpression' && /Node$/.test(calleeName(node) ?? '')) return node;
+  return null;
+}
+
+function gainOpensOnTime(context, built, fn, times) {
+  const isGain = (node) => isNamed(node, 'gain') && audioNode(context, node.object) === built;
+  const nodes = ownNodes(fn.body);
+  const writes = nodes.filter((node) => node.type === 'AssignmentExpression' && isNamed(node.left, 'value')
+    && isGain(node.left.object) && node.parent.parent === fn.body);
+  const initial = writes.at(-1)?.right;
+  if (initial?.type !== 'Literal' || initial.value !== 0) return false;
+  const scheduled = nodes.filter((node) => node.type === 'CallExpression' && isGain(node.callee.object)
+    && mentions(context, node.arguments[1], times));
+  const holds = scheduled.some((call) => methodName(call) === 'setValueAtTime' && call.arguments[0]?.value === 0);
+  return scheduled.some((call) => call.arguments[0]?.value > 0
+    && (methodName(call) === 'setValueAtTime' || (holds && methodName(call) === 'linearRampToValueAtTime')));
+}
+
+function inTimedFunction(context, fn, times) {
+  for (let p = fn; p; p = p.parent) {
+    if (!FUNCTIONS.has(p.type)) continue;
+    if (p.params.some((param) => mentions(context, param, times))) return true;
+    if (ownNodes(p.body).some((node) => {
+      const [id] = bindsTime(node);
+      return id && mentions(context, id, times);
+    })) return true;
+  }
+  return false;
+}
+
+function checkGraphInputs(context, calls, times) {
+  const checked = new Set();
+  for (const call of calls) {
+    if (methodName(call) !== 'connect') continue;
+    const built = audioNode(context, call.arguments[0]);
+    if (!built) continue;
+    let fn = built.parent;
+    while (fn && !FUNCTIONS.has(fn.type)) fn = fn.parent;
+    if (!fn) continue;
+    let source = call.callee.object;
+    while (source.type === 'CallExpression' && methodName(source) === 'connect') source = source.arguments[0];
+    const fresh = audioNode(context, source);
+    if (fresh && fresh.range[0] >= fn.range[0] && fresh.range[1] <= fn.range[1]) continue;
+    if (!inTimedFunction(context, fn, times) || checked.has(built)) continue;
+    checked.add(built);
+    if (!gainOpensOnTime(context, built, fn, times)) context.report({ node: call, messageId: 'input' });
+  }
+}
+
+const graphSwapsWaitForTheirTime = {
+  meta: {
+    messages: {
+      early: 'Disconnect replaced audio graphs in a timed onended handler so scheduling ahead preserves their sound.',
+      input: 'Hold a replacement graph\'s input at zero, then schedule it to open at its audio time.',
+    },
+  },
+  create(context) {
+    const functions = [];
+    const calls = [];
+    return {
+      ':function'(node) {
+        if (node.body) functions.push(node);
+      },
+      'Program:exit'() {
+        const times = graphTimes(context, functions, calls);
+        checkGraphInputs(context, calls, times);
+        for (const node of calls) {
+          if (!['dropEcho', 'disconnect'].includes(calleeName(node))) continue;
+          let fn = node.parent;
+          while (fn && !FUNCTIONS.has(fn.type)) fn = fn.parent;
+          let handler = false;
+          for (let p = fn; p; p = p.parent) {
+            const assigned = p.parent?.type === 'AssignmentExpression' && isNamed(p.parent.left, 'onended');
+            if (FUNCTIONS.has(p.type) && assigned) handler = true;
+          }
+          if (fn && !handler && inTimedFunction(context, fn, times)) context.report({ node, messageId: 'early' });
+        }
+      },
+      CallExpression(node) {
+        calls.push(node);
+      },
+    };
+  },
+};
+
+function fieldValue(node) {
+  if (node.type !== 'MemberExpression' || node.computed || node.object.type !== 'ThisExpression') return null;
+  let body = node.parent;
+  while (body && body.type !== 'ClassBody') body = body.parent;
+  const field = body?.body.find((p) => p.type === 'PropertyDefinition' && p.key.name === node.property.name);
+  const ctor = body?.body.find((p) => p.kind === 'constructor');
+  const assigned = ctor && ownNodes(ctor.value.body).find((p) => p.type === 'AssignmentExpression'
+    && p.left.type === 'MemberExpression' && p.left.object.type === 'ThisExpression'
+    && !p.left.computed && p.left.property.name === node.property.name)?.right;
+  return assigned ?? field?.value;
+}
+
+function readsContextKind(context, node, seen = new Set()) {
+  if (!node || seen.has(node)) return false;
+  seen.add(node);
+  if (node.type === 'Identifier') {
+    if (['AudioContext', 'OfflineAudioContext'].includes(node.name)) return true;
+    return readsContextKind(context, declaredAs(context, node), seen);
+  }
+  if (node.type === 'MemberExpression' && !node.computed) {
+    if (['AudioContext', 'OfflineAudioContext'].includes(node.property.name)) return true;
+    return readsContextKind(context, fieldValue(node), seen);
+  }
+  return children(node).some((child) => readsContextKind(context, child, seen));
+}
+
+const cueTrackingIncludesOffline = {
+  meta: {
+    messages: { missing: 'Track sounding cues in every audio context so quiet and stopAll can stop them.' },
+  },
+  create(context) {
+    return {
+      CallExpression(node) {
+        if (methodName(node) !== 'add') return;
+        const cue = node.arguments[0];
+        const built = cue?.type === 'Identifier' ? declaredAs(context, cue) : cue;
+        if (built?.type !== 'NewExpression' || built.callee.type !== 'Identifier') return;
+        const imported = variableOf(context, built.callee)?.defs[0]?.node;
+        if (imported?.type !== 'ImportSpecifier' || imported.imported.name !== 'Voice') return;
+        for (let p = node.parent; p && !FUNCTIONS.has(p.type); p = p.parent) {
+          const test = ['IfStatement', 'ConditionalExpression'].includes(p.type) ? p.test
+            : p.type === 'LogicalExpression' && p.right.range[0] <= node.range[0] ? p.left : null;
+          if (test && readsContextKind(context, test)) {
+            context.report({ node, messageId: 'missing' });
+            return;
+          }
+        }
+      },
+    };
+  },
+};
+
+const cueCleanupSharesOneClock = {
+  meta: {
+    messages: { perCue: 'Use the shared cue cleanup clock instead of creating a clock for each played voice.' },
+  },
+  create(context) {
+    return {
+      CallExpression(node) {
+        if (methodName(node) !== 'createConstantSource') return;
+        let fn = node.parent;
+        while (fn && !FUNCTIONS.has(fn.type)) fn = fn.parent;
+        if (!fn) return;
+        const cue = ownNodes(fn.body).some((n) => {
+          if (n.type !== 'NewExpression' || n.callee.type !== 'Identifier') return false;
+          const imported = variableOf(context, n.callee)?.defs[0]?.node;
+          return imported?.type === 'ImportSpecifier' && imported.imported.name === 'Voice';
+        });
+        if (cue) context.report({ node, messageId: 'perCue' });
+      },
+    };
+  },
+};
+
 const PARAM_NAMES = new Set([
   'gain', 'frequency', 'detune', 'offset', 'pan', 'Q', 'delayTime', 'playbackRate',
   'threshold', 'knee', 'ratio', 'attack', 'release',
@@ -664,10 +881,41 @@ const heldTimesAreClamped = {
   },
 };
 
+function sampleBuffer(context, node, seen = new Set()) {
+  if (!node || seen.has(node)) return null;
+  seen.add(node);
+  if (node.type === 'Identifier') return sampleBuffer(context, declaredAs(context, node), seen);
+  if (node.type === 'MemberExpression' && node.computed) return sampleBuffer(context, node.object, seen);
+  return node.type === 'CallExpression' && methodName(node) === 'getChannelData'
+    ? paramPath(context, node.callee.object) : null;
+}
+
+const noCrossRenderPeakEquality = {
+  meta: {
+    messages: {
+      samples: 'Compare scheduled calls for exact timing: separate audio renders have floating point noise.',
+    },
+  },
+  create(context) {
+    return {
+      BinaryExpression(node) {
+        if (node.operator !== '-' || methodName(node.parent) !== 'abs'
+          || methodName(node.parent.parent) !== 'max') return;
+        const a = sampleBuffer(context, node.left);
+        const b = sampleBuffer(context, node.right);
+        if (a && b && (a.length !== b.length || a.some((part, i) => part !== b[i]))) {
+          context.report({ node, messageId: 'samples' });
+        }
+      },
+    };
+  },
+};
+
 export default {
   meta: { name: 'lantern' },
   rules: {
     'audio-times-from-soon': audioTimesFromSoon,
+    'no-cross-render-peak-equality': noCrossRenderPeakEquality,
     'hold-reads-the-scheduled-curve': holdReadsTheScheduledCurve,
     'held-times-are-clamped': heldTimesAreClamped,
     'animations-share-start-time': animationsShareStartTime,
@@ -677,5 +925,8 @@ export default {
     'tap-elements-not-points': tapElementsNotPoints,
     'handle-lost-gpu-context': handleLostGpuContext,
     'schedule-before-echo-loads': scheduleBeforeEchoLoads,
+    'graph-swaps-wait-for-their-time': graphSwapsWaitForTheirTime,
+    'cue-tracking-includes-offline': cueTrackingIncludesOffline,
+    'cue-cleanup-shares-one-clock': cueCleanupSharesOneClock,
   },
 };

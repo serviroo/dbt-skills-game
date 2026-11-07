@@ -15,6 +15,7 @@ const expect = (ok, message) => ok || failures.push(message);
 
 const RULE_FINDINGS = {
   'audio-times-from-soon': 2,
+  'no-cross-render-peak-equality': 2,
   'hold-reads-the-scheduled-curve': 26,
   'held-times-are-clamped': 4,
   'animations-share-start-time': 1,
@@ -24,6 +25,9 @@ const RULE_FINDINGS = {
   'tap-elements-not-points': 3,
   'handle-lost-gpu-context': 3,
   'schedule-before-echo-loads': 102,
+  'graph-swaps-wait-for-their-time': 22,
+  'cue-tracking-includes-offline': 4,
+  'cue-cleanup-shares-one-clock': 2,
 };
 
 function checkRules() {

@@ -763,6 +763,6 @@ export class Music {
         s.until = lim;
       }
     }
-    this.live = this.live.filter((s) => s.voice.silentAt > t - 5);
+    this.live = this.live.filter((s) => s.voice.silentAt > this.host.lib.ctx.currentTime);
   }
 }

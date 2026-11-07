@@ -100,6 +100,7 @@ export class Voice {
   /** When its stop() has silenced it and its sources have ended (Infinity until then): a stop is final, and nothing it
    *  is given later, such as a held part opened after it, sounds past it. */
   private killAt = Infinity;
+  private fadesFrom = Infinity;
   private children: Voice[] = [];
   private parent: Voice | null = null;
   private parts: Voice[] = [];
@@ -454,6 +455,7 @@ export class Voice {
     const kill = stoppedBy(at, ramp);
     if (kill >= this.killAt) return false;
     this.killAt = kill;
+    this.fadesFrom = Math.min(this.fadesFrom, at);
     for (const c of [...this.children, ...this.parts]) c.stop(at, ramp);
     const tau = Math.max(0.002, ramp / 4);
     for (const g of [this.out.gain, this.roomSend.gain, this.hallSend.gain]) {
@@ -490,5 +492,9 @@ export class Voice {
 
   get silentAt() {
     return this.killAt;
+  }
+
+  get stopStartsAt() {
+    return this.fadesFrom;
   }
 }
