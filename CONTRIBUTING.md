@@ -79,9 +79,11 @@ minutes on a runner 1.33x slower than the median, the slowest GitHub's have been
 Every CI run adds its times to the `e2e-timings` artifact and the next run splits by that, so a new or slower
 scenario evens out on its own; `scripts/e2e/timings.json` is the fallback when no run has one, and a scenario in
 neither counts as 15 s. To refresh that file, run `node scripts/e2e-timings.mjs <every part's report.json>` on the
-`e2e-times-*` artifacts of one or more runs. A passing part uploads nothing more; a failed one also uploads what
-its failed scenarios wrote, as `failed-e2e-<part>-<attempt>`. For anything visual, also look at it in a browser at phone width (390 and 320 px) with motion
+`e2e-times-*` artifacts of one or more runs. For anything visual, also look at it in a browser at phone width (390 and 320 px) with motion
 on and off.
+
+A passing CI part uploads only its `report.json`. A failed or cancelled one also uploads what its failed scenarios
+wrote, as `failed-e2e-<part>-<attempt>`, kept 3 days.
 
 `--cpu-throttle=4` slows each Chromium page's CPU work by four through CDP, including new tabs. The rate must be at
 least 1. The report records `cpuThrottle` and `throttleErrors`; a failure to apply it fails the run.
@@ -158,15 +160,17 @@ prints it as held out and lists it in `report.json`, and only `--scenario=<name>
   every long task of the page counts, a stop that lands inside one too. The browser times the page's own tasks, but
   only some of what a test runs in it, so make an app call through the function's `evaluate(fn, arg)`, which is
   `page.evaluate` with the time `fn` holds the page counted.
-- `shot(page, name)`: a screenshot in the run's folder (`out`), with its tab brought to the front first, as full
+- `shot(page, name)`: a screenshot in this scenario's folder (`out`), with its tab brought to the front first, as full
   Chromium captures no tab behind another. Start the name with your file's name, and give whatever a scenario writes
   there a name no other scenario uses, as they run at once.
 - `ls(page, key)`, `youOf(page)`, `deepFind(obj, key)`, `deepDrop(obj, keys)`, `expect(cond, msg)`, `sleep(ms)`.
 - `SAVE`, `YOU`, `SEEN`: the save key, the names key and an app state that skips the intro.
 - `browser`, `server.url`, `flags`, and `shared`, one object for the whole run, for a result worth making once (a
   build, the content). Store a promise in it (`shared.x ??= make()`) so scenarios running at once share one. A file
-  that passes results from one scenario to the next must be serial.
-- `out`, this scenario's own folder in the run's artifact folder (`root`); `renderer`, the WebGL renderer; `stop()`, which closes every browser and the server.
+  that passes results from one scenario to the next must be serial, and a file it passes on goes in `root`: a failed
+  scenario's folder moves to `failed/`.
+- `out`, this scenario's own folder in the run's artifact folder (`root`); `renderer`, the WebGL renderer; `stop()`,
+  which closes every browser and the server.
 
 The runner closes any remaining browser profiles in a scenario's browser after it, including failures. A scenario
 should also work on its own: create any fixture it needs when an earlier scenario has not run. Whatever a scenario returns is kept

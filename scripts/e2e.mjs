@@ -180,11 +180,18 @@ if (!pick.length) {
 }
 const units = unitsOf(pick);
 
+const CUT_OFF = 'cut off when the run was interrupted';
 let h;
 let report;
 let interrupted = false;
 let hung;
 let ended = false;
+const inFlight = new Map();
+function saveReport() {
+  const cutOff = [...inFlight.values()].map(({ t, ...s }) => ({ ...s, ok: false, ms: Date.now() - t, error: CUT_OFF }));
+  const scenarios = [...report.scenarios, ...cutOff].sort((a, b) => a.i - b.i).map(({ i, ...s }) => s);
+  fs.writeFileSync(path.join(h.root, 'report.json'), JSON.stringify({ ...report, scenarios }, null, 2));
+}
 const onSignal = () => {
   interrupted = true;
   process.exitCode = 130;
@@ -196,6 +203,11 @@ const onSignal = () => {
       if (ended || hung) return;
       hung = setTimeout(() => {
         console.log("interrupted, and a scenario still hadn't ended 2 s after the browsers and the server stopped");
+        try {
+          if (report) saveReport();
+        } catch (e) {
+          console.error(e);
+        }
         process.exit(130);
       }, 2000);
     });
@@ -211,7 +223,8 @@ try {
       for (const { name, file, run, i } of unit.scenarios) {
         if (interrupted) break;
         const t = Date.now();
-        lane.out = folderOf(h.root, name);
+        inFlight.set(name, { name, file, t, i });
+        lane.out =folderOf(h.root, name);
         fs.mkdirSync(lane.out, { recursive: true });
         const running = mark(h.root, name);
         let cleared = true;
@@ -232,17 +245,18 @@ try {
           failed++;
           report.scenarios.push({ name, file, ok: false, ms: Date.now() - t, i, error: String(e?.message ?? e) });
           console.log(`FAIL ${name}: ${e?.message ?? e}`);
-          const why = keep(h.root, name);
+          const why = interrupted ? CUT_OFF : keep(h.root, name);
           if (why) {
             cleared = false;
-            console.log(`${name}: what it wrote couldn't be kept in failed/: ${why}`);
+            if (!interrupted) mark(h.root, name, { failed: true });
+            console.log(`${name}: what it wrote isn't in failed/: ${why}`);
           }
         }
+        inFlight.delete(name);
         if (cleared) fs.rmSync(running, { force: true });
       }
     }
   }));
-  report.scenarios = report.scenarios.sort((a, b) => a.i - b.i).map(({ i, ...s }) => s);
 } finally {
   let stopError;
   try {
@@ -251,7 +265,7 @@ try {
     stopError = e;
   }
   try {
-    if (report) fs.writeFileSync(path.join(h.root, 'report.json'), JSON.stringify(report, null, 2));
+    if (report) saveReport();
   } catch (e) {
     if (stopError) console.error(stopError);
     throw e;

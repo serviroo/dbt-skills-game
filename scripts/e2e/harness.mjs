@@ -1068,10 +1068,12 @@ export async function startHarness(flags = {}) {
     const l = {
       browser, server, root: out, out, flags, shared, renderer, throttleErrors, zone: ZONE, note, leaves, gone, poll,
       stopwatch, quick, untimed, ls, youOf, deepFind, deepDrop, expect, sleep, frames, settled, until, reachHub,
-      openSettings, SAVE, YOU, SEEN, stop, more,
+      openSettings, SAVE, YOU, SEEN, stop,
+      more: () => more().then((m) => Object.assign(m, { out: l.out })),
       open: opener(browser, () => l.out),
       evidence: (page, name) => evidence(page, name, l.out),
       evidenceAll: allEvidence(browser, () => l.out),
+      /** screenshot() of a page or one element (a locator), saved as <name>.png */
       shot: (target, name) => screenshot(target, { path: path.join(l.out, name + '.png') }),
     };
     return l;

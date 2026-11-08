@@ -74,7 +74,7 @@ jobs:
         timeout-minutes: 3
         run: node scripts/e2e/me-93-pwa-resilience.e2e.mjs --software
       - uses: actions/upload-artifact@v7
-        if: failure()
+        if: failure() || cancelled()
         timeout-minutes: 3
         with:
           name: checks-${{ github.run_attempt }}
@@ -243,14 +243,15 @@ jobs:
         timeout-minutes: 30
         run: |
           shard=${{ matrix.shard }}/${{ needs.plan.outputs.parts }}
-          node scripts/e2e.mjs --software --shard="$shard" "--timings=$RUNNER_TEMP/timings/e2e-timings.json"
+          timings=$RUNNER_TEMP/timings/e2e-timings.json
+          timeout -s INT -k 1m 28m node scripts/e2e.mjs --software --shard="$shard" "--timings=$timings"
       - name: Keep what a scenario cut off midway wrote
         id: keep
-        if: failure()
+        if: failure() || cancelled()
         timeout-minutes: 1
-        run: node scripts/e2e/keep.mjs
+        run: node scripts/e2e/keep.mjs ${{ job.status == 'cancelled' && '--failed-only' || '' }}
       - uses: actions/upload-artifact@v7
-        if: failure()
+        if: failure() || cancelled()
         timeout-minutes: 3
         with:
           name: failed-e2e-${{ matrix.shard }}-${{ github.run_attempt }}
