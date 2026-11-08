@@ -16,9 +16,34 @@ export async function installAudioRecorder(ctx) {
         return orig.apply(this, args);
       };
     }
+    const owner = new WeakMap();
+    for (const m of ['setValueAtTime', 'linearRampToValueAtTime', 'setTargetAtTime', 'cancelScheduledValues',
+      'cancelAndHoldAtTime', 'exponentialRampToValueAtTime', 'setValueCurveAtTime']) {
+      const orig = AudioParam.prototype[m];
+      AudioParam.prototype[m] = function (...args) {
+        const node = owner.get(this);
+        if (node) {
+          const list = window.__gateLog.get(node) ?? [];
+          const now = node.context.currentTime;
+          list.push(`${m}(${args.map((a) => typeof a === 'number' ? +a.toFixed(3) : String(a)).join(',')}) at ${now.toFixed(3)}`
+            + ` ${node.context.state}: ${(new Error().stack ?? '').split('\n').slice(2, 6).map((l) => l.trim()
+            .replace(/https?:\/\/[^/]+/g, '')).join(' < ')}`);
+          window.__gateLog.set(node, list.slice(-8));
+          if (m === 'setValueAtTime' && args[0] === 1) {
+            setTimeout(() => {
+              const later = window.__gateLog.get(node) ?? [];
+              later.push(`value ${node.offset.value} at ${node.context.currentTime.toFixed(3)}`);
+              window.__gateLog.set(node, later.slice(-8));
+            }, 1500);
+          }
+        }
+        return orig.apply(this, args);
+      };
+    }
     const make = BaseAudioContext.prototype.createConstantSource;
     BaseAudioContext.prototype.createConstantSource = function (...args) {
       const node = make.apply(this, args);
+      owner.set(node.offset, node);
       window.__gateMade.set(node, `${this.currentTime.toFixed(3)}: ` + (new Error().stack ?? '').split('\n').slice(2, 7)
         .map((l) => l.trim().replace(/https?:\/\/[^/]+/g, '')).join(' < '));
       return node;

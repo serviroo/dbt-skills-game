@@ -165,6 +165,7 @@ async function entryCase(h, c, { viewport = TALL, reduced = false, tag, shots = 
     await page.evaluate((cues) => cues.forEach((q) => window.__daily.sound(q)), CUES);
     await h.sleep(250);
     if (shots) await h.shot(page, `q5-${tag}-1-before`);
+    const preState = await audioState(page);
     const m = await enter(page);
     const at = await probe(page);
     const tIn = m.at[0];
@@ -185,7 +186,7 @@ async function entryCase(h, c, { viewport = TALL, reduced = false, tag, shots = 
     const back = await hear(page, 0, t - 1, t - 0.05);
     const after = await probe(page);
     if (shots) await h.shot(page, `q5-${tag}-3-after`);
-    c.ok(back.rms > 1e-3, `${tag}: the score did not come back outside (${fmt(back)}) ${await audioState(page)}`);
+    c.ok(back.rms > 1e-3, `${tag}: the score did not come back outside (${fmt(back)}) ${await audioState(page)} BEFORE ${preState}`);
     c.ok((await userGains(page)) === gains && after.prefs === prefs && after.volume === before.volume, `${tag}: the visit changed their levels or stored prefs`);
     c.ok(after.progress === before.progress, `${tag}: the visit changed XP, stats, rank or the collection ${before.progress} -> ${after.progress}`);
     c.ok(!errors.length, `${tag}: page errors: ${errors.join(' | ')}`);

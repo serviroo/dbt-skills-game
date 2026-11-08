@@ -16,8 +16,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        head: [base, fix]
-        part: [1, 2, 3, 4, 5]
+        head: [base]
+        part: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -27,9 +27,6 @@ jobs:
           node-version: 20.x
           cache: npm
       - run: npm ci
-      - name: Use the base gate
-        if: matrix.head == 'base'
-        run: sed -i 's/      gate.offset.setValueAtTime(0, 0);/      gate.offset.value = 0;/' src/audio/voice.ts && grep -n "gate.offset" src/audio/voice.ts
       - name: Repeat the two Safe Zone sound checks
         shell: bash
         run: |
@@ -37,9 +34,6 @@ jobs:
           mkdir -p results
           out=results/${{ matrix.head }}-${{ matrix.part }}.txt
           for i in $(seq 1 8); do
-            node scripts/e2e.mjs --software --file=me-92-safe-zone-clean --scenario=safe-zone-silences-score-and-reverb > run.log 2>&1
-            echo "home $i $([ $? -eq 0 ] && echo pass || echo fail)" >> "$out"
-            grep -E "^FAIL" run.log | cut -c1-6000 >> "$out"
             node scripts/e2e.mjs --software --file=safe-zone-quiet --scenario=quiet-entry-at-every-size > run.log 2>&1
             echo "visit $i $([ $? -eq 0 ] && echo pass || echo fail)" >> "$out"
             grep -E "^FAIL" run.log | cut -c1-6000 >> "$out"
