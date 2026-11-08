@@ -31,18 +31,26 @@ jobs:
         if: matrix.head == 'base'
         run: sed -i 's/      gate.offset.setValueAtTime(0, 0);/      gate.offset.value = 0;/' src/audio/voice.ts && grep -n "gate.offset" src/audio/voice.ts
       - name: Repeat the two Safe Zone sound checks
+        shell: bash
         run: |
-          fails=0
-          for i in $(seq 1 4); do
-            if true; then
-              node scripts/e2e.mjs --software --file=me-92-safe-zone-clean --scenario=safe-zone-silences-score-and-reverb > run.log 2>&1 || { fails=$((fails + 1)); echo "home run $i failed"; }
-            fi
-            grep -E "^(ok|FAIL)|output:" run.log | cut -c1-6000
-            node scripts/e2e.mjs --software --file=safe-zone-quiet --scenario=quiet-entry-at-every-size > run.log 2>&1 || { fails=$((fails + 1)); echo "visit run $i failed"; }
-            grep -E "^(ok|FAIL)|did not come back|: before " run.log | cut -c1-6000
+          mkdir -p results
+          out=results/${{ matrix.head }}-${{ matrix.part }}.txt
+          for i in $(seq 1 6); do
+            node scripts/e2e.mjs --software --file=me-92-safe-zone-clean --scenario=safe-zone-silences-score-and-reverb > run.log 2>&1
+            echo "home $i $([ $? -eq 0 ] && echo pass || echo fail)" >> "$out"
+            grep -E "^FAIL" run.log | cut -c1-6000 >> "$out"
+            node scripts/e2e.mjs --software --file=safe-zone-quiet --scenario=quiet-entry-at-every-size > run.log 2>&1
+            echo "visit $i $([ $? -eq 0 ] && echo pass || echo fail)" >> "$out"
+            grep -E "^FAIL" run.log | cut -c1-6000 >> "$out"
           done
-          echo "failed runs: $fails"
-          test "$fails" -eq 0
+          cat "$out" | cut -c1-300
+          exit 0
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: results-${{ matrix.head }}-${{ matrix.part }}
+          path: results
+          retention-days: 3
       - uses: actions/upload-artifact@v7
         if: always()
         with:
