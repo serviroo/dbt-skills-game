@@ -186,6 +186,9 @@ for (const file of newFiles) {
   }
 }
 
+for (const change of changes) {
+  change.binary = Boolean(change.after) && (show(options.head, change.after) ?? '').slice(0, 8000).includes('\0');
+}
 const log = git('log', '-z', '--format=%H%n%an <%ae>%n%cn <%ce>%n%B', `${mergeBase}..${options.head}`);
 for (const [where, why, text] of creditProblems({ changes, log, title: options.title, body: options.body })) {
   say(where, why, text);
