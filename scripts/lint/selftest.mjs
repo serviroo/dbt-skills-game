@@ -107,6 +107,18 @@ function checkWorkflows() {
   }
 }
 
+function checkPinnedDownloads() {
+  const script = path.join(here, 'tools-come-from-pinned-download.mjs');
+  const fixture = path.join(fixtures, 'tools-come-from-pinned-download.yml');
+  const check = (file) => spawnSync('node', [script, file], { cwd: root, encoding: 'utf8' });
+  const run = check(fixture);
+  const found = run.stderr.trim().split('\n');
+  expect(run.status === 1 && found.length === 5, `pinned download: expected 5 findings:\n${run.stderr}`);
+  expect(!found.some((line) => / secrets step (?:5|6) /.test(line)), 'pinned download: a pinned step was rejected');
+  const helper = check(path.join(root, '.github/actions/pinned-download/action.yml'));
+  expect(helper.status === 0, `pinned download: the helper itself was rejected:\n${helper.stderr}`);
+}
+
 function checkDiffLimits() {
   const repo = path.join(scratch, 'repo');
   fs.mkdirSync(repo);
@@ -170,6 +182,7 @@ try {
   checkRules();
   checkStyles();
   checkWorkflows();
+  checkPinnedDownloads();
   checkDiffLimits();
 } finally {
   fs.rmSync(scratch, { recursive: true, force: true });

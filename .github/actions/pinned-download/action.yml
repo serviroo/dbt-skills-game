@@ -1,0 +1,57 @@
+name: Pinned download
+description: Restore a file by its SHA256 from the Actions cache, or download it once, check it and cache it
+inputs:
+  url:
+    description: Where to download the file when the cache doesn't have it
+    required: true
+  sha256:
+    description: The file's SHA256, checked on every run
+    required: true
+outputs:
+  file:
+    description: Path to the checked file
+    value: ${{ steps.place.outputs.file }}
+runs:
+  using: composite
+  steps:
+    - id: place
+      shell: bash
+      env:
+        SHA256: ${{ inputs.sha256 }}
+      run: |
+        if [[ ! "$SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+          echo "::error title=Pinned download::sha256 must be 64 hex digits"
+          exit 1
+        fi
+        echo "file=$RUNNER_TEMP/pinned/$SHA256" >> "$GITHUB_OUTPUT"
+    - id: restore
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ steps.place.outputs.file }}
+        key: pinned-${{ inputs.sha256 }}
+    - if: steps.restore.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        URL: ${{ inputs.url }}
+        FILE: ${{ steps.place.outputs.file }}
+      run: |
+        mkdir -p "$(dirname "$FILE")"
+        if ! curl -fsSL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 300 -o "$FILE" "$URL"; then
+          rm -f "$FILE"
+          echo "::error title=Pinned download::$URL failed and the cache has no copy, so this job can't run"
+          exit 1
+        fi
+    - shell: bash
+      env:
+        SHA256: ${{ inputs.sha256 }}
+        FILE: ${{ steps.place.outputs.file }}
+      run: |
+        if ! echo "$SHA256  $FILE" | sha256sum -c --status -; then
+          echo "::error title=Pinned download::$FILE doesn't match sha256 $SHA256"
+          exit 1
+        fi
+    - if: steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: ${{ steps.place.outputs.file }}
+        key: pinned-${{ inputs.sha256 }}

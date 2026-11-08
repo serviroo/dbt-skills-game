@@ -1,0 +1,20 @@
+jobs:
+  secrets:
+    steps:
+      - run: curl -fsSLo gitleaks.tar.gz "$URL"
+      - run: |
+          wget -q "$URL"
+      - run: gh release download v1 -R gitleaks/gitleaks
+      - run: tar -xzf x.tgz https://github.com/a/b/releases/download/v1/x.tgz
+      - id: fetch
+        uses: ./.github/actions/pinned-download
+        with:
+          url: https://github.com/a/b/releases/download/v1/x.tgz
+          sha256: 0000000000000000000000000000000000000000000000000000000000000000
+      - run: tar -xzf "$ARCHIVE"
+  empty: ~
+runs:
+  using: composite
+  steps:
+    - shell: pwsh
+      run: Invoke-WebRequest $env:URL

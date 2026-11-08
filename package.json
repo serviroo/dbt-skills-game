@@ -9,7 +9,9 @@
     "preview": "vite preview --host 0.0.0.0 --port 4173",
     "check:ids": "node scripts/check-stored-ids.mjs",
     "lint": "node scripts/lint/selftest.mjs && oxlint && npm run lint:css && npm run lint:repo",
-    "lint:repo": "node scripts/lint/jobs-read-artifacts-from-their-own-run.mjs && node scripts/lint/diff-limits.mjs",
+    "lint:repo": "npm run lint:artifacts && npm run lint:downloads && node scripts/lint/diff-limits.mjs",
+    "lint:artifacts": "node scripts/lint/jobs-read-artifacts-from-their-own-run.mjs",
+    "lint:downloads": "node scripts/lint/tools-come-from-pinned-download.mjs",
     "lint:css": "stylelint \"src/**/*.css\""
   },
   "dependencies": {
