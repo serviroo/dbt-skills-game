@@ -16,7 +16,9 @@ import {
 import fs from 'node:fs';
 import path from 'node:path';
 import { installAudioRecorder, audioReady, audioRecorded, audioHeard } from './audio-recorder.mjs';
-import { doorPath, stalledDoorPath, independentStops, spareRoarGoes, repeatedMisses } from './cue-door-checks.mjs';
+import {
+  doorPath, stalledDoorPath, independentStops, spareRoarGoes, repeatedMisses, sharedGateOutlivesTheHit,
+} from './cue-door-checks.mjs';
 import { timedHush, lastSourceStall, expiredEnds, fixedScoreTimes } from './cue-end-checks.mjs';
 import { expiredBuilds } from './cue-deadline-checks.mjs';
 import { droppedRelease, checkedRoar, unownedDoor } from './cue-release-checks.mjs';
@@ -81,6 +83,7 @@ async function boot(h, levels) {
     window.__watch = false;
     window.__stall = null;
     window.__stalls = [];
+    window.__started = 0;
     const behind = (what, t) => {
       if (!window.__watch || !(t > 0)) return;
       window.__scheduled.push(t);
@@ -96,7 +99,9 @@ async function boot(h, levels) {
       window.__stalls.push({ what, from, to: clock.currentTime });
     };
     tapAudioSchedule((_, method, args, time) => behind(method, time), (receiver, method) => {
-      if (!(receiver instanceof ConstantSourceNode)) stall(method);
+      if (receiver instanceof ConstantSourceNode) return;
+      if (window.__watch && method === 'start') window.__started++;
+      stall(method);
     });
     return tap;
   });
@@ -208,7 +213,9 @@ async function startsOnTimeHoweverSlowItsBuild(h, kind) {
           const missed = window.__drops.length;
           const ask = clock.currentTime;
           const t0 = performance.now();
+          const starting = window.__started;
           const { r: handle, stalled, behind } = watched('start', () => start(ask));
+          const sources = window.__started - starting;
           const dropped = window.__opens.length === opened
             ? { from: ask, to: clock.currentTime + span, attempts: window.__drops.slice(missed) } : null;
           const ms = performance.now() - t0;
@@ -216,7 +223,7 @@ async function startsOnTimeHoweverSlowItsBuild(h, kind) {
           const extra = window.__extras[opened];
           const deadline = ask + window.__late;
           const s = { name, rate, ask, deadline, done: clock.currentTime, ms, behind, stalled,
-            opens, extra, dropped, span };
+            opens, extra, dropped, span, sources, attempts: window.__drops.length - missed };
           out.push(s);
           await reach(dropped ? dropped.to : Math.max(ask, ...opens) + span);
           const at = clock.currentTime + LEAD;
@@ -287,7 +294,8 @@ async function startsOnTimeHoweverSlowItsBuild(h, kind) {
       const firstAttempt = s.dropped?.attempts[0];
       const expiredBeforePlacement = firstAttempt && firstAttempt.earliest >= firstAttempt.deadline;
       if (!stalled && !silent && !expiredBeforePlacement) {
-        why.push('the page never stalled while it was placed, so the stall was not tested');
+        const counts = `${s.sources} sources started, ${s.attempts} attempts dropped`;
+        why.push(`the page never stalled while it was placed (${counts}), so the stall was not tested`);
       }
       const untested = 'the page never stalled while it was stopped, so that stall was not tested';
       if (kind !== 'cues' && !stopStalled) why.push(untested);
@@ -364,6 +372,7 @@ export const scenarios = {
   'held-sounds-door-unowned-destinations-too': async (h) =>
     unownedDoor(h, await boot(h, { music: 0, sfx: 1 })),
   'the-door-path-changes-no-sample': doorPath,
+  'a-hit-cleanup-keeps-the-gate-its-roar-shares-until-the-score-ends': sharedGateOutlivesTheHit,
   'a-long-stall-after-opening-leaves-the-door-path-unchanged': async (h) =>
     stalledDoorPath(h, await boot(h, { music: 0, sfx: 1 })),
   'the-hit-and-roar-stop-independently': independentStops,
