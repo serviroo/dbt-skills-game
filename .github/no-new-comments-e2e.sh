@@ -264,6 +264,35 @@ expect "src/said.js:7: adds a comment: explains the console" "a comment beside a
 expect "src/said.js:8: adds a comment" "an empty comment fails"
 expect "src/conf.js:1: adds a comment" "markers around existing code fail"
 
+case_branch executed
+put src/run.js <<'EOF'
+export const make = () => {
+  const program = "return 1; /* explanation */";
+  return new Function(program);
+};
+eval(`1;\x2f\x2a hidden \x2a\x2f`);
+export const paint = (el) => {
+  el.innerHTML = `<defs>
+    <!-- the soft glow -->
+  </defs>`;
+};
+let script;
+script = `1; // why`;
+export const run = (page) => page.evaluate(script);
+EOF
+put src/spdx.js <<'EOF'
+// SPDX-License-Identifier: MIT keeps the cache warm
+// Copyright (c) 2026 Example, the cart total skips free items
+export const a = 1;
+EOF
+commit "feat: executed strings"
+expect "src/run.js:2: adds a comment" "a comment in a string handed to new Function fails"
+expect "src/run.js:5: adds a comment" "an escaped comment in run code fails"
+expect "src/run.js:8: adds a comment" "an HTML comment set as innerHTML fails"
+expect "src/run.js:12: adds a comment" "a comment in a string assigned before a page runs it fails"
+expect "src/spdx.js:1: adds a comment" "prose after a license id fails"
+expect "src/spdx.js:2: adds a comment" "prose after a copyright holder fails"
+
 case_branch allowed
 put src/lic.js <<'EOF'
 #!/usr/bin/env node
@@ -296,6 +325,17 @@ EOF
 put src/d.ts <<'EOF'
 // @ts-expect-error
 export const d: string = 1;
+EOF
+put src/data.js <<'EOF'
+export const echo = (page) => page.evaluate((x) => x, "hello /* world */");
+function a() {
+  const probe = "1; /* x */";
+  return probe;
+}
+export function b(page) {
+  const probe = 1;
+  return page.evaluate(probe) + a();
+}
 EOF
 put src/help.js <<'EOF'
 export const help = `Type a path:

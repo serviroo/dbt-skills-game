@@ -17,13 +17,13 @@ export function scanner(scratch) {
       for (const t of templates) {
         const id = `${item.id}#${nested.length}`;
         if (t.lang === 'js' && depth < 3) nested.push({ id, owner: item.id, ...t, ext: '.js' });
-        else pieces.push(...embed(t.lang, t.text, t.line, t.oneLine));
+        else pieces.push(...embed(t.lang, t.text, t.lines));
       }
     }
     const inner = nested.length ? jsFamily(nested, depth + 1) : new Map();
     for (const n of nested) {
       const { pieces, error } = inner.get(n.id);
-      out.get(n.owner).pieces.push(...shifted(error ? textTemplatePieces(n.text) : pieces, n.line, n.oneLine));
+      out.get(n.owner).pieces.push(...shifted(error ? textTemplatePieces(n.text) : pieces, n.lines));
     }
     return out;
   }
@@ -38,8 +38,8 @@ export function scanner(scratch) {
     },
   };
 
-  function embed(lang, text, firstLine, oneLine = false) {
-    return shifted((readers[lang] ?? textTemplatePieces)(text), firstLine, oneLine);
+  function embed(lang, text, at) {
+    return shifted((readers[lang] ?? textTemplatePieces)(text), at);
   }
 
   return function scan(files) {

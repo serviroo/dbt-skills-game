@@ -2,7 +2,7 @@ import fs from 'node:fs';
 
 const MARK = /\/\*\s*(glsl|wgsl|css|html|js)\s*\*\/\s*$/;
 const TAGS = new Set(['glsl', 'wgsl', 'css', 'html']);
-const RUNS_CODE = new Set([
+const FIRST_ARG_RUNS = new Set([
   'evaluate',
   'evaluateHandle',
   'evaluateAll',
@@ -12,15 +12,16 @@ const RUNS_CODE = new Set([
   'addInitScript',
   'setTimeout',
   'setInterval',
-  'Function',
   'eval',
 ]);
+const HTML_SINKS = new Set(['innerHTML', 'outerHTML']);
 const SHADER = /^(vertex|fragment)Shader$/;
 const NAMED = [
   [/(^|_)(css|styles?)$/i, 'css'],
   [/(vert|frag|shader|glsl)$/i, 'glsl'],
 ];
 const STOP = /Statement$|Declaration$|^Program$|FunctionExpression$|^ArrowFunctionExpression$/;
+const ESCAPES = { n: '\n', t: '\t', r: '\r', b: '\b', f: '\f', v: '\v', 0: '\0' };
 
 function nameOf(node) {
   if (!node) return null;
@@ -30,42 +31,81 @@ function nameOf(node) {
   return null;
 }
 
+function codeArgs(call) {
+  if (!/^(Call|New)Expression$/.test(call.type)) return [];
+  const name = nameOf(call.callee);
+  if (name === 'Function') return call.arguments;
+  if (name === 'insertAdjacentHTML') return [];
+  return FIRST_ARG_RUNS.has(name) ? call.arguments.slice(0, 1) : [];
+}
+
 function marked(node, text) {
   const parent = node.parent;
   if (parent?.type === 'TaggedTemplateExpression' && TAGS.has(nameOf(parent.tag))) return nameOf(parent.tag);
   return MARK.exec(text.slice(Math.max(0, node.range[0] - 40), node.range[0]))?.[1] ?? null;
 }
 
-function langOf(node, text, codeNames) {
+function langOf(node, text, codeNodes) {
   for (let child = null, at = node; at && !STOP.test(at.type); child = at, at = at.parent) {
     const mark = at.type === 'TemplateLiteral' ? marked(at, text) : null;
     if (mark) return mark;
-    const call = /^(Call|New)Expression$/.test(at.type) && at.arguments.includes(child);
-    if (call && RUNS_CODE.has(nameOf(at.callee))) return 'js';
+    if (codeNodes.has(at) || codeArgs(at).includes(child)) return 'js';
+    if (at.type === 'CallExpression' && nameOf(at.callee) === 'insertAdjacentHTML' && at.arguments[1] === child) {
+      return 'html';
+    }
     if (at.type === 'Property' && at.value === child && SHADER.test(nameOf(at.key) ?? '')) return 'glsl';
-    if (at.type === 'AssignmentExpression' && at.right === child && SHADER.test(nameOf(at.left) ?? '')) return 'glsl';
+    if (at.type === 'AssignmentExpression' && at.right === child) {
+      if (SHADER.test(nameOf(at.left) ?? '')) return 'glsl';
+      if (HTML_SINKS.has(nameOf(at.left))) return 'html';
+    }
     if (at.type === 'VariableDeclarator' && at.init === child) {
-      if (codeNames.has(at.id.name)) return 'js';
       return NAMED.find(([pattern]) => pattern.test(at.id.name ?? ''))?.[1] ?? 'text';
     }
   }
   return 'text';
 }
 
-function contentOf(node, text) {
-  const start = node.range[0] + 1;
-  const chars = text
-    .slice(start, node.range[1] - 1)
-    .split('')
-    .map((c) => (c === '\n' ? c : ' '));
-  for (const [i, quasi] of node.quasis.entries()) {
-    const rawStart = quasi.range[0] + (text[quasi.range[0]] === '`' || text[quasi.range[0]] === '}' ? 1 : 0);
-    const raw = quasi.value.raw;
-    for (let k = 0; k < raw.length; k++) chars[rawStart - start + k] = raw[k];
-    const gap = rawStart - start + raw.length;
-    if (i < node.quasis.length - 1 && chars[gap] !== '\n') chars[gap] = '0';
+function decode(raw, firstLine, out) {
+  let line = firstLine;
+  for (let i = 0; i < raw.length; i++) {
+    let char = raw[i];
+    if (char === '\\') {
+      const kind = raw[++i];
+      const hex = (from, to) => parseInt(raw.slice(from, to), 16);
+      if (kind === '\n') {
+        line++;
+        continue;
+      }
+      if (kind === 'x') char = String.fromCharCode(hex(i + 1, (i += 2) + 1));
+      else if (kind === 'u' && raw[i + 1] === '{') char = String.fromCodePoint(hex(i + 2, (i = raw.indexOf('}', i))));
+      else if (kind === 'u') char = String.fromCharCode(hex(i + 1, (i += 4) + 1));
+      else char = ESCAPES[kind] ?? kind;
+    } else if (char === '\n') {
+      line++;
+    }
+    out.text += char;
+    if (char === '\n') out.lines.push(line);
   }
-  return chars.join('');
+}
+
+function contentOf(node, text, lineAt) {
+  const out = { text: '', lines: [lineAt(node.range[0])] };
+  if (node.type === 'Literal') {
+    decode(text.slice(node.range[0] + 1, node.range[1] - 1), out.lines[0], out);
+    return out;
+  }
+  for (const [i, quasi] of node.quasis.entries()) {
+    const start = quasi.range[0] + (text[quasi.range[0]] === '`' || text[quasi.range[0]] === '}' ? 1 : 0);
+    const line = lineAt(start);
+    while (out.lines.at(-1) < line) {
+      out.text += '\n';
+      out.lines.push(out.lines.at(-1) + 1);
+    }
+    const last = i === node.quasis.length - 1;
+    decode(text.slice(start, quasi.range[1] - (last ? 1 : 2)), line, out);
+    if (!last) out.text += '0';
+  }
+  return out;
 }
 
 export default {
@@ -75,27 +115,34 @@ export default {
       create(context) {
         const source = context.sourceCode;
         const strings = [];
-        const codeNames = new Set();
+        const codeNodes = new Set();
+        const starts = [0];
+        for (let at = source.text.indexOf('\n'); at >= 0; at = source.text.indexOf('\n', at + 1)) starts.push(at + 1);
+        const lineAt = (offset) => starts.findLastIndex((start) => start <= offset) + 1;
+        function trackCode(call) {
+          for (const arg of codeArgs(call).filter((a) => a.type === 'Identifier')) {
+            let scope = source.getScope(arg);
+            while (scope && !scope.set.has(arg.name)) scope = scope.upper;
+            const variable = scope?.set.get(arg.name);
+            for (const def of variable?.defs ?? []) if (def.node.init) codeNodes.add(def.node.init);
+            for (const ref of variable?.references ?? []) if (ref.writeExpr) codeNodes.add(ref.writeExpr);
+          }
+        }
         return {
           TemplateLiteral: (node) => strings.push(node),
           Literal(node) {
             if (typeof node.value === 'string' && node.parent?.type !== 'ImportDeclaration') strings.push(node);
           },
-          CallExpression(node) {
-            if (!RUNS_CODE.has(nameOf(node.callee))) return;
-            for (const arg of node.arguments) if (arg.type === 'Identifier') codeNames.add(arg.name);
-          },
+          CallExpression: trackCode,
+          NewExpression: trackCode,
           'Program:exit'() {
             const comments = source.getAllComments().map((c) => [c.range[0], c.range[1]]);
             const templates = [];
             for (const node of strings) {
-              const lang = langOf(node, source.text, codeNames);
-              const line = node.loc.start.line;
-              const oneLine = node.type === 'Literal';
-              if (oneLine && lang !== 'text') templates.push({ lang, line, text: node.value, oneLine });
-              if (node.type !== 'TemplateLiteral') continue;
-              const text = contentOf(node, source.text);
-              if (lang !== 'text' || /\/\/|\/\*|<!--/.test(text)) templates.push({ lang, line, text });
+              const lang = langOf(node, source.text, codeNodes);
+              if (node.type === 'Literal' && lang === 'text') continue;
+              const { text, lines } = contentOf(node, source.text, lineAt);
+              if (lang !== 'text' || /\/\/|\/\*|<!--/.test(text)) templates.push({ lang, text, lines });
             }
             const found = { file: context.physicalFilename ?? context.filename, comments, templates };
             fs.appendFileSync(process.env.NNC_OUT, `${JSON.stringify(found)}\n`);

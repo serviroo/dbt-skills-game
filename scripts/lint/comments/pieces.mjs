@@ -25,9 +25,9 @@ export function rangePieces(text, starts, start, end) {
 
 let embedded = 0;
 
-export function shifted(pieces, firstLine, oneLine = false) {
+export function shifted(pieces, at) {
   const prefix = `e${embedded++}`;
-  const place = (p) => (oneLine ? firstLine : p.line + firstLine - 1);
+  const place = (p) => (Array.isArray(at) ? (at[p.line - 1] ?? at.at(-1)) : p.line + at - 1);
   return pieces.map((p) => ({ ...p, line: place(p), group: `${prefix}:${p.group}` }));
 }
 
@@ -43,10 +43,11 @@ const TEXT_COMMENT = /^[ \t]*(\/\/|\/\*|<!--)([ \t]|$)/;
 export const textTemplatePieces = (text) => wholeLinePieces(text, TEXT_COMMENT);
 
 const CODE_LINE = /[;{}][ \t]*$/;
+const SLASH_LINE = /^[ \t]*\/\/([ \t]|$)/;
 
 export function codeTextPieces(text) {
-  const lines = text.split('\n').filter((line) => !TEXT_COMMENT.test(line));
-  return lines.some((line) => CODE_LINE.test(line)) ? textTemplatePieces(text) : [];
+  const codeShaped = text.split('\n').some((line) => !TEXT_COMMENT.test(line) && CODE_LINE.test(line));
+  return textTemplatePieces(text).filter((p) => codeShaped || !SLASH_LINE.test(p.text));
 }
 
 export function clikePieces(text) {

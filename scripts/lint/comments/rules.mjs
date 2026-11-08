@@ -20,20 +20,24 @@ export function strip(text) {
     .trim();
 }
 
+const SPDX_ID = '\\(?[A-Za-z0-9.+-]+\\)?';
+const HOLDER_WORD = "([A-Z0-9@][\\w.&'@-]*|and|the|of|contributors|authors)";
 const NOTICES = [
-  /^spdx-license-identifier: [a-z0-9.+() -]+$/,
-  /^(copyright )?(\(c\) |© )?[0-9]{4}([-, ]+[0-9]{4})*( [^.]+)?\.?( all rights reserved\.?)?$/,
-  /^all rights reserved\.?$/,
-  /^@(license|preserve)( [a-z0-9.+-]+)?$/,
+  new RegExp(`^SPDX-License-Identifier: ${SPDX_ID}( (AND|OR|WITH) ${SPDX_ID})*$`),
+  new RegExp(
+    `^(Copyright|COPYRIGHT)( \\(c\\)| \\(C\\)| ©)? [0-9]{4}([-, ]+[0-9]{4})*` +
+      `( ${HOLDER_WORD}(,? ${HOLDER_WORD})*)?\\.?` +
+      '( All rights reserved\\.?)?$',
+  ),
+  /^All rights reserved\.?$/,
+  /^@(license|preserve)( [A-Za-z0-9.+-]+)?$/,
 ];
 
 const words = (text) => text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
 export function licenseLine(text, licenseText) {
-  const notice = strip(text).toLowerCase();
-  if (/^(copyright|\(c\)|©|spdx|all rights|@license|@preserve)/.test(notice) && NOTICES.some((n) => n.test(notice))) {
-    return true;
-  }
+  const notice = strip(text);
+  if (NOTICES.some((n) => n.test(notice))) return true;
   const said = words(text);
   return said.split(' ').length >= 4 && ` ${words(licenseText)} `.includes(` ${said} `);
 }
