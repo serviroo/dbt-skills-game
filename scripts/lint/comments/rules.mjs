@@ -1,5 +1,5 @@
-const MARKS = ['\\/\\/+', '\\/\\*+!?', '\\*+\\/', '<!--', '-->'];
-const OPENERS = ['\\/\\/+', '\\/\\*+!?', '<!--', '\\*+'];
+const MARKS = ['\\/\\/+', '\\/\\*+!?', '\\*+\\/', '<!--', '-->', '#+', '"""', "'''"];
+const OPENERS = ['\\/\\/+', '\\/\\*+!?', '<!--', '#+', '\\*+'];
 const anyMark = new RegExp(MARKS.join('|'), 'g');
 const opener = new RegExp(`^(${OPENERS.join('|')})`);
 
@@ -57,6 +57,17 @@ const DIRECTIVES = [
   /^(istanbul ignore (next|else|if|file)|[cv]8 ignore (next|start|stop|file|if|else))$/,
   /^@(vitest|jest)-environment [a-z-]+$/,
   /^[#@] source(mapping)?url=\S+$/,
+  /^stylelint-(disable|enable)(-next-line|-line)?( [a-z0-9/-]+( *, *[a-z0-9/-]+)*)?$/,
+  /^noqa(: *[a-z]+[0-9]+( *, *[a-z]+[0-9]+)*)?$/,
+  /^type: *ignore(\[[a-z-]+( *, *[a-z-]+)*\])?$/,
+  /^pylint: *(disable|enable)=[a-z0-9,-]+$/,
+  /^pyright: *(ignore(\[[a-z]+( *, *[a-z]+)*\])?|basic|strict)$/,
+  /^mypy: *[a-z-]+(=[a-z0-9,-]+)?$/,
+  /^fmt: *(off|on|skip)$/,
+  /^isort: *(skip_file|skip|off|on)$/,
+  /^pragma: no cover$/,
+  /^nosec( [a-z][0-9]+)*$/,
+  /^-\*- coding: *[a-z0-9_-]+ *-\*-$/,
 ];
 
 const GLOBALS = /^(globals?|exported) [a-z_$][a-z0-9_$]*(:[a-z]+)?( *, *[a-z_$][a-z0-9_$]*(:[a-z]+)?)*$/;

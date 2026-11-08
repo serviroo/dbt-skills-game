@@ -182,7 +182,8 @@ for (const file of newFiles) {
   for (const group of groups(pieces)) {
     if (!group.some((p) => added.has(p.line))) continue;
     const found = verdict(group, header, added);
-    if (found) say(`${file.path}:${found[0]}`, 'adds a comment', found[1]);
+    const kind = group.some((p) => p.kind === 'd') ? 'adds a docstring' : 'adds a comment';
+    if (found) say(`${file.path}:${found[0]}`, kind, found[1]);
   }
 }
 
