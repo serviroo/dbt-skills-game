@@ -1,10 +1,29 @@
 import path from 'node:path';
-import { clikePieces, codeTextPieces, shifted, textTemplatePieces } from './pieces.mjs';
+import { clikePieces, codeTextPieces, shifted, textTemplatePieces, wholeLinePieces } from './pieces.mjs';
 import { oxlintScan } from './scan-js.mjs';
+import { cssPieces, htmlPieces } from './scan-markup.mjs';
+import { pythonPieces } from './scan-py.mjs';
 
-const BY_EXTENSION = new Map(['js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx', 'mts', 'cts'].map((ext) => [ext, 'js']));
+const BY_EXTENSION = new Map([
+  ...['js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx', 'mts', 'cts'].map((ext) => [ext, 'js']),
+  ['css', 'css'],
+  ['html', 'html'],
+  ['py', 'py'],
+  ['json', 'json'],
+]);
 
-export const languageOf = (file) => BY_EXTENSION.get(path.extname(file).slice(1).toLowerCase()) ?? null;
+export function languageOf(file) {
+  if (path.basename(file) === '.gitignore') return 'gitignore';
+  return BY_EXTENSION.get(path.extname(file).slice(1).toLowerCase()) ?? null;
+}
+
+function attempt(read, fallback) {
+  try {
+    return read();
+  } catch {
+    return fallback();
+  }
+}
 
 export function scanner(scratch) {
   function jsFamily(items, depth = 0) {
@@ -32,6 +51,8 @@ export function scanner(scratch) {
     glsl: clikePieces,
     wgsl: clikePieces,
     text: codeTextPieces,
+    css: (text) => attempt(() => cssPieces(text), () => textTemplatePieces(text)),
+    html: (text) => htmlPieces(text, embed),
     js: (text) => {
       const { pieces, error } = jsFamily([{ id: 'embedded', text, ext: '.js' }]).get('embedded');
       return error ? textTemplatePieces(text) : pieces;
@@ -42,8 +63,22 @@ export function scanner(scratch) {
     return shifted((readers[lang] ?? textTemplatePieces)(text), at);
   }
 
+  function scanOne({ lang, text }) {
+    if (lang === 'gitignore') return { pieces: wholeLinePieces(text, /^[ \t]*#/), error: null };
+    if (lang === 'json') return { pieces: clikePieces(text), error: null };
+    if (lang === 'html') return { pieces: htmlPieces(text, embed), error: null };
+    if (lang === 'py') return pythonPieces(text, scratch);
+    try {
+      return { pieces: cssPieces(text), error: null };
+    } catch (error) {
+      return { pieces: [], error: error.reason ?? error.message };
+    }
+  }
+
   return function scan(files) {
-    const items = files.map((f) => ({ id: f.id, text: f.text, ext: path.extname(f.path).toLowerCase() }));
-    return jsFamily(items);
+    const js = files.filter((f) => f.lang === 'js');
+    const results = jsFamily(js.map((f) => ({ id: f.id, text: f.text, ext: path.extname(f.path).toLowerCase() })));
+    for (const f of files) if (f.lang !== 'js') results.set(f.id, scanOne(f));
+    return results;
   };
 }
