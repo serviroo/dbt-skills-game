@@ -7,8 +7,9 @@ import { ALLY_NAMES, ART, ART_PROMPTS } from '../content/daily-lines';
 import { playerName } from '../core/you';
 import type { App, Route, ScreenOut, Visit } from './app';
 import { icon } from './art';
-import { artStore, extrasOf, revOf, type Draft, type DrawingMeta, type DrawingRec } from './artstore';
+import { artStore, extrasOf, revOf, type DrawingMeta, type DrawingRec } from './artstore';
 import { canvasBlob, INKS, InkPad, PAGE, renderDrawing, SIZES, TOOLS, type Paper, type Stroke, type Tool } from './ink';
+import { DrawVisit } from './draw-visit';
 import { dayLabel } from './lines';
 import { uid } from './store';
 import { btn, chip, field, h, keptWhole, p, panel, radioKeys, redrawn, shareOrSave, typo } from './ui';
@@ -16,9 +17,6 @@ import { pageHead, wholeText } from './page-head';
 
 const store = (app: App) => artStore(app.store.key);
 const KEPT_APART = 'A newer copy of this drawing arrived, so this one was kept as its own page.';
-
-/** A draft untouched this long was left by an earlier session (iOS can hand a relaunched app a new tab id). */
-const ORPHAN_MS = 120e3;
 /** The colours an ink's dot is drawn in (.dq-swatch-dot). */
 const dotStyle = (ink: (typeof INKS)[number]) => `--b:${ink.body};--c:${ink.core ?? ink.mid ?? ink.body};--g:${ink.halo}`;
 
@@ -285,16 +283,17 @@ function entryArt(kind: Paper) {
 }
 
 // ---------------- Drawing page ----------------
-export function drawScreen(app: App, route: Route): ScreenOut {
+export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const r = route as Extract<Route, { name: 'draw' }>;
+  const opened = new DrawVisit(r, visit);
   const kind: Paper = r.kind === 'ally' ? 'ally' : 'today';
   const as = store(app);
   const tab = as.claimTab();
   const own = (id?: string | null) => (id ? `edit:${id}:${tab.id}` : `${kind}:${tab.id}`);
-  let key = own(r.id);
+  let key = own(opened.editId);
   let saving = false;
   let storing = false;
-  let recId = r.id ?? null;
+  let recId = opened.editId ?? null;
   let rec: DrawingRec | null = null;
   let bases: string[] | undefined;
   let promptRoll = 0;
@@ -319,6 +318,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     draftTimer = 0;
     if (!dirty) return;
     if (!key.endsWith(`:${tab.id}`)) key = own(recId);
+    opened.hold();
     if (!pad.strokes.length && !recId) return void as.dropDraft(key);
     void as.putDraft({ key, kind, editId: recId ?? undefined, bases: recId ? bases : undefined, prompt, strokes: pad.strokes, t: Date.now() });
   };
@@ -506,6 +506,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     const saved: DrawingRec = { ...next, ...res.labels, id: res.id, updated: res.updated };
     rec = saved;
     recId = res.id;
+    opened.hold();
     const failed = res.stored === 'failed';
     bases = failed && res.id === id ? [...(bases ?? []), res.rev].slice(-8) : [res.rev];
     const copied = res.id !== id;
@@ -813,24 +814,9 @@ export function drawScreen(app: App, route: Route): ScreenOut {
   void (async () => {
     await tab.ready;
     if (left) return;
-    key = own(r.id);
-    let draft: Draft | null = null;
-    if (r.draft) {
-      draft = await as.getDraft(r.draft);
-      if (draft?.key.endsWith(`:${tab.id}`)) key = draft.key;
-    }
-    if (!draft) draft = await as.getDraft(key);
-    if (!draft && !r.draft) {
-      // this tab's other draft of the same page (a page first saved from a fresh screen), else one an earlier session
-      // left; a younger draft may belong to a tab that is still open, so it only waits in the Art room
-      const same = (await as.drafts()).filter((d) => (r.id ? d.editId === r.id : d.kind === kind && !d.editId));
-      const found = same.find((d) => d.key.endsWith(`:${tab.id}`)) ?? same.find((d) => !(Date.now() - d.t < ORPHAN_MS));
-      if (found) {
-        draft = found;
-        if (found.key.endsWith(`:${tab.id}`)) key = found.key;
-      }
-    }
-    const id = r.id ?? draft?.editId;
+    const draft = await opened.draft(as, kind, tab.id, own(opened.editId));
+    key = draft?.key.endsWith(`:${tab.id}`) ? draft.key : own(opened.editId);
+    const id = opened.editId ?? draft?.editId;
     if (id) {
       recId = id;
       rec = await as.get(id);
@@ -867,6 +853,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     title: kind === 'ally' ? ART.allyTitle : ART.todayTitle,
     mode: 'sub',
     bubbles: [0, 0],
+    keep: () => opened.keep(() => recId, () => key),
     after: () => {
       app.sheetLayer.append(sheet, riseEl);
       ro.observe(main);
