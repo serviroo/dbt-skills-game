@@ -1,19 +1,10 @@
 import yaml from 'js-yaml';
+import { lineOf, lineStarts } from './pieces.mjs';
 
 const BASH = /^(bash|sh)\b/;
 const SHELLS = { python: 'py', node: 'js' };
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
-
-function differences(a, b, key = null, found = []) {
-  if (JSON.stringify(a) === JSON.stringify(b)) return found;
-  const sameKeys = isObject(a) && isObject(b) && Object.keys(a).join('\n') === Object.keys(b).join('\n');
-  const sameLength = Array.isArray(a) && Array.isArray(b) && a.length === b.length;
-  if (sameKeys) for (const k of Object.keys(a)) differences(a[k], b[k], k, found);
-  else if (sameLength) a.forEach((item, i) => differences(item, b[i], i, found));
-  else found.push({ key, a });
-  return found;
-}
 
 function steps(docs) {
   const found = [];
@@ -32,70 +23,84 @@ function steps(docs) {
   return found;
 }
 
-function cutComment(value, comment) {
-  const at = value.indexOf(comment);
-  if (at < 0) return null;
-  const end = value.indexOf('\n', at);
-  return value.slice(0, at) + (end < 0 ? '' : value.slice(end));
-}
-
-function inRunOnly(before, after, comment, shell, bashRuns) {
-  const changed = differences(before, after);
-  return (
-    changed.length > 0 &&
-    changed.every(({ key, a }) => {
-      const cut = key === 'run' && bashRuns.has(a) ? cutComment(a, comment) : null;
-      return cut !== null && shell.sameMeaning(a, cut);
-    })
-  );
-}
-
 function load(text) {
+  const spans = [];
+  const open = [];
+  let key = null;
+  const listener = (type, state) => {
+    if (type === 'open') return void open.push(state.position);
+    const start = open.pop();
+    if (typeof state.result !== 'string') return;
+    spans.push({ start, end: state.position, value: state.result, key });
+    key = state.result;
+  };
   try {
-    return { value: yaml.loadAll(text) };
+    return { value: yaml.loadAll(text, null, { listener }), spans };
   } catch (error) {
     return { error: error.reason ?? error.message };
   }
 }
 
-function placed(pieces, lines, wanted) {
-  return pieces.flatMap((piece) => {
-    const said = piece.text.trim();
-    const at = lines.map((line, i) => i + 1).filter((n) => said && lines[n - 1].includes(said));
-    const line = at.find((n) => wanted.has(n)) ?? at[0];
-    return line ? [{ ...piece, line }] : [];
-  });
+function sourceLines(span, code, text, starts) {
+  const head = text.slice(span.start, span.end).trimEnd();
+  const lead = head.length - head.trimStart().length;
+  const first = lineOf(starts, span.start + lead);
+  const count = code.split('\n').length;
+  if (!head.includes('\n')) return Array.from({ length: count }, () => first);
+  if (head.trimStart()[0] === '|') return Array.from({ length: count }, (_, k) => first + 1 + k);
+  return null;
 }
 
-export function yamlPieces(text, wanted, shell, embed) {
+function counted(texts) {
+  const counts = new Map();
+  for (const text of texts) counts.set(text, (counts.get(text) ?? 0) + 1);
+  return counts;
+}
+
+function blame(found, index, comments, read, context) {
+  const { text, lines, starts, wanted } = context;
+  const blamed = [];
+  const before = counted(comments);
+  for (let n = lineOf(starts, found.span.start); n <= lineOf(starts, found.span.end - 1); n++) {
+    if (!wanted.has(n)) continue;
+    const trial = load(lines.filter((_, i) => i !== n - 1).join('\n'));
+    const code = trial.value ? steps(trial.value)[index]?.code : undefined;
+    if (code === undefined) continue;
+    const after = counted(read(code));
+    const lost = comments.find((c) => (after.get(c) ?? 0) < before.get(c));
+    if (lost) blamed.push({ line: n, text: lost, group: `y${n}` });
+  }
+  return blamed;
+}
+
+export function yamlPieces(text, wanted, embed) {
   const before = load(text);
   if (before.error) return { pieces: [], error: before.error };
-  const found = steps(before.value);
-  const bashRuns = new Set(found.filter((s) => s.key === 'run' && BASH.test(s.shell)).map((s) => s.code));
-  for (const step of found) {
-    const lang = BASH.test(step.shell) ? 'sh' : SHELLS[step.shell.split(' ')[0]];
-    if (!lang) return { pieces: [], error: `a run step uses ${step.shell}, which this check can't read` };
-    if (lang === 'sh' && shell.declared(step.code) === null) {
-      return { pieces: [], error: "bash can't parse a run step" };
-    }
-  }
   const lines = text.split('\n');
+  const starts = lineStarts(text);
+  const context = { text, lines, starts, wanted: new Set(wanted) };
   const pieces = [];
   for (const n of wanted) {
     const line = lines[n - 1] ?? '';
     for (let at = line.indexOf('#'); at >= 0; at = line.indexOf('#', at + 1)) {
       if (at > 0 && !/[ \t]/.test(line[at - 1])) continue;
       const after = load(lines.with(n - 1, line.slice(0, at).trimEnd()).join('\n'));
-      if (after.error) continue;
-      const same = JSON.stringify(after.value) === JSON.stringify(before.value);
-      if (!same && !inRunOnly(before.value, after.value, line.slice(at).trim(), shell, bashRuns)) continue;
+      if (after.error || JSON.stringify(after.value) !== JSON.stringify(before.value)) continue;
       pieces.push({ line: n, text: line.slice(at), group: `l${n}` });
       break;
     }
   }
-  for (const step of found) {
-    const lang = BASH.test(step.shell) ? 'embedded-sh' : SHELLS[step.shell.split(' ')[0]];
-    pieces.push(...placed(embed(lang, step.code, 1), lines, new Set(wanted)));
+  const unused = [...before.spans];
+  for (const [index, step] of steps(before.value).entries()) {
+    const lang = BASH.test(step.shell) ? 'sh' : SHELLS[step.shell.split(' ')[0]];
+    if (!lang) return { pieces: [], error: `a run step uses ${step.shell}, which this check can't read` };
+    const at = unused.findIndex((s) => s.key === step.key && s.value === step.code);
+    if (at < 0) return { pieces: [], error: `can't find where a ${step.key} step is` };
+    const span = unused.splice(at, 1)[0];
+    const map = sourceLines(span, step.code, text, starts);
+    const read = (code) => embed(lang, code, 1).map((p) => p.text.trim());
+    if (map) pieces.push(...embed(lang, step.code, map));
+    else pieces.push(...blame({ span }, index, read(step.code), read, context));
   }
   return { pieces, error: null };
 }

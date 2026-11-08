@@ -3,7 +3,7 @@ import { clikePieces, codeTextPieces, shifted, textTemplatePieces, wholeLinePiec
 import { oxlintScan } from './scan-js.mjs';
 import { cssPieces, htmlPieces } from './scan-markup.mjs';
 import { pythonPieces } from './scan-py.mjs';
-import { bashParser, embeddedCode, shellPieces } from './scan-shell.mjs';
+import { bashParser, shellPieces } from './scan-shell.mjs';
 import { yamlPieces } from './scan-yaml.mjs';
 
 const BY_EXTENSION = new Map([
@@ -69,7 +69,6 @@ export function scanner(scratch) {
     html: (text) => htmlPieces(text, embed),
     py: (text) => readable(pythonPieces(text, scratch)),
     sh: (text) => readable(shellPieces(text, everyLine(text), shell, embed)),
-    'embedded-sh': (text) => embeddedCode(text.split('\n')).flatMap((doc) => embed(doc.lang, doc.text, doc.line)),
     js: (text) => {
       const { pieces, error } = jsFamily([{ id: 'embedded', text, ext: '.js' }]).get('embedded');
       return error ? textTemplatePieces(text) : pieces;
@@ -87,7 +86,7 @@ export function scanner(scratch) {
     try {
       if (lang === 'py') return pythonPieces(text, scratch);
       if (lang === 'sh') return shellPieces(text, wanted, shell, embed);
-      if (lang === 'yaml') return yamlPieces(text, wanted, shell, embed);
+      if (lang === 'yaml') return yamlPieces(text, wanted, embed);
       return { pieces: cssPieces(text), error: null };
     } catch (error) {
       return { pieces: [], error: error.reason ?? error.message };

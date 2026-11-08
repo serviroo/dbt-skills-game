@@ -2,9 +2,14 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const HEREDOC = /^<<(-?)[ \t]*\\?(['"]?)([A-Za-z_][A-Za-z0-9_-]*)\2/;
-const INLINE = /(^|[\s;|&(])(node|deno|bun|bash|sh|python3?) +(-e|--eval|-p|--print|-c) +(['"])/g;
+const HEREDOC = /^<<(-?)[ \t]*(?:\\?([A-Za-z0-9_.-]+)|(['"])(.+?)\3)/;
 const LANGS = { sh: 'sh', bash: 'sh', dash: 'sh', python: 'py', python3: 'py', node: 'js', deno: 'js', bun: 'js' };
+const WRAPPERS = new Set([
+  ...['if', 'then', 'else', 'elif', 'do', 'while', 'until', '!'],
+  ...['time', 'exec', 'command', 'nohup', 'sudo', 'env', 'timeout'],
+]);
+const REMOTE = new Set(['ssh', 'docker', 'podman', 'kubectl']);
+const CODE_FLAG = { js: /^(-e|--eval|-p|--print)$/, sh: /^-[a-z]*c[a-z]*$/, py: /^-[A-Za-z]*c$/ };
 
 const startsComment = (line, at) => at === 0 || /[\s;&|()]/.test(line[at - 1]);
 
@@ -52,29 +57,58 @@ function bare(line) {
   return out;
 }
 
+const toolOf = (word) => LANGS[path.basename(word).replace(/^(python3?)\.[0-9]+$/, '$1')];
+
+function commandOf(part) {
+  const words = part.trim().split(/\s+/).filter(Boolean);
+  let k = 0;
+  const skippable = (word) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(word) || WRAPPERS.has(word) || word[0] === '-';
+  while (k < words.length && skippable(words[k])) {
+    k += words[k] === 'timeout' ? 2 : 1;
+  }
+  const lang = toolOf(words[k] ?? '');
+  if (lang || !REMOTE.has(path.basename(words[k] ?? ''))) return lang ?? null;
+  const tools = words.slice(k + 1).map(toolOf).filter(Boolean);
+  if (tools.length) return tools.at(-1);
+  return words[k] === 'ssh' && words.slice(k + 1).filter((w) => w[0] !== '-').length < 2 ? 'sh' : null;
+}
+
 function consumer(plain, at) {
-  const parts = plain.split(/(\|\||&&|;|\|)/);
-  let start = 0;
-  let index = 0;
-  while (index < parts.length - 1 && start + parts[index].length < at) start += parts[index++].length;
-  const commandOf = (part) => {
-    const words = (part ?? '').trim().split(/\s+/).filter((w) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w));
-    const remote = words[0] === 'ssh' ? words.slice(1).filter((w) => !w.startsWith('-')) : null;
-    return remote ? (remote[1] ?? 'sh') : path.basename(words[0] ?? '');
-  };
-  return LANGS[commandOf(parts[index])] ?? (parts[index + 1] === '|' ? LANGS[commandOf(parts[index + 2])] : null);
+  const parts = plain.slice(0, at).split(/(\|\||&&|;|\||\$\(|\(|`)/);
+  const after = plain.slice(at).split(/(\|\||&&|;|\|)/);
+  return commandOf(parts.at(-1)) ?? (after[1] === '|' ? commandOf(after[2] ?? '') : null);
+}
+
+function unquote(word, firstLine) {
+  const out = { text: '', lines: [firstLine] };
+  const double = word[0] === '"';
+  const body = word.slice(1, -1);
+  for (let k = 0, line = firstLine; k < body.length; k++) {
+    let char = body[k];
+    if (double && char === '\\' && /[\\"$`\n]/.test(body[k + 1] ?? '')) char = body[++k];
+    if (char === '\n') line++;
+    if (char === '\n' && body[k - 1] === '\\' && double) continue;
+    out.text += char;
+    if (char === '\n') out.lines.push(line);
+  }
+  return out;
 }
 
 function inlinePrograms(lines, i, plain) {
-  const found = [];
   const rest = lines.slice(i).join('\n');
-  for (const match of lines[i].matchAll(INLINE)) {
-    const open = match.index + match[0].length - 1;
-    if (plain[match.index + match[1].length] !== match[2][0]) continue;
-    const quote = match[4];
-    let close = open + 1;
-    while (close < rest.length && rest[close] !== quote) close += quote === '"' && rest[close] === '\\' ? 2 : 1;
-    if (close < rest.length) found.push({ lang: LANGS[match[2]], line: i + 1, text: rest.slice(open + 1, close) });
+  const words = rest.matchAll(/'[^']*'|"(?:\\[\s\S]|[^"\\])*"|[^\s'"]+/g);
+  const tokens = [...words].filter((t) => t.index <= lines[i].length);
+  const found = [];
+  for (const [k, token] of tokens.entries()) {
+    const word = token[0].replace(/^[$;&|(`]+/, '');
+    const lang = plain[token.index] === token[0][0] ? toolOf(word) : null;
+    for (let j = k + 1; lang && CODE_FLAG[lang] && tokens[j]?.[0][0] === '-'; j++) {
+      if (!CODE_FLAG[lang].test(tokens[j][0])) continue;
+      const code = tokens[j + 1];
+      const line = i + 1 + (rest.slice(0, code?.index ?? 0).match(/\n/g) ?? []).length;
+      if (code && /^['"]/.test(code[0])) found.push({ lang, ...unquote(code[0], line) });
+      break;
+    }
   }
   return found;
 }
@@ -88,16 +122,18 @@ export function embeddedCode(lines) {
     for (const { index } of plain.matchAll(/(?<!<)<<(?!<)/g)) {
       const doc = HEREDOC.exec(lines[i].slice(index));
       if (!doc) continue;
-      const end = lines.findIndex((line, j) => j >= next && (doc[1] ? line.replace(/^\t+/, '') : line) === doc[3]);
+      const delimiter = doc[2] ?? doc[4];
+      const end = lines.findIndex((line, j) => j >= next && (doc[1] ? line.replace(/^\t+/, '') : line) === delimiter);
       if (end < 0) break;
       const lang = consumer(plain, index);
-      if (lang) found.push({ lang, line: next + 1, text: lines.slice(next, end).join('\n') });
+      if (lang) found.push({ lang, lines: next + 1, text: lines.slice(next, end).join('\n') });
       next = end + 1;
     }
     i = next - 1;
   }
   return found;
 }
+
 
 
 export function shellPieces(text, wanted, parser, embed) {
@@ -115,6 +151,6 @@ export function shellPieces(text, wanted, parser, embed) {
       break;
     }
   }
-  for (const doc of embeddedCode(lines)) pieces.push(...embed(doc.lang, doc.text, doc.line));
+  for (const doc of embeddedCode(lines)) pieces.push(...embed(doc.lang, doc.text, doc.lines));
   return { pieces, error: null };
 }

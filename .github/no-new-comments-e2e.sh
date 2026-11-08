@@ -789,4 +789,78 @@ EOF
 commit "feat: shell text"
 expect pass "text sent to a remote cat and text that looks like a script key pass"
 
+case_branch shell-exact
+put tool/g.sh <<'EOF'
+#!/usr/bin/env bash
+node --input-type=module -e 'const x = 1; // explanation'
+python3 -I -c 'x = 1  # why'
+bash -ec 'true # because'
+node -e "const s = \"a\"; // quoted"
+env node <<'JS.CODE'
+const y = 2; // explains y
+JS.CODE
+out=$(python3 - <<'PY'
+print(1)  # says one
+PY
+)
+sudo bash <<'SH'
+true # as root
+SH
+echo "$out"
+EOF
+put .github/workflows/map.yml <<'EOF'
+on: push
+jobs:
+  m:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: "await x(); \x2f\x2a escaped \x2a\x2f"
+      - run: "echo hi # note"
+EOF
+commit "feat: exact shell"
+expect "tool/g.sh:2: adds a comment" "a program after node options is read"
+expect "tool/g.sh:3: adds a comment" "a program after python options is read"
+expect "tool/g.sh:4: adds a comment" "a program after combined bash flags is read"
+expect "tool/g.sh:5: adds a comment" "a double-quoted program with escaped quotes is read"
+expect "tool/g.sh:7: adds a comment" "a heredoc with a dotted end word fed to env node is read"
+expect "tool/g.sh:10: adds a comment" "a heredoc inside a command substitution is read"
+expect "tool/g.sh:14: adds a comment" "a heredoc fed to sudo bash is read"
+expect ".github/workflows/map.yml:8: adds a comment" "an escaped comment in a quoted script fails"
+expect ".github/workflows/map.yml:9: adds a comment" "a comment in a one-line quoted run fails"
+
+git checkout -q main
+put .github/workflows/keep.yml <<'EOF'
+on: push
+jobs:
+  k:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            // old
+            await x();
+EOF
+commit "base: a workflow with a script"
+case_branch note-blame
+put .github/workflows/keep.yml <<'EOF'
+on: push
+env:
+  NOTE: "// old"
+jobs:
+  k:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            // old
+            await x();
+EOF
+commit "feat: add a note"
+expect pass "a note that matches an existing script comment passes"
+git checkout -q main && git reset -q --hard HEAD^
+
 [[ $failed -eq 0 ]] && echo "All cases behaved." || exit 1
