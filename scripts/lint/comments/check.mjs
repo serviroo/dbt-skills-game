@@ -186,7 +186,7 @@ for (const file of newFiles) {
   }
 }
 
-const log = git('log', '--format=%H%x1f%an <%ae>%x1f%cn <%ce>%x1f%B%x1e', `${mergeBase}..${options.head}`);
+const log = git('log', '-z', '--format=%H%n%an <%ae>%n%cn <%ce>%n%B', `${mergeBase}..${options.head}`);
 for (const [where, why, text] of creditProblems({ changes, log, title: options.title, body: options.body })) {
   say(where, why, text);
 }
