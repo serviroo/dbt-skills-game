@@ -577,6 +577,39 @@ put web/ok.css <<'EOF'
 EOF
 commit "feat: markup text"
 expect pass "text inside a textarea and CSS strings pass"
+
+case_branch python-more
+put tool/q.py <<'EOF'
+def f():
+    "Return one."  # explanation
+    return 1
+
+
+def g():
+    (
+        "hello"
+        "world"
+    )
+    return 2
+
+
+def h():
+    ("doc"  # inside
+    )
+    return 3
+EOF
+commit "feat: python more"
+expect "tool/q.py:2: adds a comment" "a comment beside a docstring fails"
+expect "tool/q.py:15: adds a comment" "a comment inside a docstring's parentheses fails"
+expect "tool/q.py:8: adds a docstring" "a docstring joined across lines in parentheses fails"
+
+case_branch title-text
+put web/t.html <<'EOF'
+<title>Plan</titleish><!-- the plan --></title>
+EOF
+commit "feat: title text"
+expect pass "text after a lookalike closing tag stays title text"
+
 case_branch shell
 put tool/a.sh <<'EOF'
 #!/usr/bin/env bash
@@ -674,36 +707,86 @@ EOF
 commit "feat: add allowed shell"
 expect pass "shebangs, shell directives, strings, heredoc data and quoted YAML pass"
 
-case_branch python-more
-put tool/q.py <<'EOF'
-def f():
-    "Return one."  # explanation
-    return 1
-
-
-def g():
-    (
-        "hello"
-        "world"
-    )
-    return 2
-
-
-def h():
-    ("doc"  # inside
-    )
-    return 3
+case_branch shell-more
+put tool/d.sh <<'EOF'
+#!/usr/bin/env bash
+cat <<FIRST; node <<SECOND
+plain text
+FIRST
+const y = 1; // explains y
+SECOND
+n=$((x<<y))
+node <<'JS'
+const z = 2; // explains z
+JS
+node -e 'const a = 1; // reads stdin'
+echo "$n"
 EOF
-commit "feat: python more"
-expect "tool/q.py:2: adds a comment" "a comment beside a docstring fails"
-expect "tool/q.py:15: adds a comment" "a comment inside a docstring's parentheses fails"
-expect "tool/q.py:8: adds a docstring" "a docstring joined across lines in parentheses fails"
-
-case_branch title-text
-put web/t.html <<'EOF'
-<title>Plan</titleish><!-- the plan --></title>
+put tool/e.sh <<'EOF'
+#!/usr/bin/env bash
+bash <<'EOS'
+if true; then
+# hidden
+EOS
 EOF
-commit "feat: title text"
-expect pass "text after a lookalike closing tag stays title text"
+put .github/workflows/more.yml <<'EOF'
+on: push
+jobs:
+  f:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: >
+          echo first
+          # explanation
+          echo second
+      - uses: actions/github-script@v7
+        with:
+          script: "/* explanation */ await github.rest.repos.get(context.repo);"
+      - run: node -e 'const a = 1; // reads stdin'
+      - shell: python
+        run: |
+          print(1)  # says one
+EOF
+put .github/workflows/pw.yml <<'EOF'
+on: push
+defaults:
+  run:
+    shell: pwsh
+jobs:
+  p:
+    runs-on: windows-latest
+    steps:
+      - run: |
+          Write-Host hi
+          # says hi
+EOF
+commit "feat: more shell"
+expect "tool/d.sh:5: adds a comment" "a second heredoc on a line is read"
+expect "tool/d.sh:9: adds a comment" "a shift doesn't stop the heredoc search"
+expect "tool/d.sh:11: adds a comment" "a program passed to node -e is read"
+expect "tool/e.sh: can't be read as sh" "a heredoc bash can't parse fails closed"
+expect ".github/workflows/more.yml:8: adds a comment" "a comment in a folded run step fails"
+expect ".github/workflows/more.yml:12: adds a comment" "a comment in a quoted script fails"
+expect ".github/workflows/more.yml:13: adds a comment" "a program passed to node -e in a step is read"
+expect ".github/workflows/more.yml:16: adds a comment" "a comment in a python step fails"
+expect ".github/workflows/pw.yml: can't be read as yaml (a run step uses pwsh" "a step in another shell fails closed"
+
+case_branch shell-text
+put tool/f.sh <<'EOF'
+#!/usr/bin/env bash
+ssh box cat <<TXT
+# Heading
+TXT
+EOF
+put .github/workflows/note.yml <<'EOF'
+on: push
+env:
+  NOTE: |
+    script: |
+      // shown as text
+jobs: {}
+EOF
+commit "feat: shell text"
+expect pass "text sent to a remote cat and text that looks like a script key pass"
 
 [[ $failed -eq 0 ]] && echo "All cases behaved." || exit 1

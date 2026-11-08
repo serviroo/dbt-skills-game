@@ -2,9 +2,9 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const HEREDOC = /(^|[^<])<<(-?)[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\3/;
-const INTERPRETER = /(^|[\s;|&(/])(sh|bash|dash|ssh|python[0-9.]*|node|deno|bun)(\s|$)/;
-const HEREDOC_LANG = { python: 'py', node: 'js', deno: 'js', bun: 'js' };
+const HEREDOC = /^<<(-?)[ \t]*\\?(['"]?)([A-Za-z_][A-Za-z0-9_-]*)\2/;
+const INLINE = /(^|[\s;|&(])(node|deno|bun|bash|sh|python3?) +(-e|--eval|-p|--print|-c) +(['"])/g;
+const LANGS = { sh: 'sh', bash: 'sh', dash: 'sh', python: 'py', python3: 'py', node: 'js', deno: 'js', bun: 'js' };
 
 const startsComment = (line, at) => at === 0 || /[\s;&|()]/.test(line[at - 1]);
 
@@ -34,22 +34,71 @@ export function bashParser(scratch) {
   return { declared, sameMeaning: (a, b) => declared(a) !== null && declared(a) === declared(b) };
 }
 
-export function heredocs(lines) {
-  const found = [];
-  for (let i = 0; i < lines.length; i++) {
-    const match = HEREDOC.exec(lines[i]);
-    if (!match) continue;
-    const end = lines.findIndex((line, j) => j > i && (match[2] ? line.replace(/^\t+/, '') : line) === match[4]);
-    const stop = end < 0 ? lines.length : end;
-    const tool = INTERPRETER.exec(lines[i].replace(HEREDOC, ' '))?.[2];
-    if (tool) {
-      const lang = HEREDOC_LANG[tool.replace(/[0-9.]+$/, '')] ?? 'sh';
-      found.push({ lang, line: i + 2, text: lines.slice(i + 1, stop).join('\n') });
+function bare(line) {
+  let out = '';
+  for (let at = 0; at < line.length; ) {
+    const quote = line[at] === "'" || line[at] === '"' ? line[at] : null;
+    const math = line.startsWith('$((', at) || line.startsWith('((', at);
+    if (line[at] === '#' && startsComment(line, at)) break;
+    let stop = at + 1;
+    if (quote) {
+      while (stop < line.length && line[stop] !== quote) stop += quote === '"' && line[stop] === '\\' ? 2 : 1;
+      stop = Math.min(stop + 1, line.length);
     }
-    i = stop;
+    if (math) stop = line.indexOf('))', at) < 0 ? line.length : line.indexOf('))', at) + 2;
+    out += quote || math ? ' '.repeat(stop - at) : line[at];
+    at = stop;
+  }
+  return out;
+}
+
+function consumer(plain, at) {
+  const parts = plain.split(/(\|\||&&|;|\|)/);
+  let start = 0;
+  let index = 0;
+  while (index < parts.length - 1 && start + parts[index].length < at) start += parts[index++].length;
+  const commandOf = (part) => {
+    const words = (part ?? '').trim().split(/\s+/).filter((w) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w));
+    const remote = words[0] === 'ssh' ? words.slice(1).filter((w) => !w.startsWith('-')) : null;
+    return remote ? (remote[1] ?? 'sh') : path.basename(words[0] ?? '');
+  };
+  return LANGS[commandOf(parts[index])] ?? (parts[index + 1] === '|' ? LANGS[commandOf(parts[index + 2])] : null);
+}
+
+function inlinePrograms(lines, i, plain) {
+  const found = [];
+  const rest = lines.slice(i).join('\n');
+  for (const match of lines[i].matchAll(INLINE)) {
+    const open = match.index + match[0].length - 1;
+    if (plain[match.index + match[1].length] !== match[2][0]) continue;
+    const quote = match[4];
+    let close = open + 1;
+    while (close < rest.length && rest[close] !== quote) close += quote === '"' && rest[close] === '\\' ? 2 : 1;
+    if (close < rest.length) found.push({ lang: LANGS[match[2]], line: i + 1, text: rest.slice(open + 1, close) });
   }
   return found;
 }
+
+export function embeddedCode(lines) {
+  const found = [];
+  for (let i = 0; i < lines.length; i++) {
+    const plain = bare(lines[i]);
+    found.push(...inlinePrograms(lines, i, plain));
+    let next = i + 1;
+    for (const { index } of plain.matchAll(/(?<!<)<<(?!<)/g)) {
+      const doc = HEREDOC.exec(lines[i].slice(index));
+      if (!doc) continue;
+      const end = lines.findIndex((line, j) => j >= next && (doc[1] ? line.replace(/^\t+/, '') : line) === doc[3]);
+      if (end < 0) break;
+      const lang = consumer(plain, index);
+      if (lang) found.push({ lang, line: next + 1, text: lines.slice(next, end).join('\n') });
+      next = end + 1;
+    }
+    i = next - 1;
+  }
+  return found;
+}
+
 
 export function shellPieces(text, wanted, parser, embed) {
   const lines = text.split('\n');
@@ -62,10 +111,10 @@ export function shellPieces(text, wanted, parser, embed) {
       if (!startsComment(line, at)) continue;
       const trial = lines.with(n - 1, line.slice(0, at)).join('\n');
       if (parser.declared(trial) !== before) continue;
-      pieces.push({ line: n, text: line.slice(at), kind: 'c' });
+      pieces.push({ line: n, text: line.slice(at), group: `l${n}` });
       break;
     }
   }
-  for (const doc of heredocs(lines)) pieces.push(...embed(doc.lang, doc.text, doc.line));
+  for (const doc of embeddedCode(lines)) pieces.push(...embed(doc.lang, doc.text, doc.line));
   return { pieces, error: null };
 }
