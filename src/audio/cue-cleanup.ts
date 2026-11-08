@@ -27,7 +27,7 @@ export class CueCleanup {
         for (const [voice, by] of this.pending) {
           if (by > through) continue;
           voice.stop(soon(this.ctx), 0);
-          voice.out.disconnect();
+          voice.disconnect();
           this.active.delete(voice);
           this.pending.delete(voice);
         }
@@ -47,7 +47,7 @@ export class CueCleanup {
       this.clock = null;
     }
     for (const voice of this.pending.keys()) {
-      voice.out.disconnect();
+      voice.disconnect();
       this.active.delete(voice);
     }
     this.pending.clear();

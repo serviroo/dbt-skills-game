@@ -9,6 +9,7 @@ export const scenarios = {
           const { AudioEngine } = await import('/src/audio/engine.ts');
           const c = new AudioContext({ sampleRate: sr });
           const live = new Set();
+          const timers = new Set();
           let clocks = 0;
           const make = c.createConstantSource.bind(c);
           let peak = 0;
@@ -18,14 +19,18 @@ export const scenarios = {
             const connect = node.connect.bind(node);
             const disconnect = node.disconnect.bind(node);
             live.add(node);
-            clocks++;
-            peak = Math.max(peak, live.size);
             node.connect = (to) => {
               if (to === c.destination) destinations++;
+              if (to instanceof AudioNode && !timers.has(node)) {
+                timers.add(node);
+                clocks++;
+                peak = Math.max(peak, timers.size);
+              }
               return connect(to);
             };
             node.disconnect = () => {
               live.delete(node);
+              timers.delete(node);
               return disconnect();
             };
             return node;
