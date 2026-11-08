@@ -347,10 +347,10 @@ export const scenarios = {
     pendingHandleStops(h, await boot(h, { music: 0, sfx: 1 })),
   'pending-beds-and-charge-honour-separate-stop-events': async (h) =>
     pendingStops(h, await boot(h, { music: 1, sfx: 1 })),
-  'an-explicit-hit-and-roar-share-the-gate-before-either-build': async (h) =>
-    explicitHitGate(h, await boot(h, { music: 1, sfx: 1 }), 'gate'),
-  'an-explicit-hit-and-roar-drop-together-and-the-next-hit-rebuilds': async (h) =>
-    explicitHitGate(h, await boot(h, { music: 1, sfx: 1 })),
+  'a-stalled-explicit-hit-drops-its-roar-and-the-next-hit-brings-a-new-one': async (h) =>
+    explicitHitGate(h, await boot(h, { music: 1, sfx: 1 }), 'hit'),
+  'a-stalled-roar-drops-its-explicit-hit-and-the-next-hit-brings-a-new-one': async (h) =>
+    explicitHitGate(h, await boot(h, { music: 1, sfx: 1 }), 'roar'),
   'late-long-sounds-continue-and-end-the-outgoing-section': async (h) =>
     continuedSounds(h, await boot(h, { music: 1, sfx: 1 })),
   'retries-drop-sounds-that-have-already-ended': async (h) =>
@@ -376,7 +376,7 @@ export const scenarios = {
   'a-long-stall-after-opening-leaves-the-door-path-unchanged': async (h) =>
     stalledDoorPath(h, await boot(h, { music: 0, sfx: 1 })),
   'the-hit-and-roar-stop-independently': independentStops,
-  'a-played-hit-lets-the-spare-roar-go': spareRoarGoes,
+  'a-played-hit-lets-every-spare-roar-go': spareRoarGoes,
   'two-placement-misses-keep-the-sound-and-open-on-the-next-try': async (h) =>
     repeatedMisses(h, await boot(h, { music: 0, sfx: 1 }), 2 * LEAD),
   'placement-stalls-past-the-deadline-drop-the-sound-unheard': async (h) =>

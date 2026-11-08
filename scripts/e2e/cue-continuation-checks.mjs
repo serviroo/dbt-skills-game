@@ -125,22 +125,22 @@ export async function stoppedParts(h) {
   try {
     await page.waitForFunction(() => window.__lab === true, null, { timeout: 30000 });
     const result = await page.evaluate(async () => {
-      const { Voice, openBuilt } = await import('/src/audio/voice.ts');
+      const { Voice } = await import('/src/audio/voice.ts');
+      const { Prebuilt, openPrebuilt } = await import('/src/audio/prebuild.ts');
       const { AudioEngine } = await import('/src/audio/engine.ts');
       const c = new OfflineAudioContext(1, 24000, 48000);
       const e = new AudioEngine(c);
       const parts = [];
       const ended = [];
-      const { voice } = openBuilt(undefined, () => 1, () => {
+      const { voice } = openPrebuilt(undefined, new Prebuilt(() => {
         const voice = new Voice(e.lib, 0, c.destination, { held: true });
-        parts.push(voice.part());
-        parts.push(parts[0].part());
-        for (const [i, part] of parts.entries()) {
-          part.osc('sine', 440, 0, 1, part.wet);
-          part.gate.onended = () => ended.push(i);
-        }
+        const own = [voice.part()];
+        own.push(own[0].part());
+        for (const part of own) part.osc('sine', 440, 0, 1, part.wet);
+        if (!parts.length) parts.push(...own);
         return { voice };
-      });
+      }, () => 1));
+      for (const [i, part] of parts.entries()) part.gate.onended = () => ended.push(i);
       voice.stop(0.1, 0.005);
       const output = await c.startRendering();
       return { ended, stopped: parts.every((part) => part.isStopped),
@@ -163,13 +163,19 @@ export async function slowCleanupOpens(h) {
     const r = await page.evaluate(async () => {
       const { AudioEngine } = await import('/src/audio/engine.ts');
       const { Voice, LONG } = await import('/src/audio/voice.ts');
+      const { Prebuilt, openPrebuilt } = await import('/src/audio/prebuild.ts');
       const { SCORE } = await import('/src/motion/tokens.ts');
       const c = new AudioContext();
       const e = new AudioEngine(c);
       try {
         await c.resume();
-        const voice = new Voice(e.lib, 0, c.destination, { held: true });
-        voice.osc('sine', 440, 0, LONG, voice.wet);
+        let voice;
+        const make = () => {
+          const built = new Voice(e.lib, 0, c.destination, { held: true });
+          built.osc('sine', 440, 0, LONG, built.wet);
+          voice ??= built;
+          return { voice: built };
+        };
         const discard = Voice.prototype.discardBefore;
         let passes = 0;
         Voice.prototype.discardBefore = function (at) {
@@ -181,7 +187,7 @@ export async function slowCleanupOpens(h) {
           return discard.call(this, at);
         };
         try {
-          Voice.openBuilt(c.currentTime - 1, () => 1, () => ({ voice }), 'continuous');
+          openPrebuilt(c.currentTime - 1, new Prebuilt(make, () => 1, 'continuous'));
           return { opened: voice.opened, dropped: voice.isDropped, passes };
         } finally {
           Voice.prototype.discardBefore = discard;

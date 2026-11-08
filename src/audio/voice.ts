@@ -78,10 +78,13 @@ type Control = {
   apply(at: number): void;
   replay?(built: ControlledBuild, at: number): void;
 };
-type Pending = Control | { build(at: number): void };
+export interface Copies<T> {
+  readonly kind: 'once' | 'continuous';
+  readonly left: number;
+  take(): T | undefined;
+}
 
-const orderedControls = (list: Pending[]) => list.filter((control): control is Control => 'apply' in control)
-  .sort((a, b) => a.at - b.at || a.order - b.order);
+const orderedControls = (list: Control[]) => [...list].sort((a, b) => a.at - b.at || a.order - b.order);
 
 let bindBuild: ((built: ControlledBuild) => void) | undefined;
 let controlOrder = 0;
@@ -171,7 +174,7 @@ export class Voice {
   private openedAt = 0;
   private opened = false;
   private stopAsked: { at: number; ramp: number } | undefined;
-  private pending: { list: Pending[] | null };
+  private pending: { list: Control[] | null };
 
   constructor(readonly lib: Lib, t: number, dest: AudioNode, o: VoiceOpts = {}, seed = 1, parent: Voice | null = null) {
     const ctx = lib.ctx;
@@ -235,7 +238,6 @@ export class Voice {
     const at = Math.max(asked, soon(this.ctx)) + extra;
     if (at >= deadline) return this.drop(voices);
     prepare?.(at);
-    for (const control of this.pending.list ?? []) if ('build' in control) control.build(at);
     const held = voices.flatMap((v) => v.held ?? []);
     const gate = this.gateSource();
     this.joined = voices;
@@ -271,7 +273,7 @@ export class Voice {
     }
   }
 
-  ride(part: Voice, prepare?: (at: number) => void) {
+  ride(part: Voice) {
     if (!part.isHeld) return;
     if (part.pending !== this.pending) {
       this.pending.list?.push(...part.pending.list ?? []);
@@ -279,7 +281,6 @@ export class Voice {
     }
     part.share(this.gateSource(), [this, part]);
     this.riders.push(part);
-    if (prepare) this.pending.list?.push({ build: prepare });
   }
 
   control(at: number, apply: Control['apply'], replay?: Control['replay']) {
@@ -296,30 +297,28 @@ export class Voice {
 
   static openBuilt<T extends ControlledBuild & { prepare?: (at: number) => void }>(
     asked: number | undefined,
-    nextSeed: () => number,
-    build: (seed: () => number) => T,
-    kind: 'once' | 'continuous' = 'once',
+    copies: Copies<T>,
     sound = 'sound',
   ) {
-    const seeds: number[] = [];
+    const kind = copies.kind;
     let deadline: number | undefined;
     let requested = asked;
     const controls = buildingControls;
     const bind = bindBuild;
     buildingControls = [];
     bindBuild = undefined;
-    let pending: Pending[] | undefined;
+    let pending: Control[] | undefined;
     let owners: Voice[] = [];
     for (let extra = 0; ; extra = 2 * extra + SCORE.leadSec) {
-      let index = 0;
-      const built = build(() => seeds[index++] ??= nextSeed());
+      const built = copies.take();
+      if (!built) throw new Error(`${sound} has no built copy to open`);
       bind?.(built);
       requested ??= soon(built.voice.ctx);
       const targets = [built.voice, ...built.voice.riders];
       if (pending) {
         for (const c of orderedControls(pending)) if (c.replay) {
           const voice = targets[owners.indexOf(c.voice)];
-          if (!voice) throw new Error('A rebuilt sound lost a pending control target');
+          if (!voice) throw new Error('A retried sound lost a pending control target');
           c.replay({ ...built, voice }, c.at);
         }
       } else {
@@ -327,15 +326,17 @@ export class Voice {
       }
       const until = built.voice.stopAsked?.at ?? Infinity;
       deadline = Math.min(deadline ?? (asked ?? soon(built.voice.ctx)) + SCORE.lateSec, until);
-      const continuing = kind === 'continuous' && Math.max(asked ?? 0, soon(built.voice.ctx)) + extra >= deadline;
+      const late = Math.max(asked ?? 0, soon(built.voice.ctx)) + extra >= deadline;
+      const continuing = kind === 'continuous' && (late || !copies.left);
       const by = continuing ? until : deadline;
       pending = built.voice.pending.list ?? [];
       owners = targets;
       const opened = built.voice.openInTime(asked, continuing ? 0 : extra, by, built.prepare, continuing);
-      if (opened || continuing || kind === 'once' && soon(built.voice.ctx) + 2 * extra + SCORE.leadSec > deadline) {
+      const expired = soon(built.voice.ctx) + 2 * extra + SCORE.leadSec > deadline;
+      if (opened || continuing || kind === 'once' && (expired || !copies.left)) {
         if (!opened) {
           const lateMs = Math.max(0, soon(built.voice.ctx) - requested) * 1000;
-          const reason = built.voice.stopAsked ? 'stopped before opening'
+          const reason = built.voice.stopAsked ? 'stopped before opening' : !expired ? 'no built copy left'
             : asked === undefined ? 'opening deadline passed' : 'asked time passed';
           console.warn('[audio] sound dropped', sound, lateMs, lateMs > 0 ? 'ms late:' : 'ms:', reason);
         }
@@ -796,7 +797,7 @@ export class Voice {
   }
 
   discard() {
-    this.drop([this]);
+    this.drop([this, ...this.riders.splice(0)]);
   }
 
   get isHeld() {
@@ -819,5 +820,3 @@ export class Voice {
     return this.fadesFrom;
   }
 }
-
-export const openBuilt = Voice.openBuilt;

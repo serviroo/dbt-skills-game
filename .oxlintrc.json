@@ -19,7 +19,8 @@
         "lantern/handle-lost-gpu-context": "error",
         "lantern/schedule-before-echo-loads": "error",
         "lantern/bus-rises-wait-for-stops": "error",
-        "lantern/bus-levels-use-tracked-curves": "error"
+        "lantern/bus-levels-use-tracked-curves": "error",
+        "lantern/timed-cues-are-prebuilt": "error"
       }
     },
     {
@@ -29,6 +30,10 @@
         "lantern/cue-tracking-includes-offline": "error",
         "lantern/cue-cleanup-shares-one-clock": "error"
       }
+    },
+    {
+      "files": ["src/audio/prebuild.ts"],
+      "rules": { "lantern/timed-cues-are-prebuilt": "off" }
     },
     {
       "files": ["src/ui/anim.ts"],

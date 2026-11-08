@@ -1,6 +1,7 @@
 import { dB, midi } from './dsp';
 import { glide, soon } from './param';
-import { Voice, kRate, openBuilt } from './voice';
+import { Voice, kRate, type ControlledBuild } from './voice';
+import { Prebuilt, openPrebuilt } from './prebuild';
 import { figs, groove, prog, theme, roarParts } from './roar';
 import { h01, Hits, LONG, Pad, satBus, Strings, waveOf } from './instruments';
 import type { Section, SectionOpts, MusicHost } from './score-types';
@@ -161,10 +162,11 @@ function once(t: number, from: number, to: number, fn: (t: number) => void) {
 interface SectionImpl {
   tick(from: number, to: number): void;
   hush?(at: number): void;
-  arm?(cue?: Voice): Voice | undefined;
-  hit?(at: number, dropped: boolean): void;
+  hit?(at: number, dropped: boolean, cue?: Voice): void;
   opened?(until: number): void;
+  cues?: Map<string, Prebuilt<ControlledBuild>>;
 }
+type Roar = ReturnType<typeof roarParts>;
 type Factory = (v: Voice, o: SectionOpts, host: MusicHost) => (start: number) => SectionImpl;
 
 const BEAT = 60 / 72;
@@ -403,8 +405,8 @@ const FACTORIES: Record<Section, Factory> = {
     // low brass crescendo on D3 / A3 / D4 (the 150-500 Hz body of the build), opening and roughening as it grows
     const lb = new Pad(bv, 0, 3, { wave: 'brass', detune: 6, cutoff: 320, q: 1.0, level: 0, dest: build, vib: 3, drive: 1.6 });
     const roar = v.gain(1, v.filt('lowshelf', 160, 0.7, v.filt('peaking', 1300, 0.9, v.wet, -2.5), 3));
-    let R = roarParts(v, roar);
-    let spare: ReturnType<typeof roarParts> | null = null;
+    const roarOf = new WeakMap<Voice, Roar>();
+    let R: Roar;
     const grooveOffs = groove.map(([s]) => (s * BEAT) / 4);
     // Timing: with hitAt known (offline renders) everything is scheduled now. Live, the build runs until the
     // director calls hush() (build cuts dead) and plays awaken_hit (the roar starts on that exact moment).
@@ -450,44 +452,38 @@ const FACTORIES: Record<Section, Factory> = {
       let gap = 1.0;
       let roarTo = -Infinity;
       let stand = o.standAt !== undefined && o.hitAt !== undefined ? o.standAt - o.hitAt : 7.04;
-      let armed = false;
       let hitPlayed = false;
-      const placeFirstChord = (at: number) => {
-        if (o.standAt !== undefined) stand = o.standAt - at;
-        if (armed) return;
-        armed = true;
-        swellPedal(0);
-        roarNotes(0, 0, BEAT / 4);
+      const cues = new Map<string, Prebuilt<ControlledBuild>>();
+      const hitCopy = (seed: () => number) => {
+        const parts = roarParts(v, roar);
+        swellPedal(parts, 0);
+        roarNotes(parts, 0, 0, BEAT / 4);
+        const voice = host.cue('awaken_hit', seed, parts.rp);
+        voice.ride(parts.rp);
+        roarOf.set(voice, parts);
+        return { voice };
       };
       return {
+        cues,
         hush(at: number) {
           if (hitAt === Infinity) cut(at);
         },
         opened: (until: number) => {
           if (o.at !== undefined && o.hitAt !== undefined) host.hush(o.hitAt - 0.78, o.hitAt);
           roarTick(soon(host.lib.ctx), until);
-          if (hitIn === Infinity) spare = roarParts(v, roar);
+          cues.set('awaken_hit', new Prebuilt(hitCopy, host.seed));
         },
-        arm(cue?: Voice) {
+        hit(at: number, dropped: boolean, cue?: Voice) {
           if (hitPlayed) return;
-          roarTo = -Infinity;
-          if (!R.rp.isHeld && !R.rp.isStopped) R.rp.stop(soon(host.lib.ctx), 0);
-          if (R.rp.isStopped) [R, armed, spare] = [spare ?? roarParts(v, roar), false, null];
-          if (cue) cue.ride(R.rp, placeFirstChord);
-          return R.rp;
-        },
-        hit(at: number, dropped: boolean) {
-          if (hitPlayed) return;
-          hitPlayed = !dropped;
+          const parts = cue && roarOf.get(cue);
+          hitPlayed = !dropped && !!parts;
           cut(dropped ? at : Math.max(at, soon(host.lib.ctx)));
-          if (dropped) R.rp.stop(at, 0);
-          if (hitPlayed && spare) {
-            spare.rp.discard();
-            spare = null;
-          }
-          [hitAt, roarTo] = [dropped ? Infinity : at, dropped ? Infinity : at + BEAT / 4];
+          if (parts) R = parts;
+          if (hitPlayed && o.standAt !== undefined) stand = o.standAt - at;
+          [hitAt, roarTo] = hitPlayed ? [at, at + BEAT / 4] : [Infinity, Infinity];
         },
         tick(from, to) {
+          if (!hitPlayed) cues.get('awaken_hit')?.fill();
           const bEnd = Math.min(to, cutAt - 0.12, hitAt - 0.12);
           while (nextBeat < bEnd) {
             if (nextBeat >= from) {
@@ -510,44 +506,50 @@ const FACTORIES: Record<Section, Factory> = {
         const from = Math.max(hitAt, roarTo, after);
         if (!(to > from)) return;
         roarTo = to;
-        roarNotes(hitAt, from, to);
+        roarNotes(R, hitAt, from, to);
       }
-      function swellPedal(t: number) {
-        const { rp, ped } = R;
+      function swellPedal({ rp, ped }: Roar, t: number) {
         const pedal = rp.at(ped.gain);
         pedal.setValueAtTime(0, t);
         pedal.setTargetAtTime(0.11, t, 0.2);
       }
-      function roarNotes(base: number, from: number, to: number) {
-        const { rp, wall, brass, horns, choir, top, spBus, drums, dSat, thSat, hats, roll } = R;
+      function roarNotes(parts: Roar, base: number, from: number, to: number) {
+        const { rp, wall, brass, horns, choir, top, spBus, drums, dSat, thSat, hats, roll } = parts;
         const standAt = rp.isHeld ? base + stand : o.standAt ?? base + stand;
         const B = Math.max(1.5, stand / 2);
-        grid(base, B, from, to, (i, t) => {
+        const due = (t: number) => t >= from && t < to;
+        grid(base, B, from - B, to, (i, t) => {
           const k = i < 3 ? i : (i - 3) % 3;
           const [notes, tp] = prog[k];
-          brass.chord(t, notes, 0.03, i === 2 ? [1.4, 1.3, 1, 1, 1, 1, 1] : undefined, i === 2 ? 1.5 : i > 0 ? 1 : 0.6);
-          choir.chord(t, tp);
-          const lp = rp.at(brass.lp.frequency);
-          lp.setTargetAtTime(i === 2 ? 3200 : 3000, t, 0.03);
-          lp.setTargetAtTime(i === 2 ? 2300 : 2200, t + 0.35, 0.5);
+          if (due(t)) {
+            brass.chord(t, notes, 0.03, i === 2 ? [1.4, 1.3, 1, 1, 1, 1, 1] : undefined, i === 2 ? 1.5 : i > 0 ? 1 : 0.6);
+            choir.chord(t, tp);
+            const lp = rp.at(brass.lp.frequency);
+            lp.setTargetAtTime(i === 2 ? 3200 : 3000, t, 0.03);
+            lp.setTargetAtTime(i === 2 ? 2300 : 2200, t + 0.35, 0.5);
+          }
           if (i < 3) {
             const [a, b] = theme[i];
             const t2 = t + B * (i === 2 ? 0.35 : 0.62);
             const hl = rp.at(horns.lp.frequency);
             for (const [tt, m] of [[t, a], [t2, b]]) {
+              if (!due(tt)) continue;
               horns.chord(tt, [m - 12, m], { dip: true, att: 0.07, glide: 0.04 });
               hl.setTargetAtTime(3600, tt, 0.025);
               hl.setTargetAtTime(1800, tt + 0.22, 0.35);
             }
           }
-          if (i > 0) {
+          if (i > 0 && due(t)) {
             thump(rp, t, i === 2 ? 0.36 : 0.22, 82, 40, roar, thSat);
             taiko(rp, t, i === 2 ? 0.34 : 0.24, drums, { f0: 80, f1: 48, dec: 0.32, sat: dSat });
           }
-          const rg = rp.at(roll.gain);
-          rg.setValueAtTime(0.0015, t + B * 0.45);
-          rg.exponentialRampToValueAtTime(0.08, t + B - 0.015);
-          rg.setTargetAtTime(0.0012, t + B, 0.25);
+          if (due(t + B * 0.45)) {
+            const rg = rp.at(roll.gain);
+            rg.setValueAtTime(0.0015, t + B * 0.45);
+            rg.exponentialRampToValueAtTime(0.08, t + B - 0.015);
+            rg.setTargetAtTime(0.0012, t + B, 0.25);
+          }
+          if (!due(t)) return;
           if (i === 2) {
             crash(rp, t, 0.18, v.wet);
             // the stand lands low: a deep drop under the crash (reference stand: 63-125 Hz within 5-6 dB of the full mix)
@@ -708,7 +710,7 @@ export class Music {
   ) {}
 
   to(name: Section, crossfade = 2, o: SectionOpts = {}) {
-    const { voice, score, at } = openBuilt(o.at, () => this.host.seed(), (seed) => {
+    const section = new Prebuilt((seed) => {
       const opts = { hall: name === "awaken" ? 0.22 : 0.32, room: 0, gain: SECTION_GAIN[name], held: true };
       const voice = new Voice(this.host.lib, 0, this.dest, opts, seed());
       const score = FACTORIES[name](voice, o, { ...this.host, seed });
@@ -716,7 +718,8 @@ export class Music {
       voice.at(voice.out.gain).setValueAtTime(0, 0);
       voice.at(voice.out.gain).setTargetAtTime(1, 0, Math.max(0.004, crossfade / 4));
       return { voice, score };
-    }, 'continuous', name);
+    }, () => this.host.seed(), 'continuous');
+    const { voice, score, at } = openPrebuilt(o.at, section, name);
     this.stop(o.fadeOut ?? crossfade, at);
     if (voice.isDropped) return;
     const impl = score(voice.t);
@@ -730,6 +733,7 @@ export class Music {
     for (const s of this.live) {
       if (!s.voice.stop(at, fade)) continue;
       s.end = Math.min(s.end, at);
+      s.impl.cues?.forEach((copies) => copies.discard());
       this.host.retire?.(s.voice);
     }
     this.current = null;
@@ -754,16 +758,15 @@ export class Music {
     for (const s of this.live) if (s.name === "awaken" && s.end === Infinity) s.impl.hush?.(at);
   }
 
-  armHit(cue?: Voice) {
-    let group: Voice | undefined;
+  copies(cue: string) {
     for (const s of this.live) {
-      if (s.name === "awaken" && s.end === Infinity) group = s.impl.arm?.(cue) ?? group;
+      const copies = s.end === Infinity ? s.impl.cues?.get(cue) : undefined;
+      if (copies?.left) return copies;
     }
-    return group;
   }
 
-  onHit(at: number, dropped = false) {
-    for (const s of this.live) if (s.name === "awaken" && s.end === Infinity) s.impl.hit?.(at, dropped);
+  onHit(at: number, dropped = false, cue?: Voice) {
+    for (const s of this.live) if (s.name === "awaken" && s.end === Infinity) s.impl.hit?.(at, dropped, cue);
     this.scheduleUntil(Math.max(at, this.host.lib.ctx.currentTime) + 0.05);
   }
 

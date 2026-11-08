@@ -12,7 +12,8 @@ import { glide, holdAt, soon, taper } from './param';
 import { SCORE } from '../motion/tokens';
 import { makeEcho, dropEcho, type Echo, type Sends } from './echo';
 import { BusLevels } from './bus-levels';
-import { Voice, openBuilt, stoppedBy, withControls, type Lib } from './voice';
+import { Voice, stoppedBy, withControls, type Lib } from './voice';
+import { Prebuilt, openPrebuilt } from './prebuild';
 import { CueCleanup } from './cue-cleanup';
 import { pendingEvents } from './pending-events';
 
@@ -41,6 +42,8 @@ export interface PlayOpts {
   /** Variation step (e.g. the count-up tick number): rises 50 cents per step when detune is not given. */
   index?: number;
 }
+
+const BUILD_OPTS = ['gain', 'pan', 'detune', 'dur', 'index'] as const;
 
 export interface CueHandle {
   readonly voice?: Voice;
@@ -260,6 +263,7 @@ export class AudioEngine {
         lib: this.libMusic,
         hush: (a, b) => this.hush(a, b),
         seed: () => this.nextSeed(),
+        cue: (name, seed, group) => this.buildCue(name, {}, seed, group).voice,
         retire: (voice) => this.cueCleanup?.add(voice),
         onSection: (name, at) => {
           if (this.lifted) {
@@ -426,25 +430,15 @@ export class AudioEngine {
     }
     // nothing starts inside the Safe Zone, so nothing can be left sounding when the player steps out
     if (this.isQuiet) return { stop() {}, end: this.when(opts.at) };
-    const detune = opts.detune ?? (opts.index !== undefined ? opts.index * 50 : 0);
     // built first and held, then timed: however long building it takes, no part of it can land in the past
-    const gain = (opts.gain ?? 1) * dB(def.gainDb ?? 0);
-    const vo = { gain, pan: opts.pan, detune, room: def.room, hall: def.hall, held: true };
-    const { voice: v, at: openedAt } = openBuilt(opts.at, () => this.nextSeed(), (seed) => {
-      const group = cue === "awaken_hit" ? this.music.armHit() : undefined;
-      const voice = new Voice(this.lib, 0, this.sfx, { ...vo, group }, seed());
-      if (cue === "awaken_hit") this.music.armHit(voice);
-      try {
-        def.fn(voice, { dur: opts.dur });
-      } catch (err) {
-        console.warn('[audio] cue failed', cue, err);
-      }
-      return { voice };
-    }, 'once', cue);
+    const plain = BUILD_OPTS.every((name) => opts[name] === undefined);
+    const copies = (plain && this.music.copies(cue))
+      || new Prebuilt((seed) => this.buildCue(cue, opts, seed), () => this.nextSeed());
+    const { voice: v, at: openedAt } = openPrebuilt(opts.at, copies, cue);
     const at = v.isDropped ? this.when(opts.at) : openedAt;
     if (cue === "awaken_hit") {
       if (this.hushV) this.unhush(at);
-      this.music.onHit(at, v.isDropped);
+      this.music.onHit(at, v.isDropped, v);
     }
     if (cue === 'ui_close' && this.lifted) {
       this.music.lift(0, 0.4, at);
@@ -478,6 +472,20 @@ export class AudioEngine {
     };
   }
 
+  private buildCue(cue: string, opts: PlayOpts, seed: () => number, group?: Voice) {
+    const def = CUES[cue];
+    const detune = opts.detune ?? (opts.index !== undefined ? opts.index * 50 : 0);
+    const gain = (opts.gain ?? 1) * dB(def.gainDb ?? 0);
+    const vo = { gain, pan: opts.pan, detune, room: def.room, hall: def.hall, held: true, group };
+    const voice = new Voice(this.lib, 0, this.sfx, vo, seed());
+    try {
+      def.fn(voice, { dur: opts.dur });
+    } catch (err) {
+      console.warn('[audio] cue failed', cue, err);
+    }
+    return { voice };
+  }
+
   /** Start (or re-level) a continuous bed. Calling it again for a running bed ramps its level. */
   bed(name: BedName, o: { at?: number; level?: number; fadeIn?: number } = {}): BedHandle {
     const cur = this.beds.get(name);
@@ -486,9 +494,8 @@ export class AudioEngine {
       return cur;
     }
     if (cur) this.letGo(cur.voice);
-    const { handle: h } = openBuilt(o.at, () => this.nextSeed(), (seed) =>
-      buildBed(this.lib, name, this.bedBus, o.level ?? 1, o.fadeIn ?? 0.5, seed()),
-      'continuous', name);
+    const built = (seed: () => number) => buildBed(this.lib, name, this.bedBus, o.level ?? 1, o.fadeIn ?? 0.5, seed());
+    const { handle: h } = openPrebuilt(o.at, new Prebuilt(built, () => this.nextSeed(), 'continuous'), name);
     if (!h.voice.isDropped) this.beds.set(name, h);
     return h;
   }
@@ -515,7 +522,7 @@ export class AudioEngine {
   chargeLoop(o: { at?: number } = {}): ChargeHandle {
     if (this.charge && !this.charge.voice.isStopped) return this.charge;
     const self = this;
-    const { handle } = openBuilt(o.at, () => this.nextSeed(), (seed) => {
+    const charge = new Prebuilt((seed) => {
       const { voice, handle: h } = buildCharge(this.lib, this.sfx, seed());
       voice.control(o.at ?? 0, (time) => self.toFocus(dB(-2), time, 0.4));
       return { voice, handle: {
@@ -542,7 +549,8 @@ export class AudioEngine {
           voice.control(at + 0.3, apply, (_, time) => apply(time));
         },
       } };
-    }, 'continuous', 'charge');
+    }, () => this.nextSeed(), 'continuous');
+    const { handle } = openPrebuilt(o.at, charge, 'charge');
     if (handle.voice.isDropped) return handle;
     this.charge = handle;
     return handle;
@@ -554,7 +562,7 @@ export class AudioEngine {
    * holds until unhush() or the next awaken_hit. An open-ended awaken section cuts its build here.
    */
   hush(from?: number, to?: number) {
-    const { voice: v, at } = openBuilt(from, () => this.nextSeed(), (seed) => {
+    const hush = new Prebuilt((seed) => {
       const voice = new Voice(this.lib, 0, this.sfx, { held: true }, seed());
       const g = voice.gain(0, voice.dry);
       voice.at(g.gain).setValueAtTime(0, 0);
@@ -568,7 +576,8 @@ export class AudioEngine {
         voice.at(g.gain).setValueAtTime(0.065, Math.max(0, to - at - 0.01));
         voice.at(g.gain).linearRampToValueAtTime(0, to - at + 0.02);
       } };
-    }, 'once', 'hush');
+    }, () => this.nextSeed());
+    const { voice: v, at } = openPrebuilt(from, hush, 'hush');
     if (v.isDropped) {
       this.unhush(this.when(to ?? from));
       return;

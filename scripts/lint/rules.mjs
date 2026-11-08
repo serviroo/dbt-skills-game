@@ -2,6 +2,7 @@ import {
   AUDIO_TIME_ARG, audioParam, calleeName, declaratorOf, declaredAs, isNamed, memberName, methodName, variableOf,
 } from './ast.mjs';
 import { busRules } from './bus-rules.mjs';
+import { prebuildRules } from './prebuild-rules.mjs';
 
 const SKIPPED_KEYS = new Set(['parent', 'loc', 'range']);
 const FUNCTIONS = new Set(['FunctionExpression', 'ArrowFunctionExpression', 'FunctionDeclaration']);
@@ -71,7 +72,7 @@ const audioTimesFromSoon = {
 const lateOpensBuildAgain = {
   meta: {
     messages: {
-      dropped: 'Open held sounds with openBuilt so a missed placement is rebuilt or dropped before its doors open.',
+      dropped: 'Open held sounds with openPrebuilt so a missed placement retries a built copy or drops before it opens.',
     },
   },
   create(context) {
@@ -983,5 +984,6 @@ export default {
     'cue-tracking-includes-offline': cueTrackingIncludesOffline,
     'cue-cleanup-shares-one-clock': cueCleanupSharesOneClock,
     ...busRules,
+    ...prebuildRules,
   },
 };

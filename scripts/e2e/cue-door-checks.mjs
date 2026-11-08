@@ -210,20 +210,19 @@ export async function independentStops(h) {
         output.connect(c.destination);
         e.testInput('sfx').connect(output, 0, 0);
         e.testInput('music').connect(output, 0, 1);
-        e.music.to('awaken', 0.01, { at: 0.1 });
         const ride = Voice.prototype.ride;
-        let hit;
-        let roar;
+        const roars = new Map();
         Voice.prototype.ride = function (part, ...args) {
-          hit = this;
-          roar = part;
+          roars.set(this, part);
           return ride.call(this, part, ...args);
         };
         try {
-          e.play('awaken_hit', { at: 0.8 });
+          e.music.to('awaken', 0.01, { at: 0.1 });
         } finally {
           Voice.prototype.ride = ride;
         }
+        const hit = e.play('awaken_hit', { at: 0.8 }).voice;
+        const roar = roars.get(hit);
         const stops = [];
         const stop = AudioScheduledSourceNode.prototype.stop;
         AudioScheduledSourceNode.prototype.stop = function (at) {
@@ -279,47 +278,42 @@ export async function spareRoarGoes(h) {
       const { Voice } = await import('/src/audio/voice.ts');
       const c = new OfflineAudioContext(2, 2.6 * 48000, 48000);
       const e = new AudioEngine(c);
-      const parts = [];
-      const part = Voice.prototype.part;
-      Voice.prototype.part = function (...args) {
-        const p = part.apply(this, args);
-        parts.push(p);
-        return p;
+      const ride = Voice.prototype.ride;
+      const roars = new Map();
+      Voice.prototype.ride = function (part, ...args) {
+        roars.set(this, part);
+        return ride.call(this, part, ...args);
       };
       try {
         e.music.to('awaken', 0.01, { at: 0.1 });
       } finally {
-        Voice.prototype.part = part;
+        Voice.prototype.ride = ride;
       }
-      const spare = parts.at(-1);
-      const ride = Voice.prototype.ride;
       const stop = AudioScheduledSourceNode.prototype.stop;
-      const stops = [];
-      let roar;
-      Voice.prototype.ride = function (part, ...args) {
-        roar = part;
-        return ride.call(this, part, ...args);
-      };
+      const gates = new Map([...roars.values()].map((roar) => [roar.gate, []]));
       AudioScheduledSourceNode.prototype.stop = function (at) {
-        if (this === spare.gate) stops.push(at);
+        gates.get(this)?.push(at);
         return stop.call(this, at);
       };
+      let hit;
       try {
-        e.play('awaken_hit', { at: 0.8 });
+        hit = e.play('awaken_hit', { at: 0.8 }).voice;
       } finally {
-        Voice.prototype.ride = ride;
         AudioScheduledSourceNode.prototype.stop = stop;
       }
       await c.startRendering();
-      return { distinct: spare !== roar, roarOpened: roar.opened, stopped: spare.isStopped,
-        cleared: spare.pending.list === null, stops, spareOpened: spare.opened };
+      const roar = roars.get(hit);
+      const spares = [...roars.values()].filter((spare) => spare !== roar).map((spare) => ({
+        stopped: spare.isStopped, cleared: spare.pending.list === null, stops: gates.get(spare.gate),
+        opened: spare.opened }));
+      return { spares, roarOpened: !!roar?.opened };
     });
     const detail = JSON.stringify(r);
-    h.expect(r.distinct && r.roarOpened, `the hit did not open a separate roar: ${detail}`);
-    h.expect(r.stopped && r.cleared, `a played hit left its unused spare roar holding on: ${detail}`);
-    h.expect(r.stops.length > 0 && r.stops.every((at) => at <= 0.805),
-      `the unused spare roar's gate did not stop by the hit: ${detail}`);
-    h.expect(!r.spareOpened, `the unused spare roar opened: ${detail}`);
+    h.expect(r.spares.length > 0 && r.roarOpened, `the hit did not open a separate roar: ${detail}`);
+    h.expect(r.spares.every((s) => s.stopped && s.cleared), `a played hit left an unused spare roar holding on: ${detail}`);
+    h.expect(r.spares.every((s) => s.stops.length > 0 && s.stops.every((at) => at <= 0.805)),
+      `an unused spare roar's gate did not stop by the hit: ${detail}`);
+    h.expect(r.spares.every((s) => !s.opened), `an unused spare roar opened: ${detail}`);
     h.expect(!errors.length, errors.join('\n'));
     return r;
   } finally {
@@ -350,18 +344,29 @@ export async function sharedGateOutlivesTheHit(h) {
       const e = new AudioEngine(c, { muted: true });
       await c.resume();
       const before = live.size;
-      const lost = Voice.openBuilt(c.currentTime - 5, () => 1, (seed) => {
+      const { Prebuilt, openPrebuilt } = await import('/src/audio/prebuild.ts');
+      const lost = openPrebuilt(c.currentTime - 5, new Prebuilt((seed) => {
         const voice = new Voice(e.lib, 0, c.destination, { held: true }, seed());
         voice.osc('sine', 440, 0, 1, voice.wet);
         return { voice };
-      });
+      }, () => 1));
       const droppedGates = live.size - before;
       const at = c.currentTime + 0.2;
       e.music.host.hush = () => {};
-      e.music.to('awaken', 0.01, { at: c.currentTime, hitAt: at });
+      const ride = Voice.prototype.ride;
+      const roars = new Map();
+      Voice.prototype.ride = function (part, ...args) {
+        roars.set(this, part);
+        return ride.call(this, part, ...args);
+      };
+      try {
+        e.music.to('awaken', 0.01, { at: c.currentTime, hitAt: at });
+      } finally {
+        Voice.prototype.ride = ride;
+      }
       const hit = e.play('awaken_hit', { at });
       const section = e.music.live.find((s) => s.name === 'awaken').voice;
-      const roar = section.parts.at(-1);
+      const roar = roars.get(hit.voice);
       const stopAt = c.currentTime + 13;
       e.music.stop(0.05, stopAt);
       const shared = { e, c, live, section, roar, gate: roar.gate, sectionGate: section.gate, cut: null };

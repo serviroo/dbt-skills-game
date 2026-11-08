@@ -107,7 +107,7 @@ export async function pendingStops(h, { ctx, page, errors, tap }) {
   }
 }
 
-export async function explicitHitGate(h, { ctx, page, errors, tap }, phase = 'osc') {
+export async function explicitHitGate(h, { ctx, page, errors, tap }, phase = 'hit') {
   try {
     await captureEngine(page);
     await silence(page, tap);
@@ -120,20 +120,18 @@ export async function explicitHitGate(h, { ctx, page, errors, tap }, phase = 'os
       e.music.to('awaken', 0.01, { at: e.now, hitAt: at });
       const build = e.music.live.find((s) => s.name === 'awaken').voice.children[0];
       build.wet.gain.value = build.dry.gain.value = 0;
-      const original = e.music.live.find((s) => s.name === 'awaken').voice.parts.at(-1);
+      const next = e.music.copies('awaken_hit').ready[0].voice;
+      const original = next.riders[0];
       const scheduled = !original.isHeld && original.t >= e.now;
-      const owner = phase === 'gate' ? e.ctx : Voice.prototype;
-      const method = phase === 'gate' ? 'createGain' : 'osc';
-      const make = owner[method];
+      const place = Voice.prototype.place;
       let stalled = false;
-      let gains = 0;
-      owner[method] = function (...args) {
-        if (!stalled && (phase !== 'gate' || ++gains === 6)) {
+      Voice.prototype.place = function (...args) {
+        if (!stalled && this.clock === (phase === 'hit' ? next : original)) {
           stalled = true;
           const until = e.now + 0.35;
           while (e.now < until);
         }
-        return make.apply(this, args);
+        return place.apply(this, args);
       };
       const warn = console.warn;
       const warnings = [];
@@ -145,12 +143,12 @@ export async function explicitHitGate(h, { ctx, page, errors, tap }, phase = 'os
       try {
         hit = e.play('awaken_hit', { at });
       } finally {
-        owner[method] = make;
+        Voice.prototype.place = place;
         console.warn = warn;
       }
-      window.__firstRoar = e.music.live.find((s) => s.name === 'awaken').voice.parts.at(-1);
+      window.__firstRoar = original;
       return { at, to: e.now + 0.4, stalled, scheduled, warnings, hitEnd: hit.end,
-        hitDropped: e.active.size === 0, roarStopped: window.__firstRoar.isStopped };
+        hitDropped: e.active.size === 0, roarStopped: original.isStopped };
     }, phase);
     await audioRecorded(page, tap, r.to);
     const lost = await audioHeard(page, tap, r.at, r.to, [1e-6, 1e-6]);
@@ -162,26 +160,15 @@ export async function explicitHitGate(h, { ctx, page, errors, tap }, phase = 'os
     const retry = await page.evaluate(async () => {
       const e = window.__engine;
       const at = e.now + 0.1;
-      const { Voice } = await import('/src/audio/voice.ts');
-      const ride = Voice.prototype.ride;
-      let hit;
-      Voice.prototype.ride = function (...args) {
-        hit = this;
-        return ride.apply(this, args);
-      };
-      try {
-        e.play('awaken_hit', { at });
-      } finally {
-        Voice.prototype.ride = ride;
-      }
-      const roar = e.music.live.find((s) => s.name === 'awaken').voice.parts.at(-1);
-      return { at, rebuilt: roar !== window.__firstRoar, opened: !roar.isHeld && !roar.isStopped,
-        shared: hit?.gate === roar.gate && hit.openedAt === roar.openedAt };
+      const roar = e.music.copies('awaken_hit')?.ready[0]?.voice.riders[0];
+      const hit = e.play('awaken_hit', { at }).voice;
+      return { at, fresh: !!roar && roar !== window.__firstRoar, opened: !!roar && !roar.isHeld && !roar.isStopped,
+        shared: hit?.gate === roar?.gate && hit?.openedAt === roar?.openedAt };
     });
     await audioRecorded(page, tap, retry.at + 0.3);
     const heard = await audioHeard(page, tap, retry.at + 0.05, retry.at + 0.3, [1e-6, 1e-6]);
-    h.expect(retry.rebuilt && retry.opened && retry.shared && heard.rms > 1e-4,
-      `the next hit did not rebuild the roar: ${JSON.stringify({ ...retry, heard })}`);
+    h.expect(retry.fresh && retry.opened && retry.shared && heard.rms > 1e-4,
+      `the next hit did not bring a new roar: ${JSON.stringify({ ...retry, heard })}`);
     h.expect(!errors.length, errors.join('\n'));
     return { ...r, lost, retry, heard };
   } finally {
@@ -208,7 +195,8 @@ export async function pendingHandleStops(h, { ctx, page, errors, tap }) {
     for (const kind of ['bed', 'charge']) for (const phase of ['build', 'placement']) {
       for (const duration of [0.08, 0.7]) {
         const r = await page.evaluate(async ([kind, duration, phase]) => {
-          const { Voice, openBuilt, stoppedBy } = await import('/src/audio/voice.ts');
+          const { Voice, stoppedBy } = await import('/src/audio/voice.ts');
+          const { Prebuilt, openPrebuilt } = await import('/src/audio/prebuild.ts');
           const { buildBed, buildCharge } = await import('/src/audio/beds.ts');
           const e = window.__engine;
           const open = Voice.prototype.openInTime;
@@ -234,16 +222,16 @@ export async function pendingHandleStops(h, { ctx, page, errors, tap }) {
           window.__watch = true;
           let voice;
           try {
-            ({ voice } = openBuilt(from, () => 7, (seed) => {
+            ({ voice } = openPrebuilt(from, new Prebuilt((seed) => {
               const built = kind === 'bed' ? buildBed(lib, 'gate_hum', window.__pendingOutput, 1, 0.005, seed()) :
                 buildCharge(lib, window.__pendingOutput, seed());
-              pending = built.handle;
+              pending ??= built.handle;
               if (!builds++ && phase === 'build') {
                 if (kind === 'bed') built.handle.stop(0.005, stopAt);
                 else built.handle.stop(stopAt, 0.005);
               }
               return built;
-            }, 'continuous'));
+            }, () => 7, 'continuous')));
           } finally {
             window.__watch = false;
             window.__stall = null;
@@ -401,7 +389,8 @@ export async function riderStop(h, { ctx, page, errors }) {
   try {
     await captureEngine(page);
     const r = await page.evaluate(async () => {
-      const { Voice, openBuilt, LONG, stoppedBy } = await import('/src/audio/voice.ts');
+      const { Voice, LONG, stoppedBy } = await import('/src/audio/voice.ts');
+      const { Prebuilt, openPrebuilt } = await import('/src/audio/prebuild.ts');
       const e = window.__engine;
       e.stopAll(0.005);
       const outputs = [e.ctx.createGain(), e.ctx.createGain()];
@@ -425,7 +414,7 @@ export async function riderStop(h, { ctx, page, errors }) {
       let builds = 0;
       window.__watch = true;
       try {
-        openBuilt(from, () => 7, () => {
+        openPrebuilt(from, new Prebuilt(() => {
           const voice = new Voice(lib, 0, outputs[0], { held: true });
           const rider = new Voice(lib, 0, outputs[1], { held: true });
           const level = (target, at, value) => target.control(at,
@@ -440,7 +429,7 @@ export async function riderStop(h, { ctx, page, errors }) {
           rider.osc('sine', 660, 0, LONG, rider.gain(0.05, rider.dry));
           if (!builds++) rider.stop(stopAt, 0.005);
           return { voice };
-        });
+        }, () => 7));
       } finally {
         window.__watch = false;
         window.__stall = null;
