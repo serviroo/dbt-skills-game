@@ -57,7 +57,7 @@ export async function missedSectionKeepsItsChord(h, { ctx, page, errors, tap }) 
 }
 
 const voiceOf = (page, id) => page.evaluate((id) => {
-  const v = window.__engine.named.get(id)?.voice;
+  const v = window.__engine.plans.sound(id);
   return v ? { opened: v.opened, stopped: v.isStopped, dropped: v.isDropped, t: v.t, silentAt: v.silentAt } : null;
 }, id);
 
@@ -125,7 +125,8 @@ export async function visitsReachTheWindow(h, { ctx, page, errors, tap }) {
     const t0 = await page.evaluate(() => {
       const e = window.__engine;
       const t0 = e.now;
-      e.schedule([{ t: 1.4, cue: 'breath_out', opts: { id: 'before-visit', dur: 2 } }], t0);
+      e.schedule([{ t: 1.4, cue: 'breath_out', opts: { id: 'before-visit', dur: 2 } },
+        { t: 1.4, cue: 'bed', loop: { name: 'gate_hum' } }], t0);
       e.quiet(true, 0.05);
       e.schedule([{ t: 1.4, cue: 'stand_swell', opts: { id: 'in-visit' } }], t0);
       return t0;
@@ -143,11 +144,12 @@ export async function visitsReachTheWindow(h, { ctx, page, errors, tap }) {
     const carried = await audioHeard(page, tap, t0 + 1.5, t0 + 2.8, [0, 0]);
     const states = {
       beforeVisit: await voiceOf(page, 'before-visit'), inVisit: await voiceOf(page, 'in-visit'),
-      outside: await voiceOf(page, 'outside'),
+      outside: await voiceOf(page, 'outside'), bed: await page.evaluate(() => window.__engine.beds.has('gate_hum')),
     };
     const detail = JSON.stringify({ t0, back, carried, states });
     h.expect(!states.beforeVisit?.opened && !states.inVisit?.opened, `a cue waiting from a visit opened: ${detail}`);
     h.expect(states.outside?.opened, `a cue asked for after the visit did not play: ${detail}`);
+    h.expect(!states.bed, `a bed waiting from before the visit started: ${detail}`);
     h.expect(!errors.length, errors.join('\n'));
     return { carried, states };
   } finally {
@@ -156,7 +158,7 @@ export async function visitsReachTheWindow(h, { ctx, page, errors, tap }) {
 }
 
 const states = (page, ids) => page.evaluate((ids) => Object.fromEntries(ids.map((id) => {
-  const v = id === 'first' ? window.__first : window.__engine.named.get(id)?.voice;
+  const v = id === 'first' ? window.__first : window.__engine.plans.sound(id);
   return [id, v && { opened: v.opened, stopped: v.isStopped, silentAt: v.silentAt }];
 })), ids);
 
@@ -167,7 +169,7 @@ export async function resetKeepsItsBatch(h, { ctx, page, errors, tap }) {
       const e = window.__engine;
       const t0 = e.now;
       e.schedule([{ t: 0, cue: 'breath_out', opts: { id: 'first', dur: 6 } }], t0);
-      window.__first = e.named.get('first')?.voice;
+      window.__first = e.plans.sound('first');
       e.schedule([{ t: 1.6, cue: 'breath_out', opts: { id: 'old', dur: 2 } }], t0);
       e.schedule([
         { t: 1, cue: 'reset', opts: { fade: 0.05 } },
@@ -195,7 +197,7 @@ export async function laterStopReachesWaitingCue(h, { ctx, page, errors, tap }) 
       const e = window.__engine;
       const t0 = e.now;
       e.schedule([{ t: 0, cue: 'breath_out', opts: { id: 'x', dur: 6 } }], t0);
-      window.__first = e.named.get('x')?.voice;
+      window.__first = e.plans.sound('x');
       e.schedule([{ t: 1.2, cue: 'breath_out', opts: { id: 'x', dur: 4 } }], t0);
       e.schedule([{ t: 1.6, cue: 'stop', opts: { id: 'x', ramp: 0.05 } }], t0);
       e.schedule([{ t: 1.4, cue: 'breath_out', opts: { id: 'y', dur: 4 } }], t0);
@@ -209,6 +211,64 @@ export async function laterStopReachesWaitingCue(h, { ctx, page, errors, tap }) 
       `a later stop missed the waiting cue that took its name: ${detail}`);
     h.expect(r.y?.opened && r.y.silentAt <= t0 + 2, `a later stop missed a waiting named cue: ${detail}`);
     h.expect(!r.first?.stopped, `a stop meant for the waiting cue stopped the one it replaced: ${detail}`);
+    h.expect(!errors.length, errors.join('\n'));
+    return r;
+  } finally {
+    await ctx.close();
+  }
+}
+
+export async function stopsKeepTheirSound(h, { ctx, page, errors, tap }) {
+  try {
+    await quietStart(page, tap);
+    const t0 = await page.evaluate(() => {
+      const e = window.__engine;
+      const t0 = e.now;
+      e.schedule([{ t: 0, cue: 'breath_out', opts: { id: 'x', dur: 6 } }], t0);
+      window.__first = e.plans.sound('x');
+      e.schedule([{ t: 1.4, cue: 'breath_out', opts: { id: 'x', dur: 4 } }], t0);
+      e.schedule([{ t: 1, cue: 'stop', opts: { id: 'x', ramp: 0.05 } }], t0);
+      return t0;
+    });
+    await reached(page, t0 + 2);
+    const r = await states(page, ['first', 'x']);
+    const detail = JSON.stringify({ t0, ...r });
+    h.expect(r.first?.stopped && r.first.silentAt <= t0 + 1.2,
+      `a stop missed the cue playing under its name: ${detail}`);
+    h.expect(r.x?.opened && !r.x.stopped, `a stop reached a cue that took the name after it: ${detail}`);
+    h.expect(!errors.length, errors.join('\n'));
+    return r;
+  } finally {
+    await ctx.close();
+  }
+}
+
+export async function stopsEndTheirGeneration(h, { ctx, page, errors, tap }) {
+  try {
+    await quietStart(page, tap);
+    const t0 = await page.evaluate(() => {
+      const e = window.__engine;
+      const t0 = e.now;
+      const old = [{ t: 1.6, cue: 'music_stop', opts: { fade: 0.05 } }, { t: 1.8, cue: 'reset', opts: { fade: 0.05 } }];
+      e.schedule(old, t0);
+      e.stopAll(0.05);
+      e.schedule([
+        { t: 0, cue: 'music', opts: { section: 'calm', fade: 0.05 } },
+        { t: 0.9, cue: 'breath_out', opts: { id: 'after', dur: 3 } },
+      ], t0);
+      return t0;
+    });
+    await reached(page, t0 + 2.3);
+    const r = await page.evaluate(() => {
+      const e = window.__engine;
+      const calm = e.music.live.find((s) => s.name === 'calm')?.voice;
+      const after = e.plans.sound('after');
+      return { calm: calm && { stopped: calm.isStopped },
+        after: after && { opened: after.opened, stopped: after.isStopped } };
+    });
+    const detail = JSON.stringify({ t0, ...r });
+    h.expect(r.calm && !r.calm.stopped, `a stop from before stopAll cut the score after it: ${detail}`);
+    h.expect(r.after?.opened && !r.after.stopped, `a reset from before stopAll stopped a cue after it: ${detail}`);
     h.expect(!errors.length, errors.join('\n'));
     return r;
   } finally {

@@ -1,4 +1,4 @@
-import { installAudioRecorder, audioReady, scoreSounding } from './audio-recorder.mjs';
+import { installAudioRecorder, audioReady, scoreSounding, audioState } from './audio-recorder.mjs';
 import { settle } from './layout-fit.e2e.mjs';
 const SAFARI = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
 const TALL = { width: 390, height: 844 };
@@ -1180,7 +1180,7 @@ export const scenarios = {
       await scoreSounding(page, 2);
       const home = await listen(h, page, 3);
       c.ok(home[0].from.length && home[0].from.every((n) => n === 'GainNode') && home.every((x) => x.state === 'running'), `output: the speaker tap is on ${home[0].from} (${home[0].state}), not a running GainNode`);
-      c.ok(Math.max(...home.map((x) => x.rms)) > 1e-3, `output: no score reached the speakers on Home to compare with (${fmt(home)})`);
+      c.ok(home.some((x) => x.rms > 1e-3), `output: no score on Home (${fmt(home)}) ${await audioState(page)}`);
       const gains = await userGains(page);
       const before = await probe(page);
       await enterSafe(h, page, 'output', before);
@@ -1200,7 +1200,7 @@ export const scenarios = {
       await leaveSafe(h, page, 'output', before);
       await h.sleep(4000);
       const back = await listen(h, page, 3);
-      c.ok(Math.max(...back.map((x) => x.rms)) > 1e-3, `output: the score did not come back after leaving (${fmt(back)})`);
+      c.ok(back.some((x) => x.rms > 1e-3), `output: no score after leaving (${fmt(back)}) ${await audioState(page)}`);
       c.ok((await userGains(page)) === gains, `output: leaving changed their Master/Music/Effects gains ${gains} -> ${await userGains(page)}`);
       c.ok(!errors.length, `output: page errors: ${errors.join(' | ')}`);
       console.log(`output: home ${fmt(home)} | inside ${fmt(inside)} over ${notes} notes, ${tries} sound requests | back ${fmt(back)}`);

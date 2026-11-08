@@ -28,12 +28,17 @@
       "rules": {
         "lantern/graph-swaps-wait-for-their-time": "error",
         "lantern/cue-tracking-includes-offline": "error",
-        "lantern/cue-cleanup-shares-one-clock": "error"
+        "lantern/cue-cleanup-shares-one-clock": "error",
+        "lantern/events-reach-sounds-through-the-timeline": "error"
       }
     },
     {
       "files": ["src/audio/prebuild.ts"],
       "rules": { "lantern/timed-cues-are-prebuilt": "off" }
+    },
+    {
+      "files": ["src/audio/pending-events.ts"],
+      "rules": { "lantern/events-reach-sounds-through-the-timeline": "off" }
     },
     {
       "files": ["src/ui/anim.ts"],

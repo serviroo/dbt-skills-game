@@ -13,9 +13,9 @@ import { SCORE } from '../motion/tokens';
 import { makeEcho, dropEcho, type Echo, type Sends } from './echo';
 import { BusLevels } from './bus-levels';
 import { Voice, stoppedBy, withControls, type Lib } from './voice';
-import { BuildWindow, open, openCopies } from './prebuild';
+import { open, openCopies } from './prebuild';
 import { CueCleanup } from './cue-cleanup';
-import { pendingEvents, type Plan, type Waiting } from './pending-events';
+import { Timeline, type Plan, type Waiting } from './pending-events';
 
 export type { BedHandle, BedName, ChargeHandle, Section, SectionOpts };
 export { bufferToWav, toBase64 } from './wav';
@@ -130,7 +130,7 @@ export class AudioEngine {
   private seedN: number;
   private spans: { a: number; b: number }[] = [];
   private timer: ReturnType<typeof setInterval> | 0 = 0;
-  private plans = new BuildWindow<Waiting & { quiet: boolean }>();
+  private plans = new Timeline(this, () => this.isQuiet);
   private unlocked = false;
   private vol: number;
   private isMuted: boolean;
@@ -141,8 +141,6 @@ export class AudioEngine {
   private busLevels: BusLevels;
   /** The level window's low-end lift is on until the next window closes or the next section starts. */
   private lifted = false;
-  /** Cue handles named by schedule() events (opts.id), kept across calls so a later batch can stop them. */
-  private named = new Map<string, CueHandle>();
 
   constructor(ctx?: BaseAudioContext, opts: EngineOpts = {}) {
     const C = ctx ?? new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)({ latencyHint: 'interactive' });
@@ -602,6 +600,7 @@ export class AudioEngine {
    * fades back in (time constant sec / 4). Music, Effects and Master levels are left alone.
    */
   quiet(on: boolean, sec: number, at = soon(this.ctx)) {
+    this.plans.bump(at, on);
     this.isQuiet = on;
     for (const { curve: p } of on ? this.echo.out : []) {
       holdAt(p, at);
@@ -610,13 +609,11 @@ export class AudioEngine {
     if (on) this.busLevels.ramp(this.safe.curve, 0, at, at + sec);
     else this.busLevels.set(this.safe.curve, 1, at, Math.max(0.003, sec / 4));
     if (on) {
-      this.reach(['cue', 'charge', 'hush'], at);
       this.stoppedUntil = at;
       this.charge?.stop(at, sec);
       const voices = [...this.active, ...this.fading, ...this.takeHush()];
       this.release(voices, at, sec);
       this.active.clear();
-      this.named.clear();
       for (const e of [...this.closing.keys()]) this.closeEcho(e, at, sec);
       this.waitForStopped(at, voices);
       this.stopHush(at, sec, voices);
@@ -696,7 +693,7 @@ export class AudioEngine {
    *  the cutscene): what plays next starts in an empty echo. Under the Safe Zone's quiet the echo is closed already, and
    *  leaving the quiet brings the empty one (see quiet). */
   stopAll(fade = 0.4, at = soon(this.ctx)) {
-    this.reach(['cue', 'bed', 'charge', 'hush'], at);
+    this.plans.bump(at);
     const old = this.echo;
     if (!this.isQuiet) for (const e of [old, ...this.closing.keys()]) this.closeEcho(e, at, fade);
     this.charge?.stop(at, fade);
@@ -780,14 +777,9 @@ export class AudioEngine {
    * - { t, cue: 'hush', opts: { until } } / { t, cue: 'duck', opts: { db, ramp? } }
    */
   schedule(events: SoundEvent[], t0: number) {
-    const existing = { beds: this.beds, charge: this.charge, named: this.named,
-      music: this.music.live.map((s) => s.voice), waiting: this.plans.waiting };
-    const quiet = this.isQuiet;
-    const plans = pendingEvents(events, t0, this, existing).map(({ at, plan, waiting }) =>
-      ({ at, item: { kind: 'other' as const, ...waiting, entry: waiting?.entry ?? { controls: [], end: at }, quiet },
-        run: () => this.run(plan, t0, quiet) }));
-    if (this.live) this.plans.add(plans, this.ctx.currentTime + AHEAD);
-    else for (const { run } of plans) run();
+    const existing = { beds: this.beds, charge: this.charge, music: this.music.live.map((s) => s.voice) };
+    const until = this.live ? this.ctx.currentTime + AHEAD : Infinity;
+    this.plans.schedule(events, t0, existing, (plan) => this.run(plan, t0), until);
     this.music.scheduleUntil(Math.min(this.ctx.currentTime + AHEAD, t0 + 1e6));
   }
 
@@ -795,18 +787,7 @@ export class AudioEngine {
     this.plans.reach((w) => kinds.includes(w.kind) && (key === undefined || w.key === key), at);
   }
 
-  private run(plan: Plan, t0: number, quiet: boolean) {
-    const named = this.named;
-    const was = this.isQuiet;
-    this.isQuiet = quiet;
-    try {
-      this.runPlan(plan, t0, named);
-    } finally {
-      this.isQuiet = was;
-    }
-  }
-
-  private runPlan(plan: Plan, t0: number, named: Map<string, CueHandle>) {
+  private run(plan: Plan, t0: number) {
     withControls(plan.controls, () => {
       if ('existing' in plan) return plan.existing;
       const e = plan.event;
@@ -815,7 +796,6 @@ export class AudioEngine {
       const loopName = e.loop?.name;
       switch (e.cue) {
         case 'stop':
-          named.get(o.id)?.stop(at, o.ramp ?? 0.04);
           break;
         case 'bed':
         case 'bed_stop': {
@@ -877,8 +857,7 @@ export class AudioEngine {
             const h = this.bed(e.cue as BedName, { at, level: e.loop.level ?? 1, fadeIn: o.fade ?? 0.5 });
             return { voice: h.voice, handle: h };
           }
-          const h = this.play(e.cue, { ...o, at });
-          if (o.id && !this.isQuiet) named.set(o.id, h);
+          this.play(e.cue, { ...o, at });
         }
       }
     }, plan.bind);

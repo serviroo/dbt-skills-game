@@ -2,7 +2,9 @@
 // in Give me a moment) is silent at the speakers within a click-free moment of it, a quick visit never brings an old
 // cue or echo back, their levels and mute never change, and a gift or rank cut short by the tap is kept. Measured on
 // the real post-mix output, render quantum by render quantum, against the audio clock at the moment of the tap.
-import { installAudioRecorder, audioReady, audioRecorded, audioEnded, audioHeard, watchCuts, cutOf } from './audio-recorder.mjs';
+import {
+  installAudioRecorder, audioReady, audioRecorded, audioEnded, audioHeard, watchCuts, cutOf, audioState,
+} from './audio-recorder.mjs';
 
 const TALL = { width: 390, height: 844 };
 const SMALL = { width: 320, height: 568 };
@@ -183,7 +185,7 @@ async function entryCase(h, c, { viewport = TALL, reduced = false, tag, shots = 
     const back = await hear(page, 0, t - 1, t - 0.05);
     const after = await probe(page);
     if (shots) await h.shot(page, `q5-${tag}-3-after`);
-    c.ok(back.rms > 1e-3, `${tag}: the score did not come back outside (${fmt(back)})`);
+    c.ok(back.rms > 1e-3, `${tag}: the score did not come back outside (${fmt(back)}) ${await audioState(page)}`);
     c.ok((await userGains(page)) === gains && after.prefs === prefs && after.volume === before.volume, `${tag}: the visit changed their levels or stored prefs`);
     c.ok(after.progress === before.progress, `${tag}: the visit changed XP, stats, rank or the collection ${before.progress} -> ${after.progress}`);
     c.ok(!errors.length, `${tag}: page errors: ${errors.join(' | ')}`);
