@@ -1,27 +1,10 @@
-const AUDIO_TIME_ARG = new Map([
-  ['setValueAtTime', 1],
-  ['setTargetAtTime', 1],
-  ['linearRampToValueAtTime', 1],
-  ['exponentialRampToValueAtTime', 1],
-  ['setValueCurveAtTime', 1],
-  ['cancelScheduledValues', 0],
-  ['cancelAndHoldAtTime', 0],
-  ['start', 0],
-  ['stop', 0],
-]);
+import {
+  AUDIO_TIME_ARG, audioParam, calleeName, declaratorOf, declaredAs, isNamed, memberName, methodName, variableOf,
+} from './ast.mjs';
+import { busRules } from './bus-rules.mjs';
 
 const SKIPPED_KEYS = new Set(['parent', 'loc', 'range']);
 const FUNCTIONS = new Set(['FunctionExpression', 'ArrowFunctionExpression', 'FunctionDeclaration']);
-
-function memberName(node) {
-  if (node?.type !== 'MemberExpression') return null;
-  if (!node.computed) return node.property.name;
-  return typeof node.property.value === 'string' ? node.property.value : null;
-}
-
-const isNamed = (node, name) => memberName(node) === name;
-
-const methodName = (call) => memberName(call.callee);
 
 const isGlobal = (node, name) => node?.type === 'Identifier' ? node.name === name : isNamed(node, name);
 
@@ -32,21 +15,6 @@ function children(node) {
     .filter(([key, value]) => !SKIPPED_KEYS.has(key) && value && typeof value === 'object')
     .flatMap(([, value]) => (Array.isArray(value) ? value : [value]).filter(isNode));
 }
-
-function variableOf(context, id) {
-  for (let scope = context.sourceCode.getScope(id); scope; scope = scope.upper) {
-    const variable = scope.set.get(id.name);
-    if (variable) return variable;
-  }
-  return null;
-}
-
-function declaratorOf(context, id) {
-  const def = variableOf(context, id)?.defs[0]?.node;
-  return def?.type === 'VariableDeclarator' && def.id.type === 'Identifier' ? def : null;
-}
-
-const declaredAs = (context, id) => declaratorOf(context, id)?.init ?? null;
 
 function constantOf(context, id) {
   const def = declaratorOf(context, id);
@@ -350,8 +318,6 @@ const handleLostGpuContext = {
 };
 
 const LOADS_ECHO = new Set(['createConvolver', 'makeIR', 'ConvolverNode']);
-
-const calleeName = (call) => methodName(call) ?? (call.callee.type === 'Identifier' ? call.callee.name : null);
 
 function nameOf(fn) {
   const p = fn.parent;
@@ -795,21 +761,6 @@ const cueCleanupSharesOneClock = {
   },
 };
 
-const PARAM_NAMES = new Set([
-  'gain', 'frequency', 'detune', 'offset', 'pan', 'Q', 'delayTime', 'playbackRate',
-  'threshold', 'knee', 'ratio', 'attack', 'release',
-]);
-
-function audioParam(context, node, seen = new Set()) {
-  if (!node || seen.has(node)) return false;
-  seen.add(node);
-  if (node.type === 'MemberExpression' && !node.computed) return PARAM_NAMES.has(node.property.name);
-  if (node.type !== 'Identifier') return false;
-  const variable = variableOf(context, node);
-  const typed = variable?.defs.some((def) => def.name?.typeAnnotation?.typeAnnotation?.typeName?.name === 'AudioParam');
-  return typed || audioParam(context, declaredAs(context, node), seen);
-}
-
 function readsParamValue(context, node, seen = new Set()) {
   if (!node || seen.has(node) || FUNCTIONS.has(node.type)) return false;
   seen.add(node);
@@ -972,5 +923,6 @@ export default {
     'graph-swaps-wait-for-their-time': graphSwapsWaitForTheirTime,
     'cue-tracking-includes-offline': cueTrackingIncludesOffline,
     'cue-cleanup-shares-one-clock': cueCleanupSharesOneClock,
+    ...busRules,
   },
 };
