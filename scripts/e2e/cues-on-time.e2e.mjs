@@ -76,6 +76,7 @@ async function boot(h, levels) {
   // is set: such a part has already been rendered past, so it starts late, cuts in or never plays
   const tap = await page.evaluate(async () => {
     const { tapAudioSchedule } = await import('/scripts/e2e/audio-schedule.mjs');
+    const { placement } = await import('/src/audio/voice.ts');
     const tap = window.__taps.findIndex((t) => t.from === 'GainNode');
     const clock = window.__taps[tap].context;
     window.__behind = [];
@@ -83,7 +84,6 @@ async function boot(h, levels) {
     window.__watch = false;
     window.__stall = null;
     window.__stalls = [];
-    window.__started = 0;
     const behind = (what, t) => {
       if (!window.__watch || !(t > 0)) return;
       window.__scheduled.push(t);
@@ -98,10 +98,9 @@ async function boot(h, levels) {
       while (clock.currentTime < until);
       window.__stalls.push({ what, from, to: clock.currentTime });
     };
+    placement.placed = () => stall('place');
     tapAudioSchedule((_, method, args, time) => behind(method, time), (receiver, method) => {
-      if (receiver instanceof ConstantSourceNode) return;
-      if (window.__watch && method === 'start') window.__started++;
-      stall(method);
+      if (!(receiver instanceof ConstantSourceNode)) stall(method);
     });
     return tap;
   });
@@ -213,9 +212,7 @@ async function startsOnTimeHoweverSlowItsBuild(h, kind) {
           const missed = window.__drops.length;
           const ask = clock.currentTime;
           const t0 = performance.now();
-          const starting = window.__started;
-          const { r: handle, stalled, behind } = watched('start', () => start(ask));
-          const sources = window.__started - starting;
+          const { r: handle, stalled, behind } = watched('place', () => start(ask));
           const dropped = window.__opens.length === opened
             ? { from: ask, to: clock.currentTime + span, attempts: window.__drops.slice(missed) } : null;
           const ms = performance.now() - t0;
@@ -223,7 +220,7 @@ async function startsOnTimeHoweverSlowItsBuild(h, kind) {
           const extra = window.__extras[opened];
           const deadline = ask + window.__late;
           const s = { name, rate, ask, deadline, done: clock.currentTime, ms, behind, stalled,
-            opens, extra, dropped, span, sources, attempts: window.__drops.length - missed };
+            opens, extra, dropped, span };
           out.push(s);
           await reach(dropped ? dropped.to : Math.max(ask, ...opens) + span);
           const at = clock.currentTime + LEAD;
@@ -294,8 +291,7 @@ async function startsOnTimeHoweverSlowItsBuild(h, kind) {
       const firstAttempt = s.dropped?.attempts[0];
       const expiredBeforePlacement = firstAttempt && firstAttempt.earliest >= firstAttempt.deadline;
       if (!stalled && !silent && !expiredBeforePlacement) {
-        const counts = `${s.sources} sources started, ${s.attempts} attempts dropped`;
-        why.push(`the page never stalled while it was placed (${counts}), so the stall was not tested`);
+        why.push('the page never stalled while it was placed, so the stall was not tested');
       }
       const untested = 'the page never stalled while it was stopped, so that stall was not tested';
       if (kind !== 'cues' && !stopStalled) why.push(untested);
@@ -587,7 +583,7 @@ export const scenarios = {
             const opened = window.__opens.length;
             const ask = clock.currentTime;
             const t0 = performance.now();
-            window.__stall = stall ? { after: 'start', by: STALL } : null;
+            window.__stall = stall ? { after: 'place', by: STALL } : null;
             window.__watch = true;
             fn();
             window.__watch = false;

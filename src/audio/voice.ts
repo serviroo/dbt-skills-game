@@ -5,6 +5,8 @@ import { renderedTo, silentAfter, soon } from './param';
 
 export const LONG = 6 * 3600;
 
+export const placement: { placed?: () => void } = {};
+
 /** Shared, engine-owned resources every voice can draw on. */
 export interface Lib {
   ctx: Ctx;
@@ -250,6 +252,7 @@ export class Voice {
       const missed = at + h.t <= rendered();
       if (missed && h.skipWhenLate) continue;
       h.place(missed ? Math.max(at, soon(this.ctx) - h.t) : at);
+      placement.placed?.();
     }
     if (!continuing && first <= rendered()) return this.drop(voices);
     this.settle(continuing ? soon(this.ctx) : first);
