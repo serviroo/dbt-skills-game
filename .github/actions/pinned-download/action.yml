@@ -37,7 +37,6 @@ runs:
       run: |
         mkdir -p "$(dirname "$FILE")"
         if ! curl -fsSL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 300 -o "$FILE" "$URL"; then
-          rm -f "$FILE"
           echo "::error title=Pinned download::$URL failed and the cache has no copy, so this job can't run"
           exit 1
         fi
