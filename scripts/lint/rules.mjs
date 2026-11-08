@@ -72,7 +72,8 @@ const audioTimesFromSoon = {
 const lateOpensBuildAgain = {
   meta: {
     messages: {
-      dropped: 'Open held sounds with openPrebuilt so a missed placement retries a built copy or drops before it opens.',
+      dropped: 'Open held sounds with openPrebuilt so a missed placement retries a built copy or drops '
+        + 'before it opens.',
     },
   },
   create(context) {

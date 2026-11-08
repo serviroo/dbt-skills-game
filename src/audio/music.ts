@@ -522,7 +522,8 @@ const FACTORIES: Record<Section, Factory> = {
           const k = i < 3 ? i : (i - 3) % 3;
           const [notes, tp] = prog[k];
           if (due(t)) {
-            brass.chord(t, notes, 0.03, i === 2 ? [1.4, 1.3, 1, 1, 1, 1, 1] : undefined, i === 2 ? 1.5 : i > 0 ? 1 : 0.6);
+            const accents = i === 2 ? [1.4, 1.3, 1, 1, 1, 1, 1] : undefined;
+            brass.chord(t, notes, 0.03, accents, i === 2 ? 1.5 : i > 0 ? 1 : 0.6);
             choir.chord(t, tp);
             const lp = rp.at(brass.lp.frequency);
             lp.setTargetAtTime(i === 2 ? 3200 : 3000, t, 0.03);

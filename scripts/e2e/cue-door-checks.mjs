@@ -310,7 +310,8 @@ export async function spareRoarGoes(h) {
     });
     const detail = JSON.stringify(r);
     h.expect(r.spares.length > 0 && r.roarOpened, `the hit did not open a separate roar: ${detail}`);
-    h.expect(r.spares.every((s) => s.stopped && s.cleared), `a played hit left an unused spare roar holding on: ${detail}`);
+    h.expect(r.spares.every((s) => s.stopped && s.cleared),
+      `a played hit left an unused spare roar holding on: ${detail}`);
     h.expect(r.spares.every((s) => s.stops.length > 0 && s.stops.every((at) => at <= 0.805)),
       `an unused spare roar's gate did not stop by the hit: ${detail}`);
     h.expect(r.spares.every((s) => !s.opened), `an unused spare roar opened: ${detail}`);
