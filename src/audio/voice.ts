@@ -415,7 +415,7 @@ export class Voice {
   private gateSource() {
     if (!this.gate) {
       const gate = this.ctx.createConstantSource();
-      gate.offset.value = 0;
+      gate.offset.setValueAtTime(0, 0);
       gate.start();
       this.useGate(gate);
     }
