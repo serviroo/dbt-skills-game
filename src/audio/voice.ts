@@ -334,27 +334,28 @@ export class Voice {
       const last = k + 1 >= RETRIES.length;
       const built = copies.take();
       if (!built) throw new Error(`${sound} has no built copy to open`);
-      bind?.(built);
-      requested ??= soon(built.voice.ctx);
       const targets = [built.voice, ...built.voice.riders];
-      if (pending) {
-        for (const c of orderedControls(pending)) if (c.replay) {
-          const voice = targets[owners.indexOf(c.voice)];
-          if (!voice) throw new Error('A retried sound lost a pending control target');
-          c.replay({ ...built, voice }, c.at);
-        }
-      } else {
-        for (const control of controls) control(built);
-      }
-      const until = built.voice.stopAsked?.at ?? Infinity;
-      deadline = Math.min(deadline ?? (asked ?? soon(built.voice.ctx)) + SCORE.lateSec, until);
-      const late = Math.max(asked ?? 0, soon(built.voice.ctx)) + extra >= deadline;
-      const continuing = kind === 'continuous' && (late || last || !copies.left);
-      const by = continuing ? until : deadline;
-      pending = built.voice.pending.list ?? [];
-      owners = targets;
-      let opened: boolean;
+      let opened = false;
+      let continuing = false;
       try {
+        bind?.(built);
+        requested ??= soon(built.voice.ctx);
+        if (pending) {
+          for (const c of orderedControls(pending)) if (c.replay) {
+            const voice = targets[owners.indexOf(c.voice)];
+            if (!voice) throw new Error('A retried sound lost a pending control target');
+            c.replay({ ...built, voice }, c.at);
+          }
+        } else {
+          for (const control of controls) control(built);
+        }
+        const until = built.voice.stopAsked?.at ?? Infinity;
+        deadline = Math.min(deadline ?? (asked ?? soon(built.voice.ctx)) + SCORE.lateSec, until);
+        const late = Math.max(asked ?? 0, soon(built.voice.ctx)) + extra >= deadline;
+        continuing = kind === 'continuous' && (late || last || !copies.left);
+        const by = continuing ? until : deadline;
+        pending = built.voice.pending.list ?? [];
+        owners = targets;
         opened = built.voice.openInTime(asked, continuing ? 0 : extra, by, built.prepare, continuing);
       } catch (err) {
         built.voice.drop(targets);

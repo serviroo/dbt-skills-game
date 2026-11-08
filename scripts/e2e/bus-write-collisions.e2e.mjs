@@ -52,7 +52,7 @@ export const scenarios = {
               } catch (err) {
                 error = err.message;
               }
-              const batchFinished = e.named.has('after');
+              const batchFinished = !!e.plans.sound('after');
               const data = (await c.startRendering()).getChannelData(0);
               const first = Math.ceil(press * sr);
               let floor = data[first];

@@ -34,6 +34,7 @@ const RULE_FINDINGS = {
   'bus-rises-wait-for-stops': 14,
   'bus-levels-use-tracked-curves': 6,
   'timed-cues-are-prebuilt': 12,
+  'events-reach-sounds-through-the-timeline': 4,
 };
 
 function checkRules() {

@@ -1,4 +1,4 @@
-import type { AudioEngine, CueHandle, SoundEvent } from './engine';
+import type { AudioEngine, SoundEvent } from './engine';
 import { BED_NAMES, type BedHandle, type BedName, type ChargeHandle } from './beds';
 import type { ControlledBuild, Voice } from './voice';
 
@@ -10,19 +10,22 @@ export type Entry = {
 };
 export type Plan = { controls: Setup[]; bind?: Setup }
   & ({ event: SoundEvent } | { existing: ControlledBuild | undefined });
-export type Waiting = { kind: 'cue' | 'bed' | 'charge' | 'section' | 'hush' | 'other'; key?: string; entry: Entry };
+type Kind = 'cue' | 'bed' | 'charge' | 'section' | 'hush' | 'reset' | 'other';
+export type Waiting = { kind: Kind; key?: string; entry: Entry };
+type Named = Map<string, { at: number; entry?: Entry }[]>;
 type Existing = {
   beds: ReadonlyMap<BedName, BedHandle>;
   charge: ChargeHandle | null;
-  named: ReadonlyMap<string, CueHandle>;
   music: Voice[];
-  waiting: readonly Waiting[];
 };
 const CONTROLS = ['stop', 'bed_stop', 'charge_release', 'charge_stop', 'music_stop', 'music_level', 'music_lowpass',
-  'music_lift', 'unhush', 'duck', 'reset', 'chest_burst_full'];
+  'music_lift', 'unhush', 'duck'];
+const soundAt = (named: Named, id: string, at: number) => named.get(id)?.filter((n) => n.at <= at).at(-1)?.entry;
+const nameAt = (named: Named, id: string, at: number, entry?: Entry) =>
+  named.set(id, [...named.get(id) ?? [], { at, entry }].sort((a, b) => a.at - b.at));
 
-export function pendingEvents(
-  events: SoundEvent[], t0: number, engine: AudioEngine, existing: Existing,
+function pendingEvents(
+  events: SoundEvent[], t0: number, engine: AudioEngine, existing: Existing, waiting: Waiting[], named: Named,
 ): { at: number; plan: Plan; waiting?: Waiting }[] {
   const plans: { at: number; order: number; plan: Plan; waiting?: Waiting }[] = [];
   const reserves: { at: number; entry: Entry; apply: Setup }[] = [];
@@ -39,15 +42,12 @@ export function pendingEvents(
   for (const [name, handle] of existing.beds) if (!handle.stopped) {
     beds.set(name, bind({ voice: handle.voice, handle }));
   }
-  const named = new Map<string, Entry>();
-  for (const [id, handle] of existing.named) if (handle.voice) named.set(id, bind({ voice: handle.voice, handle }));
   let charge = existing.charge && !existing.charge.voice.isStopped
     ? bind({ voice: existing.charge.voice, handle: existing.charge }) : undefined;
   const sections = existing.music.filter((voice) => voice.silentAt > engine.ctx.currentTime)
     .map((voice) => bind({ voice }));
-  for (const { kind, key, entry } of existing.waiting) {
-    if (kind === 'cue' && key) named.set(key, entry);
-    else if (kind === 'bed' && key) beds.set(key, entry);
+  for (const { kind, key, entry } of waiting) {
+    if (kind === 'bed' && key) beds.set(key, entry);
     else if (kind === 'charge') charge = entry;
     else if (kind === 'section') sections.push(entry);
   }
@@ -89,7 +89,7 @@ export function pendingEvents(
     const bed = beds.get(name ?? '');
     const scoreControl = ['music_level', 'music_lowpass', 'music_lift'].includes(cue);
     let target: Entry | undefined;
-    if (cue === 'stop') target = named.get(o.id);
+    if (cue === 'stop') target = soundAt(named, o.id, at);
     else if (cue === 'bed_stop') target = bed;
     else if (cue === 'charge_stop' || cue === 'charge_release') target = charge;
     else if (scoreControl && current && sections.includes(current)) target = current;
@@ -122,11 +122,12 @@ export function pendingEvents(
       continue;
     }
     if (cue === 'reset') {
-      for (const entry of new Set([...beds.values(), ...named.values(), ...sections, ...charge ? [charge] : []])) {
+      const cues = [...named.keys()].map((id) => soundAt(named, id, at)).filter((e) => !!e);
+      for (const entry of new Set([...beds.values(), ...cues, ...sections, ...charge ? [charge] : []])) {
         reserve(entry, at, o.fade ?? 0.3);
       }
+      for (const id of named.keys()) nameAt(named, id, at);
       beds.clear();
-      named.clear();
       sections.length = 0;
       charge = undefined;
     }
@@ -135,13 +136,13 @@ export function pendingEvents(
     }
     const entry: Entry = { controls: [], end: Infinity };
     current = entry;
-    const kind = isBed ? 'bed' : cue === 'charge' ? 'charge' : cue === 'music' ? 'section' : cue === 'hush' ? 'hush'
-      : CONTROLS.includes(cue) ? 'other' : 'cue';
+    const kind: Kind = isBed ? 'bed' : cue === 'charge' ? 'charge' : cue === 'music' ? 'section'
+      : cue === 'hush' ? 'hush' : cue === 'reset' ? 'reset' : CONTROLS.includes(cue) ? 'other' : 'cue';
     plans.push({ at, order, waiting: { kind, key: isBed ? name : o.id, entry }, plan: {
       event, bind(built) { entry.built = built; }, get controls() {
         return entry.controls.sort((a, b) => a.at - b.at).map((control) => control.apply);
       } } });
-    if (o.id && !isBed && cue !== 'charge' && cue !== 'music' && cue !== 'stop') named.set(o.id, entry);
+    if (o.id && kind === 'cue') nameAt(named, o.id, at, entry);
     if (isBed) beds.set(name ?? '', entry);
     if (cue === 'charge') {
       charge = entry;
@@ -156,4 +157,74 @@ export function pendingEvents(
   const prepared = reserves.sort((a, b) => a.at - b.at).map(({ entry, apply }) =>
     ({ at: -Infinity, plan: { existing: entry.built, controls: [apply] } }));
   return [...prepared, ...plans.sort((a, b) => a.at - b.at || a.order - b.order)];
+}
+
+type Queued = { at: number; batch: number; gen: number; item: Waiting; run: () => void };
+
+export class Timeline {
+  private queued: Queued[] = [];
+  private batches = 0;
+  private running = Infinity;
+  private gen = 0;
+  private cuts: { gen: number; at: number }[] = [];
+  private named: Named = new Map();
+
+  constructor(private engine: AudioEngine, private quiet: () => boolean) {}
+
+  schedule(events: SoundEvent[], t0: number, existing: Existing, run: (plan: Plan) => void, until: number) {
+    const now = this.engine.ctx.currentTime;
+    for (const [id, list] of this.named) {
+      const kept = list.filter((n) => !n.entry?.built || n.entry.built.voice.silentAt > now);
+      if (kept.length) this.named.set(id, kept);
+      else this.named.delete(id);
+    }
+    const batch = ++this.batches;
+    for (const { at, plan, waiting } of pendingEvents(events, t0, this.engine, existing, this.waiting, this.named)) {
+      if (waiting?.kind === 'reset') this.cuts.push({ gen: ++this.gen, at });
+      const item = waiting ?? { kind: 'other', entry: { controls: [], end: at } };
+      this.queued.push({ at, batch, gen: this.gen, item, run: () => run(plan) });
+    }
+    this.queued.sort((a, b) => a.at - b.at || a.batch - b.batch);
+    this.until(until);
+  }
+
+  until(t: number) {
+    while (this.queued.length && this.queued[0].at <= t) this.run(this.queued.shift()!);
+  }
+
+  bump(at: number, forget = false) {
+    if (this.running !== Infinity) return;
+    const due = this.queued.filter((q) => q.at < at);
+    this.queued = this.queued.filter((q) => q.at >= at);
+    for (const q of due) this.run(q);
+    this.cuts.push({ gen: ++this.gen, at });
+    if (forget) this.named.clear();
+  }
+
+  private run(q: Queued) {
+    const cut = this.cuts.some((c) => q.gen < c.gen && q.at >= c.at);
+    this.cuts = this.cuts.filter((c) => this.queued.some((other) => other.gen < c.gen));
+    if (cut || (q.item.kind !== 'other' && q.item.kind !== 'reset' && this.quiet())) return;
+    const was = this.running;
+    this.running = q.batch;
+    try {
+      q.run();
+    } finally {
+      this.running = was;
+    }
+  }
+
+  get waiting() {
+    return this.queued.map((q) => q.item);
+  }
+
+  sound(id: string) {
+    return this.named.get(id)?.at(-1)?.entry?.built?.voice;
+  }
+
+  reach(match: (item: Waiting) => boolean, at: number) {
+    const reached = this.queued.filter((q) => q.batch < this.running && match(q.item));
+    this.queued = this.queued.filter((q) => !reached.includes(q));
+    for (const q of reached) if (q.at < at) this.run(q);
+  }
 }

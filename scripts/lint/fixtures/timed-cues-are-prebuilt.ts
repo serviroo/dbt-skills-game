@@ -16,9 +16,9 @@ export function openSection(build: (seed: () => number) => { voice: Voice }) {
 
 export function aliases() {
   const { openBuilt: open } = Voice;
-  const named = Voice['openBuilt'];
+  const indexed = Voice['openBuilt'];
   const quoted = Voice[`openBuilt`];
-  return [open, named, quoted];
+  return [open, indexed, quoted];
 }
 
 export class Opener {

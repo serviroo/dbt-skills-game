@@ -24,7 +24,7 @@ import { expiredBuilds } from './cue-deadline-checks.mjs';
 import { droppedRelease, checkedRoar, unownedDoor } from './cue-release-checks.mjs';
 import {
   missedSectionKeepsItsChord, windowTiming, stopsReachTheWindow, visitsReachTheWindow, resetKeepsItsBatch,
-  laterStopReachesWaitingCue,
+  laterStopReachesWaitingCue, stopsKeepTheirSound, stopsEndTheirGeneration,
 } from './cue-window-checks.mjs';
 import { stoppedAwakenLetsGo, customHitBringsItsRoar, failedBuildLetsGo } from './cue-copy-checks.mjs';
 
@@ -391,6 +391,10 @@ export const scenarios = {
     resetKeepsItsBatch(h, await boot(h, { music: 0, sfx: 1 })),
   'a-later-stop-reaches-a-named-cue-still-waiting': async (h) =>
     laterStopReachesWaitingCue(h, await boot(h, { music: 0, sfx: 1 })),
+  'a-stop-reaches-the-sound-it-was-scheduled-against': async (h) =>
+    stopsKeepTheirSound(h, await boot(h, { music: 0, sfx: 1 })),
+  'stop-all-ends-what-was-scheduled-before-it-whatever-its-kind': async (h) =>
+    stopsEndTheirGeneration(h, await boot(h, { music: 1, sfx: 1 })),
   'the-door-path-changes-no-sample': doorPath,
   'a-hit-cleanup-keeps-the-gate-its-roar-shares-until-the-score-ends': sharedGateOutlivesTheHit,
   'a-long-stall-after-opening-leaves-the-door-path-unchanged': async (h) =>

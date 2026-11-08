@@ -69,7 +69,8 @@ async function makeAudio(): Promise<AppAudio | null> {
     const e = new AudioEngine(undefined, { user: { ...initial, muted: initial.muted || params.mute } });
     const volume = params.shot ? undefined : createVolume(e, { fresh: prefs.fresh, initial, forceMute: params.mute });
     if (volume && (import.meta.env.DEV || params.debug))
-      (window as unknown as { __dbtVolume?: unknown }).__dbtVolume = { get: () => volume.get(), gains: () => e.levels };
+      (window as unknown as { __dbtVolume?: unknown }).__dbtVolume =
+        { get: () => volume.get(), gains: () => e.levels, engine: e };
     e.autoUnlock();
     wireWindowSounds(e);
     const a: AppAudio = {

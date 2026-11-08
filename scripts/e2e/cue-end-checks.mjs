@@ -151,7 +151,7 @@ export async function expiredEnds(h, { ctx, page, errors }) {
           window.__stall = null;
           Voice.prototype.openInTime = open;
         }
-        rows.push({ kind, tries, ended: kind === 'cue' ? e.named.get('ending-cue').end :
+        rows.push({ kind, tries, ended: kind === 'cue' ? e.plans.sound('ending-cue').end :
           kind === 'charge' ? e.charge === null : !e.beds.has('ambient'), at, returned: e.now });
       }
       return rows;

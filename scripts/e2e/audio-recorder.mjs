@@ -2,6 +2,12 @@
 
 export async function installAudioRecorder(ctx) {
   await ctx.addInitScript(() => {
+    const warn = console.warn;
+    window.__dropped = [];
+    console.warn = (...args) => {
+      if (args[0] === '[audio] sound dropped') window.__dropped.push(args.slice(1).join(' '));
+      return warn.apply(console, args);
+    };
     const WORKLET = 'scripts/e2e/audio-recorder-worklet.mjs';
     const connect = AudioNode.prototype.connect;
     const close = AudioContext.prototype.close;
@@ -224,7 +230,16 @@ export async function captureEngine(page) {
 
 export function scoreSounding(page, sec) {
   return page.waitForFunction((sec) => {
-    const clock = window.__taps[0]?.context;
-    return clock?.state === 'running' && window.__starts.some((t) => t <= clock.currentTime - sec);
+    const e = window.__dbtVolume?.engine;
+    const section = e?.music.live.find((s) => s.end === Infinity)?.voice;
+    return e?.ctx.state === 'running' && !!section?.opened && e.ctx.currentTime >= section.openedAt + sec;
   }, sec, { timeout: 60000 });
 }
+
+export const audioState = (page) => page.evaluate(() => {
+  const e = window.__dbtVolume?.engine;
+  const live = e?.music.live.map((s) => ({ name: s.name, opened: s.voice.opened, silentAt: s.voice.silentAt,
+    gate: s.voice.gate?.offset.value }));
+  const unrendered = window.__taps.map((t) => t.unrendered.size);
+  return JSON.stringify({ gains: e?.levels, live, state: e?.ctx.state, unrendered, dropped: window.__dropped });
+});
