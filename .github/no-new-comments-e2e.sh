@@ -578,4 +578,36 @@ EOF
 commit "feat: markup text"
 expect pass "text inside a textarea and CSS strings pass"
 
+case_branch python-more
+put tool/q.py <<'EOF'
+def f():
+    "Return one."  # explanation
+    return 1
+
+
+def g():
+    (
+        "hello"
+        "world"
+    )
+    return 2
+
+
+def h():
+    ("doc"  # inside
+    )
+    return 3
+EOF
+commit "feat: python more"
+expect "tool/q.py:2: adds a comment" "a comment beside a docstring fails"
+expect "tool/q.py:15: adds a comment" "a comment inside a docstring's parentheses fails"
+expect "tool/q.py:8: adds a docstring" "a docstring joined across lines in parentheses fails"
+
+case_branch title-text
+put web/t.html <<'EOF'
+<title>Plan</titleish><!-- the plan --></title>
+EOF
+commit "feat: title text"
+expect pass "text after a lookalike closing tag stays title text"
+
 [[ $failed -eq 0 ]] && echo "All cases behaved." || exit 1

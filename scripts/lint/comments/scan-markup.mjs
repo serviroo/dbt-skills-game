@@ -49,7 +49,9 @@ export function htmlPieces(text, embed) {
     const type = /\stype\s*=\s*["']?([^"'\s>]+)/.exec(lower.slice(at, end))?.[1];
     at = end + 1;
     if (!RAW_TEXT.has(tag[1]) && tag[1] !== 'script' && tag[1] !== 'style') continue;
-    const close = lower.indexOf(`</${tag[1]}`, at);
+    const closer = new RegExp(`</${tag[1]}[\\s/>]`, 'g');
+    closer.lastIndex = at;
+    const close = closer.exec(lower)?.index ?? -1;
     const stop = close < 0 ? text.length : close;
     if (RAW_TEXT.has(tag[1])) {
       at = stop;

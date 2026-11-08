@@ -75,7 +75,10 @@ function docstringAt(tokens, i) {
   let opens = 0;
   for (; tokens[at]?.text === '('; opens++) at = skipNoise(tokens, at + 1);
   if (!tokens[at] || !opensString(tokens[at])) return null;
-  const end = stringRunEnd(tokens, at);
+  let end = stringRunEnd(tokens, at);
+  while (opens > 0 && opensString(tokens[skipNoise(tokens, end)] ?? {})) {
+    end = stringRunEnd(tokens, skipNoise(tokens, end));
+  }
   let next = skipNoise(tokens, end);
   for (; opens > 0; opens--) {
     if (tokens[next]?.text !== ')') return null;
@@ -104,6 +107,8 @@ export function pythonPieces(text, scratch) {
     const docstring = atStart ? docstringAt(tokens, i) : null;
     if (docstring) {
       pieces.push(...rangeText(lines, tokens[docstring.first], tokens[docstring.last], 'd'));
+      const skipped = tokens.slice(i, docstring.next).filter((t) => t.type === 'COMMENT');
+      for (const comment of skipped) pieces.push(...rangeText(lines, comment, comment, 'c'));
       [atStart, i] = [false, docstring.next - 1];
       continue;
     }
