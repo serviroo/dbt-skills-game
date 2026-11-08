@@ -2,29 +2,24 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { COMMENT_EXCEPTIONS, directive, licenseLine, normalize, strip } from './rules.mjs';
+import { parseArgs } from 'node:util';
+import { directive, licenseLine, normalize, strip } from './rules.mjs';
 import { languageOf, scanner } from './scan.mjs';
-
-const USAGE = 'usage: node scripts/lint/comments/check.mjs [--base REF] [--head REF]';
 
 function fail(message) {
   console.error(message);
   process.exit(2);
 }
 
-function readOptions(argv) {
-  const options = {
-    base: process.env.BASE_SHA || '',
-    head: process.env.HEAD_SHA || 'HEAD',
-  };
-  for (let i = 0; i < argv.length; i += 2) {
-    const value = argv[i + 1];
-    if (value === undefined) fail(USAGE);
-    if (argv[i] === '--base') options.base = value;
-    else if (argv[i] === '--head') options.head = value;
-    else fail(USAGE);
+function readOptions() {
+  const options = { base: { type: 'string' }, head: { type: 'string' } };
+  let values = {};
+  try {
+    ({ values } = parseArgs({ options }));
+  } catch (error) {
+    fail(error.message);
   }
-  return options;
+  return { base: values.base ?? process.env.BASE_SHA ?? '', head: values.head ?? process.env.HEAD_SHA ?? 'HEAD' };
 }
 
 const git = (...args) =>
@@ -52,7 +47,8 @@ function changedFiles(from, to) {
 
 function hunks(from, to, before, after) {
   const paths = [...new Set([before, after].filter(Boolean))];
-  const diff = git('diff', '--no-color', '--no-ext-diff', '-M', '-U0', from, to, '--', ...paths);
+  const flags = ['--no-color', '--no-ext-diff', '--no-textconv', '--text', '-M', '-U0'];
+  const diff = git('diff', ...flags, from, to, '--', ...paths);
   const added = new Map();
   const removed = new Set();
   let [oldLine, newLine, inHunk] = [0, 0, false];
@@ -90,7 +86,7 @@ const short = (text) => {
   return trimmed.length > 90 ? `${trimmed.slice(0, 87)}...` : trimmed;
 };
 
-const options = readOptions(process.argv.slice(2));
+const options = readOptions();
 const base = options.base || 'origin/main';
 let mergeBase = '';
 try {
@@ -115,7 +111,7 @@ function codeFiles(ref, pick) {
   for (const [id, change] of changes.entries()) {
     const file = pick === 'before' ? change.before : change.after;
     const wanted = pick === 'before' ? [...change.removed] : [...change.added.keys()];
-    if (!file || !wanted.length || (pick === 'after' && COMMENT_EXCEPTIONS.has(file))) continue;
+    if (!file || !wanted.length) continue;
     const text = show(ref, file);
     const lang = text === null ? null : languageOf(file);
     if (lang) files.push({ id, path: file, lang, text, wanted });
@@ -127,9 +123,9 @@ const oldFiles = codeFiles(mergeBase, 'before');
 const oldScan = scan(oldFiles);
 let movedText = ' ';
 for (const file of oldFiles) {
-  const comments = byLine(oldScan.get(file.id).pieces);
-  for (const line of file.wanted) {
-    const words = comments.has(line) ? normalize(comments.get(line).text) : '';
+  const removed = new Set(file.wanted);
+  for (const piece of oldScan.get(file.id).pieces) {
+    const words = removed.has(piece.line) ? normalize(piece.text) : '';
     if (words) movedText += `${words} `;
   }
 }
@@ -141,7 +137,31 @@ function moved(words) {
   return true;
 }
 
-const licenseText = ` ${(show(options.head, 'LICENSE') ?? '').toLowerCase().replace(/\s+/g, ' ')} `;
+const licenseText = show(options.head, 'LICENSE') ?? '';
+
+function groups(pieces) {
+  const found = new Map();
+  for (const piece of pieces) {
+    if (piece.line === 1 && piece.text.startsWith('#!')) continue;
+    found.set(piece.group, [...(found.get(piece.group) ?? []), piece]);
+  }
+  return found.values();
+}
+
+function verdict(group, header, added) {
+  const content = group.filter((p) => normalize(p.text));
+  for (const piece of content.filter((p) => added.has(p.line))) {
+    const stripped = strip(piece.text);
+    if (directive(stripped, piece.text)) continue;
+    if (piece.line < header && licenseLine(piece.text, licenseText)) continue;
+    if (moved(normalize(piece.text))) continue;
+    return [piece.line, stripped];
+  }
+  if (content.some((p) => added.has(p.line))) return null;
+  const opened = group.find((p) => added.has(p.line));
+  return [opened.line, content.length ? strip(content[0].text) : opened.text.trim()];
+}
+
 const newFiles = codeFiles(options.head, 'after');
 const newScan = scan(newFiles);
 for (const file of newFiles) {
@@ -150,17 +170,12 @@ for (const file of newFiles) {
     problems.push(`${file.path}: can't be read as ${file.lang} (${error}), so its comments can't be checked`);
     continue;
   }
-  const comments = byLine(pieces);
-  const header = firstCodeLine(file.text, comments);
-  for (const line of file.wanted) {
-    const comment = comments.get(line);
-    const words = comment ? normalize(comment.text) : '';
-    if (!words) continue;
-    const stripped = strip(comment.text);
-    if (directive(stripped, comment.text)) continue;
-    if (line < header && licenseLine(comment.text, licenseText)) continue;
-    if (moved(words)) continue;
-    say(`${file.path}:${line}`, 'adds a comment', stripped);
+  const header = firstCodeLine(file.text, byLine(pieces));
+  const added = new Set(file.wanted);
+  for (const group of groups(pieces)) {
+    if (!group.some((p) => added.has(p.line))) continue;
+    const found = verdict(group, header, added);
+    if (found) say(`${file.path}:${found[0]}`, 'adds a comment', found[1]);
   }
 }
 
@@ -169,6 +184,7 @@ if (problems.length) {
   const count = `${problems.length} problem${problems.length === 1 ? '' : 's'}`;
   console.log(`\n${count}. Write the code so it reads without a comment (a clearer name, a smaller function, a test),`);
   console.log('and keep existing comments as they are.');
-  process.exit(1);
+  process.exitCode = 1;
+} else {
+  console.log('No new comments.');
 }
-console.log('No new comments.');

@@ -1,7 +1,5 @@
-export const COMMENT_EXCEPTIONS = new Set(['.github/no-new-comments-e2e.sh']);
-
 const MARKS = ['\\/\\/+', '\\/\\*+!?', '\\*+\\/', '<!--', '-->'];
-const OPENERS = ['\\/\\/+', '\\/\\*+', '<!--', '\\*+'];
+const OPENERS = ['\\/\\/+', '\\/\\*+!?', '<!--', '\\*+'];
 const anyMark = new RegExp(MARKS.join('|'), 'g');
 const opener = new RegExp(`^(${OPENERS.join('|')})`);
 
@@ -22,44 +20,39 @@ export function strip(text) {
     .trim();
 }
 
-const LICENSE_LINE = new RegExp(
-  [
-    'spdx-license-identifier',
-    'copyright (\\(c\\)|©|[0-9]{4})',
-    '^© ',
-    'all rights reserved',
-    '@license',
-    '@preserve',
-    'the above copyright notice',
-    'permission is hereby granted',
-    'licensed under the',
-    'gnu (general|lesser|affero) public license',
-    'apache license',
-    'the software is provided "as is"',
-    'redistribution and use in source',
-  ].join('|'),
-);
+const NOTICES = [
+  /^spdx-license-identifier: [a-z0-9.+() -]+$/,
+  /^(copyright )?(\(c\) |© )?[0-9]{4}([-, ]+[0-9]{4})*( [^.]+)?\.?( all rights reserved\.?)?$/,
+  /^all rights reserved\.?$/,
+  /^@(license|preserve)( [a-z0-9.+-]+)?$/,
+];
+
+const words = (text) => text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
 export function licenseLine(text, licenseText) {
-  if (LICENSE_LINE.test(text.toLowerCase())) return true;
-  const words = normalize(text).toLowerCase();
-  return words.split(' ').length >= 4 && licenseText.includes(` ${words} `);
+  const notice = strip(text).toLowerCase();
+  if (/^(copyright|\(c\)|©|spdx|all rights|@license|@preserve)/.test(notice) && NOTICES.some((n) => n.test(notice))) {
+    return true;
+  }
+  const said = words(text);
+  return said.split(' ').length >= 4 && ` ${words(licenseText)} `.includes(` ${said} `);
 }
 
+const RULES = '[@a-z0-9/_-]+( *, *[@a-z0-9/_-]+)*';
+const LEVEL = '(off|warn|error|[012])';
+
 const DIRECTIVES = [
-  /^eslint-(disable|enable)(-next-line|-line)?( |$)/,
-  /^eslint [@a-z0-9/_-]+: *(off|warn|error|[012]|\[)/,
-  /^eslint-env [a-z]/,
-  /^oxlint-(disable|enable)(-next-line|-line)?( |$)/,
+  new RegExp(`^(eslint|oxlint)-(disable|enable)(-next-line|-line)?( ${RULES})?$`),
+  new RegExp(`^eslint [@a-z0-9/_-]+: *${LEVEL}( *, *[@a-z0-9/_-]+: *${LEVEL})*$`),
+  /^eslint-env [a-z0-9]+( *, *[a-z0-9]+)*$/,
   /^(prettier-ignore|@vite-ignore|@ts-check|@ts-nocheck|#__pure__|@__pure__|@__no_side_effects__)$/,
-  /^@ts-(expect-error|ignore)( |:|$)/,
-  /^\/? ?<reference (path|types|lib)=/,
-  /^webpack[a-z]+: /,
-  /^@jsx(importsource|frag|runtime)? [a-z@.]/,
-  /^(istanbul ignore (next|else|if|file)|[cv]8 ignore (next|start|stop|file|if|else))/,
-  /^@(vitest|jest)-environment [a-z]/,
-  /^biome-ignore [a-z]/,
-  /^[#@] source(mapping)?url=/,
+  /^@ts-(expect-error|ignore)$/,
+  /^\/? ?<reference (path|types|lib)="[^"]*" ?\/>$/,
+  /^webpack[a-z]+: *("[^"]*"|'[^']*'|true|false|[0-9]+)$/,
+  /^@jsx(importsource|frag|runtime)? [a-z@./_-]+$/,
+  /^(istanbul ignore (next|else|if|file)|[cv]8 ignore (next|start|stop|file|if|else))$/,
+  /^@(vitest|jest)-environment [a-z-]+$/,
+  /^[#@] source(mapping)?url=\S+$/,
 ];
 
 const GLOBALS = /^(globals?|exported) [a-z_$][a-z0-9_$]*(:[a-z]+)?( *, *[a-z_$][a-z0-9_$]*(:[a-z]+)?)*$/;
@@ -68,6 +61,6 @@ export function directive(stripped, raw) {
   const lower = stripped.toLowerCase();
   if (DIRECTIVES.some((pattern) => pattern.test(lower))) return true;
   if (/^[ \t]*\/\*/.test(raw) && GLOBALS.test(lower)) return true;
-  if (/^[ \t]*\/\/ ?#(end)?region([ \t]|$)/.test(raw)) return true;
+  if (/^[ \t]*\/\/ ?#(end)?region[ \t]*$/.test(raw)) return true;
   return /^(glsl|wgsl|html|css|js)$/.test(lower) && /^[ \t]*\/\*/.test(raw);
 }

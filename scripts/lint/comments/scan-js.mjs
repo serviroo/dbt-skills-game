@@ -20,23 +20,25 @@ export function oxlintScan(items, scratch) {
     byFile.set(file, item);
   }
   const config = path.join(dir, 'oxlintrc.json');
+  const out = path.join(dir, 'found.jsonl');
   const rules = { 'nnc/found': 'error' };
   fs.writeFileSync(config, JSON.stringify({ categories: { correctness: 'off' }, jsPlugins: [plugin], rules }));
   const args = ['-c', config, '--disable-nested-config', '--no-ignore', '-f', 'json', ...byFile.keys()];
-  const run = spawnSync(oxlint, args, { cwd: dir, encoding: 'utf8', maxBuffer: 1 << 28 });
+  const env = { ...process.env, NNC_OUT: out };
+  const run = spawnSync(oxlint, args, { cwd: dir, env, encoding: 'utf8', maxBuffer: 1 << 28 });
   if (run.error || !run.stdout) throw new Error(`oxlint didn't run: ${run.error?.message ?? run.stderr}`);
-  const results = new Map(items.map((item) => [item.id, { pieces: [], templates: [], error: null }]));
-  for (const found of JSON.parse(run.stdout).diagnostics) {
-    const item = byFile.get(path.resolve(dir, found.filename));
-    if (!item) throw new Error(`oxlint reported a file it wasn't given: ${found.filename}`);
-    const result = results.get(item.id);
-    if (found.code !== 'nnc(found)') {
-      result.error ??= found.message;
-      continue;
-    }
-    const { comment, template } = JSON.parse(found.message);
-    if (template) result.templates.push(template);
-    else result.pieces.push(...rangePieces(item.text, (item.starts ??= lineStarts(item.text)), ...comment));
+  const unread = { pieces: [], templates: [], error: "oxlint didn't read it" };
+  const results = new Map(items.map((item) => [item.id, { ...unread }]));
+  const found = fs.existsSync(out) ? fs.readFileSync(out, 'utf8').split('\n').filter(Boolean) : [];
+  for (const { file, comments, templates } of found.map((row) => JSON.parse(row))) {
+    const item = byFile.get(path.resolve(dir, file));
+    const starts = lineStarts(item.text);
+    const pieces = comments.flatMap(([start, end]) => rangePieces(item.text, starts, start, end));
+    results.set(item.id, { pieces, templates, error: null });
+  }
+  for (const diagnostic of JSON.parse(run.stdout).diagnostics) {
+    const item = byFile.get(path.resolve(dir, diagnostic.filename));
+    if (item) results.get(item.id).error = diagnostic.message;
   }
   return results;
 }

@@ -20,15 +20,21 @@ export function rangePieces(text, starts, start, end) {
   return text
     .slice(start, end)
     .split('\n')
-    .map((part, i) => ({ line: first + i, text: part.replace(/\r$/, '') }));
+    .map((part, i) => ({ line: first + i, text: part.replace(/\r$/, ''), group: start }));
 }
 
-export const shifted = (pieces, firstLine) => pieces.map((p) => ({ ...p, line: p.line + firstLine - 1 }));
+let embedded = 0;
+
+export function shifted(pieces, firstLine, oneLine = false) {
+  const prefix = `e${embedded++}`;
+  const place = (p) => (oneLine ? firstLine : p.line + firstLine - 1);
+  return pieces.map((p) => ({ ...p, line: place(p), group: `${prefix}:${p.group}` }));
+}
 
 export function wholeLinePieces(text, pattern) {
   return text
     .split('\n')
-    .map((line, i) => ({ line: i + 1, text: line.replace(/\r$/, '') }))
+    .map((line, i) => ({ line: i + 1, text: line.replace(/\r$/, ''), group: `l${i}` }))
     .filter((p) => pattern.test(p.text));
 }
 
@@ -36,6 +42,12 @@ const TEXT_COMMENT = /^[ \t]*(\/\/|\/\*|<!--)([ \t]|$)/;
 
 export const textTemplatePieces = (text) => wholeLinePieces(text, TEXT_COMMENT);
 
+const CODE_LINE = /[;{}][ \t]*$/;
+
+export function codeTextPieces(text) {
+  const lines = text.split('\n').filter((line) => !TEXT_COMMENT.test(line));
+  return lines.some((line) => CODE_LINE.test(line)) ? textTemplatePieces(text) : [];
+}
 
 export function clikePieces(text) {
   const starts = lineStarts(text);

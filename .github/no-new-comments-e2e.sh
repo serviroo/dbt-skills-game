@@ -29,6 +29,12 @@ EOF
 put src/conf.js <<'EOF'
 export const fallback = load();
 EOF
+put LICENSE <<'EOF'
+Copyright (c) 2026 Example
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files.
+EOF
 put docs/guide.md <<'EOF'
 Prices skip the free items.
 EOF
@@ -213,6 +219,51 @@ EOF
 commit "feat: add warm"
 expect "src/warm.js:3: adds a comment" "prose inside a license header fails"
 
+case_branch bypasses
+printf '%s\n' '*.js -diff' >.gitattributes
+put src/hidden.js <<'EOF'
+export const a = 1;
+// hidden from the diff
+EOF
+put src/disabled.js <<'EOF'
+// still a comment
+export const order = (page) => page.evaluate("const n = 1; /* hidden */ return n;");
+const probe = `
+  const a = 1; // reads a
+`;
+export const run = (page) => page.evaluate(probe);
+setTimeout("tick(); // why", 5);
+/* eslint-disable */
+EOF
+put src/said.js <<'EOF'
+// Copyright 2026 Example. This module warms the cache.
+// eslint-disable-next-line no-console -- logs because the cart needs it
+console.log(1);
+// @ts-expect-error the old type is wrong
+export const d = 1;
+// #region the cart
+/* eslint-disable no-console */ /* explains the console */
+export const e = 2; //
+EOF
+put src/conf.js <<'EOF'
+/*
+export const fallback = load();
+*/
+EOF
+commit "feat: get around the check"
+expect "src/hidden.js:2: adds a comment" "a diff attribute doesn't hide a comment"
+expect "src/disabled.js:1: adds a comment" "a disable comment doesn't hide comments"
+expect "src/disabled.js:2: adds a comment" "a comment in a string a page runs fails"
+expect "src/disabled.js:4: adds a comment" "a comment in a string passed to a page later fails"
+expect "src/disabled.js:7: adds a comment" "a comment in a string set to run on a timer fails"
+expect "src/said.js:1: adds a comment" "prose after a copyright notice fails"
+expect "src/said.js:2: adds a comment" "a reason after a lint directive fails"
+expect "src/said.js:4: adds a comment" "a reason after a type directive fails"
+expect "src/said.js:6: adds a comment" "a named region fails"
+expect "src/said.js:7: adds a comment: explains the console" "a comment beside a directive fails"
+expect "src/said.js:8: adds a comment" "an empty comment fails"
+expect "src/conf.js:1: adds a comment" "markers around existing code fail"
+
 case_branch allowed
 put src/lic.js <<'EOF'
 #!/usr/bin/env node
@@ -243,8 +294,13 @@ const Link = () => <p>See https://example.com for more</p>;
 export { re, t, m, lazy, Link, shares };
 EOF
 put src/d.ts <<'EOF'
-// @ts-expect-error the old type is wrong
+// @ts-expect-error
 export const d: string = 1;
+EOF
+put src/help.js <<'EOF'
+export const help = `Type a path:
+  // like this
+`;
 EOF
 put docs/notes.md <<'EOF'
 <!-- docs are prose, not code -->
