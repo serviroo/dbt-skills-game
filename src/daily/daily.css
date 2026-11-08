@@ -139,7 +139,7 @@
   color: #eaf6ff;
 }
 .dq :focus-visible {
-  outline: 2px solid #a8dcff;
+  outline: 2px solid var(--focus, #a8dcff);
   outline-offset: 3px;
 }
 .dq [tabindex='-1']:focus {
@@ -337,6 +337,8 @@
   height: 44px;
   min-width: 0;
   max-width: max-content;
+  /* hidden where clip isn't known (Safari before 16) */
+  overflow: hidden;
   overflow: clip;
 }
 .dq:not([data-screen='safe']) .dq-top > .dq-back {
@@ -566,10 +568,15 @@ dq-word {
   display: inline-block;
   width: max-content;
   max-width: 100%;
+  text-wrap: wrap;
 }
 /* a skill's window lets its rows narrow past a word, as it always has: there the word asks only for its widest piece */
 .dq-skill dq-word {
   width: auto;
+}
+dq-shy {
+  font-family: var(--font-ui);
+  line-height: 0;
 }
 dq-shy::before {
   content: '\AD';
@@ -606,7 +613,7 @@ dq-shy::before {
   color: var(--mint) !important;
 }
 .dq-a {
-  color: #a9d6f7;
+  color: var(--link, #a9d6f7);
   text-decoration: underline;
   text-underline-offset: 3px;
   text-decoration-color: rgba(169, 214, 247, 0.45);
@@ -680,7 +687,7 @@ dq-shy::before {
   text-align: center;
   text-decoration: none;
   color: var(--t-title);
-  border: 1px solid rgba(125, 150, 197, 0.55);
+  border: 1px solid var(--edge, rgba(125, 150, 197, 0.55));
   border-radius: 2px;
   background: transparent;
   cursor: pointer;
@@ -829,7 +836,7 @@ dq-shy::before {
   letter-spacing: 0.01em;
   text-align: center;
   color: #d3e5f6;
-  border: 1px solid rgba(125, 150, 197, 0.42);
+  border: 1px solid var(--edge, rgba(125, 150, 197, 0.42));
   border-radius: 2px;
   background: linear-gradient(180deg, rgba(14, 32, 56, 0.72), rgba(8, 20, 36, 0.72));
   cursor: pointer;
@@ -860,7 +867,7 @@ dq-shy::before {
 .dq-seg {
   display: inline-flex;
   flex-wrap: nowrap;
-  border: 1px solid rgba(125, 150, 197, 0.45);
+  border: 1px solid var(--edge, rgba(125, 150, 197, 0.45));
   border-radius: 2px;
   background: rgba(6, 16, 30, 0.6);
 }
@@ -874,7 +881,7 @@ dq-shy::before {
   color: var(--t-body);
   background: transparent;
   border: 0;
-  border-left: 1px solid rgba(125, 150, 197, 0.22);
+  border-left: 1px solid var(--edge-soft, rgba(125, 150, 197, 0.22));
   cursor: pointer;
   transition:
     background 0.18s,
@@ -969,7 +976,7 @@ dq-shy::before {
   color: #e6f1ff;
   caret-color: var(--blue);
   background: rgba(4, 12, 24, 0.78);
-  border: 1px solid rgba(125, 150, 197, 0.5);
+  border: 1px solid var(--edge, rgba(125, 150, 197, 0.5));
   border-radius: 2px;
   resize: vertical;
   -webkit-user-select: text;
@@ -979,7 +986,7 @@ dq-shy::before {
     box-shadow 0.18s;
 }
 .dq-input::placeholder {
-  color: #8199b8;
+  color: var(--hint, #8199b8);
   opacity: 1;
 }
 .dq-input:focus {
@@ -1076,7 +1083,7 @@ textarea.dq-input {
   width: 52px;
   height: 28px;
   border-radius: 14px;
-  border: 1px solid rgba(125, 150, 197, 0.6);
+  border: 1px solid var(--edge, rgba(125, 150, 197, 0.6));
   background: rgba(6, 16, 30, 0.8);
   transition:
     background 0.2s,
@@ -1090,7 +1097,7 @@ textarea.dq-input {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: #8ea8c6;
+  background: var(--knob, #8ea8c6);
   transition:
     transform 0.25s var(--ease-out),
     background 0.2s;
@@ -1579,7 +1586,7 @@ textarea.dq-input {
   flex-direction: column;
   padding: 20px 20px 18px;
   background:
-    radial-gradient(90% 50% at 50% 0%, rgba(79, 184, 255, 0.16), transparent 70%),
+    radial-gradient(90% 50% at 50% 0%, rgba(79, 184, 255, 0.12), transparent 70%),
     linear-gradient(180deg, #0d1f37, #071222 70%, #060e1c);
 }
 .dq-cardface--front::after {
@@ -1649,9 +1656,17 @@ textarea.dq-input {
   line-height: 1.45;
   color: #b4cce4;
 }
+/* the card's last row: the stat on the right, and a foil card's tag on the left, each with its own room, so neither ever
+   sits on the words above (each brings its own top margin, so a row with nothing showing takes no room) */
+.dq-cf-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 12px;
+}
 .dq-cf-stat {
   margin-top: 14px;
-  align-self: flex-end;
+  margin-left: auto;
   font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.16em;
@@ -2494,8 +2509,6 @@ textarea.dq-input {
   white-space: normal;
   text-align: center;
 }
-.dq-sz .dq-btn--primary {
-}
 .dq-sz .dq-opt {
   min-height: 54px;
   font-size: calc(19px * var(--text-scale, 1));
@@ -2852,12 +2865,21 @@ textarea.dq-input {
   .dq-sz-talk > span:first-child {
     display: none;
   }
-  /* the pinned bar holds two or three lines here: solid behind them, fading only above, so no words show through */
+}
+/* a phone at 200% zoom, upright or held sideways, where the page scrolls under "Talk to someone now": its pinned bar is
+   solid behind it, fading only on the side the page passes in from, so no words or controls show through */
+@media (max-width: 260px), (max-width: 539px) and (max-height: 360px) {
   .dq .dq-sz-foot {
     background: linear-gradient(0deg, #07080f calc(100% - 8px), rgba(7, 8, 15, 0));
   }
+  .dq .dq-sz-foot.is-top {
+    background: linear-gradient(180deg, #07080f calc(100% - 8px), rgba(7, 8, 15, 0));
+  }
   .dq .dq-safezone.is-lit .dq-sz-foot {
     background: linear-gradient(0deg, #304866 calc(100% - 8px), rgba(48, 72, 102, 0));
+  }
+  .dq .dq-safezone.is-lit .dq-sz-foot.is-top {
+    background: linear-gradient(180deg, #304866 calc(100% - 8px), rgba(48, 72, 102, 0));
   }
 }
 .dq-person-add {
@@ -2943,6 +2965,7 @@ textarea.dq-input {
   flex: 1 1 var(--share);
   display: flex;
   flex-wrap: wrap;
+  max-width: 100%;
 }
 .dq-cardcell::after {
   content: '';
@@ -2950,6 +2973,7 @@ textarea.dq-input {
 }
 .dq-cardcell > .dq-cardbtn {
   flex: 1 1 calc(var(--share) - 1px);
+  max-width: 100%;
 }
 /* a phone zoomed to 200% (260 CSS pixels wide or less): one card a row, reaching only as far as the page's own 10 px
    padding, with narrower sides (below), so a name's longest word fits its line */
@@ -3118,7 +3142,7 @@ textarea.dq-input {
 }
 .dq-libf {
   display: grid;
-  grid-template-columns: 3.6em minmax(0, 1fr);
+  grid-template-columns: 6ch minmax(0, 1fr);
   align-items: center;
   column-gap: 12px;
 }
@@ -3204,7 +3228,7 @@ textarea.dq-input {
   color: var(--t-dim);
   background: none;
   border: 0;
-  border-left: 1px solid rgba(62, 100, 133, 0.3);
+  border-left: 1px solid var(--edge-soft, rgba(62, 100, 133, 0.3));
   cursor: pointer;
   transition:
     background 0.18s,
@@ -3231,40 +3255,6 @@ textarea.dq-input {
 }
 .dq-libsec--fav .dq-libsec-ic {
   color: var(--mint);
-}
-/* a phone at 200% zoom, held either way (300 CSS pixels wide or less): a skill's names take the whole row, its minutes
-   and arrow the line under them, and its pin a strip under the row, so no name is squeezed narrower than its words */
-@media (max-width: 300px) {
-  .dq-libitem {
-    flex-wrap: wrap;
-  }
-  .dq-libitem .dq-librow {
-    flex-basis: 100%;
-    grid-template-columns: minmax(0, 1fr) 20px;
-    padding: 11px 10px;
-  }
-  .dq-librow-n,
-  .dq-librow-r {
-    grid-column: 1 / -1;
-  }
-  .dq-librow-r {
-    letter-spacing: 0.06em;
-  }
-  .dq-librow-m {
-    grid-column: 1;
-    grid-row: 3;
-  }
-  .dq-librow-c {
-    grid-column: 2;
-    grid-row: 3;
-  }
-  .dq-libpin {
-    width: 100%;
-    justify-items: end;
-    padding: 0 10px;
-    border-left: 0;
-    border-top: 1px solid rgba(62, 100, 133, 0.3);
-  }
 }
 
 .dq-diary-grid,
@@ -3427,7 +3417,7 @@ textarea.dq-input {
   font-weight: 400;
   line-height: 1.2;
   color: var(--t-body);
-  max-width: 9em;
+  max-width: 14ch;
   hyphens: auto;
 }
 .dq-table td {
@@ -4004,7 +3994,7 @@ textarea.dq-input {
     padding: 6px 2px;
   }
   .dq-table tbody th {
-    max-width: 6.6em;
+    max-width: 10.5ch;
     padding-right: 6px;
   }
 }
@@ -4317,17 +4307,21 @@ textarea.dq-input {
   }
 }
 /* typing with the keyboard up (safe.ts): the screen is the part above the keyboard, whether the keyboard covers the
-   page or the phone gives the page only that height. Leave and Lights up show as their icons, still named, beside
-   Sound at the top, each a tap in size, and "Talk to someone now" pins with them in its words at the player's size:
-   held sideways in their row, between Leave and Lights up, where its words fit on one line there, else in a column of
-   its own at the side; upright in a row of its own just under them, wrapping its words there. The words, the list and
-   its field scroll below, the field kept in view. The frame's name and the bar's shade step aside for the room */
+   page or the phone gives the page only that height, and pinched in only the part pinched to. Leave and Lights up show
+   as their icons, still named, beside Sound at the top, each a tap in size, and "Talk to someone now" pins with them in
+   its words at the player's size: held sideways (is-sideways, safe.ts) in their row, between Leave and Lights up, where
+   its words fit on one line there, else in a column of its own at the side; upright in a row of its own just under
+   them, wrapping its words there. The words, the list and its field scroll below, the field kept in view; the screen
+   itself never scrolls, so bringing the field into view can't take the bar up out of it. The frame's name and the
+   bar's shade step aside for the room */
 .dq.is-typing {
   --top-shade: 0px;
-  top: var(--vv-top);
-  bottom: auto;
+  inset: var(--vv-top) auto auto var(--vv-left);
+  width: var(--vv-w);
   height: var(--vv-h);
+  /* hidden where clip isn't known (Safari before 16): it holds the screen exactly, so there's nothing in it to scroll */
   overflow: hidden;
+  overflow: clip;
   display: flex;
   flex-direction: column;
 }
@@ -4437,60 +4431,110 @@ textarea.dq-input {
   padding-block: 4px;
   line-height: 1.25;
 }
-@media (min-width: 540px) {
-  /* Talk in the bar's row: the heading and its words sit beside the list and its field, each column scrolling on its
-     own, so the field shows with the heading beside it */
-  .dq.is-typing:has(.dq-top .dq-sz-talk) .dq-sz {
-    display: grid;
-    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-    grid-template-rows: minmax(0, 1fr);
-    column-gap: var(--pad);
-  }
-  .dq.is-typing:has(.dq-top .dq-sz-talk) .dq-sz-body {
-    display: contents;
-    overflow: visible;
-  }
-  .dq.is-typing:has(.dq-top .dq-sz-talk) :is(.dq-sz-lead, .dq-sz-main) {
-    position: relative;
-    display: block;
-    grid-row: 1;
-    min-height: 0;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(125, 150, 197, 0.35) transparent;
-  }
-  .dq.is-typing:has(.dq-top .dq-sz-talk) .dq-sz-lead {
-    grid-column: 1;
-    margin: 0 calc(-0.5 * var(--pad)) 0 calc(-1 * var(--pad));
-    padding: 4px calc(0.5 * var(--pad)) var(--pad) var(--pad);
-  }
-  .dq.is-typing:has(.dq-top .dq-sz-talk) .dq-sz-main {
-    grid-column: 2;
-    margin: 0 calc(-1 * var(--pad)) 0 calc(-0.5 * var(--pad));
-    padding: 4px var(--pad) var(--pad) calc(0.5 * var(--pad));
-  }
-  .dq.is-typing:has(.dq-top .dq-sz-talk) .dq-sz-main > :first-child {
-    margin-top: 0;
-  }
-  /* Talk's words too big for the bar's row: Talk takes a column at the side as tall as the screen, as wide as its
-     words need up to three fifths of it, beside the bar and the page under it */
-  .dq.is-typing:has(> .dq-sz-talk) {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(auto, 60%);
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-  .dq.is-typing > .dq-top {
-    grid-area: 1 / 1;
-  }
-  .dq.is-typing > .dq-view {
-    grid-area: 2 / 1;
-  }
-  .dq.is-typing > .dq-sz-talk {
-    grid-area: 1 / 2 / 3 / 3;
-    align-self: center;
-    margin: 0 max(12px, var(--safe-right)) 0 0;
-  }
+/* held sideways (is-sideways, safe.ts), Talk in the bar's row: the heading and its words sit beside the list and its field,
+   each column scrolling on its own, so the field shows with the heading beside it */
+.dq.is-typing.is-sideways:has(.dq-top .dq-sz-talk) .dq-sz {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  grid-template-rows: minmax(0, 1fr);
+  column-gap: var(--pad);
+}
+.dq.is-typing.is-sideways:has(.dq-top .dq-sz-talk) .dq-sz-body {
+  display: contents;
+  overflow: visible;
+}
+.dq.is-typing.is-sideways:has(.dq-top .dq-sz-talk) :is(.dq-sz-lead, .dq-sz-main) {
+  position: relative;
+  display: block;
+  grid-row: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(125, 150, 197, 0.35) transparent;
+}
+.dq.is-typing.is-sideways:has(.dq-top .dq-sz-talk) .dq-sz-lead {
+  grid-column: 1;
+  margin: 0 calc(-0.5 * var(--pad)) 0 calc(-1 * var(--pad));
+  padding: 4px calc(0.5 * var(--pad)) var(--pad) var(--pad);
+}
+.dq.is-typing.is-sideways:has(.dq-top .dq-sz-talk) .dq-sz-main {
+  grid-column: 2;
+  margin: 0 calc(-1 * var(--pad)) 0 calc(-0.5 * var(--pad));
+  padding: 4px var(--pad) var(--pad) calc(0.5 * var(--pad));
+}
+.dq.is-typing.is-sideways:has(.dq-top .dq-sz-talk) .dq-sz-main > :first-child {
+  margin-top: 0;
+}
+/* Talk's words too big for the bar's row: Talk takes a column at the side as tall as the screen, as wide as its
+   words need up to three fifths of it, beside the bar and the page under it, and never so wide the bar's buttons
+   don't fit beside it (pinched in or at 200% zoom). The page's own words wrap to whatever width is left */
+.dq.is-typing.is-sideways:has(> .dq-sz-talk) {
+  display: grid;
+  grid-template-columns: minmax(min-content, 1fr) minmax(auto, 60%);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.dq.is-typing.is-sideways > .dq-top {
+  grid-area: 1 / 1;
+}
+.dq.is-typing.is-sideways > .dq-view {
+  grid-area: 2 / 1;
+  contain: inline-size;
+}
+.dq.is-typing.is-sideways > .dq-sz-talk {
+  grid-area: 1 / 2 / 3 / 3;
+  align-self: center;
+  margin: 0 max(12px, var(--safe-right)) 0 0;
+}
+/* held sideways, a field too narrow to show what's typed (is-narrow, safe.ts) takes more of the width: the frame, the
+   field and an entry being changed give up most of their sides */
+.dq.is-typing.is-narrow .dq-sz {
+  --pad: 8px;
+}
+.dq.is-typing.is-narrow .dq-sz .dq-input {
+  padding-inline: 8px;
+}
+.dq.is-typing.is-narrow :is(.dq-sz-entry, .dq-person).is-editing {
+  padding-inline: 0;
+}
+/* too little under the bar for the field (is-one-row, safe.ts: held sideways pinched in or at 200% zoom), the bar, the
+   field and Talk share one row: Leave, Lights up and Sound together at the start, the page in the middle scrolled to
+   the field, and Talk's words wrapped in a column at the end, a stronger Talk as narrow. The frame steps aside for the
+   room, the field's own border framing it */
+.dq.is-typing.is-sideways.is-one-row {
+  grid-template-columns: auto minmax(0, 1fr) min-content;
+  grid-template-rows: minmax(0, 1fr);
+}
+.dq.is-typing.is-one-row > .dq-top {
+  grid-area: 1 / 1;
+  gap: 0;
+  padding: 0 0 0 max(4px, var(--safe-left));
+}
+.dq.is-typing.is-one-row .dq-top-end {
+  gap: 0;
+}
+.dq.is-typing.is-one-row > .dq-view {
+  grid-area: 1 / 2;
+  padding-inline: 4px;
+}
+.dq.is-typing.is-one-row .dq-sz {
+  --pad: 0px;
+  background: none;
+  border: 0;
+}
+.dq.is-typing.is-one-row .dq-sz::before,
+.dq.is-typing.is-one-row .dq-sz::after {
+  display: none;
+}
+/* in that row, a field too narrow to show what's typed (is-narrow, safe.ts): Lights up and Sound step aside until the
+   keyboard goes down, and the field takes their room */
+.dq.is-typing.is-one-row.is-narrow .dq-top-end {
+  display: none;
+}
+.dq.is-typing.is-one-row > .dq-sz-talk {
+  grid-area: 1 / 3;
+  padding-inline: 6px;
+  margin: 0 max(4px, var(--safe-right)) 0 0;
 }
 .dq-cardbtn .dq-cf-stat {
   display: none;
@@ -4568,8 +4612,8 @@ textarea.dq-input {
   text-align: left;
   font: inherit;
   color: inherit;
-  border: 1px solid rgba(125, 150, 197, 0.3);
-  border-left: 2px solid rgba(79, 184, 255, 0.4);
+  border: 1px solid var(--edge, rgba(125, 150, 197, 0.3));
+  border-left: 2px solid var(--edge-accent, rgba(79, 184, 255, 0.4));
   border-radius: 2px;
   background: linear-gradient(180deg, rgba(12, 28, 50, 0.62), rgba(7, 17, 31, 0.62));
   cursor: pointer;
@@ -4763,20 +4807,6 @@ textarea.dq-input {
   width: 92px;
   height: auto;
 }
-/* a phone zoomed to 200% (260 CSS pixels wide or less): each entry's picture gets a row of its own above its words, and
-   the unfinished drawing's picture sits above its words and buttons */
-@media (max-width: 260px) {
-  .dq-artentry {
-    grid-template-columns: minmax(0, 1fr) 20px;
-  }
-  .dq-artentry-art {
-    grid-column: 1 / -1;
-  }
-  .dq-art-draft {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-}
 .dq-artentry-txt {
   display: flex;
   flex-direction: column;
@@ -4807,6 +4837,7 @@ textarea.dq-input {
 }
 .dq-art-draft {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 16px;
   padding: 12px 14px;
@@ -4821,6 +4852,9 @@ textarea.dq-input {
 }
 .dq-art-draft-img .dq-thumb {
   height: auto;
+}
+.dq-art-draft-txt {
+  flex: 1 1 0;
 }
 .dq-art-draft .dq-actions {
   margin-top: 10px;
@@ -5845,6 +5879,7 @@ textarea.dq-input {
   }
   .dq-piece-body {
     flex-direction: row;
+    flex-wrap: wrap;
     align-items: flex-start;
     gap: 40px;
   }
@@ -5852,6 +5887,7 @@ textarea.dq-input {
     flex: none;
   }
   .dq-piece-side {
+    flex: 1 1 0;
     padding-top: 12px;
   }
 }

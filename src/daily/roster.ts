@@ -7,12 +7,15 @@ import { animate } from '../ui/anim';
 import { mountScene } from '../scene/vignettes/host';
 import type { CampHit, CampInput } from '../scene/watch/camp';
 import '../scene/watch/camp.css';
+import './ask-sable.css';
 import { icon } from './art';
 import { now, onFrame } from './clock';
-import { INVENTORY, ROSTER, ROSTER_COPY, type ShadowDef, type ShadowId } from '../content/roster-lines';
+import { SKILL } from '../content/dbt';
+import { INVENTORY, ROSTER, ROSTER_COPY, SABLE_ASK, type ShadowDef, type ShadowId } from '../content/roster-lines';
+import { CALM, css, WINDOW } from '../motion/tokens';
 import type { App } from './app';
-import { cleanName, type Store } from './store';
-import { focusWhole, h, holdView, seen, typo } from './ui';
+import { addDays, cleanName, isSkillId, type Store } from './store';
+import { btn, focusWhole, h, holdView, seen, setWhole, typo } from './ui';
 
 let svgN = 0;
 
@@ -147,6 +150,66 @@ export function brambleNap(app: App) {
   return h('div', { class: 'w2-bramble', title: 'Bramble, asleep', html: shadowSVG('bramble', { size: 92, label: 'Bramble, a shadow bear, asleep in the corner' }) }, h('span', { class: 'w2-bramble-z', 'aria-hidden': 'true', text: 'z' }));
 }
 
+const sableWeek = (st: Store) => {
+  const today = st.today();
+  const from = addDays(today, -6);
+  const codes = Array.from({ length: 7 }, (_, i) => st.skillCodes(addDays(from, i)));
+  const week = new Map<string, { n: number; last: number }>();
+  for (const e of st.state.events) {
+    if (e.k !== 'skill' || e.day < from || e.day > today || !isSkillId(e.skill)) continue;
+    const w = week.get(e.skill) ?? { n: 0, last: 0 };
+    w.n += 1;
+    w.last = Math.max(w.last, e.t);
+    week.set(e.skill, w);
+  }
+  return [...week]
+    .sort(([, a], [, b]) => b.n - a.n || b.last - a.last)
+    .map(([id, w]) => ({ skill: SKILL[id], helped: codes.some((c) => c[id] === 5), ...w }));
+};
+
+function sableSays(st: Store) {
+  const week = sableWeek(st);
+  if (!week.length) return [h('p', { class: 'w2-sable-line', text: typo(SABLE_ASK.quiet) })];
+  const kept = week.find((w) => w.helped);
+  let close = SABLE_ASK.each;
+  if (kept) close = SABLE_ASK.keep(kept.skill.sl);
+  else if (week[0].n > 1) close = SABLE_ASK.again(week[0].skill.sl);
+  return [
+    h('p', { class: 'w2-sable-line', text: typo(SABLE_ASK.opens) }),
+    h(
+      'ul',
+      { class: 'w2-sable-log' },
+      week.map((w) =>
+        h(
+          'li',
+          { 'data-skill': w.skill.id },
+          h('span', { class: 'w2-sable-n', text: typo(w.skill.sl) }),
+          h('span', { class: 'w2-sable-r', text: typo(`${w.skill.real}, ${SABLE_ASK.times(w.n)}`) }),
+          w.helped ? h('span', { class: 'w2-sable-h', text: typo(SABLE_ASK.helped) }) : null,
+        ),
+      ),
+    ),
+    h('p', { class: 'w2-sable-line', text: typo(close) }),
+  ];
+}
+
+function askSable(app: App) {
+  const say = h('div', { class: 'w2-sable-say', tabindex: -1 });
+  const ask = btn(
+    SABLE_ASK.ask,
+    () => {
+      say.replaceChildren(...sableSays(app.store));
+      setWhole(say);
+      const duration = app.reduced() ? WINDOW.reducedFadeMs : CALM.fadeMs;
+      animate(say, [{ opacity: 0 }, { opacity: 1 }], { duration, easing: css(CALM.ease) });
+      say.focus({ preventScroll: true });
+      say.scrollIntoView({ block: 'nearest', behavior: app.reduced() ? 'auto' : 'smooth' });
+    },
+    { kind: 'quiet', cls: 'w2-sable-ask' },
+  );
+  return h('div', { class: 'w2-sable' }, ask, say);
+}
+
 function namedPanel(app: App, s: ShadowDef, onName: (id: ShadowId, v: string) => void) {
   const st = app.store;
   const name = st.state.settings.names[s.id] ?? '';
@@ -179,6 +242,7 @@ function namedPanel(app: App, s: ShadowDef, onName: (id: ShadowId, v: string) =>
     h('p', { class: 'w2-sh-role', text: s.role }),
     nick,
     h('p', { class: 'w2-sh-idle', text: typo(s.idle) }),
+    s.id === 'sable' ? askSable(app) : null,
     h('div', { class: 'dq-field w2-sh-field' }, h('label', { for: id, class: 'dq-label w2-sh-label', text: ROSTER_COPY.nameLabel }), input),
   );
   return { el, input, nick };

@@ -7,8 +7,9 @@ import { radialGlowTexture } from '../glow';
 import type { Pose } from './rig';
 
 /**
- * The Wanderer: a hooded night-walker in ink-navy cloth, the one figure of the cutscene. A CC0 model (see CREDITS.md,
- * built by scripts/build-hero.mjs) driven by its own idle, reach and hold clips, with the scene's poses layered on top.
+ * The Wanderer: a hooded night-walker in ink-navy cloth, the one figure of the cutscene. Modelled for this game
+ * (scripts/build-hero.py, see CREDITS.md) and driven by its CC0 idle, reach and hold clips, with the scene's poses
+ * layered on top.
  *
  * Poses keep the scene's bone keys (hips, spine, chest, neck, head, shX, uaX, faX, haX, fiX, thX, tgX, snX, ftX; X = L/R,
  * the figure's own left and right). Each value is an XYZ euler in the frame its parent has been turned into, on top of

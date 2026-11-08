@@ -1,7 +1,8 @@
 // The shaders' smoothstep calls, read from the GLSL in the source's template literals. GLSL leaves
 // smoothstep(edge0, edge1, x) undefined when edge0 >= edge1, and some phone drivers then draw a hard step or a constant,
 // so a fade the other way is written 1.0 - smoothstep(lo, hi, x). A call is known to be the wrong way round when its
-// edges are constants, or the same expression plus or minus constants (`top + 0.02, top - 0.3`). The build fails on any
+// edges are constants, the same expression plus or minus constants (`top + 0.02, top - 0.3`), or the same expression
+// with a width added to the first or taken from the second (`top + pen, top - pen`). The build fails on any
 // (vite.config.ts), and `node scripts/glsl-check.mjs` lists them for all of src/ and exits 1.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -146,6 +147,37 @@ function offset(expr) {
   return depth ? [e, 0] : [m[1].replace(/\s+/g, ''), (m[2] === '-' ? -1 : 1) * Number(m[3])];
 }
 
+/**
+ * The ways to read an edge as a part it may share with the other edge, a sign and a width that is not a constant:
+ * itself with no width (`top` is ['top', 0, '']), and, when a width is added or taken away last, the rest and that
+ * width (`outR(y) - pen` is also ['outR(y)', -1, 'pen']). Both are kept so `a + b + pen` meets `a + b` whole. A width
+ * added to one edge or taken from the other is a half-width or a softness, above zero, so `top + pen, top - pen` or
+ * `top, top - pen` is the wrong way round whatever `top` and `pen` are worth. A width with a minus in it, as in
+ * `top + (-abs(pen) - 1.0)`, may be below zero, so it is not read as one. None for an edge with a `${}` in it, and no
+ * width when the last term is a constant (see offset).
+ */
+function widths(expr) {
+  const e = expr.trim();
+  if (e.includes('\0')) return [];
+  const whole = [e.replace(/\s+/g, ''), 0, ''];
+  let depth = 0;
+  for (let i = e.length - 1; i > 0; i--) {
+    const c = e[i];
+    if (c === ')' || c === ']') depth++;
+    else if (c === '(' || c === '[') depth--;
+    else if (!depth && (c === '+' || c === '-')) {
+      const part = e.slice(0, i).trimEnd();
+      // a sign, as in `x * -pen`, or the exponent of `1e-3`, is not where a width is added
+      if (!/[\w.)\]]$/.test(part) || /(^|[^\w.])[\d.]+[eE]$/.test(part)) continue;
+      const by = e.slice(i + 1).replace(/\s+/g, '');
+      // the minus of an exponent, as in `max(fw, 1e-3)`, does not make a width negative
+      if (constant(by) !== null || by.replace(/(^|[^\w.])([\d.]+[eE])-/g, '$1$2').includes('-')) return [whole];
+      return [whole, [part.replace(/\s+/g, ''), c === '-' ? -1 : 1, by]];
+    }
+  }
+  return [whole];
+}
+
 /** Every GLSL smoothstep call in `source`: its line, its text and whether its edges are known to be the wrong way round. */
 export function smoothsteps(source) {
   const calls = [];
@@ -154,7 +186,10 @@ export function smoothsteps(source) {
       const a = args(text, m.index + m[0].length - 1);
       if (!a || a.list.length !== 3) continue;
       const [e0, e1] = a.list.slice(0, 2).map(offset);
-      const reversed = !!e0 && !!e1 && e0[0] === e1[0] && e0[1] >= e1[1];
+      const [w0, w1] = a.list.slice(0, 2).map(widths);
+      const reversed =
+        (!!e0 && !!e1 && e0[0] === e1[0] && e0[1] >= e1[1]) ||
+        w0.some((v) => w1.some((u) => v[0] === u[0] && v[1] > u[1] && (v[2] === u[2] || !v[2] || !u[2])));
       calls.push({ line: source.slice(0, at[m.index]).split('\n').length, call: text.slice(m.index, a.end + 1).replace(/\0/g, '${}'), reversed });
     }
   }

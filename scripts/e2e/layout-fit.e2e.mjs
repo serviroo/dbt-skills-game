@@ -53,7 +53,9 @@ export const SCREENS = {
 };
 
 // every Safe Zone screen in the order the player meets them, each opened on its own
-const SAFE_AT = ['start', 'breathe', 'squeeze', 'cold', 'check', 'stop', 'reasons', 'comfort', 'people', 'talk', 'close'];
+export const SAFE_AT = [
+  'start', 'breathe', 'squeeze', 'cold', 'check', 'stop', 'reasons', 'comfort', 'people', 'talk', 'close',
+];
 const SAFE_ZONE = {
   route: { name: 'safe', at: SAFE_AT[0] },
   also: SAFE_AT.slice(1).map((at) => ({ at, route: { name: 'safe', at } })),

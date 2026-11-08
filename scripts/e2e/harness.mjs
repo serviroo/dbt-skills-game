@@ -11,6 +11,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfigFromFile, parseAst } from 'vite';
 import { glArgs, checkRenderer } from '../gl.mjs';
+import { pageState } from './page-state.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -470,18 +471,6 @@ export async function quick(page, ms, what, step, { stuck } = {}) {
 }
 
 /**
- * Stops the page clock where it is, so time moves only when the scenario says. clock.pauseAt alone takes a wall time,
- * which a running clock may pass before the call lands on a slow page. Holding Date still first makes the pause land
- * exactly there; then Date catches up with the time the clock ran on before it stopped.
- */
-export async function pauseClock(page) {
-  const [wall, ticks] = await page.evaluate(() => [Date.now(), performance.now()]);
-  await page.clock.setFixedTime(wall);
-  await page.clock.pauseAt(wall);
-  await page.clock.setSystemTime(wall + (await page.evaluate((t) => performance.now() - t, ticks)));
-}
-
-/**
  * Waits for entry motion to finish on boxes that come to rest, then compares consecutive frame rects, for up to `timeout`
  * ms of the page running (see pageTime()).
  */
@@ -670,11 +659,11 @@ function pageTrail() {
           return f.apply(this, a);
         };
       }
-      const step = s.step;
-      s.step = function (...a) {
+      const frame = s.frame;
+      s.frame = function (...a) {
         const t = performance.now();
         try {
-          return step.apply(this, a);
+          return frame.apply(this, a);
         } finally {
           const ms = performance.now() - t;
           trail.lastFrame = t;
@@ -683,29 +672,6 @@ function pageTrail() {
       };
     },
   });
-}
-
-/** The page's state for evidence(), read inside the page. */
-function pageState() {
-  const trail = window.__e2eTrail;
-  trail?.flush();
-  return {
-    path: location.pathname + location.search,
-    readyState: document.readyState,
-    visibility: document.visibilityState,
-    ready: document.documentElement.dataset.ready ?? null,
-    mounted: !!window.__daily,
-    route: window.__daily?.route.name ?? null,
-    title: !!document.querySelector('.title-screen'),
-    prompt: !!document.querySelector('#np-name'),
-    windows: [...document.querySelectorAll('.sw, .dq-sw')].map((w) => {
-      const r = w.getBoundingClientRect();
-      return { label: w.getAttribute('aria-label'), visible: w.checkVisibility(), box: [r.left, r.top, r.width, r.height].map(Math.round) };
-    }),
-    stage: window.__stage ? { frames: trail?.frames ?? null, lastFrameAgo: trail?.lastFrame == null ? null : Math.round(performance.now() - trail.lastFrame) } : null,
-    origin: performance.timeOrigin,
-    trail: trail?.ev ?? null,
-  };
 }
 
 // A partial copy of the repo takes its modules from nodeImports() and viteConfigFiles(), so it still runs when one of
@@ -843,6 +809,29 @@ export async function startHarness(flags = {}) {
     for (const ev of ['domcontentloaded', 'load', 'crash', 'close']) page.on(ev, () => log(ev));
     trail.set(page, { t0, life, logs, errors: [] });
   }
+  async function serveFromHere(ctx, offline) {
+    const setOffline = ctx.setOffline.bind(ctx);
+    ctx.setOffline = async (on) => {
+      offline = on;
+      await setOffline(on);
+    };
+    await ctx.route((url) => url.origin === server.url, async (route) => {
+      if (offline) return route.abort('internetdisconnected').catch(() => {});
+      const req = route.request();
+      const headers = Object.fromEntries(Object.entries(req.headers()).filter(([k]) => !['connection', 'content-length', 'host', 'keep-alive', 'transfer-encoding', 'upgrade'].includes(k)));
+      let res;
+      let body;
+      try {
+        res = await fetch(req.url(), { method: req.method(), headers, body: req.postDataBuffer() ?? undefined, redirect: 'manual' });
+        body = Buffer.from(await res.arrayBuffer());
+      } catch {
+        return route.abort('connectionrefused').catch(() => {});
+      }
+      const out = Object.fromEntries([...res.headers].filter(([k]) => k !== 'content-encoding' && k !== 'content-length'));
+      await route.fulfill({ status: res.status, headers: out, body }).catch(() => {});
+    });
+    await ctx.routeWebSocket((url) => url.host === new URL(server.url).host, () => {});
+  }
   /** Notes a step the scenario takes (a tap, a fill) in the page's evidence timeline. */
   const note = (page, ev, extra) => {
     const t = trail.get(page);
@@ -870,6 +859,7 @@ export async function startHarness(flags = {}) {
       browser.newContext = async (o = {}) => {
         const t0 = Date.now();
         const ctx = await newContext({ timezoneId: ZONE, ...o });
+        await serveFromHere(ctx, !!o.offline);
         await ctx.addInitScript(realTimers);
         await ctx.addInitScript(pageTrail);
         const throttle = flags['cpu-throttle'] ? Number(flags['cpu-throttle']) : 1;
@@ -901,7 +891,9 @@ export async function startHarness(flags = {}) {
   async function reachesServer(browser) {
     const token = crypto.randomUUID();
     fs.writeFileSync(path.join(out, 'run-token.txt'), token);
-    const page = await browser.newPage();
+    const ctx = await browser.newContext();
+    await ctx.unrouteAll();
+    const page = await ctx.newPage();
     try {
       const res = await page.goto(`${server.url}/${path.relative(root, out)}/run-token.txt`).catch((e) => e);
       const got = res instanceof Error ? res.message.split('\n')[0] : res?.ok() ? await res.text() : `HTTP ${res?.status()}`;
@@ -979,8 +971,12 @@ export async function startHarness(flags = {}) {
    * A fresh, isolated browser profile at phone size, optionally seeded with localStorage before the app runs. `device`
    * adds context options for the kind of device, such as hasTouch for a touch-first phone.
    */
-  const opener = (browser, dirOf) => async function open(seed = {}, query = '?mute', viewport = { width: 390, height: 844 }, prepare, device = {}) {
-    const ctx = await browser.newContext({ viewport, deviceScaleFactor: 2, acceptDownloads: true, serviceWorkers: 'block', ...device, ...(flags.media === 'true' ? { recordVideo: { dir: dirOf(), size: viewport } } : {}) });
+  const opener = (browser, dirOf) => async function open(
+    seed = {}, query = '?mute', viewport = { width: 390, height: 844 }, prepare, device = {},
+  ) {
+    const options = { viewport, deviceScaleFactor: 2, acceptDownloads: true, serviceWorkers: 'block', ...device };
+    const video = flags.media === 'true' ? { recordVideo: { dir: dirOf(), size: viewport } } : {};
+    const ctx = await browser.newContext({ ...options, ...video });
     await ctx.addInitScript((s) => {
       if (sessionStorage.getItem('e2e-seeded')) return;
       sessionStorage.setItem('e2e-seeded', '1');
@@ -998,7 +994,7 @@ export async function startHarness(flags = {}) {
    * What a page showed, saved as <name>.json and <name>.png: its state (route, windows, name prompt, title, visibility,
    * the 3D stage's frames), its console, and one timeline of the scenario's notes, the page's load events and what
    * happened inside the page. Each read waits at most 3 s, so a frozen page can't hang it; if the page didn't answer,
-   * one more read waits up to 20 s and says when it came back, with the timeline from inside the page. Saved in `dir`.
+   * one more read waits up to 20 s and says when it came back, with the timeline from inside the page.
    */
   async function evidence(page, name, dir = out) {
     const { t0, life, logs, errors } = trail.get(page) ?? { t0: Date.now(), life: [], logs: [], errors: [] };
@@ -1024,12 +1020,15 @@ export async function startHarness(flags = {}) {
       ...(answered?.trail ?? []).map(({ t, ...e }) => ({ t: Math.round(answered.origin + t - t0), in: 'page', ...e })),
     ].sort((x, y) => x.t - y.t);
     for (const s of [now, later]) if (s) delete s.trail;
-    fs.writeFileSync(path.join(dir, name + '.json'), JSON.stringify({ t: now.t, state: now, later, shot, errors: errors.map(clean), console: logs, timeline, life }, null, 2));
+    const saved = { t: now.t, state: now, later, shot, errors: errors.map(clean), console: logs, timeline, life };
+    fs.writeFileSync(path.join(dir, name + '.json'), JSON.stringify(saved, null, 2));
   }
-  /** evidence() for every page still open in this browser, as <prefix>-1, -2, ... in the order the pages opened, in dirOf() */
+  /** evidence() for every page still open in this browser, as <prefix>-1, -2, ... in the order the pages opened */
   const allEvidence = (browser, dirOf) => async function evidenceAll(prefix) {
     const pages = browser.contexts().flatMap((c) => c.pages());
-    await Promise.all(pages.map((p, i) => evidence(p, `${prefix}-${i + 1}`, dirOf()).catch((e) => console.log(`evidence ${prefix}-${i + 1}: ${e?.message ?? e}`))));
+    const save = (p, name) =>
+      evidence(p, name, dirOf()).catch((e) => console.log(`evidence ${name}: ${e?.message ?? e}`));
+    await Promise.all(pages.map((p, i) => save(p, `${prefix}-${i + 1}`)));
   };
   const ls = (page, k) => page.evaluate((key) => localStorage.getItem(key), k);
   const youOf = async (page) => JSON.parse((await ls(page, YOU)) ?? 'null');
@@ -1065,16 +1064,16 @@ export async function startHarness(flags = {}) {
   })());
 
   const shared = {};
-  // A lane writes to its own folder, `out`: the run's folder (`root`) until scripts/e2e.mjs gives each scenario a folder of
-  // its own in it, so what a scenario writes, through shot(), evidence() and open()'s videos or to h.out itself, is that
-  // scenario's alone, also while other browsers run beside it.
   const lane = (browser) => {
-    const l = { browser, server, root: out, out, flags, shared, renderer, throttleErrors, zone: ZONE, note, leaves, gone, poll, stopwatch, quick, untimed, ls, youOf, deepFind, deepDrop, expect, sleep, frames, settled, until, pauseClock, reachHub, openSettings, SAVE, YOU, SEEN, stop, more };
-    l.open = opener(browser, () => l.out);
-    l.evidence = (page, name) => evidence(page, name, l.out);
-    l.evidenceAll = allEvidence(browser, () => l.out);
-    /** screenshot() of a page or one element (a locator), saved as <name>.png */
-    l.shot = (target, name) => screenshot(target, { path: path.join(l.out, name + '.png') });
+    const l = {
+      browser, server, root: out, out, flags, shared, renderer, throttleErrors, zone: ZONE, note, leaves, gone, poll,
+      stopwatch, quick, untimed, ls, youOf, deepFind, deepDrop, expect, sleep, frames, settled, until, reachHub,
+      openSettings, SAVE, YOU, SEEN, stop, more,
+      open: opener(browser, () => l.out),
+      evidence: (page, name) => evidence(page, name, l.out),
+      evidenceAll: allEvidence(browser, () => l.out),
+      shot: (target, name) => screenshot(target, { path: path.join(l.out, name + '.png') }),
+    };
     return l;
   };
   /** Another browser on the same dev server, so scenarios can run side by side: its own profiles, the same `shared`. */

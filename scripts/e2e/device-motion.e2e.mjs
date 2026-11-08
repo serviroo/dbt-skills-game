@@ -1,3 +1,5 @@
+import * as pageClock from './clock.mjs';
+
 // The game follows the device's reduce-motion setting while it shows, with no reload; on a first visit, and with
 // Motion on Auto, it is the player's only one. In the intro, the title's slit and prompt, the chest hold's breathing,
 // a Lantern window's plasma and waiting arrow, and the end card's slow drift stop as it is turned on and start again as
@@ -390,7 +392,7 @@ export const scenarios = {
     // a change another tab made while this one was in the page cache or out of sight sent no event this tab heard: a
     // write from this same tab sends it none either, so it stands in for one. Back from the page cache, or back in
     // view, the title follows what is stored
-    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?cutscene=1&mute', PHONE);
+    const { ctx, page, errors } = await h.open({}, '?mute', PHONE);
     await page.locator('.title-screen').waitFor({ timeout: 30000 });
     const moving = (n) => endlessReach(page, '.title-screen', n);
     const stored = (motion, back) =>
@@ -452,7 +454,8 @@ export const scenarios = {
     const t = Date.now() - 86400e3;
     const save = JSON.stringify({ v: 1, created: t, events: [{ id: 'motion-visit', t, day: day(t), k: 'visit', xp: 10 }], flags: { greetDay: day(t), cardDay: day(t), giftDay: day(t) } });
     const you = JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: Date.now() - 1000, companionAt: Date.now() - 1000 });
-    const { ctx, page, errors } = await h.open({ [h.SAVE]: save, [h.YOU]: you, 'dbt.app.v1': h.SEEN }, '?mute', PHONE, (c) => c.clock.install());
+    const seed = { [h.SAVE]: save, [h.YOU]: you, 'dbt.app.v1': h.SEEN };
+    const { ctx, page, errors } = await h.open(seed, '?mute', PHONE, (c) => pageClock.install(c));
     const device = await deviceMotion(ctx, page);
     await h.reachHub(page);
     await device('reduce');
@@ -474,11 +477,11 @@ export const scenarios = {
       const shark = document.querySelector('.dq-st-shark');
       new MutationObserver(() => shark.classList.contains('is-swim') && window.__swims++).observe(shark, { attributes: true, attributeFilter: ['class'] });
     });
-    await page.clock.runFor(20000);
+    await pageClock.runFor(page, 20000);
     h.expect((await page.evaluate(() => window.__swims)) === 0, 'with reduce-motion on, the shark swam');
     await device('no-preference');
     // the next swim is due 45 to 100 s after the first
-    await page.clock.runFor(110000);
+    await pageClock.runFor(page, 110000);
     h.expect((await page.evaluate(() => window.__swims)) > 0, 'with the device\'s reduce-motion turned off, the shark never swam');
     const moving = { ...(await room()), blep: await blep() };
     h.expect(moving.glow === 1 && moving.blep, `with it turned off, the glow did not breathe again or the cat did not blep: ${JSON.stringify(moving)}`);
@@ -624,7 +627,8 @@ export const scenarios = {
     const t = Date.now() - 86400e3;
     const save = JSON.stringify({ v: 1, created: t, events: [{ id: 'motion-visit', t, day: day(t), k: 'visit', xp: 10 }], flags: { greetDay: day(t), cardDay: day(t), giftDay: day(t) } });
     const you = JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: Date.now() - 1000, companionAt: Date.now() - 1000 });
-    const { ctx, page, errors } = await h.open({ [h.SAVE]: save, [h.YOU]: you, 'dbt.app.v1': h.SEEN }, '?mute', PHONE, (c) => c.clock.install());
+    const seed = { [h.SAVE]: save, [h.YOU]: you, 'dbt.app.v1': h.SEEN };
+    const { ctx, page, errors } = await h.open(seed, '?mute', PHONE, (c) => pageClock.install(c));
     const device = await deviceMotion(ctx, page);
     await h.reachHub(page);
     await device('reduce');
@@ -635,7 +639,7 @@ export const scenarios = {
     const glow = async () => {
       const seen = new Set();
       for (let i = 0; i < 8; i++) {
-        await page.clock.runFor(500);
+        await pageClock.runFor(page, 500);
         seen.add(await page.evaluate(() => document.querySelector('.dq-ease-glow').style.opacity));
       }
       return [...seen];

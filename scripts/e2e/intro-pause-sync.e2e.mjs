@@ -1,8 +1,9 @@
 import { poll, until } from './harness.mjs';
+import * as pageClock from './clock.mjs';
 
 async function intro(h, beat, reduced = false, hiddenStart = false) {
   const opened = await h.open({ 'dbt.app.v1': h.SEEN }, `?shot=${beat}&mute&dpr=1&nopost${reduced ? '&reduced' : ''}`, { width: 390, height: 844 }, async (ctx) => {
-    await ctx.clock.install();
+    await pageClock.install(ctx);
     await ctx.addInitScript(() => {
       window.AudioContext = new Proxy(window.AudioContext, { construct(Target, args) {
         return window.__introAudio = new Target(...args);
@@ -70,13 +71,13 @@ async function intro(h, beat, reduced = false, hiddenStart = false) {
     opened.timeline = await opened.ctx.newCDPSession(page);
     await opened.timeline.send('Animation.setPlaybackRate', { playbackRate: 0 });
   }
-  if (beat === 'windows') await h.pauseClock(page);
+  if (beat === 'windows') await pageClock.pauseClock(page);
   await page.locator('.title-screen').press('Enter');
   await page.locator('.ui-skip').waitFor({ timeout: 60000 });
   const cue = { silhouette: 'whoosh', awaken: 'hush', chest: 'chest_rise', windows: 'ui_open' }[beat];
   await page.waitForFunction((cue) => window.__introCues.some((c) => c.cue === cue), cue, { timeout: 60000, polling: 50 });
-  if (beat === 'windows') await page.clock.fastForward(30);
-  else await h.pauseClock(page);
+  if (beat === 'windows') await pageClock.fastForward(page, 30);
+  else await pageClock.pauseClock(page);
   return opened;
 }
 
@@ -119,7 +120,7 @@ async function checkPause(h, page, tag) {
   await hidden(page, true);
   await suspended(page);
   const before = await read(page);
-  await page.clock.fastForward(1300);
+  await pageClock.fastForward(page, 1300);
   const after = await read(page);
   h.expect(after.audio === before.audio, `${tag}: sound advanced while hidden`);
   h.expect(after.picture === before.picture, `${tag}: picture advanced ${(after.picture - before.picture).toFixed(3)} s while sound was paused`);
@@ -128,7 +129,7 @@ async function checkPause(h, page, tag) {
   await hidden(page, false);
   await running(page);
   const resumed = await read(page);
-  await page.clock.fastForward(800);
+  await pageClock.fastForward(page, 800);
   await h.sleep(100);
   const later = await read(page);
   h.expect(resumed.picture === before.picture, `${tag}: the picture jumped on return`);
@@ -142,7 +143,7 @@ export const scenarios = {
     await checkPause(h, page, beat);
     await checkPause(h, page, `${beat} again`);
     if (beat === 'awaken') {
-      for (let i = 0; i < 10; i++) await page.clock.fastForward(100);
+      for (let i = 0; i < 10; i++) await pageClock.fastForward(page, 100);
       await page.waitForFunction(() => window.__introCues.some((c) => c.cue === 'awaken_hit'), null, { timeout: 15000 });
       const hits = await page.evaluate(() => window.__introCues.filter((c) => c.cue === 'awaken_hit').length);
       h.expect(hits === 1, `the awaken hit played ${hits} times`);
@@ -166,7 +167,7 @@ export const scenarios = {
       window.__introDelayDone = false;
       void after(300).then(() => { window.__introDelayDone = true; });
     });
-    await page.clock.fastForward(800);
+    await pageClock.fastForward(page, 800);
     await h.sleep(before.end);
     const after = await page.evaluate(() => ({ time: window.__introOpening.currentTime, done: window.__introDelayDone, existing: window.__introExistingDelayDone }));
     h.expect(after.time === before.time, 'the window opening animation ran while hidden');
@@ -178,7 +179,7 @@ export const scenarios = {
     h.expect(left > 1 && left < 600, `the pending delay did not start before hiding (${left} ms left)`);
     let elapsed = 0;
     for (const at of [left - 1, left + 1, 299, 301].sort((a, b) => a - b)) {
-      await page.clock.fastForward(at - elapsed);
+      await pageClock.fastForward(page, at - elapsed);
       elapsed = at;
       const done = await page.evaluate(() => ({ existing: window.__introExistingDelayDone, created: window.__introDelayDone }));
       h.expect(done.existing === (at >= left), `the pending delay lost its remaining time at ${at} ms`);
@@ -208,7 +209,7 @@ export const scenarios = {
     await checkPause(h, page, 'before leaving the intro');
     await page.locator('.ui-skip').press('Enter');
     await companion(page, 30000);
-    await page.clock.resume();
+    await pageClock.resume(page);
     await hidden(page, true);
     const untouched = await page.evaluate(async () => {
       const { after, animate } = await import('/src/ui/anim.ts');
@@ -263,7 +264,7 @@ export const scenarios = {
     await page.evaluate(() => window.__introFinishResume());
     await h.sleep(100);
     h.expect((await read(page)).state === 'suspended', 'a pending resume left sound running while hidden');
-    await page.clock.fastForward(500);
+    await pageClock.fastForward(page, 500);
     const before = await read(page);
     await h.sleep(100);
     h.expect((await read(page)).audio === before.audio, 'sound advanced after a resume settled while hidden');

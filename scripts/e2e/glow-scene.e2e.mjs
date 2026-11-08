@@ -11,6 +11,7 @@
 import sharp from 'sharp';
 import { countdownContrast, DESK, drawn, flat, home, inStep, keepsTime, live, looks, losesContext, moreTime, openStopped, pair, PHONE, sceneShot, scenes, seed, SIDE, slowGpu, toSkill, until } from './skill-scenes.e2e.mjs';
 import { screenshot } from './harness.mjs';
+import * as pageClock from './clock.mjs';
 
 const SMALL = { width: 320, height: 568 };
 /** the sizes reduced motion, a lost context and a slow GPU are checked at */
@@ -103,7 +104,7 @@ function softLight(h, l, where) {
 async function swellOver(page, ms, step = 400) {
   const seen = [];
   for (let t = 0; t <= ms; t += step) {
-    if (t) await page.clock.runFor(step);
+    if (t) await pageClock.runFor(page, step);
     const s = await scenes(page);
     seen.push({ e: s.last.e, b: lightOf(await sceneShot(page), s.last.probe).halo });
   }
@@ -187,7 +188,7 @@ export const scenarios = {
       }
       // at its brightest: half a swell on from its dimmest
       const e = (await scenes(page)).last.e;
-      await page.clock.runFor(Math.round(((SWELL / 2 - (e % SWELL) + SWELL) % SWELL) * 1000) + 100);
+      await pageClock.runFor(page, Math.round(((SWELL / 2 - (e % SWELL) + SWELL) % SWELL) * 1000) + 100);
       const s = await scenes(page);
       const l = lightOf(await sceneShot(page), s.last.probe);
       softLight(h, l, `glow ${tag} at ${s.last.e.toFixed(1)} s`);
@@ -208,7 +209,7 @@ export const scenarios = {
       await openStopped(h, page, toReadAgain, `read again ${tag}`);
       await drawn(h, page, `read again ${tag}`);
       const e = (await scenes(page)).last.e;
-      await page.clock.runFor(Math.round(((SWELL / 2 - (e % SWELL) + SWELL) % SWELL) * 1000) + 100);
+      await pageClock.runFor(page, Math.round(((SWELL / 2 - (e % SWELL) + SWELL) % SWELL) * 1000) + 100);
       const big = page.locator('.dq-timer-big');
       const seen = await big.evaluate((el) => {
         const r = el.getBoundingClientRect();
@@ -324,13 +325,12 @@ export const scenarios = {
           return /webgl/i.test(String(type)) ? null : get.call(this, type, ...rest);
         };
       });
-      await page.clock.install();
-      await page.reload();
+      await pageClock.reloadOnFakeClock(page);
       await h.reachHub(page);
       const runs = async () => JSON.parse((await h.ls(page, h.SAVE)) ?? '{"events":[]}').events.filter((e) => e.k === 'skill' && e.skill === 'improve').length;
       const before = await runs();
       await toReadAgain(h, page);
-      await page.clock.runFor(1500);
+      await pageClock.runFor(page, 1500);
       // the flat picture fades back in on the browser's own time
       await h.sleep(800);
       const s = await scenes(page);
@@ -339,12 +339,12 @@ export const scenarios = {
       h.expect(shown.length > 1 && shown.every(Boolean), `no WebGL ${tag}: the flat Lantern is hidden (${JSON.stringify(shown)})`);
       const look = () => page.evaluate(() => ({ light: document.querySelector('.dq-timer-svg--glow circle.dq-scene-flat').getAttribute('r'), mist: document.querySelector('.dq-timer-svg--glow g.dq-scene-flat g path').getAttribute('transform') }));
       const a = await look();
-      await page.clock.runFor(2000);
+      await pageClock.runFor(page, 2000);
       const b = await look();
       h.expect(a.light !== b.light && a.mist !== b.mist, `no WebGL ${tag}: the flat Lantern's light does not pulse or its mist does not drift: ${JSON.stringify([a, b])}`);
       await h.shot(page, `glow-no-webgl-${tag}`);
       if (tag === 'phone') {
-        await page.clock.fastForward(21000);
+        await pageClock.fastForward(page, 21000);
         await page.locator('.dq-timer-num', { hasText: 'Done' }).waitFor({ timeout: 5000 });
         await page.locator('.dq-skill').getByRole('button', { name: 'Next', exact: true }).click();
         await page.locator('.dq-skill').getByRole('button', { name: 'Done', exact: true }).click();

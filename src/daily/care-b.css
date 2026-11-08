@@ -146,7 +146,7 @@
   gap: 10px;
   min-height: 44px;
   padding: 0 14px 0 12px;
-  border: 1px solid rgba(137, 190, 230, 0.26);
+  border: 1px solid var(--edge, rgba(137, 190, 230, 0.26));
   border-radius: 22px;
   background: rgba(8, 18, 34, 0.42);
   color: #c3d9ee;
@@ -296,16 +296,6 @@
   width: 72px;
   opacity: 0.55;
   pointer-events: none;
-}
-/* a phone zoomed to 200% (260 CSS pixels wide or less): the moth sits above the badge, at its end, clear of it as it
-   floats */
-@media (max-width: 260px) {
-  .dq-ease-sea {
-    position: static;
-    order: -1;
-    align-self: flex-end;
-    margin: 0 0 8px;
-  }
 }
 .dq-ease-sea svg {
   display: block;

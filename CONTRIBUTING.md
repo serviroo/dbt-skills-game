@@ -47,6 +47,7 @@ drawings, skill answers and co-writer cards are included. Thumbnails are not; a 
 ```sh
 npm ci
 npx tsc --noEmit -p .
+npm run lint
 node scripts/e2e-scope-check.mjs
 npm run build
 node scripts/pwa-verify.mjs --check
@@ -55,6 +56,9 @@ node scripts/pwa-csp-sweep.mjs --check
 node scripts/e2e.mjs
 node scripts/e2e-runner-check.mjs
 ```
+
+`npm run lint` runs Oxlint and stylelint, then fails a line over 120 characters, or a file over 1,000 lines that is
+new or grows, counting only what your branch changes since `origin/main`.
 
 The PWA checks test the build in `dist/`. `pwa-verify` runs in both Chromium and WebKit; on a machine where WebKit
 can't run, add `--browser=chromium`.
@@ -65,17 +69,27 @@ one that file records. Commit the new images in `public/` with that file: CI fai
 file.
 
 `scripts/e2e.mjs` starts its own dev server and Playwright Chromium, runs every scenario in `scripts/e2e/*.e2e.mjs`
-and saves `report.json` to `artifacts/e2e/<time>/`, each scenario's screenshots in a folder of its own there (a failed
-one's under `failed/`). It exits non-zero if any scenario fails. Scenarios run side by side, longest first, each in a browser of its own: `--jobs=<n>` browsers, by default one for every 4 of the
+and saves `report.json` to `artifacts/e2e/<time>/`, each scenario's files in a folder of its own there, moved to
+`failed/` when it fails. It exits non-zero if any scenario fails. Scenarios run side by side, longest first, each in
+a browser of its own: `--jobs=<n>` browsers, by default one for every 4 of the
 machine's CPU threads and at most 4, so one on CI's 4-vCPU runners. CI runs the same checks on every pull request and
-splits the scenarios into parts with `--shard=<i>/<n>`, spread by the seconds each one took on CI, kept in
-`scripts/e2e/timings.json`. A scenario not listed there counts as 15 s; after adding a long one, refresh the file from
-the `e2e-*` artifacts of one or more CI runs with `node scripts/e2e-timings.mjs <every part's report.json>`, which keeps
-each scenario's median. For anything visual, also look at it in a browser at phone width (390 and 320 px) with motion
+splits the scenarios into parts with `--shard=<i>/<n>`, spread by the median of the last five times each one took on
+CI. The plan job picks how many parts with `node scripts/e2e.mjs --parts`: the fewest that keep each part under 24
+minutes on a runner 1.33x slower than the median, the slowest GitHub's have been, so the count grows with the suite.
+Every CI run adds its times to the `e2e-timings` artifact and the next run splits by that, so a new or slower
+scenario evens out on its own; `scripts/e2e/timings.json` is the fallback when no run has one, and a scenario in
+neither counts as 15 s. To refresh that file, run `node scripts/e2e-timings.mjs <every part's report.json>` on the
+`e2e-times-*` artifacts of one or more runs. A passing part uploads nothing more; a failed one also uploads what
+its failed scenarios wrote, as `failed-e2e-<part>-<attempt>`. For anything visual, also look at it in a browser at phone width (390 and 320 px) with motion
 on and off.
 
 `--cpu-throttle=4` slows each Chromium page's CPU work by four through CDP, including new tabs. The rate must be at
 least 1. The report records `cpuThrottle` and `throttleErrors`; a failure to apply it fails the run.
+
+Pages get the dev server's files from the harness, not through the browser's own network. Chromium fails every request
+still waiting for a connection whenever its machine gains or loses a network address, as a CI job starting or stopping
+a Docker network does, and a page that loses a module that way never starts. Offline still fails every request. Vite's
+live-reload socket is answered by the harness and stays silent, so no file change reloads a page mid-scenario.
 
 ### E2E scenarios
 
@@ -95,8 +109,12 @@ export const scenarios = {
 
 Scenario names must be unique across all files. If two match, the runner stops before it starts anything. Scenarios
 from every file run side by side in no fixed order, so a scenario must not count on another one having run or not run
-yet. A file whose scenarios must run in the order they are written, one at a time, exports `serial = true`. Every
-scenario gets an `h` object from `scripts/e2e/harness.mjs`, the same but for `browser` and `open` in each browser:
+yet. A file whose scenarios must run in the order they are written, one at a time, exports `serial = true`. A
+scenario's own route that holds a dev server request lets it go with `route.fallback()`, so the harness answers it;
+`route.continue()` would send it through the browser's own network. A scenario that fails now and then on code that
+didn't change is quarantined until its own fix lands: its file exports `quarantined = { '<name>': '<why>' }`, every run
+prints it as held out and lists it in `report.json`, and only `--scenario=<name>` still runs it. Every scenario gets an
+`h` object from `scripts/e2e/harness.mjs`, the same but for `browser` and `open` in each browser:
 
 - `open(seed?, query = '?mute', viewport = 390x844)`: a fresh browser profile with `seed` written to localStorage
   first. Returns `{ ctx, page, errors }`; close `ctx` when done.
@@ -109,9 +127,11 @@ scenario gets an `h` object from `scripts/e2e/harness.mjs`, the same but for `br
   Use this for an observation window, and a drawn-frame count for a scene's progress. Intentional endless motion keeps
   playing; measure its layout box or a still parent when testing layout. Keep separate performance deadlines such as
   900 ms.
-- `pauseClock(page)`: stop the page clock where it is, after `page.clock.install()`, so time moves only with
-  `runFor` or `fastForward`. Use it instead of `page.clock.pauseAt` with a time read from the page: a running clock
-  on a slow page can pass that time before the call lands, and the pause then fails.
+- `scripts/e2e/clock.mjs` is the only way to move the page clock; a lint rule flags `.clock` anywhere else. `install`,
+  `runFor`, `fastForward`, `resume`, `setFixedTime` and `setSystemTime` take the page or context first, and
+  `reloadOnFakeClock(page)` installs the clock and reloads. `pauseClock(page)` stops the clock where it is, so time
+  moves only with `runFor` or `fastForward`. There is no `pauseAt`: a running clock on a slow page can pass the time
+  it is given before the call lands, and the pause then fails.
 - `until(page, check, arg?, { timeout = 10000, polling = 100 } = {})`: wait for a check in the page that awaits
   something, such as a database read. `page.waitForFunction` counts the promise an async check returns as true, so
   it returns at once.
@@ -146,7 +166,7 @@ scenario gets an `h` object from `scripts/e2e/harness.mjs`, the same but for `br
 - `browser`, `server.url`, `flags`, and `shared`, one object for the whole run, for a result worth making once (a
   build, the content). Store a promise in it (`shared.x ??= make()`) so scenarios running at once share one. A file
   that passes results from one scenario to the next must be serial.
-- `out`, the run's artifact folder; `renderer`, the WebGL renderer; `stop()`, which closes every browser and the server.
+- `out`, this scenario's own folder in the run's artifact folder (`root`); `renderer`, the WebGL renderer; `stop()`, which closes every browser and the server.
 
 The runner closes any remaining browser profiles in a scenario's browser after it, including failures. A scenario
 should also work on its own: create any fixture it needs when an earlier scenario has not run. Whatever a scenario returns is kept
@@ -197,12 +217,12 @@ ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:<port>:127.0.0.1:<port> -R 127.0
 node scripts/e2e.mjs --ws=ws://127.0.0.1:<port>/<path> --port=5400
 ```
 
-`-L` brings the browser's port to this machine's 127.0.0.1, and `-R` lets that browser load this run's dev server at
-its own 127.0.0.1. Naming 127.0.0.1 on both ends and `ExitOnForwardFailure` stop the tunnel if either port is already
-taken on its side. `--ws` needs `--port`, which keeps the dev server on the forwarded port; the run stops if that port
-is taken here, and before any scenario it checks that the browser reaches this run's dev server rather than another
-one. `--headed` goes to `scripts/e2e-browser.mjs`; `--software` goes to both `scripts/e2e-browser.mjs` and
-`scripts/e2e.mjs`.
+`-L` brings the browser's port to this machine's 127.0.0.1, and `-R` lets that browser reach this run's dev server at
+its own 127.0.0.1 for the requests the harness doesn't answer itself. Naming 127.0.0.1 on both ends and
+`ExitOnForwardFailure` stop the tunnel if either port is already taken on its side. `--ws` needs `--port`, which keeps
+the dev server on the forwarded port; the run stops if that port is taken here, and before any scenario it checks that
+the browser reaches this run's dev server rather than another one. `--headed` goes to `scripts/e2e-browser.mjs`;
+`--software` goes to both `scripts/e2e-browser.mjs` and `scripts/e2e.mjs`.
 
 ### Skill check
 

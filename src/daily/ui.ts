@@ -105,7 +105,7 @@ function shy() {
 }
 
 /** The words of each text in `node` set as dq-words, each word that can break whole in it, with its breaks. */
-function setWhole(node: Node) {
+export function setWhole(node: Node) {
   const texts: Text[] = [];
   if (node instanceof Text) texts.push(node);
   else for (let w = document.createTreeWalker(node, NodeFilter.SHOW_TEXT), t = w.nextNode(); t; t = w.nextNode()) texts.push(t as Text);
@@ -113,8 +113,8 @@ function setWhole(node: Node) {
     if (!t.parentElement || t.parentElement.closest(KEEP_OUT)) continue;
     const parts: (string | Node)[] = [];
     let from = 0;
-    // a word, or a number its no-break spaces hold together
-    for (const m of t.data.matchAll(/\S+(?:\u00A0\S+)*/g)) {
+    // a word up to and with its own hyphen, or a number its no-break spaces hold together
+    for (const m of t.data.matchAll(/[^\s-]+(?:\u00A0[^\s-]+)*-*|-+/g)) {
       // it breaks at a soft hyphen in a run of letters, or after a no-break space
       const breaks = new Map<number, () => Node>();
       for (const r of m[0].matchAll(/\p{L}+/gu)) for (const k of breaksIn(r[0], r.index)) breaks.set(k, shy);
@@ -147,6 +147,11 @@ export function wholeWords(root: HTMLElement) {
   });
   mo.observe(root, { subtree: true, childList: true, characterData: true });
   return () => mo.disconnect();
+}
+
+export function keptWhole<T extends HTMLElement>(root: T) {
+  setWhole(root);
+  return root;
 }
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

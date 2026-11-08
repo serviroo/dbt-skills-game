@@ -6,7 +6,7 @@ import { CRISIS_CHECKED } from '../content/crisis-lines';
 import { LETTER, REWARDS } from '../content/intro';
 import { ABOUT, CLEAR_COPY, CRYSTAL_COPY, KEEP_COPY, PEEK_COPY } from '../content/daily-lines';
 import type { App, Route, ScreenOut, Visit } from './app';
-import { glyph, icon, mothSVG } from './art';
+import { fishSVG, glyph, icon, lurkCatSVG, mothSVG, seaweedSVG, sharkFinSVG, sharkTailSVG } from './art';
 import { skillCard } from './hub';
 import { regionPicker, telHref, smsHref } from './safe';
 import { allyCard, allyName, cardOf, favFirst, focusBack, refill } from './artroom';
@@ -18,10 +18,10 @@ import { btn, copyText, field, focusWhole, h, md, p, panel, place, quotes, redra
 import type { KeepStatus } from '../pwa/register';
 import { volumeSliders } from '../ui/volume';
 import { STEALTH, STEALTH_LINES } from '../content/stealth-lines';
-import { fishSVG, lurkCatSVG, seaweedSVG, sharkFinSVG, sharkTailSVG } from './art';
 import { Slime } from './bubbles';
 import { inventorySection, rosterSection, brambleNap } from './roster';
 import { wardrobePanel } from './wardrobe';
+import { introPanel } from './intro-panel';
 import { DEFAULT_COMPANION, DEFAULT_NAME, readYou } from '../core/you';
 import { BESIDE, READ_SIZES, type ReadSize } from '../core/stored-names';
 import { mayMentionTherapist } from '../core/session';
@@ -32,8 +32,9 @@ import { crystalContent, makeCrystal, readCrystal, restorePreferences, restoreUn
 import { restoreSkillDrafts } from './skilldraft';
 import { supportListsCopy } from './support-lists';
 import { keepTextSize, textSize } from './text-size';
-
-const pageHead = (title: string, sub?: string) => h('header', { class: 'dq-pagehead' }, h('h1', { class: 'dq-h1', 'data-focus': '', text: title }), sub ? p(sub, 'dq-text dq-pagesub') : null);
+import { pageHead, restHead, wholeText } from './page-head';
+import { choose, wholeChoice } from './choice';
+import { contrastSwitch } from './contrast';
 
 // ---------------- Stealth room (the Rest room) ----------------
 /** The Stealth title is never stored separately: any rest event means it is unlocked. The first one carries its id. */
@@ -171,7 +172,7 @@ export function restScreen(app: App): ScreenOut {
   });
   const slime = new Slime({ reduced: () => app.reduced(), label: STEALTH.slimeLabel, onPoke: () => app.sound('bubble') });
   el.append(
-    h('header', { class: 'dq-pagehead dq-st-head' }, h('p', { class: 'dq-st-kicker', text: STEALTH.kicker }), h('h1', { class: 'dq-h1', 'data-focus': '', text: STEALTH.title }), p(STEALTH.sub, 'dq-text dq-pagesub dq-st-sub')),
+    restHead(STEALTH.kicker, STEALTH.title, STEALTH.sub),
     title,
     stage,
     h(
@@ -251,13 +252,9 @@ export function restScreen(app: App): ScreenOut {
       slime.destroy();
       const w = window as unknown as { __stealth?: typeof hook };
       if (w.__stealth === hook) delete w.__stealth;
-      // B10: one quiet line wherever the player lands, except the Safe Zone. Waits for a pending Safe Zone credit to finish.
-      const delay = st.state.flags.safeCredit ? 5600 : 420;
-      window.setTimeout(() => {
-        const r = app.route.name;
-        if (app.root.isConnected && r !== 'rest' && r !== 'safe') app.toast(STEALTH.leave);
-      }, delay);
     },
+    // B10: one quiet line wherever the player lands, except the Safe Zone, after a Safe Zone credit still owed
+    parting: () => ({ text: STEALTH.leave, after: st.state.flags.safeCredit ? 5600 : 420 }),
   };
 }
 
@@ -396,13 +393,13 @@ export function libraryScreen(app: App): ScreenOut {
       render();
     });
     picks[key] = sel;
-    return h('div', { class: 'dq-libf' }, h('label', { for: id, class: 'dq-libf-l', text: label }), sel);
+    return h('div', { class: 'dq-libf' }, h('label', { for: id, class: 'dq-libf-l', text: label }), wholeChoice(sel));
   };
   const count = h('p', { class: 'dq-libcount', role: 'status' });
   const clearAll = () => {
     Object.assign(finding, { q: '', need: '', topic: '', time: '' });
     search.value = '';
-    for (const sel of Object.values(picks)) sel.value = '';
+    for (const sel of Object.values(picks)) choose(sel, '');
     render();
     search.focus();
   };
@@ -781,7 +778,7 @@ export function diaryScreen(app: App, _route: Route, visit: Visit): ScreenOut {
     // Save tapped at the bottom of the screen brings the line under it into sight
     saved.scrollIntoView({ block: 'nearest', behavior: app.reduced() ? 'auto' : 'smooth' });
   };
-  const week = h('div', { class: 'dq-week' });
+  const week = h('div', { class: 'dq-week', tabindex: '0', role: 'region', 'aria-label': 'Past 7 days' });
   const renderWeek = () => {
     const days = Array.from({ length: 7 }, (_, i) => addDays(today, i - 6));
     const rows = [...rowsFor(s, 'emotions', days).map((r) => [r, 'emotions'] as const), ...rowsFor(s, 'urges', days).map((r) => [r, 'urges'] as const)];
@@ -1085,12 +1082,12 @@ export function printScreen(app: App, _route: Route, visit: Visit): ScreenOut {
 }
 
 // ---------------- Comfort inventory ----------------
-export function comfortScreen(app: App): ScreenOut {
+export function comfortScreen(app: App, _route: Route, visit: Visit): ScreenOut {
   const st = app.store;
   const s = st.state;
   // Undo pressed from the keys: its toast goes, so focus goes to the entry it brought back, on its Remove, in view
   const removed = (text: string, id: string, restore: () => void) =>
-    app.toast(`Removed "${text.length > 36 ? `${text.slice(0, 35)}…` : text}".`, {
+    visit.toast(`Removed "${text.length > 36 ? `${text.slice(0, 35)}…` : text}".`, {
       label: 'Undo',
       run: () => {
         const keyed = !!document.activeElement?.matches('.dq-toast-btn:focus-visible');
@@ -1321,7 +1318,7 @@ function clearedScreen(): ScreenOut {
     const now = clearStatus();
     const done = now === 'done' || now === 'elsewhere-done';
     const failed = now === 'failed' || now === 'elsewhere-failed';
-    head.textContent = typo(done ? CLEAR_COPY.doneTitle : failed ? CLEAR_COPY.failedTitle : CLEAR_COPY.clearingTitle);
+    wholeText(head, typo(done ? CLEAR_COPY.doneTitle : failed ? CLEAR_COPY.failedTitle : CLEAR_COPY.clearingTitle));
     // the line is a live region: nothing around it is marked busy, so each change is read out as it comes
     text.textContent = typo(lines[now]);
     note.classList.toggle('is-hidden', !done);
@@ -1344,7 +1341,7 @@ function welcomeNote(app: App) {
   return app.window({ kind: 'notification', title: LETTER.title, html: `${note}<p class="sys">${LETTER.signoff}</p>${gifts}`, tapToContinue: true }, true);
 }
 
-export function settingsScreen(app: App): ScreenOut {
+export function settingsScreen(app: App, _route: Route, visit: Visit): ScreenOut {
   if (cleared()) return clearedScreen();
   const st = app.store;
   const s = st.state;
@@ -1353,6 +1350,7 @@ export function settingsScreen(app: App): ScreenOut {
   const notSaving = p("This device isn't saving right now (storage may be full or private browsing). Your progress is safe for this visit; a Save Crystal keeps a copy.", `dq-small${st.saving ? ' is-hidden' : ''}`);
   const keeps = browserKeeps();
   const restoreBtn = btn('Restore', () => file.click(), { kind: 'quiet', ic: 'import' });
+  const intro = introPanel(app, visit, () => void welcomeNote(app));
   /** Each choice as it is now: brought back by a Save Crystal, or made in another open copy. */
   const showChoices = () => {
     app.root.querySelectorAll('.dq-settings [aria-label="Motion"] [role="radio"]').forEach((b, i) => b.setAttribute('aria-checked', String(['system', 'reduce', 'full'][i] === s.settings.motion)));
@@ -1668,7 +1666,6 @@ export function settingsScreen(app: App): ScreenOut {
     });
     return h('div', { class: 'dq-setting dq-setting--col' }, h('label', { for: id, class: 'dq-setting-l' }, h('span', { class: 'dq-setting-t', text: label }), h('span', { class: 'dq-setting-h', text: hint })), input);
   };
-  const motionLabels = ['Auto', 'Reduced', 'Full'];
   // no switch at all where the browser can't vibrate
   const vibrate = app.canBuzz()
     ? toggle('Vibrate when a timer starts or ends', s.settings.vibrate, (v) => {
@@ -1721,7 +1718,7 @@ export function settingsScreen(app: App): ScreenOut {
             st.touch('motion');
             st.save();
             app.applyMotion();
-          }, { labels: motionLabels, cls: 'dq-seg--3' }),
+          }, { labels: ['Auto', 'Reduced', 'Full'], cls: 'dq-seg--3' }),
         ),
         h(
           'div',
@@ -1729,15 +1726,12 @@ export function settingsScreen(app: App): ScreenOut {
           h('span', { class: 'dq-setting-l' }, h('span', { class: 'dq-setting-t', text: 'Text size' }), h('span', { class: 'dq-setting-h', text: 'Bigger words in the Safe Zone and when you read a story.' })),
           segmented('Text size', [...READ_SIZES], textSize(app), (v) => keepTextSize(app, v as ReadSize), { labels: ['Regular', 'Larger', 'Largest'], cls: 'dq-seg--3' }),
         ),
+        contrastSwitch(app),
         vibrate,
       ),
       panel({ title: 'Crisis lines', ic: icon('phone') }, regionPicker(app, undefined, SAFE.settings)),
       robe.el,
-      panel(
-        { title: 'Intro', ic: icon('replay') },
-        p('The cutscene, the shadows and the chest. As many times as you like.', 'dq-text'),
-        h('div', { class: 'dq-actions' }, btn('Replay cutscene', () => app.opts.onReplay(), { kind: 'quiet', ic: 'replay' }), btn(LETTER.title, () => void welcomeNote(app), { kind: 'quiet', ic: 'book' })),
-      ),
+      intro.el,
       panel(
         { title: 'Your data', ic: icon('export') },
         p('**Saved only on this device.** No account, no tracking.', 'dq-text'),
@@ -1776,6 +1770,7 @@ export function settingsScreen(app: App): ScreenOut {
     title: 'Settings',
     mode: 'sub',
     foot: robe.bar,
+    after: intro.after,
     leave: () => {
       robe.leave();
       offSaving();

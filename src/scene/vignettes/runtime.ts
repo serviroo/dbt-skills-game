@@ -4,7 +4,7 @@ import { deviceDpr, lendRenderer, type Lease } from '../lease';
 import { sceneStats } from '../stats';
 import type { Beat, SceneOpts } from './host';
 
-/** One scene: everything it draws, posed as a pure function of the beat. */
+/** One scene: everything it draws, posed as a pure function of the beat (the camp's sky also follows the wall clock). */
 export interface Vignette {
   readonly scene: THREE.Scene;
   readonly camera: THREE.PerspectiveCamera;
@@ -32,6 +32,7 @@ const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[xs.length >> 1];
 function disposeTree(root: THREE.Object3D) {
   root.traverse((o) => {
     const m = o as THREE.Mesh;
+    if (o instanceof THREE.InstancedMesh) o.dispose();
     m.geometry?.dispose();
     for (const mat of m.material ? ([] as THREE.Material[]).concat(m.material) : []) {
       for (const v of Object.values(mat as unknown as Record<string, unknown>)) if (v instanceof THREE.Texture) v.dispose();
@@ -64,7 +65,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   };
   let lease: Lease | undefined;
   try {
-    lease = lendRenderer(holder, evict);
+    lease = lendRenderer(holder, { evict, lost: () => onLost(), restored: () => onRestored() });
     vig = build(new THREE.Color(opts.accent ?? '#4fb8ff'), opts);
   } catch (err) {
     if (vig) disposeTree(vig.scene);
@@ -75,7 +76,7 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
   }
   const v = vig;
   const lent = lease;
-  const { renderer, canvas } = lent;
+  const { renderer } = lent;
 
   const { clock } = opts;
   const still = () => opts.reduced();
@@ -309,8 +310,6 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
     timeIn = 1;
     resync();
   };
-  canvas.addEventListener('webglcontextlost', onLost);
-  canvas.addEventListener('webglcontextrestored', onRestored);
   const offMotion = opts.onMotion(resync);
 
   return () => {
@@ -319,8 +318,6 @@ export function runScene(stage: HTMLElement, build: BuildScene, opts: SceneOpts)
     dropFence();
     io.disconnect();
     ro.disconnect();
-    canvas.removeEventListener('webglcontextlost', onLost);
-    canvas.removeEventListener('webglcontextrestored', onRestored);
     offMotion();
     setLive(false);
     v.dispose?.();

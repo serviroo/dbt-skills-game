@@ -4,7 +4,7 @@ import { params } from '../core/params';
 import { clamp, cubicBezier, ease, fbm1, lerp, smoothstep } from '../core/math';
 import { animate, wait, uiNow, pauseAfter, onAnimate } from '../ui/anim';
 import { LanternWindow, levelBody, lanternLayer, type RevealCtx } from '../ui/lantern-window';
-import { GATE, LEVEL } from '../motion/tokens';
+import { GATE, LEVEL, REFRAME } from '../motion/tokens';
 import { Letterbox, awakenWord, rewardCards, letterView, endCard, fader } from '../ui/cutscene-ui';
 import { INTRO, WINDOWS, REWARDS } from '../content/intro';
 import { POSES } from '../scene/character/hero';
@@ -47,6 +47,25 @@ const easeReach = cubicBezier(0.15, 0.6, 0.3, 1);
 const easePush = cubicBezier(0.3, 0, 0.6, 1);
 const stepped = (t: number, fps: number) => Math.floor(t * fps) / fps;
 
+/** the middle of his eyes, in the world, as he stands now */
+function eyeCentre(jw: World['jw']) {
+  jw.group.updateMatrixWorld(true);
+  const c = new THREE.Vector3();
+  jw.eyes.group.children.forEach((e) => c.add(e.getWorldPosition(new THREE.Vector3())));
+  return c.multiplyScalar(1 / Math.max(1, jw.eyes.group.children.length));
+}
+
+/** The chest shot: a dolly in over `sec`, from `back[0]` to `back[1]` in front of the chest (further on a narrow screen,
+ *  see chestFrame), aimed at `look`. The chest stays `edge` of the frame inside its edges and `promptGap` px clear of
+ *  the hold prompt, and his eyes no nearer the top than `headroom` of the frame (or than the shot has them, if nearer). */
+const CHEST_SHOT = { z: 1.45, y: [1.02, 0.98], back: [3.25, 2.85], look: [0, 0.62, 1.2], fov: 32, sec: 12, edge: 0.04, promptGap: 12, headroom: 0.12 } as const;
+/** where the chest shot's camera stands and aims `u` of the way through its dolly */
+function chestPose(k: number, u: number, shift: THREE.Vector3, pos: THREE.Vector3, look: THREE.Vector3) {
+  const S = CHEST_SHOT;
+  pos.set(0, lerp(S.y[0], S.y[1], u), S.z + lerp(S.back[0], S.back[1], u) * k).add(shift);
+  look.set(...S.look).add(shift);
+}
+
 export class Director {
   w!: World;
   private shot: Shot | null = null;
@@ -62,6 +81,16 @@ export class Director {
    *  flight is waiting on ends there */
   private readonly skip = new Promise<void>((r) => (this.resolveSkip = r));
   private baseBloom = 1.15;
+  /** the screen's width over its height as the last frame was drawn */
+  private aspect = 0;
+  /** the picture the last frame drew, where a re-frame eases from when the screen changes shape */
+  private readonly drawn = { pos: new THREE.Vector3(), quat: new THREE.Quaternion(), fov: 30, slit: 0 };
+  private reframe: { t0: number; pos: THREE.Vector3; quat: THREE.Quaternion; fov: number; slit: number } | null = null;
+  /** the gate's width for each unit of aspect while its slit keeps its share of the frame's width (the gate and the
+   *  windows), so it keeps that share whichever way the phone is held; 0 once it stands at a fixed width */
+  private slitPerAspect = 0;
+  /** the chest shot's framing for the screen size it was worked out for (see chestFrame) */
+  private readonly chestFit = { w: 0, h: 0, k: 1, shift: new THREE.Vector3() };
 
   readonly audio: AudioLike;
   /** every sound, charge hum and bed the cut scene starts, so an early end can stop whatever still plays */
@@ -96,6 +125,16 @@ export class Director {
     const cam = this.w.cam;
     this.stage.onUpdate((t, dt) => {
       const now = uiNow();
+      const aspect = this.stage.width / this.stage.height;
+      if (aspect !== this.aspect) {
+        // the screen changed shape mid-shot (a phone turned): every shot below frames for the new shape at once, and the
+        // picture eases there from what was on screen, or cuts there with reduced motion. The beat's clock runs on
+        if (this.aspect && !params.reduced) {
+          const d = this.drawn;
+          this.reframe = { t0: now, pos: d.pos.clone(), quat: d.quat.clone(), fov: d.fov, slit: d.slit };
+        }
+        this.aspect = aspect;
+      }
       for (const tr of this.tracks) {
         const lt = now - tr.t0;
         tr.fn(Math.min(lt, tr.until), dt);
@@ -117,7 +156,34 @@ export class Director {
         }
         this.applyShake(cam, now);
       }
+      this.settle(cam, now);
     });
+  }
+
+  /** Eases a re-frame in progress from the picture on screen when the screen changed shape, keeps the gate's slit at its
+   *  share of the frame, and notes the picture this frame draws. */
+  private settle(cam: THREE.PerspectiveCamera, now: number) {
+    // reduced motion turned on while a re-frame eases: the picture cuts to where it was going
+    if (params.reduced) this.reframe = null;
+    const r = this.reframe;
+    const k = r ? ease.outCubic(clamp((now - r.t0) / REFRAME.sec)) : 1;
+    if (r) {
+      cam.position.lerpVectors(r.pos, cam.position, k);
+      cam.quaternion.slerpQuaternions(r.quat, cam.quaternion, k);
+      cam.fov = lerp(r.fov, cam.fov, k);
+      cam.updateProjectionMatrix();
+      if (k >= 1) this.reframe = null;
+    }
+    const d = this.drawn;
+    if (this.slitPerAspect) {
+      const slit = this.slitPerAspect * this.aspect;
+      const w = r ? lerp(r.slit, slit, k) : slit;
+      if (w !== d.slit) (this.w.gate as { setWidth?: (w: number) => void }).setWidth?.(w);
+      d.slit = w;
+    }
+    d.pos.copy(cam.position);
+    d.quat.copy(cam.quaternion);
+    d.fov = cam.fov;
   }
 
   private applyShake(cam: THREE.PerspectiveCamera, now: number) {
@@ -284,7 +350,12 @@ export class Director {
     this.cut({ pos: lin(from, to, GATE.dollySec), look: still(look), fov: () => GATE.fov });
     this.w.cam.position.copy(from);
     this.w.cam.lookAt(look);
-    (gate as { fitWidth?: (c: THREE.PerspectiveCamera) => void }).fitWidth?.(this.w.cam);
+    // the slit's share of the frame's width is measured from where the dolly starts, and kept on any screen shape
+    const slit = (gate as { fitWidth?: (c: THREE.PerspectiveCamera) => number }).fitWidth?.(this.w.cam);
+    if (slit) {
+      this.slitPerAspect = slit / this.w.cam.aspect;
+      this.drawn.slit = slit;
+    }
     const t0 = uiNow();
     gate.setDim(1);
     gate.openAt(t0 + GATE.crackSec);
@@ -362,6 +433,7 @@ export class Director {
     characterLighting();
     gate.setDim(1);
     gate.openAt(-100);
+    this.slitPerAspect = 0;
     (gate as { setWidth?: (w: number) => void }).setWidth?.(0.8);
     jw.group.visible = true;
     jw.rig.apply(POSES.idle, null, 0);
@@ -381,8 +453,7 @@ export class Director {
 
     // 4a: low wide, he condenses out of the smoke
     // low wide, camera and aim offset together so the gate stays directly behind him (backlit silhouette)
-    const ox = this.stage.width > this.stage.height ? 0.42 : 0.12;
-    this.cut({ pos: lin(V(0, 0.44, 4.7), V(0, 0.47, 4.3), 3.2), look: still(V(ox, 1.08, 0)), fov: () => 30 });
+    this.cut({ pos: lin(V(0, 0.44, 4.7), V(0, 0.47, 4.3), 3.2), look: () => V(this.stage.width > this.stage.height ? 0.42 : 0.12, 1.08, 0), fov: () => 30 });
     jw.setDissolve(0.9);
     this.track(1.6, (lt) => jw.setDissolve(lerp(0.9, 0, ease.outCubic(lt / 1.6))));
     this.audio.play('whoosh', { gain: 0.5 });
@@ -391,13 +462,11 @@ export class Director {
     this.cut({ pos: lin(V(-0.88, 1.52, 1.78), V(-0.7, 1.53, 1.82), 3.2), look: lin(V(0.02, 1.5, 0), V(0.01, 1.51, 0), 3.2), fov: () => 26 });
     await this.hold(3.2);
     // 4c: frontal push-in to the eyes
-    jw.group.updateMatrixWorld(true);
-    const eyeC = new THREE.Vector3();
-    jw.eyes.group.children.forEach((c) => eyeC.add(c.getWorldPosition(new THREE.Vector3())));
-    eyeC.multiplyScalar(1 / Math.max(1, jw.eyes.group.children.length));
-    const aspect = this.stage.width / this.stage.height;
-    const pushTo = eyeC.clone().add(V(0.0, -0.006, lerp(0.72, 0.6, smoothstep(0.5, 1.0, aspect))));
-    this.cut({ pos: lin(eyeC.clone().add(V(0.05, -0.01, 1.7)), pushTo, 5.13, easePush), look: still(eyeC.clone().add(V(0, -0.004, 0))), fov: (lt) => lerp(24, 19, easePush(clamp(lt / 5.13))) });
+    const eyeC = eyeCentre(jw);
+    const pushFrom = eyeC.clone().add(V(0.05, -0.01, 1.7));
+    // the push ends further back on a narrow screen, so both eyes stay in
+    const pushTo = () => eyeC.clone().add(V(0.0, -0.006, lerp(0.72, 0.6, smoothstep(0.5, 1.0, this.stage.width / this.stage.height))));
+    this.cut({ pos: (lt) => pushFrom.clone().lerp(pushTo(), easePush(clamp(lt / 5.13))), look: still(eyeC.clone().add(V(0, -0.004, 0))), fov: (lt) => lerp(24, 19, easePush(clamp(lt / 5.13))) });
     await this.hold(5.13);
     // stillness, then ignition: halo flicker 100 ms, core 200 ms, bloom overshoot +15.6 % settle 267 ms
     this.handheld = 0.15;
@@ -486,6 +555,96 @@ export class Director {
     }
   }
 
+  /**
+   * The chest shot's framing for this screen: how much further back the dolly stands (k, a scale on its distance) and
+   * how far the camera moves aside and down, so the chest, as large as the dolly brings it, stays inside the frame and
+   * clear of the hold prompt where the prompt stands on this screen, with his eyes still in the picture above it. Under
+   * the chest on a tall screen, the prompt keeps its room by the camera standing lower and, as far as his eyes need,
+   * further back; beside it on a wide one, by the camera trucking right, which moves the chest left. A screen the shot
+   * already fits keeps it as it is. Worked out again when the screen changes size.
+   */
+  private chestFrame() {
+    const { width: W, height: H } = this.stage;
+    const f = this.chestFit;
+    if (f.w === W && f.h === H) return f;
+    f.w = W;
+    f.h = H;
+    f.k = Math.max(1, 0.8 / (W / H));
+    f.shift.set(0, 0, 0);
+    const { chest, jw, modules } = this.w;
+    const prompt: DOMRect | undefined = modules.chest?.promptRect?.();
+    if (!chest?.bounds || !prompt) return f;
+    const S = CHEST_SHOT;
+    const room = { l: W * S.edge, r: W * (1 - S.edge), t: H * S.edge, b: H * (1 - S.edge) };
+    if (prompt.left > W / 2) room.r = Math.min(room.r, prompt.left - S.promptGap);
+    else room.b = Math.min(room.b, prompt.top - S.promptGap);
+    chest.group.updateMatrixWorld(true);
+    const { min, max } = chest.bounds;
+    const corners = [0, 1, 2, 3, 4, 5, 6, 7].map((i) =>
+      V(i & 1 ? max.x : min.x, i & 2 ? max.y : min.y, i & 4 ? max.z : min.z).applyMatrix4(chest.group.matrixWorld),
+    );
+    const centre = chest.bounds.getCenter(new THREE.Vector3()).applyMatrix4(chest.group.matrixWorld);
+    const eyes = eyeCentre(jw);
+    const cam = new THREE.PerspectiveCamera(S.fov, W / H);
+    const look = new THREE.Vector3();
+    const p = new THREE.Vector3(), dir = new THREE.Vector3();
+    // where the chest and his eyes land on screen, in px, as the dolly ends
+    const frame = (k: number) => {
+      chestPose(k, 1, f.shift, cam.position, look);
+      cam.lookAt(look);
+      cam.updateMatrixWorld();
+      const q = { l: Infinity, r: -Infinity, t: Infinity, b: -Infinity, eyes: ((1 - p.copy(eyes).project(cam).y) / 2) * H };
+      for (const c of corners) {
+        p.copy(c).project(cam);
+        const x = ((p.x + 1) / 2) * W, y = ((1 - p.y) / 2) * H;
+        q.l = Math.min(q.l, x);
+        q.r = Math.max(q.r, x);
+        q.t = Math.min(q.t, y);
+        q.b = Math.max(q.b, y);
+      }
+      return q;
+    };
+    // world units per px at the chest's depth: the camera moving that far moves the chest one px the other way
+    const perPx = () => (2 * p.copy(centre).sub(cam.position).dot(cam.getWorldDirection(dir)) * Math.tan(THREE.MathUtils.degToRad(S.fov / 2))) / H;
+    // the camera moves down the least that lifts the chest off the room's floor (onto it, on a tall screen, the prompt)
+    const lift = (k: number) => {
+      f.shift.y = 0;
+      let q = frame(k);
+      for (let i = 0; i < 3 && q.b > room.b + 0.5; i++) {
+        f.shift.y -= (q.b - room.b) * perPx();
+        q = frame(k);
+      }
+      return q;
+    };
+    // his eyes rise no higher than the shot has them, or than `headroom` of the frame from its top if they sit lower
+    const eyesTop = Math.min(frame(f.k).eyes, H * S.headroom);
+    // further back, the chest is smaller and nearer the middle: the camera stands as near as it can with the chest, once
+    // lifted, inside the room's height and no wider than it, and his eyes still in the picture
+    const fits = (k: number) => {
+      const q = lift(k);
+      return q.t >= room.t && q.b <= room.b + 0.5 && q.r - q.l <= room.r - room.l && q.eyes >= eyesTop;
+    };
+    if (!fits(f.k)) {
+      let near = f.k, far = 2 * f.k;
+      for (let i = 0; i < 5 && !fits(far); i++) [near, far] = [far, 2 * far];
+      for (let i = 0; i < 20; i++) {
+        const mid = (near + far) / 2;
+        if (fits(mid)) far = mid;
+        else near = mid;
+      }
+      f.k = far;
+    }
+    lift(f.k);
+    // then sideways, the least that puts it inside the room's width
+    for (let i = 0; i < 3; i++) {
+      const q = frame(f.k);
+      const dx = q.r > room.r ? room.r - q.r : q.l < room.l ? room.l - q.l : 0;
+      if (Math.abs(dx) < 0.5) break;
+      f.shift.x -= dx * perPx();
+    }
+    return f;
+  }
+
   /* ---------------------------------------------------------------- beat 6: chest */
   private async beatChest() {
     if (this.skipped) return;
@@ -505,8 +664,12 @@ export class Director {
     }
     this.audio.bed?.('vortex_roar')?.stop(1.5);
     this.handheld = 0.5;
-    const k = Math.max(1, 0.8 / (this.stage.width / this.stage.height));
-    this.cut({ pos: lin(V(0, 1.02, 1.45 + 3.25 * k), V(0, 0.98, 1.45 + 2.85 * k), 12), look: still(V(0, 0.62, 1.2)), fov: () => 32 });
+    const pos = new THREE.Vector3(), look = new THREE.Vector3();
+    const at = (lt: number) => {
+      const { k, shift } = this.chestFrame();
+      chestPose(k, clamp(lt / CHEST_SHOT.sec), shift, pos, look);
+    };
+    this.cut({ pos: (lt) => (at(lt), pos.clone()), look: (lt) => (at(lt), look.clone()), fov: () => CHEST_SHOT.fov });
     if (!chest) {
       await this.window({ kind: 'reward', title: WINDOWS.unlocked.title, html: WINDOWS.unlocked.html }, 2);
       return;

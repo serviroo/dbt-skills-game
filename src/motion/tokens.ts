@@ -62,6 +62,9 @@ export const WINDOW = {
   reducedCloseMs: 180,
 } as const;
 
+/** The Safe Zone's calm fade in: a new screen's words, and Lights up and Sound back as the keyboard goes down. */
+export const SAFE_FADE = { ms: 520 } as const;
+
 /** The intro's Safe Zone and Skip: taps land on nothing this long after one is pressed, as under a closing window in the
  *  companion, so the second tap of a double tap never presses what opens in its place. */
 export const WAYS = { settleMs: 450 } as const;
@@ -132,8 +135,11 @@ export const SCORE = {
  */
 export const BREATH = { inSec: 4, outSec: 6, settleSec: 2.4 } as const;
 
-/** The clouds over the tide (src/scene/vignettes/scenes/tide.ts): each crosses in crossSec, the next spaceSec behind */
-export const CLOUDS = { crossSec: 32, spaceSec: 13 } as const;
+export const THOUGHTS = {
+  clouds: { crossSec: 32, spaceSec: 13 },
+  cars: { crossSec: 16, spaceSec: 11 },
+  leaves: { crossSec: 20, spaceSec: 8 },
+} as const;
 
 /** Home's sky (src/daily/sky.ts): a slow drift when the hour turns while Home is open, a short fade in and out */
 export const SKY = {
@@ -181,6 +187,11 @@ export const GATE = {
   fov: 30,
   handheld: 0.3,
 } as const;
+
+/** The intro's camera when the screen changes shape mid-shot (a phone turned, a window resized): every shot frames for the
+ *  new shape at once, and the picture eases there from what was on screen over this long, or cuts there with reduced
+ *  motion. */
+export const REFRAME = { sec: 0.5 } as const;
 
 /** The small calm 3D scenes in the companion (src/scene/vignettes) and the renderer they share. */
 export const SCENE = {

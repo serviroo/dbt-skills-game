@@ -310,7 +310,7 @@
   background: #a8dcff;
 }
 .vol-sl.is-muted .vol-row {
-  opacity: 0.45;
+  opacity: var(--muted-op, 0.45);
 }
 .vol-mute {
   display: block;

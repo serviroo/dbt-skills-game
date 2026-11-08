@@ -5,8 +5,9 @@
 // 320x568, 844x390 and 667x375, "Cool air" and "Cold water" are two buttons of the same kind and height, whole on
 // screen on arrival. The caution comes right under them, tied to "Cold water" for screen readers, whole on screen and
 // as big as the screen's own words, before anything starts. Either choice (each place starts with each one at some
-// size) starts the 30 seconds with nothing to confirm or dismiss and no "+N s", brings the countdown (and in a skill,
-// Next) into view, and the other one only moves the mark.
+// size) starts the 30 seconds with nothing to confirm or dismiss and no "+N s", brings the countdown into view with the
+// caution still whole on screen (except in the Safe Zone held sideways, whose column holds the countdown or the caution,
+// not both), and in a skill Next too wherever it fits with the caution; the other choice only moves the mark.
 import { returning, shippedStrings } from './skill-check.e2e.mjs';
 
 const SIZES = [
@@ -68,6 +69,8 @@ const look = (page) =>
       count: num?.textContent.trim(),
       countdown: !!num && whole(num),
       next: next ? whole(next) : null,
+      // Next and the caution fit on screen together, clear of the pinned bars
+      nextFits: !!next && !!caution && next.getBoundingClientRect().bottom - caution.getBoundingClientRect().top <= innerHeight - parseFloat(getComputedStyle(document.querySelector('.dq')).scrollPaddingTop) - parseFloat(getComputedStyle(document.querySelector('.dq')).scrollPaddingBottom),
       more: [...screen.querySelectorAll('button')].filter((b) => /^\+\d+ s$/.test(b.textContent.trim())).length,
     };
   });
@@ -143,7 +146,8 @@ export const scenarios = {
           await h.settled(page, '.dq-cool .dq-timer-stage');
           const started = await look(page);
           if (!started.countdown) failed.push(`${where}: after "${got.want[first]}" the countdown is off screen`);
-          if (started.next === false) failed.push(`${where}: after "${got.want[first]}" Next is off screen`);
+          if (!started.caution?.whole && !(place === 'Safe Zone' && vp.width > vp.height)) failed.push(`${where}: after "${got.want[first]}" the caution went off screen`);
+          if (started.next === false && started.nextFits) failed.push(`${where}: after "${got.want[first]}" Next is off screen, though it fits with the caution`);
           if (started.buttons.map((b) => b.pressed).join('|') !== marks(first)) failed.push(`${where}: after "${got.want[first]}" the marks are ${started.buttons.map((b) => b.pressed).join('|')}`);
           if (started.more) failed.push(`${where}: cold offers more time; it stays about 30 s`);
           await page.locator('.dq-cool-pick').getByRole('button', { name: got.want[then], exact: true }).click();

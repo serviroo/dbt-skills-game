@@ -1,11 +1,12 @@
 // Runs the end-to-end scenarios in scripts/e2e/*.e2e.mjs against its own Vite dev server and Playwright Chromium, then
 // stops only the processes it started. Exits 1 if any scenario fails.
-// node scripts/e2e.mjs [--file=<name>] [--scenario=<name>] [--shard=<i>/<n>] [--jobs=<n>] [--cpu-throttle=<n>] [--headed] [--software] [--ws=<endpoint from scripts/e2e-browser.mjs> --port=<dev server port>]
+// node scripts/e2e.mjs [--file=<name>] [--scenario=<name>] [--shard=<i>/<n>] [--parts] [--timings=<file>] [--jobs=<n>] [--cpu-throttle=<n>] [--headed] [--software] [--ws=<endpoint from scripts/e2e-browser.mjs> --port=<dev server port>]
 // Scenarios run side by side in --jobs browsers (default one for every 4 of this machine's CPU threads, at most 4, and 1
 // with --ws), each browser taking the longest one left. A file that exports `serial = true` runs its scenarios in the
 // order they are written, one at a time in one browser.
-// --shard=2/4 runs the second of four parts; scenarios are spread by their CI seconds in scripts/e2e/timings.json
-// (15 s for one not listed there; a serial file goes whole to one part), so CI can run the parts in parallel.
+// --shard=2/4 runs the second of four parts; scenarios are spread by the median of their recent CI seconds in
+// scripts/e2e/timings.json, or in --timings over it (15 s for one listed in neither; a serial file goes whole to one
+// part), so CI can run the parts in parallel.
 // --file=names runs scripts/e2e/names.e2e.mjs only. Browsers use this machine's GPU (Vulkan) by default.
 // --software explicitly uses SwiftShader on machines without a GPU, including browser children started by builds.
 // --cpu-throttle=4 slows every page's CPU work by four through CDP; report.json records the requested rate and any failure.
@@ -14,8 +15,7 @@
 // renderer check expects SwiftShader) and listens on that machine's 127.0.0.1 only. An SSH tunnel from here forwards
 // its port (-L) and the dev server's (-R), so both sides use 127.0.0.1. --ws needs --port, which keeps the dev server
 // on the forwarded port, and the run first checks that the browser reaches this run's dev server (CONTRIBUTING.md).
-// Writes report.json to artifacts/e2e/<time>/ and each scenario's screenshots to a folder of its own there, moved to
-// failed/<scenario>/ when it fails; each scenario is marked in running/ there while it runs (scripts/e2e/keep.mjs).
+// Writes report.json to artifacts/e2e/<time>/ and each scenario's files to <scenario>/ there, or failed/<scenario>/.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -28,7 +28,7 @@ import { undefinedNames } from './e2e-scope-check.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.join(root, 'scripts/e2e');
 const flags = Object.fromEntries(process.argv.slice(2).filter((a) => a.startsWith('--')).map((a) => { const [k, ...v] = a.slice(2).split('='); return [k, v.length ? v.join('=') : 'true']; }));
-for (const key of ['file', 'scenario', 'shard', 'jobs', 'cpu-throttle', 'port']) {
+for (const key of ['file', 'scenario', 'shard', 'timings', 'jobs', 'cpu-throttle', 'port']) {
   if (flags[key] === '') throw new Error(`--${key} needs a value`);
 }
 if (flags.jobs && !/^[1-9]\d*$/.test(flags.jobs)) throw new Error(`--jobs needs a whole number of 1 or more, got ${flags.jobs}`);
@@ -56,9 +56,9 @@ function twice(node, found = []) {
 
 const all = [];
 const fileOf = new Map();
-// each scenario's folder in the run's (scripts/e2e/keep.mjs), and whose it is; running/ and failed/ are the runner's own
 const folders = new Map([['running', 'the scenarios running'], ['failed', 'the failed scenarios']]);
 const serial = new Set();
+const quarantined = new Map();
 const files = fs.readdirSync(dir).filter((f) => f.endsWith('.e2e.mjs')).sort();
 // a name a scenario uses but never defines would stop it only once a browser got there
 const missing = undefinedNames(files.map((f) => path.join(dir, f)));
@@ -74,20 +74,42 @@ for (const f of files) {
   if (mod.serial === true) serial.add(file);
   for (const [name, run] of Object.entries(scenarios)) {
     if (fileOf.has(name)) throw new Error(`scenario "${name}" is in both ${fileOf.get(name)}.e2e.mjs and ${f}`);
-    // a folder of its own, or what two scenarios write would mix, and the failure of one would keep both
     const folder = safe(name);
-    if (folders.has(folder)) throw new Error(`scenario "${name}" in ${f} would write to ${folder}/, the folder of ${folders.get(folder)}`);
+    if (!folder) throw new Error(`a scenario in ${f} has no name to make its folder from`);
+    const owner = folders.get(folder);
+    if (owner) throw new Error(`scenario "${name}" in ${f} would write to ${folder}/, the folder of ${owner}`);
     folders.set(folder, `scenario "${name}"`);
     if (typeof run !== 'function') throw new Error(`scenario "${name}" in ${f} is not a function`);
     fileOf.set(name, file);
     all.push({ name, file, run, i: all.length });
   }
+  for (const [name, why] of Object.entries(mod.quarantined ?? {})) {
+    if (!Object.hasOwn(scenarios, name)) throw new Error(`${f} quarantines "${name}", which is not one of its scenarios`);
+    quarantined.set(name, why);
+  }
 }
 if (flags.file && !all.some((s) => s.file === flags.file)) throw new Error(`no scenario file scripts/e2e/${flags.file}.e2e.mjs`);
 if (flags.scenario && !fileOf.has(flags.scenario)) throw new Error('no scenario ' + flags.scenario);
 
-const timings = fs.existsSync(path.join(dir, 'timings.json')) ? JSON.parse(fs.readFileSync(path.join(dir, 'timings.json'), 'utf8')) : {};
-const weight = (s) => (Number.isFinite(timings[s.name]) ? timings[s.name] : 15);
+const runnable = all.filter((s) => s.name === flags.scenario || !quarantined.has(s.name));
+const held = all.filter((s) => !runnable.includes(s) && (!flags.file || s.file === flags.file));
+
+const readJson = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
+const committed = path.join(dir, 'timings.json');
+const timings = {
+  ...(fs.existsSync(committed) ? readJson(committed) : {}),
+  ...(flags.timings ? readJson(path.resolve(flags.timings)) : {}),
+};
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+function weight(s) {
+  const t = timings[s.name];
+  const seconds = Array.isArray(t) && t.length ? median(t) : t;
+  return Number.isFinite(seconds) ? seconds : 15;
+}
 /** What one browser runs at a time, longest first: a scenario, or a serial file's scenarios in order. */
 function unitsOf(list) {
   const units = [];
@@ -105,23 +127,55 @@ function unitsOf(list) {
   return units.sort((a, b) => b.weight - a.weight || a.scenarios[0].i - b.scenarios[0].i);
 }
 
+const SLOWEST_RUNNER = 1.33;
+const PART_BUDGET_S = 24 * 60;
+function pack(n) {
+  const load = Array(n).fill(0);
+  const parts = Array.from({ length: n }, () => []);
+  for (const unit of unitsOf(runnable)) {
+    const k = load.indexOf(Math.min(...load));
+    load[k] += unit.weight;
+    parts[k].push(...unit.scenarios.map((s) => s.name));
+  }
+  return { load, parts };
+}
+const minutes = (load) => load.map((l) => Math.round(l / 60)).join(', ');
+
+if (flags.parts) {
+  const units = unitsOf(runnable);
+  const fits = (seconds) => seconds * SLOWEST_RUNNER <= PART_BUDGET_S;
+  const [longest] = units;
+  if (longest && !fits(longest.weight)) {
+    const [first] = longest.scenarios;
+    const what = longest.scenarios.length > 1 ? `the serial file ${first.file}` : first.name;
+    throw new Error(`${what} takes about ${Math.round(longest.weight / 60)} min, more than one part has time for`);
+  }
+  const total = units.reduce((sum, u) => sum + u.weight, 0);
+  let n = Math.max(1, Math.ceil((total * SLOWEST_RUNNER) / PART_BUDGET_S));
+  let load = pack(n).load;
+  while (!fits(Math.max(...load))) load = pack(++n).load;
+  const most = Math.max(...load) / 60;
+  const slow = `${(most * SLOWEST_RUNNER).toFixed(1)} on a runner ${SLOWEST_RUNNER}x slower`;
+  console.error(`${n} parts, the longest about ${most.toFixed(1)} min (${slow}; parts ${minutes(load)})`);
+  console.log(n);
+  process.exit(0);
+}
+
 let part = null;
 if (flags.shard) {
   const m = /^(\d+)\/(\d+)$/.exec(flags.shard);
   if (!m || +m[1] < 1 || +m[1] > +m[2]) throw new Error(`--shard needs <i>/<n> with 1 <= i <= n, got ${flags.shard}`);
-  const load = Array(+m[2]).fill(0);
-  part = new Set();
-  for (const unit of unitsOf(all)) {
-    const k = load.indexOf(Math.min(...load));
-    load[k] += unit.weight;
-    if (k + 1 === +m[1]) for (const s of unit.scenarios) part.add(s.name);
-  }
+  const { load, parts } = pack(+m[2]);
+  part = new Set(parts[+m[1] - 1]);
+  const planned = Math.round(load[+m[1] - 1] / 60);
+  console.log(`part ${flags.shard}: ${part.size} scenarios, about ${planned} min by CI timings (parts ${minutes(load)})`);
 }
-const matched = all.filter((s) => (!flags.file || s.file === flags.file) && (!flags.scenario || s.name === flags.scenario));
-if (!matched.length) throw new Error(`scenario ${flags.scenario} is not in ${flags.file}.e2e.mjs`);
+const matched = runnable.filter((s) => (!flags.file || s.file === flags.file) && (!flags.scenario || s.name === flags.scenario));
+if (flags.scenario && !matched.length) throw new Error(`scenario ${flags.scenario} is not in ${flags.file}.e2e.mjs`);
+for (const s of held) console.log(`quarantined ${s.name}: ${quarantined.get(s.name)}`);
 const pick = matched.filter((s) => !part || part.has(s.name));
 if (!pick.length) {
-  console.log(`shard ${flags.shard} has no scenarios`);
+  console.log(matched.length ? `shard ${flags.shard} has no scenarios` : 'every scenario in this run is quarantined');
   process.exit(0);
 }
 const units = unitsOf(pick);
@@ -133,12 +187,8 @@ let hung;
 let ended = false;
 const onSignal = () => {
   interrupted = true;
-  // an interrupted run never passes, however it ends
   process.exitCode = 130;
   if (!h) return;
-  // Once the browsers and the server are stopped, every scenario ends within moments and the run writes its report. One
-  // that hangs where stopping them can't reach never ends, and the run would wait on it for good: 2 s after the stop the
-  // run ends as interrupted anyway, leaving that scenario's mark (scripts/e2e/keep.mjs keeps it).
   void h
     .stop()
     .catch((e) => console.error(e))
@@ -155,25 +205,23 @@ let failed = 0;
 try {
   h = await startHarness(flags);
   const lanes = [h, ...(await Promise.all(Array.from({ length: Math.min(jobs, units.length) - 1 }, () => h.more())))];
-  report = { url: h.server.url, browser: flags.ws ? 'remote ' + flags.ws : 'local', jobs: lanes.length, scenarios: [], renderer: h.renderer, cpuThrottle: Number(flags['cpu-throttle'] ?? 1), throttleErrors: h.throttleErrors, zone: h.zone };
+  report = { url: h.server.url, browser: flags.ws ? 'remote ' + flags.ws : 'local', jobs: lanes.length, scenarios: [], quarantined: held.map((s) => s.name), renderer: h.renderer, cpuThrottle: Number(flags['cpu-throttle'] ?? 1), throttleErrors: h.throttleErrors, zone: h.zone };
   await Promise.all(lanes.map(async (lane) => {
     for (let unit; !interrupted && (unit = units.shift()); ) {
       for (const { name, file, run, i } of unit.scenarios) {
         if (interrupted) break;
         const t = Date.now();
-        // a folder of its own for what it writes, and a mark until it ends: one that hangs past its CI step's time is
-        // kept from its mark (scripts/e2e/keep.mjs)
         lane.out = folderOf(h.root, name);
         fs.mkdirSync(lane.out, { recursive: true });
         const running = mark(h.root, name);
-        let ended = true;
+        let cleared = true;
         try {
           let result;
           try {
             result = await run(lane);
           } catch (e) {
             // what every page still open in this browser showed when the scenario failed
-            if (!interrupted) await lane.evidenceAll('fail-' + name.replace(/[^\w-]+/g, '-'));
+            if (!interrupted) await lane.evidenceAll('fail-' + safe(name));
             throw e;
           } finally {
             await Promise.all(lane.browser.contexts().map((ctx) => ctx.close()));
@@ -184,15 +232,13 @@ try {
           failed++;
           report.scenarios.push({ name, file, ok: false, ms: Date.now() - t, i, error: String(e?.message ?? e) });
           console.log(`FAIL ${name}: ${e?.message ?? e}`);
-          // what it wrote (its screenshots and notes, and the fail- evidence above), for CI to upload; one that couldn't
-          // be kept keeps its mark, so CI's keep step tries again
           const why = keep(h.root, name);
           if (why) {
-            ended = false;
+            cleared = false;
             console.log(`${name}: what it wrote couldn't be kept in failed/: ${why}`);
           }
         }
-        if (ended) fs.rmSync(running, { force: true });
+        if (cleared) fs.rmSync(running, { force: true });
       }
     }
   }));
@@ -216,5 +262,6 @@ try {
 }
 ended = true;
 clearTimeout(hung);
-console.log(`${report.scenarios.filter((s) => s.ok).length}/${pick.length} passed, artifacts in ${path.relative(root, h.root)}`);
+const passed = report.scenarios.filter((s) => s.ok).length;
+console.log(`${passed}/${pick.length} passed, artifacts in ${path.relative(root, h.root)}`);
 process.exitCode = interrupted ? 130 : failed ? 1 : 0;

@@ -6,7 +6,7 @@
 // Zone and Done still silence it. Measured on the hum's real output, render quantum by render quantum.
 import fs from 'node:fs';
 import path from 'node:path';
-import { installAudioRecorder, audioReady, audioRecorded } from './audio-recorder.mjs';
+import { installAudioRecorder, audioReady, audioRecorded, audioEnded, watchCuts, cutOf } from './audio-recorder.mjs';
 
 /** What each check measured, one line a check, in the run's artifacts. */
 const note = (h, name, o) => fs.appendFileSync(path.join(h.out, 'hum-volume.jsonl'), JSON.stringify({ name, ...o }) + '\n');
@@ -17,8 +17,9 @@ const AUDIO = 'dbt.audio.v1';
 const Q = 128;
 // silent: a peak below one step of 16-bit audio, as in safe-zone-quiet
 const SILENT_PEAK = 2 ** -15;
-// the Safe Zone silences the speakers this soon after the tap, as in safe-zone-quiet
-const WITHIN = 0.085;
+// the Safe Zone silences the speakers this soon after the cut the tap places, as in safe-zone-quiet
+const WITHIN = 0.051;
+const FLOOR_DBFS = -80;
 // a click: a step between two samples more than this many times the steepest the steady hum ever moves
 const CLICK = 3;
 // the slider curve the engine gives Master, Music and Effects
@@ -55,7 +56,8 @@ async function boot(h, { viewport = TALL, prefs = levels() } = {}) {
   await page.waitForFunction(() => !!window.__daily && !!document.querySelector('.dq-tile') && window.__taps.length > 0, null, { timeout: 30000 });
   await audioReady(page);
   await h.reachHub(page);
-  // the hum's audio clock at every step into or out of the Safe Zone
+  // the hum's audio clock at every step into or out of the Safe Zone, and where on each clock the step placed its cut
+  await watchCuts(page);
   await page.evaluate(() => {
     const a = window.__daily;
     window.__marks = [];
@@ -63,8 +65,8 @@ async function boot(h, { viewport = TALL, prefs = levels() } = {}) {
     a.go = (route, o) => {
       const was = a.route.name;
       const at = window.__taps.map((t) => t.context.currentTime);
-      go(route, o);
-      window.__marks.push({ from: was, to: a.route.name, at });
+      const cut = window.__cutsIn(() => go(route, o));
+      window.__marks.push({ from: was, to: a.route.name, at, cut });
     };
   });
   return { ctx, page, errors };
@@ -419,9 +421,10 @@ export const scenarios = {
       await page.waitForFunction((n) => window.__taps[n].context.state === 'closed', n, { timeout: 3000 }).catch(() => {
         throw new Error('the hum kept going in the Safe Zone');
       });
-      const tap = (await page.evaluate(() => window.__marks.filter((k) => k.to === 'safe'))).at(-1).at[n];
-      const inside = await quanta(page, n, tap + WITHIN, Infinity);
-      h.expect(inside.every((q) => q[1] < SILENT_PEAK), `the hum was heard ${WITHIN * 1000} ms into the Safe Zone`);
+      const into = (await page.evaluate(() => window.__marks.filter((k) => k.to === 'safe'))).at(-1);
+      const from = cutOf(into, n) + WITHIN;
+      const inside = await quanta(page, n, from, Infinity);
+      h.expect(inside.every((q) => q[1] < SILENT_PEAK), `the hum was heard ${((from - into.at[n]) * 1000).toFixed(0)} ms into the Safe Zone`);
       await page.locator('header .dq-back').click({ timeout: 4000 });
       await page.waitForFunction(() => window.__daily.route.name !== 'safe', null, { timeout: 3000 });
 
@@ -435,6 +438,85 @@ export const scenarios = {
       await h.sleep(500);
       const humming = await page.evaluate(() => new Set(window.__taps.map((t) => t.context).filter((c) => c !== window.__taps[0].context && c.state !== 'closed')).size);
       h.expect(!humming, `${humming} hum(s) still open after the moment ended`);
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'hum-off-fades-to-silence'(h) {
+    const { ctx, page, errors } = await boot(h);
+    try {
+      const n = await humOn(h, page);
+      const t0 = await clock(page, n);
+      await recorded(page, n, t0 + 1.7);
+      const steady = rms(await quanta(page, n, t0, t0 + 1.7));
+      await page.getByRole('switch', { name: 'Low hum', exact: true }).uncheck();
+      const ended = await audioEnded(page, n, 5000).catch(() => {
+        throw new Error('the hum kept going after it was turned off');
+      });
+      const off = await quanta(page, n, t0 + 1.7, ended);
+      const gone = off.findIndex((q) => q[1] < steady * 1e-5);
+      const end = gone < 0 ? off.length : gone;
+      const last = 20 * Math.log10(rms(off.slice(Math.max(0, end - 4), end)));
+      note(h, 'hum-off-fades-to-silence', { steady, last, endsAt: off[end - 1]?.[0] - t0 });
+      h.expect(steady > 1e-3, `the hum was too quiet to measure (${steady.toExponential(2)})`);
+      const ends = `the hum ends at ${last.toFixed(1)} dB of full scale, above ${FLOOR_DBFS} dB`;
+      h.expect(end > 0 && last < FLOOR_DBFS, ends);
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'fading-hum-still-answers'(h) {
+    const { ctx, page, errors } = await boot(h);
+    try {
+      const humSwitch = page.getByRole('switch', { name: 'Low hum', exact: true });
+      const intoSafe = async (n, how) => {
+        await page.locator('header .dq-safe').click({ timeout: 4000 });
+        await page.waitForFunction(() => window.__daily.route.name === 'safe', null, { timeout: 3000 });
+        const end = await audioEnded(page, n, 3000).catch(() => {
+          throw new Error(`after ${how}, the fading hum kept going in the Safe Zone`);
+        });
+        const into = (await page.evaluate(() => window.__marks.filter((k) => k.to === 'safe'))).at(-1);
+        const from = cutOf(into, n) + WITHIN;
+        const inside = await quanta(page, n, from, end);
+        const late = ((from - into.at[n]) * 1000).toFixed(0);
+        const heard = `after ${how}, the fading hum was heard ${late} ms into the Safe Zone`;
+        h.expect(inside.every((q) => q[1] < SILENT_PEAK), heard);
+        await page.locator('header .dq-back').click({ timeout: 4000 });
+        await page.waitForFunction(() => window.__daily.route.name !== 'safe', null, { timeout: 3000 });
+      };
+
+      let n = await humOn(h, page);
+      await humSwitch.uncheck();
+      await intoSafe(n, 'Off');
+
+      n = await humOn(h, page);
+      await page.getByRole('button', { name: 'Done', exact: true }).click();
+      await page.waitForFunction(() => window.__daily.route.name !== 'moment', null, { timeout: 3000 });
+      await intoSafe(n, 'Done');
+
+      n = await humOn(h, page);
+      await humSwitch.uncheck();
+      const controls = await soundControls(page);
+      await controls.getByRole('button', { name: 'Mute', exact: true }).click();
+      const m = await clock(page, n);
+      const end = await audioEnded(page, n, 5000);
+      const muted = await quanta(page, n, m + 0.25, end);
+      const peak = Math.max(...muted.map((q) => q[1]));
+      const peaks = `muted while fading, the hum still peaks at ${peak.toExponential(2)}`;
+      h.expect(muted.length > 0 && peak < SILENT_PEAK, peaks);
+      await controls.getByRole('button', { name: 'Unmute', exact: true }).click();
+      await page.keyboard.press('Escape');
+
+      n = await humOn(h, page);
+      await humSwitch.uncheck();
+      await page.evaluate((n) => window.__taps[n].context.suspend(), n);
+      await page.waitForFunction((n) => window.__taps[n].context.state === 'closed', n, { timeout: 1000 }).catch(() => {
+        throw new Error('paused while fading, the hum was left open to play on when it resumes');
+      });
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();

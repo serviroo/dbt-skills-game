@@ -9,7 +9,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
-import { screenshot } from './harness.mjs';
+import { frames, screenshot } from './harness.mjs';
+import * as pageClock from './clock.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -107,7 +108,7 @@ function returning(h, time) {
 
 async function home(h, time, query = '?mute', viewport, seed = { 'dbt.app.v1': h.SEEN }) {
   const r = await h.open(seed, query, viewport, async (ctx) => {
-    await ctx.clock.install({ time });
+    await pageClock.install(ctx, { time });
     await ctx.addInitScript(trackTimers);
     await ctx.addInitScript(skyReader);
   });
@@ -131,7 +132,7 @@ async function settle(h, page) {
 
 /** Screenshot with extra CSS applied through constructed sheets (no inline style, so the page's CSP never matters).
  *  Transitions are off while the CSS goes on and comes off again, so the page is left exactly as it was. */
-async function capture(page, css) {
+export async function capture(page, css) {
   await page.evaluate((text) => {
     const still = new CSSStyleSheet();
     still.replaceSync('.dq *, .dq *::before, .dq *::after { transition: none !important; }');
@@ -140,7 +141,7 @@ async function capture(page, css) {
     window.__shotSheets = [still, look];
     document.adoptedStyleSheets = [...document.adoptedStyleSheets, still, look];
   }, css);
-  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await frames(page, 2);
   const png = await screenshot(page);
   await page.evaluate(() => {
     const [still, look] = window.__shotSheets;
@@ -152,7 +153,7 @@ async function capture(page, css) {
   const { data, info } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   return { data, w: info.width, h: info.height };
 }
-const px = (img, x, y) => {
+export const px = (img, x, y) => {
   const i = (Math.min(img.h - 1, Math.max(0, Math.round(y))) * img.w + Math.min(img.w - 1, Math.max(0, Math.round(x)))) * 4;
   return [img.data[i], img.data[i + 1], img.data[i + 2]];
 };
@@ -165,50 +166,54 @@ const patch = (img, x, y) => {
 
 const lin = (c) => ((c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
 const lum = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-const ratio = (a, b) => {
+export const ratio = (a, b) => {
   const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
   return (x + 0.05) / (y + 0.05);
 };
 
 // the bubbles drift on their own clock, so the pictures leave them out
-const NO_BUBBLES = '.dq-bubbles { visibility: hidden !important; }';
-const NO_TEXT = `${NO_BUBBLES} .dq, .dq * { color: transparent !important; -webkit-text-fill-color: transparent !important; text-shadow: none !important; caret-color: transparent !important; }`;
+export const NO_BUBBLES = '.dq-bubbles { visibility: hidden !important; }';
+const NOT_TYPED = '[type=checkbox], [type=radio], [type=range], [type=file], [type=hidden]';
+export const FIELDS = `select, textarea, input:not(${NOT_TYPED})`;
+const CLEAR_TEXT = [
+  'color: transparent !important;',
+  '-webkit-text-fill-color: transparent !important;',
+  'text-shadow: none !important;',
+  'caret-color: transparent !important;',
+].join(' ');
+export const NO_TEXT = `${NO_BUBBLES} .dq, .dq *, .dq ::placeholder { ${CLEAR_TEXT} }`;
 const SKY_ONLY = `${NO_BUBBLES} .dq-view, .dq-top > *, .dq-toast { visibility: hidden !important; }`;
 
 /** Every piece of text the player can see, with the colour it is drawn in and the part of it that shows. */
 const textBoxes = (page) =>
-  page.evaluate(() => {
+  page.evaluate((fields) => {
     const root = document.querySelector('.dq');
     const top = document.querySelector('.dq-top').getBoundingClientRect().bottom;
     const out = [];
-    const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    for (let n; (n = walk.nextNode()); ) {
-      const el = n.parentElement;
-      if (!n.data.trim() || !el) continue;
+    const add = (el, text, rects, cs, where, fade = 1) => {
       // decorative, screen-reader-only and disabled text has no contrast minimum
-      if (el.closest('[aria-hidden="true"], .dq-sr, :disabled, [aria-disabled="true"]')) continue;
-      if (!el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) continue;
-      const cs = getComputedStyle(el);
-      if (cs.backgroundClip === 'text' || cs.webkitBackgroundClip === 'text') continue;
-      let op = 1;
+      if (el.closest('[aria-hidden="true"], .dq-sr, :disabled, [aria-disabled="true"]')) return;
+      if (!el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return;
+      const own = getComputedStyle(el);
+      if (own.backgroundClip === 'text' || own.webkitBackgroundClip === 'text') return;
+      let op = fade;
       for (let e = el; e && e !== document.body; e = e.parentElement) op *= Number(getComputedStyle(e).opacity);
-      if (op < 0.05) continue;
+      if (op < 0.05) return;
       const clips = [];
-      for (let e = el.parentElement; e && e !== document.body; e = e.parentElement) {
+      for (let e = el; e && e !== document.body; e = e.parentElement) {
         const s = getComputedStyle(e);
         if (s.overflowX !== 'visible' || s.overflowY !== 'visible') clips.push(e.getBoundingClientRect());
       }
-      const range = document.createRange();
-      range.selectNodeContents(n);
-      for (const b of range.getClientRects()) {
+      const view = { left: 0, top: el.closest('.dq-top') ? 0 : top, right: innerWidth, bottom: innerHeight };
+      for (const b of rects) {
         let [l, t, r, btm] = [b.left, b.top, b.right, b.bottom];
-        for (const c of [...clips, { left: 0, top: el.closest('.dq-top') ? 0 : top, right: innerWidth, bottom: innerHeight }]) {
+        for (const c of [...clips, view]) {
           [l, t, r, btm] = [Math.max(l, c.left), Math.max(t, c.top), Math.min(r, c.right), Math.min(btm, c.bottom)];
         }
         if (r - l < 3 || btm - t < 3) continue;
         out.push({
-          text: n.data.trim().slice(0, 40),
-          where: el.className && typeof el.className === 'string' ? el.className.split(' ')[0] : el.tagName.toLowerCase(),
+          text: text.trim().slice(0, 40),
+          where,
           box: [l, t, r, btm],
           color: cs.color,
           size: parseFloat(cs.fontSize),
@@ -216,13 +221,40 @@ const textBoxes = (page) =>
           op,
         });
       }
+    };
+    const nameOf = (el) =>
+      el.className && typeof el.className === 'string' ? el.className.split(' ')[0] : el.tagName.toLowerCase();
+    const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n; (n = walk.nextNode()); ) {
+      const el = n.parentElement;
+      if (!n.data.trim() || !el || el.closest(fields)) continue;
+      const range = document.createRange();
+      range.selectNodeContents(n);
+      add(el, n.data, range.getClientRects(), getComputedStyle(el), nameOf(el));
+    }
+    for (const el of root.querySelectorAll(fields)) {
+      const typed = el instanceof HTMLSelectElement ? (el.selectedOptions[0]?.text ?? '') : el.value;
+      const text = typed || el.placeholder || '';
+      if (!text.trim()) continue;
+      const cs = getComputedStyle(el, typed ? null : '::placeholder');
+      const own = getComputedStyle(el);
+      const r = el.getBoundingClientRect();
+      const inset = (side) => parseFloat(own[`border${side}Width`]) + parseFloat(own[`padding${side}`]);
+      const box = {
+        left: r.left + inset('Left'),
+        top: r.top + inset('Top'),
+        right: r.right - inset('Right'),
+        bottom: r.bottom - inset('Bottom'),
+      };
+      const where = typed ? nameOf(el) : `${nameOf(el)}::placeholder`;
+      add(el, text, [box], cs, where, typed ? 1 : Number(cs.opacity));
     }
     return out;
-  });
+  }, FIELDS);
 
 /** WCAG AA for each visible text: the contrast against the background behind it, taken where it is weakest
  *  (the tenth percentile of the pixels behind its line box, so one stray edge pixel does not decide it). */
-async function contrast(page) {
+export async function contrast(page) {
   const boxes = await textBoxes(page);
   const bg = await capture(page, NO_TEXT);
   const rows = [];
@@ -247,12 +279,11 @@ async function contrast(page) {
 
 /** Every text's contrast at each scroll position of Home, 80 px apart from the top to the very end. The sky stays put
  *  while the page moves over it, so each line passes over every part of the sky behind its column. */
-async function sweep(h, page) {
+async function sweep(page) {
   const max = await page.evaluate(() => { const r = document.querySelector('.dq'); return r.scrollHeight - r.clientHeight; });
   const rows = [];
   for (let y = 0; ; y = Math.min(y + 80, max)) {
     await page.evaluate((top) => document.querySelector('.dq').scrollTo({ top, behavior: 'instant' }), y);
-    await h.sleep(100);
     for (const r of await contrast(page)) rows.push({ ...r, y });
     if (y >= max) return rows;
   }
@@ -325,8 +356,8 @@ async function crossEight(h, page) {
   // the clock jumps to 08:00 as if the phone lay still, then runs on a second at a time until the open Home's next
   // look sees the new hour. Jumping well past that look would replay every frame callback of the extra time in one
   // go after the drift had started, and on a slow machine that eats the real seconds the drift is measured in.
-  await page.clock.fastForward(left);
-  for (let i = 0; i < 40 && (await skyOf(page)).mood !== 'day'; i++) await page.clock.fastForward(1000);
+  await pageClock.fastForward(page, left);
+  for (let i = 0; i < 40 && (await skyOf(page)).mood !== 'day'; i++) await pageClock.fastForward(page, 1000);
 }
 
 const isNight = (s) => s.mood === null && !s.fading && s.layers.night === 1 && DAYTIME.every((m) => s.layers[m] === 0);
@@ -387,7 +418,7 @@ async function contrastIn(h, mood) {
       bad.push(`${mood} at ${name} does not paint its own ${shape} picture: ` + JSON.stringify(pic));
       continue;
     }
-    const rows = await sweep(h, page);
+    const rows = await sweep(page);
     const low = rows.filter((r) => r.score < FLOOR);
     const w = weakest(rows);
     // the three weakest lines, each at its weakest place, so the report shows the sky's own margin next to any text
@@ -435,7 +466,6 @@ export const scenarios = {
         // is opaque, so the sky never reaches it and one mood proves it
         if (mood === 'night') {
           await page.evaluate(() => document.querySelector('.dq-card:not(.is-open) .dq-cb-t').scrollIntoView({ block: 'center', behavior: 'instant' }));
-          await h.sleep(100);
           const back = (await contrast(page)).filter((r) => r.where === 'dq-cb-t');
           expect(back.length && back.every((r) => r.score >= FLOOR), `the closed card's text at ${name} is missing or below ${FLOOR}:1: ` + JSON.stringify(back));
         }
@@ -548,7 +578,7 @@ export const scenarios = {
     let s = await skyOf(page);
     expect(isNight(s), 'Settings did not get the night sky back: ' + JSON.stringify(s));
     // hours pass on Settings: nothing wakes up and the sky stays night
-    await page.clock.fastForward(5 * 60 * 60 * 1000);
+    await pageClock.fastForward(page, 5 * 60 * 60 * 1000);
     s = await skyOf(page);
     expect((await live()) === 0 && s.mood === null && !s.fading, 'the sky woke up on Settings: ' + JSON.stringify(s));
     // back on Home (now dusk) the watch starts again; the Safe Zone then takes the night sky without a fade

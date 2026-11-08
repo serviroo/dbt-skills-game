@@ -8,12 +8,17 @@
 // the water comes in and goes out), keeps to its timer's clock, stops on leaving, holds still with reduced motion (and
 // as the device's own setting changes while it is up) and leaves its flat picture with no WebGL. The breathing light is
 // a small hot core in a halo gone by half its ring, with the countdown readable (3:1) under it all breath long; the
-// wave's moon is a light that shows whole at every size. The soft glow's checks (glow-scene.e2e.mjs) use the helpers
-// exported here.
+// wave's moon is a light that shows whole at every size. The open hands', the soft glow's and the cool water's checks
+// (hands-scene.e2e.mjs, glow-scene.e2e.mjs, cool-water-scene.e2e.mjs) use the helpers exported here.
 import fs from 'node:fs';
 import sharp from 'sharp';
 import { deviceMotion } from './device-motion.e2e.mjs';
 import { gone, screenshot, until as pageUntil } from './harness.mjs';
+import { after, scenes, showsStopped, steps } from './scene-clock.mjs';
+import { holdSceneFences } from './scene-fences.mjs';
+import * as pageClock from './clock.mjs';
+
+export { after, scenes, showsStopped, steps };
 
 /** how long a scene's stage hides its flat picture while the scene loads (SCENE.waitMs) */
 const WAIT_MS = Number(/\bwaitMs:\s*(\d+)/.exec(fs.readFileSync(new URL('../../src/motion/tokens.ts', import.meta.url), 'utf8'))?.[1]);
@@ -26,7 +31,6 @@ export const DESK = { width: 1440, height: 900 };
 const VIEWS = [['phone', PHONE], ['small', { width: 320, height: 568 }], ['side', SIDE], ['desk', { width: 1280, height: 800 }]];
 
 export const seed = (h) => ({ 'dbt.app.v1': h.SEEN });
-export const scenes = (page) => page.evaluate(() => (window.__scenes ? JSON.parse(JSON.stringify(window.__scenes)) : null));
 /** the scene's last beat and the countdown on screen, read in the same moment */
 export const pair = (page) => page.evaluate(() => ({ s: window.__scenes ? JSON.parse(JSON.stringify(window.__scenes)) : null, num: document.querySelector('.dq-timer-num')?.textContent ?? '' }));
 const wiseRuns = async (h, page) => JSON.parse((await h.ls(page, h.SAVE)) ?? '{"events":[]}').events.filter((e) => e.k === 'skill' && e.skill === 'wise-mind').length;
@@ -104,14 +108,19 @@ export async function toSkill(h, page, id, entry) {
   }
 }
 
+async function stopAtHome(h, page) {
+  await h.reachHub(page);
+  await pageClock.pauseClock(page);
+}
+
 /**
- * Home, then straight to one timer step of a skill. With `pause` the page clock stops the moment the step shows, so a
- * check can see the step's first seconds however slowly the page draws.
+ * Home, then straight to one timer step of a skill. With `pause` the page clock stops on an idle Home, before the step
+ * is tapped open, so a check can see the step's first seconds however slowly the page draws.
  */
 async function toStep(h, page, id, entry, { pause = false } = {}) {
+  if (pause) await stopAtHome(h, page);
   await toSkill(h, page, id, entry);
   await page.locator('.dq-timer-stage').waitFor({ timeout: 10000 });
-  if (pause) await h.pauseClock(page);
   await page.locator('.dq-timer-stage').scrollIntoViewIfNeeded();
 }
 
@@ -217,7 +226,8 @@ export function inStep(h, { s, num }, where) {
   const b = s?.last;
   h.expect(b && !b.still, `${where}: no moving frame has been drawn`);
   if (num === 'Done') return h.expect(b.done && b.e >= b.dur - 0.05, `${where}: the countdown is done but the scene is at ${b.e.toFixed(2)} of ${b.dur} s`);
-  const left = Number(num);
+  const [m, sec] = num.includes(':') ? num.split(':').map(Number) : [0, Number(num)];
+  const left = m * 60 + sec;
   const sceneLeft = b.dur - b.e;
   h.expect(!b.done && sceneLeft > left - 1 - 0.1 && sceneLeft <= left + 0.1, `${where}: the scene is at ${b.e.toFixed(2)} of ${b.dur} s but the countdown says ${num}`);
 }
@@ -230,28 +240,14 @@ export function inStep(h, { s, num }, where) {
  */
 async function oneSlowFrame(h, hz) {
   const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
-  await ctx.addInitScript(() => {
-    window.__blank = 0;
-    const P = WebGL2RenderingContext.prototype;
-    const make = P.fenceSync, get = P.getSyncParameter;
-    let first = null;
-    P.fenceSync = function (...args) {
-      const f = make.apply(this, args);
-      if (!first && this.canvas.closest?.('.dq-scene')) first = { f, at: performance.now() };
-      return f;
-    };
-    P.getSyncParameter = function (f, pname) {
-      if (first && f === first.f && pname === this.SYNC_STATUS && performance.now() - first.at < 600) return this.UNSIGNALED;
-      return get.call(this, f, pname);
-    };
-  });
-  await page.clock.install();
-  await page.reload();
+  await ctx.addInitScript(() => (window.__blank = 0));
+  await holdSceneFences(ctx, ({ n, at }) => n === 0 && performance.now() - at < 600);
+  await pageClock.reloadOnFakeClock(page);
   await home(h, page);
   await page.evaluate(() => window.__daily.go({ name: 'skill', id: 'wise-mind', entry: 'stone' }));
   await page.locator('.dq-skill').getByRole('button', { name: 'Begin', exact: true }).first().click({ timeout: 10000 });
   await page.locator('.dq-scene canvas').waitFor({ state: 'attached', timeout: 15000 });
-  await h.pauseClock(page);
+  await pageClock.pauseClock(page);
   // a page held to 30 frames a second: every animation frame callback waits for the frame after the one it asked for
   if (hz === 30) {
     await page.evaluate(() => {
@@ -275,14 +271,15 @@ async function oneSlowFrame(h, hz) {
   });
   const full = await page.evaluate(() => Math.min(window.devicePixelRatio, 2));
   // the scene shows once its first frame is drawn: the page clock is stepped until then (600 ms at least)
-  const live = async () => (await page.locator('.dq-timer-stage.is-scene-live').count()) > 0 || (await page.clock.runFor(100), false);
+  const liveStage = page.locator('.dq-timer-stage.is-scene-live');
+  const live = async () => (await liveStage.count()) > 0 || (await pageClock.runFor(page, 100), false);
   await h.poll(page, live, Boolean, 'one slow frame: the 3D scene never came on screen', { timeout: 30000, polling: 0 }).catch(async (e) => {
     await h.shot(page, 'fail-one-slow-frame');
     throw e;
   });
   const low = await scenes(page);
   h.expect(low.dpr < full, `${hz} fps: the slow first frame did not lower the scene (${low.dpr})`);
-  await page.clock.runFor(6000);
+  await pageClock.runFor(page, 6000);
   const back = await scenes(page);
   const blank = await page.evaluate(() => window.__blank);
   h.expect(blank === 0, `${hz} fps: a change of pixel ratio showed ${blank} blank frames`);
@@ -302,7 +299,7 @@ async function oneSlowFrame(h, hz) {
  */
 export async function slowGpu(h, { late = false, vp = DESK, reach = toStone, more = 2, cost = [60000, 1000], tag = late ? 'slow-gpu-late-desk' : 'slow-gpu-desk' } = {}) {
   const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
-  await ctx.addInitScript(([late, [free, perMs]]) => {
+  await ctx.addInitScript(([free, perMs]) => {
     window.__gpuMs = 0;
     // frames whose added work went over the scene's 30 fps budget
     window.__overBudget = 0;
@@ -326,20 +323,9 @@ export async function slowGpu(h, { late = false, vp = DESK, reach = toStone, mor
         return r;
       };
     }
-    if (!late) return;
-    const make = P.fenceSync, get = P.getSyncParameter;
-    let first = null;
-    P.fenceSync = function (...args) {
-      const f = make.apply(this, args);
-      if (!first && this.canvas.closest?.('.dq-scene')) first = f;
-      return f;
-    };
-    // the first frame is done once the countdown shows 3 s left
-    P.getSyncParameter = function (f, pname) {
-      if (f === first && pname === this.SYNC_STATUS && Number(document.querySelector('.dq-timer-num')?.textContent) > 3) return this.UNSIGNALED;
-      return get.call(this, f, pname);
-    };
-  }, [late, cost]);
+  }, cost);
+  // the first frame is done once the countdown shows 3 s left
+  if (late) await holdSceneFences(ctx, ({ n }) => n === 0 && +document.querySelector('.dq-timer-num')?.textContent > 3);
   await page.reload();
   await reach(h, page);
   // held that long, the first frame outlasts live()'s wait
@@ -380,7 +366,7 @@ export async function looks(h, page, tag, kind, vp, stage = '.dq-timer-stage', {
   // it keeps drawing; how fast is checked on the real clock (scene-live, scene-slow-gpu). On a stopped page clock the
   // clock is run half a second instead, so the scene's own time moves only that much however slowly the page draws.
   const s0 = await scenes(page);
-  if (stopped) await page.clock.runFor(500);
+  if (stopped) await pageClock.runFor(page, 500);
   else await h.sleep(1500);
   const s = await scenes(page);
   h.expect(s.live === 1 && s.contexts === 1 && s.frames - s0.frames >= 3, `${kind} ${tag}: ${s.frames - s0.frames} frames in ${stopped ? '0.5 s of page time' : '1.5 s'}, ${JSON.stringify(s)}`);
@@ -395,36 +381,15 @@ export async function looks(h, page, tag, kind, vp, stage = '.dq-timer-stage', {
   console.log(`  ${kind} ${tag}: ${s.frames} frames at pixel ratio ${s.dpr}, pixels ${JSON.stringify(p)}`);
 }
 
-/** The scene's probe after jumping the page clock forward `ms` and letting a few frames draw. */
-export async function after(h, page, ms) {
-  // the page clock is stopped: the jump runs the next animation frame once, which draws the scene at the new moment
-  if (ms > 0) await page.clock.fastForward(Math.round(ms));
-  return (await scenes(page)).last;
-}
-
 /**
- * Waits, with the page clock stopped, until the scene shows: it shows once its first frame is drawn, which it looks for
- * on animation frames, so the clock is stepped a frame at a time until then. The scene's time then starts from where it
- * first shows, however long the GPU took, and moves only when a check moves it.
- */
-export async function showsStopped(h, page, where, stage = '.dq-timer-stage') {
-  const live = async () => (await page.locator(`${stage}.is-scene-live`).count()) > 0 || (await page.clock.runFor(16), false);
-  await h.poll(page, live, Boolean, `${where}: the 3D scene never came on screen`, { timeout: 30000, polling: 0 }).catch(async (e) => {
-    await h.shot(page, `fail-${where.replace(/\W+/g, '-')}`);
-    throw e;
-  });
-}
-
-/**
- * Reloads with the page clock installed, goes to a scene's step with `reach`, stops the clock there and waits until the
- * scene shows (see showsStopped). However long the GPU takes to build it, the countdown has moved on only by the frames
- * the clock was stepped while it looked, a few seconds at most.
+ * Reloads with the page clock installed, stops it once Home is idle, goes to a scene's step with `reach` and waits
+ * until the scene shows (see showsStopped). However long the GPU takes to build it, the countdown has moved on only by
+ * the few frames the clock was stepped once the GPU had drawn them.
  */
 export async function openStopped(h, page, reach, where) {
-  await page.clock.install();
-  await page.reload();
+  await pageClock.reloadOnFakeClock(page);
+  await stopAtHome(h, page);
   await reach(h, page);
-  await h.pauseClock(page);
   await showsStopped(h, page, where);
 }
 
@@ -445,7 +410,7 @@ export async function losesContext(h, page, where, shot, whileLost = async () =>
   });
   await page.locator('.dq-timer-stage:not(.is-scene-live)').waitFor({ timeout: 5000 });
   const a = await scenes(page);
-  await page.clock.runFor(1600);
+  await pageClock.runFor(page, 1600);
   const b = await scenes(page);
   h.expect(a.live === 0 && b.frames === a.frames, `lost ${where}: the scene kept drawing (${a.frames} -> ${b.frames})`);
   // the flat picture fades back in on the browser's own time, whatever the page clock does
@@ -455,7 +420,7 @@ export async function losesContext(h, page, where, shot, whileLost = async () =>
   await page.evaluate(() => window.__lose.restoreContext());
   await showsStopped(h, page, `restored ${where}`);
   inStep(h, await pair(page), `restored ${where}, shown`);
-  await page.clock.runFor(1000);
+  await pageClock.runFor(page, 1000);
   const now = await pair(page);
   h.expect(now.s.live === 1 && now.s.contexts === 1 && now.s.frames > b.frames + 10, `restored ${where}: ${JSON.stringify(now.s)}`);
   inStep(h, now, `restored ${where}`);
@@ -468,14 +433,14 @@ export async function losesContext(h, page, where, shot, whileLost = async () =>
  * a slow page can still be on one long frame when a fixed wait ends, but a scene that stays put still fails.
  */
 async function comesBack(page, b) {
-  await page.clock.resume();
+  await pageClock.resume(page);
   await until(page, (b) => window.__scenes.frames > b.frames + 10 && window.__scenes.last.e > b.last.e + 1, b.s);
   return pair(page);
 }
 
 /** The page freezes and comes back: the scene picks up in step with the countdown. Then leaving frees it. */
 export async function keepsTime(h, page, kind) {
-  await h.pauseClock(page);
+  await pageClock.pauseClock(page);
   await h.sleep(1200);
   const b = await pair(page);
   const c = await comesBack(page, b);
@@ -633,8 +598,7 @@ export const scenarios = {
   /** the scene runs on the timer's clock: after the page freezes it picks up in step, and more time keeps them together */
   async 'scene-clock'(h) {
     const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
-    await page.clock.install();
-    await page.reload();
+    await pageClock.reloadOnFakeClock(page);
     await toStone(h, page);
     await live(h, page, 'clock');
     await moreTime(page);
@@ -642,7 +606,7 @@ export const scenarios = {
     inStep(h, await pair(page), 'running');
 
     // the page freezes (its clock and its frames stop together, as in a background tab), then comes back
-    await h.pauseClock(page);
+    await pageClock.pauseClock(page);
     await h.sleep(1500);
     const b = await pair(page);
     const c = await comesBack(page, b);
@@ -654,7 +618,7 @@ export const scenarios = {
     h.expect(d.s.last.dur === c.s.last.dur + 15, `more time mid-way: the scene thinks the timer is ${d.s.last.dur} s, not ${c.s.last.dur + 15} s`);
     inStep(h, d, 'more time mid-way');
 
-    await page.clock.fastForward(60000);
+    await pageClock.fastForward(page, 60000);
     await page.locator('.dq-timer-num', { hasText: 'Done' }).waitFor({ timeout: 5000 });
     await h.sleep(300);
     const e = await pair(page);
@@ -711,8 +675,7 @@ export const scenarios = {
         return /webgl/i.test(String(type)) ? null : get.call(this, type, ...rest);
       };
     });
-    await page.clock.install();
-    await page.reload();
+    await pageClock.reloadOnFakeClock(page);
     await home(h, page);
     const before = await wiseRuns(h, page);
     await toStone(h, page);
@@ -726,7 +689,7 @@ export const scenarios = {
     const y1 = await page.locator('.dq-timer-svg--drift ellipse').getAttribute('cy');
     h.expect(y0 !== y1, 'no WebGL: the flat stone does not move');
     await h.shot(page, 'no-webgl-phone');
-    await page.clock.fastForward(21000);
+    await pageClock.fastForward(page, 21000);
     await page.locator('.dq-timer-num', { hasText: 'Done' }).waitFor({ timeout: 5000 });
     await tap(page, 'Next');
     await h.sleep(500);
@@ -775,8 +738,7 @@ export const scenarios = {
   /** a hidden page holds no scene: past the idle period its WebGL context is gone, and shown again the scene is in step */
   async 'scene-hidden'(h) {
     const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
-    await page.clock.install();
-    await page.reload();
+    await pageClock.reloadOnFakeClock(page);
     await toStone(h, page);
     await live(h, page, 'before hiding');
     // more time, so the countdown outlasts the time spent hidden
@@ -787,7 +749,7 @@ export const scenarios = {
     await h.sleep(300);
     const a = await scenes(page);
     h.expect(a.live === 0 && !(await page.locator('.dq-scene').count()), `hidden: the scene is still up: ${JSON.stringify(a)}`);
-    await page.clock.fastForward(16000);
+    await pageClock.fastForward(page, 16000);
     await h.sleep(300);
     const b = await scenes(page);
     h.expect(b.contexts === 0, `hidden past the idle period: the shared renderer kept its WebGL context: ${JSON.stringify(b)}`);
@@ -865,8 +827,7 @@ export const scenarios = {
   /** going in and out of the scene 20 times keeps one WebGL context, frees everything on leaving, then lets go */
   async 'scene-cycles'(h) {
     const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
-    await page.clock.install();
-    await page.reload();
+    await pageClock.reloadOnFakeClock(page);
     for (let i = 1; i <= 20; i++) {
       await toStone(h, page);
       await live(h, page, `cycle ${i}`);
@@ -879,7 +840,7 @@ export const scenarios = {
       h.expect(out.live === 0 && out.contexts === 1 && !(await page.locator('.dq-scene').count()), `cycle ${i}: after leaving ${JSON.stringify(out)}`);
       h.expect(out.left && !out.left.geometries && !out.left.textures && !out.left.programs, `cycle ${i}: leaving left things on the GPU: ${JSON.stringify(out.left)}`);
     }
-    await page.clock.fastForward(16000);
+    await pageClock.fastForward(page, 16000);
     await h.sleep(300);
     const idle = await scenes(page);
     h.expect(idle.contexts === 0 && idle.live === 0, `idle: the shared renderer kept its context: ${JSON.stringify(idle)}`);
@@ -979,25 +940,14 @@ export const scenarios = {
   async 'scene-flat-handoff'(h) {
     for (const k of [{ kind: 'drift', id: 'wise-mind', entry: 'stone' }, ...KINDS]) {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
-      await ctx.addInitScript(() => {
-        // each scene's first frame stays undrawn until the scenario lets it through, however long the page took to get here
-        const P = WebGL2RenderingContext.prototype, make = P.fenceSync, get = P.getSyncParameter, held = new WeakSet();
-        window.__holdFirstFrame = true;
-        P.fenceSync = function (...args) {
-          const f = make.apply(this, args);
-          if (this.canvas.closest?.('.dq-scene')) held.add(f);
-          return f;
-        };
-        P.getSyncParameter = function (f, pname) {
-          if (window.__holdFirstFrame && held.has(f) && pname === this.SYNC_STATUS) return this.UNSIGNALED;
-          return get.call(this, f, pname);
-        };
-      });
-      await page.clock.install();
-      await page.reload();
+      // each scene's first frame stays undrawn until the scenario lets it through,
+      // however long the page took to get here
+      await ctx.addInitScript(() => (window.__holdFirstFrame = true));
+      await holdSceneFences(ctx, () => window.__holdFirstFrame);
+      await pageClock.reloadOnFakeClock(page);
       await toStep(h, page, k.id, k.entry, { pause: true });
       // just past the wait the flat picture is back, with the scene not yet on screen: the case this checks
-      await page.clock.runFor(WAIT_MS + 100);
+      await pageClock.runFor(page, WAIT_MS + 100);
       const stage = await page.locator('.dq-timer-stage').getAttribute('class');
       h.expect(!/\bis-scene-(wait|live)\b/.test(stage), `slow first frame ${k.kind}: the flat picture did not come back before the scene (${stage})`);
       await flatBack(h, page, `slow first frame ${k.kind}`);
@@ -1013,15 +963,17 @@ export const scenarios = {
   async 'wave-scene'(h) {
     for (const [tag, vp] of VIEWS) {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
-      await page.clock.install();
-      await page.reload();
+      await pageClock.reloadOnFakeClock(page);
       // the clock waits on the ride's first moment, however slowly the page got there, so its start can be seen
       await toStep(h, page, 'urge-surf', 'ride', { pause: true });
       await showsStopped(h, page, `wave ${tag}`);
       const first = (await scenes(page)).last;
       await looks(h, page, tag, 'wave', vp, undefined, { stopped: true });
-      const seen = [first, await after(h, page, 0)];
-      while (seen[seen.length - 1].probe.t < 34) seen.push(await after(h, page, 2500));
+      const seen = [first];
+      for await (const at of steps(h, page, `wave ${tag}`, 2500)) {
+        seen.push(at);
+        if (at.probe.t >= 34) break;
+      }
       const at = (a, b) => seen.filter((x) => x.probe.t >= a && x.probe.t <= b).map((x) => x.probe.board);
       const [start, crest, past] = [at(0, 4), at(12, 18), at(26, 34)];
       const ride = seen.map((x) => `${x.probe.t.toFixed(1)}s ${x.probe.board.toFixed(2)}`).join(', ');
@@ -1039,8 +991,7 @@ export const scenarios = {
   async 'ring-scene'(h) {
     for (const [tag, vp] of VIEWS) {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
-      await page.clock.install();
-      await page.reload();
+      await pageClock.reloadOnFakeClock(page);
       // the clock stays stopped while the breath is read, so the 30 s timer still runs when the pause is checked
       await toStep(h, page, 'sense-up', 'only-this', { pause: true });
       await showsStopped(h, page, `ring ${tag}`);
@@ -1097,8 +1048,7 @@ export const scenarios = {
     const bad = [];
     for (const [tag, vp] of [...VIEWS, ['wide', DESK]]) {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
-      await page.clock.install();
-      await page.reload();
+      await pageClock.reloadOnFakeClock(page);
       await toStep(h, page, 'sense-up', 'only-this', { pause: true });
       await showsStopped(h, page, `ring ${tag}`);
       await drawn(h, page, `ring ${tag}`);
@@ -1131,8 +1081,7 @@ export const scenarios = {
     const bad = [];
     for (const [tag, vp] of [...VIEWS, ['wide', DESK]]) {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
-      await page.clock.install();
-      await page.reload();
+      await pageClock.reloadOnFakeClock(page);
       await toStep(h, page, 'urge-surf', 'ride', { pause: true });
       await showsStopped(h, page, `wave ${tag}`);
       await drawn(h, page, `wave ${tag}`);
@@ -1206,28 +1155,28 @@ export const scenarios = {
   /** a timed Give me a moment ends with its light settled to a slow exhale and holding still, as its flat ring does */
   async 'moment-end-light'(h) {
     const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
-    await page.clock.install();
+    await pageClock.install(page);
     await home(h, page);
     await page.evaluate(() => window.__daily.go({ name: 'moment' }));
     await live(h, page, 'moment end', '.dq-mo-stage');
     // chosen while time runs: a welcome that leaving Home closed takes taps until its collapse ends
     await page.getByRole('radiogroup', { name: 'How long' }).getByRole('radio', { name: '1 minute' }).check();
-    await h.pauseClock(page);
-    await page.clock.runFor(2000);
+    await pageClock.pauseClock(page);
+    await pageClock.runFor(page, 2000);
     const on = await scenes(page);
     h.expect(on.last.probe.breath > 0.05, `moment end: the light was not breathing before the end (${JSON.stringify(on.last)})`);
-    await page.clock.fastForward(60000);
+    await pageClock.fastForward(page, 60000);
     await page.locator('.dq-mo-line', { hasText: /your moment/ }).waitFor({ timeout: 5000 });
     // the flat ring settles over 2.4 s; a slow page can skip from part way through that straight past its end
-    await page.clock.runFor(300);
-    await page.clock.fastForward(2300);
-    await page.clock.runFor(500);
+    await pageClock.runFor(page, 300);
+    await pageClock.fastForward(page, 2300);
+    await pageClock.runFor(page, 500);
     const a = await scenes(page);
-    await page.clock.runFor(2000);
+    await pageClock.runFor(page, 2000);
     const b = await scenes(page);
     h.expect(a.last.done && a.last.probe.breath < 0.01, `moment end: the light did not settle to its exhale (${JSON.stringify(a.last)})`);
     h.expect(b.frames === a.frames, `moment end: the light kept drawing after it settled (${a.frames} -> ${b.frames} frames)`);
-    await page.clock.resume();
+    await pageClock.resume(page);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },
@@ -1236,8 +1185,7 @@ export const scenarios = {
   async 'tide-scene'(h) {
     for (const [tag, vp] of VIEWS) {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
-      await page.clock.install();
-      await page.reload();
+      await pageClock.reloadOnFakeClock(page);
       await toStep(h, page, 'current-emotion', 'watch', { pause: true });
       await showsStopped(h, page, `tide ${tag}`);
       await looks(h, page, tag, 'tide', vp, undefined, { stopped: true });
@@ -1261,8 +1209,7 @@ export const scenarios = {
   async 'scenes-more-time'(h) {
     for (const k of [{ kind: 'drift', id: 'wise-mind', entry: 'stone' }, ...KINDS]) {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
-      await page.clock.install();
-      await page.reload();
+      await pageClock.reloadOnFakeClock(page);
       await toStep(h, page, k.id, k.entry, { pause: true });
       await showsStopped(h, page, `more time ${k.kind}`);
       const at = await after(h, page, 0);
@@ -1270,7 +1217,7 @@ export const scenarios = {
       await page.locator('.dq-timer-num', { hasText: 'Done' }).waitFor({ timeout: 5000 });
       const a = (await scenes(page)).last;
       // Done stays up for 4 s before more time is asked for
-      await page.clock.fastForward(4000);
+      await pageClock.fastForward(page, 4000);
       await page.locator('.dq-timer').getByRole('button', { name: /^\+\d+ s$/ }).click();
       const b = await after(h, page, 100);
       const probe = (p) => Object.entries(p ?? {}).map(([key, v]) => `${key} ${typeof v === 'number' ? v.toFixed(3) : v}`).join(' ');
@@ -1296,97 +1243,9 @@ export const scenarios = {
     await ctx.close();
   },
 
-  /**
-   * the clouds over the tide on Spectator Mode's watch step, when the player's thoughts are clouds: one drifts in from the
-   * left, crosses the middle of the sky and drifts out on the right; the moon dims while one passes it and comes back
-   * after; with reduced motion one cloud stands still in the middle of the sky. With cars or leaves, and on the emotion
-   * skill's watch step, the sky stays clear
-   */
-  async 'tide-clouds'(h) {
-    const clouds = (last) => last.probe.clouds.split(' ').filter(Boolean).map((c) => c.split(':').map(Number));
-    /** twenty seconds of the tide on a stopped clock: no cloud comes up and the moon never dims */
-    const clear = async (page, where) => {
-      await showsStopped(h, page, where);
-      const seen = [];
-      for (let at = await after(h, page, 0); seen.length < 10; at = await after(h, page, 2000)) seen.push(at.probe);
-      h.expect(seen.every((p) => p.clouds === '' && p.moon === 1), `${where}: clouds over the tide (${seen.map((p) => p.clouds || '-').join(' | ')})`);
-    };
-    for (const [pick, words] of [['Cars on a quiet road', /car going past/], ['Leaves on a stream', /sits on a leaf/]]) {
-      const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
-      await page.clock.install();
-      await page.reload();
-      await toSkill(h, page, 'mindful-thoughts');
-      await tap(page, pick);
-      await tap(page, 'Ready');
-      await page.locator('.dq-timer-stage').waitFor({ timeout: 10000 });
-      await h.pauseClock(page);
-      await page.locator('.dq-timer-stage').scrollIntoViewIfNeeded();
-      h.expect(words.test(await page.locator('.dq-skill').innerText()), `${pick}: the watch step does not say ${words}`);
-      await clear(page, `tide with ${pick}`);
-      h.expect(!errors.length, errors.join('\n'));
-      await ctx.close();
-    }
-    {
-      // emotions as waves, which the tide already is
-      const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
-      await page.clock.install();
-      await page.reload();
-      await toStep(h, page, 'current-emotion', 'watch', { pause: true });
-      await clear(page, 'tide for an emotion');
-      h.expect(!errors.length, errors.join('\n'));
-      await ctx.close();
-    }
-    {
-      const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
-      await page.clock.install();
-      await page.reload();
-      await toStep(h, page, 'mindful-thoughts', 'watch', { pause: true });
-      await showsStopped(h, page, 'tide clouds');
-      // two seconds at a time through most of the minute, each cloud's place across the frame and the moon's light
-      const path = new Map();
-      const moon = [];
-      let shot = false;
-      for (let at = await after(h, page, 0); at.e < at.dur - 3; at = await after(h, page, 2000)) {
-        for (const [n, x] of clouds(at)) path.set(n, [...(path.get(n) ?? []), x]);
-        moon.push(at.probe.moon);
-        if (!shot && at.probe.moon < 0.5) {
-          shot = true;
-          await h.shot(page, 'tide-clouds-moon-phone');
-        }
-      }
-      const crossed = [...path].filter(([, xs]) => xs[0] < -1 && xs.some((x) => Math.abs(x) < 0.25) && xs[xs.length - 1] > 1 && xs.every((x, i) => !i || x > xs[i - 1]));
-      const where = [...path].map(([n, xs]) => `${n}: ${xs.map((x) => x.toFixed(2)).join(' ')}`).join('; ');
-      h.expect(crossed.length > 0, `tide clouds: no cloud drifted in, crossed the sky and drifted out (${where})`);
-      const low = moon.indexOf(Math.min(...moon));
-      h.expect(moon[low] < 0.5 && moon.slice(low).some((m) => m > 0.95), `tide clouds: the moon did not dim behind a cloud and come back (${moon.map((m) => m.toFixed(2)).join(' ')})`);
-      console.log(`  tide clouds: ${crossed.length} crossed; moon ${moon.map((m) => m.toFixed(2)).join(' ')}`);
-      h.expect(!errors.length, errors.join('\n'));
-      await ctx.close();
-    }
-    {
-      const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
-      await page.emulateMedia({ reducedMotion: 'reduce' });
-      await page.reload();
-      await toStep(h, page, 'mindful-thoughts', 'watch');
-      await live(h, page, 'tide clouds still');
-      const a = (await scenes(page)).last;
-      await h.frames(page, 60);
-      const b = (await scenes(page)).last;
-      h.expect(a.still && clouds(a).some(([, x]) => Math.abs(x) < 0.35) && b.probe.clouds === a.probe.clouds, `tide clouds, reduced motion: no cloud standing still mid-sky (${a.probe.clouds} -> ${b.probe.clouds})`);
-      await h.shot(page, 'tide-clouds-still-phone');
-      h.expect(!errors.length, errors.join('\n'));
-      await ctx.close();
-    }
-  },
-
-  /**
-   * the device's reduce-motion turned on while a scene is up, with Motion on Auto: the wave, the light, the tide with and
-   * without its clouds and Give me a moment's light each settle on one still frame (the clouds with one mid-sky), and
-   * move again once it is turned off
-   */
   async 'scenes-follow-device-motion'(h) {
-    for (const k of [...KINDS, { kind: 'tide', id: 'mindful-thoughts', entry: 'watch', clouds: true }, { kind: 'ring', moment: true }]) {
-      const name = k.moment ? 'moment' : k.clouds ? 'tide with clouds' : k.kind;
+    for (const k of [...KINDS, { kind: 'ring', moment: true }]) {
+      const name = k.moment ? 'moment' : k.kind;
       const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
       const device = await deviceMotion(ctx, page);
       if (k.moment) {
@@ -1412,10 +1271,6 @@ export const scenarios = {
       await h.frames(page, 60);
       const d = await scenes(page);
       h.expect(c.last.still && d.frames === c.frames, `${name}, device set to reduce motion: not one still frame (${c.frames} -> ${d.frames}, still ${c.last.still})`);
-      if (k.clouds) {
-        const mid = c.last.probe.clouds.split(' ').filter(Boolean).some((x) => Math.abs(Number(x.split(':')[1])) < 0.35);
-        h.expect(mid, `${name}, device set to reduce motion: no cloud standing mid-sky (${c.last.probe.clouds})`);
-      }
       await device('no-preference');
       await moving('device back to motion');
       h.expect(!errors.length, errors.join('\n'));
@@ -1458,8 +1313,7 @@ export const scenarios = {
           return /webgl/i.test(String(type)) ? null : get.call(this, type, ...rest);
         };
       });
-      await page.clock.install();
-      await page.reload();
+      await pageClock.reloadOnFakeClock(page);
       await home(h, page);
       const before = JSON.parse((await h.ls(page, h.SAVE)) ?? '{"events":[]}').events.filter((e) => e.k === 'skill' && e.skill === k.id).length;
       await toStep(h, page, k.id, k.entry);
@@ -1474,7 +1328,7 @@ export const scenarios = {
         h.expect(d0 !== (await page.locator(k.flat).first().getAttribute('d')), `no WebGL (${k.kind}): the flat picture does not move`);
       }
       await h.shot(page, `no-webgl-${k.kind}-phone`);
-      await page.clock.fastForward(91000);
+      await pageClock.fastForward(page, 91000);
       await page.locator('.dq-timer-num', { hasText: 'Done' }).waitFor({ timeout: 5000 });
       if (k.kind === 'wave') {
         await tap(page, 'Next');

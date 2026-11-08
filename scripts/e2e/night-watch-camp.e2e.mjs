@@ -297,7 +297,9 @@ export const scenarios = {
     await page.mouse.click(block.cx, block.cy);
     await card.waitFor({ timeout: 5000 });
     h.expect((await card.locator('.w2-sh--block').count()) === 1, 'tapping the Unlisted did not open its card');
-    await page.mouse.click(8, PHONE.height - 8);
+    const backdrop = page.locator('.w2-camp-sheet');
+    const room = await backdrop.boundingBox();
+    await backdrop.click({ position: { x: 8, y: room.height - 8 } });
     await gone(card, 5000);
     h.expect((await page.locator('.w2-roster-row .w2-sh--block').count()) === 1, 'the backdrop did not close the card');
     // with a card open the Safe Zone is still on top and one tap away, and nothing of the camp comes along

@@ -184,7 +184,7 @@ function drawSpectrogram(cv: HTMLCanvasElement, buf: AudioBuffer, label: string)
 }
 
 export async function lab(stage: Stage) {
-  void stage;
+  stage.sceneStill = true;
   const style = document.createElement('style');
   style.textContent = CSS;
   document.head.append(style);

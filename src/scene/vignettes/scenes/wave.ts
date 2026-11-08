@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { smoothstep } from '../../../core/math';
 import { glow, NIGHT_GLSL, nightBackdrop, OUT_GLSL } from '../common';
 import type { BuildScene } from '../runtime';
 
@@ -36,11 +37,6 @@ const FLOAT = 0.012;
 const STILL_T = 11;
 const LAMP = new THREE.Color('#4fb8ff');
 
-const smooth = (a: number, b: number, x: number) => {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
-};
-
 /** The swells near time t as (where it is along DIR, height) pairs: the one passing the board and its neighbours. */
 function ridgesAt(t: number, out: THREE.Vector2[]) {
   const i0 = Math.floor((t - FIRST) / PERIOD) - 1;
@@ -56,7 +52,7 @@ function seaAt(x: number, z: number, t: number, ridges: THREE.Vector2[]) {
     const d = (u - r.x) / WIDTH;
     h += r.y * Math.exp(-d * d);
   }
-  h *= (1 - 0.6 * smooth(1, 5, z)) * (0.82 + 0.18 * Math.cos(w * 0.23 + 1.3)) * Math.exp(-Math.max(0, -z - 8) / 14);
+  h *= (1 - 0.6 * smoothstep(1, 5, z)) * (0.82 + 0.18 * Math.cos(w * 0.23 + 1.3)) * Math.exp(-Math.max(0, -z - 8) / 14);
   const small = 0.034 * Math.sin((x * 0.83 + z * 0.55) * 0.95 - 0.52 * t) + 0.022 * Math.sin((x * -0.42 + z * 0.91) * 1.45 - 0.74 * t + 1.3);
   return h + small * Math.exp(-Math.max(0, -z - 10) / 20);
 }

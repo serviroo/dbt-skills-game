@@ -4,11 +4,16 @@
  * OfflineAudioContext (renderOffline), so captured videos get the exact soundtrack the app plays.
  */
 import { CUES } from './cues';
-import { BED_NAMES, startBed, startCharge, type BedHandle, type BedName, type ChargeHandle } from './beds';
+import { BED_NAMES, buildBed, buildCharge, type BedHandle, type BedName, type ChargeHandle } from './beds';
 import { AHEAD, Music, SECTIONS, type Section, type SectionOpts } from './music';
 import { clipCurve, makeCrackle, makeIR, makeNoise, dB, type Ctx } from './dsp';
+import { trackedGain, type TrackedGain } from './curve';
 import { holdAt, soon, taper } from './param';
+import { SCORE } from '../motion/tokens';
+import { makeEcho, dropEcho, type Echo, type Sends } from './echo';
+import { BusLevels } from './bus-levels';
 import { Voice, stoppedBy, type Lib } from './voice';
+import { CueCleanup } from './cue-cleanup';
 
 export type { BedHandle, BedName, ChargeHandle, Section, SectionOpts };
 export { BED_NAMES, SECTIONS };
@@ -69,11 +74,6 @@ const UI_DUCK = new Set<string>(['ui_open', 'reward_chime', 'level_resolve', 'le
 const LIMIT = { threshold: -5, knee: 2, ratio: 16, attack: 0.002, release: 0.14 };
 const LIMIT_MAKEUP_DB = 2.47;
 
-/** Effects' and Music's sends into the echo, to the room and the hall, each at its level. */
-type Sends = { sfxRoom: GainNode; sfxHall: GainNode; musRoom: GainNode; musHall: GainNode };
-/** A room and hall echo, each behind its own return level, and the sends that feed it. */
-type Echo = { sends: Sends; room: ConvolverNode; hall: ConvolverNode; out: GainNode[] };
-
 export class AudioEngine {
   readonly ctx: Ctx;
   readonly live: boolean;
@@ -91,29 +91,32 @@ export class AudioEngine {
    *  there too. */
   private sendLevels: { sfx: number; mus: number; tau: number };
   /** The Safe Zone's gate: the last stage before the speaker level, so the score, effects, beds and echo all pass it. */
-  private safe: GainNode;
+  private safe: TrackedGain;
   private isQuiet = false;
   /** The shared room and hall echo and its sends; leaving the Safe Zone swaps in an empty echo on the same sends, and
    *  stopAll an empty echo with sends of its own. */
   private echo: Echo;
+  private closing = new Map<Echo, { by: number; silent: ConstantSourceNode }>();
   private userMaster = 1;
   private bedBus: GainNode;
-  private hushBeds: GainNode;
-  private hushMusic: GainNode;
+  private hushBeds: TrackedGain;
+  private hushMusic: TrackedGain;
   /** The score dips ~3 dB for a Lantern chime (the window speaks, the music makes room). */
-  private uiDuck: GainNode;
+  private uiDuck: TrackedGain;
   /** The score steps back while the player is doing something: paced breathing (-5 dB) or holding the chest (-2 dB idle,
    *  down to -9 dB at full charge, so the charge tone and then the burst own the moment). */
-  private focus: GainNode;
-  private hushHall: GainNode;
-  private hushRoom: GainNode;
-  private duckG: GainNode;
+  private focus: TrackedGain;
+  private hushHall: TrackedGain;
+  private hushRoom: TrackedGain;
+  private duckG: TrackedGain;
   /** Beds and score step back for a cue that must read inside the roar (soldier ignition, the stand-up swell). */
-  private yieldG: GainNode;
+  private yieldG: TrackedGain;
   private volume: GainNode;
   readonly limiter: DynamicsCompressorNode;
   private beds = new Map<BedName, BedHandle>();
+  private fading = new Set<Voice>();
   private active = new Set<Voice>();
+  private cueCleanup: CueCleanup | null;
   private mlevel: GainNode;
   private mlp: BiquadFilterNode;
   private shelf: BiquadFilterNode;
@@ -127,6 +130,8 @@ export class AudioEngine {
   private session: 'playback' | 'ambient';
   private cleanup: (() => void)[] = [];
   private hushV: Voice | null = null;
+  private stoppedUntil = 0;
+  private busLevels: BusLevels;
   /** The level window's low-end lift is on until the next window closes or the next section starts. */
   private lifted = false;
   /** Cue handles named by schedule() events (opts.id), kept across calls so a later batch can stop them. */
@@ -135,6 +140,7 @@ export class AudioEngine {
   constructor(ctx?: BaseAudioContext, opts: EngineOpts = {}) {
     const C = ctx ?? new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)({ latencyHint: 'interactive' });
     this.ctx = C;
+    this.busLevels = new BusLevels(C);
     this.live = typeof OfflineAudioContext === 'undefined' || !(C instanceof OfflineAudioContext);
     this.seedN = opts.seed ?? 20261020;
     this.vol = opts.volume ?? 1;
@@ -167,11 +173,11 @@ export class AudioEngine {
     clip.oversample = '2x';
     this.volume = C.createGain();
     this.volume.gain.value = this.masterTarget();
-    this.safe = C.createGain();
+    this.safe = trackedGain(C, 1);
     pre.connect(hp).connect(lim).connect(undo).connect(clip).connect(this.safe).connect(this.volume).connect(C.destination);
 
-    this.duckG = C.createGain();
-    this.yieldG = C.createGain();
+    this.duckG = trackedGain(C, 1);
+    this.yieldG = trackedGain(C, 1);
     this.duckG.connect(this.yieldG).connect(pre);
     const sfxLevel = taper(opts.user?.sfx ?? 1);
     const musLevel = taper(opts.user?.music ?? 1);
@@ -187,18 +193,21 @@ export class AudioEngine {
     this.sfx = C.createGain();
     this.sfx.connect(this.sfxUser).connect(pre);
 
-    this.hushRoom = C.createGain();
-    this.hushHall = C.createGain();
+    this.hushRoom = trackedGain(C, 1);
+    this.hushHall = trackedGain(C, 1);
     this.hushRoom.connect(pre);
     this.hushHall.connect(pre);
-    this.echo = this.makeEcho(
+    this.echo = makeEcho(
+      C,
       this.makeSends(),
       makeIR(C, this.seedN + 1, { rt60: 0.9, length: 1.1, preDelay: 0.008, damp0: 11000, damp1: 3500, early: 0.03, onset: 0.004 }),
       makeIR(C, this.seedN + 2, { rt60: 3.2, length: 3.6, preDelay: 0.024, damp0: 12000, damp1: 2000, early: 0.07, onset: 0.03 }),
+      [this.hushRoom, this.hushHall],
+      0,
     );
 
     this.bedBus = C.createGain();
-    this.hushBeds = C.createGain();
+    this.hushBeds = trackedGain(C, 1);
     this.bedBus.connect(this.hushBeds).connect(this.bedUser).connect(this.duckG);
 
     const musicIn = C.createGain();
@@ -217,12 +226,12 @@ export class AudioEngine {
     air.frequency.value = 5000;
     air.gain.value = 4;
     const mlevel = C.createGain();
-    this.hushMusic = C.createGain();
+    this.hushMusic = trackedGain(C, 1);
     this.mlevel = mlevel;
     this.mlp = mlp;
     this.shelf = shelf;
-    this.uiDuck = C.createGain();
-    this.focus = C.createGain();
+    this.uiDuck = trackedGain(C, 1);
+    this.focus = trackedGain(C, 1);
     musicIn.connect(mlp).connect(shelf).connect(air).connect(mlevel).connect(this.uiDuck).connect(this.focus).connect(this.hushMusic).connect(this.musUser).connect(this.duckG);
 
     this.lib = {
@@ -256,17 +265,14 @@ export class AudioEngine {
           }
           // the gate hum and the aura belong to the dark world: they leave when the score lifts into D major
           if (name !== 'reward' && name !== 'end' && name !== 'calm') return;
-          for (const n of ['gate_hum', 'aura_bed'] as BedName[]) {
-            const b = this.beds.get(n);
-            if (b && !b.stopped) b.stop(2.5, at);
-            this.beds.delete(n);
-          }
+          for (const n of ['gate_hum', 'aura_bed'] as BedName[]) this.stopBed(n, 2.5, at);
         },
       },
       musicIn,
       { lp: mlp, shelf, level: mlevel },
     );
 
+    this.cueCleanup = this.live ? new CueCleanup(C, this.sfx, this.active) : null;
     if (this.live) {
       this.timer = setInterval(() => this.music.scheduleUntil(this.ctx.currentTime + AHEAD), 120);
       const vis = () => { void this.applyVisibility(); };
@@ -381,10 +387,18 @@ export class AudioEngine {
     this.isMuted = !!l.muted;
     this.volume.gain.setTargetAtTime(this.masterTarget(), t, tau);
     const m = taper(l.music);
-    for (const g of [this.musUser, this.echo.sends.musRoom, this.echo.sends.musHall]) g.gain.setTargetAtTime(m, t, tau);
+    this.musUser.gain.setTargetAtTime(m, t, tau);
+    for (const g of [this.echo.sends.musRoom, this.echo.sends.musHall]) {
+      g.curve.cancelScheduledValues(t);
+      g.curve.setTargetAtTime(m, t, tau);
+    }
     const s = taper(l.sfx);
     this.sendLevels = { sfx: s, mus: m, tau };
-    for (const g of [this.sfxUser, this.bedUser, this.echo.sends.sfxRoom, this.echo.sends.sfxHall]) g.gain.setTargetAtTime(s, t, tau);
+    for (const g of [this.sfxUser, this.bedUser]) g.gain.setTargetAtTime(s, t, tau);
+    for (const g of [this.echo.sends.sfxRoom, this.echo.sends.sfxHall]) {
+      g.curve.cancelScheduledValues(t);
+      g.curve.setTargetAtTime(s, t, tau);
+    }
   }
 
   /** Current output gains (QA): master after scene level and mute, the Music / Effects levels, and the Safe Zone's gate. */
@@ -417,12 +431,13 @@ export class AudioEngine {
     } catch (err) {
       console.warn('[audio] cue failed', cue, err);
     }
+    if (cue === "awaken_hit") this.music.armHit();
     const at = this.when(opts.at);
     v.open(at);
     if (UI_DUCK.has(cue)) {
-      const g = this.uiDuck.gain;
-      g.setTargetAtTime(dB(-3), at, 0.012);
-      g.setTargetAtTime(1, at + 0.28, 0.16);
+      const g = this.uiDuck.curve;
+      this.busLevels.set(g, dB(-3), at, 0.012);
+      this.busLevels.set(g, 1, at + 0.28, 0.16, false);
     }
     // paced breathing: the score steps back for the whole exercise (each cue extends the dip; it lifts after the last)
     if (cue === 'breath_in' || cue === 'breath_out') this.toFocus(dB(-6.5), at, 0.3, at + Math.max(opts.dur ?? 0, 10) + 0.4);
@@ -439,17 +454,11 @@ export class AudioEngine {
     if (cue === 'soldier_ignite') this.makeRoom(at, -3, 0.03, at + 0.5, 0.3);
     else if (cue === 'stand_swell') this.makeRoom(at + 0.12, -2, 0.2, at + 1.04, 0.004);
     if (cue === "awaken_hit") {
-      this.music.onHit(at);
       if (this.hushV) this.unhush(at);
+      this.music.onHit(at);
     }
-    if (this.live) {
-      this.active.add(v);
-      const ms = (v.end - this.ctx.currentTime + 4) * 1000;
-      setTimeout(() => {
-        v.out.disconnect();
-        this.active.delete(v);
-      }, Math.max(1000, ms));
-    }
+    this.active.add(v);
+    this.cueCleanup?.add(v);
     return {
       stop: (t = soon(this.ctx), ramp = 0.03) => v.stop(t, ramp),
       get end() {
@@ -460,38 +469,42 @@ export class AudioEngine {
 
   /** Start (or re-level) a continuous bed. Calling it again for a running bed ramps its level. */
   bed(name: BedName, o: { at?: number; level?: number; fadeIn?: number } = {}): BedHandle {
-    const at = this.when(o.at);
     const cur = this.beds.get(name);
     if (cur && !cur.stopped) {
-      if (o.level !== undefined) cur.level(o.level, o.fadeIn ?? 0.5, at);
+      if (o.level !== undefined) cur.level(o.level, o.fadeIn ?? 0.5, this.when(o.at));
       return cur;
     }
-    const h = startBed(this.lib, name, this.bedBus, at, o.level ?? 1, o.fadeIn ?? 0.5, this.nextSeed());
+    if (cur) this.letGo(cur.voice);
+    const built = buildBed(this.lib, name, this.bedBus, o.level ?? 1, o.fadeIn ?? 0.5, this.nextSeed());
+    const h = built.open(this.when(o.at));
     this.beds.set(name, h);
     return h;
   }
 
+  stopBed(name: BedName, fade = 0.5, at?: number) {
+    this.beds.get(name)?.stop(fade, at);
+  }
+
   private makeRoom(at: number, db: number, tau: number, back: number, tauBack: number) {
-    const g = this.yieldG.gain;
-    g.cancelScheduledValues(at);
-    g.setTargetAtTime(dB(db), at, tau);
-    g.setTargetAtTime(1, back, tauBack);
+    const g = this.yieldG.curve;
+    this.busLevels.set(g, dB(db), at, tau);
+    this.busLevels.set(g, 1, back, tauBack, false);
   }
 
   /** Move the focus dip to `v` from `at` (time constant tau); with `back`, return to full level from then. */
   private toFocus(v: number, at: number, tau: number, back?: number) {
-    const g = this.focus.gain;
-    g.cancelScheduledValues(at);
-    g.setTargetAtTime(v, at, tau);
-    if (back !== undefined) g.setTargetAtTime(1, back, 0.8);
+    const g = this.focus.curve;
+    this.busLevels.set(g, v, at, tau);
+    if (back !== undefined) this.busLevels.set(g, 1, back, 0.8, false);
   }
 
   /** The hold-to-charge loop (idle hum at c=0). One at a time; calling again returns the running one. While it runs the
    *  score steps back (-2 dB idle, -9 dB at full charge); after stop() it swells back in behind the burst. */
   chargeLoop(o: { at?: number } = {}): ChargeHandle {
     if (this.charge) return this.charge;
+    const built = buildCharge(this.lib, this.sfx, this.nextSeed());
     const t0 = this.when(o.at);
-    const h = startCharge(this.lib, this.sfx, t0, this.nextSeed());
+    const h = built.open(t0);
     const self = this;
     this.toFocus(dB(-2), t0, 0.4);
     this.charge = {
@@ -505,9 +518,11 @@ export class AudioEngine {
         h.release(t);
         self.toFocus(dB(-2), t, 0.15);
       },
+      voice: h.voice,
       stop(at?: number, ramp?: number) {
         const t = self.when(at);
         h.stop(t, ramp);
+        self.letGo(h.voice);
         self.charge = null;
         self.toFocus(1, t + 0.3, 0.5);
       },
@@ -520,36 +535,35 @@ export class AudioEngine {
    * -35 dBFS RMS) so the hit lands +22 dB over it. With `to`, everything returns at `to` in ~5 ms. Without it the hush
    * holds until unhush() or the next awaken_hit. An open-ended awaken section cuts its build here.
    */
-  hush(from = soon(this.ctx), to?: number) {
-    for (const g of [this.hushBeds.gain, this.hushMusic.gain, this.hushHall.gain, this.hushRoom.gain]) {
-      g.cancelScheduledValues(from);
-      g.setTargetAtTime(0.008, from, 0.007);
-      if (to !== undefined) g.setTargetAtTime(1, to, 0.0015);
-    }
-    this.hushV?.stop(from, 0.02);
-    const end = to ?? from + 120;
-    const v = new Voice(this.lib, from, this.sfx, {}, this.nextSeed());
+  hush(from?: number, to?: number) {
+    const v = new Voice(this.lib, 0, this.sfx, { held: true }, this.nextSeed());
     const g = v.gain(0, v.dry);
-    g.gain.setValueAtTime(0, from);
-    g.gain.linearRampToValueAtTime(0.065, from + 0.03);
+    v.at(g.gain).setValueAtTime(0, 0);
+    v.at(g.gain).linearRampToValueAtTime(0.065, 0.03);
+    const end = 120;
+    v.noise("brown", 0, end + 0.05, v.filt("lowpass", 240, 0.7, g));
+    v.noise("pink", 0, end + 0.05, v.gain(0.08, v.filt("highpass", 1800, 0.7, g)));
+    const at = from ?? soon(this.ctx);
+    for (const p of [this.hushBeds.curve, this.hushMusic.curve, this.hushHall.curve, this.hushRoom.curve]) {
+      this.busLevels.set(p, 0.008, at, 0.007);
+      if (to !== undefined) this.busLevels.set(p, 1, to, 0.0015, false);
+    }
+    this.release(this.takeHush(), at, 0.02);
+    v.open(at);
     if (to !== undefined) {
       g.gain.setValueAtTime(0.065, to - 0.01);
       g.gain.linearRampToValueAtTime(0, to + 0.02);
+      this.release([v], to + 0.02, 0.02);
     }
-    v.noise("brown", from, end + 0.05, v.filt("lowpass", 240, 0.7, g));
-    v.noise("pink", from, end + 0.05, v.gain(0.08, v.filt("highpass", 1800, 0.7, g)));
     this.hushV = to === undefined ? v : null;
-    this.music.onHush(from);
+    this.music.onHush(at);
   }
 
   /** End an open-ended hush (awaken_hit does this itself). */
   unhush(at = soon(this.ctx)) {
-    for (const g of [this.hushBeds.gain, this.hushMusic.gain, this.hushHall.gain, this.hushRoom.gain]) {
-      g.cancelScheduledValues(at);
-      g.setTargetAtTime(1, at, 0.0015);
-    }
-    this.hushV?.stop(at, 0.02);
-    this.hushV = null;
+    const open = this.takeHush();
+    this.endHush(at, 0.0015);
+    this.release(open, at, 0.02);
   }
 
   /**
@@ -560,124 +574,163 @@ export class AudioEngine {
    */
   quiet(on: boolean, sec: number, at = soon(this.ctx)) {
     this.isQuiet = on;
-    if (!on) {
-      const old = this.echo;
-      this.echo = this.makeEcho(old.sends, old.room.buffer!, old.hall.buffer!);
-      this.dropEcho(old);
-    }
-    for (const p of on ? [this.safe.gain, ...this.echo.out.map((g) => g.gain)] : [this.safe.gain]) {
+    for (const { curve: p } of on ? this.echo.out : []) {
       holdAt(p, at);
-      if (on) p.linearRampToValueAtTime(0, at + sec);
-      else p.setTargetAtTime(1, at, Math.max(0.003, sec / 4));
+      p.linearRampToValueAtTime(0, at + sec);
     }
-    if (!on) return;
-    for (const v of this.active) v.stop(at, sec);
-    this.active.clear();
-    for (const c of this.named.values()) c.stop(at, sec);
-    this.named.clear();
-    this.charge?.stop(at, sec);
+    if (on) this.busLevels.ramp(this.safe.curve, 0, at, at + sec);
+    else this.busLevels.set(this.safe.curve, 1, at, Math.max(0.003, sec / 4));
+    if (on) {
+      this.stoppedUntil = at;
+      this.charge?.stop(at, sec);
+      const voices = [...this.active, ...this.fading, ...this.takeHush()];
+      this.release(voices, at, sec);
+      this.active.clear();
+      this.named.clear();
+      for (const e of [...this.closing.keys()]) this.closeEcho(e, at, sec);
+      this.waitForStopped(at, voices);
+      this.stopHush(at, sec, voices);
+      return;
+    }
+    const old = this.echo;
+    this.closeEcho(old, at, SCORE.safeOutSec);
+    this.echo = makeEcho(
+      this.ctx, old.sends, old.room.buffer!, old.hall.buffer!, [this.hushRoom, this.hushHall],
+      Math.max(at, this.stoppedUntil),
+    );
   }
 
   /** Effects' and Music's sends into an echo, at their levels; made in place of `from`, they start where those are and go
    *  on to where setUser last sent them, so a level still on its way gets there in the new sends too. */
   private makeSends(from?: Sends): Sends {
     const { sfx, mus, tau } = this.sendLevels;
-    const level = (to: number, was?: GainNode) => {
-      const g = this.ctx.createGain();
-      g.gain.value = was?.gain.value ?? to;
-      if (was) g.gain.setTargetAtTime(to, soon(this.ctx), tau);
+    const at = soon(this.ctx);
+    const level = (to: number, was?: TrackedGain) => {
+      const g = trackedGain(this.ctx, was ? was.curve.valueAt(at) : to);
+      if (was) g.curve.setTargetAtTime(to, at, tau);
       return g;
     };
     return { sfxRoom: level(sfx, from?.sfxRoom), sfxHall: level(sfx, from?.sfxHall), musRoom: level(mus, from?.musRoom), musHall: level(mus, from?.musHall) };
   }
 
-  /** An empty room and hall echo with these responses, fed by `sends`. */
-  private makeEcho(sends: Sends, roomIR: AudioBuffer, hallIR: AudioBuffer): Echo {
-    const make = (ir: AudioBuffer, from: GainNode[], hush: GainNode) => {
-      const c = this.ctx.createConvolver();
-      c.normalize = false;
-      c.buffer = ir;
-      const out = this.ctx.createGain();
-      for (const g of from) g.connect(c);
-      c.connect(out).connect(hush);
-      return { c, out };
-    };
-    const room = make(roomIR, [sends.sfxRoom, sends.musRoom], this.hushRoom);
-    const hall = make(hallIR, [sends.sfxHall, sends.musHall], this.hushHall);
-    return { sends, room: room.c, hall: hall.c, out: [room.out, hall.out] };
-  }
-
-  /** Drops an echo another has replaced, with its tail: its sends no longer feed it (the new one may share them). */
-  private dropEcho(old: Echo) {
-    const { sends: s, room, hall } = old;
-    for (const [from, to] of [[s.sfxRoom, room], [s.musRoom, room], [s.sfxHall, hall], [s.musHall, hall]] as const) from.disconnect(to);
-    room.disconnect();
-    hall.disconnect();
-    for (const g of old.out) g.disconnect();
-  }
-
   /** Duck beds + score together (e.g. -3 dB as the gate dims for the first window). */
   duck(db: number, ramp = 0.4, at = soon(this.ctx)) {
-    this.duckG.gain.cancelScheduledValues(at);
-    this.duckG.gain.setTargetAtTime(dB(db), at, Math.max(0.003, ramp / 4));
+    this.busLevels.set(this.duckG.curve, dB(db), at, Math.max(0.003, ramp / 4));
+  }
+
+  private voices() {
+    return [...this.active, ...[...this.beds.values()].map((b) => b.voice), ...this.fading];
+  }
+
+  private waitForStopped(at: number, voices: Voice[]) {
+    const all = [...voices, ...this.voices()];
+    const fading = all.filter((v) => v.stopStartsAt <= at && v.silentAt > at);
+    const ends = fading.map((v) => v.silentAt);
+    const echoes = [...this.closing.values()].map((c) => c.by);
+    this.stoppedUntil = Math.max(this.stoppedUntil, at, ...ends, ...echoes);
+  }
+
+  private stopHush(at: number, fade: number, stopped: Voice[]) {
+    const ends = [...stopped, ...this.music.live.map((s) => s.voice)].map((v) => v.silentAt).filter(Number.isFinite);
+    const echoes = [...this.closing.values()].map((c) => c.by);
+    this.busLevels.hold(at, Math.max(at, ...ends, ...echoes));
+    this.endHush(at, Math.max(0.003, fade / 4));
+  }
+
+  private endHush(at: number, tau: number) {
+    for (const g of [this.hushBeds.curve, this.hushMusic.curve, this.hushHall.curve, this.hushRoom.curve]) {
+      this.busLevels.set(g, 1, at, tau);
+    }
+  }
+
+  private release(voices: Voice[], at: number, ramp: number) {
+    for (const v of voices) {
+      v.stop(at, ramp);
+      if (this.active.has(v)) this.stoppedUntil = Math.max(this.stoppedUntil, v.silentAt);
+      this.letGo(v);
+    }
+  }
+
+  private takeHush() {
+    const v = this.hushV;
+    this.hushV = null;
+    return v ? [v] : [];
+  }
+
+  private letGo(v: Voice) {
+    for (const f of this.fading) if (f.end <= this.ctx.currentTime) this.fading.delete(f);
+    this.fading.add(v);
   }
 
   /** Stop every cue still sounding, the beds, charge and score, and the echo's tail with them (e.g. on replay or leaving
    *  the cutscene): what plays next starts in an empty echo. Under the Safe Zone's quiet the echo is closed already, and
    *  leaving the quiet brings the empty one (see quiet). */
   stopAll(fade = 0.4, at = soon(this.ctx)) {
-    for (const v of this.active) v.stop(at, fade);
-    this.active.clear();
-    for (const b of this.beds.values()) b.stop(fade, at);
-    this.beds.clear();
-    this.charge?.stop(at, fade);
-    this.music.stop(fade, at);
-    if (this.isQuiet) return;
-    // what plays from here on gets an empty echo with sends of its own at once. What was stopped keeps the old one, whose
-    // return closes as they fade, until they are silent and it is dropped, timed on the audio clock, which stands still
-    // while the page is hidden: none of their fade rings on, in the old echo or the new
     const old = this.echo;
-    for (const g of old.out) {
-      holdAt(g.gain, at);
-      g.gain.linearRampToValueAtTime(0, at + fade);
+    if (!this.isQuiet) for (const e of [old, ...this.closing.keys()]) this.closeEcho(e, at, fade);
+    this.charge?.stop(at, fade);
+    const stopped = [...this.voices(), ...this.takeHush()];
+    this.release(stopped, at, fade);
+    this.active.clear();
+    this.beds.clear();
+    this.music.stop(fade, at);
+    this.stopHush(at, fade, stopped);
+    if (this.isQuiet) {
+      this.waitForStopped(at, [...stopped, ...this.music.live.map((s) => s.voice)]);
+      return;
     }
+    // what plays from here on gets an empty echo with sends of its own, opening over SCORE.safeOutSec from at. What was
+    // stopped keeps the old one, whose return closes as they fade; it drops when silent, timed on the
+    // audio clock, which stands still while the page is hidden: none of their fade rings on, in either echo
     const sends = this.makeSends(old.sends);
-    this.echo = this.makeEcho(sends, old.room.buffer!, old.hall.buffer!);
+    this.echo = makeEcho(
+      this.ctx, sends, old.room.buffer!, old.hall.buffer!, [this.hushRoom, this.hushHall], at,
+    );
     Object.assign(this.lib, { room: sends.sfxRoom, hall: sends.sfxHall });
     Object.assign(this.libMusic, { room: sends.musRoom, hall: sends.musHall });
-    const silent = this.ctx.createConstantSource();
-    silent.offset.value = 0;
-    silent.connect(this.ctx.destination);
-    silent.onended = () => {
-      silent.disconnect();
-      this.dropEcho(old);
-    };
-    silent.start(at);
+  }
+
+  private closeEcho(e: Echo, at: number, fade: number) {
+    const was = this.closing.get(e);
+    if (was && was.by <= at + fade) return;
+    for (const { curve: p } of e.out) {
+      holdAt(p, at);
+      p.linearRampToValueAtTime(0, at + fade);
+    }
+    const silent = was?.silent ?? this.ctx.createConstantSource();
+    if (!was) {
+      silent.offset.value = 0;
+      silent.connect(this.ctx.destination);
+      silent.onended = () => {
+        silent.disconnect();
+        this.closing.delete(e);
+        dropEcho(e);
+      };
+      silent.start(at);
+    }
     silent.stop(stoppedBy(at, fade));
+    this.closing.set(e, { by: at + fade, silent });
   }
 
   /** Stop everything and restore the score controls (level, low-pass, lift, duck, hush) for a clean replay. */
   reset(fade = 0.3, at = soon(this.ctx)) {
-    this.stopAll(fade, at);
+    const tau = Math.max(0.003, fade / 4);
     const set = (p: AudioParam, v: number) => {
       p.cancelScheduledValues(at);
-      p.setTargetAtTime(v, at, Math.max(0.003, fade / 4));
+      p.setTargetAtTime(v, at, tau);
     };
     set(this.mlevel.gain, 1);
     set(this.mlp.frequency, 20000);
     set(this.shelf.gain, 0);
-    set(this.duckG.gain, 1);
-    set(this.uiDuck.gain, 1);
-    set(this.focus.gain, 1);
-    set(this.yieldG.gain, 1);
     this.lifted = false;
-    for (const g of [this.hushBeds.gain, this.hushMusic.gain, this.hushHall.gain, this.hushRoom.gain]) set(g, 1);
-    this.hushV?.stop(at, fade);
-    this.hushV = null;
+    for (const g of [this.duckG, this.uiDuck, this.focus, this.yieldG]) {
+      this.busLevels.set(g.curve, 1, at, tau);
+    }
+    this.stopAll(fade, at);
   }
 
   /** Full charge reached: cut the charge loop, 200 ms hush, then the gold burst (visual leads by 1-2 frames). */
-  chestBurst(at = soon(this.ctx)) {
+  chestBurst(at: number) {
     this.charge?.stop(at, 0.03);
     this.hush(at, at + 0.2);
     return this.play("chest_burst", { at: at + 0.2 });
@@ -695,7 +748,7 @@ export class AudioEngine {
    * - { t, cue: 'music_stop' | 'music_level' | 'music_lowpass' | 'music_lift', opts: { fade? | v, ramp? | hz, ramp? | db, ramp? } }
    * - { t, cue: 'hush', opts: { until } } / { t, cue: 'duck', opts: { db, ramp? } }
    */
-  schedule(events: SoundEvent[], t0 = soon(this.ctx)) {
+  schedule(events: SoundEvent[], t0: number) {
     const named = this.named;
     const sorted = [...events].sort((a, b) => a.t - b.t);
     for (const e of sorted) {
@@ -710,8 +763,7 @@ export class AudioEngine {
         case 'bed_stop': {
           const name = loopName as BedName;
           if (e.cue === 'bed_stop') {
-            this.beds.get(name)?.stop(o.fade ?? 0.5, at);
-            this.beds.delete(name);
+            this.stopBed(name, o.fade ?? 0.5, at);
             break;
           }
           const h = this.bed(name, { at, level: e.loop?.level ?? 1, fadeIn: o.fade ?? 0.5 });
@@ -773,7 +825,7 @@ export class AudioEngine {
             break;
           }
           const h = this.play(e.cue, { ...o, at });
-          if (o.id) named.set(o.id, h);
+          if (o.id && !this.isQuiet) named.set(o.id, h);
         }
       }
     }
@@ -798,6 +850,7 @@ export class AudioEngine {
 
   dispose() {
     if (this.timer) clearInterval(this.timer);
+    this.cueCleanup?.dispose();
     for (const f of this.cleanup) f();
     if (this.live) (this.ctx as AudioContext).close().catch(() => {});
   }

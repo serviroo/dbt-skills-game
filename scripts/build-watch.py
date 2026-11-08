@@ -21,281 +21,49 @@ import random
 import sys
 from mathutils import Euler, Matrix, Vector
 
-TAU = math.tau
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from blender_kit import (TAU, Materials, V, assemble, ball_mesh, bake, dress, export, glow,  # noqa: E402
+                         interp, light, loft, metaball, new_mesh, on_surface, orient, path_secs, ridge, ring,
+                         shipping, slim, smooth_path, stage, start, tris, tube_mesh, unwrap)
+
 ARGV = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 OUT = os.path.abspath(ARGV[0] if ARGV else '.')
 RENDERS = '--renders' in ARGV
 IDS = [a for a in ARGV[1:] if not a.startswith('--')]
 ONLY = IDS[0].split(',') if IDS else ['sable', 'anvil', 'harrow', 'bramble', 'vesper', 'block']
 
-bpy.ops.wm.read_factory_settings(use_empty=True)
-SCENE = bpy.context.scene
-SCENE.render.engine = 'CYCLES'
-prefs = bpy.context.preferences.addons['cycles'].preferences
-for kind in ('OPTIX', 'CUDA'):
-    try:
-        prefs.compute_device_type = kind
-        prefs.refresh_devices()
-        if any(d.type == kind for d in prefs.devices):
-            for d in prefs.devices:
-                d.use = d.type == kind
-            SCENE.cycles.device = 'GPU'
-            break
-    except TypeError:
-        continue
-
-
-def V(x, y=None, z=None):
-    """a point in page space"""
-    return Vector(x) if y is None else Vector((x, y, z))
-
-
-def B(p):
-    """page space to Blender space (glTF export turns Blender's +z up back into +y up)"""
-    return Vector((p[0], -p[2], p[1]))
+SCENE = start()
 
 
 # ---------------------------------------------------------------------------------------------------- materials
 
-def hexrgb(h):
-    c = [((h >> s) & 255) / 255 for s in (16, 8, 0)]
-    return [(x / 12.92) if x <= 0.04045 else ((x + 0.055) / 1.055) ** 2.4 for x in c]
-
-
-class Mat:
-    """A procedural surface: colour, roughness, metalness and a bump, each a socket the baker can route to emission."""
-
-    def __init__(self, name, color, rough, metal, detail, wear=0.0, bump=0.4, scale=30.0, var=0.12):
-        self.name = name
-        m = bpy.data.materials.new(name)
-        m.use_nodes = True
-        nt = m.node_tree
-        nt.nodes.clear()
-        self.m, self.nt = m, nt
-        N = nt.nodes.new
-        L = nt.links.new
-        tc = N('ShaderNodeTexCoord')
-        obj = tc.outputs['Object']
-        # colour wander: a soft cloud
-        n1 = N('ShaderNodeTexNoise')
-        n1.inputs['Scale'].default_value = scale * 0.18
-        n1.inputs['Detail'].default_value = 4
-        L(obj, n1.inputs['Vector'])
-        base = hexrgb(color)
-        lo = N('ShaderNodeValToRGB')
-        lo.color_ramp.elements[0].color = (*[c * (1 - var) for c in base], 1)
-        lo.color_ramp.elements[1].color = (*[c * (1 + var) for c in base], 1)
-        L(n1.outputs['Fac'], lo.inputs['Fac'])
-        col = lo.outputs['Color']
-        height = self.detail(detail, obj, scale)
-        # worn edges catch the light: a bevelled normal against the true one marks every edge
-        if wear > 0:
-            bev = N('ShaderNodeBevel')
-            bev.inputs['Radius'].default_value = 0.012
-            geo = N('ShaderNodeNewGeometry')
-            dot = N('ShaderNodeVectorMath')
-            dot.operation = 'DOT_PRODUCT'
-            L(bev.outputs['Normal'], dot.inputs[0])
-            L(geo.outputs['Normal'], dot.inputs[1])
-            edge = N('ShaderNodeMapRange')
-            edge.inputs['From Min'].default_value = 0.985
-            edge.inputs['From Max'].default_value = 0.9
-            L(dot.outputs['Value'], edge.inputs['Value'])
-            n2 = N('ShaderNodeTexNoise')
-            n2.inputs['Scale'].default_value = scale * 0.9
-            L(obj, n2.inputs['Vector'])
-            mul = N('ShaderNodeMath')
-            mul.operation = 'MULTIPLY'
-            L(edge.outputs['Result'], mul.inputs[0])
-            L(n2.outputs['Fac'], mul.inputs[1])
-            mul2 = N('ShaderNodeMath')
-            mul2.operation = 'MULTIPLY'
-            mul2.use_clamp = True
-            L(mul.outputs['Value'], mul2.inputs[0])
-            mul2.inputs[1].default_value = 2.2 * wear
-            mix = N('ShaderNodeMix')
-            mix.data_type = 'RGBA'
-            L(mul2.outputs['Value'], mix.inputs[0])
-            L(col, mix.inputs[6])
-            mix.inputs[7].default_value = (*[min(1, c * 2.4 + 0.02) for c in base], 1)
-            col = mix.outputs[2]
-            self.wear = mul2.outputs['Value']
-        else:
-            self.wear = None
-        # roughness wanders a little, and polished where worn
-        rv = N('ShaderNodeMapRange')
-        rv.inputs['To Min'].default_value = rough - 0.08
-        rv.inputs['To Max'].default_value = rough + 0.08
-        L(n1.outputs['Fac'], rv.inputs['Value'])
-        r = rv.outputs['Result']
-        if self.wear is not None:
-            sub = N('ShaderNodeMath')
-            sub.operation = 'MULTIPLY_ADD'
-            L(self.wear, sub.inputs[0])
-            sub.inputs[1].default_value = -0.18
-            L(r, sub.inputs[2])
-            r = sub.outputs['Value']
-        val = N('ShaderNodeValue')
-        val.outputs[0].default_value = metal
-        bn = N('ShaderNodeBump')
-        bn.inputs['Strength'].default_value = bump
-        bn.inputs['Distance'].default_value = 0.004
-        L(height, bn.inputs['Height'])
-        bsdf = N('ShaderNodeBsdfPrincipled')
-        L(col, bsdf.inputs['Base Color'])
-        L(r, bsdf.inputs['Roughness'])
-        L(val.outputs[0], bsdf.inputs['Metallic'])
-        L(bn.outputs['Normal'], bsdf.inputs['Normal'])
-        out = N('ShaderNodeOutputMaterial')
-        L(bsdf.outputs['BSDF'], out.inputs['Surface'])
-        emit = N('ShaderNodeEmission')
-        self.sock = {'color': col, 'rough': r, 'metal': val.outputs[0]}
-        self.bsdf, self.out, self.emit = bsdf, out, emit
-        self.img = N('ShaderNodeTexImage')
-
-    def detail(self, kind, obj, s):
-        N = self.nt.nodes.new
-        L = self.nt.links.new
-        def mapped(sx, sy, sz):
-            mp = N('ShaderNodeMapping')
-            mp.inputs['Scale'].default_value = (sx, sy, sz)
-            L(obj, mp.inputs['Vector'])
-            return mp.outputs['Vector']
-        if kind == 'hammer':
-            v = N('ShaderNodeTexVoronoi')
-            v.feature = 'SMOOTH_F1'
-            v.inputs['Scale'].default_value = s
-            L(obj, v.inputs['Vector'])
-            return v.outputs['Distance']
-        if kind == 'mail':
-            v = N('ShaderNodeTexVoronoi')
-            v.feature = 'DISTANCE_TO_EDGE'
-            v.inputs['Scale'].default_value = s
-            L(mapped(1, 1, 1.6), v.inputs['Vector'])
-            return v.outputs['Distance']
-        if kind in ('weave', 'leather', 'smooth'):
-            n = N('ShaderNodeTexNoise')
-            n.inputs['Scale'].default_value = s
-            n.inputs['Detail'].default_value = 6 if kind == 'leather' else 2
-            if kind == 'weave':
-                w1 = N('ShaderNodeTexWave')
-                w1.inputs['Scale'].default_value = s
-                w1.bands_direction = 'X'
-                L(obj, w1.inputs['Vector'])
-                w2 = N('ShaderNodeTexWave')
-                w2.inputs['Scale'].default_value = s
-                w2.bands_direction = 'Z'
-                L(obj, w2.inputs['Vector'])
-                add = N('ShaderNodeMath')
-                add.operation = 'ADD'
-                L(w1.outputs['Fac'], add.inputs[0])
-                L(w2.outputs['Fac'], add.inputs[1])
-                return add.outputs['Value']
-            L(obj, n.inputs['Vector'])
-            return n.outputs['Fac']
-        if kind in ('fur', 'feather', 'grain', 'brushed'):
-            # long strands: noise stretched along one axis, bent by a second noise
-            axis = {'fur': (1, 4, 4), 'feather': (5, 5, 1), 'grain': (5, 5, 0.6), 'brushed': (1, 1, 8)}[kind]
-            w = N('ShaderNodeTexWave')
-            w.wave_type = 'BANDS'
-            w.bands_direction = 'X' if kind in ('fur',) else 'Z' if kind in ('grain',) else 'Y'
-            w.inputs['Scale'].default_value = s
-            w.inputs['Distortion'].default_value = 6 if kind != 'brushed' else 1
-            w.inputs['Detail'].default_value = 3
-            w.inputs['Detail Scale'].default_value = 2
-            L(mapped(*axis), w.inputs['Vector'])
-            return w.outputs['Fac']
-        if kind == 'scale':
-            v = N('ShaderNodeTexVoronoi')
-            v.feature = 'F1'
-            v.inputs['Scale'].default_value = s
-            L(obj, v.inputs['Vector'])
-            return v.outputs['Distance']
-        if kind == 'veins':
-            v = N('ShaderNodeTexVoronoi')
-            v.feature = 'DISTANCE_TO_EDGE'
-            v.inputs['Scale'].default_value = s
-            L(mapped(1, 1, 3), v.inputs['Vector'])
-            return v.outputs['Distance']
-        if kind == 'stone':
-            v = N('ShaderNodeTexVoronoi')
-            v.inputs['Scale'].default_value = s
-            L(obj, v.inputs['Vector'])
-            n = N('ShaderNodeTexNoise')
-            n.inputs['Scale'].default_value = s * 3
-            n.inputs['Detail'].default_value = 8
-            L(obj, n.inputs['Vector'])
-            add = N('ShaderNodeMath')
-            add.operation = 'MULTIPLY_ADD'
-            L(n.outputs['Fac'], add.inputs[0])
-            add.inputs[1].default_value = 0.5
-            L(v.outputs['Distance'], add.inputs[2])
-            return add.outputs['Value']
-        if kind == 'rings':
-            w = N('ShaderNodeTexWave')
-            w.wave_type = 'RINGS'
-            w.rings_direction = 'Z'
-            w.inputs['Scale'].default_value = s
-            w.inputs['Distortion'].default_value = 3
-            L(obj, w.inputs['Vector'])
-            return w.outputs['Fac']
-        raise ValueError(kind)
-
-    def route(self, what):
-        """sends one channel to the output as emission, or (None) puts the BSDF back"""
-        L = self.nt.links.new
-        if what is None:
-            L(self.bsdf.outputs['BSDF'], self.out.inputs['Surface'])
-            return
-        L(self.sock[what], self.emit.inputs['Color'])
-        L(self.emit.outputs['Emission'], self.out.inputs['Surface'])
-
-
-MATS = {}
-
-
-def mat(name):
-    if name not in MATS:
-        spec = {
-            # name: colour, roughness, metalness, detail, edge wear, bump, detail scale, colour wander
-            'plate': (0x2b3650, 0.4, 0.8, 'hammer', 0.55, 0.35, 34),
-            'trim': (0x9fb1cf, 0.3, 0.95, 'brushed', 0.3, 0.2, 40),
-            'steel': (0x8794ad, 0.3, 0.92, 'brushed', 0.25, 0.15, 30),
-            'iron': (0x343a48, 0.5, 0.85, 'hammer', 0.5, 0.4, 40),
-            'mail': (0x2c3446, 0.45, 0.85, 'mail', 0.0, 1.0, 140),
-            'leather': (0x2a2a33, 0.7, 0.0, 'leather', 0.35, 0.35, 60),
-            'cloth': (0x141d33, 0.9, 0.0, 'weave', 0.0, 0.25, 160),
-            'cape': (0x111a31, 0.9, 0.0, 'weave', 0.0, 0.25, 160),
-            'cloak': (0x101828, 0.92, 0.0, 'weave', 0.0, 0.25, 140),
-            'plume': (0x1c2350, 0.8, 0.0, 'feather', 0.0, 0.5, 60),
-            'fur': (0x161c2e, 0.95, 0.0, 'fur', 0.0, 0.8, 26),
-            'mane': (0x1a2034, 0.95, 0.0, 'fur', 0.0, 0.8, 30),
-            'horn': (0x262c3e, 0.45, 0.25, 'grain', 0.4, 0.5, 30),
-            'claw': (0x9aa4b8, 0.4, 0.1, 'smooth', 0.0, 0.1, 30),
-            'pad': (0x1d1f27, 0.7, 0.0, 'leather', 0.0, 0.5, 80),
-            'scale': (0x1b1d36, 0.55, 0.15, 'scale', 0.35, 0.6, 70),
-            'belly': (0x2a2c4a, 0.6, 0.1, 'grain', 0.3, 0.5, 20),
-            'membrane': (0x1d1b3e, 0.6, 0.0, 'veins', 0.0, 0.5, 9),
-            'wood': (0x3a3631, 0.82, 0.0, 'grain', 0.2, 0.6, 26),
-            'bark': (0x26231f, 0.95, 0.0, 'grain', 0.0, 1.2, 14),
-            'woodEnd': (0x57504a, 0.9, 0.0, 'rings', 0.0, 0.4, 30),
-            'cube': (0x252e45, 0.55, 0.35, 'stone', 0.6, 0.6, 18),
-            'cubeDark': (0x1a2133, 0.6, 0.3, 'stone', 0.4, 0.6, 18),
-            'visor': (0x030409, 1.0, 0.0, 'smooth', 0.0, 0.0, 10),
-        }[name]
-        c, r, m, d, w, b, s = spec
-        MATS[name] = Mat(name, c, r, m, d, wear=w, bump=b, scale=s)
-    return MATS[name].m
-
-
-def glow(name, color, strength):
-    m = bpy.data.materials.new(name)
-    m.use_nodes = True
-    b = m.node_tree.nodes['Principled BSDF']
-    b.inputs['Base Color'].default_value = (0, 0, 0, 1)
-    b.inputs['Emission Color'].default_value = (*hexrgb(color), 1)
-    b.inputs['Emission Strength'].default_value = strength
-    return m
+mat = Materials({
+    # name: colour, roughness, metalness, detail, edge wear, bump, detail scale, colour wander
+    'plate': (0x2b3650, 0.4, 0.8, 'hammer', 0.55, 0.35, 34),
+    'trim': (0x9fb1cf, 0.3, 0.95, 'brushed', 0.3, 0.2, 40),
+    'steel': (0x8794ad, 0.3, 0.92, 'brushed', 0.25, 0.15, 30),
+    'iron': (0x343a48, 0.5, 0.85, 'hammer', 0.5, 0.4, 40),
+    'mail': (0x2c3446, 0.45, 0.85, 'mail', 0.0, 1.0, 140),
+    'leather': (0x2a2a33, 0.7, 0.0, 'leather', 0.35, 0.35, 60),
+    'cloth': (0x141d33, 0.9, 0.0, 'weave', 0.0, 0.25, 160),
+    'cape': (0x111a31, 0.9, 0.0, 'weave', 0.0, 0.25, 160),
+    'cloak': (0x101828, 0.92, 0.0, 'weave', 0.0, 0.25, 140),
+    'plume': (0x1c2350, 0.8, 0.0, 'feather', 0.0, 0.5, 60),
+    'fur': (0x161c2e, 0.95, 0.0, 'fur', 0.0, 0.8, 26),
+    'mane': (0x1a2034, 0.95, 0.0, 'fur', 0.0, 0.8, 30),
+    'horn': (0x262c3e, 0.45, 0.25, 'grain', 0.4, 0.5, 30),
+    'claw': (0x9aa4b8, 0.4, 0.1, 'smooth', 0.0, 0.1, 30),
+    'pad': (0x1d1f27, 0.7, 0.0, 'leather', 0.0, 0.5, 80),
+    'scale': (0x1b1d36, 0.55, 0.15, 'scale', 0.35, 0.6, 70),
+    'belly': (0x2a2c4a, 0.6, 0.1, 'grain', 0.3, 0.5, 20),
+    'membrane': (0x1d1b3e, 0.6, 0.0, 'veins', 0.0, 0.5, 9),
+    'wood': (0x3a3631, 0.82, 0.0, 'grain', 0.2, 0.6, 26),
+    'bark': (0x26231f, 0.95, 0.0, 'grain', 0.0, 1.2, 14),
+    'woodEnd': (0x57504a, 0.9, 0.0, 'rings', 0.0, 0.4, 30),
+    'cube': (0x252e45, 0.55, 0.35, 'stone', 0.6, 0.6, 18),
+    'cubeDark': (0x1a2133, 0.6, 0.3, 'stone', 0.4, 0.6, 18),
+    'visor': (0x030409, 1.0, 0.0, 'smooth', 0.0, 0.0, 10),
+})
 
 
 EYE = glow('eye', 0xcfefff, 6)
@@ -307,99 +75,6 @@ COLL = bpy.data.collections.new('watch')
 SCENE.collection.children.link(COLL)
 
 
-def frame(t, front):
-    t = t.normalized()
-    v = (front - t * front.dot(t))
-    if v.length < 1e-6:
-        v = Vector((0, 0, 1)) if abs(t.z) < 0.9 else Vector((0, 1, 0))
-        v = (v - t * v.dot(t))
-    v.normalize()
-    return t.cross(v), v
-
-
-def ring(c, t, front, rx, rz, n, a0=0.0, a1=TAU, shape=None):
-    u, v = frame(t, front)
-    closed = abs((a1 - a0) - TAU) < 1e-6
-    m = n if closed else n + 1
-    pts = []
-    for i in range(m):
-        a = a0 + (a1 - a0) * i / n
-        k, push = shape(a) if shape else (1.0, 0.0)
-        pts.append(c + u * (rx * math.cos(a) * k) + v * (rz * math.sin(a) * k + push))
-    return pts, closed
-
-
-def ridge(depth, width=0.45, at=math.pi / 2):
-    """a raised line down the front (a=pi/2), like a breastplate's medial ridge"""
-    def f(a):
-        d = (a - at + math.pi) % TAU - math.pi
-        return 1.0, depth * math.exp(-(d / width) ** 2)
-    return f
-
-
-def loft(secs, n=20, arc=(0.0, TAU), cap0=False, cap1=False):
-    """
-    A surface through rings. Each section: dict(c=centre, rx, rz, t=axis (default up), f=front (default +z), s=shape).
-    Returns (verts, faces, rings) where rings are the vertex index lists of each ring, for trims and seams.
-    """
-    verts, faces, rings = [], [], []
-    closed = False
-    for s in secs:
-        pts, closed = ring(V(s['c']), V(s.get('t', (0, 1, 0))), V(s.get('f', (0, 0, 1))), s['rx'], s['rz'], n, arc[0], arc[1], s.get('s'))
-        rings.append(list(range(len(verts), len(verts) + len(pts))))
-        verts += pts
-    m = len(rings[0])
-    for a, b in zip(rings, rings[1:]):
-        for j in range(m if closed else m - 1):
-            j2 = (j + 1) % m
-            faces.append((a[j], a[j2], b[j2], b[j]))
-    for cap, r in ((cap0, rings[0]), (cap1, rings[-1])):
-        if cap:
-            c = sum((verts[i] for i in r), Vector()) / len(r)
-            verts.append(c)
-            ci = len(verts) - 1
-            for j in range(m if closed else m - 1):
-                faces.append((r[j], r[(j + 1) % m], ci))
-    return verts, faces, rings
-
-
-def path_secs(pts, radii, front=(0, 0, 1), aspect=1.0, shape=None):
-    """sections along a polyline, each facing along the path"""
-    pts = [V(p) for p in pts]
-    out = []
-    for i, p in enumerate(pts):
-        a = pts[max(0, i - 1)]
-        b = pts[min(len(pts) - 1, i + 1)]
-        r = radii[i]
-        out.append(dict(c=p, t=(b - a), f=front, rx=r, rz=r * aspect, s=shape))
-    return out
-
-
-def smooth_path(pts, steps=4):
-    """a Catmull-Rom curve through pts"""
-    P = [V(p) for p in pts]
-    P = [P[0] * 2 - P[1]] + P + [P[-1] * 2 - P[-2]]
-    out = []
-    for i in range(1, len(P) - 2):
-        p0, p1, p2, p3 = P[i - 1], P[i], P[i + 1], P[i + 2]
-        for k in range(steps):
-            t = k / steps
-            out.append(0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + (-p0 + 3 * p1 - 3 * p2 + p3) * t ** 3))
-    out.append(P[-2])
-    return out
-
-
-def interp(vals, n):
-    """vals spread over n samples, linearly"""
-    out = []
-    for i in range(n):
-        x = i / (n - 1) * (len(vals) - 1)
-        k = min(int(x), len(vals) - 2)
-        f = x - k
-        out.append(vals[k] * (1 - f) + vals[k + 1] * f)
-    return out
-
-
 class Fig:
     """one watcher's pieces, by role: 'body' (rigid, one texture set), 'cape' (sways), 'eye', or a named node"""
 
@@ -408,90 +83,23 @@ class Fig:
         self.parts = []
 
     def add(self, name, verts, faces, m, role='body', sub=0, solid=0.0, sharp=None, flip=False, center=None):
-        me = bpy.data.meshes.new(f'{self.id}-{name}')
-        me.from_pydata([B(v) for v in verts], [], faces)
-        me.validate()
-        bm = bmesh.new()
-        bm.from_mesh(me)
-        bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-6)
-        # faces point away from the piece's own middle (or the given one)
-        if all(e.is_manifold for e in bm.edges):
-            bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-        else:
-            c = B(V(center)) if center is not None else sum((v.co for v in bm.verts), Vector()) / max(1, len(bm.verts))
-            bm.faces.ensure_lookup_table()
-            score = sum((f.calc_center_median() - c).dot(f.normal) * f.calc_area() for f in bm.faces)
-            if (score < 0) != flip:
-                for f in bm.faces:
-                    f.normal_flip()
-        bm.to_mesh(me)
-        bm.free()
+        me = new_mesh(f'{self.id}-{name}', verts, faces)
+        orient(me, center, flip)
         o = bpy.data.objects.new(me.name, me)
         COLL.objects.link(o)
-        me.materials.append(m if isinstance(m, bpy.types.Material) else mat(m))
-        for p in me.polygons:
-            p.use_smooth = True
-        if solid:
-            md = o.modifiers.new('solid', 'SOLIDIFY')
-            md.thickness = solid
-            md.offset = -1
-            md.use_even_offset = True
-        if sub:
-            md = o.modifiers.new('sub', 'SUBSURF')
-            md.levels = md.render_levels = sub
-        apply_mods(o)
+        dress(o, m if isinstance(m, bpy.types.Material) else mat(m), solid, sub)
         if sharp is not None:
             o.data.set_sharp_from_angle(angle=math.radians(sharp))
         self.parts.append((o, role))
         return o
 
     def tube(self, name, pts, r, m, n=8, role='body', sub=0, closed=False, steps=1, aspect=1.0, front=(0, 0, 1)):
-        """a tube along pts; r is one radius or one per point"""
-        if steps > 1:
-            pts = smooth_path(pts, steps)
-        radii = r if isinstance(r, (list, tuple)) else [r] * len(pts)
-        if len(radii) != len(pts):
-            radii = interp(list(radii), len(pts))
-        if closed:
-            pts = list(pts) + [pts[0]]
-            radii = list(radii) + [radii[0]]
-        secs = path_secs(pts, radii, front=front, aspect=aspect)
-        if closed:
-            # the seam's two rings face along the loop
-            secs[0]['t'] = secs[-1]['t'] = V(pts[1]) - V(pts[-2])
-        v, f, rings = loft(secs, n, cap0=not closed, cap1=not closed)
-        if closed:
-            # weld the end ring onto the start ring
-            last, first = rings[-1], rings[0]
-            remap = {a: b for a, b in zip(last, first)}
-            f = [tuple(remap.get(i, i) for i in face) for face in f]
+        v, f = tube_mesh(pts, r, n, closed, steps, aspect, front)
         return self.add(name, v, f, m, role=role, sub=sub, center=None)
 
     def ball(self, name, at, r, m, s=(1, 1, 1), n=14, role='body', sub=0, rot=None):
-        rings = max(6, n // 2)
-        secs = []
-        for i in range(rings + 1):
-            a = -math.pi / 2 + math.pi * i / rings
-            y = math.sin(a) * r * s[1]
-            rr = max(1e-4, math.cos(a) * r)
-            secs.append(dict(c=(0, y, 0), rx=rr * s[0], rz=rr * s[2]))
-        v, f, _ = loft(secs, n)
-        if rot:
-            R = Euler(rot, 'XYZ').to_matrix()
-            v = [R @ x for x in v]
-        v = [x + V(at) for x in v]
+        v, f = ball_mesh(at, r, s, n, rot)
         return self.add(name, v, f, m, role=role, sub=sub, center=at)
-
-
-def apply_mods(o):
-    if not o.modifiers:
-        return
-    dg = bpy.context.evaluated_depsgraph_get()
-    me = bpy.data.meshes.new_from_object(o.evaluated_get(dg))
-    old = o.data
-    o.modifiers.clear()
-    o.data = me
-    bpy.data.meshes.remove(old)
 
 
 def rim(f, name, pts, r, m='trim', n=4):
@@ -935,49 +543,7 @@ def harrow():
 
 
 def metaball_mesh(f, name, elements, m, res=0.025, decimate=None, fur=0.0, role='body'):
-    """a smooth organic body from metaball elements (each: co, surface radius r, size s, rotation); returns the object"""
-    mb = bpy.data.metaballs.new(f'{f.id}-{name}')
-    mb.resolution = mb.render_resolution = res
-    mb.threshold = 0.6
-    for e in elements:
-        el = mb.elements.new()
-        el.type = 'ELLIPSOID'
-        el.co = B(V(e['co']))
-        # stiff elements blend only where they nearly touch, so masses stay distinct: alone, one meets the threshold at
-        # 0.78 of its radius (stiffness 10, threshold 0.6)
-        el.stiffness = 10.0
-        el.radius = e['r'] / 0.78
-        sx, sy, sz = e.get('s', (1, 1, 1))
-        el.size_x, el.size_y, el.size_z = sx, sz, sy
-        if 'rot' in e:
-            C = Matrix(((1, 0, 0), (0, 0, -1), (0, 1, 0)))
-            el.rotation = (C @ Euler(e['rot'], 'XYZ').to_matrix() @ C.inverted()).to_quaternion()
-    mo = bpy.data.objects.new(mb.name, mb)
-    COLL.objects.link(mo)
-    dg = bpy.context.evaluated_depsgraph_get()
-    me = bpy.data.meshes.new_from_object(mo.evaluated_get(dg))
-    bpy.data.objects.remove(mo)
-    o = bpy.data.objects.new(f'{f.id}-{name}', me)
-    COLL.objects.link(o)
-    me.materials.append(mat(m))
-    sm = o.modifiers.new('smooth', 'SMOOTH')
-    sm.factor = 0.5
-    sm.iterations = 4
-    if fur:
-        # shaggy fur in the silhouette: clumps a few centimetres across
-        tex = bpy.data.textures.new(f'{f.id}-furtex', 'CLOUDS')
-        tex.noise_scale = 0.045
-        tex.noise_depth = 2
-        d = o.modifiers.new('fur', 'DISPLACE')
-        d.texture = tex
-        d.strength = fur
-        d.mid_level = 0.5
-    if decimate:
-        d = o.modifiers.new('dec', 'DECIMATE')
-        d.ratio = decimate
-    apply_mods(o)
-    for p in o.data.polygons:
-        p.use_smooth = True
+    o = metaball(COLL, f'{f.id}-{name}', elements, mat(m), res, fur=fur, decimate=decimate)
     f.parts.append((o, role))
     return o
 
@@ -987,15 +553,6 @@ def chain(el, pts, radii, s=(1, 1, 1), steps=3):
     path = smooth_path(pts, steps)
     for p, r in zip(path, interp(list(radii), len(path))):
         el(p, r, s)
-
-
-def on_surface(o, toward, frm):
-    """the point where a ray from `frm` towards `toward` meets the body, and its normal"""
-    d = V(toward) - V(frm)
-    ok, p, n, _ = raycast(o, V(frm), d.normalized())
-    if not ok:
-        raise RuntimeError(f'nothing hit on {o.name} from {frm}')
-    return p, n
 
 
 def bramble():
@@ -1046,18 +603,6 @@ def bramble():
     return f
 
 
-def raycast(o, origin, direction):
-    """casts in page space against one object"""
-    mw = o.matrix_world
-    inv = mw.inverted()
-    ok, loc, nrm, idx = o.ray_cast(inv @ B(origin), (inv.to_3x3() @ B(direction)).normalized())
-    if not ok:
-        return False, None, None, None
-    w = mw @ loc
-    nw = (mw.to_3x3() @ nrm).normalized()
-    return True, V(w.x, w.z, -w.y), V(nw.x, nw.z, -nw.y), idx
-
-
 def bounds(o):
     xs = [v.co.x for v in o.data.vertices]
     ys = [-v.co.y for v in o.data.vertices]
@@ -1079,7 +624,6 @@ def wing(f, s):
         mid = wrist + (t - wrist) * 0.5 + X(0.0, 0.02, 0.0)
         f.tube(f'w{s}-finger{i}', [wrist, mid, t], [0.013, 0.009, 0.0025], 'scale', n=6, steps=3, role=role, sub=0)
     # membrane: a fan of panels from the arm to each finger, the trailing edge scalloped between the tips
-    edge = [wrist] + tips + [X(0.12, -0.2, -0.01), root]
     verts = []
     faces = []
     def scallop(a, b, depth, n=5):
@@ -1181,14 +725,13 @@ def block():
     f = Fig('block')
     # the log: bark with deep ridges, cut ends with rings
     secs = []
-    rnd = random.Random(4)
     for i in range(9):
         x = -0.34 + 0.68 * i / 8
         def bark(a, i=i):
             return 1.0 + 0.06 * math.sin(a * 9 + i * 0.7) * (0.6 + 0.4 * math.sin(a * 3 + i)), 0.0
         secs.append(dict(c=(x, 0.13, 0), t=(1, 0, 0), f=(0, 1, 0), rx=0.13 - 0.01 * abs(x), rz=0.125, s=bark))
     v, fc, _ = loft(secs, 22, cap0=True, cap1=True)
-    o = f.add('log', v, fc, 'bark', sub=1)
+    f.add('log', v, fc, 'bark', sub=1)
     for x in (-0.338, 0.338):
         s = 1 if x > 0 else -1
         f.ball(f'logend{s}', (x + 0.004 * s, 0.13, 0), 0.118, 'woodEnd', s=(0.06, 1, 1.02), n=16)
@@ -1242,90 +785,14 @@ TEX = {'block': 512}
 
 def bake_figure(f):
     objs = [o for o, role in f.parts if role != 'eye']
-    size = TEX.get(f.id, 1024)
     for o in bpy.data.objects:
         o.hide_render = o.type == 'MESH' and o not in [p for p, _ in f.parts]
-    bpy.ops.object.select_all(action='DESELECT')
-    for o in objs:
-        o.select_set(True)
-    bpy.context.view_layer.objects.active = objs[0]
-    bpy.ops.object.mode_set(mode='EDIT')
-    bpy.ops.mesh.select_all(action='SELECT')
-    bpy.ops.uv.smart_project(angle_limit=math.radians(60), island_margin=0.003, area_weight=0.6, correct_aspect=True, scale_to_bounds=False)
-    bpy.ops.uv.pack_islands(margin=0.004, rotate=True)
-    bpy.ops.object.mode_set(mode='OBJECT')
-    imgs = {}
-    for k in ('color', 'rough', 'metal', 'ao', 'normal'):
-        imgs[k] = bpy.data.images.new(f'{f.id}-{k}', size, size, alpha=False, float_buffer=k == 'normal')
-        if k != 'color':
-            imgs[k].colorspace_settings.name = 'Non-Color'
+    unwrap(objs, 0.004)
     used = {s.material.name for o in objs for s in o.material_slots if s.material}
-    procs = [MATS[n] for n in used if n in MATS]
-    def target(k):
-        for p in procs:
-            p.img.image = imgs[k]
-            p.nt.nodes.active = p.img
-    SCENE.render.bake.margin = 6
-    SCENE.cycles.samples = 1
-    for k in ('color', 'rough', 'metal'):
-        target(k)
-        for p in procs:
-            p.route(k)
-        bpy.ops.object.bake(type='EMIT', margin=6, use_clear=True)
-    for p in procs:
-        p.route(None)
-    target('normal')
-    SCENE.cycles.samples = 4
-    bpy.ops.object.bake(type='NORMAL', normal_space='TANGENT', margin=6, use_clear=True)
-    target('ao')
-    SCENE.cycles.samples = 96
-    bpy.ops.object.bake(type='AO', margin=6, use_clear=True)
-    # colour carries the occlusion, softened; roughness and metalness go to G and B of one image
-    import numpy as np
-    def px(img):
-        a = np.empty(size * size * 4, dtype=np.float32)
-        img.pixels.foreach_get(a)
-        return a.reshape(-1, 4)
-    col, ao, ro, me = px(imgs['color']), px(imgs['ao']), px(imgs['rough']), px(imgs['metal'])
-    occ = 0.45 + 0.55 * ao[:, :1]
-    col[:, :3] *= occ
-    orm = np.ones_like(col)
-    orm[:, 0] = 1.0
-    orm[:, 1] = ro[:, 0]
-    orm[:, 2] = me[:, 0]
-    out_col = bpy.data.images.new(f'{f.id}-basecolor', size, size, alpha=False)
-    out_col.pixels.foreach_set(col.ravel())
-    out_orm = bpy.data.images.new(f'{f.id}-orm', size, size, alpha=False)
-    out_orm.colorspace_settings.name = 'Non-Color'
-    out_orm.pixels.foreach_set(orm.ravel())
-    os.makedirs(os.path.join(OUT, 'tex'), exist_ok=True)
-    for img, name in ((out_col, 'basecolor'), (out_orm, 'orm'), (imgs['normal'], 'normal')):
-        img.filepath_raw = os.path.join(OUT, 'tex', f'{f.id}-{name}.png')
-        img.file_format = 'PNG'
-        img.save()
+    procs = [mat.made[n] for n in used if n in mat.made]
+    maps = bake(f.id, procs, TEX.get(f.id, 1024), margin=6, ao_samples=96, ao_floor=0.45, out=OUT)
     # the shipping materials: one texture set; the cape keeps its own material so it can sway
-    def shipping(name, double):
-        m = bpy.data.materials.new(name)
-        m.use_nodes = True
-        nt = m.node_tree
-        b = nt.nodes['Principled BSDF']
-        tc = nt.nodes.new('ShaderNodeTexImage')
-        tc.image = out_col
-        nt.links.new(tc.outputs['Color'], b.inputs['Base Color'])
-        to = nt.nodes.new('ShaderNodeTexImage')
-        to.image = out_orm
-        sep = nt.nodes.new('ShaderNodeSeparateColor')
-        nt.links.new(to.outputs['Color'], sep.inputs['Color'])
-        nt.links.new(sep.outputs['Green'], b.inputs['Roughness'])
-        nt.links.new(sep.outputs['Blue'], b.inputs['Metallic'])
-        tn = nt.nodes.new('ShaderNodeTexImage')
-        tn.image = imgs['normal']
-        nm = nt.nodes.new('ShaderNodeNormalMap')
-        nt.links.new(tn.outputs['Color'], nm.inputs['Color'])
-        nt.links.new(nm.outputs['Normal'], b.inputs['Normal'])
-        m.use_backface_culling = not double
-        return m
-    ship = {'body': shipping(f'{f.id}', False), 'cape': shipping(f'{f.id}-cape', True)}
+    ship = {'body': shipping(f'{f.id}', maps, False), 'cape': shipping(f'{f.id}-cape', maps, True)}
     for o, role in f.parts:
         if role == 'eye':
             continue
@@ -1333,42 +800,7 @@ def bake_figure(f):
         o.data.materials.append(ship['cape'] if role == 'cape' else ship['body'])
 
 
-def assemble(f):
-    """joins each role's pieces into one mesh under the figure's root"""
-    root = bpy.data.objects.new(f.id, None)
-    COLL.objects.link(root)
-    groups = {}
-    for o, role in f.parts:
-        key = 'body' if role == 'cape' else role
-        groups.setdefault(key, []).append(o)
-    for key, objs in groups.items():
-        if len(objs) > 1:
-            with bpy.context.temp_override(active_object=objs[0], selected_editable_objects=objs, object=objs[0]):
-                bpy.ops.object.join()
-        o = objs[0]
-        o.name = o.data.name = f'{f.id}-{key}'
-        o.parent = root
-    return root
-
-
 TARGET = {'sable': 10000, 'anvil': 10500, 'harrow': 10500, 'bramble': 8000, 'vesper': 7000, 'block': 3000}
-
-
-def slim(f):
-    """collapses the bigger pieces evenly so the figure comes in near its triangle budget; small pieces keep their shape"""
-    count = lambda o: sum(len(p.vertices) - 2 for p in o.data.polygons)
-    sizes = [(o, count(o)) for o, _ in f.parts]
-    big = sum(n for _, n in sizes if n > 160)
-    small = sum(n for _, n in sizes if n <= 160)
-    r = max(0.2, min(1.0, (TARGET[f.id] - small) / max(1, big)))
-    if r >= 0.999:
-        return
-    for o, n in sizes:
-        if n > 160:
-            d = o.modifiers.new('slim', 'DECIMATE')
-            d.ratio = r
-            d.delimit = {'NORMAL', 'SHARP'}
-            apply_mods(o)
 
 
 def heavy(f):
@@ -1376,54 +808,14 @@ def heavy(f):
     print(f.id, 'heaviest:', ', '.join(f'{n}={t}' for t, n in rows[:12]), 'total', sum(t for t, _ in rows))
 
 
-def tris(root):
-    n = 0
-    for c in root.children:
-        n += sum(len(p.vertices) - 2 for p in c.data.polygons)
-    return n
-
-
 def preview(roots):
     """stills of each figure in a dark camp light: the blue fire low in front, the moon behind"""
-    world = bpy.data.worlds.new('night')
-    world.use_nodes = True
-    world.node_tree.nodes['Background'].inputs['Color'].default_value = (*hexrgb(0x07080f), 1)
-    world.node_tree.nodes['Background'].inputs['Strength'].default_value = 1.0
-    SCENE.world = world
-    SCENE.view_settings.view_transform = 'AgX'
-    SCENE.cycles.samples = 64
-    SCENE.cycles.use_denoising = True
-    SCENE.render.resolution_x, SCENE.render.resolution_y = 600, 800
-    def light(name, kind, at, color, power, size=0.5):
-        ld = bpy.data.lights.new(name, kind)
-        ld.color = hexrgb(color)
-        ld.energy = power
-        if kind == 'AREA':
-            ld.size = size
-        lo = bpy.data.objects.new(name, ld)
-        SCENE.collection.objects.link(lo)
-        lo.location = B(V(at))
-        d = (B(V(0, 0.9, 0)) - lo.location)
-        lo.rotation_euler = d.to_track_quat('-Z', 'Y').to_euler()
-        return lo
+    cam = stage(samples=64, width=600, height=800, ground_color=0x10141f, ground_rough=0.95)
+    cam.data.lens = 70
     light('fire', 'POINT', (0.9, 0.45, 1.3), 0x9fdcff, 120)
     light('moon', 'AREA', (-1.4, 2.6, -1.8), 0x6fa8ff, 220, 1.5)
     light('rim', 'AREA', (1.6, 1.6, -1.4), 0x4fb8ff, 160, 1.0)
     light('fill', 'AREA', (-1.0, 1.2, 2.2), 0x2a3550, 40, 2.0)
-    ground = bpy.data.meshes.new('ground')
-    ground.from_pydata([B(V(x, 0, z)) for x, z in ((-6, -6), (6, -6), (6, 6), (-6, 6))], [], [(0, 1, 2, 3)])
-    go = bpy.data.objects.new('ground', ground)
-    SCENE.collection.objects.link(go)
-    gm = bpy.data.materials.new('groundm')
-    gm.use_nodes = True
-    gm.node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value = (*hexrgb(0x10141f), 1)
-    gm.node_tree.nodes['Principled BSDF'].inputs['Roughness'].default_value = 0.95
-    ground.materials.append(gm)
-    cam_d = bpy.data.cameras.new('cam')
-    cam_d.lens = 70
-    cam = bpy.data.objects.new('cam', cam_d)
-    SCENE.collection.objects.link(cam)
-    SCENE.camera = cam
     os.makedirs(os.path.join(OUT, 'out'), exist_ok=True)
     for root in roots:
         for r in roots:
@@ -1456,24 +848,15 @@ for id in ONLY:
     figs.append(f)
     print(f'built {id}: {len(f.parts)} pieces')
 for f in figs:
-    slim(f)
+    slim(f.parts, TARGET[f.id])
     heavy(f)
     bake_figure(f)
-roots = [assemble(f) for f in figs]
+roots = [assemble(COLL, f, lambda role: 'body' if role == 'cape' else role) for f in figs]
 for r in roots:
     print(f'{r.name}: {tris(r)} triangles')
-bpy.ops.object.select_all(action='DESELECT')
-for r in roots:
-    r.select_set(True)
     for c in r.children:
-        c.select_set(True)
         c.hide_render = False
-bpy.ops.export_scene.gltf(
-    filepath=os.path.join(OUT, 'watch-raw.glb'), export_format='GLB', use_selection=True, export_yup=True, export_apply=True,
-    export_texcoords=True, export_normals=True, export_tangents=False, export_materials='EXPORT', export_image_format='AUTO',
-    export_animations=False, export_cameras=False, export_lights=False, export_extras=False,
-)
-bpy.ops.wm.save_as_mainfile(filepath=os.path.join(OUT, 'watch.blend'))
+export(roots, OUT, 'watch')
 if RENDERS:
     preview(roots)
 print('done')

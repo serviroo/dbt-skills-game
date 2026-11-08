@@ -61,10 +61,13 @@ const moves = (page) =>
     return [...window.__fitSeen].map((a) => ({ on: a.effect.target.className, ms: a.effect.getComputedTiming().activeDuration, moves: MOVES.filter((p) => a.effect.getKeyframes().some((f) => p in f && f[p] !== 'none')) }));
   }, MOVES);
 
-const faces = (page) =>
+export const faces = (page) =>
   page.evaluate(async () => {
     const { skillCard } = await import('/src/daily/hub.ts');
+    const { foilDay, foilLayer } = await import('/src/daily/wave2.ts');
     const { ROTATION } = await import('/src/content/dbt.ts');
+    // a day that deals a foil card, so each face is also tried as one whatever today is
+    const foil = Array.from({ length: 31 }, (_, i) => `2026-01-${String(i + 1).padStart(2, '0')}`).find(foilDay);
     const card = document.querySelector('.dq-quest .dq-card');
     const inner = card.querySelector('.dq-card-inner');
     const real = inner.querySelector('.dq-cardface--front');
@@ -85,12 +88,27 @@ const faces = (page) =>
       off: parts(real).filter(off).map((e) => (e === card ? 'the card' : e.className.split(' ')[0])),
       hit: card.contains(document.elementFromPoint(label.left + label.width / 2, label.top + label.height / 2)),
     };
+    // runs of the face's words that sit on top of each other: lines whose letter boxes only touch don't
+    const over = (face) => {
+      const runs = [];
+      const walk = document.createTreeWalker(face, NodeFilter.SHOW_TEXT);
+      for (let t = walk.nextNode(); t; t = walk.nextNode()) {
+        if (!t.data.trim() || !t.parentElement.checkVisibility({ checkVisibilityCSS: true })) continue;
+        const range = document.createRange();
+        range.selectNodeContents(t);
+        for (const r of range.getClientRects()) runs.push([t.data.trim(), r]);
+      }
+      return runs.flatMap(([ta, a], i) => runs.slice(i + 1).filter(([tb, b]) => ta !== tb && Math.min(a.right, b.right) - Math.max(a.left, b.left) > 2 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.4 * Math.min(a.height, b.height)).map(([tb]) => `"${ta}" and "${tb}"`));
+    };
     const cut = [];
     const out = [];
-    for (const q of ROTATION) {
+    const on = [];
+    for (const q of ROTATION.flatMap((q) => [q, { ...q, foil }])) {
       const face = skillCard(q.skill, { label: q.label, special: q.special });
+      if (q.foil) foilLayer(window.__daily, face, q.foil);
       inner.replaceChild(face, inner.querySelector('.dq-cardface--front'));
-      const who = `${q.special ?? q.skill}${q.label ? ` (${q.label})` : ''}`;
+      const who = `${q.special ?? q.skill}${q.label ? ` (${q.label})` : ''}${q.foil ? ', foil' : ''}`;
+      on.push(...over(face).map((pair) => `${who}: ${pair}`));
       const gone = parts(face).filter(off);
       if (gone.length) out.push(`${who}: ${gone.map((e) => `${e === card ? 'the card' : e.className.split(' ')[0]} at ${box(e)}`).join(', ')}`);
       const f = face.getBoundingClientRect();
@@ -98,7 +116,7 @@ const faces = (page) =>
       const bottom = f.bottom - parseFloat(cs.paddingBottom) - parseFloat(cs.borderBottomWidth);
       const right = f.right - parseFloat(cs.paddingRight) - parseFloat(cs.borderRightWidth);
       for (const c of face.querySelectorAll('*')) {
-        if (!c.checkVisibility() || c.closest('svg')) continue;
+        if (!c.checkVisibility() || c.closest('svg, [aria-hidden="true"]')) continue;
         const r = c.getBoundingClientRect();
         if (r.bottom > bottom + 0.5 || r.right > right + 0.5) {
           cut.push(`${who}: ${c.className || c.tagName}`);
@@ -107,7 +125,7 @@ const faces = (page) =>
       }
     }
     inner.replaceChild(real, inner.querySelector('.dq-cardface--front'));
-    return { width: Math.round(inner.getBoundingClientRect().width), cut, out, drawn };
+    return { width: Math.round(inner.getBoundingClientRect().width), cut, out, on, drawn };
   });
 
 async function onScreen(h, page, where) {
@@ -210,6 +228,7 @@ export const scenarios = {
         const shown = await choices(h, page, ['Begin', 'Pick another', c.look], `${where}, revealed`);
         const fit = await onScreen(h, page, `${where}, revealed`);
         h.expect(!fit.cut.length, `${where}: at ${fit.width} px the card face cuts off ${fit.cut.join('; ')}`);
+        h.expect(!fit.on.length, `${where}: at ${fit.width} px the card face has words on top of each other: ${fit.on.join('; ')}`);
         await h.shot(page, `home-quest-fit-revealed-${run.vp.width}x${run.vp.height}-${run.save.replace(' ', '-')}${run.motion ? '-reduced' : ''}`);
 
         const mid = await progress(h, page);

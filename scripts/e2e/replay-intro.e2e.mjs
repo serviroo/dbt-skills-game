@@ -1,0 +1,492 @@
+const day = () => {
+  const d = new Date(Date.now() - 6 * 3600000);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const seed = (h) => ({
+  [h.SAVE]: JSON.stringify({
+    v: 1,
+    events: [{ id: 'replay-visit', k: 'visit', xp: 10, t: 1, day: day() }],
+    flags: { greetDay: day(), therapistLineShown: true },
+  }),
+  [h.YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: 1, companionAt: 1 }),
+  'dbt.app.v1': h.SEEN,
+});
+
+const screenOf = () => {
+  if (!window.__daily || !document.querySelector('#dq-main > *')) return null;
+  return document.querySelector('.dq')?.dataset.screen;
+};
+const shown = () => {
+  if (document.querySelector('.title-screen')) return 'intro';
+  if (!window.__daily || !document.querySelector('#dq-main > *')) return null;
+  return document.querySelector('.dq')?.dataset.screen;
+};
+
+const logHistory = () => {
+  const note = (what) => {
+    const log = sessionStorage.getItem('replay-history') ?? '';
+    sessionStorage.setItem('replay-history', `${log}${what} `);
+  };
+  const { go, pushState } = History.prototype;
+  window.__pushes = 0;
+  history.pushState = (...a) => {
+    window.__pushes++;
+    note(navigator.userActivation.isActive ? 'push' : 'push-untapped');
+    return pushState.apply(history, a);
+  };
+  history.go = (by) => {
+    note('go');
+    return go.call(history, by);
+  };
+};
+
+const refuseHistory = () => {
+  const full = () => {
+    throw new DOMException('History changed too often', 'SecurityError');
+  };
+  history.pushState = full;
+  history.replaceState = full;
+};
+
+async function settings(h, viewport) {
+  const { ctx, page, errors } = await h.open(seed(h), '?mute&reduced', viewport, (c) => c.addInitScript(logHistory));
+  await h.openSettings(page);
+  return { ctx, page, errors, before: new URL(page.url()).search };
+}
+
+async function replay(h, page, tag, { started, double } = {}) {
+  await page.evaluate(() => sessionStorage.removeItem('replay-history'));
+  const button = page.getByRole('button', { name: 'Replay cutscene' });
+  await (double ? button.dblclick() : button.click());
+  await (started ?? page.getByRole('button', { name: 'Skip intro' }).waitFor({ timeout: 30000 }));
+  const log = await page.evaluate(() => sessionStorage.getItem('replay-history')?.trim());
+  h.expect(log === 'push', `${tag}: Replay cutscene changed history as "${log}", not one push inside the tap`);
+}
+
+async function backOnSettings(h, page, before, tag) {
+  const at = await h.until(page, screenOf, null, { timeout: 30000 });
+  h.expect(at === 'settings', `${tag}: the replay ended on ${at}, not back on Settings where it was played from`);
+  const search = new URL(page.url()).search;
+  h.expect(search === before, `${tag}: the address is ${search} after the replay, not ${before} as before it`);
+  const focus = await page.evaluate(() => document.activeElement?.textContent?.trim() ?? '');
+  h.expect(focus === 'Replay cutscene', `${tag}: focus is on "${focus}" after the replay, not on Replay cutscene`);
+  await h.shot(page, `${tag}-settings`);
+}
+
+async function move(h, page, step, to, moves) {
+  await page.evaluate(() => {
+    window.__moves = 0;
+  });
+  await (step === 'back' ? page.goBack({ waitUntil: 'commit' }) : page.goForward({ waitUntil: 'commit' }));
+  await h.until(page, (n) => !window.__samePage || window.__moves >= n, moves);
+  const settled = (n) => document.querySelector('.title-screen') || document.querySelector('.dq')?.dataset.screen === n;
+  await h.until(page, settled, to).catch(() => undefined);
+  return page.evaluate(shown).catch(() => 'a new page');
+}
+
+async function neverAgain(h, page, before, tag) {
+  await page.evaluate(() => {
+    window.__samePage = true;
+    window.addEventListener('popstate', () => window.__moves++);
+  });
+  for (const [step, to, moves] of [['back', 'hub', 1], ['forward', 'settings', 1], ['forward', 'settings', 2]]) {
+    const at = await move(h, page, step, to, moves);
+    h.expect(at === to, `${tag}: ${step} after the replay showed ${at}, not ${to}`);
+    const same = await page.evaluate(() => window.__samePage === true);
+    h.expect(same, `${tag}: ${step} after the replay loaded the page again`);
+  }
+  const cdp = await page.context().newCDPSession(page);
+  const { entries } = await cdp.send('Page.getNavigationHistory');
+  await cdp.detach();
+  const flagged = entries.filter((e) => new URL(e.url).searchParams.has('cutscene')).length;
+  h.expect(!flagged, `${tag}: ${flagged} history entries still ask for the replay`);
+  await page.reload();
+  const at = await h.until(page, shown, null, { timeout: 30000 });
+  h.expect(at !== 'intro', `${tag}: a reload after the replay played the intro again`);
+  const search = new URL(page.url()).search;
+  h.expect(search === before, `${tag}: the address is ${search} after a reload, not ${before}`);
+  await h.shot(page, `${tag}-reloaded`);
+}
+
+async function toEndCard(page) {
+  await page.locator('.title-screen').click();
+  await page.locator('.lb').first().waitFor({ state: 'attached', timeout: 30000 });
+  await page.evaluate(() => window.__stage.renderer.getContext().getExtension('WEBGL_lose_context').loseContext());
+  for (const button of ['.rw .sw-btn', '.letter .sw-btn']) await page.locator(button).first().click({ timeout: 30000 });
+  await page.locator('.endcard').waitFor({ timeout: 30000 });
+}
+
+async function backWhileLoading(h, file) {
+  const { ctx, page, errors, before } = await settings(h);
+  const tag = `back while ${file} loads`;
+  let release;
+  const held = new Promise((r) => (release = r));
+  try {
+    let reached;
+    const asked = new Promise((r) => (reached = r));
+    await ctx.route(`**/${file}*`, (r) => {
+      reached();
+      return held.then(() => r.fallback());
+    });
+    await replay(h, page, tag, { started: asked });
+    await page.goBack({ waitUntil: 'commit' });
+    release();
+    await backOnSettings(h, page, before, tag);
+    const intro = await page.evaluate(() => !!document.querySelector('.title-screen'));
+    h.expect(!intro, `${tag}: Back before the replay had loaded still played the intro`);
+    h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
+  } catch (e) {
+    await h.evidence(page, 'replay-back-while-loading-fail');
+    throw e;
+  } finally {
+    release();
+    await ctx.close();
+  }
+}
+
+async function helpThenBack(h, backs) {
+  const tag = `help, then Back ${backs}x`;
+  const { ctx, page, errors, before } = await settings(h);
+  let release;
+  const held = new Promise((r) => (release = r));
+  try {
+    await replay(h, page, tag);
+    let reached;
+    const asked = new Promise((r) => (reached = r));
+    await ctx.route('**/src/daily/index.ts*', (r) => {
+      reached();
+      return held.then(() => r.fallback());
+    });
+    await page.locator('.ui-safe').click();
+    await asked;
+    for (let i = 0; i < backs; i++) await page.goBack({ waitUntil: 'commit' });
+    release();
+    if (backs === 1) await backOnSettings(h, page, before, tag);
+    const at = await h.until(page, screenOf, null, { timeout: 30000 });
+    h.expect(at === (backs === 1 ? 'settings' : 'hub'), `${tag}: the companion opened on ${at}`);
+    const pushes = await page.evaluate(() => window.__pushes);
+    h.expect(pushes === 0, `${tag}: the page that played the replay added ${pushes} history entries`);
+    const [step, next] = backs === 1 ? ['back', 'hub'] : ['forward', 'settings'];
+    await (step === 'back' ? page.goBack({ waitUntil: 'commit' }) : page.goForward({ waitUntil: 'commit' }));
+    await h.until(page, (n) => document.querySelector('.dq')?.dataset.screen === n, next).catch(() => undefined);
+    const then = await page.evaluate(screenOf);
+    h.expect(then === next, `${tag}: ${step} from there showed ${then}, not ${next}`);
+    h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
+  } catch (e) {
+    await h.evidence(page, 'replay-help-then-back-fail');
+    throw e;
+  } finally {
+    release();
+    await ctx.close();
+  }
+}
+
+export const scenarios = {
+  async 'replay-skip-reload'(h) {
+    const { ctx, page, errors, before } = await settings(h);
+    try {
+      await replay(h, page, 'skip', { double: true });
+      await h.shot(page, 'skip-replaying');
+      await page.getByRole('button', { name: 'Skip intro' }).click();
+      await backOnSettings(h, page, before, 'skip');
+      await neverAgain(h, page, before, 'skip');
+      h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
+    } catch (e) {
+      await h.evidence(page, 'replay-skip-fail');
+      throw e;
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'replay-end-card-reload'(h) {
+    const { ctx, page, errors, before } = await settings(h);
+    try {
+      await replay(h, page, 'end-card');
+      await toEndCard(page);
+      await page.locator('.ec-actions [data-v="replay"]').click();
+      await page.locator('.title-screen').waitFor({ timeout: 30000 });
+      await toEndCard(page);
+      await h.shot(page, 'end-card');
+      await page.locator('.ec-actions .sw-btn.gold').click();
+      await backOnSettings(h, page, before, 'end-card');
+      await neverAgain(h, page, before, 'end-card');
+      h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
+    } catch (e) {
+      await h.evidence(page, 'replay-end-card-fail');
+      throw e;
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'replay-back'(h) {
+    const { ctx, page, errors, before } = await settings(h, { width: 320, height: 568 });
+    try {
+      await replay(h, page, 'back');
+      await page.goBack({ waitUntil: 'commit' });
+      await backOnSettings(h, page, before, 'back');
+      const pushes = await page.evaluate(() => window.__pushes);
+      h.expect(pushes === 0, `back: the page playing the replay, never touched, added ${pushes} history entries`);
+      await neverAgain(h, page, before, 'back');
+      h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
+    } catch (e) {
+      await h.evidence(page, 'replay-back-fail');
+      throw e;
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'replay-help'(h) {
+    const { ctx, page, errors, before } = await settings(h);
+    try {
+      await replay(h, page, 'help');
+      await page.locator('.ui-safe').click();
+      const at = await h.until(page, screenOf, null, { timeout: 30000 });
+      h.expect(at === 'safe', `help: the Safe Zone button in the replay opened ${at}`);
+      const pushes = await page.evaluate(() => window.__pushes);
+      h.expect(pushes === 0, `help: the page playing the replay added ${pushes} history entries for the Safe Zone`);
+      const search = new URL(page.url()).search;
+      h.expect(search === before, `help: the address is ${search} in the Safe Zone, not ${before}`);
+      await h.shot(page, 'help-safe');
+      await page.goBack({ waitUntil: 'commit' });
+      await h.until(page, () => document.querySelector('.dq')?.dataset.screen !== 'safe');
+      const back = await page.evaluate(screenOf);
+      h.expect(back === 'settings', `help: Back from the Safe Zone showed ${back}, not Settings`);
+      h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
+    } catch (e) {
+      await h.evidence(page, 'replay-help-fail');
+      throw e;
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'replay-help-then-back'(h) {
+    for (const backs of [1, 2]) await helpThenBack(h, backs);
+  },
+
+  async 'replay-reload'(h) {
+    const { ctx, page, errors, before } = await settings(h);
+    try {
+      await replay(h, page, 'reload');
+      await page.reload();
+      await backOnSettings(h, page, before, 'reload');
+      await neverAgain(h, page, before, 'reload');
+      h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
+    } catch (e) {
+      await h.evidence(page, 'replay-reload-fail');
+      throw e;
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'replay-forward-fresh'(h) {
+    const { ctx, page, errors, before } = await settings(h);
+    const holds = [];
+    const hold = async () => {
+      let release;
+      const held = new Promise((r) => (release = r));
+      holds.push(release);
+      let reached;
+      const asked = new Promise((r) => (reached = r));
+      await ctx.unroute('**/src/main.ts*');
+      await ctx.route('**/src/main.ts*', (r) => {
+        reached();
+        return held.then(() => r.fallback());
+      });
+      return { asked, release };
+    };
+    try {
+      const first = await hold();
+      await replay(h, page, 'forward', { started: first.asked });
+      await page.goBack({ waitUntil: 'commit' });
+      first.release();
+      await backOnSettings(h, page, before, 'forward');
+      const second = await hold();
+      await page.reload({ waitUntil: 'commit' });
+      await second.asked;
+      await page.goForward({ waitUntil: 'commit' });
+      await page.goto(new URL('/robots.txt', page.url()).href);
+      await ctx.unroute('**/src/main.ts*');
+      second.release();
+      await page.goBack({ waitUntil: 'commit' });
+      const how = await page.evaluate(() => performance.getEntriesByType('navigation')[0]?.type);
+      h.expect(how === 'back_forward', `forward: the replay's entry loaded by ${how}, not fresh from history`);
+      const at = await h.until(page, shown, null, { timeout: 30000 });
+      h.expect(at === 'settings', `forward: the replay's entry loaded fresh from history showed ${at}, not Settings`);
+      const search = new URL(page.url()).search;
+      h.expect(search === before, `forward: the address is ${search} after that load, not ${before}`);
+      h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
+    } catch (e) {
+      await h.evidence(page, 'replay-forward-fresh-fail');
+      throw e;
+    } finally {
+      for (const release of holds) release();
+      await ctx.close();
+    }
+  },
+
+  async 'replay-back-while-loading'(h) {
+    for (const file of ['src/main.ts', 'src/audio/engine.ts']) await backWhileLoading(h, file);
+  },
+
+  async 'replay-history-full'(h) {
+    const { ctx, page, errors, before } = await settings(h);
+    try {
+      await page.evaluate(refuseHistory);
+      await page.getByRole('button', { name: 'Replay cutscene' }).click();
+      await page.getByRole('button', { name: 'Skip intro' }).waitFor({ timeout: 30000 });
+      await page.evaluate(refuseHistory);
+      await toEndCard(page);
+      await page.locator('.ec-actions [data-v="replay"]').click();
+      await page.locator('.title-screen').waitFor({ timeout: 30000 });
+      const settingsLoads = page.waitForEvent('load');
+      await page.getByRole('button', { name: 'Skip intro' }).click();
+      await settingsLoads;
+      await backOnSettings(h, page, before, 'history full');
+      await page.reload();
+      const then = await h.until(page, shown, null, { timeout: 30000 });
+      h.expect(then !== 'intro', 'history full: a reload after the replay played the intro again');
+      h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
+    } catch (e) {
+      await h.evidence(page, 'replay-history-full-fail');
+      throw e;
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'replay-history-full-back'(h) {
+    const { ctx, page, errors, before } = await settings(h);
+    try {
+      await page.evaluate(refuseHistory);
+      await page.getByRole('button', { name: 'Replay cutscene' }).click();
+      await page.getByRole('button', { name: 'Skip intro' }).waitFor({ timeout: 30000 });
+      await page.goBack({ waitUntil: 'commit' });
+      await backOnSettings(h, page, before, 'history full, back');
+      await page.reload();
+      const at = await h.until(page, shown, null, { timeout: 30000 });
+      h.expect(at !== 'intro', 'history full, back: a reload after the replay played the intro again');
+      h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
+    } catch (e) {
+      await h.evidence(page, 'replay-history-full-back-fail');
+      throw e;
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'replay-history-full-cached'(h) {
+    const { ctx, page, errors, before } = await settings(h);
+    try {
+      await page.evaluate(refuseHistory);
+      await page.getByRole('button', { name: 'Replay cutscene' }).click();
+      await page.getByRole('button', { name: 'Skip intro' }).waitFor({ timeout: 30000 });
+      const settingsLoads = page.waitForEvent('load');
+      await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+      await settingsLoads;
+      await backOnSettings(h, page, before, 'history full, cached');
+      h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
+    } catch (e) {
+      await h.evidence(page, 'replay-history-full-cached-fail');
+      throw e;
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'replay-history-full-help'(h) {
+    const { ctx, page, errors } = await settings(h);
+    try {
+      await page.evaluate(refuseHistory);
+      await page.getByRole('button', { name: 'Replay cutscene' }).click();
+      await page.getByRole('button', { name: 'Skip intro' }).waitFor({ timeout: 30000 });
+      await page.locator('.ui-safe').click();
+      const at = await h.until(page, screenOf, null, { timeout: 30000 });
+      h.expect(at === 'safe', `history full, help: the Safe Zone button in the replay opened ${at}`);
+      await page.goBack({ waitUntil: 'commit' });
+      const back = await h.until(page, screenOf, null, { timeout: 30000 });
+      h.expect(back === 'settings', `history full, help: Back from the Safe Zone showed ${back}, not Settings`);
+      h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
+    } catch (e) {
+      await h.evidence(page, 'replay-history-full-help-fail');
+      throw e;
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'replay-nowhere-to-keep'(h) {
+    const { ctx, page, errors, before } = await settings(h);
+    try {
+      await page.evaluate(refuseHistory);
+      await page.evaluate(() => {
+        const { setItem } = Storage.prototype;
+        Storage.prototype.setItem = function (...a) {
+          if (this === sessionStorage) throw new DOMException('Storage is off', 'SecurityError');
+          return setItem.apply(this, a);
+        };
+      });
+      await page.getByRole('button', { name: 'Replay cutscene' }).click();
+      await page.getByRole('button', { name: 'Skip intro' }).click({ timeout: 30000 });
+      const at = await h.until(page, screenOf, null, { timeout: 30000 });
+      h.expect(!!at, 'nowhere to keep: the companion did not open after the replay');
+      const search = new URL(page.url()).search;
+      h.expect(search === before, `nowhere to keep: the address is ${search} after the replay, not ${before}`);
+      await page.reload();
+      const then = await h.until(page, shown, null, { timeout: 30000 });
+      h.expect(then !== 'intro', 'nowhere to keep: a reload after the replay played the intro again');
+      h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
+    } catch (e) {
+      await h.evidence(page, 'replay-nowhere-to-keep-fail');
+      throw e;
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'replay-kept-cleared'(h) {
+    const { ctx, page, errors } = await settings(h);
+    try {
+      await page.evaluate((save) => {
+        sessionStorage.setItem('dbt.replay', JSON.stringify({ here: null, replay: null }));
+        localStorage.setItem('dbt.cleared', `other.${Date.now().toString(36)}`);
+        localStorage.removeItem(save);
+        window.dispatchEvent(new Event('focus'));
+      }, h.SAVE);
+      await page.locator('.dq-cleared').waitFor({ timeout: 15000 });
+      const kept = await page.evaluate(() => sessionStorage.getItem('dbt.replay'));
+      h.expect(kept === null, 'kept cleared: a clear in another tab left this tab\'s kept replay behind');
+      h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
+    } catch (e) {
+      await h.evidence(page, 'replay-kept-cleared-fail');
+      throw e;
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'replay-flag-encoded'(h) {
+    const query = '?mute&reduced&%63utscene=1';
+    const { ctx, page, errors } = await h.open(seed(h), query, undefined, (c) => c.addInitScript(logHistory));
+    try {
+      await page.getByRole('button', { name: 'Skip intro' }).waitFor({ timeout: 30000 });
+      const flagged = new URL(page.url()).searchParams.has('cutscene');
+      h.expect(!flagged, `encoded flag: the address still asks for the replay as it plays: ${page.url()}`);
+      await page.getByRole('button', { name: 'Skip intro' }).click();
+      await h.until(page, screenOf, null, { timeout: 30000 });
+      await page.reload();
+      const at = await h.until(page, shown, null, { timeout: 30000 });
+      h.expect(at !== 'intro', 'encoded flag: a reload after the replay played the intro again');
+      h.expect(!errors.length, 'page errors: ' + errors.join(' | '));
+    } catch (e) {
+      await h.evidence(page, 'replay-flag-encoded-fail');
+      throw e;
+    } finally {
+      await ctx.close();
+    }
+  },
+};

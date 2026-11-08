@@ -7,7 +7,7 @@ import { animate } from '../ui/anim';
 import { WARDEN_XP } from '../content/daily-lines';
 import { playerName } from '../core/you';
 import { CLASS_LINE, MOONFLOWER, TITLE_COPY, TITLES, type TitleId } from '../content/roster-lines';
-import type { App } from './app';
+import type { App, Visit } from './app';
 import type { Store } from './store';
 import { h, holdView, radioKeys, typo } from './ui';
 import { plateClass } from './wardrobe';
@@ -160,10 +160,10 @@ export function moonflowerSVG(days: number, size = 46) {
 }
 
 /** The moonflower next to the status: small, quiet, a petal per distinct visit day. */
-export function moonflower(app: App) {
+export function moonflower(app: App, toast: Visit['toast']) {
   const days = app.store.derived().visitDays.length;
   const b = h('button', { type: 'button', class: 'w2-moonflower', 'data-days': String(days), 'aria-label': MOONFLOWER.label(Math.min(days, MOONFLOWER.petalCap)), html: moonflowerSVG(days) });
-  b.addEventListener('click', () => app.toast(MOONFLOWER.toast));
+  b.addEventListener('click', () => toast(MOONFLOWER.toast));
   return b;
 }
 
@@ -182,7 +182,11 @@ export function foilLayer(app: App, front: HTMLElement, day: string) {
   if (!foilDay(day)) return null;
   const layer = h('span', { class: 'w2-foil', 'aria-hidden': 'true' });
   front.classList.add('is-foil');
-  front.append(layer, h('span', { class: 'w2-foil-tag', text: 'Foil' }));
+  const tag = () => h('span', { class: 'w2-foil-tag', text: 'Foil' });
+  front.append(layer);
+  // one shows, by the card's size (wave2.css)
+  front.querySelector('.dq-cf-foot')!.prepend(tag());
+  front.querySelector('.dq-cf-min')!.before(tag());
   return {
     play() {
       if (app.reduced()) return;

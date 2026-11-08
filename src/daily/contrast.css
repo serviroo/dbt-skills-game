@@ -1,0 +1,48 @@
+:root[data-dq-contrast='high'] {
+  --dim: var(--body);
+  --rule: var(--hair-lit);
+  --hair-shade: var(--hair-lit);
+}
+:root[data-dq-contrast='high'] :is(.dq, .dq-sw) {
+  --t-body: var(--t-title);
+  --t-dim: var(--body);
+  --t-faint: var(--body);
+  --dim: var(--body);
+  --hair-shade: var(--hair-lit);
+  --plate-a: var(--plate);
+  --plate-b: var(--plate);
+  --hl: var(--hair-lit);
+  --hs: var(--hair-lit);
+  --rule: var(--hair-lit);
+  --w2-tick: var(--hair-lit);
+  --edge: var(--hair-lit);
+  --edge-soft: var(--hair-lit);
+  --edge-accent: var(--accent);
+  --lit-fill: rgba(42, 66, 96, 0.95);
+  --knob: var(--t-title);
+  --hint: var(--body);
+  --focus: var(--t-title);
+  --muted-op: 0.8;
+}
+:root[data-dq-contrast='high'] .dq-safezone.is-lit {
+  --t-title: #ffffff;
+  --edge: var(--body);
+  --edge-soft: var(--body);
+  --link: #ffffff;
+}
+:root[data-dq-contrast='high'] .dq-stealth {
+  --gold: var(--gold-hi);
+}
+:where(:root[data-dq-contrast='high']) :is(.dq-tile, .dq-artentry) {
+  border-color: var(--edge);
+}
+:root[data-dq-contrast='high'] .dq-cardface.is-foil {
+  --t-dim: var(--t-title);
+  --accent: var(--t-title);
+}
+:root[data-dq-contrast='high'] .dq-skill::after {
+  z-index: 4;
+}
+:root[data-dq-contrast='high'] .dq-skill .dq-stepbox {
+  z-index: 5;
+}

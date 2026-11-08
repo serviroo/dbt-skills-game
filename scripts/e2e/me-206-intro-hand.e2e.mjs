@@ -10,6 +10,9 @@ import path from 'node:path';
 
 /** Each case runs the same frame three more times: a pose that moves on a re-run has stacked. */
 const SAME = 1e-4;
+const TORN_STRETCH = 1.8;
+const TORN_GAP = 0.01;
+const WANDERER = ['wanderer', 'wanderer-cloth', 'wanderer-eye'];
 
 async function probe(page) {
   await page.evaluate(() => {
@@ -21,8 +24,79 @@ async function probe(page) {
     const at = (n) => { const b = hero().getObjectByName(n); return b.getWorldPosition(b.position.clone()); };
     const bones = () => { const a = []; hero().traverse((o) => o.isBone && a.push(o.getWorldPosition(o.position.clone()))); return a; };
     const pause = () => new Promise((r) => setTimeout(r));
+    const skinned = () => { const a = []; hero().traverse((o) => o.isSkinnedMesh && a.push(o)); return a; };
+    const firstEdges = new Map();
+    const edgeStretch = (m, world, gap) => {
+      const idx = m.geometry.getIndex();
+      const first = !firstEdges.has(m);
+      if (first) firstEdges.set(m, new Float32Array(idx.count));
+      const ref = firstEdges.get(m);
+      const q = hero().position.clone();
+      const r = q.clone();
+      let worst = { k: 0, at: null };
+      for (let t = 0; t < idx.count; t += 3) {
+        for (let e = 0; e < 3; e++) {
+          q.fromArray(world, idx.getX(t + e) * 3);
+          r.fromArray(world, idx.getX(t + (e + 1) % 3) * 3);
+          const now = q.distanceTo(r);
+          if (first) ref[t + e] = now;
+          if (ref[t + e] < 1e-5 || now - ref[t + e] < gap) continue;
+          if (now / ref[t + e] > worst.k) worst = { k: now / ref[t + e], at: q.clone().add(r).multiplyScalar(0.5) };
+        }
+      }
+      return worst;
+    };
     window.__hand = {
       visible: () => !!hero()?.visible,
+      materials: () => [...new Set(skinned().map((m) => m.material.name))].sort(),
+      figure(gap) {
+        hero().updateMatrixWorld(true);
+        const p = hero().position.clone();
+        let worst = { k: 0, where: '' };
+        let top = -Infinity;
+        let bottom = Infinity;
+        const eyes = [];
+        for (const m of skinned()) {
+          const count = m.geometry.getAttribute('position').count;
+          const world = new Float32Array(count * 3);
+          for (let i = 0; i < count; i++) {
+            m.getVertexPosition(i, p).applyMatrix4(m.matrixWorld);
+            p.toArray(world, i * 3);
+            top = Math.max(top, p.y);
+            bottom = Math.min(bottom, p.y);
+            if (m.material.name === 'wanderer-eye') eyes.push(p.clone());
+          }
+          const e = edgeStretch(m, world, gap);
+          if (e.k > worst.k) {
+            const spot = e.at.toArray().map((x) => x.toFixed(2));
+            worst = { k: e.k, where: `${m.material.name} near ${spot}` };
+          }
+        }
+        const head = at('Head');
+        const eyeMid = eyes.reduce((s, e) => s.add(e), p.set(0, 0, 0)).multiplyScalar(1 / Math.max(1, eyes.length));
+        return { stretch: worst.k, where: worst.where, height: top - bottom, eyes: eyes.length,
+          eyesFromHead: eyeMid.distanceTo(head), headTop: top - head.y };
+      },
+      eyeGlow() {
+        const s = window.__stage;
+        const lit = [];
+        const inHood = (o) => o.isSprite && o.parent?.parent?.name === 'Head';
+        hero().traverse((o) => inHood(o) && lit.push(o.getWorldPosition(o.position.clone())));
+        const c = document.createElement('canvas');
+        c.width = s.canvas.width;
+        c.height = s.canvas.height;
+        const g = c.getContext('2d', { willReadFrequently: true });
+        g.drawImage(s.canvas, 0, 0);
+        return lit.map((e) => {
+          const q = e.project(s.camera);
+          const x = Math.round(((q.x + 1) / 2) * c.width);
+          const y = Math.round(((1 - q.y) / 2) * c.height);
+          const d = g.getImageData(Math.max(0, x - 4), Math.max(0, y - 4), 9, 9).data;
+          let best = 0;
+          for (let i = 0; i < d.length; i += 4) best = Math.max(best, (d[i] + d[i + 1] + d[i + 2]) / 3);
+          return best;
+        });
+      },
       async step(until, max = 4000) {
         for (let i = 0; i < max && !until(); i++) { window.__stage.step(1 / 15); await pause(); }
         return until();
@@ -110,6 +184,12 @@ async function introHand(h, viewport, from) {
     log.push(`${label} ${fmt(m)} aura ${fmt(veil)}`);
     h.expect(m.drift < SAME, `${label}: re-running the same frame moved his bones by ${near(m.drift)} m`);
     for (const [part, d] of Object.entries(veil)) if (d !== null) h.expect(d < 6, `${label}: his aura draws over his ${part} (${near(d)} of 255)`);
+    const f = await page.evaluate((gap) => window.__hand.figure(gap), TORN_GAP);
+    log.push(`${label} figure ${fmt(f)}`);
+    h.expect(f.stretch < TORN_STRETCH, `${label}: his ${f.where} stretches to ${near(f.stretch)} times its length`);
+    h.expect(f.height > 1.45 && f.height < 2.0, `${label}: he stands ${near(f.height)} m tall`);
+    h.expect(f.eyes > 0 && f.eyesFromHead < 0.14, `${label}: his eyes are ${near(f.eyesFromHead)} m from his head`);
+    h.expect(f.headTop > 0.12 && f.headTop < 0.4, `${label}: his hood's crown is ${near(f.headTop)} m over his head`);
     return m;
   };
   const stepTo = (lt) => page.evaluate((lt) => window.__hand.step(() => (window.__awakenLT ?? -1) >= lt), lt);
@@ -121,6 +201,8 @@ async function introHand(h, viewport, from) {
   const frames = (n) => page.evaluate((n) => { let i = 0; return window.__hand.step(() => ++i > n); }, n);
 
   h.expect(await page.evaluate(() => window.__hand.step(() => window.__hand.visible())), 'the hero never appeared');
+  const dressed = await page.evaluate(() => window.__hand.materials());
+  h.expect(dressed.join() === WANDERER.join(), `the intro shows a figure in ${dressed.join(', ')}, not the Wanderer`);
   if (from === 'silhouette') {
     // he breathes with his hands at his sides
     await frames(30);
@@ -141,6 +223,12 @@ async function introHand(h, viewport, from) {
     h.expect(m.open > fist.open + 0.015, `reach ${lt}: his palm never opened (index tip ${near(m.open)} m from the wrist, a fist is ${near(fist.open)} m)`);
     reach ??= m;
     if (lt === 3.42) await snap(`intro-hand-reach-${name}`);
+    if (lt === 4.2) {
+      const glow = await page.evaluate(() => window.__hand.eyeGlow());
+      log.push(`eyes ${glow.map(near).join(', ')}`);
+      const lit = glow.length === 2 && glow.every((g) => g > 150);
+      h.expect(lit, `his eyes don't light in the hood (${glow.map(near)})`);
+    }
   }
 
   // the shot from 11.9 to 13.1 s lines his raised hand up with the gate's light; in it the stones come down and the
@@ -199,7 +287,7 @@ export const scenarios = {
       const from = await read();
       await new Promise((s) => setTimeout(s, 3000));
       held = { from, to: await read() };
-      await r.continue();
+      await r.fallback();
     });
     const reach = async (slow) => {
       const { page, errors } = await h.open({}, '?shot=awaken&capture&mute&dpr=1&nopost', { width: 390, height: 844 }, slow ? delay : undefined);

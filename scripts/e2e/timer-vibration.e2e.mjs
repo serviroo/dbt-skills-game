@@ -3,10 +3,14 @@
 // every second, on more time, while the page is out of sight, inside the Safe Zone or in the intro, and the choice
 // survives a reload.
 
-import { gone } from './harness.mjs';
+import { appears, playing } from './beat.mjs';
+import { gone, until } from './harness.mjs';
+import { tapWhereItIs } from './taps.mjs';
+import * as pageClock from './clock.mjs';
 
 const START = JSON.stringify([40]);
 const END = JSON.stringify([40, 120, 40]);
+const FIRST_WINDOW_SEC = 10;
 /** a skip's double pulse, a 200 ms rest, then the next timer's start pulse: one pattern, so neither cuts the other off */
 const END_THEN_START = JSON.stringify([40, 120, 40, 200, 40]);
 /** what stops a pattern still playing */
@@ -18,8 +22,8 @@ const SWITCH = 'Vibrate when a timer starts or ends';
  * the page out of sight the way a switched tab or a locked phone does. With `frames: false` the hidden page also gets
  * no animation frames, as on a phone: they wait until it is back.
  */
-const device = ({ vibrates = true, clock = true } = {}) => async (ctx) => {
-  if (clock) await ctx.clock.install();
+const device = ({ vibrates = true, fakeTime = true } = {}) => async (ctx) => {
+  if (fakeTime) await pageClock.install(ctx);
   await ctx.addInitScript((vibrates) => {
     window.__buzz = [];
     if (!vibrates) delete Navigator.prototype.vibrate;
@@ -75,14 +79,14 @@ async function turnOn(h, page) {
  * it is for a player, and a timer's start pulse plays on its own.
  */
 async function standStill(h, page) {
-  await h.pauseClock(page);
-  await page.clock.runFor(1000);
+  await pageClock.pauseClock(page);
+  await pageClock.runFor(page, 1000);
 }
 
 /** Wise Mind's 20 second timer, which starts by itself after the breathing step. The page clock stands still from here. */
 async function wiseMind(h, page) {
   await page.waitForFunction(() => !!window.__daily, null, { timeout: 30000 });
-  await page.clock.resume();
+  await pageClock.resume(page);
   await page.evaluate(() => window.__daily.go({ name: 'hub' }));
   await h.reachHub(page);
   await page.evaluate(() => window.__daily.go({ name: 'skill', id: 'wise-mind' }));
@@ -92,17 +96,31 @@ async function wiseMind(h, page) {
   await timer(page).waitFor({ timeout: 5000 });
 }
 
+async function holdChestToFull(page, url) {
+  await page.goto(url + '/?shot=chest&mute&nopost&msaa=0');
+  await page.locator('.title-screen').click();
+  const target = '.chest-hold .ch-target';
+  await until(page, (sel) => !!document.querySelector(sel)?.checkVisibility(), target, { timeout: 60000 });
+  const box = await page.locator(target).boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await until(page, () => !!document.querySelector('.chest-hold.is-full'), null, { timeout: 30000 });
+  const nativeSwitches = await page.locator('input[switch]').count();
+  await page.mouse.up();
+  return { buzzes: await buzzes(page), nativeSwitches };
+}
+
 export const scenarios = {
   /** a player who never touched the switch feels nothing, start to end */
   async 'vibration-off-by-default'(h) {
     const { ctx, page, errors } = await open(h);
     await wiseMind(h, page);
-    await page.clock.runFor(21000);
+    await pageClock.runFor(page, 21000);
     h.expect((await timer(page).textContent()).trim() === 'Done', 'the Wise Mind timer did not finish');
     await tap(page, 'Next');
     const got = await buzzes(page);
     h.expect(got === none, `the timer buzzed with the switch never turned on: ${got}`);
-    await page.clock.resume();
+    await pageClock.resume(page);
     await page.evaluate(() => window.__daily.go({ name: 'hub' }));
     await h.openSettings(page);
     h.expect(!(await page.getByRole('switch', { name: SWITCH }).isChecked()), 'the vibration switch starts on');
@@ -112,7 +130,7 @@ export const scenarios = {
 
   /** the switch is a real, readable switch at phone widths, and the choice is saved and comes back after a reload */
   async 'vibration-switch-and-reload'(h) {
-    const { ctx, page, errors } = await open(h, { clock: false });
+    const { ctx, page, errors } = await open(h, { fakeTime: false });
     await turnOn(h, page);
     await h.openSettings(page);
     const sw = page.getByRole('switch', { name: SWITCH });
@@ -163,22 +181,22 @@ export const scenarios = {
     await wiseMind(h, page);
     let got = await buzzes(page);
     h.expect(got === only(START), `the timer starting did not give one start pulse: ${got}`);
-    await page.clock.runFor(5000);
+    await pageClock.runFor(page, 5000);
     got = await buzzes(page);
     h.expect(got === none, `the timer buzzed while it ran: ${got}`);
     await tap(page, '+15 s');
-    await page.clock.runFor(1000);
+    await pageClock.runFor(page, 1000);
     got = await buzzes(page);
     h.expect(got === none, `more time buzzed: ${got}`);
     // 20 s and 15 more: 6 s gone, 29 s left
-    await page.clock.runFor(28500);
+    await pageClock.runFor(page, 28500);
     h.expect((await timer(page).textContent()).trim() !== 'Done', 'the timer ended before its extra 15 seconds');
     h.expect((await buzzes(page)) === none, 'the timer buzzed before it ended');
-    await page.clock.runFor(1000);
+    await pageClock.runFor(page, 1000);
     h.expect((await timer(page).textContent()).trim() === 'Done', 'the timer did not end after its extra 15 seconds');
     got = await buzzes(page);
     h.expect(got === only(END), `the timer ending did not give one end pulse: ${got}`);
-    await page.clock.runFor(5000);
+    await pageClock.runFor(page, 5000);
     await tap(page, 'Next');
     got = await buzzes(page);
     h.expect(got === none, `the finished timer buzzed again, or moving on after it ended buzzed: ${got}`);
@@ -186,10 +204,10 @@ export const scenarios = {
     // Next while it runs skips it: the end pulse, once
     await wiseMind(h, page);
     h.expect((await buzzes(page)) === only(START), 'the second timer did not give one start pulse');
-    await page.clock.runFor(3000);
+    await pageClock.runFor(page, 3000);
     await tap(page, 'Next');
     await page.locator('.dq-step-body input, .dq-step-body textarea').first().waitFor({ timeout: 5000 });
-    await page.clock.runFor(25000);
+    await pageClock.runFor(page, 25000);
     got = await buzzes(page);
     h.expect(got === only(END), `skipping the timer did not give one end pulse: ${got}`);
     await h.shot(page, 'after-skip');
@@ -203,22 +221,22 @@ export const scenarios = {
     await turnOn(h, page);
     await wiseMind(h, page);
     h.expect((await buzzes(page)) === only(START), 'the timer did not give one start pulse');
-    await page.clock.runFor(1000);
+    await pageClock.runFor(page, 1000);
     await page.locator('header .dq-safe').click();
     await page.locator('.dq-safezone').waitFor({ timeout: 5000 });
-    await page.clock.runFor(25000);
+    await pageClock.runFor(page, 25000);
     let got = await buzzes(page);
     h.expect(got === none, `opening the Safe Zone over a running timer buzzed: ${got}`);
     await page.evaluate(() => window.__daily.go({ name: 'safe', at: 'cold' }));
     await tap(page, 'Cool air');
-    await page.clock.runFor(32000);
+    await pageClock.runFor(page, 32000);
     got = await buzzes(page);
     h.expect(got === none, `the Safe Zone's own timer buzzed: ${got}`);
     await h.shot(page, 'safe-zone-quiet');
     // an end pulse still playing as the Safe Zone opens stops at once, so no part of it is felt in there
     await wiseMind(h, page);
     h.expect((await buzzes(page)) === only(START), 'the second timer did not give one start pulse');
-    await page.clock.runFor(20050);
+    await pageClock.runFor(page, 20050);
     h.expect((await buzzes(page)) === only(END), 'the second timer did not give one end pulse');
     await page.locator('header .dq-safe').click();
     await page.locator('.dq-safezone').waitFor({ timeout: 5000 });
@@ -235,16 +253,16 @@ export const scenarios = {
     await wiseMind(h, page);
     h.expect((await buzzes(page)) === only(START), 'the timer did not give one start pulse');
     await page.evaluate(() => window.__hide(true));
-    await page.clock.runFor(3000);
+    await pageClock.runFor(page, 3000);
     await page.evaluate(() => window.__hide(false));
-    await page.clock.runFor(1000);
+    await pageClock.runFor(page, 1000);
     let got = await buzzes(page);
     h.expect(got === none, `hiding the page and coming back buzzed: ${got}`);
     // the end while the page is out of sight, frames still running
     await page.evaluate(() => window.__hide(true));
-    await page.clock.runFor(17000);
+    await pageClock.runFor(page, 17000);
     await page.evaluate(() => window.__hide(false));
-    await page.clock.runFor(1000);
+    await pageClock.runFor(page, 1000);
     h.expect((await timer(page).textContent()).trim() === 'Done', 'the timer did not end');
     got = await buzzes(page);
     h.expect(got === none, `the timer buzzed as it ended out of sight, or when the page came back: ${got}`);
@@ -252,12 +270,12 @@ export const scenarios = {
     // even when it comes back just after the end
     await wiseMind(h, page);
     h.expect((await buzzes(page)) === only(START), 'the second timer did not give one start pulse');
-    await page.clock.runFor(5000);
+    await pageClock.runFor(page, 5000);
     await page.evaluate(() => window.__hide(true, { frames: false }));
-    await page.clock.runFor(15400);
+    await pageClock.runFor(page, 15400);
     h.expect((await timer(page).textContent()).trim() !== 'Done', 'the hidden page drew the end, so this proves nothing');
     await page.evaluate(() => window.__hide(false));
-    await page.clock.runFor(500);
+    await pageClock.runFor(page, 500);
     h.expect((await timer(page).textContent()).trim() === 'Done', 'the timer did not end once the page was back');
     got = await buzzes(page);
     h.expect(got === none, `the timer buzzed when the page came back 0.4 s after it ended out of sight: ${got}`);
@@ -272,12 +290,12 @@ export const scenarios = {
     await wiseMind(h, page);
     h.expect((await buzzes(page)) === only(START), 'the timer did not give one start pulse');
     await page.evaluate(() => window.__hide(true, { frames: false }));
-    await page.clock.runFor(25000);
+    await pageClock.runFor(page, 25000);
     await page.evaluate(() => window.__hide(false));
     // the page clock stands still, so no frame comes before the tap
     h.expect((await timer(page).textContent()).trim() !== 'Done', 'a frame drew the end before Next, so this proves nothing');
     await tap(page, 'Next');
-    await page.clock.runFor(1000);
+    await pageClock.runFor(page, 1000);
     const got = await buzzes(page);
     h.expect(got === none, `Next on a timer that had ended out of sight buzzed as a skip: ${got}`);
     h.expect(!errors.length, errors.join('\n'));
@@ -290,19 +308,19 @@ export const scenarios = {
     await turnOn(h, page);
     await wiseMind(h, page);
     h.expect((await buzzes(page)) === only(START), 'the timer did not give one start pulse');
-    await page.clock.runFor(3000);
+    await pageClock.runFor(page, 3000);
     await page.getByRole('button', { name: 'Leave this skill' }).click();
     h.expect((await page.evaluate(() => window.__daily.route.name)) === 'hub', 'Leave this skill did not go Home');
-    await page.clock.runFor(25000);
+    await pageClock.runFor(page, 25000);
     let got = await buzzes(page);
     h.expect(got === only(END), `closing the skill while its timer ran did not give one end pulse: ${got}`);
     await wiseMind(h, page);
     h.expect((await buzzes(page)) === only(START), 'the second timer did not give one start pulse');
-    await page.clock.runFor(21000);
+    await pageClock.runFor(page, 21000);
     h.expect((await timer(page).textContent()).trim() === 'Done', 'the Wise Mind timer did not finish');
     h.expect((await buzzes(page)) === only(END), 'the second timer did not give one end pulse');
     await page.getByRole('button', { name: 'Leave this skill' }).click();
-    await page.clock.runFor(1000);
+    await pageClock.runFor(page, 1000);
     got = await buzzes(page);
     h.expect(got === none, `closing the skill after its timer ended buzzed again: ${got}`);
     h.expect(!errors.length, errors.join('\n'));
@@ -311,7 +329,7 @@ export const scenarios = {
 
   /** another open copy turning it on or off moves this copy's switch too, so the switch shows the choice a buzz follows */
   async 'vibration-switch-follows-other-tab'(h) {
-    const { ctx, page, errors } = await open(h, { clock: false });
+    const { ctx, page, errors } = await open(h, { fakeTime: false });
     await h.openSettings(page);
     h.expect(!(await page.getByRole('switch', { name: SWITCH }).isChecked()), 'the vibration switch starts on');
     const other = await ctx.newPage();
@@ -336,7 +354,7 @@ export const scenarios = {
     const { ctx, page, errors } = await open(h);
     await turnOn(h, page);
     await page.waitForFunction(() => !!window.__daily, null, { timeout: 30000 });
-    await page.clock.resume();
+    await pageClock.resume(page);
     await page.evaluate(() => window.__daily.go({ name: 'hub' }));
     await h.reachHub(page);
     // Open Gauntlets: three 20 second timers in a row, each starting by itself
@@ -345,7 +363,7 @@ export const scenarios = {
     await tap(page, 'Begin');
     await timer(page).waitFor({ timeout: 5000 });
     h.expect((await buzzes(page)) === only(START), 'the first timer did not give one start pulse');
-    await page.clock.runFor(3000);
+    await pageClock.runFor(page, 3000);
     await tap(page, 'Next');
     // the second call replaces the first, so it has to carry the skip pulse too
     const got = await buzzes(page);
@@ -354,23 +372,35 @@ export const scenarios = {
     await ctx.close();
   },
 
-  /** the intro never buzzes, even with the switch on */
+  /** the intro never buzzes, the chest's hold included, with the switch off or on, and has no native switch to tick */
   async 'vibration-not-in-intro'(h) {
-    const { ctx, page, errors } = await open(h, { clock: false });
-    await turnOn(h, page);
+    const { ctx, page, errors } = await open(h, { fakeTime: false });
+    for (const setting of ['off', 'on']) {
+      if (setting === 'on') {
+        await page.goto(h.server.url + '/?mute');
+        await turnOn(h, page);
+      }
+      const chest = await holdChestToFull(page, h.server.url);
+      const quiet = chest.buzzes === none && !chest.nativeSwitches;
+      h.expect(quiet, `the chest buzzed with the switch ${setting}: ${JSON.stringify(chest)}`);
+    }
     await page.goto(h.server.url + '/?fresh&mute');
-    await h.sleep(2500);
-    await page.mouse.click(195, 500);
+    await page.locator('.title-screen').click({ timeout: 20000 });
     const name = page.locator('#np-name');
     await name.waitFor({ timeout: 15000 });
     await name.fill('Sky');
     await page.keyboard.press('Enter');
     await page.keyboard.press('Enter');
     await gone(name, 10000);
+    await playing(page);
+    await appears(page, '.sw .sw-plate', FIRST_WINDOW_SEC);
+    const plate = page.locator('.sw .sw-plate').last();
+    let tapped = 0;
     for (let i = 0; i < 12; i++) {
+      if (await plate.count()) tapped += await tapWhereItIs(page, plate).then(() => 1, () => 0);
       await h.sleep(1500);
-      await page.mouse.click(195, 700);
     }
+    h.expect(tapped > 0, 'no Lantern window in the intro took a tap');
     await h.shot(page, 'intro-quiet');
     const got = await buzzes(page);
     h.expect(got === none, `the intro buzzed: ${got}`);
@@ -380,7 +410,7 @@ export const scenarios = {
 
   /** where the browser can't vibrate there is no switch at all, not a dead one */
   async 'vibration-switch-hidden-without-support'(h) {
-    const { ctx, page, errors } = await open(h, { vibrates: false, clock: false });
+    const { ctx, page, errors } = await open(h, { vibrates: false, fakeTime: false });
     await h.openSettings(page);
     h.expect(await page.locator('.dq-settings [aria-label="Motion"]').isVisible(), 'Settings lost the Motion choice beside it');
     h.expect((await page.getByRole('switch', { name: SWITCH }).count()) === 0, 'Settings shows a vibration switch on a browser that cannot vibrate');
@@ -401,11 +431,11 @@ export const scenarios = {
       a.store.save();
     });
     await wiseMind(h, page);
-    await page.clock.runFor(21000);
+    await pageClock.runFor(page, 21000);
     h.expect((await timer(page).textContent()).trim() === 'Done', 'the Wise Mind timer did not finish');
     const got = await buzzes(page);
     h.expect(got === none, `a desktop was asked to vibrate: ${got}`);
-    await page.clock.resume();
+    await pageClock.resume(page);
     await page.evaluate(() => window.__daily.go({ name: 'hub' }));
     await h.openSettings(page);
     h.expect(await page.locator('.dq-settings [aria-label="Motion"]').isVisible(), 'Settings lost the Motion choice beside it');

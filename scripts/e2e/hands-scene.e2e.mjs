@@ -11,7 +11,31 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
-import { after, countdownContrast, DESK, drawn, flat, inStep, keepsTime, live, looks, losesContext, moreTime, openStopped, pair, PHONE, sceneShot, scenes, seed, SIDE, slowGpu, toSkill, until } from './skill-scenes.e2e.mjs';
+import {
+  countdownContrast,
+  DESK,
+  drawn,
+  flat,
+  inStep,
+  keepsTime,
+  live,
+  looks,
+  losesContext,
+  moreTime,
+  openStopped,
+  pair,
+  PHONE,
+  sceneShot,
+  scenes,
+  seed,
+  SIDE,
+  slowGpu,
+  steps,
+  toSkill,
+  until,
+} from './skill-scenes.e2e.mjs';
+import { holdSceneFences } from './scene-fences.mjs';
+import * as pageClock from './clock.mjs';
 
 const SMALL = { width: 320, height: 568 };
 /** the sizes reduced motion, a lost context and a slow GPU are checked at */
@@ -101,15 +125,11 @@ export const scenarios = {
       await openStopped(h, page, toHands, `hands ${tag}`);
       await looks(h, page, tag, 'hands', vp, undefined, { stopped: true });
       await showsHands(h, page, fs.readFileSync(path.join(h.out, `hands-${tag}.png`)), `hands ${tag}, saved`);
-      const seen = [await after(h, page, 0)];
-      const said = [`${seen[0].e.toFixed(0)}s ${await inFrame(h, page, `hands ${tag} at the start`)}`];
-      // two seconds at a time: a jump that long reads as a pause, not as a slow device. Once the page has run the step's
-      // whole length its countdown is over, so the scene is at Done by then.
-      for (let ran = 0; !seen[seen.length - 1].done; ran += 2) {
-        h.expect(ran < seen[0].dur, `hands ${tag}: not at Done ${ran} s on, past the step's ${seen[0].dur} s (${JSON.stringify(seen[seen.length - 1])})`);
-        const at = await after(h, page, 2000);
+      const [seen, said] = [[], []];
+      for await (const at of steps(h, page, `hands ${tag}`, 2000)) {
         seen.push(at);
         said.push(`${at.e.toFixed(0)}s ${await inFrame(h, page, `hands ${tag} at ${at.e.toFixed(1)} s`)}`);
+        if (at.done) break;
       }
       const curls = seen.map((s) => +s.probe.curl.toFixed(4));
       h.expect(curls.every((c, i) => !i || c <= curls[i - 1]), `hands ${tag}: the fingers curled back at some point: ${curls.join(', ')}`);
@@ -118,7 +138,7 @@ export const scenarios = {
       console.log(`  hands ${tag}: curl ${curls.join(' > ')}; ${said.join('; ')}`);
       if (tag === 'phone') {
         // more time after Done carries on from the open hands: nothing closes again
-        await page.clock.resume();
+        await pageClock.resume(page);
         const done = curls[curls.length - 1];
         const { frames } = await scenes(page);
         await page.locator('.dq-timer').getByRole('button', { name: '+15 s', exact: true }).click();
@@ -131,6 +151,39 @@ export const scenarios = {
       h.expect(!errors.length, errors.join('\n'));
       await ctx.close();
     }
+  },
+
+  async 'hands-slow-first-frame'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute', DESK);
+    await ctx.addInitScript((stallMs) => {
+      const P = WebGL2RenderingContext.prototype;
+      const realNow = performance.now.bind(performance);
+      const slow = (window.__slowFirstFrame = { stalled: false, busyUntil: 0, now: realNow });
+      for (const name of ['drawArrays', 'drawElements', 'drawArraysInstanced', 'drawElementsInstanced']) {
+        const draw = P[name];
+        P[name] = function (...args) {
+          if (!slow.stalled && this.canvas.closest?.('.dq-scene')) {
+            slow.stalled = true;
+            const until = realNow() + stallMs;
+            while (realNow() < until);
+          }
+          return draw.apply(this, args);
+        };
+      }
+    }, 2000);
+    await holdSceneFences(ctx, () => {
+      const slow = window.__slowFirstFrame;
+      slow.busyUntil ||= slow.now() + 6000;
+      return slow.now() < slow.busyUntil;
+    });
+    await openStopped(h, page, toHands, 'hands slow first frame');
+    const slow = await page.evaluate(() => window.__slowFirstFrame);
+    h.expect(slow.stalled && slow.busyUntil > 0, `hands slow first frame: no slow GPU: ${JSON.stringify(slow)}`);
+    const { e } = (await scenes(page)).last;
+    const moved = `hands slow first frame: the countdown moved on ${e.toFixed(2)} s while the GPU drew the first frame`;
+    h.expect(e < 0.25, moved);
+    h.expect(!errors.length, errors.join('\n'));
+    await ctx.close();
   },
 
   /** Radical Acceptance's open hands, and Willing Hands' and Willingness's steps that wait for Start, show the hands too */
@@ -236,8 +289,7 @@ export const scenarios = {
         return /webgl/i.test(String(type)) ? null : get.call(this, type, ...rest);
       };
     });
-    await page.clock.install();
-    await page.reload();
+    await pageClock.reloadOnFakeClock(page);
     await h.reachHub(page);
     const before = await handsRuns(h, page);
     await toHands(h, page);
@@ -247,7 +299,7 @@ export const scenarios = {
     const shown = await flat(page);
     h.expect(shown.length === 2 && shown.every(Boolean), `no WebGL: the flat drawing is hidden (${JSON.stringify(shown)})`);
     await h.shot(page, 'hands-no-webgl-phone');
-    await page.clock.fastForward(21000);
+    await pageClock.fastForward(page, 21000);
     await page.locator('.dq-timer-num', { hasText: 'Done' }).waitFor({ timeout: 5000 });
     const tap = (name) => page.locator('.dq-skill').getByRole('button', { name, exact: true }).first().click();
     await tap('Next');

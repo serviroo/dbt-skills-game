@@ -13,6 +13,7 @@ const dist = path.resolve(root, flags.dist ?? 'dist');
 const secs = Number(flags.seconds ?? 6);
 const sub = (flags.path ?? '').replace(/^\/+|\/+$/g, '');
 const mount = sub ? `/${sub}/` : '/';
+const WAITS_FOR_A_TAP = '.title-screen, .sw .sw-plate, .ch-hit';
 const pages = ['', '?lab=character', '?lab=window', '?lab=gate', '?lab=awaken', '?lab=chest', '?lab=audio', '?lab=daily', '?cutscene=1'];
 const results = {};
 let fatal = null;
@@ -39,10 +40,12 @@ try {
       await page.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 30000 }).catch(() => errs.push('ready timeout'));
       // tap through anything that waits for their (title screen, windows, hold-to-charge gets a long press)
       for (let t = 0; t < secs; t++) {
-        await page.mouse.move(187, 400);
-        await page.mouse.down();
+        const box = await page.locator(WAITS_FOR_A_TAP).last().boundingBox({ timeout: 120 }).catch(() => null);
+        const at = box && { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+        if (at) await page.mouse.move(at.x, at.y);
+        if (at) await page.mouse.down();
         await page.waitForTimeout(t % 3 === 2 ? 900 : 120);
-        await page.mouse.up();
+        if (at) await page.mouse.up();
         await page.waitForTimeout(880);
       }
       if (flags.shots) await page.screenshot({ path: path.join(root, flags.shots, (q.replace(/[^a-z0-9]+/gi, '_') || 'root') + '.png') });

@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { line as stroke } from './art-eraser-glow.e2e.mjs';
+import * as pageClock from './clock.mjs';
 
 const PHONES = [{ width: 390, height: 844 }, { width: 320, height: 568 }];
 const line = (x, y, i = 1) => ({ i, w: 25, p: [x, y, x + 300, y + 80, x + 520, y + 20] });
@@ -129,13 +130,13 @@ const steady = (page) => page.waitForFunction(() => document.getAnimations().eve
 /**
  * Holds the page's clock, runs tap(), which raises a toast, and lets the screen it opens settle for 1 s of that clock.
  * The toast's Undo lasts 6 s of the page's timers, and a screenshot on a slow machine, or a browser stopped for a while,
- * can take longer; held, it waits for the scenario. page.clock.resume() lets it run out again.
+ * can take longer; held, it waits for the scenario. pageClock.resume(page) lets it run out again.
  */
 export async function holdToast(h, page, tap) {
-  await page.clock.install();
-  await h.pauseClock(page);
+  await pageClock.install(page);
+  await pageClock.pauseClock(page);
   await tap();
-  await page.clock.runFor(1000);
+  await pageClock.runFor(page, 1000);
 }
 
 /** Nothing sticks out sideways, and the piece page's controls sit inside the screen with readable text. */
@@ -181,18 +182,20 @@ export const scenarios = {
   async 'art-home-waits-for-welcome'(h) {
     let paused = false;
     const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', PHONES[0], async (ctx) => {
-      await ctx.clock.install();
+      await pageClock.install(ctx);
       await ctx.route('**/src/daily/index.ts*', async (route) => {
-        await ctx.clock.pauseAt((await route.request().frame().evaluate(() => Date.now())) + 1000);
+        await pageClock.pauseClock(route.request().frame().page());
         paused = true;
-        await route.continue();
+        await route.fallback();
       });
     });
     try {
       const cdp = await ctx.newCDPSession(page);
       await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
       const state = () => page.evaluate(() => ({ home: !!document.querySelector('.dq-tile'), greeting: window.__daily?.greeting, window: !!document.querySelector('.dq-sw'), inert: document.querySelector('#dq-main')?.inert }));
-      await h.poll(page, async () => (await state()).home || (await page.clock.runFor(20), false), Boolean, 'Home did not become ready as the page clock ran', { timeout: 30000, polling: 0 });
+      const home = async () => (await state()).home || (await pageClock.runFor(page, 20), false);
+      const notHome = 'Home did not become ready as the page clock ran';
+      await h.poll(page, home, Boolean, notHome, { timeout: 30000, polling: 0 });
       const before = await state();
       h.expect(paused, 'the navigation did not pass through the clock gate');
       h.expect(before.home && before.greeting && !before.window, 'the welcome was not pending when Home became ready: ' + JSON.stringify(before));
@@ -200,12 +203,14 @@ export const scenarios = {
       let closed;
       let failed;
       const reaching = h.reachHub(page).then(async (names) => { closed = names; reached = await state(); }, (e) => { failed = e; });
-      await h.poll(page, async () => reached || failed || (await page.clock.runFor(50), false), Boolean, 'reaching Home did not end as the page clock ran', { timeout: 30000, polling: 0 });
+      const ended = async () => reached || failed || (await pageClock.runFor(page, 50), false);
+      const notEnded = 'reaching Home did not end as the page clock ran';
+      await h.poll(page, ended, Boolean, notEnded, { timeout: 30000, polling: 0 });
       await reaching;
       if (failed) throw failed;
       h.expect(JSON.stringify(closed) === '["Notification"]', 'the helper did not close the due welcome: ' + JSON.stringify(closed));
       h.expect(reached && !reached.greeting && !reached.window && !reached.inert, 'reaching Home returned before the pending welcome closed: ' + JSON.stringify(reached));
-      await page.clock.resume();
+      await pageClock.resume(page);
       await seed(page);
       await page.locator('.dq-tile--art').click();
       await page.locator('.dq-artroom .dq-galitem').first().waitFor();
@@ -393,7 +398,7 @@ export const scenarios = {
       await steady(page);
       await h.shot(page, `${at}-removed-toast`);
       await toast.getByRole('button', { name: 'Undo', exact: true }).click();
-      await page.clock.resume();
+      await pageClock.resume(page);
       await h.poll(page, () => order(page, '.dq-galitem'), (o) => JSON.stringify(o) === '["pg-a","al-c","pg-b"]', `${at}: Undo did not bring the page back to its place`, { timeout: 12000 });
       await h.poll(page, () => page.evaluate(() => document.activeElement?.dataset?.piece), (f) => f === 'pg-b', `${at}: focus did not go to the page Undo brought back`, { timeout: 12000 });
       await h.sleep(7000);

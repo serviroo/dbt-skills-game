@@ -126,7 +126,7 @@ export function newerParts(save, crystal = false) {
 }
 
 /** The records of a newer save past this build's limits or unreadable here, which must be stored exactly as they came. */
-export function newerRecords(save, rows = true) {
+export function newerRecords(save) {
   const ev = (id) => save.events?.find((e) => e.id === id);
   return {
     bigXp: ev('nx1'),
@@ -137,7 +137,7 @@ export function newerRecords(save, rows = true) {
     oddDay: save.diary?.someday,
     oddPin: save.skillPins?.stop,
     farPin: save.skillPins?.tipp,
-    ...(rows ? { rows: save.settings?.emotionRows } : {}),
+    rows: save.settings?.emotionRows,
   };
 }
 
@@ -185,7 +185,6 @@ export const scenarios = {
   async 'newer-keeps'(h) {
     const want = newerParts(newerSave());
     const records = newerRecords(newerSave());
-    const restoredRecords = newerRecords(newerSave(), false);
     const seed = { [h.SAVE]: JSON.stringify(newerSave()), 'dbt.app.v1': h.SEEN, [h.YOU]: YOU };
     const { ctx, page, errors } = await h.open(seed);
     await h.reachHub(page);
@@ -243,12 +242,15 @@ export const scenarios = {
     got = newerParts(restored);
     h.expect(same(want, got), `restoring lost newer values: ${diff(want, got)}`);
     h.expect(['nv1', 'ns1', 'ns2', 'nc1'].every((id) => restored.events.some((e) => e.id === id)), 'restoring lost known progress');
-    // a restore adds the file's rows to this device's own list, up to this build's limit, so rows aren't compared
-    h.expect(same(restoredRecords, newerRecords(restored, false)), `restoring changed records this build can't hold as stored: ${diff(restoredRecords, newerRecords(restored, false))}`);
+    const restoredAs = newerRecords(restored);
+    const restoreChanged = diff(records, restoredAs);
+    h.expect(same(records, restoredAs), `restoring changed records this build can't hold as stored: ${restoreChanged}`);
     const again = await crystal(h, clean.page, 'newer-crystal-again');
     got = newerParts(again, true);
     h.expect(same(want, got), `backing up the restored save lost newer values: ${diff(want, got)}`);
-    h.expect(same(restoredRecords, newerRecords(again, false)), `backing up the restored save changed records this build can't hold as stored: ${diff(restoredRecords, newerRecords(again, false))}`);
+    const againAs = newerRecords(again);
+    const changed = diff(records, againAs);
+    h.expect(same(records, againAs), `backing up the restored save changed records it can't hold as stored: ${changed}`);
     h.expect(!clean.errors.length, clean.errors.join('\n'));
     await clean.ctx.close();
 
