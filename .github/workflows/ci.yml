@@ -24,7 +24,9 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Busy page at x80 and drop counts, base then this head
+        shell: bash
         run: |
+          set +e
           git worktree add ../base bf7df9b7f60c919264a1128fa63e58059e1b1cb2
           ln -s "$PWD/node_modules" ../base/node_modules
           count() {
