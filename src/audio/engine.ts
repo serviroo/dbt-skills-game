@@ -3,7 +3,7 @@
  * convolution reverb, a limiter and a soft clipper. The same code runs on a live AudioContext and on an
  * OfflineAudioContext (renderOffline), so captured videos get the exact soundtrack the app plays.
  */
-import { CUES } from './cues';
+import { CUES, buildCue } from './cues';
 import { BED_NAMES, buildBed, buildCharge, type BedHandle, type BedName, type ChargeHandle } from './beds';
 import { AHEAD, Music, SECTIONS, type Section, type SectionOpts } from './music';
 import { clipCurve, makeCrackle, makeIR, makeNoise, dB, type Ctx } from './dsp';
@@ -13,9 +13,9 @@ import { SCORE } from '../motion/tokens';
 import { makeEcho, dropEcho, type Echo, type Sends } from './echo';
 import { BusLevels } from './bus-levels';
 import { Voice, stoppedBy, withControls, type Lib } from './voice';
-import { Prebuilt, openPrebuilt } from './prebuild';
+import { BuildWindow, openPrebuilt } from './prebuild';
 import { CueCleanup } from './cue-cleanup';
-import { pendingEvents } from './pending-events';
+import { pendingEvents, type Plan } from './pending-events';
 
 export type { BedHandle, BedName, ChargeHandle, Section, SectionOpts };
 export { BED_NAMES, SECTIONS };
@@ -129,6 +129,7 @@ export class AudioEngine {
   private seedN: number;
   private spans: { a: number; b: number }[] = [];
   private timer: ReturnType<typeof setInterval> | 0 = 0;
+  private plans = new BuildWindow();
   private unlocked = false;
   private vol: number;
   private isMuted: boolean;
@@ -263,7 +264,7 @@ export class AudioEngine {
         lib: this.libMusic,
         hush: (a, b) => this.hush(a, b),
         seed: () => this.nextSeed(),
-        cue: (name, seed, group) => this.buildCue(name, {}, seed, group).voice,
+        cue: (name, seed, group) => buildCue(this.lib, this.sfx, name, {}, seed, group).voice,
         retire: (voice) => this.cueCleanup?.add(voice),
         onSection: (name, at) => {
           if (this.lifted) {
@@ -281,7 +282,10 @@ export class AudioEngine {
 
     this.cueCleanup = this.live ? new CueCleanup(C, this.sfx, this.active) : null;
     if (this.live) {
-      this.timer = setInterval(() => this.music.scheduleUntil(this.ctx.currentTime + AHEAD), 120);
+      this.timer = setInterval(() => {
+        this.plans.until(this.ctx.currentTime + AHEAD);
+        this.music.scheduleUntil(this.ctx.currentTime + AHEAD);
+      }, 120);
       const vis = () => { void this.applyVisibility(); };
       document.addEventListener('visibilitychange', vis);
       const sc = () => {
@@ -431,9 +435,9 @@ export class AudioEngine {
     // nothing starts inside the Safe Zone, so nothing can be left sounding when the player steps out
     if (this.isQuiet) return { stop() {}, end: this.when(opts.at) };
     // built first and held, then timed: however long building it takes, no part of it can land in the past
-    const plain = BUILD_OPTS.every((name) => opts[name] === undefined);
-    const copies = (plain && this.music.copies(cue))
-      || new Prebuilt((seed) => this.buildCue(cue, opts, seed), () => this.nextSeed());
+    const custom = BUILD_OPTS.some((name) => opts[name] !== undefined);
+    const make = (seed: () => number, group?: Voice) => buildCue(this.lib, this.sfx, cue, opts, seed, group);
+    const copies = this.music.copies(cue, custom, make) ?? { make, seed: () => this.nextSeed() };
     const { voice: v, at: openedAt } = openPrebuilt(opts.at, copies, cue);
     const at = v.isDropped ? this.when(opts.at) : openedAt;
     if (cue === "awaken_hit") {
@@ -472,20 +476,6 @@ export class AudioEngine {
     };
   }
 
-  private buildCue(cue: string, opts: PlayOpts, seed: () => number, group?: Voice) {
-    const def = CUES[cue];
-    const detune = opts.detune ?? (opts.index !== undefined ? opts.index * 50 : 0);
-    const gain = (opts.gain ?? 1) * dB(def.gainDb ?? 0);
-    const vo = { gain, pan: opts.pan, detune, room: def.room, hall: def.hall, held: true, group };
-    const voice = new Voice(this.lib, 0, this.sfx, vo, seed());
-    try {
-      def.fn(voice, { dur: opts.dur });
-    } catch (err) {
-      console.warn('[audio] cue failed', cue, err);
-    }
-    return { voice };
-  }
-
   /** Start (or re-level) a continuous bed. Calling it again for a running bed ramps its level. */
   bed(name: BedName, o: { at?: number; level?: number; fadeIn?: number } = {}): BedHandle {
     const cur = this.beds.get(name);
@@ -495,7 +485,7 @@ export class AudioEngine {
     }
     if (cur) this.letGo(cur.voice);
     const built = (seed: () => number) => buildBed(this.lib, name, this.bedBus, o.level ?? 1, o.fadeIn ?? 0.5, seed());
-    const { handle: h } = openPrebuilt(o.at, new Prebuilt(built, () => this.nextSeed(), 'continuous'), name);
+    const { handle: h } = openPrebuilt(o.at, { make: built, seed: () => this.nextSeed(), kind: 'continuous' }, name);
     if (!h.voice.isDropped) this.beds.set(name, h);
     return h;
   }
@@ -522,7 +512,7 @@ export class AudioEngine {
   chargeLoop(o: { at?: number } = {}): ChargeHandle {
     if (this.charge && !this.charge.voice.isStopped) return this.charge;
     const self = this;
-    const charge = new Prebuilt((seed) => {
+    const make = (seed: () => number) => {
       const { voice, handle: h } = buildCharge(this.lib, this.sfx, seed());
       voice.control(o.at ?? 0, (time) => self.toFocus(dB(-2), time, 0.4));
       return { voice, handle: {
@@ -549,8 +539,8 @@ export class AudioEngine {
           voice.control(at + 0.3, apply, (_, time) => apply(time));
         },
       } };
-    }, () => this.nextSeed(), 'continuous');
-    const { handle } = openPrebuilt(o.at, charge, 'charge');
+    };
+    const { handle } = openPrebuilt(o.at, { make, seed: () => this.nextSeed(), kind: 'continuous' }, 'charge');
     if (handle.voice.isDropped) return handle;
     this.charge = handle;
     return handle;
@@ -562,7 +552,7 @@ export class AudioEngine {
    * holds until unhush() or the next awaken_hit. An open-ended awaken section cuts its build here.
    */
   hush(from?: number, to?: number) {
-    const hush = new Prebuilt((seed) => {
+    const make = (seed: () => number) => {
       const voice = new Voice(this.lib, 0, this.sfx, { held: true }, seed());
       const g = voice.gain(0, voice.dry);
       voice.at(g.gain).setValueAtTime(0, 0);
@@ -576,8 +566,8 @@ export class AudioEngine {
         voice.at(g.gain).setValueAtTime(0.065, Math.max(0, to - at - 0.01));
         voice.at(g.gain).linearRampToValueAtTime(0, to - at + 0.02);
       } };
-    }, () => this.nextSeed());
-    const { voice: v, at } = openPrebuilt(from, hush, 'hush');
+    };
+    const { voice: v, at } = openPrebuilt(from, { make, seed: () => this.nextSeed() }, 'hush');
     if (v.isDropped) {
       this.unhush(this.when(to ?? from));
       return;
@@ -699,6 +689,7 @@ export class AudioEngine {
    *  the cutscene): what plays next starts in an empty echo. Under the Safe Zone's quiet the echo is closed already, and
    *  leaving the quiet brings the empty one (see quiet). */
   stopAll(fade = 0.4, at = soon(this.ctx)) {
+    this.plans.clear();
     const old = this.echo;
     if (!this.isQuiet) for (const e of [old, ...this.closing.keys()]) this.closeEcho(e, at, fade);
     this.charge?.stop(at, fade);
@@ -781,9 +772,18 @@ export class AudioEngine {
    * - { t, cue: 'hush', opts: { until } } / { t, cue: 'duck', opts: { db, ramp? } }
    */
   schedule(events: SoundEvent[], t0: number) {
+    const existing = { beds: this.beds, charge: this.charge, named: this.named,
+      music: this.music.live.map((s) => s.voice) };
+    const plans = pendingEvents(events, t0, this, existing).map(({ at, plan }) =>
+      ({ at, run: () => this.run(plan, t0) }));
+    if (this.live) this.plans.add(plans, this.ctx.currentTime + AHEAD);
+    else for (const { run } of plans) run();
+    this.music.scheduleUntil(Math.min(this.ctx.currentTime + AHEAD, t0 + 1e6));
+  }
+
+  private run(plan: Plan, t0: number) {
     const named = this.named;
-    const existing = { beds: this.beds, charge: this.charge, named, music: this.music.live.map((s) => s.voice) };
-    for (const plan of pendingEvents(events, t0, this, existing)) withControls(plan.controls, () => {
+    withControls(plan.controls, () => {
       if ('existing' in plan) return plan.existing;
       const e = plan.event;
       const at = t0 + e.t;
@@ -858,7 +858,6 @@ export class AudioEngine {
         }
       }
     }, plan.bind);
-    this.music.scheduleUntil(Math.min(this.ctx.currentTime + AHEAD, t0 + 1e6));
   }
 
   /** Peak number of simultaneously scheduled source nodes (oscillators + buffer sources), from recorded spans. */

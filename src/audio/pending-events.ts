@@ -8,7 +8,8 @@ type Entry = {
   controls: { at: number; apply: Setup }[];
   end: number;
 };
-type Plan = { controls: Setup[]; bind?: Setup } & ({ event: SoundEvent } | { existing: ControlledBuild | undefined });
+export type Plan = { controls: Setup[]; bind?: Setup }
+  & ({ event: SoundEvent } | { existing: ControlledBuild | undefined });
 type Existing = {
   beds: ReadonlyMap<BedName, BedHandle>;
   charge: ChargeHandle | null;
@@ -16,7 +17,9 @@ type Existing = {
   music: Voice[];
 };
 
-export function pendingEvents(events: SoundEvent[], t0: number, engine: AudioEngine, existing: Existing): Plan[] {
+export function pendingEvents(
+  events: SoundEvent[], t0: number, engine: AudioEngine, existing: Existing,
+): { at: number; plan: Plan }[] {
   const plans: { at: number; order: number; plan: Plan }[] = [];
   const reserves: { at: number; entry: Entry; apply: Setup }[] = [];
   const playing = new Map<Voice, Entry>();
@@ -138,6 +141,6 @@ export function pendingEvents(events: SoundEvent[], t0: number, engine: AudioEng
     if (cue === 'music') sections.push(entry);
   }
   const prepared = reserves.sort((a, b) => a.at - b.at).map(({ entry, apply }) =>
-    ({ existing: entry.built, controls: [apply] }));
-  return [...prepared, ...plans.sort((a, b) => a.at - b.at || a.order - b.order).map(({ plan }) => plan)];
+    ({ at: -Infinity, plan: { existing: entry.built, controls: [apply] } }));
+  return [...prepared, ...plans.sort((a, b) => a.at - b.at || a.order - b.order)];
 }

@@ -2,6 +2,8 @@ interface Clock {
   control(at: number, apply: (time: number) => void): void;
 }
 
+const invoke = (run: () => void) => run();
+
 export function handles(voice: Clock, gain: AudioParam) {
   const apply = (at: number) => gain.setTargetAtTime(0, at, 0.03);
   const unsafe = {
@@ -31,5 +33,15 @@ export function handles(voice: Clock, gain: AudioParam) {
       },
     },
   };
-  return { unsafe, queued };
+  const helped = {
+    handle: {
+      level(v: number, at: number) {
+        invoke(() => gain.setTargetAtTime(v, at, 0.03));
+      },
+      release(at: number) {
+        invoke(() => voice.control(at, apply));
+      },
+    },
+  };
+  return { unsafe, queued, helped };
 }

@@ -77,23 +77,18 @@ const lateOpensBuildAgain = {
     },
   },
   create(context) {
-    const usesVoice = context.sourceCode.ast.body.some((node) =>
-      node.type === 'ImportDeclaration'
-        ? node.specifiers.some((s) => s.imported?.name === 'Voice')
-        : (node.declaration ?? node).id?.name === 'Voice');
     return {
       CallExpression(node) {
         const callee = node.callee;
         const method = callee.type === 'MemberExpression'
           ? callee.computed ? callee.property.value : callee.property.name
           : null;
-        if (method !== 'open' && method !== 'openInTime') return;
-        if (method === 'open' && !usesVoice) return;
+        if (method !== 'openInTime') return;
         let parent = node.parent;
         while (parent && parent.type !== 'MethodDefinition') parent = parent.parent;
         const checked = parent?.static && parent.key.name === 'openBuilt' &&
           parent.parent.parent.id?.name === 'Voice';
-        if (method === 'open' || !checked) context.report({ node, messageId: 'dropped' });
+        if (!checked) context.report({ node, messageId: 'dropped' });
       },
     };
   },
@@ -590,10 +585,12 @@ const controlsWaitForOpening = {
       const method = methodName(call);
       if (method === 'control') return false;
       if (AUDIO_TIME_ARG.has(method) && method !== 'stop' && method !== 'start') return true;
-      const fn = functionOf(context, call.callee);
-      if (!fn || seen.has(fn)) return false;
-      seen.add(fn);
-      return ownCalls(fn.body).some((next) => changesParameter(next, seen));
+      const passed = call.arguments.map((arg) => FUNCTIONS.has(arg.type) ? arg : functionOf(context, arg));
+      return [functionOf(context, call.callee), ...passed].some((fn) => {
+        if (!fn || seen.has(fn)) return false;
+        seen.add(fn);
+        return ownCalls(fn.body).some((next) => changesParameter(next, seen));
+      });
     };
     return {
       Property(node) {

@@ -5,6 +5,11 @@ import { renderedTo, silentAfter, soon } from './param';
 
 export const LONG = 6 * 3600;
 
+export const RETRIES = [0];
+for (let next = SCORE.leadSec; RETRIES[RETRIES.length - 1] + next <= SCORE.lateSec; next = 2 * next + SCORE.leadSec) {
+  RETRIES.push(next);
+}
+
 /** Shared, engine-owned resources every voice can draw on. */
 export interface Lib {
   ctx: Ctx;
@@ -172,6 +177,7 @@ export class Voice {
   private joined: Voice[] = [this];
   private riders: Voice[] = [];
   private openedAt = 0;
+  private opensAt = -Infinity;
   private opened = false;
   private stopAsked: { at: number; ramp: number } | undefined;
   private pending: { list: Control[] | null };
@@ -254,7 +260,9 @@ export class Voice {
       h.place(missed ? Math.max(at, soon(this.ctx) - h.t) : at);
     }
     if (!continuing && first <= rendered()) return this.drop(voices);
-    this.settle(continuing ? soon(this.ctx) : first);
+    const settleAt = continuing ? soon(this.ctx) : first;
+    for (const v of voices) v.opensAt = settleAt;
+    this.settle(settleAt);
     for (let room = 0; ; room = 2 * room + SCORE.leadSec) {
       const openedAt = continuing ? soon(this.ctx) + room : first;
       if (continuing) for (const v of voices) v.discardBefore(openedAt);
@@ -309,7 +317,9 @@ export class Voice {
     bindBuild = undefined;
     let pending: Control[] | undefined;
     let owners: Voice[] = [];
-    for (let extra = 0; ; extra = 2 * extra + SCORE.leadSec) {
+    for (let k = 0; ; k++) {
+      const extra = RETRIES[k];
+      const last = k + 1 >= RETRIES.length;
       const built = copies.take();
       if (!built) throw new Error(`${sound} has no built copy to open`);
       bind?.(built);
@@ -327,12 +337,18 @@ export class Voice {
       const until = built.voice.stopAsked?.at ?? Infinity;
       deadline = Math.min(deadline ?? (asked ?? soon(built.voice.ctx)) + SCORE.lateSec, until);
       const late = Math.max(asked ?? 0, soon(built.voice.ctx)) + extra >= deadline;
-      const continuing = kind === 'continuous' && (late || !copies.left);
+      const continuing = kind === 'continuous' && (late || last || !copies.left);
       const by = continuing ? until : deadline;
       pending = built.voice.pending.list ?? [];
       owners = targets;
-      const opened = built.voice.openInTime(asked, continuing ? 0 : extra, by, built.prepare, continuing);
-      const expired = soon(built.voice.ctx) + 2 * extra + SCORE.leadSec > deadline;
+      let opened: boolean;
+      try {
+        opened = built.voice.openInTime(asked, continuing ? 0 : extra, by, built.prepare, continuing);
+      } catch (err) {
+        built.voice.discard();
+        throw err;
+      }
+      const expired = last || soon(built.voice.ctx) + RETRIES[k + 1] > deadline;
       if (opened || continuing || kind === 'once' && (expired || !copies.left)) {
         if (!opened) {
           const lateMs = Math.max(0, soon(built.voice.ctx) - requested) * 1000;
@@ -755,7 +771,8 @@ export class Voice {
     const committed = !reserve && !this.stopCommitted;
     if (!reserve) this.commitStop();
     const t = Math.max(at, soon(this.ctx));
-    const kill = at <= this.openedAt ? t : stoppedBy(t, ramp);
+    const opening = this.clock.opensAt;
+    const kill = at <= Math.max(this.openedAt, opening) ? t : stoppedBy(t, ramp);
     if (kill >= this.killAt) return committed;
     this.killAt = kill;
     this.fadesFrom = Math.min(this.fadesFrom, at);
@@ -763,8 +780,9 @@ export class Voice {
     const tau = Math.max(0.002, ramp / 4);
     for (const g of [this.out.gain, this.roomSend.gain, this.hallSend.gain]) {
       const p = this.at(g, true);
-      p.cancelScheduledValues(t);
-      p.setTargetAtTime(0, t, tau);
+      p.cancelScheduledValues(at <= opening ? at : t);
+      if (at <= opening) p.setValueAtTime(0, at);
+      else p.setTargetAtTime(0, t, tau);
     }
     for (const c of [...this.children, ...this.parts]) {
       c.pending.list = null;

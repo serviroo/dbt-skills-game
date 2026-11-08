@@ -1,5 +1,5 @@
-import { bezierCurve, midi } from './dsp';
-import type { Timed, Voice } from './voice';
+import { bezierCurve, dB, midi } from './dsp';
+import { Voice, type Lib, type Timed } from './voice';
 
 export interface CueDef {
   /** Nominal length in seconds including tails (used by offline cue renders). */
@@ -717,3 +717,19 @@ export const CUES: Record<string, CueDef> = {
 };
 
 export type CueName = keyof typeof CUES;
+
+type CueOpts = { gain?: number; pan?: number; detune?: number; dur?: number; index?: number };
+
+export function buildCue(lib: Lib, dest: AudioNode, cue: string, opts: CueOpts, seed: () => number, group?: Voice) {
+  const def = CUES[cue];
+  const detune = opts.detune ?? (opts.index !== undefined ? opts.index * 50 : 0);
+  const gain = (opts.gain ?? 1) * dB(def.gainDb ?? 0);
+  const vo = { gain, pan: opts.pan, detune, room: def.room, hall: def.hall, held: true, group };
+  const voice = new Voice(lib, 0, dest, vo, seed());
+  try {
+    def.fn(voice, { dur: opts.dur });
+  } catch (err) {
+    console.warn('[audio] cue failed', cue, err);
+  }
+  return { voice };
+}

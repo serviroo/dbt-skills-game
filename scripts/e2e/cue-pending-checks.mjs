@@ -115,11 +115,10 @@ export async function explicitHitGate(h, { ctx, page, errors, tap }, phase = 'hi
     const r = await page.evaluate(async (phase) => {
       const { Voice } = await import('/src/audio/voice.ts');
       const e = window.__engine;
-      const at = e.now + 0.05;
+      const hitAt = e.now + 0.05;
       e.music.host.hush = () => {};
-      e.music.to('awaken', 0.01, { at: e.now, hitAt: at });
-      const build = e.music.live.find((s) => s.name === 'awaken').voice.children[0];
-      build.wet.gain.value = build.dry.gain.value = 0;
+      e.music.to('awaken', 0.01, { at: e.now, hitAt });
+      const at = Math.max(hitAt, e.now + 0.05);
       const next = e.music.copies('awaken_hit').ready[0].voice;
       const original = next.riders[0];
       const scheduled = !original.isHeld && original.t >= e.now;

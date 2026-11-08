@@ -15,8 +15,8 @@ const expect = (ok, message) => ok || failures.push(message);
 
 const RULE_FINDINGS = {
   'audio-times-from-soon': 2,
-  'controls-wait-for-opening': 3,
-  'late-opens-build-again': 10,
+  'controls-wait-for-opening': 4,
+  'late-opens-build-again': 8,
   'no-cross-render-peak-equality': 2,
   'hold-reads-the-scheduled-curve': 26,
   'held-times-are-clamped': 4,
@@ -33,7 +33,7 @@ const RULE_FINDINGS = {
   'cue-cleanup-shares-one-clock': 2,
   'bus-rises-wait-for-stops': 14,
   'bus-levels-use-tracked-curves': 6,
-  'timed-cues-are-prebuilt': 6,
+  'timed-cues-are-prebuilt': 9,
 };
 
 function checkRules() {

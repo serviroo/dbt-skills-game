@@ -1,7 +1,7 @@
 import { dB, midi } from './dsp';
 import { glide, soon } from './param';
 import { Voice, kRate, type ControlledBuild } from './voice';
-import { Prebuilt, openPrebuilt } from './prebuild';
+import { copiesAhead, openPrebuilt, type Build, type Spares } from './prebuild';
 import { figs, groove, prog, theme, roarParts } from './roar';
 import { h01, Hits, LONG, Pad, satBus, Strings, waveOf } from './instruments';
 import type { Section, SectionOpts, MusicHost } from './score-types';
@@ -164,8 +164,10 @@ interface SectionImpl {
   hush?(at: number): void;
   hit?(at: number, dropped: boolean, cue?: Voice): void;
   opened?(until: number): void;
-  cues?: Map<string, Prebuilt<ControlledBuild>>;
+  copies?(cue: string, custom: boolean, make?: CueMake): Spares<ControlledBuild> | Build<ControlledBuild> | undefined;
+  stop?(): void;
 }
+export type CueMake = (seed: () => number, group: Voice) => ControlledBuild;
 type Roar = ReturnType<typeof roarParts>;
 type Factory = (v: Voice, o: SectionOpts, host: MusicHost) => (start: number) => SectionImpl;
 
@@ -453,25 +455,34 @@ const FACTORIES: Record<Section, Factory> = {
       let roarTo = -Infinity;
       let stand = o.standAt !== undefined && o.hitAt !== undefined ? o.standAt - o.hitAt : 7.04;
       let hitPlayed = false;
-      const cues = new Map<string, Prebuilt<ControlledBuild>>();
-      const hitCopy = (seed: () => number) => {
+      let stopping = false;
+      let spares: Spares<ControlledBuild> | undefined;
+      const hitCopy = (seed: () => number, make?: CueMake) => {
         const parts = roarParts(v, roar);
         swellPedal(parts, 0);
         roarNotes(parts, 0, 0, BEAT / 4);
-        const voice = host.cue('awaken_hit', seed, parts.rp);
+        const voice = make ? make(seed, parts.rp).voice : host.cue('awaken_hit', seed, parts.rp);
         voice.ride(parts.rp);
         roarOf.set(voice, parts);
         return { voice };
       };
       return {
-        cues,
+        copies(cue, custom, make) {
+          if (cue !== 'awaken_hit' || hitPlayed || stopping) return undefined;
+          if (!custom && spares?.left) return spares;
+          return { make: (seed) => hitCopy(seed, make), seed: host.seed };
+        },
+        stop() {
+          stopping = true;
+          spares?.discard();
+        },
         hush(at: number) {
           if (hitAt === Infinity) cut(at);
         },
         opened: (until: number) => {
           if (o.at !== undefined && o.hitAt !== undefined) host.hush(o.hitAt - 0.78, o.hitAt);
           roarTick(soon(host.lib.ctx), until);
-          cues.set('awaken_hit', new Prebuilt(hitCopy, host.seed));
+          if (!stopping) spares = copiesAhead((seed) => hitCopy(seed), host.seed);
         },
         hit(at: number, dropped: boolean, cue?: Voice) {
           if (hitPlayed) return;
@@ -481,9 +492,10 @@ const FACTORIES: Record<Section, Factory> = {
           if (parts) R = parts;
           if (hitPlayed && o.standAt !== undefined) stand = o.standAt - at;
           [hitAt, roarTo] = hitPlayed ? [at, at + BEAT / 4] : [Infinity, Infinity];
+          if (hitPlayed) spares?.discard();
         },
         tick(from, to) {
-          if (!hitPlayed) cues.get('awaken_hit')?.fill();
+          if (!hitPlayed && !stopping) spares?.fill();
           const bEnd = Math.min(to, cutAt - 0.12, hitAt - 0.12);
           while (nextBeat < bEnd) {
             if (nextBeat >= from) {
@@ -711,7 +723,7 @@ export class Music {
   ) {}
 
   to(name: Section, crossfade = 2, o: SectionOpts = {}) {
-    const section = new Prebuilt((seed) => {
+    const make = (seed: () => number) => {
       const opts = { hall: name === "awaken" ? 0.22 : 0.32, room: 0, gain: SECTION_GAIN[name], held: true };
       const voice = new Voice(this.host.lib, 0, this.dest, opts, seed());
       const score = FACTORIES[name](voice, o, { ...this.host, seed });
@@ -719,8 +731,8 @@ export class Music {
       voice.at(voice.out.gain).setValueAtTime(0, 0);
       voice.at(voice.out.gain).setTargetAtTime(1, 0, Math.max(0.004, crossfade / 4));
       return { voice, score };
-    }, () => this.host.seed(), 'continuous');
-    const { voice, score, at } = openPrebuilt(o.at, section, name);
+    };
+    const { voice, score, at } = openPrebuilt(o.at, { make, seed: () => this.host.seed(), kind: 'continuous' }, name);
     this.stop(o.fadeOut ?? crossfade, at);
     if (voice.isDropped) return;
     const impl = score(voice.t);
@@ -734,7 +746,7 @@ export class Music {
     for (const s of this.live) {
       if (!s.voice.stop(at, fade)) continue;
       s.end = Math.min(s.end, at);
-      s.impl.cues?.forEach((copies) => copies.discard());
+      s.impl.stop?.();
       this.host.retire?.(s.voice);
     }
     this.current = null;
@@ -759,10 +771,10 @@ export class Music {
     for (const s of this.live) if (s.name === "awaken" && s.end === Infinity) s.impl.hush?.(at);
   }
 
-  copies(cue: string) {
+  copies(cue: string, custom = false, make?: CueMake) {
     for (const s of this.live) {
-      const copies = s.end === Infinity ? s.impl.cues?.get(cue) : undefined;
-      if (copies?.left) return copies;
+      const copies = s.end === Infinity ? s.impl.copies?.(cue, custom, make) : undefined;
+      if (copies) return copies;
     }
   }
 

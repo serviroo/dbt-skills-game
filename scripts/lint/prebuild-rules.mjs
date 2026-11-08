@@ -1,9 +1,10 @@
-const OPENER = 'openBuilt';
+const BANNED = new Set(['openBuilt', 'Prebuilt']);
 
 const timedCuesArePrebuilt = {
   meta: {
     messages: {
-      inline: 'Open held sounds with openPrebuilt from src/audio/prebuild.ts, so every try takes a copy built ahead.',
+      inline: 'Build and open held sounds only through src/audio/prebuild.ts (openPrebuilt, copiesAhead, ahead), '
+        + 'so it alone decides when their copies are built.',
     },
   },
   create(context) {
@@ -16,13 +17,13 @@ const timedCuesArePrebuilt = {
     return {
       Identifier(node) {
         const declared = node.parent?.type === 'MethodDefinition' && node.parent.key === node;
-        if (node.name === OPENER && !declared) report(node);
+        if (BANNED.has(node.name) && !declared) report(node);
       },
       Literal(node) {
-        if (node.value === OPENER) report(node);
+        if (BANNED.has(node.value)) report(node);
       },
       TemplateElement(node) {
-        if (node.value.cooked === OPENER) report(node);
+        if (BANNED.has(node.value.cooked)) report(node);
       },
     };
   },

@@ -22,6 +22,7 @@ import {
 import { timedHush, lastSourceStall, expiredEnds, fixedScoreTimes } from './cue-end-checks.mjs';
 import { expiredBuilds } from './cue-deadline-checks.mjs';
 import { droppedRelease, checkedRoar, unownedDoor } from './cue-release-checks.mjs';
+import { stoppedAwakenLetsGo, customHitBringsItsRoar, failedBuildLetsGo } from './cue-copy-checks.mjs';
 
 /** What each check measured, in the run's artifacts. */
 const note = (h, name, o) => fs.appendFileSync(path.join(h.out, 'cues-on-time.jsonl'), JSON.stringify({ name, ...o }) + '\n');
@@ -371,6 +372,9 @@ export const scenarios = {
     checkedRoar(h, await boot(h, { music: 1, sfx: 1 })),
   'held-sounds-door-unowned-destinations-too': async (h) =>
     unownedDoor(h, await boot(h, { music: 0, sfx: 1 })),
+  'an-awaken-stopped-before-its-hit-lets-every-hit-copy-and-gate-go': stoppedAwakenLetsGo,
+  'a-hit-with-its-own-options-brings-its-roar': customHitBringsItsRoar,
+  'copies-built-before-a-failed-one-are-let-go': failedBuildLetsGo,
   'the-door-path-changes-no-sample': doorPath,
   'a-hit-cleanup-keeps-the-gate-its-roar-shares-until-the-score-ends': sharedGateOutlivesTheHit,
   'a-long-stall-after-opening-leaves-the-door-path-unchanged': async (h) =>
