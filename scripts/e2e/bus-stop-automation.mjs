@@ -88,7 +88,7 @@ export async function renderedHorizonCollisions() {
           rise = Math.max(rise, data[i] - low);
         }
         results.push({ firefox, kind, error, rise, end: data.at(-1),
-          dipKept: kind === 'dip-then-cut' ? data[Math.floor((horizon + 0.005) * sr)] < 0.06
+          dipKept: kind === 'dip-then-cut' ? Math.abs(data[Math.floor(horizon * sr) - 1] - 0.05) < 1e-3
             : !kind.startsWith('early') || Math.abs(data[0.3 * sr] - 0.05) < 1e-6,
           expected: kind.endsWith('target') ? 0.7 : kind === 'fade' || kind === 'dip-then-cut' ? 0 : 0.2 });
       }
