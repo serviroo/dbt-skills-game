@@ -74,26 +74,43 @@ export async function customHitBringsItsRoar(h) {
 export async function failedBuildLetsGo(h) {
   const r = await offline(h, async () => {
     const { Voice } = await import('/src/audio/voice.ts');
-    const { copiesAhead } = await import('/src/audio/prebuild.ts');
+    const { copiesAhead, open } = await import('/src/audio/prebuild.ts');
     const c = new OfflineAudioContext(2, 48000, 48000);
     const lib = { ctx: c, room: c.destination, hall: c.destination, live: false, track: () => null };
     const built = [];
     let message = '';
     try {
-      copiesAhead((seed) => {
-        if (built.length === 2) throw new Error('the third copy failed');
+      copiesAhead({ make: (seed) => {
         const voice = new Voice(lib, 0, c.destination, { held: true }, seed());
         voice.osc('sine', 440, 0, 0.5, voice.dry);
         built.push(voice);
+        if (built.length === 3) throw new Error('the third copy failed');
         return { voice };
-      }, () => 1);
+      }, seed: () => 1, lib });
     } catch (err) {
       message = err.message;
     }
-    return { message, built: built.length, kept: built.filter((v) => !v.isDropped).length };
+    let rider;
+    let opening = '';
+    try {
+      open(undefined, { make: () => {
+        const voice = new Voice(lib, 0, c.destination, { held: true });
+        rider = voice.part(voice.wet);
+        rider.osc('sine', 660, 0, 0.5, rider.dry);
+        voice.ride(rider);
+        return { voice, prepare() {
+          throw new Error('the opening failed');
+        } };
+      }, seed: () => 1, lib });
+    } catch (err) {
+      opening = err.message;
+    }
+    return { message, built: built.length, kept: built.filter((v) => !v.isDropped).length, opening,
+      riderKept: !rider?.isDropped };
   });
   const detail = JSON.stringify(r);
   h.expect(r.message === 'the third copy failed', `the failed build was not reported: ${detail}`);
-  h.expect(r.built === 2 && r.kept === 0, `copies built before a failed one were kept: ${detail}`);
+  h.expect(r.built === 3 && r.kept === 0, `a failed build kept copies or the voice it made: ${detail}`);
+  h.expect(r.opening === 'the opening failed' && !r.riderKept, `a failed opening kept its rider: ${detail}`);
   return r;
 }

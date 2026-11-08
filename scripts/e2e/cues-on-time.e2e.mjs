@@ -22,6 +22,10 @@ import {
 import { timedHush, lastSourceStall, expiredEnds, fixedScoreTimes } from './cue-end-checks.mjs';
 import { expiredBuilds } from './cue-deadline-checks.mjs';
 import { droppedRelease, checkedRoar, unownedDoor } from './cue-release-checks.mjs';
+import {
+  missedSectionKeepsItsChord, windowTiming, stopsReachTheWindow, visitsReachTheWindow, resetKeepsItsBatch,
+  laterStopReachesWaitingCue,
+} from './cue-window-checks.mjs';
 import { stoppedAwakenLetsGo, customHitBringsItsRoar, failedBuildLetsGo } from './cue-copy-checks.mjs';
 
 /** What each check measured, in the run's artifacts. */
@@ -374,7 +378,19 @@ export const scenarios = {
     unownedDoor(h, await boot(h, { music: 0, sfx: 1 })),
   'an-awaken-stopped-before-its-hit-lets-every-hit-copy-and-gate-go': stoppedAwakenLetsGo,
   'a-hit-with-its-own-options-brings-its-roar': customHitBringsItsRoar,
-  'copies-built-before-a-failed-one-are-let-go': failedBuildLetsGo,
+  'failed-builds-and-openings-let-every-voice-go': failedBuildLetsGo,
+  'a-section-that-misses-its-first-placement-keeps-its-opening-chord': async (h) =>
+    missedSectionKeepsItsChord(h, await boot(h, { music: 1, sfx: 0 })),
+  'scheduled-sounds-build-one-window-ahead-and-due-ones-at-once': async (h) =>
+    windowTiming(h, await boot(h, { music: 0, sfx: 1 })),
+  'stop-all-reaches-sounds-waiting-for-their-window': async (h) =>
+    stopsReachTheWindow(h, await boot(h, { music: 0, sfx: 1 })),
+  'live-cues-cannot-carry-a-visit-from-the-window-into-the-next': async (h) =>
+    visitsReachTheWindow(h, await boot(h, { music: 0, sfx: 1 })),
+  'a-reset-keeps-the-rest-of-its-own-list': async (h) =>
+    resetKeepsItsBatch(h, await boot(h, { music: 0, sfx: 1 })),
+  'a-later-stop-reaches-a-named-cue-still-waiting': async (h) =>
+    laterStopReachesWaitingCue(h, await boot(h, { music: 0, sfx: 1 })),
   'the-door-path-changes-no-sample': doorPath,
   'a-hit-cleanup-keeps-the-gate-its-roar-shares-until-the-score-ends': sharedGateOutlivesTheHit,
   'a-long-stall-after-opening-leaves-the-door-path-unchanged': async (h) =>

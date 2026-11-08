@@ -1,34 +1,25 @@
-import { RETRIES, Voice, type ControlledBuild, type Copies } from './voice';
+import { soon } from './param';
+import { RETRIES, Voice, tracking, type ControlledBuild, type Copies, type Lib } from './voice';
 
 type Built = ControlledBuild & { prepare?: (at: number) => void };
-type Make<T> = (seed: () => number) => T;
 
 export interface Build<T> {
-  make: Make<T>;
+  make: (seed: () => number) => T;
   seed: () => number;
+  lib: Lib;
   kind?: Copies<T>['kind'];
 }
 
-export interface Spares<T> extends Copies<T> {
-  fill(): void;
-  discard(): void;
-}
-
-let windowed = false;
-
-export class Prebuilt<T extends Built> implements Spares<T> {
+class Prebuilt<T extends Built> implements Copies<T> {
   private ready: T[] = [];
   private seeds: number[] = [];
   private taken = 0;
   private readonly depth: number;
+  readonly kind: Copies<T>['kind'];
 
-  constructor(
-    private make: Make<T>,
-    private nextSeed: () => number,
-    readonly kind: Copies<T>['kind'] = 'once',
-    private ahead = windowed,
-  ) {
-    this.depth = kind === 'once' ? RETRIES.length : 2;
+  constructor(private build: Build<T>, private ahead: boolean) {
+    this.kind = build.kind ?? 'once';
+    this.depth = RETRIES.length;
     if (ahead) this.fill();
   }
 
@@ -38,23 +29,29 @@ export class Prebuilt<T extends Built> implements Spares<T> {
 
   fill() {
     try {
-      while (this.ready.length < this.depth) this.ready.push(this.build());
+      while (this.ready.length < this.depth) this.ready.push(this.copy());
     } catch (err) {
       this.discard();
       throw err;
     }
   }
 
-  private build() {
+  private copy() {
     let index = 0;
-    return this.make(() => (this.seeds[index++] ??= this.nextSeed()));
+    const made: Voice[] = [];
+    try {
+      return tracking(made, () => this.build.make(() => (this.seeds[index++] ??= this.build.seed())));
+    } catch (err) {
+      for (const voice of made) voice.discard();
+      throw err;
+    }
   }
 
   take() {
     if (this.ahead) return this.ready.shift();
     if (this.taken >= this.depth) return undefined;
     this.taken++;
-    return this.build();
+    return this.copy();
   }
 
   discard() {
@@ -62,22 +59,13 @@ export class Prebuilt<T extends Built> implements Spares<T> {
   }
 }
 
-export function ahead<R>(run: () => R) {
-  const was = windowed;
-  windowed = true;
-  try {
-    return run();
-  } finally {
-    windowed = was;
-  }
+export type Spares<T extends Built> = Prebuilt<T>;
+
+export function copiesAhead<T extends Built>(build: Build<T>): Spares<T> {
+  return new Prebuilt(build, true);
 }
 
-export function copiesAhead<T extends Built>(make: Make<T>, nextSeed: () => number): Spares<T> {
-  return new Prebuilt(make, nextSeed, 'once', true);
-}
-
-export function openPrebuilt<T extends Built>(asked: number | undefined, from: Spares<T> | Build<T>, sound?: string) {
-  const copies = 'take' in from ? from : new Prebuilt(from.make, from.seed, from.kind);
+export function openCopies<T extends Built>(asked: number | undefined, copies: Spares<T>, sound?: string) {
   try {
     return Voice.openBuilt(asked, copies, sound);
   } finally {
@@ -85,14 +73,21 @@ export function openPrebuilt<T extends Built>(asked: number | undefined, from: S
   }
 }
 
-type Queued = { at: number; batch: number; run: () => void };
+const timed = (asked: number | undefined, lib: Lib): asked is number =>
+  asked !== undefined && lib.live && asked > soon(lib.ctx);
 
-export class BuildWindow {
-  private queued: Queued[] = [];
+export function open<T extends Built>(asked: number | undefined, build: Build<T>, sound?: string) {
+  return openCopies(asked, new Prebuilt(build, timed(asked, build.lib)), sound);
+}
+
+type Queued<T> = { at: number; batch: number; item: T; run: () => void };
+
+export class BuildWindow<T> {
+  private queued: Queued<T>[] = [];
   private batches = 0;
-  private running: number | undefined;
+  private running = Infinity;
 
-  add(items: { at: number; run: () => void }[], until: number) {
+  add(items: { at: number; item: T; run: () => void }[], until: number) {
     const batch = ++this.batches;
     this.queued.push(...items.map((item) => ({ ...item, batch })));
     this.queued.sort((a, b) => a.at - b.at || a.batch - b.batch);
@@ -100,20 +95,26 @@ export class BuildWindow {
   }
 
   until(t: number) {
-    while (this.queued.length && this.queued[0].at <= t) {
-      const { batch, run } = this.queued.shift()!;
-      const was = this.running;
-      this.running = batch;
-      try {
-        ahead(run);
-      } finally {
-        this.running = was;
-      }
+    while (this.queued.length && this.queued[0].at <= t) this.run(this.queued.shift()!);
+  }
+
+  private run({ batch, run }: Queued<T>) {
+    const was = this.running;
+    this.running = batch;
+    try {
+      run();
+    } finally {
+      this.running = was;
     }
   }
 
-  clear() {
-    const running = this.running ?? Infinity;
-    this.queued = this.queued.filter((item) => item.batch >= running);
+  get waiting() {
+    return this.queued.map((q) => q.item);
+  }
+
+  reach(match: (item: T) => boolean, at: number) {
+    const reached = this.queued.filter((q) => q.batch < this.running && match(q.item));
+    this.queued = this.queued.filter((q) => !reached.includes(q));
+    for (const q of reached) if (q.at < at) this.run(q);
   }
 }

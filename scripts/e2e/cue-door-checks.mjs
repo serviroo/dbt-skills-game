@@ -345,8 +345,9 @@ export async function sharedGateOutlivesTheHit(h) {
       const e = new AudioEngine(c, { muted: true });
       await c.resume();
       const before = live.size;
-      const { Prebuilt, openPrebuilt } = await import('/src/audio/prebuild.ts');
-      const lost = openPrebuilt(c.currentTime - 5, new Prebuilt((seed) => {
+      const { open: openSound } = await import('/src/audio/prebuild.ts');
+      const build = (make, seed, kind) => ({ make, seed, kind, lib: e.lib });
+      const lost = openSound(c.currentTime - 5, build((seed) => {
         const voice = new Voice(e.lib, 0, c.destination, { held: true }, seed());
         voice.osc('sine', 440, 0, 1, voice.wet);
         return { voice };

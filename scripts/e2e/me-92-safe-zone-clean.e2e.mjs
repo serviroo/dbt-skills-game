@@ -1,4 +1,4 @@
-import { installAudioRecorder, audioReady } from './audio-recorder.mjs';
+import { installAudioRecorder, audioReady, scoreSounding } from './audio-recorder.mjs';
 import { settle } from './layout-fit.e2e.mjs';
 const SAFARI = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
 const TALL = { width: 390, height: 844 };
@@ -1177,7 +1177,7 @@ export const scenarios = {
     const { ctx, page, errors } = await boot(h, { save: returning(), init: tapOutput, live: true, extra: { [AUDIO]: prefs } });
     const c = step();
     try {
-      await h.sleep(3000);
+      await scoreSounding(page, 2);
       const home = await listen(h, page, 3);
       c.ok(home[0].from.length && home[0].from.every((n) => n === 'GainNode') && home.every((x) => x.state === 'running'), `output: the speaker tap is on ${home[0].from} (${home[0].state}), not a running GainNode`);
       c.ok(Math.max(...home.map((x) => x.rms)) > 1e-3, `output: no score reached the speakers on Home to compare with (${fmt(home)})`);

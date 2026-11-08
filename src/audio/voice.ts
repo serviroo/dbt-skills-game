@@ -64,6 +64,17 @@ const SAME = 1e-9;
 const through = new WeakMap<GainNode, Source[]>();
 const ownerOf = new WeakMap<AudioNode, Voice>();
 const gateUsers = new WeakMap<ConstantSourceNode, Set<Voice>>();
+let made: Voice[] | null = null;
+
+export function tracking<R>(into: Voice[], run: () => R) {
+  const was = made;
+  made = into;
+  try {
+    return run();
+  } finally {
+    made = was;
+  }
+}
 
 export interface ControlledBuild {
   voice: Voice;
@@ -217,6 +228,7 @@ export class Voice {
     this.link(outlet, dest);
     this.link(this.roomSend, lib.room);
     this.link(this.hallSend, lib.hall);
+    made?.push(this);
   }
 
   /** A sub-voice feeding this one, stopped with it (or on its own). */
@@ -345,7 +357,7 @@ export class Voice {
       try {
         opened = built.voice.openInTime(asked, continuing ? 0 : extra, by, built.prepare, continuing);
       } catch (err) {
-        built.voice.discard();
+        built.voice.drop(targets);
         throw err;
       }
       const expired = last || soon(built.voice.ctx) + RETRIES[k + 1] > deadline;

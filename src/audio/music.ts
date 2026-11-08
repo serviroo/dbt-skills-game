@@ -1,7 +1,7 @@
 import { dB, midi } from './dsp';
 import { glide, soon } from './param';
 import { Voice, kRate, type ControlledBuild } from './voice';
-import { copiesAhead, openPrebuilt, type Build, type Spares } from './prebuild';
+import { copiesAhead, open, type Build, type Spares } from './prebuild';
 import { figs, groove, prog, theme, roarParts } from './roar';
 import { h01, Hits, LONG, Pad, satBus, Strings, waveOf } from './instruments';
 import type { Section, SectionOpts, MusicHost } from './score-types';
@@ -470,7 +470,7 @@ const FACTORIES: Record<Section, Factory> = {
         copies(cue, custom, make) {
           if (cue !== 'awaken_hit' || hitPlayed || stopping) return undefined;
           if (!custom && spares?.left) return spares;
-          return { make: (seed) => hitCopy(seed, make), seed: host.seed };
+          return { make: (seed) => hitCopy(seed, make), seed: host.seed, lib: host.lib };
         },
         stop() {
           stopping = true;
@@ -482,7 +482,7 @@ const FACTORIES: Record<Section, Factory> = {
         opened: (until: number) => {
           if (o.at !== undefined && o.hitAt !== undefined) host.hush(o.hitAt - 0.78, o.hitAt);
           roarTick(soon(host.lib.ctx), until);
-          if (!stopping) spares = copiesAhead((seed) => hitCopy(seed), host.seed);
+          if (!stopping) spares = copiesAhead({ make: (seed) => hitCopy(seed), seed: host.seed, lib: host.lib });
         },
         hit(at: number, dropped: boolean, cue?: Voice) {
           if (hitPlayed) return;
@@ -732,7 +732,8 @@ export class Music {
       voice.at(voice.out.gain).setTargetAtTime(1, 0, Math.max(0.004, crossfade / 4));
       return { voice, score };
     };
-    const { voice, score, at } = openPrebuilt(o.at, { make, seed: () => this.host.seed(), kind: 'continuous' }, name);
+    const build = { make, seed: () => this.host.seed(), lib: this.host.lib, kind: 'continuous' as const };
+    const { voice, score, at } = open(o.at, build, name);
     this.stop(o.fadeOut ?? crossfade, at);
     if (voice.isDropped) return;
     const impl = score(voice.t);
@@ -743,6 +744,7 @@ export class Music {
   }
 
   stop(fade = 1, at = soon(this.host.lib.ctx)) {
+    this.host.stopping?.(at);
     for (const s of this.live) {
       if (!s.voice.stop(at, fade)) continue;
       s.end = Math.min(s.end, at);

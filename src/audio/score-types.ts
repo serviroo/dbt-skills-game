@@ -20,5 +20,6 @@ export interface MusicHost {
   /** Called when a section starts (the engine fades the dark-world beds when the score lifts into D major). */
   onSection?(name: Section, at: number): void;
   retire?(voice: Voice): void;
+  stopping?(at: number): void;
   cue(name: string, seed: () => number, group: Voice): Voice;
 }

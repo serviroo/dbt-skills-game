@@ -13,11 +13,12 @@ import { SCORE } from '../motion/tokens';
 import { makeEcho, dropEcho, type Echo, type Sends } from './echo';
 import { BusLevels } from './bus-levels';
 import { Voice, stoppedBy, withControls, type Lib } from './voice';
-import { BuildWindow, openPrebuilt } from './prebuild';
+import { BuildWindow, open, openCopies } from './prebuild';
 import { CueCleanup } from './cue-cleanup';
-import { pendingEvents, type Plan } from './pending-events';
+import { pendingEvents, type Plan, type Waiting } from './pending-events';
 
 export type { BedHandle, BedName, ChargeHandle, Section, SectionOpts };
+export { bufferToWav, toBase64 } from './wav';
 export { BED_NAMES, SECTIONS };
 
 export const CUE_NAMES = [
@@ -129,7 +130,7 @@ export class AudioEngine {
   private seedN: number;
   private spans: { a: number; b: number }[] = [];
   private timer: ReturnType<typeof setInterval> | 0 = 0;
-  private plans = new BuildWindow();
+  private plans = new BuildWindow<Waiting & { quiet: boolean }>();
   private unlocked = false;
   private vol: number;
   private isMuted: boolean;
@@ -266,6 +267,7 @@ export class AudioEngine {
         seed: () => this.nextSeed(),
         cue: (name, seed, group) => buildCue(this.lib, this.sfx, name, {}, seed, group).voice,
         retire: (voice) => this.cueCleanup?.add(voice),
+        stopping: (at) => this.reach(['section'], at),
         onSection: (name, at) => {
           if (this.lifted) {
             this.music.lift(0, 0.3, this.when(at));
@@ -437,8 +439,9 @@ export class AudioEngine {
     // built first and held, then timed: however long building it takes, no part of it can land in the past
     const custom = BUILD_OPTS.some((name) => opts[name] !== undefined);
     const make = (seed: () => number, group?: Voice) => buildCue(this.lib, this.sfx, cue, opts, seed, group);
-    const copies = this.music.copies(cue, custom, make) ?? { make, seed: () => this.nextSeed() };
-    const { voice: v, at: openedAt } = openPrebuilt(opts.at, copies, cue);
+    const found = this.music.copies(cue, custom, make);
+    const { voice: v, at: openedAt } = found && 'take' in found ? openCopies(opts.at, found, cue)
+      : open(opts.at, found ?? { make, seed: () => this.nextSeed(), lib: this.lib }, cue);
     const at = v.isDropped ? this.when(opts.at) : openedAt;
     if (cue === "awaken_hit") {
       if (this.hushV) this.unhush(at);
@@ -485,12 +488,14 @@ export class AudioEngine {
     }
     if (cur) this.letGo(cur.voice);
     const built = (seed: () => number) => buildBed(this.lib, name, this.bedBus, o.level ?? 1, o.fadeIn ?? 0.5, seed());
-    const { handle: h } = openPrebuilt(o.at, { make: built, seed: () => this.nextSeed(), kind: 'continuous' }, name);
+    const build = { make: built, seed: () => this.nextSeed(), lib: this.lib, kind: 'continuous' as const };
+    const { handle: h } = open(o.at, build, name);
     if (!h.voice.isDropped) this.beds.set(name, h);
     return h;
   }
 
   stopBed(name: BedName, fade = 0.5, at?: number) {
+    this.reach(['bed'], at ?? soon(this.ctx), name);
     this.beds.get(name)?.stop(fade, at);
   }
 
@@ -540,7 +545,7 @@ export class AudioEngine {
         },
       } };
     };
-    const { handle } = openPrebuilt(o.at, { make, seed: () => this.nextSeed(), kind: 'continuous' }, 'charge');
+    const { handle } = open(o.at, { make, seed: () => this.nextSeed(), lib: this.lib, kind: 'continuous' }, 'charge');
     if (handle.voice.isDropped) return handle;
     this.charge = handle;
     return handle;
@@ -567,7 +572,7 @@ export class AudioEngine {
         voice.at(g.gain).linearRampToValueAtTime(0, to - at + 0.02);
       } };
     };
-    const { voice: v, at } = openPrebuilt(from, { make, seed: () => this.nextSeed() }, 'hush');
+    const { voice: v, at } = open(from, { make, seed: () => this.nextSeed(), lib: this.lib }, 'hush');
     if (v.isDropped) {
       this.unhush(this.when(to ?? from));
       return;
@@ -584,6 +589,7 @@ export class AudioEngine {
 
   /** End an open-ended hush (awaken_hit does this itself). */
   unhush(at = soon(this.ctx)) {
+    this.reach(['hush'], at);
     const open = this.takeHush();
     this.endHush(at, 0.0015);
     this.release(open, at, 0.02);
@@ -604,6 +610,7 @@ export class AudioEngine {
     if (on) this.busLevels.ramp(this.safe.curve, 0, at, at + sec);
     else this.busLevels.set(this.safe.curve, 1, at, Math.max(0.003, sec / 4));
     if (on) {
+      this.reach(['cue', 'charge', 'hush'], at);
       this.stoppedUntil = at;
       this.charge?.stop(at, sec);
       const voices = [...this.active, ...this.fading, ...this.takeHush()];
@@ -689,7 +696,7 @@ export class AudioEngine {
    *  the cutscene): what plays next starts in an empty echo. Under the Safe Zone's quiet the echo is closed already, and
    *  leaving the quiet brings the empty one (see quiet). */
   stopAll(fade = 0.4, at = soon(this.ctx)) {
-    this.plans.clear();
+    this.reach(['cue', 'bed', 'charge', 'hush'], at);
     const old = this.echo;
     if (!this.isQuiet) for (const e of [old, ...this.closing.keys()]) this.closeEcho(e, at, fade);
     this.charge?.stop(at, fade);
@@ -754,6 +761,7 @@ export class AudioEngine {
 
   /** Full charge reached: cut the charge loop, 200 ms hush, then the gold burst (visual leads by 1-2 frames). */
   chestBurst(at: number) {
+    this.reach(['charge'], at);
     this.charge?.stop(at, 0.03);
     this.hush(at, at + 0.2);
     return this.play("chest_burst", { at: at + 0.2 });
@@ -773,16 +781,32 @@ export class AudioEngine {
    */
   schedule(events: SoundEvent[], t0: number) {
     const existing = { beds: this.beds, charge: this.charge, named: this.named,
-      music: this.music.live.map((s) => s.voice) };
-    const plans = pendingEvents(events, t0, this, existing).map(({ at, plan }) =>
-      ({ at, run: () => this.run(plan, t0) }));
+      music: this.music.live.map((s) => s.voice), waiting: this.plans.waiting };
+    const quiet = this.isQuiet;
+    const plans = pendingEvents(events, t0, this, existing).map(({ at, plan, waiting }) =>
+      ({ at, item: { kind: 'other' as const, ...waiting, entry: waiting?.entry ?? { controls: [], end: at }, quiet },
+        run: () => this.run(plan, t0, quiet) }));
     if (this.live) this.plans.add(plans, this.ctx.currentTime + AHEAD);
     else for (const { run } of plans) run();
     this.music.scheduleUntil(Math.min(this.ctx.currentTime + AHEAD, t0 + 1e6));
   }
 
-  private run(plan: Plan, t0: number) {
+  private reach(kinds: Waiting['kind'][], at: number, key?: string) {
+    this.plans.reach((w) => kinds.includes(w.kind) && (key === undefined || w.key === key), at);
+  }
+
+  private run(plan: Plan, t0: number, quiet: boolean) {
     const named = this.named;
+    const was = this.isQuiet;
+    this.isQuiet = quiet;
+    try {
+      this.runPlan(plan, t0, named);
+    } finally {
+      this.isQuiet = was;
+    }
+  }
+
+  private runPlan(plan: Plan, t0: number, named: Map<string, CueHandle>) {
     withControls(plan.controls, () => {
       if ('existing' in plan) return plan.existing;
       const e = plan.event;
@@ -942,50 +966,6 @@ export interface RenderOpts {
 }
 
 export let lastStats: ReturnType<AudioEngine['stats']> | null = null;
-
-/** 16-bit PCM WAV (or 32-bit float with { float: true }). */
-export function bufferToWav(buf: AudioBuffer, o: { float?: boolean } = {}): ArrayBuffer {
-  const ch = buf.numberOfChannels;
-  const n = buf.length;
-  const bps = o.float ? 4 : 2;
-  const data = n * ch * bps;
-  const ab = new ArrayBuffer(44 + data);
-  const dv = new DataView(ab);
-  const str = (off: number, s: string) => {
-    for (let i = 0; i < s.length; i++) dv.setUint8(off + i, s.charCodeAt(i));
-  };
-  str(0, 'RIFF');
-  dv.setUint32(4, 36 + data, true);
-  str(8, 'WAVE');
-  str(12, 'fmt ');
-  dv.setUint32(16, 16, true);
-  dv.setUint16(20, o.float ? 3 : 1, true);
-  dv.setUint16(22, ch, true);
-  dv.setUint32(24, buf.sampleRate, true);
-  dv.setUint32(28, buf.sampleRate * ch * bps, true);
-  dv.setUint16(32, ch * bps, true);
-  dv.setUint16(34, bps * 8, true);
-  str(36, 'data');
-  dv.setUint32(40, data, true);
-  const chans = Array.from({ length: ch }, (_, c) => buf.getChannelData(c));
-  let off = 44;
-  for (let i = 0; i < n; i++) {
-    for (let c = 0; c < ch; c++) {
-      const x = chans[c][i];
-      if (o.float) dv.setFloat32(off, x, true);
-      else dv.setInt16(off, Math.max(-32768, Math.min(32767, Math.round(x * 32767))), true);
-      off += bps;
-    }
-  }
-  return ab;
-}
-
-export function toBase64(ab: ArrayBuffer) {
-  const u = new Uint8Array(ab);
-  let s = '';
-  for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, Array.from(u.subarray(i, i + 0x8000)));
-  return btoa(s);
-}
 
 /** Nominal render length of a cue (tails included). */
 export function cueLength(cue: string) {

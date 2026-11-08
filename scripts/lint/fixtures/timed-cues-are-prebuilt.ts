@@ -1,6 +1,6 @@
 import { CUES } from '../../../src/audio/cues';
 import { openBuilt, Voice, type Lib } from '../../../src/audio/voice';
-import { openPrebuilt, Prebuilt } from '../../../src/audio/prebuild';
+import { open, openCopies, copiesAhead, openPrebuilt, Prebuilt } from '../../../src/audio/prebuild';
 
 export function playCue(lib: Lib, dest: AudioNode, cue: string, at: number) {
   return openBuilt(at, () => 1, (seed: () => number) => {
@@ -35,6 +35,11 @@ export function keptCopies(copies: Prebuilt<{ voice: Voice }>) {
   return copies.left;
 }
 
-export function builtByTheWindow(make: (seed: () => number) => { voice: Voice }) {
-  return openPrebuilt(undefined, { make, seed: () => 1 });
+export function timedWithABuilder(make: (seed: () => number) => { voice: Voice }, futureAt: number) {
+  return openPrebuilt(futureAt, { make, seed: () => 1 });
+}
+
+export function timedFromCopies(lib: Lib, make: (seed: () => number) => { voice: Voice }, futureAt: number) {
+  open(futureAt, { make, seed: () => 1, lib });
+  return openCopies(futureAt, copiesAhead({ make, seed: () => 1, lib }));
 }

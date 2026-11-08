@@ -126,13 +126,14 @@ export async function stoppedParts(h) {
     await page.waitForFunction(() => window.__lab === true, null, { timeout: 30000 });
     const result = await page.evaluate(async () => {
       const { Voice } = await import('/src/audio/voice.ts');
-      const { Prebuilt, openPrebuilt } = await import('/src/audio/prebuild.ts');
+      const { open: openSound } = await import('/src/audio/prebuild.ts');
+      const build = (make, seed, kind) => ({ make, seed, kind, lib: e.lib });
       const { AudioEngine } = await import('/src/audio/engine.ts');
       const c = new OfflineAudioContext(1, 24000, 48000);
       const e = new AudioEngine(c);
       const parts = [];
       const ended = [];
-      const { voice } = openPrebuilt(undefined, new Prebuilt(() => {
+      const { voice } = openSound(undefined, build(() => {
         const voice = new Voice(e.lib, 0, c.destination, { held: true });
         const own = [voice.part()];
         own.push(own[0].part());
@@ -163,7 +164,8 @@ export async function slowCleanupOpens(h) {
     const r = await page.evaluate(async () => {
       const { AudioEngine } = await import('/src/audio/engine.ts');
       const { Voice, LONG } = await import('/src/audio/voice.ts');
-      const { Prebuilt, openPrebuilt } = await import('/src/audio/prebuild.ts');
+      const { open: openSound } = await import('/src/audio/prebuild.ts');
+      const build = (make, seed, kind) => ({ make, seed, kind, lib: e.lib });
       const { SCORE } = await import('/src/motion/tokens.ts');
       const c = new AudioContext();
       const e = new AudioEngine(c);
@@ -187,7 +189,7 @@ export async function slowCleanupOpens(h) {
           return discard.call(this, at);
         };
         try {
-          openPrebuilt(c.currentTime - 1, new Prebuilt(make, () => 1, 'continuous'));
+          openSound(c.currentTime - 1, build(make, () => 1, 'continuous'));
           return { opened: voice.opened, dropped: voice.isDropped, passes };
         } finally {
           Voice.prototype.discardBefore = discard;

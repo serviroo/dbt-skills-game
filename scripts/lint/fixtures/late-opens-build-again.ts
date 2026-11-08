@@ -1,6 +1,6 @@
 import { soon } from '../../../src/audio/param';
-import { openPrebuilt } from '../../../src/audio/prebuild';
-import type { Voice } from '../../../src/audio/voice';
+import { open } from '../../../src/audio/prebuild';
+import type { Lib, Voice } from '../../../src/audio/voice';
 
 export function playOnce(ctx: AudioContext, voice: Voice) {
   voice.openInTime(soon(ctx));
@@ -10,8 +10,8 @@ export function playLater(ctx: AudioContext, voice: Voice) {
   void voice.openInTime(soon(ctx) + 1);
 }
 
-export function playKept(ctx: AudioContext, build: () => { voice: Voice }) {
-  const { at } = openPrebuilt(undefined, { make: build, seed: () => 1 });
+export function playKept(lib: Lib, build: () => { voice: Voice }) {
+  const { at } = open(undefined, { make: build, seed: () => 1, lib });
   return at;
 }
 

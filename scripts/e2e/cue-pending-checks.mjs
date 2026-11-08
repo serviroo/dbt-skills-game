@@ -195,7 +195,8 @@ export async function pendingHandleStops(h, { ctx, page, errors, tap }) {
       for (const duration of [0.08, 0.7]) {
         const r = await page.evaluate(async ([kind, duration, phase]) => {
           const { Voice, stoppedBy } = await import('/src/audio/voice.ts');
-          const { Prebuilt, openPrebuilt } = await import('/src/audio/prebuild.ts');
+          const { open: openSound } = await import('/src/audio/prebuild.ts');
+          const build = (make, seed, kind) => ({ make, seed, kind, lib: e.lib });
           const { buildBed, buildCharge } = await import('/src/audio/beds.ts');
           const e = window.__engine;
           const open = Voice.prototype.openInTime;
@@ -221,7 +222,7 @@ export async function pendingHandleStops(h, { ctx, page, errors, tap }) {
           window.__watch = true;
           let voice;
           try {
-            ({ voice } = openPrebuilt(from, new Prebuilt((seed) => {
+            ({ voice } = openSound(from, build((seed) => {
               const built = kind === 'bed' ? buildBed(lib, 'gate_hum', window.__pendingOutput, 1, 0.005, seed()) :
                 buildCharge(lib, window.__pendingOutput, seed());
               pending ??= built.handle;
@@ -389,7 +390,8 @@ export async function riderStop(h, { ctx, page, errors }) {
     await captureEngine(page);
     const r = await page.evaluate(async () => {
       const { Voice, LONG, stoppedBy } = await import('/src/audio/voice.ts');
-      const { Prebuilt, openPrebuilt } = await import('/src/audio/prebuild.ts');
+      const { open: openSound } = await import('/src/audio/prebuild.ts');
+      const build = (make, seed, kind) => ({ make, seed, kind, lib: e.lib });
       const e = window.__engine;
       e.stopAll(0.005);
       const outputs = [e.ctx.createGain(), e.ctx.createGain()];
@@ -413,7 +415,7 @@ export async function riderStop(h, { ctx, page, errors }) {
       let builds = 0;
       window.__watch = true;
       try {
-        openPrebuilt(from, new Prebuilt(() => {
+        openSound(from, build(() => {
           const voice = new Voice(lib, 0, outputs[0], { held: true });
           const rider = new Voice(lib, 0, outputs[1], { held: true });
           const level = (target, at, value) => target.control(at,

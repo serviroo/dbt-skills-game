@@ -221,3 +221,10 @@ export async function captureEngine(page) {
     }
   });
 }
+
+export function scoreSounding(page, sec) {
+  return page.waitForFunction((sec) => {
+    const clock = window.__taps[0]?.context;
+    return clock?.state === 'running' && window.__starts.some((t) => t <= clock.currentTime - sec);
+  }, sec, { timeout: 60000 });
+}

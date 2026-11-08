@@ -3,24 +3,28 @@ import { BED_NAMES, type BedHandle, type BedName, type ChargeHandle } from './be
 import type { ControlledBuild, Voice } from './voice';
 
 type Setup = (built: ControlledBuild) => void;
-type Entry = {
+export type Entry = {
   built?: ControlledBuild;
   controls: { at: number; apply: Setup }[];
   end: number;
 };
 export type Plan = { controls: Setup[]; bind?: Setup }
   & ({ event: SoundEvent } | { existing: ControlledBuild | undefined });
+export type Waiting = { kind: 'cue' | 'bed' | 'charge' | 'section' | 'hush' | 'other'; key?: string; entry: Entry };
 type Existing = {
   beds: ReadonlyMap<BedName, BedHandle>;
   charge: ChargeHandle | null;
   named: ReadonlyMap<string, CueHandle>;
   music: Voice[];
+  waiting: readonly Waiting[];
 };
+const CONTROLS = ['stop', 'bed_stop', 'charge_release', 'charge_stop', 'music_stop', 'music_level', 'music_lowpass',
+  'music_lift', 'unhush', 'duck', 'reset', 'chest_burst_full'];
 
 export function pendingEvents(
   events: SoundEvent[], t0: number, engine: AudioEngine, existing: Existing,
-): { at: number; plan: Plan }[] {
-  const plans: { at: number; order: number; plan: Plan }[] = [];
+): { at: number; plan: Plan; waiting?: Waiting }[] {
+  const plans: { at: number; order: number; plan: Plan; waiting?: Waiting }[] = [];
   const reserves: { at: number; entry: Entry; apply: Setup }[] = [];
   const playing = new Map<Voice, Entry>();
   const bind = (built: ControlledBuild) => {
@@ -41,6 +45,12 @@ export function pendingEvents(
     ? bind({ voice: existing.charge.voice, handle: existing.charge }) : undefined;
   const sections = existing.music.filter((voice) => voice.silentAt > engine.ctx.currentTime)
     .map((voice) => bind({ voice }));
+  for (const { kind, key, entry } of existing.waiting) {
+    if (kind === 'cue' && key) named.set(key, entry);
+    else if (kind === 'bed' && key) beds.set(key, entry);
+    else if (kind === 'charge') charge = entry;
+    else if (kind === 'section') sections.push(entry);
+  }
   let current: Entry | undefined;
   let order = 0;
   const deliver = (entry: Entry, at: number, apply: Setup) => {
@@ -125,9 +135,12 @@ export function pendingEvents(
     }
     const entry: Entry = { controls: [], end: Infinity };
     current = entry;
-    plans.push({ at, order, plan: { event, bind(built) { entry.built = built; }, get controls() {
-      return entry.controls.sort((a, b) => a.at - b.at).map((control) => control.apply);
-    } } });
+    const kind = isBed ? 'bed' : cue === 'charge' ? 'charge' : cue === 'music' ? 'section' : cue === 'hush' ? 'hush'
+      : CONTROLS.includes(cue) ? 'other' : 'cue';
+    plans.push({ at, order, waiting: { kind, key: isBed ? name : o.id, entry }, plan: {
+      event, bind(built) { entry.built = built; }, get controls() {
+        return entry.controls.sort((a, b) => a.at - b.at).map((control) => control.apply);
+      } } });
     if (o.id && !isBed && cue !== 'charge' && cue !== 'music' && cue !== 'stop') named.set(o.id, entry);
     if (isBed) beds.set(name ?? '', entry);
     if (cue === 'charge') {

@@ -1,9 +1,9 @@
-const BANNED = new Set(['openBuilt', 'Prebuilt']);
+const BANNED = new Set(['openBuilt', 'Prebuilt', 'openPrebuilt']);
 
 const timedCuesArePrebuilt = {
   meta: {
     messages: {
-      inline: 'Build and open held sounds only through src/audio/prebuild.ts (openPrebuilt, copiesAhead, ahead), '
+      inline: 'Build and open held sounds only through src/audio/prebuild.ts (open, openCopies, copiesAhead), '
         + 'so it alone decides when their copies are built.',
     },
   },
