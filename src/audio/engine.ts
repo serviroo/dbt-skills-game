@@ -260,6 +260,7 @@ export class AudioEngine {
         lib: this.libMusic,
         hush: (a, b) => this.hush(a, b),
         seed: () => this.nextSeed(),
+        retire: (voice) => this.cueCleanup?.add(voice),
         onSection: (name, at) => {
           if (this.lifted) {
             this.music.lift(0, 0.3, this.when(at));
@@ -739,13 +740,14 @@ export class AudioEngine {
   /** Stop everything and restore the score controls (level, low-pass, lift, duck, hush) for a clean replay. */
   reset(fade = 0.3, at = soon(this.ctx)) {
     const tau = Math.max(0.003, fade / 4);
-    const set = (p: AudioParam, v: number) => glide(p, v, fade, Math.max(at, soon(this.ctx)));
+    const start = Math.max(at, soon(this.ctx));
+    const set = (p: AudioParam, v: number) => glide(p, v, fade, start);
     set(this.mlevel.gain, 1);
     set(this.mlp.frequency, 20000);
     set(this.shelf.gain, 0);
     this.lifted = false;
     for (const g of [this.duckG, this.uiDuck, this.focus, this.yieldG]) {
-      this.busLevels.set(g.curve, 1, at, tau);
+      this.busLevels.set(g.curve, 1, start, tau);
     }
     this.stopAll(fade, at);
   }

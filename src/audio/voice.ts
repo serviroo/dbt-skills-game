@@ -58,6 +58,7 @@ const silentFrom = new WeakMap<GainNode, { last: number; at: number; peak: numbe
 const SAME = 1e-9;
 const through = new WeakMap<GainNode, Source[]>();
 const ownerOf = new WeakMap<AudioNode, Voice>();
+const gateUsers = new WeakMap<ConstantSourceNode, Set<Voice>>();
 
 export interface ControlledBuild {
   voice: Voice;
@@ -166,7 +167,6 @@ export class Voice {
   private doors: { to: AudioNode; input: number; g: GainNode }[] = [];
   private gate: ConstantSourceNode | null = null;
   private joined: Voice[] = [this];
-  private disconnected = false;
   private riders: Voice[] = [];
   private openedAt = 0;
   private opened = false;
@@ -180,7 +180,7 @@ export class Voice {
     this.end = t;
     this.held = o.held && !parent ? [] : null;
     this.pending = parent?.clock.pending ?? o.group?.pending ?? { list: this.held ? [] : null };
-    this.gate = o.group?.gateSource() ?? null;
+    this.useGate(o.group?.gateSource() ?? null);
     if (parent) [this.killAt, this.clock, this.stopCommitted] = [parent.killAt, parent.clock, parent.stopCommitted];
     this.cents = o.detune ?? 0;
     this.rng = mulberry32(seed);
@@ -384,16 +384,37 @@ export class Voice {
 
   private gateSource() {
     if (!this.gate) {
-      this.gate = this.ctx.createConstantSource();
-      this.gate.offset.value = 0;
-      this.gate.start();
+      const gate = this.ctx.createConstantSource();
+      gate.offset.value = 0;
+      gate.start();
+      this.useGate(gate);
     }
-    return this.gate;
+    return this.gate!;
+  }
+
+  private useGate(gate: ConstantSourceNode | null) {
+    this.gate = gate;
+    if (!gate) return;
+    if (!gateUsers.has(gate)) gateUsers.set(gate, new Set());
+    gateUsers.get(gate)!.add(this);
+  }
+
+  private leaveGate() {
+    const gate = this.gate;
+    if (!gate) return;
+    const users = gateUsers.get(gate);
+    users?.delete(this);
+    if (users?.size) return;
+    gate.stop();
+    gate.disconnect();
   }
 
   private share(gate: ConstantSourceNode, voices: Voice[]) {
-    if (this.gate !== gate) this.gate?.stop();
-    this.gate = gate;
+    if (this.gate !== gate) {
+      this.gate?.stop();
+      this.leaveGate();
+    }
+    this.useGate(gate);
     this.joined = voices;
     for (const d of this.doors) gate.connect(d.g.gain);
   }
@@ -735,7 +756,7 @@ export class Voice {
     const kill = at <= this.openedAt ? t : stoppedBy(t, ramp);
     if (kill >= this.killAt) return committed;
     this.killAt = kill;
-    this.fadesFrom = Math.min(this.fadesFrom, t);
+    this.fadesFrom = Math.min(this.fadesFrom, at);
     if (at <= this.openedAt) this.closeDoors(t);
     const tau = Math.max(0.002, ramp / 4);
     for (const g of [this.out.gain, this.roomSend.gain, this.hallSend.gain]) {
@@ -767,15 +788,10 @@ export class Voice {
   }
 
   disconnect() {
-    for (const w of [this, ...this.parts]) {
-      for (const d of w.doors.splice(0)) d.g.disconnect();
-      w.disconnected = true;
-    }
+    const own = [this, ...this.parts];
+    for (const w of own) for (const d of w.doors.splice(0)) d.g.disconnect();
     this.out.disconnect();
-    if (this.joined.every((v) => v.disconnected)) {
-      this.gate?.stop();
-      this.gate?.disconnect();
-    }
+    for (const w of own) w.leaveGate();
   }
 
   discard() {

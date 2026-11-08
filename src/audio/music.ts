@@ -727,7 +727,11 @@ export class Music {
   }
 
   stop(fade = 1, at = soon(this.host.lib.ctx)) {
-    for (const s of this.live) if (s.voice.stop(at, fade)) s.end = Math.min(s.end, at);
+    for (const s of this.live) {
+      if (!s.voice.stop(at, fade)) continue;
+      s.end = Math.min(s.end, at);
+      this.host.retire?.(s.voice);
+    }
     this.current = null;
   }
 

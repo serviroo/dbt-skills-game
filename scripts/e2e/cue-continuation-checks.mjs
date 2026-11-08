@@ -305,7 +305,7 @@ export async function expiredNoteStaysSilent(h) {
           second.stop(1);
         });
         second.disconnect();
-        const start = c.currentTime - 1;
+        const start = Math.max(0, c.currentTime - 1);
         const voice = new Voice(e.lib, start, c.destination);
         const stop = AudioScheduledSourceNode.prototype.stop;
         const stops = [];
