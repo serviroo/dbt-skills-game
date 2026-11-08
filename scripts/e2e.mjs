@@ -212,7 +212,7 @@ const onSignal = () => {
       }, 2000);
     });
 };
-for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, onSignal);
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, onSignal);
 let failed = 0;
 try {
   h = await startHarness(flags);
@@ -224,17 +224,22 @@ try {
         if (interrupted) break;
         const t = Date.now();
         inFlight.set(name, { name, file, t, i });
-        lane.out =folderOf(h.root, name);
+        lane.out = folderOf(h.root, name);
         fs.mkdirSync(lane.out, { recursive: true });
         const running = mark(h.root, name);
         let cleared = true;
+        let own;
+        let realFailure = false;
         try {
           let result;
           try {
             result = await run(lane);
           } catch (e) {
+            own = e;
+            realFailure = !interrupted;
+            if (realFailure) mark(h.root, name, { failed: true });
             // what every page still open in this browser showed when the scenario failed
-            if (!interrupted) await lane.evidenceAll('fail-' + safe(name));
+            if (realFailure) await lane.evidenceAll('fail-' + safe(name));
             throw e;
           } finally {
             await Promise.all(lane.browser.contexts().map((ctx) => ctx.close()));
@@ -243,12 +248,16 @@ try {
           console.log(`ok   ${name} (${Date.now() - t} ms)`);
         } catch (e) {
           failed++;
-          report.scenarios.push({ name, file, ok: false, ms: Date.now() - t, i, error: String(e?.message ?? e) });
-          console.log(`FAIL ${name}: ${e?.message ?? e}`);
-          const why = interrupted ? CUT_OFF : keep(h.root, name);
+          const cause = own ?? e;
+          const message = String(cause?.message ?? cause);
+          const cutOff = interrupted && !realFailure;
+          const error = cutOff ? `${CUT_OFF}: ${message}` : message;
+          report.scenarios.push({ name, file, ok: false, ms: Date.now() - t, i, error });
+          console.log(`FAIL ${name}: ${error}`);
+          if (!cutOff) mark(h.root, name, { failed: true });
+          const why = cutOff ? CUT_OFF : keep(h.root, name);
           if (why) {
             cleared = false;
-            if (!interrupted) mark(h.root, name, { failed: true });
             console.log(`${name}: what it wrote isn't in failed/: ${why}`);
           }
         }

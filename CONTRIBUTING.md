@@ -83,7 +83,8 @@ neither counts as 15 s. To refresh that file, run `node scripts/e2e-timings.mjs 
 on and off.
 
 A passing CI part uploads only its `report.json`. A failed or cancelled one also uploads what its failed scenarios
-wrote, as `failed-e2e-<part>-<attempt>`, kept 3 days.
+wrote, as `failed-e2e-<part>-<attempt>`, kept 3 days. A part still running after 28 minutes is stopped the way Ctrl+C
+stops it, so it still writes its report and keeps the scenario it was on.
 
 `--cpu-throttle=4` slows each Chromium page's CPU work by four through CDP, including new tabs. The rate must be at
 least 1. The report records `cpuThrottle` and `throttleErrors`; a failure to apply it fails the run.
@@ -167,8 +168,8 @@ prints it as held out and lists it in `report.json`, and only `--scenario=<name>
 - `SAVE`, `YOU`, `SEEN`: the save key, the names key and an app state that skips the intro.
 - `browser`, `server.url`, `flags`, and `shared`, one object for the whole run, for a result worth making once (a
   build, the content). Store a promise in it (`shared.x ??= make()`) so scenarios running at once share one. A file
-  that passes results from one scenario to the next must be serial, and a file it passes on goes in `root`: a failed
-  scenario's folder moves to `failed/`.
+  that passes results from one scenario to the next must be serial, and passes a file's contents, not its path: a
+  failed scenario's folder moves to `failed/`.
 - `out`, this scenario's own folder in the run's artifact folder (`root`); `renderer`, the WebGL renderer; `stop()`,
   which closes every browser and the server.
 

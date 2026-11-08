@@ -12,17 +12,20 @@ async function tapTitle(page, note) {
   await title.click();
 }
 
-async function saveCrystal({ open, openSettings, root, shared, expect, deepFind, YOU, SEEN }) {
-  if (shared.crystal) return shared.crystal;
+async function saveCrystal({ open, openSettings, out, shared, expect, deepFind, YOU, SEEN }) {
+  const file = path.join(out, 'save-crystal.json');
+  if (shared.crystal) {
+    fs.writeFileSync(file, shared.crystal);
+    return file;
+  }
   const { ctx, page, errors } = await open({ [YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: Date.now() - 1000, companionAt: Date.now() - 1000 }), 'dbt.app.v1': SEEN });
   await openSettings(page);
   const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 15000 }), page.getByRole('button', { name: 'Save Crystal' }).click()]);
-  const file = path.join(root, 'save-crystal.json');
   await dl.saveAs(file);
   expect(deepFind(JSON.parse(fs.readFileSync(file, 'utf8')), 'playerName').includes('Kit'), 'the Save Crystal has no player name');
   expect(!errors.length, errors.join('\n'));
   await ctx.close();
-  shared.crystal = file;
+  shared.crystal = fs.readFileSync(file);
   return file;
 }
 

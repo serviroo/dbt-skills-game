@@ -197,6 +197,13 @@ export const scenarios = {
       console.log('fixture ready');
       await page.waitForTimeout(60000);
     },
+    async '${name}-capture'(h) {
+      record(h);
+      const { page } = await h.open();
+      void page.evaluate(() => { for (;;) {} }).catch(() => {});
+      console.log('fixture ready');
+      throw new Error('deliberate capture failure');
+    },
     async '${name}-hang'(h) {
       record(h);
       const { page } = await h.open();
@@ -308,6 +315,15 @@ chromium.launchServer = (options) => launchServer({ ...options, args: [...option
   const sigintMarks = fs.readdirSync(path.join(sigintOut, 'running'));
   assert(!fs.existsSync(path.join(sigintOut, 'failed')), 'a scenario cut off by the interrupt was kept as failed');
   assert.deepEqual(sigintMarks, [`${name}-signal.json`], 'the cut-off scenario lost its mark');
+  const sigintEntry = sigint.report?.scenarios.find((s) => s.name === `${name}-signal`);
+  assert.match(sigintEntry?.error ?? '', /^cut off when the run was interrupted: \S/, JSON.stringify(sigintEntry));
+  const capture = await run('capture-interrupted', [`--scenario=${name}-capture`], 'SIGINT');
+  assert.equal(capture.code, 130, capture.log.slice(-600));
+  const captureOut = JSON.parse(fs.readFileSync(state, 'utf8')).out;
+  const captureEntry = capture.report?.scenarios.find((s) => s.name === `${name}-capture`);
+  assert.equal(captureEntry?.error, 'deliberate capture failure', JSON.stringify(captureEntry));
+  const captureKept = fs.existsSync(path.join(captureOut, 'failed', `${name}-capture`));
+  assert(captureKept, 'a failure interrupted while its evidence was saved was not kept');
   const hang = await run('hang-kept', [`--scenario=${name}-hang`], 'SIGINT');
   assert.equal(hang.code, 130, hang.log.slice(-600));
   const hungEntry = hang.report?.scenarios.find((s) => s.name === `${name}-hang`);

@@ -74,7 +74,7 @@ jobs:
         timeout-minutes: 3
         run: node scripts/e2e/me-93-pwa-resilience.e2e.mjs --software
       - uses: actions/upload-artifact@v7
-        if: failure() || cancelled()
+        if: failure()
         timeout-minutes: 3
         with:
           name: checks-${{ github.run_attempt }}
@@ -210,7 +210,7 @@ jobs:
     container:
       image: mcr.microsoft.com/playwright:v1.64.1-noble
       options: --user 1001
-    timeout-minutes: 53
+    timeout-minutes: 54
     env:
       STORED_IDS_BASE: ${{ github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha }}
     strategy:
@@ -244,12 +244,27 @@ jobs:
         run: |
           shard=${{ matrix.shard }}/${{ needs.plan.outputs.parts }}
           timings=$RUNNER_TEMP/timings/e2e-timings.json
-          timeout -s INT -k 1m 28m node scripts/e2e.mjs --software --shard="$shard" "--timings=$timings"
+          timeout --foreground -s INT -k 1m 28m node scripts/e2e.mjs --software --shard="$shard" "--timings=$timings" &
+          echo "$!" > "$RUNNER_TEMP/e2e.pid"
+          code=0
+          wait "$!" || code=$?
+          if [ "$code" = 124 ] || [ "$code" = 137 ]; then
+            echo "::error title=E2E part $shard::still running after 28 minutes, so it was stopped like Ctrl+C would"
+          fi
+          exit "$code"
       - name: Keep what a scenario cut off midway wrote
         id: keep
         if: failure() || cancelled()
-        timeout-minutes: 1
-        run: node scripts/e2e/keep.mjs ${{ job.status == 'cancelled' && '--failed-only' || '' }}
+        timeout-minutes: 2
+        run: |
+          pid=$(cat "$RUNNER_TEMP/e2e.pid" 2>/dev/null || true)
+          if [ "${{ job.status }}" = cancelled ] && [ -n "$pid" ] && kill -INT "$pid" 2>/dev/null; then
+            for _ in $(seq 60); do
+              kill -0 "$pid" 2>/dev/null || break
+              sleep 1
+            done
+          fi
+          node scripts/e2e/keep.mjs ${{ job.status == 'cancelled' && '--failed-only' || '' }}
       - uses: actions/upload-artifact@v7
         if: failure() || cancelled()
         timeout-minutes: 3
