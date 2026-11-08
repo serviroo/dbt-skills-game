@@ -3,6 +3,8 @@ import { clikePieces, codeTextPieces, shifted, textTemplatePieces, wholeLinePiec
 import { oxlintScan } from './scan-js.mjs';
 import { cssPieces, htmlPieces } from './scan-markup.mjs';
 import { pythonPieces } from './scan-py.mjs';
+import { bashParser, heredocs, shellPieces } from './scan-shell.mjs';
+import { blockScalars, yamlPieces } from './scan-yaml.mjs';
 
 const BY_EXTENSION = new Map([
   ...['js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx', 'mts', 'cts'].map((ext) => [ext, 'js']),
@@ -10,6 +12,10 @@ const BY_EXTENSION = new Map([
   ['html', 'html'],
   ['py', 'py'],
   ['json', 'json'],
+  ['sh', 'sh'],
+  ['bash', 'sh'],
+  ['yml', 'yaml'],
+  ['yaml', 'yaml'],
 ]);
 
 export function languageOf(file) {
@@ -26,6 +32,9 @@ function attempt(read, fallback) {
 }
 
 export function scanner(scratch) {
+  const shell = bashParser(scratch);
+  const everyLine = (text) => text.split('\n').map((_, i) => i + 1);
+
   function jsFamily(items, depth = 0) {
     const results = oxlintScan(items, scratch);
     const nested = [];
@@ -53,6 +62,8 @@ export function scanner(scratch) {
     text: codeTextPieces,
     css: (text) => attempt(() => cssPieces(text), () => textTemplatePieces(text)),
     html: (text) => htmlPieces(text, embed),
+    py: (text) => pythonPieces(text, scratch).pieces,
+    sh: (text) => attempt(() => shellPieces(text, everyLine(text), shell, embed).pieces, () => []),
     js: (text) => {
       const { pieces, error } = jsFamily([{ id: 'embedded', text, ext: '.js' }]).get('embedded');
       return error ? textTemplatePieces(text) : pieces;
@@ -63,11 +74,25 @@ export function scanner(scratch) {
     return shifted((readers[lang] ?? textTemplatePieces)(text), at);
   }
 
-  function scanOne({ lang, text }) {
+  function workflowPieces(text, wanted) {
+    const found = yamlPieces(text, wanted, shell);
+    for (const block of found.error ? [] : blockScalars(text)) {
+      if (block.key === 'script') found.pieces.push(...embed('js', block.text, block.line));
+      if (block.key !== 'run') continue;
+      for (const doc of heredocs(block.text.split('\n'))) {
+        found.pieces.push(...embed(doc.lang, doc.text, block.line + doc.line - 1));
+      }
+    }
+    return found;
+  }
+
+  function scanOne({ lang, text, wanted }) {
     if (lang === 'gitignore') return { pieces: wholeLinePieces(text, /^[ \t]*#/), error: null };
     if (lang === 'json') return { pieces: clikePieces(text), error: null };
     if (lang === 'html') return { pieces: htmlPieces(text, embed), error: null };
     if (lang === 'py') return pythonPieces(text, scratch);
+    if (lang === 'sh') return shellPieces(text, wanted, shell, embed);
+    if (lang === 'yaml') return workflowPieces(text, wanted);
     try {
       return { pieces: cssPieces(text), error: null };
     } catch (error) {

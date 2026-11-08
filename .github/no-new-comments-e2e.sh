@@ -577,6 +577,102 @@ put web/ok.css <<'EOF'
 EOF
 commit "feat: markup text"
 expect pass "text inside a textarea and CSS strings pass"
+case_branch shell
+put tool/a.sh <<'EOF'
+#!/usr/bin/env bash
+x=1
+echo "$x" # print it
+tr a b <<< "hello"
+echo $((1<<2))
+cat <<'RUN' | bash
+# then the disk
+RUN
+# after the here-string
+ssh box sh <<'REMOTE'
+uptime
+# then the disk
+df -h
+REMOTE
+EOF
+put .github/workflows/a.yml <<'EOF'
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: |
+          echo hi
+          # say hi
+EOF
+commit "feat: add shell"
+expect "tool/a.sh:3: adds a comment" "a new shell comment fails"
+expect "tool/a.sh:12: adds a comment" "a comment in a script inside a heredoc fails"
+expect "tool/a.sh:7: adds a comment" "a heredoc piped into a shell is read as a script"
+expect "tool/a.sh:9: adds a comment" "a here-string or a shift doesn't hide later comments"
+expect ".github/workflows/a.yml:8: adds a comment" "a new comment in a workflow step fails"
+
+case_branch script-block
+put .github/workflows/script.yml <<'EOF'
+on: push
+jobs:
+  s:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            // ask the API
+            await github.rest.repos.get(context.repo);
+EOF
+commit "feat: add a script step"
+expect ".github/workflows/script.yml:9: adds a comment" "a comment in a workflow script block fails"
+
+case_branch shell-strings
+put tool/c.sh <<'EOF'
+#!/usr/bin/env bash
+x="$(echo a # inside the substitution
+)"
+node <<'JS'
+const y = 1; // explains y
+JS
+echo "$x"
+EOF
+commit "feat: code in shell strings"
+expect "tool/c.sh:2: adds a comment" "a comment in a quoted command substitution fails"
+expect "tool/c.sh:5: adds a comment" "a trailing comment in a script fed to node fails"
+
+case_branch allowed-shell
+put tool/b.sh <<'EOF'
+#!/usr/bin/env bash
+# shellcheck disable=SC2034
+n=${#BASH_ARGV[@]} c=$# s="a # b" u='# c'
+cat <<'TXT'
+#!/bin/sh
+a # b
+TXT
+cat >>"$GITHUB_STEP_SUMMARY" <<TXT
+# Results
+## Passed
+TXT
+EOF
+put .github/workflows/b.yml <<'EOF'
+on: push
+jobs:
+  b:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: 'echo "${#GITHUB_SHA} # not a comment"'
+EOF
+put .github/workflows/c.yml <<'EOF'
+on: push
+env:
+  NOTE: "first
+    # still the note"
+jobs: {}
+EOF
+commit "feat: add allowed shell"
+expect pass "shebangs, shell directives, strings, heredoc data and quoted YAML pass"
 
 case_branch python-more
 put tool/q.py <<'EOF'

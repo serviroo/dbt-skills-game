@@ -155,11 +155,11 @@ function groups(pieces) {
   return found.values();
 }
 
-function verdict(group, header, added) {
+function verdict(group, header, added, lines) {
   const content = group.filter((p) => normalize(p.text));
   for (const piece of content.filter((p) => added.has(p.line))) {
     const stripped = strip(piece.text);
-    if (directive(stripped, piece.text)) continue;
+    if (directive(stripped, piece.text, lines[piece.line - 1])) continue;
     if (piece.line < header && licenseLine(piece.text, licenseText)) continue;
     if (moved(normalize(piece.text))) continue;
     return [piece.line, stripped];
@@ -181,7 +181,7 @@ for (const file of newFiles) {
   const added = new Set(file.wanted);
   for (const group of groups(pieces)) {
     if (!group.some((p) => added.has(p.line))) continue;
-    const found = verdict(group, header, added);
+    const found = verdict(group, header, added, file.text.split('\n'));
     const kind = group.some((p) => p.kind === 'd') ? 'adds a docstring' : 'adds a comment';
     if (found) say(`${file.path}:${found[0]}`, kind, found[1]);
   }
