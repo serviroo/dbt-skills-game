@@ -216,16 +216,20 @@ export const scenarios = {
   },
 
   /** while the page is still loading the writer is out of reach, the Safe Zone still one tap away: taps on it do
-   *  nothing, nothing throws or is lost, and once the page is in a card's Insert lands */
+   *  nothing, nothing throws or is lost, and once the page is in a card's Insert lands. Later, an Insert tapped while
+   *  its page is on its way waits for it and lands there */
   async 'story-edits-wait-for-the-page'(h) {
     const { ctx, page, errors } = await h.open(seed(h));
     try {
       await h.reachHub(page);
-      const id = await page.evaluate(async () => {
+      const { id, firstId } = await page.evaluate(async () => {
         const { storyStore } = await import('/src/daily/storystore.ts');
         const ss = storyStore(window.__daily.store.key);
         const { story, first } = await ss.create('Slow Night');
-        await ss.putCards(first.id, [{ id: 'slow-card', mode: 'continue', text: 'The kettle began to hum.', t: Date.now() }]);
+        await ss.putCards(first.id, [
+          { id: 'slow-card', mode: 'continue', text: 'The kettle began to hum.', t: Date.now() },
+          { id: 'later-card', mode: 'continue', text: 'The lamp went out.', t: Date.now() },
+        ]);
         // the page's chapter read waits until the test lets it through, as a slow IndexedDB open would
         const real = ss.chapter;
         let go;
@@ -238,7 +242,7 @@ export const scenarios = {
           ss.chapter = real;
           go();
         };
-        return story.id;
+        return { id: story.id, firstId: first.id };
       });
       await page.evaluate((r) => window.__daily.go(r), { name: 'write', id });
       await page.locator('.st-write').waitFor({ state: 'attached' });
@@ -275,6 +279,23 @@ export const scenarios = {
       const text = await ta(page).inputValue();
       h.expect(text === 'The kettle began to hum.', `the card's Insert was lost: ${JSON.stringify(text)}`);
       await storedIs(h, page, 'The kettle began to hum.', "the card's Insert");
+
+      await page.getByRole('radio', { name: 'Show: Notes' }).click();
+      await page.getByRole('textbox', { name: 'Notes for this story' }).waitFor();
+      const held = await holdStorage(page, ['chapter']);
+      await page.getByRole('button', { name: 'Co-writer', exact: true }).click();
+      const later = page.locator('.st-card', { hasText: 'The lamp went out.' });
+      await later.getByRole('button', { name: 'Insert', exact: true }).click({ timeout: 5000 });
+      await held.waitHeld(`chapter ${firstId}`);
+      const notesStill = await shownIn(page);
+      const early = notesStill.box === 'Notes for this story';
+      h.expect(early, `the Insert landed before its page: ${JSON.stringify(notesStill)}`);
+      await held.drain();
+      const both = 'The kettle began to hum. The lamp went out.';
+      const landed = () => ta(page).inputValue();
+      await h.poll(page, landed, (t) => t.replace(/\s+/g, ' ') === both, (t) => `the waiting Insert left ${t}`, {
+        timeout: 5000,
+      });
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();
@@ -514,20 +535,23 @@ export const scenarios = {
     }
   },
 
-  /** the Story Room comes in only once its first page's cards are read, and another page opened then shows its own
-   *  cards, never the first page's beside it (or saved with it) */
+  /** the Story Room comes in only once its first page's cards are read, and a page opened while another page's card
+   *  read is still out shows its own cards, never the other page's beside it (or saved with it) */
   async 'story-first-cards-read-overtaken'(h) {
     const { ctx, page, errors } = await h.open(seed(h));
     try {
       await h.reachHub(page);
-      const { id, first, second } = await page.evaluate(async () => {
+      const { id, first, second, third } = await page.evaluate(async () => {
         const { storyStore } = await import('/src/daily/storystore.ts');
         const ss = storyStore(window.__daily.store.key);
         const { story, first } = await ss.create('Two Doors');
         const second = await ss.addChapter(story.id, 'Second Door');
         await ss.putCards(first.id, [{ id: 'first-card', mode: 'continue', text: 'The kettle began to hum.', t: Date.now() }]);
         await ss.putCards(second.id, [{ id: 'second-card', mode: 'continue', text: 'The second door stuck.', t: Date.now() }]);
-        return { id: story.id, first: first.id, second: second.id };
+        const third = await ss.addChapter(story.id, 'Third Door');
+        const card = { id: 'third-card', mode: 'continue', text: 'The third door creaked.', t: Date.now() };
+        await ss.putCards(third.id, [card]);
+        return { id: story.id, first: first.id, second: second.id, third: third.id };
       });
       const { waitHeld, release, drain } = await holdStorage(page, ['cards']);
       await page.evaluate((r) => window.__daily.go(r), { name: 'write', id });
@@ -537,17 +561,24 @@ export const scenarios = {
       await page.getByRole('textbox', { name: /^Page,/ }).waitFor({ timeout: 5000 });
       const card = (text) => page.locator('.st-card', { hasText: text }).count();
       h.expect((await card('The kettle began to hum.')) === 1, "the first page came in without its cards");
-      await page.locator('.st-chbtn').click();
-      const secondRow = page.locator('.st-chrow-b', { hasText: 'Second Door' });
-      await secondRow.click({ timeout: 10000 });
+      const pick = async (name) => {
+        await page.locator('.st-chbtn').click();
+        await page.locator('.st-chrow-b', { hasText: name }).click({ timeout: 10000 });
+      };
+      await pick('Second Door');
       await waitHeld(`cards ${second}`);
+      await pick('Third Door');
+      await waitHeld(`cards ${third}`);
+      await release(`cards ${third}`);
+      await page.getByRole('textbox', { name: 'Page, Third Door' }).waitFor({ timeout: 5000 }).catch(() => {});
       await release(`cards ${second}`);
-      await page.getByRole('textbox', { name: 'Page, Second Door' }).waitFor({ timeout: 5000 }).catch(() => {});
       await drain();
       await h.sleep(300);
       const s = await shownIn(page);
-      h.expect(s.box === 'Page, Second Door', `opening Second Door during the first read showed ${JSON.stringify(s)}`);
-      h.expect((await card('The kettle began to hum.')) === 0 && (await card('The second door stuck.')) === 1, "the first page's late card read put its cards beside Second Door");
+      const where = `opening Third Door during Second Door's card read showed ${JSON.stringify(s)}`;
+      h.expect(s.box === 'Page, Third Door', where);
+      const only = (await card('The second door stuck.')) === 0 && (await card('The third door creaked.')) === 1;
+      h.expect(only, "Second Door's late card read put its cards beside Third Door");
       const kept = await page.evaluate(async (c) => {
         const { storyStore } = await import('/src/daily/storystore.ts');
         const ss = storyStore(window.__daily.store.key);
