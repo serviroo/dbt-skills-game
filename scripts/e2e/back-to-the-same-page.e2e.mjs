@@ -82,12 +82,16 @@ async function keepDrawingOverAnother(h, page) {
   await routeIs(page, 'draw');
   await drawReady(page);
   await shows(h, page, 1, 'Keep drawing:');
-  await page.evaluate(async (ss) => {
+  const other = await page.context().newPage();
+  await other.goto(page.url());
+  await other.waitForFunction(() => !!window.__daily?.store);
+  await other.evaluate(async (ss) => {
     const m = await import('/src/daily/artstore.ts');
     const as = m.artStore(window.__daily.store.key);
     const rec = await as.get('pg-a');
     await as.put({ ...rec, n: ss.length, strokes: ss, updated: 2, bases: [m.revOf(rec)], after: rec.updated });
   }, [stroke(200, 500), stroke(200, 900), stroke(200, 1300)]);
+  await other.close();
   await line(page, [0.2, 0.6], [0.7, 0.7]);
 }
 
@@ -116,6 +120,43 @@ export const scenarios = {
       await shows(h, page, 2, 'Forward to it');
       const after = await xp(h, page);
       h.expect(after === before, `coming back credited it again: ${before} XP, then ${after}`);
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'back-to-a-saved-ally-after-a-fresh-one'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await h.reachHub(page);
+      await page.evaluate(() => window.__daily.go({ name: 'draw', kind: 'ally' }));
+      await routeIs(page, 'draw');
+      await drawReady(page);
+      await line(page, [0.2, 0.3], [0.7, 0.4]);
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      await page.getByRole('button', { name: 'Rise', exact: true }).click();
+      await page.getByRole('button', { name: 'See your army', exact: true }).click();
+      await routeIs(page, 'shadows');
+      await drawingsAre(h, page, '[1]', 'after Rise');
+
+      await page.locator('.dq-allyslot').click();
+      await routeIs(page, 'draw');
+      await drawReady(page);
+      await line(page, [0.2, 0.5], [0.7, 0.6]);
+      await line(page, [0.2, 0.6], [0.7, 0.7]);
+      await line(page, [0.2, 0.7], [0.7, 0.8]);
+
+      await page.goBack();
+      await routeIs(page, 'shadows');
+      await page.goBack();
+      await routeIs(page, 'draw');
+      await drawReady(page);
+      await shows(h, page, 1, 'back to the saved ally after a fresh one');
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      await page.getByRole('button', { name: 'Rise', exact: true }).click();
+      await page.getByRole('button', { name: 'See your army', exact: true }).waitFor();
+      await drawingsAre(h, page, '[1]', 'Rise again on the saved ally:');
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();

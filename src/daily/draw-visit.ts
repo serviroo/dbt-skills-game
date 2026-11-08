@@ -22,7 +22,9 @@ export class DrawVisit {
   }
 
   async draft(as: ArtStore, kind: Paper, tab: string, own: string): Promise<Draft | null> {
-    const draft = (this.from ? await as.getDraft(this.from) : null) ?? (await as.getDraft(own));
+    const kept = this.from ? await as.getDraft(this.from) : null;
+    const ours = kept && (!this.editId || kept.editId === this.editId) ? kept : null;
+    const draft = ours ?? (await as.getDraft(own));
     if (draft || this.from) return draft;
     const id = this.editId;
     // this tab's other draft of the same page (a page first saved from a fresh screen), else one an earlier session
