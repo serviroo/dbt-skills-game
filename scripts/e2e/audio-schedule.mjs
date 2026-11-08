@@ -1,11 +1,13 @@
-export function tapAudioSchedule(record) {
+export function tapAudioSchedule(record, after) {
   const undo = [];
   const wrap = (prototype, method, timeArg) => {
     const original = prototype[method];
     const own = Object.getOwnPropertyDescriptor(prototype, method);
     prototype[method] = function (...args) {
       record(this, method, args, args[timeArg] ?? 0);
-      return original.apply(this, args);
+      const result = original.apply(this, args);
+      after?.(this, method);
+      return result;
     };
     undo.push(() => {
       if (own) Object.defineProperty(prototype, method, own);

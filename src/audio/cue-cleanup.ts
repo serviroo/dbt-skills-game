@@ -26,6 +26,7 @@ export class CueCleanup {
         const through = this.ctx.currentTime;
         for (const [voice, by] of this.pending) {
           if (by > through) continue;
+          voice.stop(soon(this.ctx), 0);
           voice.out.disconnect();
           this.active.delete(voice);
           this.pending.delete(voice);

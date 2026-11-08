@@ -68,6 +68,35 @@ const audioTimesFromSoon = {
   },
 };
 
+const lateOpensBuildAgain = {
+  meta: {
+    messages: {
+      dropped: 'Open held sounds with openBuilt so a missed placement is rebuilt or dropped before its doors open.',
+    },
+  },
+  create(context) {
+    const usesVoice = context.sourceCode.ast.body.some((node) =>
+      node.type === 'ImportDeclaration'
+        ? node.specifiers.some((s) => s.imported?.name === 'Voice')
+        : (node.declaration ?? node).id?.name === 'Voice');
+    return {
+      CallExpression(node) {
+        const callee = node.callee;
+        const method = callee.type === 'MemberExpression'
+          ? callee.computed ? callee.property.value : callee.property.name
+          : null;
+        if (method !== 'open' && method !== 'openInTime') return;
+        if (method === 'open' && !usesVoice) return;
+        let parent = node.parent;
+        while (parent && parent.type !== 'MethodDefinition') parent = parent.parent;
+        const checked = parent?.static && parent.key.name === 'openBuilt' &&
+          parent.parent.parent.id?.name === 'Voice';
+        if (method === 'open' || !checked) context.report({ node, messageId: 'dropped' });
+      },
+    };
+  },
+};
+
 const animationsShareStartTime = {
   meta: {
     messages: {
@@ -550,6 +579,34 @@ const scheduleBeforeEchoLoads = {
   },
 };
 
+const controlsWaitForOpening = {
+  meta: {
+    messages: { early: 'Queue held sound controls with voice.control before changing their parameters.' },
+  },
+  create(context) {
+    const changesParameter = (call, seen = new Set()) => {
+      const method = methodName(call);
+      if (method === 'control') return false;
+      if (AUDIO_TIME_ARG.has(method) && method !== 'stop' && method !== 'start') return true;
+      const fn = functionOf(context, call.callee);
+      if (!fn || seen.has(fn)) return false;
+      seen.add(fn);
+      return ownCalls(fn.body).some((next) => changesParameter(next, seen));
+    };
+    return {
+      Property(node) {
+        if (node.key.name !== 'handle' || node.value.type !== 'ObjectExpression') return;
+        for (const method of node.value.properties) {
+          if (!['level', 'set', 'release'].includes(method.key?.name) || !FUNCTIONS.has(method.value?.type)) continue;
+          if (ownCalls(method.value.body).some((call) => changesParameter(call))) {
+            context.report({ node: method, messageId: 'early' });
+          }
+        }
+      },
+    };
+  },
+};
+
 function passedAsAudioTime(context, node, times) {
   if (node.type === 'CallExpression') {
     const index = AUDIO_TIME_ARG.get(calleeName(node));
@@ -909,6 +966,8 @@ export default {
   meta: { name: 'lantern' },
   rules: {
     'audio-times-from-soon': audioTimesFromSoon,
+    'controls-wait-for-opening': controlsWaitForOpening,
+    'late-opens-build-again': lateOpensBuildAgain,
     'no-cross-render-peak-equality': noCrossRenderPeakEquality,
     'hold-reads-the-scheduled-curve': holdReadsTheScheduledCurve,
     'held-times-are-clamped': heldTimesAreClamped,
