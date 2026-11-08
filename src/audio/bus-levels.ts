@@ -3,8 +3,10 @@ import { holdAt } from './param';
 
 type LevelEvent = Pick<ReturnType<Curve['scheduledFrom']>[number], 'kind' | 'value' | 'time' | 'tau'>;
 
+const FLOAT32_SLACK = 2 ** -20;
+
 function rising(value: number, from: number) {
-  return value - from > Math.max(Math.abs(value), Math.abs(from)) * 1e-9;
+  return value - from > Math.max(Math.abs(value), Math.abs(from)) * FLOAT32_SLACK;
 }
 
 function mergeAnchors(events: LevelEvent[]) {
@@ -45,6 +47,7 @@ export class BusLevels {
       const pending = mergeAnchors(p.scheduledFrom(time));
       const deferred: LevelEvent[] = [];
       holdAt(p, time);
+      let anchored = true;
       for (const event of pending) {
         if (event.time >= this.stoppedUntil) {
           deferred.push(event);
@@ -52,13 +55,14 @@ export class BusLevels {
           deferred.push({ ...event, time: this.stoppedUntil });
         } else {
           deferred.length = 0;
+          anchored = event.kind !== 'target';
           this.write(p, event);
         }
       }
       let rampFrom = Math.max(time, this.stoppedUntil);
       const later = mergeAnchors(deferred.sort((a, b) => a.time - b.time));
       for (const [index, event] of later.entries()) {
-        const keepsFalling = index === 0 && !rising(event.value, p.valueAt(rampFrom));
+        const keepsFalling = index === 0 && anchored && !rising(event.value, p.valueAt(rampFrom));
         if (event.kind === 'linear' && !keepsFalling) holdAt(p, rampFrom);
         this.write(p, event);
         rampFrom = event.time;
