@@ -1,4 +1,5 @@
 import { drawPage, line } from './art-eraser-glow.e2e.mjs';
+import { expectLiveNote, recordLiveNote } from './live-note.mjs';
 import { holdStorage } from './story-reading.e2e.mjs';
 
 const day = () => {
@@ -458,11 +459,13 @@ export const scenarios = {
           throw new DOMException('The disk could not be read.', 'NotReadableError');
         };
       });
+      await recordLiveNote(failed.page, '.dq-draw', '.dq-tools-msg', 'open this drawing');
       await openEarlierDraft(failed.page);
       await routeIs(failed.page, 'draw');
       await failed.page.getByText(/open this drawing/).waitFor();
       const inert = await failed.page.locator('.dq-ink-stage').evaluate((el) => el.inert);
       h.expect(inert, 'drawing opened after a read error');
+      await expectLiveNote(h, failed.page, 'drawing read error');
       await safeAndBack(failed.page, 'draw');
       await drawReady(failed.page);
       await shows(h, failed.page, 1, 'back to the draft whose read failed');

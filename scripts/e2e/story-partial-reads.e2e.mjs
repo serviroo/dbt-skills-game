@@ -186,6 +186,8 @@ export const scenarios = {
       await storyError.waitFor({ timeout: 3000 }).catch(() => {});
       h.expect(await storyError.isVisible() && (await page.locator('.st-read-text').count()) === 0,
         'the reader showed a partial story');
+      h.expect(await page.locator('.dq-cant-t').evaluate((el) => document.activeElement === el),
+        'unreadable reader chapter heading was not focused');
       h.expect(!(await page.locator('.st-read-tools').isVisible()),
         'the reader showed size controls without a story');
       h.expect(!(await page.getByText(/This story isn.t on this device any more/).isVisible()),
@@ -200,6 +202,8 @@ export const scenarios = {
       await page.evaluate((id) => window.__daily.go({ name: 'read', id }), ids.story);
       await storyError.waitFor({ timeout: 3000 }).catch(() => {});
       h.expect(await storyError.isVisible(), 'the reader called an unreadable story gone');
+      h.expect(await page.locator('.dq-cant-t').evaluate((el) => document.activeElement === el),
+        'unreadable reader story heading was not focused');
       h.expect(!(await page.getByText(/This story isn.t on this device any more/).isVisible()),
         'an unreadable story was called gone');
       await restore();

@@ -3,6 +3,7 @@
 // the match marked, opens that chapter at that place with the place marked, comes back to the same search, works
 // offline, stores nothing and never runs the player's text as markup. The Safe Zone stays one tap away. The search
 // lives in memory with its visit: the browser's history, address and saved session never hold a word of it.
+import { expectEditedLiveNote, expectLiveNote, recordLiveNote } from './live-note.mjs';
 import { holdStorage, letIn, opening, shownIn } from './story-reading.e2e.mjs';
 
 const day = () => {
@@ -347,6 +348,7 @@ export const scenarios = {
         h.expect((await field(page).inputValue()) === 'key ferry', `${at}: back from the Safe Zone lost the search`);
 
         // a result opens that chapter at that place, marked, and the cursor waits there
+        await recordLiveNote(page, '.st-write', '.st-note', 'What you searched for is marked on the page.');
         await page.locator('.st-found-row', { hasText: 'Notes' }).click();
         await routeIs(page, 'write');
         await page.getByRole('textbox', { name: 'Notes for this story' }).waitFor();
@@ -354,6 +356,7 @@ export const scenarios = {
         let p = await placeShown(page);
         h.expect(p.text === 'key' && p.sel === 'key' && p.marks === 2, `${at}: the notes did not open at "key": ${JSON.stringify(p)}`);
         h.expect((await page.locator('.st-note').textContent()) === 'What you searched for is marked on the page.', `${at}: the page does not say what is marked`);
+        await expectLiveNote(h, page, `${at}: search note`);
         await h.shot(page, `opened-notes-${at}`);
 
         // Back comes to the same search
@@ -364,7 +367,9 @@ export const scenarios = {
 
         // a place far down a long chapter is brought into view between the bars
         await search(h, page, 'lighthouse');
+        await recordLiveNote(page, '.st-write', '.st-note', 'What you searched for is marked on the page.', true);
         await page.locator('.st-found-row', { hasText: 'Spring' }).click();
+        await expectEditedLiveNote(h, page, `${at}: edited search note`);
         await routeIs(page, 'write');
         await page.getByRole('textbox', { name: 'Page, Spring' }).waitFor();
         await page.waitForSelector('.st-hl .st-mark.is-place');
@@ -402,9 +407,8 @@ export const scenarios = {
     }
   },
 
-  /** a result opening its chapter gives way to a Page or Notes tap made while it settled, however slowly storage
-   *  answers: the tapped side shows, with nothing marked, selected or said about the search on it. Before its chapter
-   *  is in, the writer is out of reach */
+  /** a result opening its chapter gives way to a Page or Notes tap made while it opened, however slowly storage
+   *  answers: the tapped side shows, with nothing marked, selected or said about the search on it */
   async 'story-search-open-overtaken'(h) {
     const cases = [
       { row: 'Winter', tap: 'Notes', box: 'Notes for this story', text: NOTES },

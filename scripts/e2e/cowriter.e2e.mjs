@@ -222,6 +222,46 @@ async function requestIdeas(page) {
 }
 
 export const scenarios = {
+  async 'cowriter-unread-ideas-focus-on-open'(h) {
+    for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 }]) {
+      const { ctx, page, errors } = await openCtx(h, { viewport });
+      try {
+        await h.reachHub(page);
+        const id = await page.evaluate(async () => {
+          const { storyStore } = await import('/src/daily/storystore.ts');
+          const ss = storyStore(window.__daily.store.key);
+          const { story, first } = await ss.create('A Door');
+          await ss.saveChapter({ ...first, text: 'A light.' }, [first.rev]);
+          window.__realGet = IDBObjectStore.prototype.get;
+          IDBObjectStore.prototype.get = function (...args) {
+            if (this.name === 'cards' && this.transaction.mode === 'readonly') {
+              throw new DOMException('Cannot read cards', 'NotReadableError');
+            }
+            return window.__realGet.apply(this, args);
+          };
+          return story.id;
+        });
+        await page.evaluate((story) => window.__daily.go({ name: 'write', id: story }), id);
+        await page.getByRole('textbox', { name: /^Page,/ }).waitFor();
+        const panel = page.locator('.st-cw [role="alert"] [data-focus]');
+        h.expect(await panel.textContent() === 'Can’t read this chapter’s ideas right now', 'Ideas error is missing.');
+        h.expect(await page.locator('.st-title').inputValue() === 'A Door', 'Story title did not load.');
+        h.expect(await ta(page).inputValue() === 'A light.', 'Story page did not load.');
+        const target = viewport.width === 390 ? page.locator('.st-write h1[data-focus]') : panel;
+        h.expect(await target.textContent() === (viewport.width === 390 ? 'Your story' :
+          'Can’t read this chapter’s ideas right now'), 'Focus target is wrong.');
+        h.expect(await target.evaluate((el) => document.activeElement === el),
+          `${viewport.width}: expected focus on ${await target.textContent()}`);
+        h.expect(!errors.length, errors.join('\n'));
+      } finally {
+        await page.evaluate(() => {
+          if (window.__realGet) IDBObjectStore.prototype.get = window.__realGet;
+        });
+        await ctx.close();
+      }
+    }
+  },
+
   async 'cowriter-ask-while-unread-keeps-ideas'(h) {
     const { ctx, page, onDisk, fault, restore, open, panel, ideasKept } = await ideasScene(h);
     try {
