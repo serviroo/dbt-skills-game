@@ -239,7 +239,7 @@ jobs:
 
   timings:
     needs: [plan, e2e]
-    if: ${{ always() && needs.e2e.result != 'skipped' }}
+    if: ${{ !cancelled() && needs.e2e.result != 'skipped' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

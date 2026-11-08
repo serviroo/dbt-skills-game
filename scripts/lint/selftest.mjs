@@ -107,6 +107,14 @@ function checkWorkflows() {
   }
 }
 
+function checkCancelledRuns() {
+  const script = path.join(here, 'jobs-skip-cancelled-runs.mjs');
+  const run = spawnSync('node', [script, path.join(fixtures, 'jobs-skip-cancelled-runs.yml')], { encoding: 'utf8' });
+  const jobs = run.stderr.trim().split('\n').map((line) => line.match(/: (\S+) runs with/)?.[1]);
+  expect(run.status === 1 && jobs.join() === 'plain,wrapped,reusable',
+    `cancelled runs: expected plain, wrapped and reusable:\n${run.stderr}`);
+}
+
 function checkDiffLimits() {
   const repo = path.join(scratch, 'repo');
   fs.mkdirSync(repo);
@@ -170,6 +178,7 @@ try {
   checkRules();
   checkStyles();
   checkWorkflows();
+  checkCancelledRuns();
   checkDiffLimits();
 } finally {
   fs.rmSync(scratch, { recursive: true, force: true });
