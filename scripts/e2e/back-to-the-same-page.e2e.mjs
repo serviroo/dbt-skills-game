@@ -1,4 +1,5 @@
 import { drawPage, line } from './art-eraser-glow.e2e.mjs';
+import { holdStorage } from './story-reading.e2e.mjs';
 
 const day = () => {
   const d = new Date(Date.now() - 6 * 3600000);
@@ -93,6 +94,46 @@ async function keepDrawingOverAnother(h, page) {
   }, [stroke(200, 500), stroke(200, 900), stroke(200, 1300)]);
   await other.close();
   await line(page, [0.2, 0.6], [0.7, 0.7]);
+}
+const pageReads = (h, page, want, where) =>
+  h.poll(
+    page,
+    () => page.locator('.st-ta').inputValue(),
+    (v) => v === want,
+    (v) => `${where} the page reads ${JSON.stringify(v)}, not ${JSON.stringify(want)}`,
+    { timeout: 5000 },
+  );
+const holds = (h, page, name, where) =>
+  h.poll(
+    page,
+    () => page.locator('.st-ta').getAttribute('aria-label'),
+    (l) => l === name,
+    (l) => `${where} opened ${l}, not ${name}`,
+    { timeout: 5000 },
+  );
+const writeStory = (page, r) => page.evaluate((r) => window.__daily.go(r), { name: 'write', ...r });
+const storyTexts = (page, id) =>
+  page.evaluate(async (id) => {
+    const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+    const s = await ss.story(id);
+    return Promise.all([s.notes, ...s.chapters].map(async (c) => (await ss.chapter(c))?.text));
+  }, id);
+const changedElsewhere = (page, id) =>
+  page.evaluate(async (id) => {
+    const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+    const c = await ss.chapter(id);
+    await ss.saveChapter({ ...c, text: 'The other open copy.' }, [c.rev]);
+  }, id);
+async function typeThenSafeZone(page, text) {
+  const held = await holdStorage(page, ['saveChapter']);
+  await page.locator('.st-ta').fill(text);
+  await page.locator('.dq-top .dq-safe').click();
+  await routeIs(page, 'safe');
+  await held.drain();
+  await page.evaluate(async () => {
+    const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+    ss.saveChapter = ss.__real.saveChapter;
+  });
 }
 
 export const scenarios = {
@@ -277,6 +318,127 @@ export const scenarios = {
       h.expect(!failed.errors.length, failed.errors.join('\n'));
     } finally {
       await failed.ctx.close();
+    }
+  },
+
+  async 'back-to-the-same-chapter'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await h.reachHub(page);
+      const ids = await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const { story, first } = await ss.create('The Long Night');
+        await ss.saveChapter({ ...first, text: 'The lantern woke.' }, [first.rev]);
+        const next = await ss.addChapter(story.id);
+        await ss.saveChapter({ ...next, text: 'The river ran bright.' }, [next.rev]);
+        return { story: story.id, ch1: first.id };
+      });
+      await writeStory(page, { id: ids.story, ch: ids.ch1 });
+      await page.getByRole('textbox', { name: 'Page, Chapter 1' }).waitFor();
+      await page.locator('.st-chbtn').click();
+      await page.locator('.st-sheet').waitFor();
+      await page.locator('.st-sheet .st-chrow-b').filter({ hasText: 'Chapter 2' }).click();
+      await page.getByRole('textbox', { name: 'Page, Chapter 2' }).waitFor();
+
+      await page.getByRole('button', { name: 'More', exact: true }).click();
+      await page.getByRole('menuitem', { name: 'Read', exact: true }).click();
+      await routeIs(page, 'read');
+      await page.getByRole('button', { name: 'Back to writing' }).click();
+      await routeIs(page, 'write');
+      await holds(h, page, 'Page, Chapter 2', 'Back to writing');
+      await pageReads(h, page, 'The river ran bright.', 'Back to writing:');
+
+      await safeAndBack(page, 'write');
+      await holds(h, page, 'Page, Chapter 2', 'back from the Safe Zone');
+
+      await page.getByRole('radio', { name: 'Show: Notes' }).click();
+      await page.getByRole('textbox', { name: 'Notes for this story' }).waitFor();
+      await safeAndBack(page, 'write');
+      await holds(h, page, 'Notes for this story', 'back from the Safe Zone on the notes');
+
+      const held = await holdStorage(page, ['story']);
+      await page.locator('.dq-top .dq-safe').click();
+      await routeIs(page, 'safe');
+      await page.goBack();
+      await routeIs(page, 'write');
+      await held.waitHeld(`story ${ids.story}`);
+      await page.locator('.dq-top .dq-safe').click();
+      await routeIs(page, 'safe');
+      await page.evaluate(async () => {
+        const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+        ss.story = ss.__real.story;
+      });
+      await held.drain();
+      await page.goBack();
+      await routeIs(page, 'write');
+      await holds(h, page, 'Notes for this story', 'the next Back from the Safe Zone');
+      await page.getByRole('radio', { name: 'Show: Page' }).click();
+      await holds(h, page, 'Page, Chapter 2', 'the Page tab after coming back');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'back-to-a-chapter-kept-apart'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await h.reachHub(page);
+      const ids = await page.evaluate(async () => {
+        const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+        const { story, first } = await ss.create('The Long Night');
+        await ss.saveChapter({ ...first, text: 'The lantern woke.' }, [first.rev]);
+        return { story: story.id, ch1: first.id };
+      });
+      await writeStory(page, { id: ids.story, ch: ids.ch1 });
+      await holds(h, page, 'Page, Chapter 1', 'the story');
+      await changedElsewhere(page, ids.ch1);
+      await typeThenSafeZone(page, 'My newest words.');
+      await h.poll(
+        page,
+        () => storyTexts(page, ids.story),
+        (t) => t.includes('My newest words.') && t.includes('The other open copy.'),
+        (t) => `the notes and chapters saved are ${JSON.stringify(t)}`,
+        { timeout: 8000 },
+      );
+      await page.goBack();
+      await routeIs(page, 'write');
+      await pageReads(h, page, 'My newest words.', 'back from the Safe Zone');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'back-to-notes-kept-apart'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await h.reachHub(page);
+      const ids = await page.evaluate(async () => {
+        const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+        const { story } = await ss.create('The Long Night');
+        const n = await ss.chapter(story.notes);
+        await ss.saveChapter({ ...n, text: 'Mira keeps the map.' }, [n.rev]);
+        return { story: story.id, notes: story.notes };
+      });
+      await writeStory(page, { id: ids.story, ch: ids.notes });
+      await holds(h, page, 'Notes for this story', 'the notes');
+      await changedElsewhere(page, ids.notes);
+      await typeThenSafeZone(page, 'My newest notes.');
+      await h.poll(
+        page,
+        () => storyTexts(page, ids.story),
+        (t) => t.includes('My newest notes.') && t[0] === 'The other open copy.',
+        (t) => `the notes and chapters saved are ${JSON.stringify(t)}`,
+        { timeout: 8000 },
+      );
+      await page.goBack();
+      await routeIs(page, 'write');
+      await pageReads(h, page, 'My newest notes.', 'back from the Safe Zone');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
     }
   },
 };
