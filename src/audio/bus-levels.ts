@@ -51,13 +51,15 @@ export class BusLevels {
         } else if (rising(event.value, p.valueAt(event.time))) {
           deferred.push({ ...event, time: this.stoppedUntil });
         } else {
+          deferred.length = 0;
           this.write(p, event);
         }
       }
       let rampFrom = Math.max(time, this.stoppedUntil);
       const later = mergeAnchors(deferred.sort((a, b) => a.time - b.time));
-      for (const event of later) {
-        if (event.kind === 'linear') holdAt(p, rampFrom);
+      for (const [index, event] of later.entries()) {
+        const keepsFalling = index === 0 && !rising(event.value, p.valueAt(rampFrom));
+        if (event.kind === 'linear' && !keepsFalling) holdAt(p, rampFrom);
         this.write(p, event);
         rampFrom = event.time;
       }

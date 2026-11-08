@@ -27,10 +27,13 @@ export async function renderedBusDips(buses = [
         eng.stopAll(0.04, 0.25);
         const data = (await c.startRendering()).getChannelData(0);
         let rise = 0;
+        let low = data[0.25 * sr];
         for (let i = 0.25 * sr + 1; i < Math.floor(horizon * sr); i++) {
-          rise = Math.max(rise, data[i] - data[i - 1]);
+          low = Math.min(low, data[i - 1]);
+          rise = Math.max(rise, data[i] - low);
         }
-        results.push({ bus, firefox, horizon, held: data[0.25 * sr], rise });
+        const last = bus.startsWith('hush') ? 1 : 10 ** (-22 / 20);
+        results.push({ bus, firefox, horizon, held: data[0.25 * sr], rise, end: data.at(-1), last });
       }
     } finally {
       if (hold) Object.defineProperty(AudioParam.prototype, 'cancelAndHoldAtTime', hold);
@@ -74,8 +77,10 @@ export async function renderedHorizonCollisions() {
         }
         const data = (await c.startRendering()).getChannelData(0);
         let rise = 0;
+        let low = data[0.25 * sr];
         for (let i = 0.25 * sr + 1; i < Math.floor(horizon * sr); i++) {
-          rise = Math.max(rise, data[i] - data[i - 1]);
+          low = Math.min(low, data[i - 1]);
+          rise = Math.max(rise, data[i] - low);
         }
         results.push({ firefox, kind, error, rise, end: data.at(-1),
           dipKept: !kind.startsWith('early') || Math.abs(data[0.3 * sr] - 0.05) < 1e-6,

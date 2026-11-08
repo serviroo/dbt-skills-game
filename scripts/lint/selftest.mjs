@@ -30,7 +30,7 @@ const RULE_FINDINGS = {
   'cue-tracking-includes-offline': 4,
   'cue-cleanup-shares-one-clock': 2,
   'bus-rises-wait-for-stops': 14,
-  'bus-levels-use-tracked-curves': 5,
+  'bus-levels-use-tracked-curves': 6,
 };
 
 function checkRules() {

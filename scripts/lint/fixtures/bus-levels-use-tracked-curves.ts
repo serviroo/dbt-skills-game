@@ -10,6 +10,7 @@ export class Engine {
   create() {
     this.duckG = this.ctx.createGain();
     this.safe = this.ctx.createGain();
+    this.safe = this.duckG;
   }
 
   stop(at: number) {

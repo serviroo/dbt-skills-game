@@ -15,13 +15,15 @@ async function checkAutomation({ open, expect }, render, passes, input) {
   }
 }
 
+const staysDipped = (r) => r.rise < 1e-6 && r.held > 0.1 && Math.abs(r.end - r.last) < 1e-4;
+
 export const scenarios = {
   async 'skip-keeps-a-later-duck-dip-falling'(h) {
-    return checkAutomation(h, renderedBusDips, (r) => r.rise < 1e-6 && r.held > 0.1, ['duckG']);
+    return checkAutomation(h, renderedBusDips, staysDipped, ['duckG']);
   },
 
   async 'skip-keeps-every-later-bus-dip-falling'(h) {
-    return checkAutomation(h, renderedBusDips, (r) => r.rise < 1e-6 && r.held > 0.1);
+    return checkAutomation(h, renderedBusDips, staysDipped);
   },
 
   async 'skip-merges-level-changes-at-the-silence-horizon'(h) {
@@ -81,7 +83,11 @@ export const scenarios = {
           const first = Math.round(1.005 * sr);
           const end = Math.floor(stoppedBy(1, 1) * sr);
           let rise = 0;
-          for (let i = first; i < end; i++) rise = Math.max(rise, data[i] - data[i - 1]);
+          let low = data[first - 1];
+          for (let i = first; i < end; i++) {
+            low = Math.min(low, data[i - 1]);
+            rise = Math.max(rise, data[i] - low);
+          }
           out.push({ firefox, rise, held: data[first], end: data[end - 1], restored: data.at(-1) });
         } finally {
           if (hold) Object.defineProperty(AudioParam.prototype, 'cancelAndHoldAtTime', hold);
@@ -89,6 +95,42 @@ export const scenarios = {
       }
       return out;
     }, (r) => r.rise < 1e-6 && Math.abs(r.held - 0.995) < 1e-6 && r.end === 0 && r.restored > 0.99);
+  },
+
+  async 'holding-keeps-a-falling-fade-on-its-line'(h) {
+    return checkAutomation(h, async () => {
+      const { AudioEngine } = await import('/src/audio/engine.ts');
+      const sr = 48000;
+      const hold = Object.getOwnPropertyDescriptor(AudioParam.prototype, 'cancelAndHoldAtTime');
+      const out = [];
+      for (const firefox of [false, true]) {
+        if (firefox) delete AudioParam.prototype.cancelAndHoldAtTime;
+        try {
+          const cases = [[1, 2, 1.2, 1.5], [1.05, 1.065, 1.05, 1.057], [1.05, 1.065, 1.05, 1.065]];
+          for (const [from, to, at, until] of cases) {
+            const c = new OfflineAudioContext(1, 3 * sr, sr);
+            const eng = new AudioEngine(c, { volume: 0 });
+            const gain = eng.safe;
+            gain.disconnect();
+            gain.connect(c.destination);
+            const source = c.createConstantSource();
+            source.connect(gain);
+            source.start();
+            eng.busLevels.ramp(gain.curve, 0, from, to);
+            eng.busLevels.hold(at, until);
+            const data = (await c.startRendering()).getChannelData(0);
+            let off = 0;
+            for (let i = Math.ceil(at * sr); i < Math.ceil(to * sr); i++) {
+              off = Math.max(off, Math.abs(data[i] - (to - i / sr) / (to - from)));
+            }
+            out.push({ firefox, from, to, at, until, off, end: data.at(-1) });
+          }
+        } finally {
+          if (hold) Object.defineProperty(AudioParam.prototype, 'cancelAndHoldAtTime', hold);
+        }
+      }
+      return out;
+    }, (r) => r.off < 1e-4 && r.end === 0);
   },
 
   async 'holding-at-a-fade-end-keeps-earlier-samples'(h) {
