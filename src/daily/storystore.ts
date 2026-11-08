@@ -10,9 +10,20 @@
  * (persistent = false); exports read both.
  */
 import type { App } from './app';
-import { connectionLost, uid, validDay } from './store';
+import { IdbLink } from './idb-link';
+import { uid, validDay } from './store';
 import { BESIDE, STORY_DB } from '../core/stored-names';
-import { canWrite, cleared, dropBefore, fromBefore, goneElsewhere, marked, mayWrite, onClear, removeStored, setStored, write } from '../core/cleared';
+import {
+  canWrite,
+  cleared,
+  dropBefore,
+  fromBefore,
+  marked,
+  onClear,
+  removeStored,
+  setStored,
+  write,
+} from '../core/cleared';
 
 export type CardMode = 'continue' | 'whatif' | 'polish' | 'questions';
 export interface Story {
@@ -182,13 +193,22 @@ interface View {
 }
 
 export class StoryStore {
-  persistent = true;
-  private db: Promise<IDBDatabase | null>;
-  /** IndexedDB is here but couldn't be opened, so stories stored earlier can't be read this visit. */
-  private unreadable = false;
-  /** Reads of the stored stories that got no answer; exportAll compares it before and after. */
-  private readFails = 0;
-  private lost = new WeakSet<IDBDatabase>();
+  readonly link: IdbLink;
+  get persistent() {
+    return this.link.persistent;
+  }
+  private get db() {
+    return this.link.db;
+  }
+  private get readFails() {
+    return this.link.readFails;
+  }
+  private set readFails(n: number) {
+    this.link.readFails = n;
+  }
+  private tx<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>) {
+    return this.link.tx(stores, mode, fn);
+  }
   private mem = { stories: new Map<string, Story>(), chapters: new Map<string, Chapter>(), cards: new Map<string, Card[]>(), days: new Set<string>() };
   private cardImports = new Set<string>();
   /** For a chapter kept only in memory: the revisions it was saved over (a stored one in this set is its own past). */
@@ -207,14 +227,12 @@ export class StoryStore {
   private lastCopy = 0;
   private channel: BroadcastChannel | null = null;
   private listeners = new Set<() => void>();
-  /** Writes under way, so a clear's check waits for them. */
-  private writes = new Set<Promise<unknown>>();
 
   constructor(
     readonly name: string,
     readonly liveKey: string,
   ) {
-    onClear({ hold: () => Promise.allSettled([...this.writes]), clear: () => this.dispose() });
+    onClear({ hold: () => Promise.allSettled([...this.link.writes]), clear: () => this.dispose() });
     if (typeof BroadcastChannel !== 'undefined') {
       try {
         this.channel = new BroadcastChannel(name);
@@ -226,123 +244,19 @@ export class StoryStore {
         this.channel = null;
       }
     }
-    this.db = this.connect(true);
-  }
-
-  /** Opens the database; a lost connection on open gets one more try (`again`). Null when there is none to use. */
-  private connect(again: boolean): Promise<IDBDatabase | null> {
-    return new Promise((resolve) => {
-      try {
-        if (typeof indexedDB === 'undefined') throw new Error('no idb');
-        // this game's data is being cleared: opening would make the database again
-        if (cleared()) return resolve(null);
-        const open = indexedDB.open(this.name, STORY_DB.version);
-        open.onupgradeneeded = () => {
-          const db = open.result;
-          const [stories, chapters, ...plain] = STORY_DB.stores;
-          if (!db.objectStoreNames.contains(stories)) db.createObjectStore(stories, { keyPath: 'id' });
-          if (!db.objectStoreNames.contains(chapters)) db.createObjectStore(chapters, { keyPath: 'id' }).createIndex(STORY_DB.chapterIndex, 'story');
-          for (const s of plain) if (!db.objectStoreNames.contains(s)) db.createObjectStore(s);
-        };
-        open.onsuccess = () => {
-          const db = open.result;
-          db.onversionchange = (e) => {
-            db.close();
-            // deleted: another copy cleared this game's data
-            if (e.newVersion === null) goneElsewhere();
-          };
-          resolve(db);
-        };
-        const fail = (retry: boolean) => {
-          if (again && retry) return resolve(this.connect(false));
-          this.persistent = false;
-          this.unreadable = true;
-          resolve(null);
-        };
-        open.onerror = () => fail(connectionLost(open.error));
-        open.onblocked = () => fail(false);
-      } catch {
-        this.persistent = false;
-        this.unreadable = true;
-        resolve(null);
+    this.link = new IdbLink(name, STORY_DB.version, (db) => {
+      const [stories, chapters, ...plain] = STORY_DB.stores;
+      if (!db.objectStoreNames.contains(stories)) db.createObjectStore(stories, { keyPath: 'id' });
+      if (!db.objectStoreNames.contains(chapters)) {
+        db.createObjectStore(chapters, { keyPath: 'id' }).createIndex(STORY_DB.chapterIndex, 'story');
       }
+      for (const s of plain) if (!db.objectStoreNames.contains(s)) db.createObjectStore(s);
     });
-  }
-
-  /** One fresh connection in place of a lost one (callers that saw the same loss share it). True when there is one. */
-  private async reconnect(old: IDBDatabase) {
-    if (cleared()) return false;
-    if (!this.lost.has(old)) {
-      this.lost.add(old);
-      try {
-        old.close();
-      } catch {
-        /* already closed */
-      }
-      this.db = this.connect(false);
-    }
-    return !!(await this.db);
-  }
-
-  /**
-   * Runs fn in one transaction; null when there is no database or the transaction failed (then persistent turns false).
-   * A lost connection is opened again once: a read runs again on the fresh one, and so does a write that never started.
-   * A read that still gets no answer counts in readFails.
-   */
-  private async tx<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>): Promise<{ v: T } | null> {
-    if (mode === 'readonly') return this.run(stores, mode, fn);
-    // a clear checking its Save Crystal holds writes; once it clears they never happen
-    if (!canWrite() && !(await mayWrite())) return null;
-    const job = this.run(stores, mode, fn);
-    this.writes.add(job);
-    void job.finally(() => this.writes.delete(job));
-    return job;
-  }
-
-  private async run<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>): Promise<{ v: T } | null> {
-    let failed = false;
-    for (let retry = true; ; retry = false) {
-      const db = await this.db;
-      if (!db) break;
-      let started = false;
-      try {
-        const t = db.transaction(stores, mode);
-        started = true;
-        const done = new Promise<void>((ok, bad) => {
-          t.oncomplete = () => ok();
-          t.onerror = () => bad(t.error);
-          t.onabort = () => bad(t.error ?? new Error('aborted'));
-        });
-        done.catch(() => undefined);
-        let v: T;
-        try {
-          v = await fn(t);
-        } catch (e) {
-          try {
-            t.abort();
-          } catch {
-            /* already finished */
-          }
-          throw e;
-        }
-        await done;
-        return { v };
-      } catch (e) {
-        failed = true;
-        if (retry && connectionLost(e) && (await this.reconnect(db)) && (!started || mode === 'readonly')) continue;
-        break;
-      }
-    }
-    if (failed) this.persistent = false;
-    if (mode === 'readonly' && (failed || this.unreadable)) this.readFails++;
-    return null;
   }
 
   /** This game's data is being cleared: the database closes so it can go, and nothing stays in memory. */
   private dispose() {
-    const db = this.db;
-    this.db = Promise.resolve(null);
-    void db.then((d) => d?.close());
+    this.link.close();
     try {
       this.channel?.close();
     } catch {
