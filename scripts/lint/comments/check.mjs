@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { creditProblems } from './credits.mjs';
 import { directive, licenseLine, normalize, strip } from './rules.mjs';
 import { languageOf, scanner } from './scan.mjs';
 
@@ -12,14 +13,20 @@ function fail(message) {
 }
 
 function readOptions() {
-  const options = { base: { type: 'string' }, head: { type: 'string' } };
+  const names = ['base', 'head', 'title', 'body-file'];
+  const options = Object.fromEntries(names.map((name) => [name, { type: 'string' }]));
   let values = {};
   try {
     ({ values } = parseArgs({ options }));
   } catch (error) {
     fail(error.message);
   }
-  return { base: values.base ?? process.env.BASE_SHA ?? '', head: values.head ?? process.env.HEAD_SHA ?? 'HEAD' };
+  return {
+    base: values.base ?? process.env.BASE_SHA ?? '',
+    head: values.head ?? process.env.HEAD_SHA ?? 'HEAD',
+    title: values.title ?? process.env.PR_TITLE ?? '',
+    body: values['body-file'] ? fs.readFileSync(values['body-file'], 'utf8') : (process.env.PR_BODY ?? ''),
+  };
 }
 
 const git = (...args) =>
@@ -179,12 +186,17 @@ for (const file of newFiles) {
   }
 }
 
+const log = git('log', '--format=%H%x1f%an <%ae>%x1f%cn <%ce>%x1f%B%x1e', `${mergeBase}..${options.head}`);
+for (const [where, why, text] of creditProblems({ changes, log, title: options.title, body: options.body })) {
+  say(where, why, text);
+}
+
 if (problems.length) {
   console.log(problems.join('\n'));
   const count = `${problems.length} problem${problems.length === 1 ? '' : 's'}`;
   console.log(`\n${count}. Write the code so it reads without a comment (a clearer name, a smaller function, a test),`);
-  console.log('and keep existing comments as they are.');
+  console.log('keep existing comments, and keep authorship credits out of the repo and the PR.');
   process.exitCode = 1;
 } else {
-  console.log('No new comments.');
+  console.log('No new comments and no authorship credits.');
 }

@@ -2,7 +2,7 @@ name: No new comments
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
@@ -29,10 +29,12 @@ jobs:
       - run: npm ci
       - name: The check still catches its own cases
         run: bash .github/no-new-comments-e2e.sh
-      - name: No new comments
+      - name: No new comments or authorship credits
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           set -euo pipefail
           checker=scripts/lint/comments

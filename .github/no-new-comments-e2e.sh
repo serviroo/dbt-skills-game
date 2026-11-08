@@ -3,6 +3,9 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 checker=$root/scripts/lint/comments/check.mjs
+credits=$root/scripts/lint/comments/credits.mjs
+name=$(node --input-type=module -e "import { NAMES } from '$credits'; console.log(NAMES[0]);")
+[[ -n $name ]] || { echo "can't read the names the checker looks for" >&2; exit 1; }
 repo=$(mktemp -d) || exit 1
 trap 'rm -rf -- "${repo:?}"' EXIT
 cd "$repo"
@@ -348,5 +351,51 @@ put docs/notes.md <<'EOF'
 EOF
 commit "feat: add allowed"
 expect pass "license headers, shebangs, directives, strings and docs pass"
+
+case_branch credit
+put src/b.js <<'EOF'
+export const b = 1;
+EOF
+commit "feat: add b"
+git commit -q --amend -m "feat: add b" -m "Co-authored-by: helper[bot] <1+helper[bot]@users.noreply.github.com>"
+expect "credits an assistant, model or bot as co-author" "a co-author trailer naming a bot fails"
+git commit -q --amend -m "feat: add b" -m "Co-authored-by: Sam <12345+sam@users.noreply.github.com>
+Co-authored-by: Ana Talbot <talbot@example.com>"
+expect pass "a person on a GitHub no-reply address is a real co-author"
+git commit -q --amend -m "feat: add b with $name"
+expect "names an assistant or model ($name)" "a commit message naming a model fails"
+git commit -q --amend -m "feat: add b" -m "Generated with Copilot"
+expect "carries an authorship label" "a generated-with line naming a coding tool fails"
+git commit -q --amend -m "fix: convert the disk to GPT"
+expect pass "a GPT partition table is not a model name"
+git commit -q --amend -m "feat: add b"
+expect "PR title: names an assistant or model" "a PR title naming a model fails" --title "Add b with ${name^}"
+printf '%s\n' 'Adds b.' '' 'AI-generated summary.' >"$repo/.git/body"
+expect "PR body line 3: carries an authorship label" "a PR body with an authorship label fails" \
+  --body-file "$repo/.git/body"
+opened='<!-- This is an auto-generated comment: release notes by bot -->'
+closed='<!-- end of auto-generated comment: release notes by bot -->'
+printf '%s\n' 'Adds b.' '' "$opened" '<!-- bot-ai-generated:v1 -->' 'Summary' "$closed" >"$repo/.git/body"
+expect pass "a review bot's own summary block in the PR body passes" --body-file "$repo/.git/body"
+printf '%s\n' 'Adds b.' "$opened" "Generated with ${name^}" >"$repo/.git/body"
+expect "PR body line 3: names an assistant or model" "an unclosed review bot marker hides nothing after it" \
+  --body-file "$repo/.git/body"
+bot='helper[bot] <1+helper[bot]@users.noreply.github.com>'
+git commit -q --amend -m "feat: add b" --author "$bot"
+expect "is authored by an assistant, model or bot" "a commit authored by a bot fails"
+git commit -q --amend -m "feat: add b" --author "${name^} <noreply@example.com>"
+expect "is authored by an assistant, model or bot" "a commit authored by an assistant fails"
+git commit -q --amend -m "feat: add b" --reset-author
+git checkout -q -b side main && commit "chore: side" && git checkout -q case-credit
+git merge -q --no-ff side -m "Merge side" -m "Co-authored-by: $bot"
+expect "credits an assistant, model or bot as co-author" "a merge commit crediting a bot fails"
+git reset -q --hard HEAD^
+printf 'export const note = "Co-authored-by: %s";\n' "$bot" >src/credit.js
+commit "feat: add a note"
+expect "src/credit.js:1: credits an assistant, model or bot" "a co-author credit in a source string fails"
+git reset -q --hard HEAD^
+printf 'export const who = "%s";\n' "$name" >src/c.js
+commit "feat: add c"
+expect "src/c.js:1: names an assistant or model ($name)" "code naming a model fails"
 
 [[ $failed -eq 0 ]] && echo "All cases behaved." || exit 1
