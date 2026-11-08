@@ -333,6 +333,7 @@ export async function sharedGateOutlivesTheHit(h) {
     await page.waitForFunction(() => window.__lab === true, null, { timeout: 30000 });
     const start = await page.evaluate(async () => {
       const { AudioEngine } = await import('/src/audio/engine.ts');
+      const { Voice } = await import('/src/audio/voice.ts');
       const c = new AudioContext();
       const make = c.createConstantSource.bind(c);
       const live = new Set();
@@ -348,33 +349,57 @@ export async function sharedGateOutlivesTheHit(h) {
       };
       const e = new AudioEngine(c, { muted: true });
       await c.resume();
+      const before = live.size;
+      const lost = Voice.openBuilt(c.currentTime - 5, () => 1, (seed) => {
+        const voice = new Voice(e.lib, 0, c.destination, { held: true }, seed());
+        voice.osc('sine', 440, 0, 1, voice.wet);
+        return { voice };
+      });
+      const droppedGates = live.size - before;
       const at = c.currentTime + 0.2;
       e.music.host.hush = () => {};
       e.music.to('awaken', 0.01, { at: c.currentTime, hitAt: at });
       const hit = e.play('awaken_hit', { at });
       const section = e.music.live.find((s) => s.name === 'awaken').voice;
       const roar = section.parts.at(-1);
-      window.__shared = { e, live, section, gate: roar.gate, sectionGate: section.gate };
-      return { shared: hit.voice.gate === roar.gate, tracked: live.has(roar.gate) && live.has(section.gate) };
+      const stopAt = c.currentTime + 13;
+      e.music.stop(0.05, stopAt);
+      const shared = { e, c, live, section, roar, gate: roar.gate, sectionGate: section.gate, cut: null };
+      const disconnect = section.out.disconnect.bind(section.out);
+      section.out.disconnect = (...args) => {
+        shared.cut = c.currentTime;
+        return disconnect(...args);
+      };
+      window.__shared = shared;
+      return { dropped: lost.voice.isDropped, droppedGates, shared: hit.voice.gate === roar.gate,
+        tracked: live.has(roar.gate) && live.has(section.gate), silentAt: section.silentAt, stopAt };
     });
-    h.expect(start.shared && start.tracked,
-      `the hit and its roar did not share a tracked gate: ${JSON.stringify(start)}`);
+    h.expect(start.dropped && start.droppedGates === 0,
+      `a dropped build kept its gates: ${JSON.stringify(start)}`);
+    h.expect(start.shared && start.tracked && start.silentAt > start.stopAt,
+      `the hit and its roar did not share a tracked gate under a scheduled stop: ${JSON.stringify(start)}`);
     await page.waitForFunction(() => window.__shared.e.active.size === 0, null, { timeout: 15000, polling: 50 });
     const afterHit = await page.evaluate(() => {
-      const { e, live, section, gate } = window.__shared;
-      const kept = live.has(gate);
-      e.music.stop(0.05);
-      return { kept, sectionLive: e.music.live.some((s) => s.voice === section) };
+      const { c, live, section, roar, gate, cut } = window.__shared;
+      return { now: c.currentTime, kept: live.has(gate), cut, roarStopped: roar.silentAt <= c.currentTime,
+        sectionSilent: section.silentAt <= c.currentTime };
     });
-    h.expect(afterHit.kept && afterHit.sectionLive,
-      `the hit's cleanup released the gate its roar still uses: ${JSON.stringify(afterHit)}`);
+    const playing = afterHit.now < start.stopAt && !afterHit.roarStopped && !afterHit.sectionSilent;
+    h.expect(playing && afterHit.kept && afterHit.cut === null,
+      `the hit's cleanup reached the gate or score still playing: ${JSON.stringify(afterHit)}`);
     await page.waitForFunction(() => {
       const { live, gate, sectionGate } = window.__shared;
       return !live.has(gate) && !live.has(sectionGate);
-    }, null, { timeout: 15000, polling: 50 });
-    await page.evaluate(() => window.__shared.e.dispose());
+    }, null, { timeout: 25000, polling: 50 });
+    const end = await page.evaluate(() => {
+      const { e, section, cut } = window.__shared;
+      e.dispose();
+      return { cut, silentAt: section.silentAt };
+    });
+    h.expect(end.cut !== null && end.cut >= end.silentAt,
+      `the stopped score was disconnected before it was silent: ${JSON.stringify(end)}`);
     h.expect(!errors.length, errors.join('\n'));
-    return { ...start, ...afterHit };
+    return { ...start, ...afterHit, ...end };
   } finally {
     await ctx.close();
   }

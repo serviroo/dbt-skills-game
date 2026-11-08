@@ -9,7 +9,8 @@ export class CueCleanup {
   constructor(private ctx: Ctx, private output: AudioNode, private active: Set<Voice>) {}
 
   add(voice: Voice) {
-    this.pending.set(voice, Math.max(voice.end, soon(this.ctx)) + 4);
+    const silent = Number.isFinite(voice.silentAt) ? voice.silentAt : voice.end;
+    this.pending.set(voice, Math.max(voice.end, silent, soon(this.ctx)) + 4);
     this.arm();
   }
 
