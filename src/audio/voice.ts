@@ -351,6 +351,7 @@ export class Voice {
       for (const w of [v, ...v.parts]) w.pending.list = null;
       v.stop(soon(this.ctx), 0);
       v.stopAsked = stop;
+      for (const w of [v, ...v.parts]) w.leaveGate();
     }
     return false;
   }
@@ -405,7 +406,7 @@ export class Voice {
     const users = gateUsers.get(gate);
     users?.delete(this);
     if (users?.size) return;
-    gate.stop();
+    gate.stop(soon(this.ctx));
     gate.disconnect();
   }
 
