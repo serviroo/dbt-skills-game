@@ -179,10 +179,11 @@ export class Timeline {
       else this.named.delete(id);
     }
     const batch = ++this.batches;
-    for (const { at, plan, waiting } of pendingEvents(events, t0, this.engine, existing, this.waiting, this.named)) {
-      if (waiting?.kind === 'reset') this.cuts.push({ gen: ++this.gen, at });
-      const item = waiting ?? { kind: 'other', entry: { controls: [], end: at } };
-      this.queued.push({ at, batch, gen: this.gen, item, run: () => run(plan) });
+    const waiting = this.queued.map((q) => q.item);
+    for (const { at, plan, waiting: item } of pendingEvents(events, t0, this.engine, existing, waiting, this.named)) {
+      if (item?.kind === 'reset') this.cuts.push({ gen: ++this.gen, at });
+      this.queued.push({ at, batch, gen: this.gen, item: item ?? { kind: 'other', entry: { controls: [], end: at } },
+        run: () => run(plan) });
     }
     this.queued.sort((a, b) => a.at - b.at || a.batch - b.batch);
     this.until(until);
@@ -212,10 +213,6 @@ export class Timeline {
     } finally {
       this.running = was;
     }
-  }
-
-  get waiting() {
-    return this.queued.map((q) => q.item);
   }
 
   sound(id: string) {
