@@ -4,6 +4,25 @@ export async function installAudioRecorder(ctx) {
   await ctx.addInitScript(() => {
     const warn = console.warn;
     window.__dropped = [];
+    window.__gateLog = new WeakMap();
+    window.__gateMade = new WeakMap();
+    for (const m of ['stop', 'disconnect']) {
+      const orig = ConstantSourceNode.prototype[m];
+      ConstantSourceNode.prototype[m] = function (...args) {
+        const list = window.__gateLog.get(this) ?? [];
+        list.push(`${m}(${args.map(String).join(',')}) at ${this.context.currentTime.toFixed(3)}: `
+          + (new Error().stack ?? '').split('\n').slice(2, 9).map((l) => l.trim().replace(/https?:\/\/[^/]+/g, '')).join(' < '));
+        window.__gateLog.set(this, list.slice(-6));
+        return orig.apply(this, args);
+      };
+    }
+    const make = BaseAudioContext.prototype.createConstantSource;
+    BaseAudioContext.prototype.createConstantSource = function (...args) {
+      const node = make.apply(this, args);
+      window.__gateMade.set(node, `${this.currentTime.toFixed(3)}: ` + (new Error().stack ?? '').split('\n').slice(2, 7)
+        .map((l) => l.trim().replace(/https?:\/\/[^/]+/g, '')).join(' < '));
+      return node;
+    };
     console.warn = (...args) => {
       if (String(args[0]).startsWith('[audio]')) window.__dropped.push(args.map(String).join(' ').slice(0, 300));
       return warn.apply(console, args);
@@ -243,7 +262,9 @@ export const audioState = (page) => page.evaluate(() => {
     .map(([k, v]) => [k, +v.gain.value.toPrecision(3)]));
   const live = e.music.live.map((s) => ({ name: s.name, start: +(s.start - now).toFixed(2), end: s.end,
     opened: s.voice.opened, openedAt: +(s.voice.openedAt - now).toFixed(2), silentAt: s.voice.silentAt,
-    gate: s.voice.gate?.offset.value, out: s.voice.out.gain.value, held: s.voice.isHeld, until: +(s.until - now).toFixed(2) }));
+    gate: s.voice.gate?.offset.value, out: s.voice.out.gain.value, held: s.voice.isHeld, until: +(s.until - now).toFixed(2),
+    gateMade: window.__gateMade.get(s.voice.gate), gateLog: window.__gateLog.get(s.voice.gate),
+    doors: s.voice.doors?.length, joined: s.voice.joined?.length, users: undefined }));
   const taps = window.__taps.map((t) => ({ unrendered: t.unrendered.size, end: t.end, error: t.error, state: t.context.state }));
   return JSON.stringify({ now, state: e.ctx.state, quiet: e.isQuiet, held: e.busLevels?.stoppedUntil - now,
     stoppedUntil: e.stoppedUntil - now, current: e.music.current, buses, live, taps, beds: [...e.beds.keys()],
