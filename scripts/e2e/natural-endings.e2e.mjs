@@ -66,6 +66,7 @@ export const scenarios = {
       }
       out['score awaken through its hit and stand'] = await worst((eng, len) => {
         eng.music.to('awaken', 0.5, { at: 0.02, hitAt: 0.02 + hit });
+        eng.play('awaken_hit', { at: 0.02 + hit });
         eng.music.scheduleUntil(len);
       }, hitSec);
       return out;

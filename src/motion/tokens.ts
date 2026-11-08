@@ -121,6 +121,7 @@ export const SCORE = {
   inSec: 3,
   /** sound asked for now lands this long after, on the audio clock: visuals lead their sound by up to 2 frames */
   leadSec: 2 / FPS,
+  lateSec: 0.25,
   /** Safe Zone in: a click-free ramp to exact silence, shorter than one 60 Hz frame */
   safeOutSec: 0.015,
   /** Safe Zone out: the score fades back in */
