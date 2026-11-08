@@ -3,10 +3,8 @@ import { holdAt } from './param';
 
 type LevelEvent = Pick<ReturnType<Curve['scheduledFrom']>[number], 'kind' | 'value' | 'time' | 'tau'>;
 
-const FLOAT32_SLACK = 2 ** -20;
-
 function rising(value: number, from: number) {
-  return value - from > Math.max(Math.abs(value), Math.abs(from)) * FLOAT32_SLACK;
+  return value - from > Math.max(Math.abs(value), Math.abs(from)) * 1e-9;
 }
 
 function mergeAnchors(events: LevelEvent[]) {
