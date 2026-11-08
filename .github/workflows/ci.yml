@@ -16,6 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        head: [base, fix]
         part: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     steps:
       - uses: actions/checkout@v7
@@ -26,11 +27,14 @@ jobs:
           node-version: 20.x
           cache: npm
       - run: npm ci
+      - name: Use the base gate
+        if: matrix.head == 'base'
+        run: sed -i 's/      gate.offset.setValueAtTime(0, 0);/      gate.offset.value = 0;/' src/audio/voice.ts && grep -n "gate.offset" src/audio/voice.ts
       - name: Repeat the two Safe Zone sound checks
         run: |
           fails=0
-          for i in $(seq 1 12); do
-            if [ "${{ matrix.part }}" -gt 3 ]; then
+          for i in $(seq 1 6); do
+            if true; then
               node scripts/e2e.mjs --software --file=me-92-safe-zone-clean --scenario=safe-zone-silences-score-and-reverb > run.log 2>&1 || { fails=$((fails + 1)); echo "home run $i failed"; }
             fi
             grep -E "^(ok|FAIL)|output:" run.log | cut -c1-6000
@@ -42,7 +46,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: repeat-${{ matrix.part }}
+          name: repeat-${{ matrix.head }}-${{ matrix.part }}
           path: artifacts/e2e
           retention-days: 3
           if-no-files-found: ignore
