@@ -1897,13 +1897,16 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     pageMade();
     await loadCards();
     // search can open the notes; the Page tab then goes to the first chapter
-    const landed = await load(notesOf(visit, r.ch, s) ? notesId : pageId, n);
-    await refreshStory();
-    syncState();
-    syncModes();
-    kb();
-    // only on the chapter the result opened, as it opened: a Page or Notes tap, or typing, while it opened wins
-    if (alive && found && landed && n === picks && !typed) markFound(found);
+    const landing = load(notesOf(visit, r.ch, s) ? notesId : pageId, n);
+    await Promise.race([pageLoaded, landing]);
+    await Promise.all([refreshStory(), showPic()]);
+    void landing.then((landed) => {
+      syncState();
+      syncModes();
+      kb();
+      // only on the chapter the result opened, as it opened: a Page or Notes tap, or typing, while it opened wins
+      if (alive && found && landed && n === picks && !typed) markFound(found);
+    });
   };
   /** Marks every place the search words are on this page and brings the one they picked into view. */
   const markFound = (f: { q: string; at: number }) => {
@@ -1929,7 +1932,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   };
   renderCards(false);
   syncModes();
-  void init();
 
   return {
     el,
@@ -1937,6 +1939,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     mode: 'sub',
     bubbles: [0.9, 0.45],
     foot: dock,
+    ready: init(),
     keep: () => writeKept(visit, () => ({ opened: shown > 0, tab, open: cur, pageId })),
     leave: () => {
       commit();
@@ -2018,21 +2021,17 @@ export function readScreen(app: App, route: Route): ScreenOut {
     unkeep = () => (keep.disconnect(), box.removeEventListener('scroll', theirs));
   };
 
-  let titled!: () => void;
-  const ready = new Promise<void>((done) => (titled = done));
   const init = async () => {
     const s = await ss.story(r.id);
     if (!alive) return;
     if (!s || s.removed) {
       wholeText(title, STORY.title);
-      titled();
       tools.remove();
       body.replaceChildren(h('p', { class: 'st-read-empty', text: STORY_READ.gone }));
       return;
     }
     wholeText(title, shownTitle(s.title));
     sub.textContent = storyMeta(app, s);
-    titled();
     // what this copy holds but couldn't store yet reads as it is in the editor
     const chs = await Promise.all(s.chapters.map(async (id) => ss.unsaved(id) ?? (await ss.chapter(id))));
     if (!alive) return;
@@ -2068,15 +2067,14 @@ export function readScreen(app: App, route: Route): ScreenOut {
     for (const [k, x] of shown.entries()) if (x.i <= from) at = k;
     if (at >= 0 && shown[at].i > 0) openAt(shown[at].sec);
   };
-  void init().finally(titled);
 
   return {
     el,
     title: STORY.title,
     mode: 'sub',
     bubbles: [0.9, 0.45],
-    // focus lands on the heading once it holds the story's title
-    ready,
+    // focus lands on the heading once it holds the story, its words and the place it opens at
+    ready: init(),
     leave: () => {
       alive = false;
       unkeep();

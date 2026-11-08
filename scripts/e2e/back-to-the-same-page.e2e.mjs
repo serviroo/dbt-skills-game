@@ -103,14 +103,108 @@ const pageReads = (h, page, want, where) =>
     (v) => `${where} the page reads ${JSON.stringify(v)}, not ${JSON.stringify(want)}`,
     { timeout: 5000 },
   );
-const holds = (h, page, name, where) =>
-  h.poll(
+const isIn = (sel) => {
+  const el = document.querySelector(sel);
+  return !!el && !el.inert && getComputedStyle(el).visibility !== 'hidden';
+};
+const comesIn = (h, page, sel, where) =>
+  page.waitForFunction(isIn, sel, { timeout: 5000 }).then(
+    () => {},
+    () => h.expect(false, `${where}: the page never came in`),
+  );
+async function holds(h, page, name, where) {
+  await h.poll(
     page,
     () => page.locator('.st-ta').getAttribute('aria-label'),
     (l) => l === name,
     (l) => `${where} opened ${l}, not ${name}`,
     { timeout: 5000 },
   );
+  await comesIn(h, page, '.st-write', where);
+}
+const slowStorage = (page, store, kinds, ms) =>
+  page.evaluate(
+    async ([store, kinds, ms]) => {
+      const key = window.__daily.store.key;
+      const s =
+        store === 'story'
+          ? (await import('/src/daily/storystore.ts')).storyStore(key)
+          : (await import('/src/daily/artstore.ts')).artStore(key);
+      for (const k of kinds) {
+        const real = s[k];
+        s[k] = function (...a) {
+          return new Promise((go) => setTimeout(go, ms)).then(() => real.apply(this, a));
+        };
+      }
+    },
+    [store, kinds, ms],
+  );
+const STILL_EDGES = {
+  '.st-title': ['top', 'height'],
+  '.st-bar': ['top', 'height'],
+  '.st-seg': ['top', 'left'],
+  '.st-frame': ['top'],
+};
+async function watchFrames(page) {
+  await page.evaluate((edges) => {
+    const f = (window.__frames = { want: null, seen: 0, bad: [] });
+    const shows = (el) => {
+      if (!el?.isConnected || getComputedStyle(el).visibility === 'hidden') return false;
+      for (let n = el; n; n = n.parentElement) if (Number(getComputedStyle(n).opacity) === 0) return false;
+      return true;
+    };
+    const layoutOf = (write, still) => {
+      const at = write.getBoundingClientRect();
+      const box = (sel) => {
+        const r = write.querySelector(sel).getBoundingClientRect();
+        const from = { top: at.top, left: at.left, height: 0 };
+        return edges[sel].map((k) => Math.round(r[k] - from[k])).join(',');
+      };
+      return still.map(box).join(' ');
+    };
+    const writer = (w) => {
+      const write = document.querySelector('.st-write');
+      const title = write.querySelector('.st-title');
+      const ta = write.querySelector('.st-ta');
+      const label = write.querySelector('.st-chbtn-t');
+      const side = write.querySelector('.st-seg [aria-checked="true"]')?.textContent;
+      const layout = layoutOf(write, w.still);
+      const moved = f.page === write && layout !== f.layout;
+      f.page = write;
+      f.layout = layout;
+      return [
+        title.value !== w.title && `the title "${title.value || title.placeholder}"`,
+        shows(title) && !shows(ta) && 'the title over no page',
+        shows(ta) && !w.texts.includes(ta.value) && `the page "${ta.value || ta.placeholder}"`,
+        !w.sides.includes(side) && `the ${side} tab`,
+        shows(label) && !label.textContent && 'no chapter name',
+        moved && `${w.still.join(', ')} moving as it came in`,
+      ].filter(Boolean);
+    };
+    const tick = () => {
+      const w = f.want;
+      const at = window.__daily?.route.name;
+      let wrong = [];
+      if (w?.screen === 'write' && at === 'write' && shows(document.querySelector('.st-write'))) wrong = writer(w);
+      else if (w?.screen === 'draw' && at === 'draw' && shows(document.querySelector('.dq-draw'))) {
+        const n = window.__daily.ink?.strokes.length;
+        if (n !== w.strokes) wrong = [`${n} strokes`];
+      } else wrong = null;
+      if (wrong) f.seen++;
+      if (wrong?.length) f.bad.push(wrong.join(', '));
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }, STILL_EDGES);
+}
+async function framesShow(h, page, want, where, step) {
+  await page.evaluate((w) => Object.assign(window.__frames, { want: w, seen: 0, bad: [], page: null }), want);
+  await step();
+  await h.frames(page, 3);
+  const f = await page.evaluate(() => ({ seen: window.__frames.seen, bad: [...new Set(window.__frames.bad)] }));
+  h.expect(f.seen > 0, `${where}: no frame of the page was seen`);
+  h.expect(!f.bad.length, `${where}: a frame showed ${f.bad.join('; ')}`);
+}
 const writeStory = (page, r) => page.evaluate((r) => window.__daily.go(r), { name: 'write', ...r });
 const storyTexts = (page, id) =>
   page.evaluate(async (id) => {
@@ -436,6 +530,124 @@ export const scenarios = {
       await page.goBack();
       await routeIs(page, 'write');
       await pageReads(h, page, 'My newest notes.', 'back from the Safe Zone');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'writer-never-shows-empty'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute', { width: 320, height: 568 });
+    try {
+      await h.reachHub(page);
+      const [one, two, notes] = ['The lantern woke.', 'The river ran bright.', 'Mira keeps the map.'];
+      const LONG = 'Where the river ran bright under the old stone bridge';
+      await page.evaluate(
+        async ([one, two, notes, LONG]) => {
+          const { storyStore } = await import('/src/daily/storystore.ts');
+          const ss = storyStore(window.__daily.store.key);
+          const { story, first } = await ss.create('The Long Night');
+          await ss.saveChapter({ ...first, text: one }, [first.rev]);
+          const next = await ss.addChapter(story.id);
+          await ss.saveChapter({ ...next, title: LONG, text: two }, [next.rev]);
+          const n = await ss.chapter(story.notes);
+          await ss.saveChapter({ ...n, text: notes }, [n.rev]);
+        },
+        [one, two, notes, LONG],
+      );
+      const ROW = ['.st-title', '.st-bar', '.st-seg'];
+      const want = (texts, sides = ['Page'], still = [...ROW, '.st-frame']) => ({
+        screen: 'write',
+        title: 'The Long Night',
+        texts,
+        sides,
+        still,
+      });
+      const lantern = async () => {
+        await page.locator('.dq-top .dq-back').click();
+        await routeIs(page, 'stories');
+      };
+      await watchFrames(page);
+      await page.evaluate(() => window.__daily.go({ name: 'stories' }));
+      await routeIs(page, 'stories');
+      await slowStorage(page, 'story', ['story', 'chapter', 'cards'], 250);
+
+      await framesShow(h, page, want([one]), 'the Story Room list', async () => {
+        await page.locator('.st-row', { hasText: 'The Long Night' }).click();
+        await holds(h, page, 'Page, Chapter 1', 'the Story Room list');
+      });
+      await framesShow(h, page, want([one, two], ['Page'], []), 'the chapter list', async () => {
+        await page.locator('.st-chbtn').click();
+        await page.locator('.st-sheet .st-chrow-b').filter({ hasText: LONG }).click();
+        await holds(h, page, `Page, ${LONG}`, 'the chapter list');
+      });
+      await framesShow(h, page, want([two]), 'Back to writing', async () => {
+        await page.getByRole('button', { name: 'More', exact: true }).click();
+        await page.getByRole('menuitem', { name: 'Read', exact: true }).click();
+        await routeIs(page, 'read');
+        await page.getByRole('button', { name: 'Back to writing' }).click();
+        await routeIs(page, 'write');
+        await holds(h, page, `Page, ${LONG}`, 'Back to writing');
+      });
+      await page.getByRole('radio', { name: 'Show: Notes' }).click();
+      await holds(h, page, 'Notes for this story', 'the Notes tab');
+      await framesShow(h, page, want([notes], ['Notes']), 'the notes back from the Safe Zone', async () => {
+        await safeAndBack(page, 'write');
+        await holds(h, page, 'Notes for this story', 'the notes back from the Safe Zone');
+      });
+      await lantern();
+      await framesShow(h, page, want([notes], ['Notes']), 'Forward', async () => {
+        await page.goForward();
+        await routeIs(page, 'write');
+        await holds(h, page, 'Notes for this story', 'Forward');
+      });
+      await lantern();
+      await framesShow(h, page, want([two], ['Page'], ROW), 'a search result', async () => {
+        await page.getByRole('searchbox', { name: 'Search your stories and notes' }).fill('river');
+        await page.locator('.st-found-row', { hasText: LONG }).click();
+        await routeIs(page, 'write');
+        await holds(h, page, `Page, ${LONG}`, 'a search result');
+      });
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'drawing-never-shows-empty'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute', { width: 320, height: 568 });
+    try {
+      await drawPage(h, page);
+      await line(page, [0.2, 0.3], [0.7, 0.4]);
+      await save(page);
+      const artRoom = async () => {
+        await page.locator('.dq-top .dq-back').click();
+        await routeIs(page, 'art');
+      };
+      const opened = async (where) => {
+        await routeIs(page, 'draw');
+        await drawReady(page);
+        await shows(h, page, 1, where);
+      };
+      await watchFrames(page);
+      await slowStorage(page, 'art', ['get', 'getDraft', 'drafts'], 250);
+      const want = { screen: 'draw', strokes: 1 };
+
+      await framesShow(h, page, want, 'back from the Safe Zone', async () => {
+        await safeAndBack(page, 'draw');
+        await opened('back from the Safe Zone');
+      });
+      await artRoom();
+      await framesShow(h, page, want, 'Forward', async () => {
+        await page.goForward();
+        await opened('Forward');
+      });
+      await artRoom();
+      await framesShow(h, page, want, 'Keep drawing', async () => {
+        await page.locator('[data-piece]').first().click();
+        await page.getByRole('button', { name: 'Keep drawing', exact: true }).click();
+        await opened('Keep drawing');
+      });
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();
