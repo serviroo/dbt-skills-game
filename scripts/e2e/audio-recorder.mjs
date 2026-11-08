@@ -2,6 +2,12 @@
 
 export async function installAudioRecorder(ctx) {
   await ctx.addInitScript(() => {
+    const warn = console.warn;
+    window.__dropped = [];
+    console.warn = (...args) => {
+      if (String(args[0]).startsWith('[audio]')) window.__dropped.push(args.map(String).join(' ').slice(0, 300));
+      return warn.apply(console, args);
+    };
     const WORKLET = 'scripts/e2e/audio-recorder-worklet.mjs';
     const connect = AudioNode.prototype.connect;
     const close = AudioContext.prototype.close;
@@ -228,3 +234,18 @@ export function scoreSounding(page, sec) {
     return clock?.state === 'running' && window.__starts.some((t) => t <= clock.currentTime - sec);
   }, sec, { timeout: 60000 });
 }
+
+export const audioState = (page) => page.evaluate(() => {
+  const e = window.__dbtVolume?.engine;
+  if (!e) return 'no engine';
+  const now = e.ctx.currentTime;
+  const buses = Object.fromEntries(Object.entries(e).filter(([, v]) => v instanceof GainNode)
+    .map(([k, v]) => [k, +v.gain.value.toPrecision(3)]));
+  const live = e.music.live.map((s) => ({ name: s.name, start: +(s.start - now).toFixed(2), end: s.end,
+    opened: s.voice.opened, openedAt: +(s.voice.openedAt - now).toFixed(2), silentAt: s.voice.silentAt,
+    gate: s.voice.gate?.offset.value, out: s.voice.out.gain.value, held: s.voice.isHeld, until: +(s.until - now).toFixed(2) }));
+  const taps = window.__taps.map((t) => ({ unrendered: t.unrendered.size, end: t.end, error: t.error, state: t.context.state }));
+  return JSON.stringify({ now, state: e.ctx.state, quiet: e.isQuiet, held: e.busLevels?.stoppedUntil - now,
+    stoppedUntil: e.stoppedUntil - now, current: e.music.current, buses, live, taps, beds: [...e.beds.keys()],
+    active: e.active.size, fading: e.fading.size, closing: e.closing.size, dropped: window.__dropped });
+});
