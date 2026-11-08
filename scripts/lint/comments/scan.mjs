@@ -9,6 +9,7 @@ const BY_EXTENSION = new Map([
   ['css', 'css'],
   ['html', 'html'],
   ['py', 'py'],
+  ['json', 'json'],
 ]);
 
 export function languageOf(file) {
@@ -64,6 +65,7 @@ export function scanner(scratch) {
 
   function scanOne({ lang, text }) {
     if (lang === 'gitignore') return { pieces: wholeLinePieces(text, /^[ \t]*#/), error: null };
+    if (lang === 'json') return { pieces: clikePieces(text), error: null };
     if (lang === 'html') return { pieces: htmlPieces(text, embed), error: null };
     if (lang === 'py') return pythonPieces(text, scratch);
     try {

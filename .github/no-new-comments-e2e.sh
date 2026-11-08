@@ -536,4 +536,46 @@ commit "feat: caret hints"
 git commit -q --amend -m "feat: caret hints" -m "Co-authored-by: Devin Park <devin@example.com>"
 expect pass "binary files, everyday phrases, a co-author named Devin and numbered names pass"
 
+case_branch markup-more
+put tool/p.py <<'EOF'
+def f():
+    ("""Return one.""")
+    return 1
+EOF
+put web/inner.css <<'EOF'
+.a { margin: 0 /* top */ 1px; }
+.b /* sel */ {}
+@media /* mq */ (min-width: 1px) {}
+EOF
+put tsconfig.json <<'EOF'
+{
+  // strict because the cart is
+  "strict": true
+}
+EOF
+put src/labs.ts <<'EOF'
+const CSS = `
+  .al { color: red; } /* why */
+`;
+export { CSS };
+EOF
+commit "feat: more markup"
+expect "tool/p.py:2: adds a docstring" "a docstring in parentheses fails"
+expect "web/inner.css:1: adds a comment" "a CSS comment inside a value fails"
+expect "web/inner.css:2: adds a comment" "a CSS comment inside a selector fails"
+expect "web/inner.css:3: adds a comment" "a CSS comment inside an at-rule fails"
+expect "tsconfig.json:2: adds a comment" "a comment in a JSON config fails"
+expect "src/labs.ts:2: adds a comment" "a trailing comment in a CSS string fails"
+
+case_branch markup-text
+put web/note.html <<'EOF'
+<textarea><!-- displayed text --></textarea>
+<title><!-- shown as is --></title>
+EOF
+put web/ok.css <<'EOF'
+.a { content: " /* s */ "; background: url(a//b.png); }
+EOF
+commit "feat: markup text"
+expect pass "text inside a textarea and CSS strings pass"
+
 [[ $failed -eq 0 ]] && echo "All cases behaved." || exit 1

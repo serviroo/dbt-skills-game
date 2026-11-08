@@ -25,7 +25,8 @@ function readTokens(text, scratch) {
   const file = path.join(fs.mkdtempSync(path.join(scratch, 'py-')), 'a.py');
   fs.writeFileSync(file, text);
   const run = spawnSync('python3', ['-I', '-m', 'tokenize', '-e', file], { encoding: 'utf8', maxBuffer: 1 << 28 });
-  if (run.error || run.status !== 0) return { error: (run.stderr || String(run.error)).trim().split('\n').at(-1) };
+  const why = (run.stderr || String(run.error)).trim().split('\n').at(-1).replaceAll(`${file}:`, 'line ');
+  if (run.error || run.status !== 0) return { error: why };
   const lines = text.split('\n');
   const tokens = [];
   for (const row of run.stdout.split('\n')) {
@@ -63,6 +64,28 @@ function stringRunEnd(tokens, i) {
   return at;
 }
 
+const skipNoise = (tokens, from) => {
+  let at = from;
+  while (tokens[at]?.type === 'NL' || tokens[at]?.type === 'COMMENT') at++;
+  return at;
+};
+
+function docstringAt(tokens, i) {
+  let at = i;
+  let opens = 0;
+  for (; tokens[at]?.text === '('; opens++) at = skipNoise(tokens, at + 1);
+  if (!tokens[at] || !opensString(tokens[at])) return null;
+  const end = stringRunEnd(tokens, at);
+  let next = skipNoise(tokens, end);
+  for (; opens > 0; opens--) {
+    if (tokens[next]?.text !== ')') return null;
+    next = skipNoise(tokens, next + 1);
+  }
+  const after = tokens[next];
+  const ends = !after || /^(NEWLINE|ENDMARKER)$/.test(after.type) || after.text === ';';
+  return ends ? { first: at, last: end - 1, next } : null;
+}
+
 export function pythonPieces(text, scratch) {
   const { tokens, lines, error } = readTokens(text, scratch);
   if (error) return { pieces: [], error };
@@ -78,15 +101,10 @@ export function pythonPieces(text, scratch) {
       [atStart, first, depth] = [true, null, 0];
       continue;
     }
-    if (atStart && opensString(token)) {
-      const end = stringRunEnd(tokens, i);
-      let next = end;
-      while (tokens[next]?.type === 'COMMENT' || tokens[next]?.type === 'NL') next++;
-      const after = tokens[next];
-      if (!after || /^(NEWLINE|ENDMARKER)$/.test(after.type) || after.text === ';') {
-        pieces.push(...rangeText(lines, token, tokens[end - 1], 'd'));
-      }
-      [atStart, i] = [false, end - 1];
+    const docstring = atStart ? docstringAt(tokens, i) : null;
+    if (docstring) {
+      pieces.push(...rangeText(lines, tokens[docstring.first], tokens[docstring.last], 'd'));
+      [atStart, i] = [false, docstring.next - 1];
       continue;
     }
     if (atStart) first = token.text;

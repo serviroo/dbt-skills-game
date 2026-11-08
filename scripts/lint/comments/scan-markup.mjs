@@ -2,14 +2,19 @@ import { createRequire } from 'node:module';
 import { lineOf, lineStarts, rangePieces } from './pieces.mjs';
 
 const require = createRequire(import.meta.url);
-const postcss = createRequire(require.resolve('stylelint/package.json'))('postcss');
+const viaStylelint = createRequire(require.resolve('stylelint/package.json'));
+const tokenize = viaStylelint('postcss/lib/tokenize');
+const Input = viaStylelint('postcss/lib/input');
+const RAW_TEXT = new Set(['textarea', 'title', 'xmp', 'iframe', 'noembed', 'noframes']);
 
 export function cssPieces(text) {
   const starts = lineStarts(text);
+  const tokens = tokenize(new Input(text));
   const pieces = [];
-  postcss.parse(text).walkComments((c) => {
-    pieces.push(...rangePieces(text, starts, c.source.start.offset, c.source.end.offset));
-  });
+  while (!tokens.endOfFile()) {
+    const [type, , start, end] = tokens.nextToken();
+    if (type === 'comment') pieces.push(...rangePieces(text, starts, start, end + 1));
+  }
   return pieces;
 }
 
@@ -43,9 +48,13 @@ export function htmlPieces(text, embed) {
     const end = tagEnd(text, at + tag[0].length);
     const type = /\stype\s*=\s*["']?([^"'\s>]+)/.exec(lower.slice(at, end))?.[1];
     at = end + 1;
-    if (tag[1] !== 'script' && tag[1] !== 'style') continue;
+    if (!RAW_TEXT.has(tag[1]) && tag[1] !== 'script' && tag[1] !== 'style') continue;
     const close = lower.indexOf(`</${tag[1]}`, at);
     const stop = close < 0 ? text.length : close;
+    if (RAW_TEXT.has(tag[1])) {
+      at = stop;
+      continue;
+    }
     const runs = !type || /^(module|text\/javascript|application\/javascript)$/.test(type);
     const lang = tag[1] === 'style' ? 'css' : 'js';
     if (lang === 'css' || runs) pieces.push(...embed(lang, text.slice(at, stop), lineOf(starts, at)));
