@@ -3,9 +3,12 @@ import { connectionLost } from './store';
 
 export class IdbLink {
   persistent = true;
+  /** IndexedDB is here but couldn't be opened, so what was stored earlier can't be read this visit. */
   unreadable = false;
+  /** Reads of what is stored that got no answer; exportAll compares it before and after. */
   readFails = 0;
   db: Promise<IDBDatabase | null>;
+  /** Writes under way, so a clear's check waits for them. */
   readonly writes = new Set<Promise<unknown>>();
   private lost = new WeakSet<IDBDatabase>();
 
@@ -23,8 +26,14 @@ export class IdbLink {
     void db.then((d) => d?.close());
   }
 
+  /**
+   * Runs fn in one transaction; null when there is no database or the transaction failed (then persistent turns false).
+   * A lost connection is opened again once: a read runs again on the fresh one, and so does a write that never started.
+   * A read that still gets no answer counts in readFails.
+   */
   async tx<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>) {
     if (mode === 'readonly') return this.run(stores, mode, fn);
+    // a clear checking its Save Crystal holds writes; once it clears they never happen
     if (!canWrite() && !(await mayWrite())) return null;
     const job = this.run(stores, mode, fn);
     this.writes.add(job);
@@ -37,10 +46,12 @@ export class IdbLink {
     this.unreadable = true;
   }
 
+  /** Opens the database; a lost connection on open gets one more try (`again`). Null when there is none to use. */
   private connect(again: boolean): Promise<IDBDatabase | null> {
     return new Promise((resolve) => {
       try {
         if (typeof indexedDB === 'undefined') throw new Error('no idb');
+        // this game's data is being cleared: opening would make the database again
         if (cleared()) return resolve(null);
         const open = indexedDB.open(this.name, this.version);
         open.onupgradeneeded = () => this.upgrade(open.result);
@@ -48,6 +59,7 @@ export class IdbLink {
           const db = open.result;
           db.onversionchange = (e) => {
             db.close();
+            // deleted: another copy cleared this game's data
             if (e.newVersion === null) goneElsewhere();
           };
           resolve(db);
@@ -66,6 +78,7 @@ export class IdbLink {
     });
   }
 
+  /** One fresh connection in place of a lost one (callers that saw the same loss share it). True when there is one. */
   private async reconnect(old: IDBDatabase) {
     if (cleared()) return false;
     if (!this.lost.has(old)) {
@@ -95,17 +108,7 @@ export class IdbLink {
           t.onabort = () => bad(t.error ?? new Error('aborted'));
         });
         done.catch(() => undefined);
-        let v: T;
-        try {
-          v = await fn(t);
-        } catch (e) {
-          try {
-            t.abort();
-          } catch {
-            /* already finished */
-          }
-          throw e;
-        }
+        const v = await fn(t);
         await done;
         return { v };
       } catch (e) {

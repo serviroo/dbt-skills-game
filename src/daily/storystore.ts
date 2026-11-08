@@ -207,7 +207,18 @@ export class StoryStore {
     this.link.readFails = n;
   }
   private tx<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>) {
-    return this.link.tx(stores, mode, fn);
+    return this.link.tx(stores, mode, async (t) => {
+      try {
+        return await fn(t);
+      } catch (e) {
+        try {
+          t.abort();
+        } catch {
+          /* already finished */
+        }
+        throw e;
+      }
+    });
   }
   private mem = { stories: new Map<string, Story>(), chapters: new Map<string, Chapter>(), cards: new Map<string, Card[]>(), days: new Set<string>() };
   private cardImports = new Set<string>();
