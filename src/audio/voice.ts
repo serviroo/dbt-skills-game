@@ -166,6 +166,7 @@ export class Voice {
   private doors: { to: AudioNode; input: number; g: GainNode }[] = [];
   private gate: ConstantSourceNode | null = null;
   private joined: Voice[] = [this];
+  private disconnected = false;
   private riders: Voice[] = [];
   private openedAt = 0;
   private opened = false;
@@ -763,6 +764,18 @@ export class Voice {
     const last = Math.max(...this.joined.map((v) => v.killAt));
     if (Number.isFinite(last)) this.gate?.stop(Math.max(last, soon(this.ctx)));
     return true;
+  }
+
+  disconnect() {
+    for (const w of [this, ...this.parts]) {
+      for (const d of w.doors.splice(0)) d.g.disconnect();
+      w.disconnected = true;
+    }
+    this.out.disconnect();
+    if (this.joined.every((v) => v.disconnected)) {
+      this.gate?.stop();
+      this.gate?.disconnect();
+    }
   }
 
   discard() {
