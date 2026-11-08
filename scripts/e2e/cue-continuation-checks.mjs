@@ -210,21 +210,76 @@ export async function lateSectionKeepsItsWindow(h, { ctx, page, errors }) {
       window.__watch = true;
       window.__stall = { after: 'start', by: SCORE.leadSec + 0.01 };
       try {
-        e.music.to('calm', 0.3, { at: e.ctx.currentTime - 1 });
+        e.music.to('calm', 0.3, { at: e.ctx.currentTime - SCORE.lateSec - 0.05 });
       } finally {
         window.__watch = false;
         window.__stall = null;
       }
       const s = e.music.live.at(-1);
-      return { ahead: AHEAD, window: s.until - s.start, dropped: s.voice.isDropped,
-        opened: s.voice.opened, late: s.voice.openedAt > s.start, stalls: window.__stalls.length - stalls };
+      return { ahead: AHEAD, window: s.until - s.start, dropped: s.voice.isDropped, opened: s.voice.opened,
+        late: s.voice.openedAt > s.start, inside: s.voice.openedAt < s.start + AHEAD,
+        stalls: window.__stalls.length - stalls };
     });
-    h.expect(r.opened && !r.dropped && r.late && r.stalls > 0,
-      `the section never opened late in continuing mode: ${JSON.stringify(r)}`);
+    h.expect(r.opened && !r.dropped && r.late && r.inside && r.stalls > 0,
+      `the section never opened late inside its first window in continuing mode: ${JSON.stringify(r)}`);
     h.expect(Math.abs(r.window - r.ahead) < 1e-9,
       `a late section skipped the end of its first window: ${JSON.stringify(r)}`);
     h.expect(!errors.length, errors.join('\n'));
     return r;
+  } finally {
+    await ctx.close();
+  }
+}
+
+export async function lateSectionWaitsForItsOpening(h, { ctx, page, errors }) {
+  try {
+    await captureEngine(page);
+    const r = await page.evaluate(async () => {
+      const { AHEAD } = await import('/src/audio/music.ts');
+      const { Voice } = await import('/src/audio/voice.ts');
+      const e = window.__engine;
+      const c = e.ctx;
+      const asked = c.currentTime - 1;
+      const discard = Voice.prototype.discardBefore;
+      const place = Voice.prototype.place;
+      const placed = [];
+      let passes = 0;
+      Voice.prototype.discardBefore = function (at) {
+        if (at < this.t + 2 * AHEAD && c.currentTime <= at) {
+          passes++;
+          while (c.currentTime <= at);
+        }
+        return discard.call(this, at);
+      };
+      try {
+        e.music.to('windows', 0.3, { at: asked });
+      } finally {
+        Voice.prototype.discardBefore = discard;
+      }
+      const s = e.music.live.at(-1);
+      Voice.prototype.place = function (source, t0, offset) {
+        placed.push({ clock: this.clock, t0 });
+        return place.call(this, source, t0, offset);
+      };
+      try {
+        e.music.scheduleUntil(c.currentTime + AHEAD);
+        e.music.scheduleUntil(s.voice.openedAt + AHEAD);
+      } finally {
+        Voice.prototype.place = place;
+      }
+      const own = placed.filter((p) => p.clock === s.voice).map((p) => p.t0);
+      const openedAt = s.voice.openedAt;
+      return { ahead: AHEAD, passes, dropped: s.voice.isDropped, opened: s.voice.opened, opensAfter: openedAt - s.start,
+        before: own.filter((t) => t < openedAt).map((t) => +(openedAt - t).toFixed(4)),
+        after: own.filter((t) => t >= openedAt).length };
+    });
+    h.expect(r.opened && !r.dropped && r.passes > 0 && r.opensAfter > r.ahead,
+      `the section never opened past its first window: ${JSON.stringify(r)}`);
+    h.expect(r.after > 0, `the section placed nothing after its opening: ${JSON.stringify(r)}`);
+    h.expect(!r.before.length,
+      `${r.before.length} notes were placed before the section opened (seconds early): ${r.before.join(', ')}`);
+    h.expect(!errors.length, errors.join('\n'));
+    return { opensAfter: r.opensAfter, placed: r.after };
   } finally {
     await ctx.close();
   }
@@ -241,7 +296,15 @@ export async function expiredNoteStaysSilent(h) {
       const e = new AudioEngine(c);
       try {
         await c.resume();
-        await new Promise((done) => setTimeout(done, 1100));
+        const second = c.createConstantSource();
+        second.offset.value = 0;
+        second.connect(c.destination);
+        await new Promise((done) => {
+          second.onended = done;
+          second.start();
+          second.stop(1);
+        });
+        second.disconnect();
         const start = c.currentTime - 1;
         const voice = new Voice(e.lib, start, c.destination);
         const stop = AudioScheduledSourceNode.prototype.stop;

@@ -3,7 +3,8 @@ import {
   pendingStops, pendingHandleStops, explicitHitGate, slowCueStop, pendingLevels, riderStop, existingStops,
 } from './cue-pending-checks.mjs';
 import {
-  continuedSounds, missedAttacks, stoppedParts, slowCleanupOpens, lateSectionKeepsItsWindow, expiredNoteStaysSilent,
+  continuedSounds, missedAttacks, stoppedParts, slowCleanupOpens, lateSectionKeepsItsWindow,
+  lateSectionWaitsForItsOpening, expiredNoteStaysSilent,
 } from './cue-continuation-checks.mjs';
 // Every cue plays whole and on time, even on a busy page. A cue is built before its start is read, then placed a stated
 // lead past the audio clock (soon() in src/audio/param.ts), so neither a slow main thread building it nor the audio
@@ -315,6 +316,8 @@ export const scenarios = {
   'slow-cleanups-still-open-a-late-continuing-sound': slowCleanupOpens,
   'a-late-section-schedules-on-from-its-first-window': async (h) =>
     lateSectionKeepsItsWindow(h, await boot(h, { music: 1, sfx: 0 })),
+  'a-section-opened-past-its-first-window-places-nothing-before-it': async (h) =>
+    lateSectionWaitsForItsOpening(h, await boot(h, { music: 1, sfx: 0 })),
   'a-note-placed-after-its-end-stays-silent': expiredNoteStaysSilent,
   'cleanup-stalls-never-open-a-score-gate-behind-the-clock': async (h) =>
     missedAttacks(h, await boot(h, { music: 1, sfx: 1 }), true),
