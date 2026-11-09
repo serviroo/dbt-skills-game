@@ -68,14 +68,18 @@ const DIRECTIVES = [
   /^pragma: no cover$/,
   /^nosec( [a-z][0-9]+)*$/,
   /^-\*- coding: *[a-z0-9_-]+ *-\*-$/,
+  /^shellcheck (disable|enable|source|shell|external-sources)=[a-z0-9,./_-]+$/,
+  /^yaml-language-server: \$schema=\S+$/,
+  /^yamllint (disable|enable)(-line)?( rule:[a-z-]+)*$/,
 ];
 
 const GLOBALS = /^(globals?|exported) [a-z_$][a-z0-9_$]*(:[a-z]+)?( *, *[a-z_$][a-z0-9_$]*(:[a-z]+)?)*$/;
 
-export function directive(stripped, raw) {
+export function directive(stripped, raw, line) {
   const lower = stripped.toLowerCase();
   if (DIRECTIVES.some((pattern) => pattern.test(lower))) return true;
   if (/^[ \t]*\/\*/.test(raw) && GLOBALS.test(lower)) return true;
   if (/^[ \t]*\/\/ ?#(end)?region[ \t]*$/.test(raw)) return true;
+  if (/^v?[0-9]+(\.[0-9]+)*$/.test(lower) && /uses:[ \t]*[^ \t]+@[0-9a-f]+[ \t]+#/.test(line)) return true;
   return /^(glsl|wgsl|html|css|js)$/.test(lower) && /^[ \t]*\/\*/.test(raw);
 }

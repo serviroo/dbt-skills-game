@@ -610,4 +610,257 @@ EOF
 commit "feat: title text"
 expect pass "text after a lookalike closing tag stays title text"
 
+case_branch shell
+put tool/a.sh <<'EOF'
+#!/usr/bin/env bash
+x=1
+echo "$x" # print it
+tr a b <<< "hello"
+echo $((1<<2))
+cat <<'RUN' | bash
+# then the disk
+RUN
+# after the here-string
+ssh box sh <<'REMOTE'
+uptime
+# then the disk
+df -h
+REMOTE
+EOF
+put .github/workflows/a.yml <<'EOF'
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: |
+          echo hi
+          # say hi
+EOF
+commit "feat: add shell"
+expect "tool/a.sh:3: adds a comment" "a new shell comment fails"
+expect "tool/a.sh:12: adds a comment" "a comment in a script inside a heredoc fails"
+expect "tool/a.sh:7: adds a comment" "a heredoc piped into a shell is read as a script"
+expect "tool/a.sh:9: adds a comment" "a here-string or a shift doesn't hide later comments"
+expect ".github/workflows/a.yml:8: adds a comment" "a new comment in a workflow step fails"
+
+case_branch script-block
+put .github/workflows/script.yml <<'EOF'
+on: push
+jobs:
+  s:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            // ask the API
+            await github.rest.repos.get(context.repo);
+EOF
+commit "feat: add a script step"
+expect ".github/workflows/script.yml:9: adds a comment" "a comment in a workflow script block fails"
+
+case_branch shell-strings
+put tool/c.sh <<'EOF'
+#!/usr/bin/env bash
+x="$(echo a # inside the substitution
+)"
+node <<'JS'
+const y = 1; // explains y
+JS
+echo "$x"
+EOF
+commit "feat: code in shell strings"
+expect "tool/c.sh:2: adds a comment" "a comment in a quoted command substitution fails"
+expect "tool/c.sh:5: adds a comment" "a trailing comment in a script fed to node fails"
+
+case_branch allowed-shell
+put tool/b.sh <<'EOF'
+#!/usr/bin/env bash
+# shellcheck disable=SC2034
+n=${#BASH_ARGV[@]} c=$# s="a # b" u='# c'
+cat <<'TXT'
+#!/bin/sh
+a # b
+TXT
+cat >>"$GITHUB_STEP_SUMMARY" <<TXT
+# Results
+## Passed
+TXT
+EOF
+put .github/workflows/b.yml <<'EOF'
+on: push
+jobs:
+  b:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: 'echo "${#GITHUB_SHA} # not a comment"'
+EOF
+put .github/workflows/c.yml <<'EOF'
+on: push
+env:
+  NOTE: "first
+    # still the note"
+jobs: {}
+EOF
+commit "feat: add allowed shell"
+expect pass "shebangs, shell directives, strings, heredoc data and quoted YAML pass"
+
+case_branch shell-more
+put tool/d.sh <<'EOF'
+#!/usr/bin/env bash
+cat <<FIRST; node <<SECOND
+plain text
+FIRST
+const y = 1; // explains y
+SECOND
+n=$((x<<y))
+node <<'JS'
+const z = 2; // explains z
+JS
+node -e 'const a = 1; // reads stdin'
+echo "$n"
+EOF
+put tool/e.sh <<'EOF'
+#!/usr/bin/env bash
+bash <<'EOS'
+if true; then
+# hidden
+EOS
+EOF
+put .github/workflows/more.yml <<'EOF'
+on: push
+jobs:
+  f:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: >
+          echo first
+          # explanation
+          echo second
+      - uses: actions/github-script@v7
+        with:
+          script: "/* explanation */ await github.rest.repos.get(context.repo);"
+      - run: node -e 'const a = 1; // reads stdin'
+      - shell: python
+        run: |
+          print(1)  # says one
+EOF
+put .github/workflows/pw.yml <<'EOF'
+on: push
+defaults:
+  run:
+    shell: pwsh
+jobs:
+  p:
+    runs-on: windows-latest
+    steps:
+      - run: |
+          Write-Host hi
+          # says hi
+EOF
+commit "feat: more shell"
+expect "tool/d.sh:5: adds a comment" "a second heredoc on a line is read"
+expect "tool/d.sh:9: adds a comment" "a shift doesn't stop the heredoc search"
+expect "tool/d.sh:11: adds a comment" "a program passed to node -e is read"
+expect "tool/e.sh: can't be read as sh" "a heredoc bash can't parse fails closed"
+expect ".github/workflows/more.yml:8: adds a comment" "a comment in a folded run step fails"
+expect ".github/workflows/more.yml:12: adds a comment" "a comment in a quoted script fails"
+expect ".github/workflows/more.yml:13: adds a comment" "a program passed to node -e in a step is read"
+expect ".github/workflows/more.yml:16: adds a comment" "a comment in a python step fails"
+expect ".github/workflows/pw.yml: can't be read as yaml (a run step uses pwsh" "a step in another shell fails closed"
+
+case_branch shell-text
+put tool/f.sh <<'EOF'
+#!/usr/bin/env bash
+ssh box cat <<TXT
+# Heading
+TXT
+EOF
+put .github/workflows/note.yml <<'EOF'
+on: push
+env:
+  NOTE: |
+    script: |
+      // shown as text
+jobs: {}
+EOF
+commit "feat: shell text"
+expect pass "text sent to a remote cat and text that looks like a script key pass"
+
+case_branch shell-exact
+put tool/g.sh <<'EOF'
+#!/usr/bin/env bash
+node --input-type=module -e 'const x = 1; // explanation'
+python3 -I -c 'x = 1  # why'
+bash -ec 'true # because'
+node -e "const s = \"a\"; // quoted"
+env node <<'JS.CODE'
+const y = 2; // explains y
+JS.CODE
+out=$(python3 - <<'PY'
+print(1)  # says one
+PY
+)
+sudo bash <<'SH'
+true # as root
+SH
+echo "$out"
+EOF
+put .github/workflows/map.yml <<'EOF'
+on: push
+jobs:
+  m:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: "await x(); \x2f\x2a escaped \x2a\x2f"
+      - run: "echo hi # note"
+EOF
+commit "feat: exact shell"
+expect "tool/g.sh:2: adds a comment" "a program after node options is read"
+expect "tool/g.sh:3: adds a comment" "a program after python options is read"
+expect "tool/g.sh:4: adds a comment" "a program after combined bash flags is read"
+expect "tool/g.sh:5: adds a comment" "a double-quoted program with escaped quotes is read"
+expect "tool/g.sh:7: adds a comment" "a heredoc with a dotted end word fed to env node is read"
+expect "tool/g.sh:10: adds a comment" "a heredoc inside a command substitution is read"
+expect "tool/g.sh:14: adds a comment" "a heredoc fed to sudo bash is read"
+expect ".github/workflows/map.yml:8: adds a comment" "an escaped comment in a quoted script fails"
+expect ".github/workflows/map.yml:9: adds a comment" "a comment in a one-line quoted run fails"
+
+git checkout -q main
+put .github/workflows/keep.yml <<'EOF'
+on: push
+jobs:
+  k:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            // old
+            await x();
+EOF
+commit "base: a workflow with a script"
+case_branch note-blame
+put .github/workflows/keep.yml <<'EOF'
+on: push
+env:
+  NOTE: "// old"
+jobs:
+  k:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            // old
+            await x();
+EOF
+commit "feat: add a note"
+expect pass "a note that matches an existing script comment passes"
+git checkout -q main && git reset -q --hard HEAD^
+
 [[ $failed -eq 0 ]] && echo "All cases behaved." || exit 1
