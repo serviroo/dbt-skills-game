@@ -36,7 +36,7 @@ export function bashParser(scratch) {
     memo.set(script, shown);
     return shown;
   }
-  return { declared, sameMeaning: (a, b) => declared(a) !== null && declared(a) === declared(b) };
+  return { declared };
 }
 
 function bare(line) {
