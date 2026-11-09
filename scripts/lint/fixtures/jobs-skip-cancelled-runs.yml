@@ -1,0 +1,14 @@
+jobs:
+  plain:
+    if: always()
+  wrapped:
+    if: ${{ ALWAYS () && needs.e2e.result != 'skipped' }}
+  reusable:
+    if: success() || always()
+    uses: ./.github/workflows/other.yml
+  kept:
+    if: ${{ !cancelled() && needs.e2e.result != 'skipped' }}
+    steps:
+      - uses: actions/upload-artifact@v7
+        if: always()
+  empty: ~
