@@ -957,8 +957,13 @@ export class ArtStore {
   }
 
   /** The newer of the stored draft and the one this copy holds in memory (a draft write can fail when storage is full). */
-  async getDraft(key: string): Promise<Draft | null> {
-    const d = cleanDraft(await this.tx(['drafts'], 'readonly', (t) => req(t.objectStore('drafts').get(key) as IDBRequest<unknown>), () => undefined));
+  async getDraft(key: string): Promise<Draft | null | undefined> {
+    const failed = Symbol();
+    const raw = await this.tx<unknown>(
+      ['drafts'], 'readonly', (t) => req(t.objectStore('drafts').get(key) as IDBRequest<unknown>), () => failed,
+    );
+    if (raw === failed) return undefined;
+    const d = cleanDraft(raw);
     const m = this.mem.drafts.get(key);
     const best = d && m ? (m.t > d.t ? m : d) : (d ?? m);
     return best && Array.isArray(best.strokes) && best.strokes.length ? best : null;

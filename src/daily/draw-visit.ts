@@ -8,23 +8,36 @@ const ORPHAN_MS = 120e3;
 export interface DrawKept {
   readonly id: string | null;
   readonly key: string | undefined;
+  readonly pending: Promise<unknown> | null;
 }
 
 export class DrawVisit {
-  readonly editId: string | undefined;
-  readonly from: string | undefined;
+  private readonly was: DrawKept | undefined;
   private held = false;
+  occupied = false;
 
-  constructor(route: Extract<Route, { name: 'draw' }>, visit: Visit) {
-    const was = visit.again ? (visit.kept as DrawKept | undefined) : undefined;
-    this.editId = was?.id ?? route.id;
-    this.from = was ? was.key : route.draft;
+  get editId() {
+    return this.was?.id ?? this.route.id;
+  }
+  get from() {
+    return this.was ? this.was.key : this.route.draft;
+  }
+  get pending() {
+    return this.was?.pending;
   }
 
-  async draft(as: ArtStore, kind: Paper, tab: string, own: string): Promise<Draft | null> {
+  constructor(private readonly route: Extract<Route, { name: 'draw' }>, visit: Visit) {
+    this.was = visit.again ? (visit.kept as DrawKept | undefined) : undefined;
+  }
+
+  async draft(as: ArtStore, kind: Paper, tab: string, own: string): Promise<Draft | null | undefined> {
     const kept = this.from ? await as.getDraft(this.from) : null;
+    if (kept === undefined) return undefined;
     const ours = kept && (!this.editId || kept.editId === this.editId) ? kept : null;
-    const draft = ours ?? (await as.getDraft(own));
+    const candidate = !ours || !ours.key.endsWith(`:${tab}`) ? await as.getDraft(own) : null;
+    if (candidate === undefined) return undefined;
+    this.occupied = !!candidate && (!!ours || candidate.editId !== this.editId);
+    const draft = ours ?? (this.occupied ? null : candidate);
     if (draft || this.from) return draft;
     const id = this.editId;
     // this tab's other draft of the same page (a page first saved from a fresh screen), else one an earlier session
@@ -38,9 +51,12 @@ export class DrawVisit {
     this.held = true;
   }
 
-  keep(id: () => string | null, key: () => string): DrawKept {
+  keep(id: () => string | null, key: () => string, pending: () => Promise<unknown> | null): DrawKept {
     const v = this;
     return {
+      get pending() {
+        return pending();
+      },
       get id() {
         return v.held ? id() : (v.editId ?? null);
       },

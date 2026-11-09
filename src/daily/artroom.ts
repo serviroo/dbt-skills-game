@@ -292,6 +292,7 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const own = (id?: string | null) => (id ? `edit:${id}:${tab.id}` : `${kind}:${tab.id}`);
   let key = own(opened.editId);
   let saving = false;
+  let pendingSave: Promise<unknown> | null = null;
   let storing = false;
   let recId = opened.editId ?? null;
   let rec: DrawingRec | null = null;
@@ -536,7 +537,9 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     openTray(false);
     if (kind === 'ally') return nameSheet();
     saving = true;
-    const result = await persist().finally(() => (saving = false));
+    const job = persist().finally(() => (saving = false));
+    pendingSave = job;
+    const result = await job;
     if (!result) return;
     const { first, xp, rec: saved, copied, failed } = result;
     void prepImage(saved);
@@ -563,7 +566,9 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
       const name = f.input.value.trim().slice(0, 24);
       hideName(false);
       saving = true;
-      const result = await persist(name || undefined).finally(() => (saving = false));
+      const job = persist(name || undefined).finally(() => (saving = false));
+      pendingSave = job;
+      const result = await job;
       if (!result) return;
       const { xp, rec: saved, copied, failed } = result;
       void prepImage(saved);
@@ -813,9 +818,16 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
 
   void (async () => {
     await tab.ready;
+    await opened.pending;
     if (left) return;
     const draft = await opened.draft(as, kind, tab.id, own(opened.editId));
-    key = draft?.key.endsWith(`:${tab.id}`) ? draft.key : own(opened.editId);
+    if (draft === undefined) {
+      say(p("Couldn't open this drawing. Please try again.", 'dq-small'));
+      return;
+    }
+    if (draft?.key.endsWith(`:${tab.id}`)) key = draft.key;
+    else if (opened.occupied) key = `${opened.editId ? `edit:${opened.editId}` : kind}:${uid()}:${tab.id}`;
+    else key = own(opened.editId);
     const id = opened.editId ?? draft?.editId;
     if (id) {
       recId = id;
@@ -853,7 +865,7 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     title: kind === 'ally' ? ART.allyTitle : ART.todayTitle,
     mode: 'sub',
     bubbles: [0, 0],
-    keep: () => opened.keep(() => recId, () => key),
+    keep: () => opened.keep(() => recId, () => key, () => pendingSave ?? opened.pending ?? null),
     after: () => {
       app.sheetLayer.append(sheet, riseEl);
       ro.observe(main);

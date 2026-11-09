@@ -130,7 +130,8 @@ export const scenarios = {
     const { ctx, page, errors } = await h.open(seed(h));
     try {
       await h.reachHub(page);
-      await page.evaluate(() => window.__daily.go({ name: 'draw', kind: 'ally' }));
+      await page.locator('.dq-tile--art').click();
+      await page.locator('.dq-artentry--ally').click();
       await routeIs(page, 'draw');
       await drawReady(page);
       await line(page, [0.2, 0.3], [0.7, 0.4]);
@@ -146,6 +147,10 @@ export const scenarios = {
       await line(page, [0.2, 0.5], [0.7, 0.6]);
       await line(page, [0.2, 0.6], [0.7, 0.7]);
       await line(page, [0.2, 0.7], [0.7, 0.8]);
+      await page.waitForFunction(async () => {
+        const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+        return (await as.drafts()).some((d) => d.kind === 'ally' && d.strokes.length === 3);
+      });
 
       await page.goBack();
       await routeIs(page, 'shadows');
@@ -157,6 +162,43 @@ export const scenarios = {
       await page.getByRole('button', { name: 'Rise', exact: true }).click();
       await page.getByRole('button', { name: 'See your army', exact: true }).waitFor();
       await drawingsAre(h, page, '[1]', 'Rise again on the saved ally:');
+      const drafts = await page.evaluate(async () => {
+        const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+        return (await as.drafts()).map((d) => d.strokes.length);
+      });
+      h.expect(drafts.includes(3), 'the new ally draft was lost');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'drawing-does-not-use-another-drawings-draft'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await h.reachHub(page);
+      await page.evaluate(async (ss) => {
+        const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+        const tab = as.claimTab();
+        await tab.ready;
+        const day = window.__daily.store.today();
+        await as.put({ id: 'pg-a', kind: 'today', day, t: 1, updated: 1, n: 1, strokes: [ss[0]] });
+        await as.put({ id: 'pg-b', kind: 'today', day, t: 2, updated: 2, n: 1, strokes: [ss[0]] });
+        await as.putDraft({ key: `edit:pg-a:${tab.id}`, kind: 'today', editId: 'pg-b', strokes: ss, t: Date.now() });
+        window.__daily.go({ name: 'draw', kind: 'today', id: 'pg-a' });
+      }, [stroke(200, 500), stroke(200, 900), stroke(200, 1300)]);
+      await routeIs(page, 'draw');
+      await drawReady(page);
+      await shows(h, page, 1, 'opening a drawing with another drawing under its draft key');
+      await line(page, [0.2, 0.6], [0.7, 0.7]);
+      await safeAndBack(page, 'draw');
+      await drawReady(page);
+      await shows(h, page, 2, 'returning to the edited drawing');
+      const other = await page.evaluate(async () => {
+        const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+        return (await as.drafts()).find((d) => d.editId === 'pg-b')?.strokes.length;
+      });
+      h.expect(other === 3, "the other drawing's draft was changed");
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();
@@ -193,12 +235,19 @@ export const scenarios = {
       await late.page.waitForFunction(() => !!window.__letPut);
       await late.page.locator('.dq-top .dq-safe').click();
       await routeIs(late.page, 'safe');
-      await late.page.evaluate(() => window.__letPut());
-      await drawingsAre(h, late.page, '[2,3]', 'after the late Save');
       await late.page.goBack();
       await routeIs(late.page, 'draw');
+      await late.page.goForward();
+      await routeIs(late.page, 'safe');
+      await late.page.goBack();
+      await routeIs(late.page, 'draw');
+      await late.page.evaluate(() => window.__letPut());
+      await drawingsAre(h, late.page, '[2,3]', 'after the late Save');
       await drawReady(late.page);
       await shows(h, late.page, 2, 'back from the Safe Zone after a late Save');
+      await line(late.page, [0.2, 0.7], [0.7, 0.8]);
+      await save(late.page);
+      await drawingsAre(h, late.page, '[3,3]', 'saving the returned copy');
       h.expect(!late.errors.length, late.errors.join('\n'));
     } finally {
       await late.ctx.close();
@@ -260,6 +309,12 @@ export const scenarios = {
       await earlierDraft(failed.page);
       await failed.page.reload();
       await h.reachHub(failed.page);
+      await failed.page.evaluate(async (ss) => {
+        const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+        const tab = as.claimTab();
+        await tab.ready;
+        await as.putDraft({ key: `today:${tab.id}`, kind: 'today', strokes: ss, t: Date.now() });
+      }, [stroke(200, 500), stroke(200, 900), stroke(200, 1300)]);
       await failed.page.evaluate(() => {
         const get = IDBObjectStore.prototype.get;
         IDBObjectStore.prototype.get = function (...a) {
@@ -270,10 +325,16 @@ export const scenarios = {
       });
       await openEarlierDraft(failed.page);
       await routeIs(failed.page, 'draw');
-      await drawReady(failed.page);
+      await failed.page.getByText(/open this drawing/).waitFor();
+      h.expect(await failed.page.locator('.dq-ink-stage').evaluate((el) => el.inert), 'drawing opened after a read error');
       await safeAndBack(failed.page, 'draw');
       await drawReady(failed.page);
       await shows(h, failed.page, 1, 'back to the draft whose read failed');
+      const drafts = await failed.page.evaluate(async () => {
+        const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+        return (await as.drafts()).map((d) => d.strokes.length);
+      });
+      h.expect(drafts.includes(3), 'the other draft was overwritten');
       h.expect(!failed.errors.length, failed.errors.join('\n'));
     } finally {
       await failed.ctx.close();
