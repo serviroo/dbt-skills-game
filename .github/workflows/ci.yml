@@ -16,23 +16,32 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        head: [base]
-        part: [1, 2, 3, 4, 5, 6, 7, 8]
+        side: [pr, round7, main]
+        part: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v7
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: 20.x
           cache: npm
       - run: npm ci
+      - name: Product code for this side
+        shell: bash
+        run: |
+          case "${{ matrix.side }}" in
+            round7) git checkout dfe4881853c45ba3f2a5f6a876351e821eac3198 -- src ;;
+            main) git checkout aed9ced -- src && sed -i 's/gains: () => e.levels };/gains: () => e.levels, engine: e };/' src/app.ts ;;
+          esac
+          git log -1 --format=%h; git status --short src | head -5; grep -n "__dbtVolume =" -A1 src/app.ts | head -2
       - name: Repeat the two Safe Zone sound checks
         shell: bash
         run: |
           set +e
           mkdir -p results
-          out=results/${{ matrix.head }}-${{ matrix.part }}.txt
+          out=results/${{ matrix.side }}-${{ matrix.part }}.txt
           for i in $(seq 1 8); do
             node scripts/e2e.mjs --software --file=safe-zone-quiet --scenario=quiet-entry-at-every-size > run.log 2>&1
             echo "visit $i $([ $? -eq 0 ] && echo pass || echo fail)" >> "$out"
@@ -43,13 +52,13 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: results-${{ matrix.head }}-${{ matrix.part }}
+          name: results-${{ matrix.side }}-${{ matrix.part }}
           path: results
           retention-days: 3
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: repeat-${{ matrix.head }}-${{ matrix.part }}
+          name: repeat-${{ matrix.side }}-${{ matrix.part }}
           path: artifacts/e2e
           retention-days: 3
           if-no-files-found: ignore
