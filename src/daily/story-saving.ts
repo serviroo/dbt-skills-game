@@ -16,20 +16,3 @@ export function storySaving(
   };
   return { pinLive, flushAll };
 }
-
-export async function readAfterSave<T>(
-  read: () => Promise<T | null>,
-  active: () => boolean,
-  needsSave: () => boolean,
-  flush: () => Promise<void>,
-  pinFailed: () => void,
-): Promise<T | null> {
-  for (;;) {
-    const chapter = await read();
-    if (!chapter || !active()) return null;
-    if (!needsSave()) return chapter;
-    await flush();
-    if (!active()) return null;
-    pinFailed();
-  }
-}

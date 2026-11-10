@@ -21,7 +21,7 @@ import { dayDiff, dayKey } from './store';
 import { spans, terms } from './storyfind';
 import { creditStory, STORY_CAP, storyStore, type Card, type CardMode, type Chapter, type Story } from './storystore';
 import { storyFromText, storyToText, type StoryText } from './storytext';
-import { readAfterSave, storySaving } from './story-saving';
+import { storySaving } from './story-saving';
 import { keepTextSize, textSize } from './text-size';
 import { breakable, btn, h, keptWhole, p, segmented, shareOrSave, typo } from './ui';
 import { storyHead, wholeText } from './page-head';
@@ -878,16 +878,14 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
 
   /** `taking` runs as the chapter reaches the editor, only if no newer tap came first */
   const load = async (id: string, n = ++picks, taking?: () => void) => {
-    const c = await readAfterSave(() => ss.chapter(id), () => alive && n === picks,
-      () => !!cur && cur.id !== id && (dirty || !!saving), flushAll, () => {
-        if (failed && dirty && !saving) {
-          live(true);
-          dirty = false;
-          clearTimeout(saveTimer);
-          saveTimer = 0;
-        }
-      });
-    if (!c) return false;
+    let c: Chapter | null;
+    for (;;) {
+      c = await ss.chapter(id);
+      if (!c || !alive || n !== picks) return false;
+      if (!cur || !(dirty || saving)) break;
+      await flushAll();
+      if (failed && dirty && !saving) (live(true), (dirty = false), clearTimeout(saveTimer));
+    }
     shown = n;
     taking?.();
     let text = c.text;
