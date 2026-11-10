@@ -18,6 +18,7 @@ import { pageHead, wholeText } from './page-head';
 
 const store = (app: App) => artStore(app.store.key);
 const KEPT_APART = 'A newer copy of this drawing arrived, so this one was kept as its own page.';
+const UNSAVED = "Couldn't save this drawing. Please try again.";
 /** The colours an ink's dot is drawn in (.dq-swatch-dot). */
 const dotStyle = (ink: (typeof INKS)[number]) => `--b:${ink.body};--c:${ink.core ?? ink.mid ?? ink.body};--g:${ink.halo}`;
 
@@ -472,7 +473,8 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     saving = true;
     const job = persist().finally(() => (saving = false));
     pendingSave = job;
-    const result = await job;
+    const result = await job.catch(() => false as const);
+    if (result === false) return say(p(UNSAVED, 'dq-small'));
     if (!result) return;
     const { first, xp, rec: saved, copied, failed } = result;
     void prepImage(saved);
@@ -501,7 +503,8 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
       saving = true;
       const job = persist(name || undefined).finally(() => (saving = false));
       pendingSave = job;
-      const result = await job;
+      const result = await job.catch(() => false as const);
+      if (result === false) return say(p(UNSAVED, 'dq-small'));
       if (!result) return;
       const { xp, rec: saved, copied, failed } = result;
       void prepImage(saved);

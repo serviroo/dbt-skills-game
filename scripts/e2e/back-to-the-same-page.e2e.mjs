@@ -380,8 +380,11 @@ export const scenarios = {
       await page.evaluate(() => window.__failPut());
       await drawReady(page);
       await shows(h, page, 1, 'back while its save failed');
-      const others = errors.filter((e) => !e.includes('save refused'));
-      h.expect(!others.length, others.join('\n'));
+      const gone = await page.getByText('That page is no longer here.', { exact: false }).count();
+      h.expect(!gone, 'the unsaved page was called a removed one');
+      await save(page);
+      await drawingsAre(h, page, '[1]', 'saving again after the failed save');
+      h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();
     }

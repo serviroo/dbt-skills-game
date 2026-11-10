@@ -50,6 +50,7 @@ async function collect() {
     const roster = await load('src/content/roster-lines.ts');
     const crisis = await load('src/content/crisis-lines.ts');
     const art = await load('src/daily/artstore.ts');
+    const strokes = await load('src/daily/stored-strokes.ts');
     const ink = await load('src/daily/ink.ts');
     const story = await load('src/daily/storystore.ts');
     const you = await load('src/core/you.ts');
@@ -87,7 +88,15 @@ async function collect() {
     const draft = art.cleanDraft({ key: 'edit:a1:t1', kind: 'ally', editId: 'a1', bases: ['r1@1'], base: t, prompt: 'p', strokes: [{ i: 0, w: 4, p: [1, 2, 3, 4] }, { i: 0, w: 4, p: [], m: ink.STROKE_MODES[0], q: [1, 2] }], t });
     const skills = await load('src/daily/skilldraft.ts');
     const skillDraft = skills.readDraft({ skill: 'clear-sight', part: '', at: 1, layout: skills.stepLayout(dbt.SKILL['clear-sight'].steps), answers: { judged: 'x' }, typed: { 1: [['', 'x']] }, leads: { 1: 'x' }, done: [0], t });
-    const crystal = JSON.parse(st.exportJSON({ skillDrafts: [skillDraft], art: [art.storedRec(rec)], drafts: [{ ...draft, strokes: draft.strokes.map(art.storedStroke) }], stories: { stories: [tale], chapters: [chapter] }, unreadSaves: [{ at: String(t), raw: '{' }] }));
+    const crystal = JSON.parse(
+      st.exportJSON({
+        skillDrafts: [skillDraft],
+        art: [art.storedRec(rec)],
+        drafts: [{ ...draft, strokes: draft.strokes.map(strokes.storedStroke) }],
+        stories: { stories: [tale], chapters: [chapter] },
+        unreadSaves: [{ at: String(t), raw: '{' }],
+      }),
+    );
     const card = story.cleanCard({ id: 'k1', mode: story.CARD_MODES[0], text: 'x', t, sel: { start: 0, end: 1, text: 'x' } });
     you.writeYou({ name: 'Kit', companion: 'Lumen', nameAt: t, companionAt: t });
     prefs.savePrefs({ master: 1, music: 1, sfx: 1, hum: 1, muted: false });
@@ -111,7 +120,8 @@ async function collect() {
       'audio-field': json(names.AUDIO_KEY),
       'stored-interface-field': [
         ...['Ev', 'Item', 'Person', 'SavedMap', 'DiaryEntry', 'LineEntry', 'Settings', 'Flags', 'SkillPin', 'State'].flatMap((type) => interfaceFields('src/daily/store.ts', type)),
-        ...['DrawingMeta', 'Draft', 'StoredStroke', 'Gone'].flatMap((type) => interfaceFields('src/daily/artstore.ts', type)),
+        ...['DrawingMeta', 'Draft', 'Gone'].flatMap((type) => interfaceFields('src/daily/artstore.ts', type)),
+        ...interfaceFields('src/daily/stored-strokes.ts', 'StoredStroke'),
         ...interfaceFields('src/daily/ink.ts', 'Stroke'),
         ...['Story', 'Chapter', 'Card', 'Live'].flatMap((type) => interfaceFields('src/daily/storystore.ts', type)),
         ...interfaceFields('src/cowriter/types.ts', 'Cred'),
