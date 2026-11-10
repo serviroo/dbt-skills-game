@@ -209,7 +209,8 @@ export const scenarios = {
       await page.evaluate(() => window.__daily.go({ name: 'safe' }));
       await routeIs(page, 'safe');
       await held.drain();
-      h.expect(await page.evaluate(() => window.__daily.route.name === 'safe'), 'retry changed the screen after leaving');
+      h.expect(await page.evaluate(() => window.__daily.route.name === 'safe'),
+        'retry changed the screen after leaving');
       h.expect(!bad.length, bad.join('; '));
       h.expect(!errors.length, errors.join('\n'));
     } finally {
