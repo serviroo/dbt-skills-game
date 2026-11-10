@@ -8,7 +8,7 @@ const day = () => {
   const d = new Date(Date.now() - 6 * 3600000);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
-export const seed = (h) => ({
+const seed = (h) => ({
   [h.SAVE]: JSON.stringify({ v: 1, events: [{ id: 'reading-visit', k: 'visit', xp: 10, t: 1, day: day() }], flags: { greetDay: day(), therapistLineShown: true } }),
   [h.YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: 1, companionAt: 1 }),
   'dbt.app.v1': h.SEEN,
@@ -16,8 +16,7 @@ export const seed = (h) => ({
 const SIZE_KEY = (h) => `${h.SAVE}.read-size`;
 const ta = (page) => page.locator('.st-write .st-ta');
 export const ready = (page) => page.waitForFunction(() => !!window.__daily, null, { timeout: 30000 });
-export const routeIs = (page, name) =>
-  page.waitForFunction((n) => window.__daily?.route.name === n, name, { timeout: 10000 });
+const routeIs = (page, name) => page.waitForFunction((n) => window.__daily?.route.name === n, name, { timeout: 10000 });
 /** the first page of the open story as IndexedDB holds it, not as the editor shows it */
 const stored = (page) =>
   page.evaluate(async () => {
