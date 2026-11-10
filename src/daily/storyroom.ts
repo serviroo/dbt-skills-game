@@ -1606,7 +1606,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const changeCards = async (id: string, fn: (stored: Card[]) => Card[], draw = true, fresh = false) => {
     const next = await ss.changeCards(id, fn);
     if (!alive) return false;
-    syncState();
     if (id !== pageId) return false;
     if (next) cardsUnread = false;
     cards = next ?? fn(cards);

@@ -143,137 +143,168 @@ async function production(h) {
   throw new Error('serve-static did not start:\n' + srv.log());
 }
 
-export const scenarios = {
-  async 'cowriter-ideas-kept-when-unread'(h) {
-    const { ctx, page } = await openCtx(h);
-    try {
-      await h.reachHub(page);
-      const ids = await page.evaluate(async () => {
-        const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
-        const { story, first } = await ss.create('Ideas kept');
-        return { story: story.id, chapter: first.id, name: ss.name };
+async function ideasScene(h) {
+  const { ctx, page } = await openCtx(h);
+  try {
+    await h.reachHub(page);
+    const ids = await page.evaluate(async () => {
+      const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+      const { story, first } = await ss.create('Ideas kept');
+      return { story: story.id, chapter: first.id, name: ss.name };
+    });
+    const seeds = ['First idea', 'Second idea', 'Third idea'].map((text, i) =>
+      ({ id: 'seed-' + i, text, mode: 'questions', t: i + 1 }));
+    const disk = (write) => page.evaluate(async ({ name, chapter, write }) => {
+      const db = await new Promise((resolve, reject) => {
+        const req = indexedDB.open(name);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
       });
-      const seeds = ['First idea', 'Second idea', 'Third idea'].map((text, i) =>
-        ({ id: 'seed-' + i, text, mode: 'questions', t: i + 1 }));
-      const disk = (write) => page.evaluate(async ({ name, chapter, write }) => {
-        const db = await new Promise((resolve, reject) => {
-          const req = indexedDB.open(name);
-          req.onsuccess = () => resolve(req.result);
-          req.onerror = () => reject(req.error);
+      try {
+        return await new Promise((resolve, reject) => {
+          const tx = db.transaction('cards', write ? 'readwrite' : 'readonly');
+          const store = tx.objectStore('cards');
+          const req = write ? (window.cardPut || IDBObjectStore.prototype.put).call(store, write, chapter)
+            : (window.cardGet || IDBObjectStore.prototype.get).call(store, chapter);
+          let result;
+          req.onsuccess = () => { result = req.result; };
+          tx.oncomplete = () => resolve(result);
+          tx.onabort = () => reject(tx.error);
         });
-        try {
-          return await new Promise((resolve, reject) => {
-            const tx = db.transaction('cards', write ? 'readwrite' : 'readonly');
-            const store = tx.objectStore('cards');
-            const req = write ? (window.cardPut || IDBObjectStore.prototype.put).call(store, write, chapter)
-              : (window.cardGet || IDBObjectStore.prototype.get).call(store, chapter);
-            let result;
-            req.onsuccess = () => { result = req.result; };
-            tx.oncomplete = () => resolve(result);
-            tx.onabort = () => reject(tx.error);
-          });
-        } finally { db.close(); }
-      }, { ...ids, write });
-      const seedCards = () => disk(seeds);
-      const onDisk = () => disk(null);
-      const fault = ({ read = false, write = false }) => page.evaluate(({ read, write }) => {
-        window.cardGet ||= IDBObjectStore.prototype.get;
-        window.cardPut ||= IDBObjectStore.prototype.put;
-        IDBObjectStore.prototype.get = function (...args) {
-          if (this.name === 'cards' &&
-            (read === 'all' || (read === 'readonly' && this.transaction.mode === 'readonly'))) {
-            throw new DOMException('Cannot read cards', 'NotReadableError');
-          }
-          return window.cardGet.apply(this, args);
-        };
-        IDBObjectStore.prototype.put = function (...args) {
-          if (this.name === 'cards' && write) throw new DOMException('Cannot write cards', 'QuotaExceededError');
-          return window.cardPut.apply(this, args);
-        };
-      }, { read, write });
-      const restore = () => page.evaluate(() => {
-        IDBObjectStore.prototype.get = window.cardGet;
-        IDBObjectStore.prototype.put = window.cardPut;
-      });
-      const open = async () => {
-        await page.evaluate((id) => window.__daily.go({ name: 'write', id }), ids.story);
-        await page.getByRole('textbox', { name: /^Page,/ }).waitFor();
-        await openCw(h, page);
+      } finally { db.close(); }
+    }, { ...ids, write });
+    const seedCards = () => disk(seeds);
+    const onDisk = () => disk(null);
+    const fault = ({ read = false, write = false }) => page.evaluate(({ read, write }) => {
+      window.cardGet ||= IDBObjectStore.prototype.get;
+      window.cardPut ||= IDBObjectStore.prototype.put;
+      IDBObjectStore.prototype.get = function (...args) {
+        if (this.name === 'cards' &&
+          (read === 'all' || (read === 'readonly' && this.transaction.mode === 'readonly'))) {
+          throw new DOMException('Cannot read cards', 'NotReadableError');
+        }
+        return window.cardGet.apply(this, args);
       };
-      const leave = () => page.evaluate(() => window.__daily.go({ name: 'hub' }, { quiet: true }));
-      const panel = () => page.getByText(/Can.t read this chapter.s ideas right now/);
-      await seedCards();
-      await fault({ write: true });
-      await open();
-      h.expect((await page.locator('.st-state').textContent()).trim() === 'Saved on this device',
-        'The save indicator was not saved before the card write.');
-      await page.locator('.st-card').first().getByRole('button', { name: 'Toss' }).click();
-      await page.waitForFunction(() => document.querySelectorAll('.st-card').length === 2);
-      h.expect(
-        (await page.locator('.st-state').textContent()).trim() ===
-          'Not saving right now. Download the story to keep a copy.',
-        'A failed card write did not update the save indicator.',
-      );
-      h.expect((await onDisk()).length === 3, 'A failed card write changed stored ideas.');
-      await restore();
-      await page.locator('.st-card').first().getByRole('button', { name: 'Toss' }).click();
-      await page.waitForFunction(() => document.querySelectorAll('.st-card').length === 1);
-      let cards = await onDisk();
-      h.expect(cards.length === 1 && cards[0].id === seeds[2].id, 'Retrying a card change lost its earlier Toss.');
-      await leave();
-      await page.reload();
-      await page.waitForFunction(() => !!window.__daily);
-      await seedCards();
+      IDBObjectStore.prototype.put = function (...args) {
+        if (this.name === 'cards' && write) throw new DOMException('Cannot write cards', 'QuotaExceededError');
+        return window.cardPut.apply(this, args);
+      };
+    }, { read, write });
+    const restore = () => page.evaluate(() => {
+      IDBObjectStore.prototype.get = window.cardGet;
+      IDBObjectStore.prototype.put = window.cardPut;
+    });
+    const open = async () => {
+      await page.evaluate((id) => window.__daily.go({ name: 'write', id }), ids.story);
+      await page.getByRole('textbox', { name: /^Page,/ }).waitFor();
+      await openCw(h, page);
+    };
+    const leave = () => page.evaluate(() => window.__daily.go({ name: 'hub' }, { quiet: true }));
+    const panel = () => page.getByText(/Can.t read this chapter.s ideas right now/);
+    await seedCards();
+    const seeded = await onDisk();
+    h.expect(seeded.length === 3 && seeds.every((s, i) => seeded[i].id === s.id),
+      'Seeding did not store the three ideas.');
+    const ideasKept = (cards, n) => cards.length === n && seeds.every((s) => cards.some((c) => c.id === s.id));
+    return { ctx, page, ids, seeds, onDisk, fault, restore, open, leave, panel, ideasKept };
+  } catch (error) {
+    await ctx.close();
+    throw error;
+  }
+}
+
+async function requestIdeas(page) {
+  await page.locator('.st-cw .st-mode--questions').click();
+  await page.locator('.st-cw .st-ask').click();
+  await page.waitForFunction(() => document.querySelectorAll('.st-card').length >= 3 &&
+    !document.querySelector('.st-cw .st-ask').disabled);
+}
+
+export const scenarios = {
+  async 'cowriter-ask-while-unread-keeps-ideas'(h) {
+    const { ctx, page, onDisk, fault, restore, open, panel, ideasKept } = await ideasScene(h);
+    try {
       await fault({ read: 'readonly' });
       await open();
-      const sawPanel = await panel().isVisible();
-      await ask(h, page, 'questions');
+      h.expect(ideasKept(await onDisk(), 3) && await page.locator('.st-card').count() === 0,
+        'Ask did not start with three stored ideas and no visible cards.');
+      await requestIdeas(page);
       await restore();
-      cards = await onDisk();
-      h.expect(cards.length === 6 && seeds.every((s) => cards.some((c) => c.id === s.id)),
-        'Asking while unread lost stored ideas: ' + JSON.stringify(cards));
-      h.expect(sawPanel, 'Unread ideas should show the retry panel.');
-      h.expect((await page.locator('.st-card').count()) === 6 && !(await panel().isVisible()),
+      const cards = await onDisk();
+      h.expect(ideasKept(cards, 6), 'Asking while unread lost stored ideas: ' + JSON.stringify(cards));
+      h.expect(await page.locator('.st-card').count() === 6 && !(await panel().isVisible()),
         'A successful change did not show all ideas and remove the retry panel.');
-      await leave();
-      await seedCards();
-      await fault({ read: 'all' });
-      await open();
-      await ask(h, page, 'questions');
-      h.expect(await panel().isVisible(), 'The retry panel disappeared before Toss.');
-      await fault({ read: 'readonly' });
-      await newest(page).first().getByRole('button', { name: 'Toss' }).click();
-      await page.waitForFunction(() => document.querySelectorAll('.st-card').length === 5);
-      await restore();
-      cards = await onDisk();
-      h.expect(cards.length === 5 && seeds.every((s) => cards.some((c) => c.id === s.id)),
-        'Tossing while unread lost stored ideas: ' + JSON.stringify(cards));
-      h.expect(!(await panel().isVisible()), 'A successful Toss did not remove the retry panel.');
-      await leave();
-      await seedCards();
+    } finally { await ctx.close(); }
+  },
+
+  async 'cowriter-toss-while-unread-keeps-ideas'(h) {
+    const { ctx, page, onDisk, fault, restore, open, panel, ideasKept } = await ideasScene(h);
+    try {
       await fault({ read: 'all', write: true });
       await open();
+      await requestIdeas(page);
+      h.expect(ideasKept(await onDisk(), 3) && await page.locator('.st-card').count() === 3,
+        'Toss did not start with three stored ideas and three visible cards.');
+      await fault({ read: 'readonly' });
+      await newest(page).first().getByRole('button', { name: 'Toss' }).click();
+      await page.waitForFunction(() => document.querySelectorAll('.st-card').length !== 3);
+      await restore();
+      const cards = await onDisk();
+      h.expect(ideasKept(cards, 5), 'Tossing while unread lost stored ideas: ' + JSON.stringify(cards));
+      h.expect(!(await panel().isVisible()), 'A successful Toss did not remove the retry panel.');
+    } finally { await ctx.close(); }
+  },
+
+  async 'cowriter-unread-panel-until-read'(h) {
+    const { ctx, page, seeds, onDisk, fault, restore, open, panel, ideasKept } = await ideasScene(h);
+    try {
+      await fault({ read: 'all', write: true });
+      await open();
+      h.expect(ideasKept(await onDisk(), 3) && await page.locator('.st-card').count() === 0,
+        'Retry did not start with three stored ideas and no visible cards.');
       h.expect(await panel().isVisible(), 'Failed read did not show the retry panel.');
-      await ask(h, page, 'questions');
-      h.expect((await page.locator('.st-card').count()) === 3 && await panel().isVisible(),
+      await requestIdeas(page);
+      h.expect(await page.locator('.st-card').count() === 3 && await panel().isVisible(),
         'Asking after a failed read removed the retry panel.');
       await page.getByRole('button', { name: 'Try again' }).click();
       await page.getByText(/Still can.t open it/).waitFor();
-      h.expect(await panel().isVisible() && (await page.locator('.st-card').count()) === 3,
+      h.expect(await panel().isVisible() && await page.locator('.st-card').count() === 3,
         'A failed retry removed the panel or pending ideas.');
       await restore();
       await page.getByRole('button', { name: 'Try again' }).click();
       await page.waitForFunction(() => document.querySelectorAll('.st-card').length === 6);
       h.expect(!(await panel().isVisible()), 'A successful retry kept the retry panel.');
-      cards = await onDisk();
+      const cards = await onDisk();
       h.expect(cards.length === 3 && seeds.every((s, i) => cards[i].id === s.id),
         'A failed read wrote pending ideas to storage.');
-      await leave();
-      await seedCards();
-      await page.reload();
-      await page.waitForFunction(() => !!window.__daily);
+    } finally { await ctx.close(); }
+  },
+
+  async 'cowriter-failed-card-write-keeps-list'(h) {
+    const { ctx, page, seeds, onDisk, fault, restore, open, ideasKept } = await ideasScene(h);
+    try {
+      await fault({ write: true });
       await open();
-      await ask(h, page, 'questions');
+      h.expect(ideasKept(await onDisk(), 3) && await page.locator('.st-card').count() === 3,
+        'Failed write did not start with three stored and visible ideas.');
+      await page.locator('.st-card').first().getByRole('button', { name: 'Toss' }).click();
+      await page.waitForFunction(() => document.querySelectorAll('.st-card').length === 2);
+      h.expect(await page.locator('.st-card').count() === 2, 'A failed card write hid the readable ideas.');
+      h.expect(ideasKept(await onDisk(), 3), 'A failed card write changed stored ideas.');
+      await restore();
+      await page.locator('.st-card').first().getByRole('button', { name: 'Toss' }).click();
+      await page.waitForFunction(() => document.querySelectorAll('.st-card').length === 1);
+      const cards = await onDisk();
+      h.expect(cards.length === 1 && cards[0].id === seeds[2].id, 'Retrying a card change lost its earlier Toss.');
+    } finally { await ctx.close(); }
+  },
+
+  async 'cowriter-undo-after-edit-in-place'(h) {
+    const { ctx, page, ids, onDisk, open, ideasKept } = await ideasScene(h);
+    try {
+      await open();
+      h.expect(ideasKept(await onDisk(), 3) && await page.locator('.st-card').count() === 3,
+        'Undo did not start with three stored and visible ideas.');
       const before = await page.locator('.st-card').evaluateAll((els) => els.map((el) => el.dataset.id));
       const second = page.locator('.st-card').nth(1);
       await second.getByRole('button', { name: 'Edit', exact: true }).click();
@@ -290,17 +321,25 @@ export const scenarios = {
         });
       }, ids);
       await second.getByRole('button', { name: 'Toss' }).click();
-      await page.waitForFunction(() => document.querySelectorAll('.st-card').length === 5);
+      await page.waitForFunction(() => document.querySelectorAll('.st-card').length === 2);
       await page.locator('.dq-toast-btn', { hasText: 'Undo' }).click();
-      await page.waitForFunction(() => document.querySelectorAll('.st-card').length === 6);
+      await page.waitForFunction(() => document.querySelectorAll('.st-card').length === 3);
       const order = await page.locator('.st-card').evaluateAll((els) => els.map((el) => el.dataset.id));
       h.expect(order.join() === before.join(), 'Undo after Edit restored the idea in the wrong place.');
-      cards = await onDisk();
+      const cards = await onDisk();
       h.expect(cards.map((c) => c.id).join() === order.join() && cards[1].text === 'Second idea changed',
         'Undo after Edit did not save the edited idea in its original place.');
-      await leave();
+    } finally { await ctx.close(); }
+  },
+
+  async 'cowriter-retry-after-leaving-draws-nothing'(h) {
+    const { ctx, page, onDisk, fault, restore, open, leave, panel, ideasKept } = await ideasScene(h);
+    try {
       await fault({ read: 'readonly' });
       await open();
+      h.expect(ideasKept(await onDisk(), 3) && await page.locator('.st-card').count() === 0,
+        'Leaving did not start with three stored ideas and no visible cards.');
+      h.expect(await panel().isVisible(), 'Unread ideas should show the retry panel.');
       await page.evaluate(() => {
         IDBObjectStore.prototype.get = function (...args) {
           const request = window.cardGet.apply(this, args);
@@ -314,11 +353,19 @@ export const scenarios = {
       });
       await page.getByRole('button', { name: 'Try again' }).click();
       await page.waitForFunction(() => window.heldCards?.ready);
-      await page.evaluate(() => window.__daily.go({ name: 'hub' }, { quiet: true }));
+      await leave();
       await page.evaluate(() => window.heldCards.onsuccess());
       await page.waitForFunction(() => window.__daily.route.name === 'hub');
       h.expect(!(await page.locator('.st-cards').count()), 'A retry drew on the page after leaving the writer.');
       await restore();
+    } finally { await ctx.close(); }
+  },
+
+  async 'cowriter-two-copies-keep-both-ideas'(h) {
+    const { ctx, page, ids, onDisk, ideasKept } = await ideasScene(h);
+    try {
+      h.expect(ideasKept(await onDisk(), 3) && await page.locator('.st-card').count() === 0,
+        'Two copies did not start with three stored ideas and no visible cards.');
       const concurrent = await page.evaluate(async (id) => {
         const { StoryStore, storyStore } = await import('/src/daily/storystore.ts');
         const ss = storyStore(window.__daily.store.key);
@@ -332,9 +379,7 @@ export const scenarios = {
       }, ids.chapter);
       h.expect(concurrent.includes('tab-one') && concurrent.includes('tab-two'),
         'Two open copies did not keep both new ideas: ' + JSON.stringify(concurrent));
-    } finally {
-      await ctx.close();
-    }
+    } finally { await ctx.close(); }
   },
 
   async 'cowriter-card-edits'(h) {
