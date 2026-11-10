@@ -124,7 +124,7 @@ export const scenarios = {
           };
         };
         window.__failRead('stories');
-        return { story: story.id, second: second.id, notes: story.notes };
+        return { story: story.id, first: first.id, second: second.id, notes: story.notes };
       });
       await page.evaluate((id) => window.__daily.go({ name: 'write', id }), ids.story);
       const storyError = page.getByText(/Can.t open this story right now/);
@@ -145,8 +145,23 @@ export const scenarios = {
         const { storyStore } = await import('/src/daily/storystore.ts');
         const ss = storyStore(window.__daily.store.key);
         ss.story = ss.__real.story;
+        ss.chapter = ss.__real.chapter ?? ss.chapter;
       });
+      await page.evaluate((id) => window.__failRead('chapters', id), ids.first);
+      const firstHeld = await holdStorage(page, ['chapter']);
       await page.evaluate((id) => window.__daily.go({ name: 'write', id }), ids.story);
+      await firstHeld.waitHeld(`chapter ${ids.first}`);
+      h.expect(await ta(page).isDisabled(), 'the page took typing before its chapter was read');
+      await firstHeld.drain();
+      await page.getByText(/Can.t open this chapter right now/).waitFor();
+      h.expect((await ta(page).count()) === 0, 'an unreadable first page left a page to type on');
+      await page.evaluate(async () => {
+        IDBObjectStore.prototype.get = window.__realGet;
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        ss.chapter = ss.__real.chapter;
+      });
+      await page.getByRole('button', { name: 'Try again' }).click();
       const box = page.getByRole('textbox', { name: /^Page,/ });
       await box.waitFor();
       h.expect((await box.inputValue()) === 'The first door.', 'the story did not open after storage returned');
@@ -184,6 +199,24 @@ export const scenarios = {
       await page.getByRole('button', { name: 'Try again' }).click();
       await page.waitForFunction(() => document.querySelectorAll('.st-chrow').length === 2);
       h.expect((await page.locator('.st-chrow').count()) === 2, 'retry did not restore the full chapter list');
+      await page.getByRole('button', { name: 'Close the chapter list' }).click();
+
+      await page.evaluate(async ({ story, second }) => {
+        IDBObjectStore.prototype.get = function (id) {
+          if (this.name === 'stories') throw new DOMException('Read failed', 'NotReadableError');
+          return window.__realGet.call(this, id);
+        };
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        await storyStore(window.__daily.store.key).setDrawing(story, second, 'test-drawing');
+      }, ids);
+      await page.locator('.st-chbtn').click();
+      await listError.waitFor({ timeout: 3000 }).catch(() => {});
+      h.expect((await page.locator('.st-chrow').count()) === 0,
+        'a story read that failed showed the chapter list held in memory');
+      h.expect(await listError.isVisible(), 'a failed story read did not show the chapter list error');
+      await page.evaluate(() => { IDBObjectStore.prototype.get = window.__realGet; });
+      await page.getByRole('button', { name: 'Try again' }).click();
+      await page.waitForFunction(() => document.querySelectorAll('.st-chrow').length === 2);
       await page.getByRole('button', { name: 'Close the chapter list' }).click();
 
       await page.evaluate((id) => window.__failRead('chapters', id), ids.second);

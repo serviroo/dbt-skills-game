@@ -587,6 +587,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
 
   // ---- the page ----
   const ta = h('textarea', { class: 'st-ta', maxlength: STORY_CAP.text, spellcheck: 'true', autocapitalize: 'sentences', autocomplete: 'off', 'aria-label': 'Your page', placeholder: 'Start anywhere.', rows: 8 }) as HTMLTextAreaElement;
+  ta.disabled = true;
   // a place found by search, marked behind the text (same box and type as the page) until the page changes
   const hl = h('div', { class: 'st-hl', 'aria-hidden': 'true' });
   const frame = h('div', { class: 'dq-panel st-frame' }, h('span', { class: 'dq-hairbar', 'aria-hidden': 'true' }), hl, ta);
@@ -920,7 +921,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     }
     cur = { id: c.id, kind: c.kind, title: c.title, bases };
     pageIn();
-    startBtn.disabled = false;
+    startBtn.disabled = ta.disabled = false;
     tab = c.kind === 'notes' ? 'notes' : 'page';
     unmark();
     ta.value = text;
@@ -1105,8 +1106,8 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
               'span',
               { class: 'st-chrow-acts' },
               ib('pencil', `Rename ${c.title}`, 'Rename', rename),
-              ib('up', `Move ${c.title} up`, 'Move up', () => void move(i, -1), i === 0),
-              ib('down', `Move ${c.title} down`, 'Move down', () => void move(i, 1), i === chs.length - 1),
+              ib('up', `Move ${c.title} up`, 'Move up', () => void move(c.id, -1), i === 0),
+              ib('down', `Move ${c.title} down`, 'Move down', () => void move(c.id, 1), i === chs.length - 1),
               ib('trash', `Remove ${c.title}`, 'Remove', () => void removeCh(c.id, i), only),
             ),
           );
@@ -1114,9 +1115,13 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
       );
       return true;
     };
-    const move = async (i: number, d: number) => {
+    const move = async (id: string, d: number) => {
       const s = await ss.story(storyId);
-      if (!s) return;
+      const i = s?.chapters.indexOf(id) ?? -1;
+      if (!s || i < 0) {
+        await render();
+        return;
+      }
       const order = [...s.chapters];
       const j = i + d;
       if (j < 0 || j >= order.length) return;
@@ -1739,22 +1744,17 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   on(window, 'resize', grow);
 
   // ---------- start ----------
+  const cantShow = (what: 'story' | 'chapter', report: boolean) => {
+    if (report) main.replaceChildren(cantOpen(what, () => init(false)));
+    cw.classList.add('is-hidden');
+    return false;
+  };
   const init = async (report = true): Promise<boolean> => {
     await ss.sweepLives();
     const read = reading(ss);
     const s = await ss.story(storyId);
     if (!alive) return false;
-    if (!s && read.failed()) {
-      if (report) {
-        main.replaceChildren(cantOpen('story', () => init(false)));
-        cw.classList.add('is-hidden');
-      }
-      return false;
-    }
-    if (!report) {
-      main.replaceChildren(...writeContents);
-      cw.classList.remove('is-hidden');
-    }
+    if (!s && read.failed()) return cantShow('story', report);
     if (!s || s.removed) {
       main.replaceChildren(h('div', { class: 'dq-panel st-empty' }, h('p', { class: 'st-empty-t', text: STORY.gone }), h('div', { class: 'dq-actions' }, btn('Story Room', () => app.go({ name: 'stories' }, { replace: true }), { kind: 'primary' }))));
       cw.remove();
@@ -1771,11 +1771,13 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     await loadCards();
     // search can open the notes; the Page tab then goes to the first chapter
     const landed = await load(notesOf(visit, r.ch, s) ? notesId : pageId, n);
-    if (landed === 'unread') {
-      const target = notesOf(visit, r.ch, s) ? notesId : pageId;
-      showChapterError(async () => (await load(target)) === true);
-    }
+    if (landed === 'unread') return cantShow('chapter', report);
     if (!alive) return false;
+    if (!report) {
+      main.replaceChildren(...writeContents);
+      cw.classList.remove('is-hidden');
+      grow();
+    }
     await refreshStory();
     if (!alive) return false;
     syncState();

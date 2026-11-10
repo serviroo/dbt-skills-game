@@ -423,10 +423,10 @@ export class StoryStore {
     return (await this.allStories()).filter((s) => !!s.removed).sort((a, b) => (b.removed ?? 0) - (a.removed ?? 0));
   }
 
-  async story(id: string): Promise<Story | null> {
+  async story(id: string, whole = true): Promise<Story | null> {
     const r = await this.tx(['stories'], 'readonly', (t) => req<Story | undefined>(t.objectStore('stories').get(id)));
     if (r?.v) this.lastStory.set(id, r.v);
-    const s = this.join(r?.v, this.mem.stories.get(id));
+    const s = r || !whole || !this.lastStory.has(id) ? this.join(r?.v, this.mem.stories.get(id)) : undefined;
     this.note(s);
     return s ?? null;
   }
@@ -671,7 +671,7 @@ export class StoryStore {
   }
 
   async addChapter(storyId: string, title?: string): Promise<Chapter> {
-    const cur = await this.story(storyId);
+    const cur = await this.story(storyId, false);
     if (!cur) throw new RangeError('That story is not on this device.');
     if (cur.chapters.length >= STORY_CAP.chapters) throw new RangeError('This story already holds as many chapters as it can.');
     const rev = uid();
