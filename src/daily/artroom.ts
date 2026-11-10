@@ -486,6 +486,7 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
   // ally: name it, then it rises
   const sheet = h('div', { class: 'dq-sheet is-hidden', role: 'dialog', 'aria-modal': 'true' });
   let nameDone: (() => void) | null = null;
+  let unsavedName: string | null = null;
   const hideName = (focus: boolean) => {
     sheet.classList.add('is-hidden');
     nameDone?.();
@@ -493,7 +494,8 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     if (focus) saveB.focus({ preventScroll: true });
   };
   const nameSheet = () => {
-    const f = field(ART.nameAsk, { value: rec?.name ?? '', placeholder: 'Shadow ally', max: 24, hideLabel: true, autocomplete: 'off' });
+    const value = unsavedName ?? rec?.name ?? '';
+    const f = field(ART.nameAsk, { value, placeholder: 'Shadow ally', max: 24, hideLabel: true, autocomplete: 'off' });
     const vi = app.store.visitIndex();
     const ideas = [0, 1, 2, 3].map((k) => ALLY_NAMES[(vi * 3 + k) % ALLY_NAMES.length]);
     const go = async () => {
@@ -504,6 +506,7 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
       const job = persist(name || undefined).finally(() => (saving = false));
       pendingSave = job;
       const result = await job.catch(() => false as const);
+      unsavedName = result === false ? name : null;
       if (result === false) return say(p(UNSAVED, 'dq-small'));
       if (!result) return;
       const { xp, rec: saved, copied, failed } = result;

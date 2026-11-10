@@ -426,4 +426,37 @@ export const scenarios = {
       await ctx.close();
     }
   },
+
+  async 'ally-name-kept-after-a-failed-save'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await h.reachHub(page);
+      await page.locator('.dq-tile--art').click();
+      await page.locator('.dq-artentry--ally').click();
+      await routeIs(page, 'draw');
+      await drawReady(page);
+      await line(page, [0.2, 0.3], [0.7, 0.4]);
+      await page.evaluate(async () => {
+        const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+        const put = as.put;
+        as.put = function () {
+          as.put = put;
+          return Promise.reject(new Error('save refused'));
+        };
+      });
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      await page.locator('.dq-sheet input').fill('Moth');
+      await page.getByRole('button', { name: 'Rise', exact: true }).click();
+      await page.getByText(/save this drawing\. Please try again/).waitFor();
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      const name = await page.locator('.dq-sheet input').inputValue();
+      h.expect(name === 'Moth', `the name sheet came back with "${name}", not the name typed before the failed save`);
+      await page.getByRole('button', { name: 'Rise', exact: true }).click();
+      await page.getByRole('button', { name: 'See your army', exact: true }).waitFor();
+      await drawingsAre(h, page, '[1]', 'Rise after the failed save:');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
 };

@@ -906,9 +906,9 @@ export class ArtStore {
     const raw = await this.tx<unknown>(
       ['drafts'], 'readonly', (t) => req(t.objectStore('drafts').get(key) as IDBRequest<unknown>), () => failed,
     );
-    const m = this.mem.drafts.get(key);
-    if (raw === failed && !m && (await this.db)) return undefined;
+    if (raw === failed && (await this.db)) return undefined;
     const d = cleanDraft(raw);
+    const m = this.mem.drafts.get(key);
     const best = d && m ? (m.t > d.t ? m : d) : (d ?? m);
     return best && Array.isArray(best.strokes) && best.strokes.length ? best : null;
   }
