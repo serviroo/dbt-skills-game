@@ -1158,11 +1158,13 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     list.querySelector<HTMLElement>('[aria-current="true"]')?.focus({ preventScroll: true });
   };
 
+  // ---------- a drawing above the page ----------
   const { showPic, openDrawings, update: updatePictures } = storyPictures({
     app, ss, storyId, current: () => cur, alive: () => alive, closeSheet, flushAll, syncState,
     picThumb, picIc, picT, picBtn, isOpen: (wrap) => sheet === wrap,
     openSheet: (wrap, body) => { sheet = wrap; sheetFrom = picBtn; showSheet(wrap, body); },
   });
+  // the open page's drawing and the picker follow the Art room: a drawing removed, brought back with its Undo or renamed
   offs.push(artStore(app.store.key).onChange(updatePictures));
   const renameChapter = async (id: string, title: string) => {
     if (cur && cur.id === id) {
@@ -1186,6 +1188,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
       const results = await Promise.all(s.chapters.map((id) => ss.chapter(id)));
       if (results.some((c) => !c) && failed()) return null;
       const chs = results.filter((c): c is Chapter => !!c);
+      // the open page always goes out as the editor holds it, saved or not
       const open = cur && cur.kind === 'page' ? cur : null;
       const shown = chs.map((c) =>
         open && c.id === open.id ? { title: open.title, text: ta.value } : { title: c.title, text: c.text });
@@ -1887,6 +1890,7 @@ export function readScreen(app: App, route: Route): ScreenOut {
       sub.textContent = storyMeta(app, s);
       titled();
       named = true;
+      // what this copy holds but couldn't store yet reads as it is in the editor
       const chs = await Promise.all(s.chapters.map(async (id) => ss.unsaved(id) ?? ss.chapter(id)));
       if (chs.some((c) => !c) && failed()) return null;
       return { s, chs };

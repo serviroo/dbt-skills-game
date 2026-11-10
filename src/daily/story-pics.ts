@@ -7,9 +7,13 @@ import { refill } from './artroom';
 import type { Story, StoryStore } from './storystore';
 import { btn, h, keptWhole, p, typo } from './ui';
 
+/** What a drawing is called: its own name, else what the Art room calls it. */
 const drawingName = (m: DrawingMeta) =>
   typo(m.name?.trim() || (m.kind === 'ally' ? STORY_DRAWING.ally : STORY_DRAWING.page(dayLabel(m.day))));
+/** What a drawing shows in the Story Room: a new version or name changes it, a favourite does not. None is ''. */
 export const picOf = (m: DrawingMeta | undefined) => (m ? `${m.id}|${revOf(m)}|${drawingName(m)}` : '');
+/** The drawing above each page of the story that this device shows, by chapter id. One gone, waiting for its Undo
+ * or kept elsewhere is simply not here. */
 export async function drawingsOf(app: App, s: Story) {
   const out = new Map<string, DrawingMeta>();
   if (!s.drawings) return out;
@@ -22,6 +26,7 @@ export async function drawingsOf(app: App, s: Story) {
   }
   return out;
 }
+/** A drawing's picture, filled in once it is ready; `box` is taken away when there is no picture to show. */
 function drawingImg(app: App, m: DrawingMeta, alt: string, box?: HTMLElement) {
   const img = h('img', { class: 'st-pic-img', alt, decoding: 'async', draggable: 'false' });
   void artStore(app.store.key)
@@ -32,6 +37,7 @@ function drawingImg(app: App, m: DrawingMeta, alt: string, box?: HTMLElement) {
     );
   return img;
 }
+/** A drawing above a chapter of the story they read, at its own shape. */
 export function drawingFig(app: App, m: DrawingMeta) {
   const fig = h('figure', { class: `st-read-pic st-pic--${m.kind}` });
   fig.append(drawingImg(app, m, drawingName(m), fig));
@@ -49,6 +55,7 @@ type PictureOptions = {
 export function storyPictures(options: PictureOptions) {
   const { app, ss, storyId, current, alive, closeSheet, flushAll, syncState, openSheet, isOpen } = options;
   const { picThumb, picIc, picT, picBtn } = options;
+  /** every look at the open page's drawing takes a number, and only the newest one shows */
   let picTurn = 0;
   let picShown: string | null = null;
   const showPic = async () => {
@@ -62,16 +69,20 @@ export function storyPictures(options: PictureOptions) {
     picThumb.classList.toggle('is-hidden', !m);
     picIc.classList.toggle('is-hidden', !!m);
     picT.textContent = m ? STORY_DRAWING.change : STORY_DRAWING.add;
+    // the name they see first, then which drawing it is
     if (m) picBtn.setAttribute('aria-label', `${STORY_DRAWING.change}, ${drawingName(m)}`);
     else picBtn.removeAttribute('aria-label');
   };
+  /** `at` is the page the picker opened for, which keeps the pick even if another page came in while it was open */
   const placeDrawing = async (at: string, id: string | null) => {
     closeSheet();
     await ss.setDrawing(storyId, at, id);
     if (!alive()) return;
+    // a change this device couldn't store says so, as the words do
     syncState();
     await showPic();
   };
+  /** the drawing picker while it is open: it follows the Art room as the page's drawing does */
   let picker: { wrap: HTMLElement; fill: () => Promise<boolean> } | null = null;
   const openDrawings = async () => {
     const at = current()?.kind === 'page' ? current()!.id : '';
@@ -122,6 +133,7 @@ export function storyPictures(options: PictureOptions) {
                 btn(STORY_DRAWING.toArt, () => void toArt(), { kind: 'quiet', ic: 'brush' }))),
         ...(list.some((m) => m.id === placed) ? [takeOff] : []),
       ]);
+      // focus that was on a pick or a button the change took away stays in the picker
       if (inside && !body.contains(document.activeElement)) {
         body.querySelector<HTMLElement>('.st-pick, .st-picks-none .dq-btn, .dq-sheet-x')
           ?.focus({ preventScroll: true });
