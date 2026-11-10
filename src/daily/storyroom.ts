@@ -803,10 +803,13 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     chLabel.replaceChildren(pc ? breakable(pc.title) : '');
     chBtn.setAttribute('aria-label', pc ? `Chapter: ${pc.title}${idx >= 0 ? `, ${idx + 1} of ${s.chapters.length}` : ''}. Open the chapter list.` : 'Open the chapter list');
   };
-  const saveStoryFresh = async (patch: { title?: string; chapters?: string[] }) => {
+  const saveStoryFresh = async (patch: { title?: string; chapters?: string[] }, base?: string) => {
     const fresh = await ss.story(storyId);
     if (!fresh) return;
-    const res = await ss.saveStory({ id: storyId, title: patch.title ?? titleIn.value, chapters: patch.chapters ?? fresh.chapters }, [fresh.rev]).catch(() => null);
+    const res = await ss.saveStory(
+      { id: storyId, title: patch.title ?? titleIn.value, chapters: patch.chapters ?? fresh.chapters },
+      [base ?? fresh.rev],
+    ).catch(() => null);
     if (!res || res.stored === 'failed') {
       failed = true;
       syncState();
@@ -1065,7 +1068,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
       const j = i + d;
       if (j < 0 || j >= order.length) return;
       [order[i], order[j]] = [order[j], order[i]];
-      await saveStoryFresh({ chapters: order });
+      await saveStoryFresh({ chapters: order }, s.rev);
       await render();
       const target = list.querySelectorAll<HTMLElement>('.st-chrow')[j]?.querySelector<HTMLButtonElement>(d < 0 ? '[data-act="up"]' : '[data-act="down"]');
       (target && !target.disabled ? target : list.querySelectorAll<HTMLElement>('.st-chrow-b')[j])?.focus();

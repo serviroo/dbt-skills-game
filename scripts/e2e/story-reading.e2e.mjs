@@ -259,6 +259,8 @@ export const scenarios = {
         const ss = storyStore(window.__daily.store.key);
         const { story, first } = await ss.create('Two Doors');
         await ss.saveChapter({ ...first, text: 'The first door.' }, [first.rev]);
+        const notesCh = await ss.chapter(story.notes);
+        await ss.saveChapter({ ...notesCh, text: 'Notes kept.' }, [notesCh.rev]);
         const second = await ss.addChapter(story.id, 'Second Door');
         await ss.saveChapter({ ...second, text: 'The second door.' }, [second.rev]);
         window.__realGet = IDBObjectStore.prototype.get;
@@ -349,10 +351,33 @@ export const scenarios = {
         return (await storyStore(window.__daily.store.key).story(id)).chapters;
       }, ids.story), (order) => order.join() === [third, ids.second, ids.first].join(),
       (order) => `Move moved another chapter: ${JSON.stringify(order)}`, { timeout: 4000, polling: 200 });
+      await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const real = ss.story;
+        ss.story = async (id, whole) => {
+          const s = await real.call(ss, id, whole);
+          if (whole && !window.__added) {
+            ss.story = real;
+            window.__added = (await ss.addChapter(id, 'Fourth Door')).id;
+          }
+          return s;
+        };
+      });
+      await page.getByRole('button', { name: 'Move Chapter 1 up' }).click();
+      await h.poll(page, async () => page.evaluate(async (id) => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const order = (await storyStore(window.__daily.store.key).story(id)).chapters;
+        return { order, added: window.__added };
+      }, ids.story), ({ order, added }) => order.join() === [third, ids.first, ids.second, added].join(),
+      ({ order }) => `Move dropped a chapter added meanwhile: ${JSON.stringify(order)}`,
+      { timeout: 4000, polling: 200 });
       await page.getByRole('button', { name: 'Close the chapter list' }).click();
       await page.evaluate(async ({ story, third }) => {
         const { storyStore } = await import('/src/daily/storystore.ts');
-        await storyStore(window.__daily.store.key).removeChapter(story, third);
+        const ss = storyStore(window.__daily.store.key);
+        await ss.removeChapter(story, third);
+        await ss.removeChapter(story, window.__added);
       }, { story: ids.story, third });
       await page.evaluate((id) => window.__failRead('chapters', id), ids.second);
       await page.getByRole('button', { name: 'More', exact: true }).click();
@@ -374,8 +399,32 @@ export const scenarios = {
       const notesPending = page.waitForEvent('download');
       await tryAgain.click();
       const notesText = fs.readFileSync(await (await notesPending).path(), 'utf8');
-      h.expect(notesText.includes('The first door.') && notesText.includes('The second door.'),
-        'the download after a Notes retry missed a chapter');
+      h.expect(notesText.includes('Notes kept.'), 'the download after a Notes retry missed the Notes');
+      const missing = await page.evaluate(async (id) => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const ch = await ss.addChapter(id, 'Lost Door');
+        await ss.saveChapter({ ...ch, text: 'Lost door.' }, [ch.rev]);
+        const db = await ss.db;
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction('chapters', 'readwrite');
+          tx.objectStore('chapters').delete(ch.id);
+          tx.oncomplete = resolve;
+          tx.onerror = () => reject(tx.error);
+        });
+        return ch.id;
+      }, ids.story);
+      await page.evaluate((id) => window.__daily.go({ name: 'read', id }), ids.story);
+      await page.getByText('The first door.').waitFor();
+      h.expect(!(await page.getByText('Lost door.').isVisible()) &&
+        !(await page.getByText(/Can.t open this story right now/).isVisible()),
+      'the reader treated a missing chapter as a failed read');
+      await page.evaluate(async ({ story, missing }) => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        await storyStore(window.__daily.store.key).removeChapter(story, missing);
+      }, { story: ids.story, missing });
+      await page.getByRole('button', { name: 'Back to writing' }).click();
+      await routeIs(page, 'write');
       await page.evaluate((id) => window.__failRead('chapters', id), ids.second);
       await page.evaluate((id) => window.__daily.go({ name: 'read', id }), ids.story);
       const storyError = page.getByText(/Can.t open this story right now/);
