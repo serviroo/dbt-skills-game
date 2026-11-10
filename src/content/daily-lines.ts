@@ -376,6 +376,7 @@ export const CANT_OPEN = {
   story: "Can't open this story right now",
   drawing: "Can't open this drawing right now",
   stories: "Can't read your stories right now",
+  search: "Can't search your stories right now",
   drawings: "Can't read your drawings right now",
   ideas: "Can't read this chapter's ideas right now",
   note: 'Nothing was changed. Try again in a moment.',

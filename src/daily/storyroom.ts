@@ -14,9 +14,11 @@ import { refill } from './artroom';
 import { artStore, revOf, type DrawingMeta } from './artstore';
 import { dayLabel } from './lines';
 import { reading } from './reading';
+import { cantOpen } from './cant-open';
+import { clearFind, findIn as searchStories, marked, renderFind } from './story-find';
 import { renderStoryCards } from './story-cards';
 import { dayDiff, dayKey } from './store';
-import { match, spans, terms, type Span } from './storyfind';
+import { spans, terms, type Span } from './storyfind';
 import { creditStory, STORY_CAP, storyStore, type Card, type CardMode, type Chapter, type Story } from './storystore';
 import { storyFromText, storyToText, type StoryText } from './storytext';
 import { keepTextSize, textSize } from './text-size';
@@ -118,18 +120,6 @@ function drawingFig(app: App, m: DrawingMeta) {
   fig.append(drawingImg(app, m, drawingName(m), fig));
   return fig;
 }
-/** The player's text as text nodes, with each span in a mark: nothing in it is ever read as markup. */
-const marked = (text: string, at: Span[], place?: Span, shown = (from: number, to: number): Node => document.createTextNode(text.slice(from, to))) => {
-  const out: Node[] = [];
-  let i = 0;
-  for (const [a, b] of at) {
-    if (a > i) out.push(shown(i, a));
-    out.push(h('mark', { class: `st-mark${place && place[0] === a ? ' is-place' : ''}` }, shown(a, b)));
-    i = b;
-  }
-  if (i < text.length) out.push(shown(i, text.length));
-  return out;
-};
 const SEARCH_IC = '<svg class="dq-ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="5.5"/><path d="M14.6 14.6l4.6 4.6"/></svg>';
 
 // ---------------- the shelf ----------------
@@ -211,7 +201,9 @@ export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut 
     const s = fitted(storyFromText(raw, f.name));
     if (!s.chapters.some((c) => c.text.trim()) && !s.notes.trim()) return oops(STORY_IMPORT.empty);
     if (s.chapters.length > STORY_CAP.chapters) return oops(STORY_IMPORT.tooMany);
-    const same = (await ss.list()).some((x) => x.title.trim().toLowerCase() === s.title.toLowerCase());
+    const read = reading(ss);
+    const stories = await ss.list();
+    const same = read.failed() || stories.some((x) => x.title.trim().toLowerCase() === s.title.toLowerCase());
     if (n === bringN) offer(s, same);
   };
   /** what the file holds, before anything is added; after a write this device couldn't make, it says so and Add tries again */
@@ -288,35 +280,56 @@ export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut 
     h('p', { class: 'dq-small st-privacy', text: STORY.privacyShelf }),
   );
   let showRemoved = false;
+  let alive = true;
   let seq = 0;
-  const render = async () => {
+  const render = async (): Promise<boolean> => {
     const n = ++seq;
-    const [stories, gone] = await Promise.all([ss.list(), ss.removed()]);
-    if (n !== seq) return;
-    top.classList.toggle('is-hidden', !stories.length);
-    findBox.classList.toggle('is-hidden', !stories.length);
-    if (!stories.length) {
-      // nothing left to search (Back after removing the last story): a kept search goes, so the empty shelf shows
-      if (findIn.value) {
-        findIn.value = '';
-        void find();
-      }
-      list.replaceChildren(h('div', { class: 'dq-panel st-empty' }, h('p', { class: 'st-empty-t', text: STORY.empty }), h('div', { class: 'dq-actions' }, btn('New story', () => void newStory(), { kind: 'primary', ic: 'plus' }), bringBtn())));
+    const storyRead = reading(ss);
+    const stories = await ss.list();
+    const storyFailed = storyRead.failed();
+    const removedRead = reading(ss);
+    const gone = await ss.removed();
+    const removedFailed = removedRead.failed();
+    if (!alive || n !== seq) return false;
+    if (storyFailed) {
+      if (!list.querySelector('.dq-cant')) list.replaceChildren(cantOpen('stories', render));
     } else {
-      list.replaceChildren(
-        ...stories.map((s) =>
-          h(
-            'button',
-            { type: 'button', class: 'dq-panel st-row', onclick: () => app.go({ name: 'write', id: s.id }) },
-            h('span', { class: `st-row-t ${s.title.trim() ? '' : 'is-untitled'}` }, breakable(shownTitle(s.title))),
-            h('span', { class: 'st-row-m', text: storyMeta(app, s) }),
-            h('span', { class: 'st-row-go', 'aria-hidden': 'true', html: icon('chev') }),
+      top.classList.toggle('is-hidden', !stories.length);
+      findBox.classList.toggle('is-hidden', !stories.length);
+      if (!stories.length) {
+        // nothing left to search (Back after removing the last story): a kept search goes, so the empty shelf shows
+        if (findIn.value) {
+          findIn.value = '';
+          void find();
+        }
+        list.replaceChildren(h('div', { class: 'dq-panel st-empty' },
+          h('p', { class: 'st-empty-t', text: STORY.empty }),
+          h('div', { class: 'dq-actions' }, btn('New story', () => void newStory(), { kind: 'primary', ic: 'plus' }),
+            bringBtn())));
+      } else {
+        list.replaceChildren(
+          ...stories.map((s) =>
+            h(
+              'button',
+              { type: 'button', class: 'dq-panel st-row', onclick: () => app.go({ name: 'write', id: s.id }) },
+              h('span', { class: `st-row-t ${s.title.trim() ? '' : 'is-untitled'}` }, breakable(shownTitle(s.title))),
+              h('span', { class: 'st-row-m', text: storyMeta(app, s) }),
+              h('span', { class: 'st-row-go', 'aria-hidden': 'true', html: icon('chev') }),
+            ),
           ),
-        ),
-      );
+        );
+      }
+    }
+    if (removedFailed) {
+      removedBox.classList.remove('is-hidden');
+      if (!removedBox.querySelector('.dq-cant')) removedBox.replaceChildren(cantOpen('stories', render));
+      return false;
     }
     removedBox.classList.toggle('is-hidden', !gone.length);
-    if (!gone.length) return removedBox.replaceChildren();
+    if (!gone.length) {
+      removedBox.replaceChildren();
+      return !storyFailed;
+    }
     const rows = h(
       'ul',
       { class: 'st-removed-list', id: 'st-removed-list' },
@@ -353,31 +366,16 @@ export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut 
       h('span', { class: 'st-removed-chev', 'aria-hidden': 'true', html: icon('chevdown') }),
     );
     removedBox.replaceChildren(tg, rows);
+    return !storyFailed;
   };
   const deleteForGood = async (id: string) => {
     const v = await app.window({ kind: 'notification', title: 'Story Room', icon: 'alert', html: `<p>${STORY.deleteAsk}</p>`, actions: [{ label: 'Delete', value: 'delete' }, { label: 'Keep it', value: 'keep', variant: 'quiet' }] });
     if (v === 'delete') await ss.deleteForever(id);
   };
 
-  // every story with its chapters and notes, read once and again only after a change; what the editor holds but
-  // couldn't store yet is searched as it reads there
-  type Shelf = { story: Story; chs: { ch: Chapter; where: string }[] }[];
-  let shelf: Promise<Shelf> | null = null;
-  const readShelf = async (): Promise<Shelf> =>
-    Promise.all(
-      (await ss.list()).map(async (story) => {
-        const chs = await Promise.all([...story.chapters, story.notes].filter(Boolean).map(async (id) => ss.unsaved(id) ?? (await ss.chapter(id))));
-        return { story, chs: chs.flatMap((ch, i) => (ch ? [{ ch, where: ch.kind === 'notes' ? STORY_FIND.notes : ch.title.trim() || `Chapter ${i + 1}` }] : [])) };
-      }),
-    );
-  const PER_STORY = 6;
   let fseq = 0;
   let fTimer = 0;
-  // the route keeps only the place, since history keeps every route; the words go across in memory, to this opening only.
-  // They are the words that found the result, so a tap before the next search runs still opens what it showed
-  const openFound = (story: Story, ch?: Chapter, at?: number, q?: string) =>
-    ch && at !== undefined ? app.go({ name: 'write', id: story.id, ch: ch.id, find: { at } }, { hand: q }) : app.go({ name: 'write', id: story.id });
-  const find = async () => {
+  const find = async (): Promise<boolean> => {
     const n = ++fseq;
     const q = findIn.value;
     const words = terms(q);
@@ -385,53 +383,24 @@ export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut 
     if (!words.length) {
       findN.textContent = '';
       found.replaceChildren();
-      return;
+      return true;
     }
-    const all = await (shelf ??= readShelf());
-    if (n !== fseq) return;
-    const groups = all.flatMap(({ story, chs }) => {
-      const title = shownTitle(story.title);
-      const inTitle = story.title.trim() ? match(title, words) : null;
-      const places = chs.flatMap(({ ch, where }) => {
-        const at = match(ch.text, words);
-        return at ? [{ ch, where, at }] : [];
-      });
-      if (!inTitle && !places.length) return [];
-      const row = (x: (typeof places)[number]) =>
-        h('li', {}, h('button', { type: 'button', class: 'st-found-row', onclick: () => openFound(story, x.ch, x.at[0][0], q) }, h('span', { class: 'st-found-where', text: x.where }), h('span', { class: 'st-found-snip' }, snip(x.ch.text, x.at))));
-      const rows = places.length ? h('ul', { class: 'st-found-list' }, places.slice(0, PER_STORY).map(row)) : null;
-      // the rest of this story's places come on a tap, so every one of them can be opened
-      const more =
-        rows && places.length > PER_STORY
-          ? h('button', {
-              type: 'button',
-              class: 'st-found-more',
-              text: STORY_FIND.more(places.length - PER_STORY),
-              onclick: () => {
-                const rest = places.slice(PER_STORY).map(row);
-                rows.append(...rest);
-                more?.remove();
-                rest[0].querySelector('button')?.focus();
-              },
-            })
-          : null;
-      return [
-        h(
-          'li',
-          { class: 'dq-panel st-found-story' },
-          h(
-            'button',
-            { type: 'button', class: 'st-found-head', onclick: () => openFound(story) },
-            h('span', { class: `st-row-t ${story.title.trim() ? '' : 'is-untitled'}` }, inTitle ? marked(title, inTitle, undefined, (from, to) => breakable(title, from, to)) : breakable(title)),
-            h('span', { class: 'st-row-m st-found-m', text: storyMeta(app, story) }),
-          ),
-          rows,
-          more,
-        ),
-      ];
-    });
-    found.replaceChildren(...groups);
-    findN.textContent = groups.length ? STORY_FIND.found(groups.length) : STORY_FIND.none;
+    const result = await searchStories(ss, q);
+    if (!alive || n !== fseq) return false;
+    if (result === 'unread') {
+      findN.textContent = '';
+      if (!found.querySelector('.dq-cant')) {
+        found.replaceChildren(h('li', {}, cantOpen('search', find)));
+      }
+      return false;
+    }
+    const open = (story: Story, ch?: Chapter, at?: number) =>
+      ch && at !== undefined
+        ? app.go({ name: 'write', id: story.id, ch: ch.id, find: { at } }, { hand: q })
+        : app.go({ name: 'write', id: story.id });
+    found.replaceChildren(...renderFind(result, open, (story) => storyMeta(app, story), shownTitle));
+    findN.textContent = result.length ? STORY_FIND.found(result.length) : STORY_FIND.none;
+    return true;
   };
   findIn.addEventListener('input', () => {
     clearTimeout(fTimer);
@@ -452,7 +421,7 @@ export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut 
   }
 
   const off = ss.onChange(() => {
-    shelf = null;
+    clearFind(ss);
     void render();
     if (findIn.value.trim()) void find();
   });
@@ -463,6 +432,10 @@ export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut 
     mode: 'sub',
     bubbles: [1.4, 0.55],
     leave: () => {
+      alive = false;
+      seq++;
+      fseq++;
+      clearFind(ss);
       off();
       clearTimeout(fTimer);
       bringN++;
@@ -505,24 +478,6 @@ function fitted(s: StoryText): StoryText {
   more.forEach((text, k) => chapters.push({ title: `Notes (${k + 2})`, text }));
   if (!chapters.length) chapters.push({ title: 'Chapter 1', text: '' });
   return { title: clip(s.title.trim(), STORY_CAP.title) || STORY.untitled, chapters, notes };
-}
-
-/** A line or two around the first place, cut at spaces, with every place inside it marked. */
-function snip(text: string, at: Span[]) {
-  const [s0, e0] = at[0];
-  let a = Math.max(0, s0 - 48);
-  let b = Math.min(text.length, e0 + 96);
-  if (a > 0) {
-    const sp = text.slice(a, s0).search(/\s/);
-    if (sp >= 0) a += sp + 1;
-  }
-  if (b < text.length) {
-    const sp = text.slice(e0, b).search(/\s\S*$/);
-    if (sp >= 0) b = e0 + sp;
-  }
-  const part = text.slice(a, b);
-  const inPart = at.filter(([x, y]) => x >= a && y <= b).map(([x, y]): Span => [x - a, y - a]);
-  return [a > 0 ? '…' : '', ...marked(part, inPart), b < text.length ? '…' : ''];
 }
 
 // ---------------- writing view ----------------
