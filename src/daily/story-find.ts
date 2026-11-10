@@ -4,6 +4,7 @@ import { match, terms, type Span } from './storyfind';
 import type { Chapter, Story, StoryStore } from './storystore';
 import { breakable, h } from './ui';
 
+/** The player's text as text nodes, with each span in a mark: nothing in it is ever read as markup. */
 export const marked = (
   text: string,
   at: Span[],
@@ -21,6 +22,7 @@ export const marked = (
   return out;
 };
 
+/** A line or two around the first place, cut at spaces, with every place inside it marked. */
 function snip(text: string, at: Span[]) {
   const [s0, e0] = at[0];
   let a = Math.max(0, s0 - 48);
@@ -38,10 +40,12 @@ function snip(text: string, at: Span[]) {
   return [a > 0 ? '…' : '', ...marked(part, inPart), b < text.length ? '…' : ''];
 }
 
-
+// every story with its chapters and notes, read once and again only after a change; what the editor holds but
+// couldn't store yet is searched as it reads there
 type Shelf = { story: Story; chs: { ch: Chapter; where: string }[] }[];
 type Place = { ch: Chapter; where: string; at: Span[] };
 export type FindResult = { story: Story; inTitle: Span[] | null; places: Place[] }[];
+const PER_STORY = 6;
 const shelves = new WeakMap<StoryStore, Promise<Shelf | 'unread'>>();
 
 export function clearFind(ss: StoryStore) {
@@ -95,11 +99,12 @@ export function renderFind(
       type: 'button', class: 'st-found-row', onclick: () => open(story, x.ch, x.at[0][0]),
     }, h('span', { class: 'st-found-where', text: x.where }),
     h('span', { class: 'st-found-snip' }, snip(x.ch.text, x.at))));
-    const rows = places.length ? h('ul', { class: 'st-found-list' }, places.slice(0, 6).map(row)) : null;
-    const more = rows && places.length > 6 ? h('button', {
-      type: 'button', class: 'st-found-more', text: STORY_FIND.more(places.length - 6),
+    const rows = places.length ? h('ul', { class: 'st-found-list' }, places.slice(0, PER_STORY).map(row)) : null;
+    // the rest of this story's places come on a tap, so every one of them can be opened
+    const more = rows && places.length > PER_STORY ? h('button', {
+      type: 'button', class: 'st-found-more', text: STORY_FIND.more(places.length - PER_STORY),
       onclick: () => {
-        const rest = places.slice(6).map(row);
+        const rest = places.slice(PER_STORY).map(row);
         rows.append(...rest);
         more?.remove();
         rest[0].querySelector('button')?.focus();

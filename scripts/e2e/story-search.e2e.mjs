@@ -197,6 +197,31 @@ export const scenarios = {
       }
       await page.evaluate(() => window.__daily.go({ name: 'safe' }));
       await routeIs(page, 'safe');
+      await page.evaluate(async () => {
+        IDBObjectStore.prototype.getAll = function (...args) {
+          if (this.name === 'stories' && this.transaction.mode === 'readonly') {
+            throw new DOMException('Cannot read', 'NotReadableError');
+          }
+          return window.__realGetAll.apply(this, args);
+        };
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        await storyStore(window.__daily.store.key).create('Another story');
+        window.__daily.back();
+      });
+      await routeIs(page, 'stories');
+      await searchError.waitFor();
+      await page.evaluate(() => { IDBObjectStore.prototype.getAll = window.__realGetAll; });
+      await page.locator('.st-found .dq-cant').getByRole('button', { name: 'Try again' }).click();
+      await page.getByRole('button', { name: /Harbour Days/ }).waitFor();
+      if (!(await field(page).isVisible())) bad.push('retry after Back left the search box hidden');
+      if (!(await page.getByRole('button', { name: 'New story' }).isVisible())) {
+        bad.push('retry after Back left New story hidden');
+      }
+      if (!(await page.getByRole('button', { name: 'Bring in a story' }).isVisible())) {
+        bad.push('retry after Back left Bring in hidden');
+      }
+      await page.evaluate(() => window.__daily.go({ name: 'safe' }));
+      await routeIs(page, 'safe');
       await page.evaluate(() => window.__daily.go({ name: 'stories' }));
       await field(page).waitFor();
       await page.evaluate(() => { IDBObjectStore.prototype.get = window.__failedGet; });

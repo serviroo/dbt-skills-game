@@ -18,7 +18,7 @@ import { cantOpen } from './cant-open';
 import { clearFind, findIn as searchStories, marked, renderFind } from './story-find';
 import { renderStoryCards } from './story-cards';
 import { dayDiff, dayKey } from './store';
-import { spans, terms, type Span } from './storyfind';
+import { spans, terms } from './storyfind';
 import { creditStory, STORY_CAP, storyStore, type Card, type CardMode, type Chapter, type Story } from './storystore';
 import { storyFromText, storyToText, type StoryText } from './storytext';
 import { keepTextSize, textSize } from './text-size';
@@ -390,10 +390,13 @@ export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut 
     if (result === 'unread') {
       findN.textContent = '';
       if (!found.querySelector('.dq-cant')) {
-        found.replaceChildren(h('li', {}, cantOpen('search', find)));
+        found.replaceChildren(h('li', {}, cantOpen('search', async () => { await render(); return find(); })));
       }
       return false;
     }
+    // the route keeps only the place, since history keeps every route; the words go across in memory, to this
+    // opening only.
+    // They are the words that found the result, so a tap before the next search runs still opens what it showed
     const open = (story: Story, ch?: Chapter, at?: number) =>
       ch && at !== undefined
         ? app.go({ name: 'write', id: story.id, ch: ch.id, find: { at } }, { hand: q })
