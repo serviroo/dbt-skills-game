@@ -122,6 +122,163 @@ async function noneTyped(page, when, bad) {
 }
 
 export const scenarios = {
+  async 'search-says-when-stories-cant-be-read'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute');
+    const bad = [];
+    try {
+      await h.reachHub(page);
+      await page.evaluate(() => window.__daily.go({ name: 'safe' }));
+      await routeIs(page, 'safe');
+      const ids = await shelf(page);
+      await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const removed = await ss.create('Removed tale');
+        await ss.remove(removed.story.id);
+      });
+      await page.evaluate(() => {
+        window.__realGetAll = IDBObjectStore.prototype.getAll;
+        IDBObjectStore.prototype.getAll = function (...args) {
+          if (this.name === 'stories' && this.transaction.mode === 'readonly') {
+            throw new DOMException('Cannot read', 'NotReadableError');
+          }
+          return window.__realGetAll.apply(this, args);
+        };
+      });
+      await page.evaluate(() => window.__daily.go({ name: 'stories' }));
+      await h.sleep(500);
+      const shelfError = page.locator('.st-shelf .dq-cant');
+      const removedError = page.locator('.st-removed .dq-cant');
+      if (!(await shelfError.getByText('Can’t read your stories right now').isVisible())) {
+        bad.push('shelf did not say it cannot read the stories');
+      }
+      if (!(await removedError.getByText('Can’t read your stories right now').isVisible())) {
+        bad.push('removed list did not say it cannot read the stories');
+      }
+      if (await page.getByText('No stories yet. Start one whenever you like.').isVisible()) {
+        bad.push('shelf said there are no stories after a failed read');
+      }
+      if (await shelfError.isVisible()) {
+        await shelfError.getByRole('button', { name: 'Try again' }).click();
+        await shelfError.getByText('Still can’t open it. Nothing was changed. Try again in a moment.').waitFor();
+      }
+      await page.evaluate(() => { IDBObjectStore.prototype.getAll = window.__realGetAll; });
+      if (await shelfError.isVisible()) await shelfError.getByRole('button', { name: 'Try again' }).click();
+      else await page.evaluate(() => window.__daily.go({ name: 'stories' }));
+      await field(page).waitFor();
+      await page.waitForFunction(() => document.querySelectorAll('.st-shelf .st-row').length === 3);
+      await page.getByRole('button', { name: /Removed/ }).click();
+      h.expect(await page.getByText('Removed tale').isVisible(), 'retry did not restore the removed list');
+      await page.evaluate(() => {
+        window.__realGet = IDBObjectStore.prototype.get;
+        IDBObjectStore.prototype.get = function (...args) {
+          if (this.name === 'chapters' && this.transaction.mode === 'readonly') {
+            throw new DOMException('Cannot read', 'NotReadableError');
+          }
+          return window.__realGet.apply(this, args);
+        };
+        window.__failedGet = IDBObjectStore.prototype.get;
+      });
+      await field(page).fill('lantern');
+      await h.sleep(500);
+      const searchError = page.getByText('Can’t search your stories right now');
+      if (!(await searchError.isVisible())) bad.push('search did not say it cannot search the stories');
+      if (await page.getByText('Nothing matches that yet.').isVisible()) {
+        bad.push('search said nothing matched after a failed read');
+      }
+      if (await searchError.isVisible()) {
+        await page.getByRole('button', { name: 'Try again' }).click();
+        await page.getByText('Still can’t open it. Nothing was changed. Try again in a moment.').waitFor();
+      }
+      await page.evaluate(() => { IDBObjectStore.prototype.get = window.__realGet; });
+      if (await searchError.isVisible()) {
+        await page.getByRole('button', { name: 'Try again' }).click();
+        await page.getByRole('button', { name: /Harbour Days/ }).waitFor();
+      }
+      await page.evaluate(() => window.__daily.go({ name: 'safe' }));
+      await routeIs(page, 'safe');
+      await page.evaluate(async () => {
+        IDBObjectStore.prototype.getAll = function (...args) {
+          if (this.name === 'stories' && this.transaction.mode === 'readonly') {
+            throw new DOMException('Cannot read', 'NotReadableError');
+          }
+          return window.__realGetAll.apply(this, args);
+        };
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        await storyStore(window.__daily.store.key).create('Another story');
+        window.__daily.back();
+      });
+      await routeIs(page, 'stories');
+      await searchError.waitFor();
+      await page.evaluate(() => { IDBObjectStore.prototype.getAll = window.__realGetAll; });
+      await page.locator('.st-found .dq-cant').getByRole('button', { name: 'Try again' }).click();
+      await page.getByRole('button', { name: /Harbour Days/ }).waitFor();
+      if (!(await field(page).isVisible())) bad.push('retry after Back left the search box hidden');
+      if (!(await page.getByRole('button', { name: 'New story' }).isVisible())) {
+        bad.push('retry after Back left New story hidden');
+      }
+      if (!(await page.getByRole('button', { name: 'Bring in a story' }).isVisible())) {
+        bad.push('retry after Back left Bring in hidden');
+      }
+      await page.evaluate(() => window.__daily.go({ name: 'safe' }));
+      await routeIs(page, 'safe');
+      await page.evaluate(() => window.__daily.go({ name: 'stories' }));
+      await field(page).waitFor();
+      await page.evaluate(() => { IDBObjectStore.prototype.get = window.__failedGet; });
+      await field(page).fill('lantern');
+      await searchError.waitFor();
+      await page.evaluate(() => { IDBObjectStore.prototype.get = window.__realGet; });
+      const held = await holdStorage(page, ['chapter']);
+      await page.getByRole('button', { name: 'Try again' }).click();
+      await held.waitHeld(`chapter ${ids.winter}`);
+      await page.evaluate(() => window.__daily.go({ name: 'safe' }));
+      await routeIs(page, 'safe');
+      await held.drain();
+      h.expect(await page.evaluate(() => window.__daily.route.name === 'safe'),
+        'retry changed the screen after leaving');
+      await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        ss.chapter = ss.__real.chapter;
+        window.__daily.go({ name: 'stories' });
+      });
+      await field(page).waitFor();
+      await page.evaluate(() => { IDBObjectStore.prototype.get = window.__failedGet; });
+      await field(page).fill('lantern');
+      await searchError.waitFor();
+      await page.evaluate(() => { IDBObjectStore.prototype.get = window.__realGet; });
+      const shelfHeld = await holdStorage(page, ['list']);
+      await page.locator('.st-found .dq-cant').getByRole('button', { name: 'Try again' }).click();
+      await shelfHeld.waitHeld('list undefined');
+      await page.evaluate(async () => {
+        window.__daily.go({ name: 'safe' });
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        ss.list = ss.__real.list;
+      });
+      await routeIs(page, 'safe');
+      await shelfHeld.drain();
+      await h.sleep(500);
+      await page.evaluate(async (id) => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const story = await ss.story(id);
+        const chapter = await ss.chapter(story.chapters[0]);
+        await ss.saveChapter({ ...chapter, text: 'The lamps were lit.' }, [chapter.rev]);
+        window.__daily.go({ name: 'stories' });
+      }, ids.harbour);
+      await field(page).waitFor();
+      h.expect(await field(page).inputValue() === '', 'fresh visit kept the old search');
+      h.expect(await page.locator('.st-found-story').count() === 0, 'fresh visit drew old search results');
+      const fresh = await search(h, page, 'lantern');
+      h.expect(fresh.stories.length === 0, 'retry after leaving cached stale search results');
+      h.expect(!bad.length, bad.join('; '));
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** every way of finding words, at phone sizes, offline, storing nothing */
   async 'story-search-finds'(h) {
     for (const vp of [{ width: 390, height: 844 }, { width: 320, height: 568 }, { width: 568, height: 320 }]) {

@@ -60,6 +60,41 @@ const write = (h, name, body) => {
 };
 
 export const scenarios = {
+  async 'story-bring-in-when-title-check-cant-read'(h) {
+    const { ctx, page, errors } = await h.open(seed(h), '?mute');
+    try {
+      await h.reachHub(page);
+      await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        await storyStore(window.__daily.store.key).create('The Long Night');
+      });
+      await shelfOf(h, page);
+      await page.evaluate(async () => {
+        window.__realGetAll = IDBObjectStore.prototype.getAll;
+        IDBObjectStore.prototype.getAll = function (...args) {
+          if (this.name === 'stories' && this.transaction.mode === 'readonly') {
+            throw new DOMException('Cannot read', 'NotReadableError');
+          }
+          return window.__realGetAll.apply(this, args);
+        };
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        await storyStore(window.__daily.store.key).create('Another story');
+      });
+      await page.locator('.st-shelf .dq-cant').waitFor();
+      const preview = await bringIn(page, write(h, 'The Long Night.txt', 'A story brought back.'));
+      h.expect(preview.same, 'a failed title check did not use the same-title behavior');
+      await page.evaluate(() => { IDBObjectStore.prototype.getAll = window.__realGetAll; });
+      await page.getByRole('button', { name: 'Add as a new story' }).click();
+      await page.locator('.st-bring-said', { hasText: '“The Long Night” is on your shelf now.' }).waitFor();
+      const stories = await everything(page);
+      h.expect(stories.filter((story) => story.title === 'The Long Night').length === 2,
+        'the brought-in story did not keep the same-title name');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** Download story, then Bring in a story: the same story again, next to the first, exactly */
   async 'story-bring-in-round-trip'(h) {
     for (const vp of [{ width: 390, height: 844 }, { width: 320, height: 568 }]) {
