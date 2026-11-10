@@ -144,6 +144,93 @@ async function production(h) {
 }
 
 export const scenarios = {
+  async 'cowriter-ideas-kept-when-unread'(h) {
+    const { ctx, page } = await openCtx(h);
+    try {
+      await h.reachHub(page);
+      const ids = await page.evaluate(async () => {
+        const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+        const { story, first } = await ss.create('Ideas kept');
+        const cards = ['First idea', 'Second idea', 'Third idea'].map((text, i) =>
+          ({ id: 'seed-' + i, text, mode: 'questions', t: i + 1 }));
+        await ss.changeCards(first.id, () => cards);
+        return { story: story.id, chapter: first.id };
+      });
+      const openUnread = async () => {
+        await page.evaluate(() => {
+          window.cardGet = IDBObjectStore.prototype.get;
+          IDBObjectStore.prototype.get = function (...args) {
+            if (this.name === 'cards' && this.transaction.mode === 'readonly') {
+              throw new DOMException('Cannot read cards', 'NotReadableError');
+            }
+            return window.cardGet.apply(this, args);
+          };
+        });
+        await page.evaluate((id) => window.__daily.go({ name: 'write', id }), ids.story);
+        await page.getByRole('textbox', { name: /^Page,/ }).waitFor();
+        await openCw(h, page);
+      };
+      const restore = () => page.evaluate(() => { IDBObjectStore.prototype.get = window.cardGet; });
+      const stored = () => page.evaluate(async (id) => {
+        const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+        return ss.cards(id);
+      }, ids.chapter);
+      await openUnread();
+      h.expect(await page.getByText(/Can.t read this chapter.s ideas right now/).isVisible(),
+        'Unread ideas should show the retry panel.');
+      await ask(h, page, 'questions');
+      await restore();
+      let cards = await stored();
+      h.expect(cards.length === 6 && ['First idea', 'Second idea', 'Third idea'].every((t) =>
+        cards.some((c) => c.text === t)), 'Asking while unread lost stored ideas: ' + JSON.stringify(cards));
+      await page.getByRole('button', { name: 'Try again' }).click();
+      h.expect((await page.locator('.st-card').count()) === 6, 'Retry did not show all ideas.');
+      await page.evaluate(() => window.__daily.go({ name: 'hub' }, { quiet: true }));
+      await openUnread();
+      await ask(h, page, 'questions');
+      await newest(page).first().getByRole('button', { name: 'Toss' }).click();
+      await restore();
+      cards = await stored();
+      h.expect(['First idea', 'Second idea', 'Third idea'].every((t) => cards.some((c) => c.text === t)),
+        'Tossing while unread lost stored ideas: ' + JSON.stringify(cards));
+      await page.evaluate(() => window.__daily.go({ name: 'hub' }, { quiet: true }));
+      await openUnread();
+      await page.evaluate(() => {
+        IDBObjectStore.prototype.get = function (...args) {
+          const request = window.cardGet.apply(this, args);
+          if (this.name !== 'cards' || this.transaction.mode !== 'readonly') return request;
+          const held = { ready: false, result: undefined, onsuccess: null, onerror: null };
+          window.heldCards = held;
+          request.onsuccess = () => { held.result = request.result; held.ready = true; };
+          request.onerror = () => held.onerror?.();
+          return held;
+        };
+      });
+      await page.getByRole('button', { name: 'Try again' }).click();
+      await page.waitForFunction(() => window.heldCards?.ready);
+      await page.evaluate(() => window.__daily.go({ name: 'hub' }, { quiet: true }));
+      await page.evaluate(() => window.heldCards.onsuccess());
+      await page.waitForFunction(() => window.__daily.route.name === 'hub');
+      h.expect(!(await page.locator('.st-cards').count()), 'A retry drew on the page after leaving the writer.');
+      await restore();
+      const concurrent = await page.evaluate(async (id) => {
+        const { StoryStore, storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const other = new StoryStore(ss.name, ss.liveKey);
+        const card = (id) => ({ id, mode: 'questions', text: id, t: Date.now() });
+        await Promise.all([
+          ss.changeCards(id, (old) => [card('tab-one'), ...old]),
+          other.changeCards(id, (old) => [card('tab-two'), ...old]),
+        ]);
+        return (await ss.cards(id)).map((c) => c.id);
+      }, ids.chapter);
+      h.expect(concurrent.includes('tab-one') && concurrent.includes('tab-two'),
+        'Two open copies did not keep both new ideas: ' + JSON.stringify(concurrent));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   async 'cowriter-card-edits'(h) {
     const s = await openCtx(h);
     const { page } = s;

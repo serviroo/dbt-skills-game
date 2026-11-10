@@ -206,7 +206,8 @@ export const scenarios = {
         const { storyStore } = await import('/src/daily/storystore.ts');
         const ss = storyStore(window.__daily.store.key);
         const { story, first } = await ss.create('Slow Night');
-        await ss.putCards(first.id, [{ id: 'slow-card', mode: 'continue', text: 'The kettle began to hum.', t: Date.now() }]);
+        await ss.changeCards(first.id,
+          () => [{ id: 'slow-card', mode: 'continue', text: 'The kettle began to hum.', t: Date.now() }]);
         // the page's chapter read waits until the test lets it through, as a slow IndexedDB open would
         const real = ss.chapter;
         let go;
@@ -321,11 +322,12 @@ export const scenarios = {
         const ss = storyStore(window.__daily.store.key);
         const { story, first } = await ss.create('Two Doors');
         const second = await ss.addChapter(story.id, 'Second Door');
-        await ss.putCards(first.id, [
+        await ss.changeCards(first.id, () => [
           { id: 'first-card', mode: 'continue', text: 'The kettle began to hum.', t: Date.now() },
           { id: 'lamp-card', mode: 'continue', text: 'The lamp went out.', t: Date.now() },
         ]);
-        await ss.putCards(second.id, [{ id: 'second-card', mode: 'continue', text: 'The second door stuck.', t: Date.now() }]);
+        await ss.changeCards(second.id,
+          () => [{ id: 'second-card', mode: 'continue', text: 'The second door stuck.', t: Date.now() }]);
         return { id: story.id, notes: story.notes, first: first.id, second: second.id };
       });
       await page.evaluate((r) => window.__daily.go(r), { name: 'write', id });
@@ -493,8 +495,10 @@ export const scenarios = {
         const ss = storyStore(window.__daily.store.key);
         const { story, first } = await ss.create('Two Doors');
         const second = await ss.addChapter(story.id, 'Second Door');
-        await ss.putCards(first.id, [{ id: 'first-card', mode: 'continue', text: 'The kettle began to hum.', t: Date.now() }]);
-        await ss.putCards(second.id, [{ id: 'second-card', mode: 'continue', text: 'The second door stuck.', t: Date.now() }]);
+        await ss.changeCards(first.id,
+          () => [{ id: 'first-card', mode: 'continue', text: 'The kettle began to hum.', t: Date.now() }]);
+        await ss.changeCards(second.id,
+          () => [{ id: 'second-card', mode: 'continue', text: 'The second door stuck.', t: Date.now() }]);
         return { id: story.id, first: first.id, second: second.id };
       });
       const { waitHeld, release, drain } = await holdStorage(page, ['cards']);

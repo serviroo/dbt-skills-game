@@ -13,6 +13,8 @@ import { icon } from './art';
 import { refill } from './artroom';
 import { artStore, revOf, type DrawingMeta } from './artstore';
 import { dayLabel } from './lines';
+import { reading } from './reading';
+import { renderStoryCards } from './story-cards';
 import { dayDiff, dayKey } from './store';
 import { match, spans, terms, type Span } from './storyfind';
 import { creditStory, STORY_CAP, storyStore, type Card, type CardMode, type Chapter, type Story } from './storystore';
@@ -557,6 +559,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   let story: Story | null = null;
   let notesId = '';
   let pageId = '';
+  let cardsUnread = false;
   let tab: 'page' | 'notes' = 'page';
   let cur: Open | null = null;
   /** every tab switch and page open takes a number, and only the newest one's chapter reaches the editor, however
@@ -858,7 +861,8 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
         const copy = await ss.chapter(res.id);
         if (copy) (c.title = copy.title), (c.kind = copy.kind);
         if (pageId === old) {
-          if (cards.length) void ss.putCards(res.id, cards);
+          const copied = cards;
+          if (copied.length) void ss.changeCards(res.id, (old) => [...copied, ...old]);
           pageId = res.id;
         }
         say(STORY.copied, 0);
@@ -1007,7 +1011,9 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     if (n !== picks) return;
     // the page's cards are read aside, and the page and its cards are taken only as its chapter reaches the editor with no
     // newer tap first, so an overtaken open leaves the selection and the cards as they were
+    const read = reading(ss);
     const next = id !== pageId ? await ss.cards(id) : null;
+    const unread = !!next && !next.length && read.failed();
     if (n !== picks) return;
     await load(id, n, () => {
       if (!next) return;
@@ -1016,6 +1022,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
       sel = null;
       syncModes();
       cards = next;
+      cardsUnread = unread;
       renderCards(false);
     });
     await refreshStory();
@@ -1549,13 +1556,9 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
       const t = Date.now();
       if (steer) steers.set(t, steer);
       const batch: Card[] = res.cards.map((text) => ({ id: rid(), mode: m, text, t, ...(usedSel ? { sel: usedSel } : {}) }));
-      if (askPage !== pageId) {
-        // the player moved to another chapter while it was thinking: the cards belong to the chapter the player asked from
-        void ss.cards(askPage).then((old) => ss.putCards(askPage, [...batch, ...old].slice(0, 12)));
-        return;
-      }
-      cards = [...batch, ...cards].slice(0, 12);
-      void ss.putCards(pageId, cards);
+      const next = await ss.changeCards(askPage, (old) => [...batch, ...old].slice(0, 12));
+      if (!alive || askPage !== pageId) return;
+      cards = next;
       renderCards(true);
       if (res.care) care();
     } else showMsg(STORY.msg[res.kind]);
@@ -1585,15 +1588,45 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   };
 
   // ---------- cards ----------
-  /** the open page's cards; a read that answers after another page was opened is dropped, so cards never land on it */
-  const loadCards = async () => {
+  const loadCards = async (present = () => true): Promise<boolean> => {
     const id = pageId;
+    const read = reading(ss);
     const next = id ? await ss.cards(id) : [];
-    if (id !== pageId) return;
+    if (!alive || id !== pageId || !present()) return false;
+    if (!next.length && read.failed()) {
+      if (!cardsUnread) {
+        cardsUnread = true;
+        renderCards(false);
+      }
+      return false;
+    }
     cards = next;
+    cardsUnread = false;
     renderCards(false);
+    return true;
   };
-  const persistCards = () => void ss.putCards(pageId, cards);
+  const changeCards = async (id: string, fn: (stored: Card[]) => Card[], draw = true) => {
+    const next = await ss.changeCards(id, fn);
+    if (!alive || id !== pageId) return;
+    cards = next;
+    if (draw) renderCards(false);
+  };
+  const editCard = (id: string, card: Card) => {
+    const text = card.text;
+    void changeCards(id, (old) => old.map((c) => c.id === card.id ? { ...c, text } : c), false);
+  };
+  const tossCard = (id: string, card: Card) => {
+    const index = cards.indexOf(card);
+    void changeCards(id, (old) => old.filter((c) => c.id !== card.id));
+    visit.toast('Tossed.', { label: 'Undo', run: () => {
+      if (id !== pageId) return;
+      void changeCards(id, (old) => {
+        const next = old.filter((c) => c.id !== card.id);
+        next.splice(Math.min(index, next.length), 0, card);
+        return next.slice(0, 12);
+      });
+    } });
+  };
   /** The page in the editor for an Insert or Replace; false when a newer tap took the editor elsewhere first */
   const toPage = async () => {
     await pageLoaded;
@@ -1745,124 +1778,13 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
       },
     });
   };
-  const cardEl = (c: Card) => {
-    const textEl = h('p', { class: 'st-card-t', text: c.text });
-    const msg = h('p', { class: 'st-card-msg', role: 'status' });
-    let editor: HTMLTextAreaElement | null = null;
-    let editTimer = 0;
-    const value = () => (editor ? editor.value : c.text).trim();
-    const tell = (t: string) => (msg.textContent = t);
-    const acts = h('div', { class: 'st-card-acts' });
-    const card = h('article', { class: `st-card st-card--${c.mode}`, 'data-id': c.id }, h('span', { class: 'st-card-k', text: MODE_LABEL[c.mode] }), textEl, acts, msg);
-    let main: HTMLButtonElement;
-    if (c.mode === 'continue')
-      main = btn('Insert', async () => {
-        const next = await insertText(value());
-        if (next === undefined) return;
-        if (next === null) return tell(STORY.full);
-        afterChange('Added to your page.', next);
-      }, { kind: 'primary', cls: 'dq-btn--sm' });
-    else if (c.mode === 'polish')
-      main = btn('Replace', async () => {
-        const done = await replaceSel(c.sel, value());
-        if (done === undefined) return;
-        if (!done) return tell(STORY.full);
-        const { next, moved } = done;
-        if (moved) {
-          tell(STORY.moved);
-          say(STORY.moved);
-        }
-        afterChange(moved ? STORY.moved : 'Replaced.', next);
-      }, { kind: 'primary', cls: 'dq-btn--sm' });
-    else if (c.mode === 'whatif')
-      main = btn('Add to Notes', async () => {
-        const r2 = await appendNotes(`• ${value()}`);
-        tell(r2 === 'ok' ? STORY.addedNotes : r2 === 'full' ? STORY.full : STORY.notSaving);
-      }, { kind: 'primary', cls: 'dq-btn--sm' });
-    else {
-      main = btn('Answer', () => {
-        if (card.querySelector('.st-answer')) return card.querySelector<HTMLInputElement>('.st-answer input')?.focus();
-        const id = `st-ans-${c.id}`;
-        const inp = h('input', { id, class: 'dq-input', type: 'text', maxlength: 600, autocomplete: 'off', autocapitalize: 'sentences', spellcheck: 'true', enterkeyhint: 'done' });
-        const saveA = async () => {
-          const a = inp.value.trim();
-          if (!a) return inp.focus();
-          const r2 = await appendNotes(`Q: ${value()}\nA: ${a}`);
-          tell(r2 === 'ok' ? 'Saved to Notes.' : r2 === 'full' ? STORY.full : STORY.notSaving);
-          if (r2 === 'ok') row.remove();
-        };
-        inp.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') (e.preventDefault(), void saveA());
-        });
-        const row = h('div', { class: 'st-answer' }, h('label', { for: id, class: 'dq-sr', text: 'Your answer' }), inp, btn('Save', () => void saveA(), { kind: 'primary', cls: 'dq-btn--sm' }));
-        acts.after(row);
-        inp.focus();
-      }, { kind: 'primary', cls: 'dq-btn--sm' });
-    }
-    const editB = btn('Edit', () => {
-      if (editor) {
-        c.text = editor.value;
-        textEl.textContent = c.text;
-        editor.replaceWith(textEl);
-        editor = null;
-        editB.querySelector('.dq-btn-t')!.textContent = 'Edit';
-        persistCards();
-        return;
-      }
-      editor = h('textarea', { class: 'st-card-edit', 'aria-label': `Edit this ${MODE_LABEL[c.mode]} card`, maxlength: STORY_CAP.card, spellcheck: 'true', autocapitalize: 'sentences' }) as HTMLTextAreaElement;
-      editor.value = c.text;
-      editor.addEventListener('input', () => {
-        clearTimeout(editTimer);
-        editTimer = window.setTimeout(() => {
-          if (!editor) return;
-          c.text = editor.value;
-          persistCards();
-        }, 500);
-        editor!.style.height = 'auto';
-        editor!.style.height = `${editor!.scrollHeight + 2}px`;
-      });
-      textEl.replaceWith(editor);
-      editor.style.height = `${Math.max(88, editor.scrollHeight + 2)}px`;
-      editor.focus();
-      editB.querySelector('.dq-btn-t')!.textContent = 'Done';
-    }, { kind: 'quiet', cls: 'dq-btn--sm' });
-    const tossB = btn('Toss', () => {
-      const i = cards.indexOf(c);
-      if (i < 0) return;
-      cards.splice(i, 1);
-      persistCards();
-      renderCards(false);
-      visit.toast('Tossed.', {
-        label: 'Undo',
-        run: () => {
-          cards.splice(Math.min(i, cards.length), 0, c);
-          cards = cards.slice(0, 12);
-          persistCards();
-          renderCards(false);
-        },
-      });
-    }, { kind: 'link', cls: 'st-toss' });
-    acts.append(main, editB, tossB);
-    return card;
-  };
   const renderCards = (fresh: boolean) => {
-    if (!cards.length) {
-      cardsEl.replaceChildren(h('p', { class: 'st-cards-empty', text: STORY.cardsEmpty }));
-      return;
-    }
-    const groups: Card[][] = [];
-    for (const c of cards) {
-      const g = groups[groups.length - 1];
-      if (g && g[0].t === c.t) g.push(c);
-      else groups.push([c]);
-    }
-    cardsEl.replaceChildren(
-      ...groups.map((g, i) => h('div', { class: `st-batch ${i ? 'is-older' : ''}` }, i === 1 ? h('p', { class: 'st-batch-k', text: 'Earlier' }) : null, g.map(cardEl))),
-    );
-    if (fresh && !app.reduced()) {
-      const first = cardsEl.querySelector('.st-batch');
-      if (first) animate(first as HTMLElement, [{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], { duration: 360, easing: 'cubic-bezier(.16,1,.3,1)' });
-    }
+    const id = pageId;
+    renderStoryCards({
+      cardsEl, cards, unread: cardsUnread, retry: loadCards, reduced: () => app.reduced(),
+      edit: (card) => editCard(id, card), toss: (card) => tossCard(id, card),
+      insertText, replaceSel, appendNotes, afterChange, say,
+    }, fresh);
   };
 
   // ---------- on-screen keyboard (iPhone): keep the sheet above it (the app keeps the dock above it) ----------
