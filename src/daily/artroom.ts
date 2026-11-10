@@ -758,6 +758,7 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
   void (async () => {
     await tab.ready;
     await Promise.allSettled([opened.pending]);
+    unsavedName = opened.name;
     if (left) return;
     const draft = await opened.draft(as, kind, tab.id, own(opened.editId));
     if (draft === undefined) {
@@ -804,7 +805,7 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     title: kind === 'ally' ? ART.allyTitle : ART.todayTitle,
     mode: 'sub',
     bubbles: [0, 0],
-    keep: () => opened.keep(() => recId, () => key, () => pendingSave ?? opened.pending ?? null),
+    keep: () => opened.keep(() => recId, () => key, () => pendingSave ?? opened.pending ?? null, () => unsavedName),
     after: () => {
       app.sheetLayer.append(sheet, riseEl);
       ro.observe(main);

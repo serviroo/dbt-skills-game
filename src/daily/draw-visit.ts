@@ -9,6 +9,7 @@ export interface DrawKept {
   readonly id: string | null;
   readonly key: string | undefined;
   readonly pending: Promise<unknown> | null;
+  readonly name: string | null;
 }
 
 export class DrawVisit {
@@ -24,6 +25,9 @@ export class DrawVisit {
   }
   get pending() {
     return this.was?.pending;
+  }
+  get name() {
+    return this.was?.name ?? null;
   }
 
   constructor(private readonly route: Extract<Route, { name: 'draw' }>, visit: Visit) {
@@ -55,9 +59,17 @@ export class DrawVisit {
     this.held = true;
   }
 
-  keep(id: () => string | null, key: () => string, pending: () => Promise<unknown> | null): DrawKept {
+  keep(
+    id: () => string | null,
+    key: () => string,
+    pending: () => Promise<unknown> | null,
+    name: () => string | null,
+  ): DrawKept {
     const v = this;
     return {
+      get name() {
+        return name();
+      },
       get pending() {
         return pending();
       },
