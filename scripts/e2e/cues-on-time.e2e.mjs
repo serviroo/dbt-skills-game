@@ -23,6 +23,7 @@ const PER = 5;
 const RATES = [4, 10, 20];
 // visuals lead their sound by 1 or 2 frames (DESIGN.md)
 const LEAD = 2 / 60;
+const STALL = 3 * LEAD;
 // its first quanta above a twentieth of its loudest where it rings louder than what still sounds from the cues before it
 const ONSET = 6;
 // and the rest of it through its tail, in parts by how much of its energy has come: to half, 90%, 99% and 99.9%
@@ -65,10 +66,20 @@ async function boot(h, levels) {
     const clock = window.__taps[tap].context;
     window.__behind = [];
     window.__watch = false;
+    window.__stall = 0;
     const behind = (what, t) => {
       if (window.__watch && t > 0 && t < clock.currentTime) window.__behind.push([what, clock.currentTime - t]);
     };
-    tapAudioSchedule((_, method, args, time) => behind(method, time));
+    const stall = (what) => {
+      if (!window.__watch || !window.__stall || what !== 'start') return;
+      const until = clock.currentTime + window.__stall;
+      window.__stall = 0;
+      while (clock.currentTime < until);
+    };
+    tapAudioSchedule((_, method, args, time) => {
+      stall(method);
+      behind(method, time);
+    });
     return tap;
   });
   return { ctx, page, errors, tap };
@@ -79,8 +90,15 @@ async function recordOpens() {
   const open = Voice.prototype.open;
   window.__opens = [];
   Voice.prototype.open = function (at) {
-    if (window.__watch) window.__opens.push(at);
-    return open.call(this, at);
+    const from = window.__behind.length;
+    const r = open.call(this, at);
+    if (window.__watch) window.__opens.push({ voice: this, at, from, to: window.__behind.length });
+    return r;
+  };
+  window.__heard = (since) => {
+    const opens = window.__opens.slice(since);
+    for (const o of opens.toReversed()) if (o.voice.isStopped) window.__behind.splice(o.from, o.to - o.from);
+    return opens.filter((o) => !o.voice.isStopped).map((o) => o.at);
   };
 }
 
@@ -117,7 +135,7 @@ async function startsOnTimeHoweverSlowItsBuild(h, kind) {
     const started = [];
     for (const rate of RATES) {
       await cdp.send('Emulation.setCPUThrottlingRate', { rate });
-      started.push(...(await page.evaluate(async ([kind, hold, rate, LEAD, tap, Q]) => {
+      started.push(...(await page.evaluate(async ([kind, hold, rate, LEAD, STALL, tap, Q]) => {
         const { BED_NAMES } = await import('/src/audio/beds.ts');
         const { SECTIONS } = await import('/src/audio/music.ts');
         const { stoppedBy } = await import('/src/audio/voice.ts');
@@ -152,12 +170,16 @@ async function startsOnTimeHoweverSlowItsBuild(h, kind) {
           const opened = window.__opens.length;
           const ask = clock.currentTime;
           const t0 = performance.now();
+          window.__stall = STALL;
           window.__watch = true;
           const handle = start();
           window.__watch = false;
+          const stalled = !window.__stall;
+          window.__stall = 0;
           const ms = performance.now() - t0;
-          const opens = window.__opens.slice(opened);
-          out.push({ name, rate, ask, done: clock.currentTime, ms, behind: window.__behind.slice(was), opens });
+          const opens = window.__heard(opened);
+          const behind = window.__behind.slice(was);
+          out.push({ name, rate, ask, done: clock.currentTime, ms, behind, opens, stalled });
           await reach(Math.max(ask, ...opens) + hold);
           const at = clock.currentTime + LEAD;
           stop(handle, at);
@@ -176,7 +198,7 @@ async function startsOnTimeHoweverSlowItsBuild(h, kind) {
         }
         await play('hush', () => engine.hush(), (_, at) => engine.unhush(at));
         return out;
-      }, [kind, hold, rate, LEAD, tap, Q])));
+      }, [kind, hold, rate, LEAD, STALL, tap, Q])));
     }
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
     await audioRecorded(page, tap, Math.max(...started.map((s) => Math.max(s.ask, ...s.opens))) + hold);
@@ -196,6 +218,7 @@ async function startsOnTimeHoweverSlowItsBuild(h, kind) {
         const worst = worstMs.toFixed(1);
         why.push(`${s.behind.length} of its parts were placed up to ${worst} ms behind the clock (${where})`);
       }
+      if (!s.stalled) why.push('the page never stalled while it was placed, so the stall was not tested');
       if (!s.opens.length) why.push('it never opened');
       else if (at < s.ask - 1e-4 || at > s.done + LEAD + 1e-4) why.push(`it opens ${leadMs} ms past the clock`);
       if (lag > 1e-6) why.push(`its parts opened ${(lag * 1000).toFixed(1)} ms apart`);
@@ -220,6 +243,7 @@ export const scenarios = {
   async 'every-cue-plays-whole-and-on-time-on-a-busy-page'(h) {
     const { ctx, page, errors, tap } = await boot(h, { music: 0, sfx: 1 });
     try {
+      await page.evaluate(recordOpens);
       await page.evaluate(async () => {
         const { AudioEngine } = await import('/src/audio/engine.ts');
         const play = AudioEngine.prototype.play;
@@ -228,10 +252,14 @@ export const scenarios = {
           const ask = this.ctx.currentTime;
           const t0 = performance.now();
           const was = window.__behind.length;
+          const opened = window.__opens.length;
           window.__watch = true;
           try {
             const hd = play.call(this, cue, o);
-            window.__plays.push({ cue, ask, done: this.ctx.currentTime, ms: performance.now() - t0, end: hd.end, behind: window.__behind.length - was });
+            const done = this.ctx.currentTime;
+            window.__heard(opened);
+            const behind = window.__behind.length - was;
+            window.__plays.push({ cue, ask, done, ms: performance.now() - t0, end: hd.end, behind });
             return hd;
           } finally {
             window.__watch = false;
@@ -410,7 +438,7 @@ export const scenarios = {
             window.__watch = true;
             fn();
             window.__watch = false;
-            const opens = window.__opens.slice(opened);
+            const opens = window.__heard(opened);
             const ms = performance.now() - t0;
             return { name, rate, ask, done: clock.currentTime, ms, behind: window.__behind.slice(was), opens };
           };

@@ -1,6 +1,6 @@
 import { mulberry32, type Rng } from '../core/math';
 import { tanhCurve, type Ctx } from './dsp';
-import { silentAfter } from './param';
+import { silentAfter, soon } from './param';
 
 /** Shared, engine-owned resources every voice can draw on. */
 export interface Lib {
@@ -51,6 +51,7 @@ const gainOf = new WeakMap<AudioParam, GainNode>();
 const clockOf = new WeakMap<GainNode, Voice>();
 const silentFrom = new WeakMap<GainNode, { last: number; at: number; peak: number }>();
 const SAME = 1e-9;
+const MAX_TRIES = 3;
 const through = new WeakMap<GainNode, Source[]>();
 
 export interface VoiceOpts {
@@ -75,6 +76,17 @@ interface Placing {
 function keep(held: Placing[], t: number, place: (at: number) => void, cancels = false) {
   const cancelsBefore = (held[held.length - 1]?.cancelsBefore ?? 0) + (cancels ? 1 : 0);
   held.push({ t, cancelsBefore, place });
+}
+
+export function openBuilt<T>(built: T, build: () => T, voice: (b: T) => Voice, when: () => number) {
+  let slowest = 0;
+  for (let tries = 1; ; tries++) {
+    const at = when() + (tries < MAX_TRIES ? 0 : slowest);
+    const from = performance.now();
+    if (voice(built).inTime(at, tries === MAX_TRIES)) return { built, at };
+    slowest = Math.max(slowest, (performance.now() - from) / 1000);
+    built = build();
+  }
 }
 
 /**
@@ -106,6 +118,7 @@ export class Voice {
   private parts: Voice[] = [];
   private clock: Voice = this;
   private zero = 0;
+  private readonly level: number;
 
   constructor(readonly lib: Lib, t: number, dest: AudioNode, o: VoiceOpts = {}, seed = 1) {
     const ctx = lib.ctx;
@@ -118,7 +131,7 @@ export class Voice {
     this.out = ctx.createGain();
     this.wet = ctx.createGain();
     this.dry = ctx.createGain();
-    const g = o.gain ?? 1;
+    const g = (this.level = o.gain ?? 1);
     this.wet.gain.value = g;
     this.dry.gain.value = g;
     this.wet.connect(this.out);
@@ -160,6 +173,20 @@ export class Voice {
     this.release(at);
     held.sort((a, b) => a.cancelsBefore - b.cancelsBefore || a.t + at - (b.t + at));
     for (const h of held) h.place(at);
+  }
+
+  inTime(at: number, force: boolean) {
+    this.wet.gain.value = 0;
+    this.dry.gain.value = 0;
+    this.open(at);
+    const ahead = this.ctx.state === 'running' ? (this.ctx as AudioContext).baseLatency || 0 : 0;
+    if (!force && this.ctx.currentTime + ahead > at) {
+      this.stop(soon(this.ctx), 0);
+      return false;
+    }
+    this.wet.gain.setValueAtTime(this.level, at);
+    this.dry.gain.setValueAtTime(this.level, at);
+    return true;
   }
 
   private release(at: number) {
