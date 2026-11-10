@@ -286,6 +286,7 @@ export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut 
     const n = ++seq;
     const storyRead = reading(ss);
     const stories = await ss.list();
+    if (!alive || n !== seq) return false;
     const storyFailed = storyRead.failed();
     const removedRead = reading(ss);
     const gone = await ss.removed();
@@ -390,7 +391,7 @@ export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut 
     if (result === 'unread') {
       findN.textContent = '';
       if (!found.querySelector('.dq-cant')) {
-        found.replaceChildren(h('li', {}, cantOpen('search', async () => { await render(); return find(); })));
+        found.replaceChildren(h('li', {}, cantOpen('search', async () => { await render(); return alive && find(); })));
       }
       return false;
     }

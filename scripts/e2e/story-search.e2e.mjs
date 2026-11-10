@@ -236,6 +236,42 @@ export const scenarios = {
       await held.drain();
       h.expect(await page.evaluate(() => window.__daily.route.name === 'safe'),
         'retry changed the screen after leaving');
+      await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        ss.chapter = ss.__real.chapter;
+        window.__daily.go({ name: 'stories' });
+      });
+      await field(page).waitFor();
+      await page.evaluate(() => { IDBObjectStore.prototype.get = window.__failedGet; });
+      await field(page).fill('lantern');
+      await searchError.waitFor();
+      await page.evaluate(() => { IDBObjectStore.prototype.get = window.__realGet; });
+      const shelfHeld = await holdStorage(page, ['list']);
+      await page.locator('.st-found .dq-cant').getByRole('button', { name: 'Try again' }).click();
+      await shelfHeld.waitHeld('list undefined');
+      await page.evaluate(async () => {
+        window.__daily.go({ name: 'safe' });
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        ss.list = ss.__real.list;
+      });
+      await routeIs(page, 'safe');
+      await shelfHeld.drain();
+      await h.sleep(500);
+      await page.evaluate(async (id) => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const story = await ss.story(id);
+        const chapter = await ss.chapter(story.chapters[0]);
+        await ss.saveChapter({ ...chapter, text: 'The lamps were lit.' }, [chapter.rev]);
+        window.__daily.go({ name: 'stories' });
+      }, ids.harbour);
+      await field(page).waitFor();
+      h.expect(await field(page).inputValue() === '', 'fresh visit kept the old search');
+      h.expect(await page.locator('.st-found-story').count() === 0, 'fresh visit drew old search results');
+      const fresh = await search(h, page, 'lantern');
+      h.expect(fresh.stories.length === 0, 'retry after leaving cached stale search results');
       h.expect(!bad.length, bad.join('; '));
       h.expect(!errors.length, errors.join('\n'));
     } finally {
