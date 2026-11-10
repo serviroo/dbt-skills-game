@@ -4,9 +4,9 @@ import './cant-open.css';
 
 export type CantOpenWhat = 'story' | 'chapters' | 'storyText' | 'drawing' | 'stories' | 'drawings' | 'ideas';
 
-export function cantOpen(what: CantOpenWhat, again: () => Promise<boolean>): HTMLElement {
+export function cantOpen(what: CantOpenWhat, again: () => Promise<boolean>, retried = false): HTMLElement {
   const title = h('h2', { class: 'dq-cant-t', 'data-focus': '', tabindex: '-1', text: typo(CANT_OPEN[what]) });
-  const note = p(CANT_OPEN.note);
+  const note = p(retried ? CANT_OPEN.still : CANT_OPEN.note);
   const retry = btn(CANT_OPEN.retry, () => void tryAgain());
   const label = retry.querySelector('.dq-btn-t')!;
   const busy = (on: boolean) => {

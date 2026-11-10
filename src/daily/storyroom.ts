@@ -513,7 +513,10 @@ type Sel = { start: number; end: number; text: string };
 export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const r = route as Extract<Route, { name: 'write' }>;
   // a search result opening this page hands over its words; Back or Forward to it brings none, so the page is as they left it
-  const found = r.find && typeof visit.handed === 'string' ? { q: visit.handed, at: r.find.at } : null;
+  const incoming = visit.handed;
+  const retry = typeof incoming === 'object' && incoming !== null && 'writerRetry' in incoming;
+  const handed = retry && 'handed' in incoming ? incoming.handed : incoming;
+  const found = r.find && typeof handed === 'string' ? { q: handed, at: r.find.at } : null;
   const ss = store(app);
   const storyId = r.id;
   const offs: (() => void)[] = [];
@@ -550,7 +553,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   /** resolves once the story's first page exists, which opening a story with no pages makes first */
   let pageMade!: () => void;
   const pageExists = new Promise<void>((done) => (pageMade = done));
-
   // ---- head: title, chapter bar ----
   const titleIn = h('input', { class: 'st-title', type: 'text', maxlength: 120, placeholder: STORY.untitled, 'aria-label': 'Story title', autocomplete: 'off', autocapitalize: 'words', spellcheck: 'true', enterkeyhint: 'done' });
   const chLabel = h('span', { class: 'st-chbtn-t' });
@@ -561,7 +563,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const menu = h('div', { class: 'st-menu is-hidden', role: 'menu', 'aria-label': 'Story' });
   const moreWrap = h('div', { class: 'st-morewrap' }, moreBtn, menu);
   const note = h('p', { class: 'st-note', role: 'status', 'aria-live': 'polite' });
-
   // ---- a starting point: one scripted line at a time, written to the page only on Use this ----
   const starts = shuffled(STORY_START.prompts);
   let startAt = 0;
@@ -584,7 +585,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const picT = h('span', { class: 'st-pic-t', text: STORY_DRAWING.add });
   const picBtn = h('button', { type: 'button', class: 'st-start-tg st-pic-b', 'aria-haspopup': 'dialog', onclick: () => void openDrawings() }, picIc, picThumb, picT);
   const start = h('div', { class: 'st-start' }, startBtn, picBtn, startBox);
-
   // ---- the page ----
   const ta = h('textarea', { class: 'st-ta', maxlength: STORY_CAP.text, spellcheck: 'true', autocapitalize: 'sentences', autocomplete: 'off', 'aria-label': 'Your page', placeholder: 'Start anywhere.', rows: 8 }) as HTMLTextAreaElement;
   // a place found by search, marked behind the text (same box and type as the page) until the page changes
@@ -594,7 +594,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const unmark = () => hl.firstChild && hl.replaceChildren();
   // once they type, the page is theirs: a search still opening it marks nothing and leaves the cursor where they are
   let typed = false;
-
   // ---- dock ----
   const undoB = h('button', { type: 'button', class: 'dq-icbtn st-dock-b', 'aria-label': 'Undo', html: icon('undo'), disabled: true, onclick: () => undo() });
   const redoB = h('button', { type: 'button', class: 'dq-icbtn st-dock-b', 'aria-label': 'Redo', html: icon('redo'), disabled: true, onclick: () => redo() });
@@ -605,7 +604,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const dock = h('div', { class: 'st-dock' }, h('div', { class: 'st-dock-in' }, undoB, redoB, stateEl, cwBtn));
   /** Where the page shows down to: above the dock and any keyboard under it, where a scroll stops (app.ts). */
   const pageEnd = () => app.root.getBoundingClientRect().bottom - (parseFloat(getComputedStyle(app.root).scrollPaddingBottom) || 0);
-
   // ---- co-writer ----
   let mode: CardMode = 'continue';
   let cards: Card[] = [];
@@ -643,11 +641,9 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     wait,
     cardsEl,
   );
-
   const main = h('div', { class: 'st-main' }, titleIn, h('div', { class: 'st-bar' }, chBtn, seg, moreWrap),
     note, start, readError, frame, dock);
   const el = h('div', { class: 'st-write' }, h('h1', { class: 'dq-sr', 'data-focus': '', text: 'Your story' }), main, cw);
-
   // ---------- save state ----------
   const atCap = () => !!cur && ta.value.length >= STORY_CAP.text;
   const syncState = () => {
@@ -663,7 +659,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     clearTimeout(noteTimer);
     if (ms) noteTimer = window.setTimeout(() => (note.textContent = ''), ms);
   };
-
   // ---------- undo / redo ----------
   const snap = (): Snap => ({ text: ta.value, s: ta.selectionStart, e: ta.selectionEnd });
   const H = () => {
@@ -748,7 +743,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     syncUndo();
     return true;
   };
-
   // ---------- page size ----------
   const grow = () => {
     const sc = app.root.scrollTop;
@@ -756,7 +750,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     ta.style.height = `${ta.scrollHeight + 2}px`;
     app.root.scrollTop = sc;
   };
-
   // ---------- saving ----------
   const live = (force = false) => {
     if (!cur) return;
@@ -852,7 +845,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     pinLive();
     for (let i = 0; i < 6 && (saving || dirty); i++) await (saving ?? save());
   };
-
   // ---------- story, chapters ----------
   const syncSeg = () => segBtns.forEach((b, i) => b.setAttribute('aria-checked', String((i === 0 ? 'page' : 'notes') === tab)));
   const refreshStory = async () => {
@@ -895,7 +887,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   on(titleIn, 'keydown', (e) => {
     if ((e as KeyboardEvent).key === 'Enter') titleIn.blur();
   });
-
   /** `taking` runs as the chapter reaches the editor, only if no newer tap came first */
   const load = async (id: string, n = ++picks, taking?: () => void) => {
     const c = await ss.chapter(id);
@@ -998,7 +989,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     });
     await refreshStory();
   };
-
   // ---------- chapter sheet ----------
   let sheet: HTMLElement | null = null;
   let sheetDone: (() => void) | null = null;
@@ -1157,7 +1147,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     showSheet(wrap, body);
     list.querySelector<HTMLElement>('[aria-current="true"]')?.focus({ preventScroll: true });
   };
-
   // ---------- a drawing above the page ----------
   const { showPic, openDrawings, update: updatePictures } = storyPictures({
     app, ss, storyId, current: () => cur, alive: () => alive, closeSheet, flushAll, syncState,
@@ -1177,15 +1166,14 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     }
     await refreshStory();
   };
-
   // ---------- more menu ----------
   let prepared: Promise<{ text: string; name: string } | null> | null = null;
   const storyText = async () => {
     await flushAll();
     const result = await outcome(ss, async (failed) => {
       const s = await ss.story(storyId, true);
-      if (!s) return null;
-      const results = await Promise.all(s.chapters.map((id) => ss.chapter(id)));
+      if (!s && failed()) return null;
+      const results = await Promise.all((s?.chapters ?? []).map((id) => ss.chapter(id)));
       if (results.some((c) => !c) && failed()) return null;
       const chs = results.filter((c): c is Chapter => !!c);
       // the open page always goes out as the editor holds it, saved or not
@@ -1280,7 +1268,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     await ss.remove(storyId);
     visit.back({ text: 'Story removed.', action: { label: 'Undo', run: () => void ss.putBack(storyId) } });
   };
-
   // ---------- selection ----------
   const syncModes = () => {
     if (mode === 'polish' && !sel) mode = 'continue';
@@ -1312,7 +1299,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   on(document, 'selectionchange', () => {
     if (document.activeElement === ta) track();
   });
-
   // ---------- typing ----------
   on(ta, 'input', () => ((typed = true), unmark()));
   on(ta, 'input', (e) => {
@@ -1738,10 +1724,18 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   on(window, 'resize', grow);
 
   // ---------- start ----------
+  const cantShow = () => {
+    main.replaceChildren(cantOpen('story', async () => {
+      app.go(route, { replace: true, quiet: true, hand: { writerRetry: true, handed } });
+      return true;
+    }, retry));
+    cw.classList.add('is-hidden');
+  };
   const init = async () => {
     await ss.sweepLives();
-    const s = await ss.story(storyId);
+    const s = await outcome(ss, () => ss.story(storyId));
     if (!alive) return;
+    if (s === 'unread') return cantShow();
     if (!s || s.removed) {
       main.replaceChildren(h('div', { class: 'dq-panel st-empty' }, h('p', { class: 'st-empty-t', text: STORY.gone }), h('div', { class: 'dq-actions' }, btn('Story Room', () => app.go({ name: 'stories' }, { replace: true }), { kind: 'primary' }))));
       cw.remove();
@@ -1753,7 +1747,13 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     pageId = pageOf(visit, r.ch, s);
     // the first page takes its number now, so a Page or Notes tap while the chapter is made or its cards are read wins
     const n = ++picks;
-    if (!pageId) pageId = (await ss.addChapter(storyId)).id;
+    if (!pageId) {
+      const first = await outcome(ss, () => ss.addChapter(storyId));
+      if (!alive) return;
+      if (first === 'unread') return cantShow();
+      if (!first) return;
+      pageId = first.id;
+    }
     pageMade();
     await loadCards();
     // search can open the notes; the Page tab then goes to the first chapter
