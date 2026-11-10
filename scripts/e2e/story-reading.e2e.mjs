@@ -103,6 +103,138 @@ const CH2 = 'In spring the door opened by itself.\n\nOutside, the path went on f
 const NAMES = ['A regular', 'A larger', 'A largest'];
 
 export const scenarios = {
+  async 'story-that-cant-be-read-says-so'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await h.reachHub(page);
+      const ids = await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const { story, first } = await ss.create('Two Doors');
+        await ss.saveChapter({ ...first, text: 'The first door.' }, [first.rev]);
+        const second = await ss.addChapter(story.id, 'Second Door');
+        await ss.saveChapter({ ...second, text: 'The second door.' }, [second.rev]);
+        window.__realGet = IDBObjectStore.prototype.get;
+        window.__failRead = (store, key) => {
+          IDBObjectStore.prototype.get = function (id) {
+            if (this.name === store && this.transaction.mode === 'readonly' && (!key || id === key)) {
+              throw new DOMException('Read failed', 'NotReadableError');
+            }
+            return window.__realGet.call(this, id);
+          };
+        };
+        window.__failRead('stories');
+        return { story: story.id, second: second.id, notes: story.notes };
+      });
+      await page.evaluate((id) => window.__daily.go({ name: 'write', id }), ids.story);
+      const storyError = page.getByText(/Can.t open this story right now/);
+      await storyError.waitFor({ timeout: 3000 }).catch(() => {});
+      h.expect(await storyError.isVisible(), "an unreadable story didn't say it can't open");
+      h.expect(!(await page.locator('.st-cw').isVisible()), 'the co-writer showed beside an unreadable story');
+      h.expect(!(await page.getByText(/This story isn.t on this device any more/).isVisible()),
+        'an unreadable story was called gone');
+      const held = await holdStorage(page, ['story']);
+      await page.getByRole('button', { name: 'Try again' }).click();
+      await held.waitHeld(`story ${ids.story}`);
+      await page.evaluate(() => window.__daily.go({ name: 'hub' }));
+      await routeIs(page, 'hub');
+      await held.drain();
+      h.expect(await page.evaluate(() => window.__daily.route.name === 'hub'), 'a late retry reopened the story');
+      await page.evaluate(async () => {
+        IDBObjectStore.prototype.get = window.__realGet;
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        ss.story = ss.__real.story;
+      });
+      await page.evaluate((id) => window.__daily.go({ name: 'write', id }), ids.story);
+      const box = page.getByRole('textbox', { name: /^Page,/ });
+      await box.waitFor();
+      h.expect((await box.inputValue()) === 'The first door.', 'the story did not open after storage returned');
+      await page.locator('.st-chbtn').click();
+      const second = page.locator('.st-chrow-b', { hasText: 'Second Door' });
+      await second.waitFor();
+      await page.evaluate((id) => window.__failRead('chapters', id), ids.second);
+      await second.click();
+      const chapterError = page.getByText(/Can.t open this chapter right now/);
+      await chapterError.waitFor({ timeout: 3000 }).catch(() => {});
+      h.expect(await chapterError.isVisible(), "an unreadable chapter didn't say it can't open");
+      h.expect((await box.inputValue()) === 'The first door.', 'an unreadable chapter changed the open page');
+      await page.evaluate(() => { IDBObjectStore.prototype.get = window.__realGet; });
+      await page.getByRole('button', { name: 'Try again' }).click();
+      await page.getByRole('textbox', { name: 'Page, Second Door' }).waitFor();
+      await page.evaluate((id) => window.__failRead('chapters', id), ids.notes);
+      await page.getByRole('radio', { name: 'Show: Notes' }).click();
+      await page.getByText(/Can.t open this chapter right now/).waitFor();
+      h.expect((await page.getByRole('textbox', { name: 'Page, Second Door' }).inputValue()) === 'The second door.',
+        'unreadable Notes changed the open page');
+      h.expect((await page.getByRole('radio', { name: 'Show: Page' }).getAttribute('aria-checked')) === 'true',
+        'unreadable Notes changed the selected tab');
+      await page.evaluate(() => { IDBObjectStore.prototype.get = window.__realGet; });
+      await page.getByRole('button', { name: 'Try again' }).click();
+      await page.getByRole('textbox', { name: 'Notes for this story' }).waitFor();
+      await page.getByRole('radio', { name: 'Show: Page' }).click();
+      await page.getByRole('textbox', { name: 'Page, Second Door' }).waitFor();
+
+      await page.evaluate((id) => window.__failRead('chapters', id), ids.second);
+      await page.locator('.st-chbtn').click();
+      const listError = page.getByText(/Can.t read the chapters right now/);
+      await listError.waitFor();
+      h.expect((await page.locator('.st-chrow').count()) === 0, 'the chapter list showed a partial list');
+      await page.evaluate(() => { IDBObjectStore.prototype.get = window.__realGet; });
+      await page.getByRole('button', { name: 'Try again' }).click();
+      await page.waitForFunction(() => document.querySelectorAll('.st-chrow').length === 2);
+      h.expect((await page.locator('.st-chrow').count()) === 2, 'retry did not restore the full chapter list');
+      await page.getByRole('button', { name: 'Close the chapter list' }).click();
+
+      await page.evaluate((id) => window.__failRead('chapters', id), ids.second);
+      await page.getByRole('button', { name: 'More', exact: true }).click();
+      await page.getByRole('menuitem', { name: 'Download story' }).click();
+      await page.getByText(/Can.t share this story as text right now/).waitFor();
+      await page.evaluate(() => { IDBObjectStore.prototype.get = window.__realGet; });
+      const pending = page.waitForEvent('download');
+      await page.getByRole('button', { name: 'Try again' }).click();
+      const text = fs.readFileSync(await (await pending).path(), 'utf8');
+      h.expect(text.includes('The first door.') && text.includes('The second door.'), 'the download missed a chapter');
+
+      await page.evaluate((id) => window.__failRead('chapters', id), ids.second);
+      await page.evaluate((id) => window.__daily.go({ name: 'read', id }), ids.story);
+      await page.getByText(/Can.t open this story right now/).waitFor();
+      h.expect((await page.locator('.st-read-text').count()) === 0, 'the reader showed a partial story');
+      h.expect(!(await page.locator('.st-read-tools').isVisible()), 'the reader showed size controls without a story');
+      await page.evaluate(() => { IDBObjectStore.prototype.get = window.__realGet; });
+      await page.getByRole('button', { name: 'Try again' }).click();
+      await page.locator('.st-read-text').first().waitFor();
+      await page.getByRole('button', { name: 'Back to writing' }).click();
+      await routeIs(page, 'write');
+      const memory = await page.evaluate(async (id) => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        await ss.remove(id);
+        const { story, first } = await ss.create('Held Here');
+        IDBObjectStore.prototype.get = function (key) {
+          if (this.name === 'chapters' && this.transaction.mode === 'readwrite' && key === first.id) {
+            throw new DOMException('Write failed', 'NotReadableError');
+          }
+          return window.__realGet.call(this, key);
+        };
+        const saved = await ss.saveChapter({ ...first, text: 'Kept here.' }, [first.rev]);
+        IDBObjectStore.prototype.get = window.__realGet;
+        return { story: story.id, chapter: first.id, saved: saved.stored };
+      }, ids.story);
+      h.expect(memory.saved === 'failed', 'the memory-only chapter was not made with a failed write');
+      await page.evaluate((id) => window.__daily.go({ name: 'write', id }), ids.story);
+      await page.getByText(/This story isn.t on this device any more/).waitFor();
+      await page.evaluate((id) => window.__failRead('chapters', id), memory.chapter);
+      await page.evaluate((id) => window.__daily.go({ name: 'write', id }), memory.story);
+      const memoryBox = page.getByRole('textbox', { name: /^Page,/ });
+      await memoryBox.waitFor();
+      h.expect((await memoryBox.inputValue()) === 'Kept here.', 'the chapter held in memory did not open');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** Another shows a new line each time, nothing is kept before Use this, and Use this writes it at the cursor */
   async 'story-starting-points'(h) {
     const { ctx, page, errors } = await h.open(seed(h));

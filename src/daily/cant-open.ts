@@ -2,7 +2,8 @@ import { CANT_OPEN } from '../content/daily-lines';
 import { btn, h, p, panel, row, typo } from './ui';
 import './cant-open.css';
 
-export type CantOpenWhat = 'story' | 'drawing' | 'stories' | 'drawings' | 'ideas';
+export type CantOpenWhat = 'story' | 'chapter' | 'chapters' | 'storyText' | 'drawing' | 'stories' | 'drawings'
+  | 'ideas';
 
 export function cantOpen(what: CantOpenWhat, again: () => Promise<boolean>): HTMLElement {
   const title = h('h2', { class: 'dq-cant-t', 'data-focus': '', tabindex: '-1', text: typo(CANT_OPEN[what]) });
