@@ -160,10 +160,18 @@ export const scenarios = {
       await waitHeld(`chapter ${second}`);
       await secondBox.press('End');
       await secondBox.pressSequentially(' in the window');
+      await secondBox.evaluate((el) => {
+        window.__reopened = false;
+        const observer = new MutationObserver(() => {
+          window.__reopened = true;
+          observer.disconnect();
+        });
+        observer.observe(el, { attributes: true, attributeFilter: ['aria-label'] });
+      });
       await h.poll(page, async () => {
         await drain();
-        return shownIn(page);
-      }, (shown) => shown.box === 'Page, Second Door' && shown.text.endsWith(' in the window'),
+        return { ...(await shownIn(page)), reopened: await page.evaluate(() => window.__reopened) };
+      }, (shown) => shown.reopened && shown.box === 'Page, Second Door' && shown.text.endsWith(' in the window'),
       (shown) => `reopening the current chapter lost words: ${JSON.stringify(shown)}`,
       { timeout: 8000, polling: 50 });
       const afterReopen = await disk([second]);
