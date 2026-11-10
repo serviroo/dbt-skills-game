@@ -13,7 +13,7 @@ import { icon } from './art';
 import { artStore } from './artstore';
 import { cantOpen } from './cant-open';
 import { drawingFig, drawingsOf, picOf, storyPictures } from './story-pics';
-import { reading } from './reading';
+import { outcome, reading } from './reading';
 import { renderStoryCards } from './story-cards';
 import { dayDiff, dayKey } from './store';
 import { match, spans, terms, type Span } from './storyfind';
@@ -587,7 +587,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
 
   // ---- the page ----
   const ta = h('textarea', { class: 'st-ta', maxlength: STORY_CAP.text, spellcheck: 'true', autocapitalize: 'sentences', autocomplete: 'off', 'aria-label': 'Your page', placeholder: 'Start anywhere.', rows: 8 }) as HTMLTextAreaElement;
-  ta.disabled = true;
   // a place found by search, marked behind the text (same box and type as the page) until the page changes
   const hl = h('div', { class: 'st-hl', 'aria-hidden': 'true' });
   const frame = h('div', { class: 'dq-panel st-frame' }, h('span', { class: 'dq-hairbar', 'aria-hidden': 'true' }), hl, ta);
@@ -632,7 +631,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const cardsEl = h('div', { class: 'st-cards', 'aria-live': 'polite' });
   const cw = h(
     'aside',
-    { class: 'st-cw dq-panel', id: 'st-cw', 'aria-labelledby': 'st-cw-h' },
+    { class: 'st-cw dq-panel is-hidden', id: 'st-cw', 'aria-labelledby': 'st-cw-h' },
     h('span', { class: 'dq-hairbar', 'aria-hidden': 'true' }),
     h('header', { class: 'st-cw-top' }, cwHead, cwClose),
     h('div', { class: 'dq-opts dq-opts--grid st-modes', role: 'group', 'aria-label': 'What kind of help' }, modeBtns),
@@ -645,10 +644,10 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     cardsEl,
   );
 
-  const main = h('div', { class: 'st-main' }, titleIn, h('div', { class: 'st-bar' }, chBtn, seg, moreWrap),
-    note, start, readError, frame, dock);
+  const writeContents = [titleIn, h('div', { class: 'st-bar' }, chBtn, seg, moreWrap),
+    note, start, readError, frame, dock];
+  const main = h('div', { class: 'st-main' });
   const el = h('div', { class: 'st-write' }, h('h1', { class: 'dq-sr', 'data-focus': '', text: 'Your story' }), main, cw);
-  const writeContents = [...main.childNodes];
 
   // ---------- save state ----------
   const atCap = () => !!cur && ta.value.length >= STORY_CAP.text;
@@ -898,10 +897,10 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
 
   /** `taking` runs as the chapter reaches the editor, only if no newer tap came first */
   const load = async (id: string, n = ++picks, taking?: () => void) => {
-    const read = reading(ss);
-    const c = await ss.chapter(id);
+    const c = await outcome(ss, () => ss.chapter(id));
     if (!alive || n !== picks) return false;
-    if (!c) return read.failed() ? 'unread' : false;
+    if (c === 'unread') return c;
+    if (!c) return false;
     readError.replaceChildren();
     shown = n;
     taking?.();
@@ -921,7 +920,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     }
     cur = { id: c.id, kind: c.kind, title: c.title, bases };
     pageIn();
-    startBtn.disabled = ta.disabled = false;
+    startBtn.disabled = false;
     tab = c.kind === 'notes' ? 'notes' : 'page';
     unmark();
     ta.value = text;
@@ -1051,21 +1050,21 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     let renderTurn = 0;
     const render = async (report = true): Promise<boolean> => {
       const turn = ++renderTurn;
-      const read = reading(ss);
-      const s = await ss.story(storyId);
+      const result = await outcome(ss, async (failed) => {
+        const s = await ss.story(storyId);
+        if (!s) return null;
+        const results = await Promise.all(s.chapters.map((id) => ss.chapter(id)));
+        if (results.some((c) => !c) && failed()) return null;
+        return { s, chs: results.filter((c): c is Chapter => !!c) };
+      });
       if (!alive || sheet !== wrap || turn !== renderTurn) return false;
-      if (!s) {
-        if (read.failed() && report) list.replaceChildren(h('li', {}, cantOpen('chapters', () => render(false))));
-        return false;
-      }
-      story = s;
-      const results = await Promise.all(s.chapters.map((id) => ss.chapter(id)));
-      if (!alive || sheet !== wrap || turn !== renderTurn) return false;
-      if (results.some((c) => !c) && read.failed()) {
+      if (result === 'unread') {
         if (report) list.replaceChildren(h('li', {}, cantOpen('chapters', () => render(false))));
         return false;
       }
-      const chs = results.filter((c): c is Chapter => !!c);
+      if (!result) return false;
+      const { s, chs } = result;
+      story = s;
       const only = chs.length <= 1;
       list.replaceChildren(
         ...chs.map((c, i) => {
@@ -1194,19 +1193,23 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   let prepared: Promise<{ text: string; name: string } | null> | null = null;
   const storyText = async () => {
     await flushAll();
-    const read = reading(ss);
-    const s = await ss.story(storyId);
-    if (!s) return null;
-    const results = await Promise.all(s.chapters.map((id) => ss.chapter(id)));
-    if (results.some((c) => !c) && read.failed()) return null;
-    const chs = results.filter((c): c is Chapter => !!c);
-    // the open page always goes out as the editor holds it, saved or not
-    const open = cur && cur.kind === 'page' ? cur : null;
-    const shown = chs.map((c) => (open && c.id === open.id ? { title: open.title, text: ta.value } : { title: c.title, text: c.text }));
-    if (open && !chs.some((c) => c.id === open.id)) shown.push({ title: open.title, text: ta.value });
+    const result = await outcome(ss, async (failed) => {
+      const s = await ss.story(storyId);
+      if (!s) return null;
+      const results = await Promise.all(s.chapters.map((id) => ss.chapter(id)));
+      if (results.some((c) => !c) && failed()) return null;
+      const chs = results.filter((c): c is Chapter => !!c);
+      const open = cur && cur.kind === 'page' ? cur : null;
+      const shown = chs.map((c) =>
+        open && c.id === open.id ? { title: open.title, text: ta.value } : { title: c.title, text: c.text });
+      if (open && !chs.some((c) => c.id === open.id)) shown.push({ title: open.title, text: ta.value });
+      const notes = cur?.kind === 'notes' ? null : (ss.unsaved(notesId) ?? (await ss.chapter(notesId)));
+      if (cur?.kind !== 'notes' && !notes && failed()) return null;
+      return { shown, notes };
+    });
+    if (!result || result === 'unread') return null;
+    const { shown, notes: notesChapter } = result;
     // then Notes, as it is now: the open editor, else what this copy holds unsaved, else what is stored
-    const notesChapter = cur && cur.kind === 'notes' ? null : (ss.unsaved(notesId) ?? (await ss.chapter(notesId)));
-    if (cur?.kind !== 'notes' && !notesChapter && read.failed()) return null;
     const notes = cur?.kind === 'notes' ? ta.value : notesChapter?.text ?? '';
     const slug = titleIn.value.normalize('NFKD').replace(/[^\w\s-]/g, '').trim().toLowerCase().replace(/[\s_-]+/g, '-').slice(0, 60) || 'story';
     // headings mark the title, each chapter and Notes, so Bring in a story reads it back exactly
@@ -1751,10 +1754,9 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   };
   const init = async (report = true): Promise<boolean> => {
     await ss.sweepLives();
-    const read = reading(ss);
-    const s = await ss.story(storyId);
+    const s = await outcome(ss, () => ss.story(storyId));
     if (!alive) return false;
-    if (!s && read.failed()) return cantShow('story', report);
+    if (s === 'unread') return cantShow('story', report);
     if (!s || s.removed) {
       main.replaceChildren(h('div', { class: 'dq-panel st-empty' }, h('p', { class: 'st-empty-t', text: STORY.gone }), h('div', { class: 'dq-actions' }, btn('Story Room', () => app.go({ name: 'stories' }, { replace: true }), { kind: 'primary' }))));
       cw.remove();
@@ -1766,20 +1768,24 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     pageId = pageOf(visit, r.ch, s);
     // the first page takes its number now, so a Page or Notes tap while the chapter is made or its cards are read wins
     const n = ++picks;
-    if (!pageId) pageId = (await ss.addChapter(storyId)).id;
+    if (!pageId) {
+      const first = await outcome(ss, () => ss.addChapter(storyId));
+      if (!alive) return false;
+      if (first === 'unread') return cantShow('story', report);
+      if (!first) return false;
+      pageId = first.id;
+    }
     pageMade();
     await loadCards();
     // search can open the notes; the Page tab then goes to the first chapter
     const landed = await load(notesOf(visit, r.ch, s) ? notesId : pageId, n);
     if (landed === 'unread') return cantShow('chapter', report);
     if (!alive) return false;
-    if (!report) {
-      main.replaceChildren(...writeContents);
-      cw.classList.remove('is-hidden');
-      grow();
-    }
     await refreshStory();
     if (!alive) return false;
+    main.replaceChildren(...writeContents);
+    cw.classList.remove('is-hidden');
+    grow();
     syncState();
     syncModes();
     kb();
@@ -1903,34 +1909,37 @@ export function readScreen(app: App, route: Route): ScreenOut {
   let titled!: () => void;
   const ready = new Promise<void>((done) => (titled = done));
   const init = async (report = true): Promise<boolean> => {
-    const read = reading(ss);
-    const s = await ss.story(r.id);
-    if (!alive) return false;
-    if (!s && read.failed()) {
-      wholeText(title, STORY.title);
+    let named = false;
+    const result = await outcome(ss, async (failed) => {
+      const s = await ss.story(r.id);
+      if (!alive || !s) return null;
+      if (s.removed) return { s, chs: [] };
+      wholeText(title, shownTitle(s.title));
+      sub.textContent = storyMeta(app, s);
       titled();
+      named = true;
+      const chs = await Promise.all(s.chapters.map(async (id) => ss.unsaved(id) ?? ss.chapter(id)));
+      if (chs.some((c) => !c) && failed()) return null;
+      return { s, chs };
+    });
+    if (!alive) return false;
+    if (result === 'unread') {
+      if (!named) {
+        wholeText(title, STORY.title);
+        titled();
+      }
       tools.classList.add('is-hidden');
       if (report) body.replaceChildren(cantOpen('story', () => init(false)));
       return false;
     }
-    if (!s || s.removed) {
+    if (!result || result.s.removed) {
       wholeText(title, STORY.title);
       titled();
       tools.classList.add('is-hidden');
       body.replaceChildren(h('p', { class: 'st-read-empty', text: STORY_READ.gone }));
       return true;
     }
-    wholeText(title, shownTitle(s.title));
-    sub.textContent = storyMeta(app, s);
-    titled();
-    // what this copy holds but couldn't store yet reads as it is in the editor
-    const chs = await Promise.all(s.chapters.map(async (id) => ss.unsaved(id) ?? (await ss.chapter(id))));
-    if (!alive) return false;
-    if (chs.some((c) => !c) && read.failed()) {
-      tools.classList.add('is-hidden');
-      if (report) body.replaceChildren(cantOpen('story', () => init(false)));
-      return false;
-    }
+    const { s, chs } = result;
     tools.classList.remove('is-hidden');
     const shown = chs.flatMap((c, i) =>
       c && c.text.trim()

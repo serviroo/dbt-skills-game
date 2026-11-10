@@ -120,16 +120,19 @@ export const scenarios = {
     const id = await threeChapters(page);
     await page.evaluate((r) => window.__daily.go(r), { name: 'write', id });
     await route(page, 'write');
-    const left = await page.$('.st-chbtn');
+    const left = await page.waitForSelector('.st-chbtn');
     await chaptersLeft(page, left, 3);
     const leaving = await removeHeld(page, id, 'Second Door');
     await tap(page, '.dq-top .dq-back', 'hub');
     await leaving.drain();
-    await chaptersLeft(page, left, 2);
+    await page.waitForFunction(async (storyId) => {
+      const { storyStore } = await import('/src/daily/storystore.ts');
+      return (await storyStore(window.__daily.store.key).story(storyId, false))?.chapters.length === 2;
+    }, id, { timeout: 5000 });
     const onHome = await notice(page);
     await page.evaluate((r) => window.__daily.go(r), { name: 'write', id });
     await route(page, 'write');
-    const stay = await page.$('.st-chbtn');
+    const stay = await page.waitForSelector('.st-chbtn');
     await chaptersLeft(page, stay, 2);
     const staying = await removeHeld(page, id, 'Third Door');
     await staying.drain();

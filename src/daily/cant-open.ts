@@ -17,7 +17,7 @@ export function cantOpen(what: CantOpenWhat, again: () => Promise<boolean>): HTM
   const tryAgain = async () => {
     if (retry.getAttribute('aria-disabled') === 'true') return;
     busy(true);
-    const ok = await again();
+    const ok = await again().catch(() => false);
     if (!box.isConnected) return;
     busy(false);
     if (!ok) note.textContent = typo(CANT_OPEN.still);

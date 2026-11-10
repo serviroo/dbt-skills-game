@@ -245,8 +245,6 @@ export const scenarios = {
     }
   },
 
-  /** a result opening its chapter gives way to a Page or Notes tap made while it opened, however slowly storage
-   *  answers: the tapped side shows, with nothing marked, selected or said about the search on it */
   async 'story-search-open-overtaken'(h) {
     const cases = [
       { row: 'Winter', tap: 'Notes', box: 'Notes for this story', text: NOTES },
@@ -271,21 +269,23 @@ export const scenarios = {
         await page.locator('.st-found-row', { hasText: c.row }).click();
         await routeIs(page, 'write');
         await waitHeld(`chapter ${opened}`);
+        h.expect((await page.getByRole('radio', { name: `Show: ${c.tap}` }).count()) === 0,
+          `${at}: the tab was available before the result opened`);
+        await release(`chapter ${opened}`);
+        await h.poll(page, async () => (await drain(), page.getByRole('radio', { name: `Show: ${c.tap}` }).count()),
+          Boolean, `${at}: the result never opened`);
         await page.getByRole('radio', { name: `Show: ${c.tap}` }).click();
         await waitHeld(`chapter ${tapped}`);
-        // the tapped side reaches the editor first, then the chapter the result asked for answers
         await release(`chapter ${tapped}`);
-        await release(`chapter ${opened}`);
-        await drain();
-        await h.sleep(200);
-        await drain();
+        await h.poll(page, async () => (await drain(), (await shownIn(page)).seg === c.tap), Boolean,
+          `${at}: the selected tab never opened`);
         const s = await shownIn(page);
         h.expect(s.seg === c.tap && s.box === c.box && s.text === c.text, `${at}: the Story Room showed ${JSON.stringify(s)}`);
         const left = await page.evaluate(() => {
           const ta = document.querySelector('.st-write .st-ta');
-          return { marks: document.querySelectorAll('.st-hl .st-mark').length, sel: ta.value.slice(ta.selectionStart, ta.selectionEnd), note: document.querySelector('.st-note')?.textContent ?? '' };
+          return { marks: document.querySelectorAll('.st-hl .st-mark').length, sel: ta.value.slice(ta.selectionStart, ta.selectionEnd) };
         });
-        h.expect(!left.marks && !left.sel && left.note !== 'What you searched for is marked on the page.', `${at}: the search was marked on the ${c.tap} side: ${JSON.stringify(left)}`);
+        h.expect(!left.marks && !left.sel, `${at}: the search was marked on the ${c.tap} side: ${JSON.stringify(left)}`);
         h.expect(!errors.length, errors.join('\n'));
       } finally {
         await ctx.close();
@@ -377,9 +377,6 @@ export const scenarios = {
     }
   },
 
-  /** each result opens what it showed: every place in a story can be opened (past the first six, Notes too), a tap
-   *  made before the next search runs opens with the words that found it, and typing on the page while it opens wins
-   *  over the marks and the cursor */
   async 'story-search-result-taps'(h) {
     const { ctx, page, errors } = await h.open(seed(h), '?mute');
     try {
@@ -440,7 +437,6 @@ export const scenarios = {
       p = await placeShown(page);
       h.expect(p?.text === 'comet' && p.sel === 'comet', `a tap before the next search opened without its words marked: ${JSON.stringify(p)}`);
 
-      // they type while the result is still opening: nothing is marked after, and the cursor stays where they typed
       await page.evaluate(() => window.__daily.go({ name: 'stories' }));
       await field(page).waitFor();
       await search(h, page, 'comet');
@@ -448,20 +444,20 @@ export const scenarios = {
       await page.locator('.st-found-row', { hasText: 'Sky 3' }).click();
       await routeIs(page, 'write');
       const box = page.getByRole('textbox', { name: 'Page, Sky 3' });
-      await box.waitFor();
-      // the page shows Sky 3, and the opening waits on storage
       await waitHeld(`onDisk ${sky[2]}`);
+      h.expect((await box.count()) === 0, 'the result offered a page to type on before opening finished');
+      await drain();
+      await box.waitFor();
+      await page.waitForSelector('.st-hl .st-mark.is-place');
       await box.click();
       await page.keyboard.press('End');
       await page.keyboard.type('!');
-      await drain();
-      await h.sleep(300);
-      await drain();
       const left = await page.evaluate(() => {
         const ta = document.querySelector('.st-write .st-ta');
-        return { text: ta.value, marks: document.querySelectorAll('.st-hl .st-mark').length, at: [ta.selectionStart, ta.selectionEnd], note: document.querySelector('.st-note')?.textContent ?? '' };
+        return { text: ta.value, marks: document.querySelectorAll('.st-hl .st-mark').length, at: [ta.selectionStart, ta.selectionEnd] };
       });
-      h.expect(left.text === 'Night 3: the comet came back.!' && !left.marks && left.at[0] === left.text.length && left.at[1] === left.text.length && left.note !== 'What you searched for is marked on the page.', `typing while the result opened was overruled by the search: ${JSON.stringify(left)}`);
+      h.expect(left.text === 'Night 3: the comet came back.!' && !left.marks && left.at[0] === left.text.length &&
+        left.at[1] === left.text.length, `typing after the result opened was overruled: ${JSON.stringify(left)}`);
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();
