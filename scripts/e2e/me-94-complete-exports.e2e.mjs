@@ -244,7 +244,9 @@ export const scenarios = {
         const ss = storyStore(a.store.key);
         const { first } = await ss.create('Saved choices');
         await ss.saveChapter({ ...first, text: 'A chapter to keep.' }, [first.rev]);
-        await ss.putCards(first.id, [{ id: 'card-one', mode: 'polish', text: 'A card to keep.', t: 3, sel: { start: 0, end: 9, text: 'A chapter' } }]);
+        await ss.changeCards(first.id,
+          () => [{ id: 'card-one',
+            mode: 'polish', text: 'A card to keep.', t: 3, sel: { start: 0, end: 9, text: 'A chapter' } }]);
         const { artStore } = await import('/src/daily/artstore.ts');
         await artStore(a.store.key).put({ id: 'roundtrip-art', kind: 'today', day: '2026-01-02', t: 3, updated: 3, n: 1, strokes: [{ i: 1, w: 3, p: [20, 20, 80, 80] }] });
       });
@@ -344,7 +346,9 @@ export const scenarios = {
         const { storyStore } = await import('/src/daily/storystore.ts');
         const ss = storyStore(window.__daily.store.key);
         const { first } = await ss.create('Card merge');
-        await ss.putCards(first.id, Array.from({ length: 12 }, (_, n) => ({ id: 'card-' + n, mode: 'polish', text: 'Local card ' + n, t: 20 })));
+        await ss.changeCards(first.id,
+          () => Array.from({ length: 12 }, (_, n) => ({ id: 'card-' + n,
+            mode: 'polish', text: 'Local card ' + n, t: 20 })));
         const stories = await ss.exportAll();
         stories.cards = { [first.id]: [...Array.from({ length: 11 }, (_, n) => ({ id: 'extra-card-' + n, mode: 'polish', text: 'Extra card', t: 30 })), { id: 'card-0', mode: 'polish', text: 'Older card', t: 10 }, { id: 'card-1', mode: 'polish', text: 'Newer card', t: 30 }] };
         return JSON.parse(window.__daily.store.exportJSON({ stories }));
@@ -367,7 +371,8 @@ export const scenarios = {
           const a = window.__daily;
           const ss = storyStore(a.store.key);
           const { first } = await ss.create('Card recovery');
-          await ss.putCards(first.id, [{ id: 'local-card', mode: 'polish', text: 'Already saved card.', t: 10 }]);
+          await ss.changeCards(first.id,
+            () => [{ id: 'local-card', mode: 'polish', text: 'Already saved card.', t: 10 }]);
           const stories = await ss.exportAll();
           stories.cards = { [first.id]: [{ id: 'incoming-card', mode: 'polish', text: 'Incoming card.', t: 20 }] };
           const transaction = IDBDatabase.prototype.transaction;
@@ -391,7 +396,8 @@ export const scenarios = {
             const ss = storyStore(window.__daily.store.key);
             const { chapters } = await ss.exportAll();
             const id = chapters.find((c) => c.kind === 'page').id;
-            await ss.putCards(id, [{ id: 'discarded-card', mode: 'polish', text: 'A card deliberately removed.', t: 10 }]);
+            await ss.changeCards(id,
+              () => [{ id: 'discarded-card', mode: 'polish', text: 'A card deliberately removed.', t: 10 }]);
             const transaction = IDBDatabase.prototype.transaction;
             IDBDatabase.prototype.transaction = function (stores, mode, ...rest) {
               const names = typeof stores === 'string' ? [stores] : [...stores];
@@ -399,7 +405,7 @@ export const scenarios = {
               return transaction.call(this, stores, mode, ...rest);
             };
             window.restoreCardStorage = () => { IDBDatabase.prototype.transaction = transaction; };
-            await ss.putCards(id, replacement);
+            await ss.changeCards(id, () => replacement);
           }, { replacement, blockRead });
           try { await restore(page, raw); }
           finally { await page.evaluate(() => window.restoreCardStorage()); }
@@ -428,7 +434,9 @@ export const scenarios = {
         const { storyStore } = await import('/src/daily/storystore.ts');
         const ss = storyStore(window.__daily.store.key);
         const { first } = await ss.create('Full card recovery');
-        await ss.putCards(first.id, Array.from({ length: 12 }, (_, n) => ({ id: 'saved-' + n, mode: 'polish', text: 'Saved card ' + n, t: 10 })));
+        await ss.changeCards(first.id,
+          () => Array.from({ length: 12 }, (_, n) => ({ id: 'saved-' + n,
+            mode: 'polish', text: 'Saved card ' + n, t: 10 })));
         const stories = await ss.exportAll();
         stories.cards = { [first.id]: Array.from({ length: 12 }, (_, n) => ({ id: 'pending-' + n, mode: 'polish', text: 'Pending card ' + n, t: 20 })) };
         const transaction = IDBDatabase.prototype.transaction;
@@ -589,7 +597,9 @@ export const scenarios = {
         const { storyStore } = await import('/src/daily/storystore.ts');
         const ss = storyStore(window.__daily.store.key);
         const { first } = await ss.create('Bounded card import');
-        await ss.putCards(first.id, Array.from({ length: 12 }, (_, n) => ({ id: 'local-' + n, mode: 'polish', text: 'Local card ' + n, t: 10 })));
+        await ss.changeCards(first.id,
+          () => Array.from({ length: 12 }, (_, n) => ({ id: 'local-' + n,
+            mode: 'polish', text: 'Local card ' + n, t: 10 })));
         const list = Array(2001).fill(null);
         list[12] = { id: 'local-0', mode: 'polish', text: 'Within scan bound.', t: 20 };
         list[2000] = { id: 'local-0', mode: 'polish', text: 'Beyond scan bound.', t: 30 };

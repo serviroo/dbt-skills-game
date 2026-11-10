@@ -10,6 +10,8 @@
  * (persistent = false); exports read both.
  */
 import type { App } from './app';
+import { cardLists, cleanCard, mergeCards } from './story-card-list';
+export { cleanCard, skippedCards } from './story-card-list';
 import { connectionLost, uid, validDay } from './store';
 import { BESIDE, STORY_DB } from '../core/stored-names';
 import { canWrite, cleared, dropBefore, fromBefore, goneElsewhere, marked, mayWrite, onClear, removeStored, setStored, write } from '../core/cleared';
@@ -120,49 +122,6 @@ export function cleanChapter(x: unknown): Chapter | null {
   return { id: x.id, story: x.story, kind, title: chapterTitle(x.title, kind), text: x.text.slice(0, STORY_CAP.text), updated, rev: revOf(x.rev, updated) };
 }
 
-export function cleanCard(x: unknown): Card | null {
-  if (!isObj(x) || !CARD_MODES.includes(x.mode as CardMode) || typeof x.text !== 'string') return null;
-  const c: Card = { id: validId(x.id) ? x.id : uid(), mode: x.mode as CardMode, text: x.text.slice(0, STORY_CAP.card), t: stampOf(x.t) };
-  const s = x.sel;
-  if (isObj(s) && fin(s.start) && fin(s.end) && typeof s.text === 'string') c.sel = { start: Math.max(0, s.start), end: Math.max(0, s.end), text: s.text.slice(0, STORY_CAP.card) };
-  return c;
-}
-
-function mergeCards(local: Card[], incoming: unknown[]) {
-  const merged = new Map<string, Card>();
-  for (const card of local) {
-    const had = merged.get(card.id);
-    if (!had || card.t > had.t) merged.set(card.id, card);
-  }
-  let skipped = Math.max(0, incoming.length - LISTED);
-  for (const value of incoming.slice(0, LISTED)) {
-    const card = cleanCard(value);
-    if (!card) { skipped++; continue; }
-    const had = merged.get(card.id);
-    if (!had && merged.size >= STORY_CAP.cards) { skipped++; continue; }
-    if (!had || card.t > had.t) merged.set(card.id, card);
-  }
-  return { cards: [...merged.values()], skipped };
-}
-
-function cardLists(x: Record<string, unknown>) {
-  const maxCh = STORY_CAP.stories * (STORY_CAP.chapters + 2);
-  const entries = Object.entries(x);
-  const lists: [string, unknown[]][] = [];
-  let skipped = Math.max(0, entries.length - maxCh);
-  for (const [id, list] of entries.slice(0, maxCh)) {
-    if (validId(id) && Array.isArray(list)) lists.push([id, list]);
-    else skipped++;
-  }
-  return { lists, skipped };
-}
-
-export function skippedCards(x: unknown) {
-  if (!isObj(x)) return 0;
-  const { lists, skipped } = cardLists(x);
-  return lists.reduce((n, [, list]) => n + mergeCards([], list).skipped, skipped);
-}
-
 function req<T>(r: IDBRequest) {
   return new Promise<T>((ok, bad) => {
     r.onsuccess = () => ok(r.result as T);
@@ -188,9 +147,11 @@ export class StoryStore {
   private unreadable = false;
   /** Reads of the stored stories that got no answer; exportAll compares it before and after. */
   private readFails = 0;
+  get fails() { return this.readFails; }
   private lost = new WeakSet<IDBDatabase>();
   private mem = { stories: new Map<string, Story>(), chapters: new Map<string, Chapter>(), cards: new Map<string, Card[]>(), days: new Set<string>() };
   private cardImports = new Set<string>();
+  private cardChanges = new Map<string, { base: Card[]; ops: ((cards: Card[]) => Card[])[] }>();
   /** For a chapter kept only in memory: the revisions it was saved over (a stored one in this set is its own past). */
   private memBases = new Map<string, Set<string>>();
   /** The last stored version of each story this copy read, so a failed write still has the story to add to. */
@@ -233,7 +194,7 @@ export class StoryStore {
   private connect(again: boolean): Promise<IDBDatabase | null> {
     return new Promise((resolve) => {
       try {
-        if (typeof indexedDB === 'undefined') throw new Error('no idb');
+        if (typeof indexedDB === 'undefined') { this.persistent = false; return resolve(null); }
         // this game's data is being cleared: opening would make the database again
         if (cleared()) return resolve(null);
         const open = indexedDB.open(this.name, STORY_DB.version);
@@ -350,7 +311,8 @@ export class StoryStore {
     }
     this.channel = null;
     for (const m of Object.values(this.mem)) m.clear();
-    for (const m of [this.cardImports, this.memBases, this.lastStory, this.removedHere, this.removedAt, this.seen]) m.clear();
+    for (const m of [this.cardImports, this.cardChanges, this.memBases, this.lastStory,
+      this.removedHere, this.removedAt, this.seen]) m.clear();
     this.drop();
   }
 
@@ -694,6 +656,8 @@ export class StoryStore {
         gone.add(ch.id);
         this.mem.chapters.delete(ch.id);
         this.mem.cards.delete(ch.id);
+        this.cardImports.delete(ch.id);
+        this.cardChanges.delete(ch.id);
         this.memBases.delete(ch.id);
       }
     this.mem.stories.delete(id);
@@ -767,27 +731,55 @@ export class StoryStore {
     });
   }
 
+  private pendingCards(id: string, disk: Card[]) {
+    const pending = this.cardChanges.get(id);
+    if (!pending) return mergeCards(disk, this.mem.cards.get(id) ?? []);
+    const merged = mergeCards(disk, pending.base);
+    return { ...merged, cards: pending.ops.reduce((cards, fn) => fn(cards), merged.cards) };
+  }
+
   async cards(chapterId: string): Promise<Card[]> {
     const m = this.mem.cards.get(chapterId);
     if (m && !this.cardImports.has(chapterId)) return m.map((c) => ({ ...c, ...(c.sel ? { sel: { ...c.sel } } : {}) }));
     const r = await this.tx(['cards'], 'readonly', (t) => req<unknown>(t.objectStore('cards').get(chapterId)));
     const disk = Array.isArray(r?.v) ? r.v.map(cleanCard).filter((c): c is Card => !!c) : [];
-    const list = m ? mergeCards(disk, m).cards : disk;
+    const list = m ? this.pendingCards(chapterId, disk).cards : disk;
     return list.map((c) => ({ ...c, ...(c.sel ? { sel: { ...c.sel } } : {}) }));
   }
 
-  /** Keeps at most 12 (the newest by time when there are more), in the order given. */
-  async putCards(chapterId: string, cards: Card[]) {
-    if (!validId(chapterId)) return;
-    this.cardImports.delete(chapterId);
-    let list = (Array.isArray(cards) ? cards : []).map(cleanCard).filter((c): c is Card => !!c);
-    if (list.length > STORY_CAP.cards) {
+  async changeCards(chapterId: string, fn: (stored: Card[]) => Card[]): Promise<Card[] | null> {
+    if (!validId(chapterId)) return null;
+    const clean = (cards: Card[]) => {
+      const list = cards.map(cleanCard).filter((c): c is Card => !!c);
+      if (list.length <= STORY_CAP.cards) return list;
       const keep = new Set([...list].sort((a, b) => b.t - a.t).slice(0, STORY_CAP.cards));
-      list = list.filter((c) => keep.has(c));
+      return list.filter((c) => keep.has(c));
+    };
+    const seen: { list?: Card[] } = {};
+    const r = await this.tx(['cards'], 'readwrite', async (t) => {
+      const store = t.objectStore('cards');
+      const raw = await req<unknown>(store.get(chapterId));
+      const disk = Array.isArray(raw) ? raw.map(cleanCard).filter((c): c is Card => !!c) : [];
+      const memory = this.mem.cards.get(chapterId);
+      const list = clean(fn(memory ? this.pendingCards(chapterId, disk).cards : disk));
+      seen.list = list;
+      store.put(list, chapterId);
+      return list;
+    });
+    if (r) {
+      this.mem.cards.delete(chapterId);
+      this.cardImports.delete(chapterId);
+      this.cardChanges.delete(chapterId);
+      return r.v;
     }
-    const r = await this.tx(['cards'], 'readwrite', async (t) => void t.objectStore('cards').put(list, chapterId));
-    if (r) this.mem.cards.delete(chapterId);
-    else this.mem.cards.set(chapterId, list);
+    const memory = this.mem.cards.get(chapterId) ?? [];
+    const pending = this.cardChanges.get(chapterId) ?? { base: memory, ops: [] };
+    pending.ops.push((cards) => clean(fn(cards)));
+    this.cardChanges.set(chapterId, pending);
+    const list = clean(fn(memory));
+    this.mem.cards.set(chapterId, list);
+    this.cardImports.add(chapterId);
+    return seen.list ?? null;
   }
 
   /**
@@ -981,7 +973,7 @@ export class StoryStore {
     });
     for (const [k, v] of this.mem.cards) {
       if (this.cardImports.has(k)) {
-        const merged = mergeCards(cards.get(k) ?? [], v);
+        const merged = this.pendingCards(k, cards.get(k) ?? []);
         cards.set(k, merged.cards);
         cardIncomplete ||= merged.skipped > 0;
       } else cards.set(k, v);
@@ -1289,7 +1281,8 @@ export class StoryStore {
         const plan = (disk: unknown) => {
           const local = Array.isArray(disk) ? disk.map(cleanCard).filter((c): c is Card => !!c) : [];
           const memory = this.mem.cards.get(id);
-          const pending = memory && !this.cardImports.has(id) ? { cards: memory, skipped: 0 } : mergeCards(local, memory ?? []);
+          const pending = memory && !this.cardImports.has(id)
+            ? { cards: memory, skipped: 0 } : this.pendingCards(id, local);
           return { ...mergeCards(pending.cards, list), pendingSkipped: pending.skipped };
         };
         if (dry) {
@@ -1309,6 +1302,7 @@ export class StoryStore {
           else {
             this.mem.cards.delete(id);
             this.cardImports.delete(id);
+            this.cardChanges.delete(id);
           }
           out.skipped += r.v.skipped + r.v.pendingSkipped;
           wrote = true;
@@ -1316,6 +1310,8 @@ export class StoryStore {
           const explicitPending = this.mem.cards.has(id) && !this.cardImports.has(id);
           const merged = mergeCards(await this.cards(id), list);
           this.mem.cards.set(id, merged.cards);
+          const pending = this.cardChanges.get(id);
+          if (pending) pending.ops.push((cards) => mergeCards(cards, list).cards);
           if (!explicitPending) this.cardImports.add(id);
           out.skipped += merged.skipped;
           out.unsaved++;

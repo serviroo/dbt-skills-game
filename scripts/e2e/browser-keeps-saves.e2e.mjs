@@ -96,7 +96,8 @@ async function seedSaves(today) {
   await art.putDraft({ key: 'today:keep', kind: 'today', strokes: [line(2, 420)], t: 2 });
   const { story, first } = await stories.create('The lantern by the river');
   const kept = await stories.saveChapter({ id: first.id, story: story.id, kind: 'page', title: first.title, text: 'Kit sat by the water and let the breath go slowly.' }, [first.rev]);
-  await stories.putCards(first.id, [{ id: 'keep-card', mode: 'continue', text: 'What does Lumen notice next?', t: 3 }]);
+  await stories.changeCards(first.id,
+    () => [{ id: 'keep-card', mode: 'continue', text: 'What does Lumen notice next?', t: 3 }]);
   await stories.markOpened(today);
   return {
     wrote: [drawn.stored, kept.stored],

@@ -383,7 +383,7 @@ export class ArtStore {
   private connect(again: boolean): Promise<IDBDatabase | null> {
     return new Promise((resolve) => {
       try {
-        if (typeof indexedDB === 'undefined') throw new Error('no idb');
+        if (typeof indexedDB === 'undefined') { this.persistent = false; return resolve(null); }
         // this game's data is being cleared: opening would make the database again
         if (cleared()) return resolve(null);
         const open = indexedDB.open(this.name, ART_DB.version);

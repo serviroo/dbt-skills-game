@@ -371,3 +371,15 @@ export const TRY_ON = {
 
 /** Name ideas for a shadow ally. Original, gentle, no lore names. */
 export const ALLY_NAMES = ['Ember', 'Moss', 'Drift', 'Inkling', 'Hush', 'Pebble', 'Wisp', 'Nightcap', 'Thistle', 'Tidewatch'];
+
+export const CANT_OPEN = {
+  story: "Can't open this story right now",
+  drawing: "Can't open this drawing right now",
+  stories: "Can't read your stories right now",
+  drawings: "Can't read your drawings right now",
+  ideas: "Can't read this chapter's ideas right now",
+  note: 'Nothing was changed. Try again in a moment.',
+  still: "Still can't open it. Nothing was changed. Try again in a moment.",
+  retry: 'Try again',
+  trying: 'Trying again',
+};

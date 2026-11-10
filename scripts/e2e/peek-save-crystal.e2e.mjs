@@ -495,7 +495,7 @@ export const scenarios = {
     try {
       await page.evaluate(async () => {
         const { storyStore } = await import('/src/daily/storystore.ts');
-        await storyStore(window.__daily.store.key).putCards('file-page', [
+        await storyStore(window.__daily.store.key).changeCards('file-page', () => [
           { id: 'file-newer', mode: 'whatif', text: 'Older words.', t: 3 },
           { id: 'here-card', mode: 'polish', text: 'A card made here.', t: 4 },
         ]);
@@ -560,7 +560,9 @@ export const scenarios = {
         const { storyStore } = await import('/src/daily/storystore.ts');
         const s = storyStore(window.__daily.store.key);
         const { story, first } = await s.create('Shore story');
-        await s.putCards(first.id, Array.from({ length: 12 }, (_, i) => ({ id: `here-k${i}`, mode: 'continue', text: `Card ${i} made here.`, t: i + 1 })));
+        await s.changeCards(first.id,
+          () => Array.from({ length: 12 }, (_, i) => ({ id: `here-k${i}`,
+            mode: 'continue', text: `Card ${i} made here.`, t: i + 1 })));
         return { story: story.id, page: first.id };
       });
       const told = {
