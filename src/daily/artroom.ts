@@ -7,8 +7,10 @@ import { ALLY_NAMES, ART, ART_PROMPTS } from '../content/daily-lines';
 import { playerName } from '../core/you';
 import type { App, Route, ScreenOut, Visit } from './app';
 import { icon } from './art';
-import { artStore, extrasOf, revOf, type Draft, type DrawingMeta, type DrawingRec } from './artstore';
+import { artStore, extrasOf, revOf, type DrawingMeta, type DrawingRec } from './artstore';
 import { canvasBlob, INKS, InkPad, PAGE, renderDrawing, SIZES, TOOLS, type Paper, type Stroke, type Tool } from './ink';
+import { renderAllyCard } from './ally-card';
+import { DrawVisit } from './draw-visit';
 import { dayLabel } from './lines';
 import { uid } from './store';
 import { btn, chip, field, h, keptWhole, p, panel, radioKeys, redrawn, shareOrSave, typo } from './ui';
@@ -16,9 +18,7 @@ import { pageHead, wholeText } from './page-head';
 
 const store = (app: App) => artStore(app.store.key);
 const KEPT_APART = 'A newer copy of this drawing arrived, so this one was kept as its own page.';
-
-/** A draft untouched this long was left by an earlier session (iOS can hand a relaunched app a new tab id). */
-const ORPHAN_MS = 120e3;
+const UNSAVED = "Couldn't save this drawing. Please try again.";
 /** The colours an ink's dot is drawn in (.dq-swatch-dot). */
 const dotStyle = (ink: (typeof INKS)[number]) => `--b:${ink.body};--c:${ink.core ?? ink.mid ?? ink.body};--g:${ink.halo}`;
 
@@ -90,80 +90,6 @@ export function allyCard(app: App, m: DrawingMeta, img?: HTMLImageElement | HTML
     h('div', { class: 'dq-allycard-top' }, h('span', { class: 'dq-allycard-tag', html: `${icon('ally')}<span>Shadow ally</span>` }), star && m.fav ? h('span', { class: 'dq-allycard-fav', html: icon('star') }) : null),
     h('div', { class: 'dq-allycard-foot' }, h('div', { class: 'dq-allycard-name', text: typo(name) }), h('div', { class: 'dq-allycard-by', text: 'Your design' })),
   ));
-}
-
-async function fontsReady() {
-  try {
-    await Promise.all([document.fonts.load('600 90px "Bodoni Moda"'), document.fonts.load('500 30px "Jost"')]);
-  } catch {
-    /* system fallback fonts still draw */
-  }
-}
-
-function spaced(g: CanvasRenderingContext2D, text: string, x: number, y: number, track: number) {
-  let cx = x;
-  for (const ch of text) {
-    g.fillText(ch, cx, y);
-    cx += g.measureText(ch).width + track;
-  }
-}
-
-/** The ally card as an image: the drawing, the card frame, its name. */
-export async function renderAllyCard(rec: DrawingRec) {
-  await fontsReady();
-  const W = PAGE.ally.w, H = PAGE.ally.h;
-  const c = renderDrawing(rec.strokes, 'ally', W);
-  const g = c.getContext('2d')!;
-  const shade = g.createLinearGradient(0, H * 0.62, 0, H);
-  shade.addColorStop(0, 'rgba(4,8,16,0)');
-  shade.addColorStop(0.55, 'rgba(4,8,16,0.72)');
-  shade.addColorStop(1, 'rgba(4,8,16,0.92)');
-  g.fillStyle = shade;
-  g.fillRect(0, H * 0.62, W, H * 0.38);
-  g.strokeStyle = 'rgba(143,180,225,0.62)';
-  g.lineWidth = 3;
-  g.strokeRect(1.5, 1.5, W - 3, H - 3);
-  g.strokeStyle = 'rgba(125,160,205,0.3)';
-  g.lineWidth = 2;
-  g.strokeRect(22, 22, W - 44, H - 44);
-  g.strokeStyle = 'rgba(190,228,255,0.75)';
-  g.lineWidth = 4;
-  const L = 44, m = 36;
-  for (const [x, y, dx, dy] of [[m, m, 1, 1], [W - m, m, -1, 1], [m, H - m, 1, -1], [W - m, H - m, -1, -1]] as const) {
-    g.beginPath();
-    g.moveTo(x, y + dy * L);
-    g.lineTo(x, y);
-    g.lineTo(x + dx * L, y);
-    g.stroke();
-  }
-  const top = g.createLinearGradient(W * 0.2, 0, W * 0.8, 0);
-  top.addColorStop(0, 'rgba(164,248,255,0)');
-  top.addColorStop(0.5, 'rgba(164,248,255,0.9)');
-  top.addColorStop(1, 'rgba(164,248,255,0)');
-  g.fillStyle = top;
-  g.fillRect(W * 0.2, 0, W * 0.6, 4);
-  g.textBaseline = 'alphabetic';
-  g.fillStyle = '#89cf9d';
-  g.font = '500 30px "Jost", system-ui, sans-serif';
-  spaced(g, 'SHADOW ALLY', 76, 104, 7);
-  const name = rec.name?.trim() || 'Shadow ally';
-  let size = 104;
-  g.font = `600 ${size}px "Bodoni Moda", Didot, serif`;
-  while (g.measureText(name).width > W - 152 && size > 48) {
-    size -= 4;
-    g.font = `600 ${size}px "Bodoni Moda", Didot, serif`;
-  }
-  g.fillStyle = '#eaf6ff';
-  g.shadowColor = 'rgba(79,184,255,0.45)';
-  g.shadowBlur = 18;
-  g.fillText(name, 76, H - 150);
-  g.shadowBlur = 0;
-  g.fillStyle = 'rgba(79,184,255,0.45)';
-  g.fillRect(76, H - 118, W - 152, 2);
-  g.fillStyle = '#7cc8ff';
-  g.font = '500 28px "Jost", system-ui, sans-serif';
-  spaced(g, `DRAWN BY ${playerName().toUpperCase()}`, 76, H - 72, 6);
-  return c;
 }
 
 const prepared = new Map<string, Promise<Blob | null>>();
@@ -285,16 +211,18 @@ function entryArt(kind: Paper) {
 }
 
 // ---------------- Drawing page ----------------
-export function drawScreen(app: App, route: Route): ScreenOut {
+export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const r = route as Extract<Route, { name: 'draw' }>;
+  const opened = new DrawVisit(r, visit);
   const kind: Paper = r.kind === 'ally' ? 'ally' : 'today';
   const as = store(app);
   const tab = as.claimTab();
   const own = (id?: string | null) => (id ? `edit:${id}:${tab.id}` : `${kind}:${tab.id}`);
-  let key = own(r.id);
+  let key = own(opened.editId);
   let saving = false;
+  let pendingSave: Promise<unknown> | null = null;
   let storing = false;
-  let recId = r.id ?? null;
+  let recId = opened.editId ?? null;
   let rec: DrawingRec | null = null;
   let bases: string[] | undefined;
   let promptRoll = 0;
@@ -319,6 +247,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     draftTimer = 0;
     if (!dirty) return;
     if (!key.endsWith(`:${tab.id}`)) key = own(recId);
+    opened.hold();
     if (!pad.strokes.length && !recId) return void as.dropDraft(key);
     void as.putDraft({ key, kind, editId: recId ?? undefined, bases: recId ? bases : undefined, prompt, strokes: pad.strokes, t: Date.now() });
   };
@@ -493,7 +422,13 @@ export function drawScreen(app: App, route: Route): ScreenOut {
       strokes: pad.strokes.slice(),
     };
     storing = true;
-    const res = await as.put(first ? next : { ...next, bases: bases ?? [], after: rec?.updated }).finally(() => (storing = false));
+    const res = await as
+      .put(first ? next : { ...next, bases: bases ?? [], after: rec?.updated })
+      .catch((e: unknown) => {
+        if (first && recId === id) recId = null;
+        throw e;
+      })
+      .finally(() => (storing = false));
     // removed in another tab meanwhile: the removal kept these strokes as a draft. A save that landed on the page went
     // with it, so that draft is the copy; one kept apart as its own page replaces the draft.
     const lost = recId !== id;
@@ -506,6 +441,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     const saved: DrawingRec = { ...next, ...res.labels, id: res.id, updated: res.updated };
     rec = saved;
     recId = res.id;
+    opened.hold();
     const failed = res.stored === 'failed';
     bases = failed && res.id === id ? [...(bases ?? []), res.rev].slice(-8) : [res.rev];
     const copied = res.id !== id;
@@ -535,7 +471,10 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     openTray(false);
     if (kind === 'ally') return nameSheet();
     saving = true;
-    const result = await persist().finally(() => (saving = false));
+    const job = persist().finally(() => (saving = false));
+    pendingSave = job;
+    const result = await job.catch(() => false as const);
+    if (result === false) return say(p(UNSAVED, 'dq-small'));
     if (!result) return;
     const { first, xp, rec: saved, copied, failed } = result;
     void prepImage(saved);
@@ -547,6 +486,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
   // ally: name it, then it rises
   const sheet = h('div', { class: 'dq-sheet is-hidden', role: 'dialog', 'aria-modal': 'true' });
   let nameDone: (() => void) | null = null;
+  let unsavedName: string | null = null;
   const hideName = (focus: boolean) => {
     sheet.classList.add('is-hidden');
     nameDone?.();
@@ -554,7 +494,8 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     if (focus) saveB.focus({ preventScroll: true });
   };
   const nameSheet = () => {
-    const f = field(ART.nameAsk, { value: rec?.name ?? '', placeholder: 'Shadow ally', max: 24, hideLabel: true, autocomplete: 'off' });
+    const value = unsavedName ?? rec?.name ?? '';
+    const f = field(ART.nameAsk, { value, placeholder: 'Shadow ally', max: 24, hideLabel: true, autocomplete: 'off' });
     const vi = app.store.visitIndex();
     const ideas = [0, 1, 2, 3].map((k) => ALLY_NAMES[(vi * 3 + k) % ALLY_NAMES.length]);
     const go = async () => {
@@ -562,7 +503,11 @@ export function drawScreen(app: App, route: Route): ScreenOut {
       const name = f.input.value.trim().slice(0, 24);
       hideName(false);
       saving = true;
-      const result = await persist(name || undefined).finally(() => (saving = false));
+      const job = persist(name || undefined).finally(() => (saving = false));
+      pendingSave = job;
+      const result = await job.catch(() => false as const);
+      unsavedName = result === false ? name : null;
+      if (result === false) return say(p(UNSAVED, 'dq-small'));
       if (!result) return;
       const { xp, rec: saved, copied, failed } = result;
       void prepImage(saved);
@@ -812,27 +757,20 @@ export function drawScreen(app: App, route: Route): ScreenOut {
 
   void (async () => {
     await tab.ready;
+    await Promise.allSettled([opened.pending]);
+    unsavedName = opened.name;
     if (left) return;
-    key = own(r.id);
-    let draft: Draft | null = null;
-    if (r.draft) {
-      draft = await as.getDraft(r.draft);
-      if (draft?.key.endsWith(`:${tab.id}`)) key = draft.key;
+    const draft = await opened.draft(as, kind, tab.id, own(opened.editId));
+    if (draft === undefined) {
+      say(p("Couldn't open this drawing. Please try again.", 'dq-small'));
+      return;
     }
-    if (!draft) draft = await as.getDraft(key);
-    if (!draft && !r.draft) {
-      // this tab's other draft of the same page (a page first saved from a fresh screen), else one an earlier session
-      // left; a younger draft may belong to a tab that is still open, so it only waits in the Art room
-      const same = (await as.drafts()).filter((d) => (r.id ? d.editId === r.id : d.kind === kind && !d.editId));
-      const found = same.find((d) => d.key.endsWith(`:${tab.id}`)) ?? same.find((d) => !(Date.now() - d.t < ORPHAN_MS));
-      if (found) {
-        draft = found;
-        if (found.key.endsWith(`:${tab.id}`)) key = found.key;
-      }
-    }
-    const id = r.id ?? draft?.editId;
+    if (draft?.key.endsWith(`:${tab.id}`)) key = draft.key;
+    else if (opened.occupied) key = `${opened.editId ? `edit:${opened.editId}` : kind}:${uid()}:${tab.id}`;
+    else key = own(opened.editId);
+    const id = opened.editId ?? draft?.editId;
+    recId = id ?? null;
     if (id) {
-      recId = id;
       rec = await as.get(id);
       if (rec) {
         const old = draft?.editId === id ? draft : null;
@@ -867,6 +805,7 @@ export function drawScreen(app: App, route: Route): ScreenOut {
     title: kind === 'ally' ? ART.allyTitle : ART.todayTitle,
     mode: 'sub',
     bubbles: [0, 0],
+    keep: () => opened.keep(() => recId, () => key, () => pendingSave ?? opened.pending ?? null, () => unsavedName),
     after: () => {
       app.sheetLayer.append(sheet, riseEl);
       ro.observe(main);

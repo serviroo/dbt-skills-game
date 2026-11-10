@@ -227,7 +227,7 @@ export const scenarios = {
     // build leaves of a tool's stroke (no points) is dropped.
     const newer = [{ i: 1, w: 3, p: [1, 2, 3, 4] }, { i: 1, w: 3, p: [], m: 'smudge', q: [1, 2] }, { i: 2, w: 9, p: [], m: 'glow', q: [5, 6] }, { i: 1, w: 3, p: [7, 8], o: 0.5 }, { i: 9, w: 3, p: [1, 2] }];
     const clean = await b.page.evaluate(async (newer) => {
-      const { cleanStrokes, storedStroke } = await import('/src/daily/artstore.ts');
+      const { cleanStrokes, storedStroke } = await import('/src/daily/stored-strokes.ts');
       const read = cleanStrokes([...newer, { i: 1, w: 3, p: [] }], 'today');
       return { read, back: read.map(storedStroke) };
     }, newer);

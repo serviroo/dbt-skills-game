@@ -43,7 +43,8 @@ const CONTROLS = '.dq-swatch, .dq-pen, .dq-size, .dq-tools .dq-tool, .dq-save, .
  */
 const stored = (page) =>
   page.evaluate(async () => {
-    const { artStore, cleanDraft, cleanStrokes } = await import('/src/daily/artstore.ts');
+    const { artStore, cleanDraft } = await import('/src/daily/artstore.ts');
+    const { cleanStrokes } = await import('/src/daily/stored-strokes.ts');
     const db = await new Promise((ok, bad) => Object.assign(indexedDB.open(artStore(window.__daily.store.key).name), { onsuccess: (e) => ok(e.target.result), onerror: bad }));
     const read = (store, how) => new Promise((ok, bad) => Object.assign(db.transaction(store).objectStore(store)[how](), { onsuccess: (e) => ok(e.target.result), onerror: bad }));
     const [drafts, metas, ids, strokes] = await Promise.all([read('drafts', 'getAll'), read('meta', 'getAll'), read('strokes', 'getAllKeys'), read('strokes', 'getAll')]);
