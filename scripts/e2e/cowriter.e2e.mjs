@@ -151,50 +151,139 @@ export const scenarios = {
       const ids = await page.evaluate(async () => {
         const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
         const { story, first } = await ss.create('Ideas kept');
-        const cards = ['First idea', 'Second idea', 'Third idea'].map((text, i) =>
-          ({ id: 'seed-' + i, text, mode: 'questions', t: i + 1 }));
-        await ss.changeCards(first.id, () => cards);
-        return { story: story.id, chapter: first.id };
+        return { story: story.id, chapter: first.id, name: ss.name };
       });
-      const openUnread = async () => {
-        await page.evaluate(() => {
-          window.cardGet = IDBObjectStore.prototype.get;
-          IDBObjectStore.prototype.get = function (...args) {
-            if (this.name === 'cards' && this.transaction.mode === 'readonly') {
-              throw new DOMException('Cannot read cards', 'NotReadableError');
-            }
-            return window.cardGet.apply(this, args);
-          };
+      const seeds = ['First idea', 'Second idea', 'Third idea'].map((text, i) =>
+        ({ id: 'seed-' + i, text, mode: 'questions', t: i + 1 }));
+      const disk = (write) => page.evaluate(async ({ name, chapter, write }) => {
+        const db = await new Promise((resolve, reject) => {
+          const req = indexedDB.open(name);
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
         });
+        try {
+          return await new Promise((resolve, reject) => {
+            const tx = db.transaction('cards', write ? 'readwrite' : 'readonly');
+            const store = tx.objectStore('cards');
+            const req = write ? (window.cardPut || IDBObjectStore.prototype.put).call(store, write, chapter)
+              : (window.cardGet || IDBObjectStore.prototype.get).call(store, chapter);
+            let result;
+            req.onsuccess = () => { result = req.result; };
+            tx.oncomplete = () => resolve(result);
+            tx.onabort = () => reject(tx.error);
+          });
+        } finally { db.close(); }
+      }, { ...ids, write });
+      const seedCards = () => disk(seeds);
+      const onDisk = () => disk(null);
+      const fault = ({ read = false, write = false }) => page.evaluate(({ read, write }) => {
+        window.cardGet ||= IDBObjectStore.prototype.get;
+        window.cardPut ||= IDBObjectStore.prototype.put;
+        IDBObjectStore.prototype.get = function (...args) {
+          if (this.name === 'cards' && (read === 'all' || (read === 'readonly' && this.transaction.mode === 'readonly'))) {
+            throw new DOMException('Cannot read cards', 'NotReadableError');
+          }
+          return window.cardGet.apply(this, args);
+        };
+        IDBObjectStore.prototype.put = function (...args) {
+          if (this.name === 'cards' && write) throw new DOMException('Cannot write cards', 'QuotaExceededError');
+          return window.cardPut.apply(this, args);
+        };
+      }, { read, write });
+      const restore = () => page.evaluate(() => {
+        IDBObjectStore.prototype.get = window.cardGet;
+        IDBObjectStore.prototype.put = window.cardPut;
+      });
+      const open = async () => {
         await page.evaluate((id) => window.__daily.go({ name: 'write', id }), ids.story);
         await page.getByRole('textbox', { name: /^Page,/ }).waitFor();
         await openCw(h, page);
       };
-      const restore = () => page.evaluate(() => { IDBObjectStore.prototype.get = window.cardGet; });
-      const stored = () => page.evaluate(async (id) => {
-        const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
-        return ss.cards(id);
-      }, ids.chapter);
-      await openUnread();
-      h.expect(await page.getByText(/Can.t read this chapter.s ideas right now/).isVisible(),
-        'Unread ideas should show the retry panel.');
+      const leave = () => page.evaluate(() => window.__daily.go({ name: 'hub' }, { quiet: true }));
+      const panel = () => page.getByText(/Can.t read this chapter.s ideas right now/);
+      await seedCards();
+      await fault({ read: 'readonly' });
+      await open();
+      const sawPanel = await panel().isVisible();
       await ask(h, page, 'questions');
       await restore();
-      let cards = await stored();
-      h.expect(cards.length === 6 && ['First idea', 'Second idea', 'Third idea'].every((t) =>
-        cards.some((c) => c.text === t)), 'Asking while unread lost stored ideas: ' + JSON.stringify(cards));
-      await page.getByRole('button', { name: 'Try again' }).click();
-      h.expect((await page.locator('.st-card').count()) === 6, 'Retry did not show all ideas.');
-      await page.evaluate(() => window.__daily.go({ name: 'hub' }, { quiet: true }));
-      await openUnread();
+      let cards = await onDisk();
+      h.expect(cards.length === 6 && seeds.every((s) => cards.some((c) => c.id === s.id)),
+        'Asking while unread lost stored ideas: ' + JSON.stringify(cards));
+      h.expect(sawPanel, 'Unread ideas should show the retry panel.');
+      h.expect((await page.locator('.st-card').count()) === 6 && !(await panel().isVisible()),
+        'A successful change did not show all ideas and remove the retry panel.');
+      await leave();
+      await fault({ read: 'readonly' });
+      await open();
       await ask(h, page, 'questions');
       await newest(page).first().getByRole('button', { name: 'Toss' }).click();
+      await page.waitForFunction(() => document.querySelectorAll('.st-card').length === 8);
       await restore();
-      cards = await stored();
-      h.expect(['First idea', 'Second idea', 'Third idea'].every((t) => cards.some((c) => c.text === t)),
+      cards = await onDisk();
+      h.expect(seeds.every((s) => cards.some((c) => c.id === s.id)),
         'Tossing while unread lost stored ideas: ' + JSON.stringify(cards));
-      await page.evaluate(() => window.__daily.go({ name: 'hub' }, { quiet: true }));
-      await openUnread();
+      await leave();
+      await seedCards();
+      await fault({ write: true });
+      await open();
+      await page.locator('.st-card').first().getByRole('button', { name: 'Toss' }).click();
+      await page.waitForFunction(() => document.querySelectorAll('.st-card').length === 2);
+      h.expect((await page.locator('.st-state').textContent()).trim() === 'Not saving right now. Download the story to keep a copy.',
+        'A failed card write did not update the save indicator.');
+      h.expect((await onDisk()).length === 3, 'A failed card write changed stored ideas.');
+      await restore();
+      await page.locator('.st-card').first().getByRole('button', { name: 'Toss' }).click();
+      await page.waitForFunction(() => document.querySelectorAll('.st-card').length === 1);
+      cards = await onDisk();
+      h.expect(cards.length === 1 && cards[0].id === seeds[2].id, 'Retrying a card change lost its earlier Toss.');
+      await leave();
+      await seedCards();
+      await fault({ read: 'all', write: true });
+      await open();
+      h.expect(await panel().isVisible(), 'Failed read did not show the retry panel.');
+      await ask(h, page, 'questions');
+      h.expect((await page.locator('.st-card').count()) === 3 && await panel().isVisible(),
+        'Asking after a failed read removed the retry panel.');
+      await page.getByRole('button', { name: 'Try again' }).click();
+      await page.getByText(/Still can.t open it/).waitFor();
+      h.expect(await panel().isVisible() && (await page.locator('.st-card').count()) === 3,
+        'A failed retry removed the panel or pending ideas.');
+      await restore();
+      await page.getByRole('button', { name: 'Try again' }).click();
+      await page.waitForFunction(() => document.querySelectorAll('.st-card').length === 6);
+      h.expect(!(await panel().isVisible()), 'A successful retry kept the retry panel.');
+      cards = await onDisk();
+      h.expect(cards.length === 3 && seeds.every((s, i) => cards[i].id === s.id),
+        'A failed read wrote pending ideas to storage.');
+      await leave();
+      await seedCards();
+      await page.reload();
+      await page.waitForFunction(() => !!window.__daily);
+      await open();
+      await ask(h, page, 'questions');
+      const before = await page.locator('.st-card').evaluateAll((els) => els.map((el) => el.dataset.id));
+      const second = page.locator('.st-card').nth(1);
+      await second.getByRole('button', { name: 'Edit', exact: true }).click();
+      await second.locator('.st-card-edit').fill('Second idea changed');
+      await second.getByRole('button', { name: 'Done', exact: true }).click();
+      await page.waitForFunction(async ({ name, chapter }) => {
+        const db = await new Promise((resolve) => { const r = indexedDB.open(name); r.onsuccess = () => resolve(r.result); });
+        const req = db.transaction('cards').objectStore('cards').get(chapter);
+        return new Promise((resolve) => { req.onsuccess = () => { db.close(); resolve(req.result?.[1]?.text === 'Second idea changed'); }; });
+      }, ids);
+      await second.getByRole('button', { name: 'Toss' }).click();
+      await page.waitForFunction(() => document.querySelectorAll('.st-card').length === 5);
+      await page.locator('.dq-toast-btn', { hasText: 'Undo' }).click();
+      await page.waitForFunction(() => document.querySelectorAll('.st-card').length === 6);
+      const order = await page.locator('.st-card').evaluateAll((els) => els.map((el) => el.dataset.id));
+      h.expect(order.join() === before.join(), 'Undo after Edit restored the idea in the wrong place.');
+      cards = await onDisk();
+      h.expect(cards.map((c) => c.id).join() === order.join() && cards[1].text === 'Second idea changed',
+        'Undo after Edit did not save the edited idea in its original place.');
+      await leave();
+      await fault({ read: 'readonly' });
+      await open();
       await page.evaluate(() => {
         IDBObjectStore.prototype.get = function (...args) {
           const request = window.cardGet.apply(this, args);

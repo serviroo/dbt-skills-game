@@ -747,20 +747,22 @@ export class StoryStore {
     return list.map((c) => ({ ...c, ...(c.sel ? { sel: { ...c.sel } } : {}) }));
   }
 
-  async changeCards(chapterId: string, fn: (stored: Card[]) => Card[]): Promise<Card[]> {
-    if (!validId(chapterId)) return [];
+  async changeCards(chapterId: string, fn: (stored: Card[]) => Card[]): Promise<Card[] | null> {
+    if (!validId(chapterId)) return null;
     const clean = (cards: Card[]) => {
       const list = cards.map(cleanCard).filter((c): c is Card => !!c);
       if (list.length <= STORY_CAP.cards) return list;
       const keep = new Set([...list].sort((a, b) => b.t - a.t).slice(0, STORY_CAP.cards));
       return list.filter((c) => keep.has(c));
     };
+    const seen: { list?: Card[] } = {};
     const r = await this.tx(['cards'], 'readwrite', async (t) => {
       const store = t.objectStore('cards');
       const raw = await req<unknown>(store.get(chapterId));
       const disk = Array.isArray(raw) ? raw.map(cleanCard).filter((c): c is Card => !!c) : [];
       const memory = this.mem.cards.get(chapterId);
       const list = clean(fn(memory ? this.pendingCards(chapterId, disk).cards : disk));
+      seen.list = list;
       store.put(list, chapterId);
       return list;
     });
@@ -777,7 +779,7 @@ export class StoryStore {
     const list = clean(fn(memory));
     this.mem.cards.set(chapterId, list);
     this.cardImports.add(chapterId);
-    return list;
+    return seen.list ?? null;
   }
 
   /**

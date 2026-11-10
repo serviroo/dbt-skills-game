@@ -862,8 +862,8 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
         if (copy) (c.title = copy.title), (c.kind = copy.kind);
         if (pageId === old) {
           const copied = cards;
-          if (copied.length) void ss.changeCards(res.id, (old) => [...copied, ...old]);
           pageId = res.id;
+          if (copied.length) void changeCards(res.id, (old) => [...copied, ...old]);
         }
         say(STORY.copied, 0);
         void refreshStory();
@@ -1013,7 +1013,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     // newer tap first, so an overtaken open leaves the selection and the cards as they were
     const read = reading(ss);
     const next = id !== pageId ? await ss.cards(id) : null;
-    const unread = !!next && !next.length && read.failed();
+    const unread = !!next && read.failed();
     if (n !== picks) return;
     await load(id, n, () => {
       if (!next) return;
@@ -1556,10 +1556,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
       const t = Date.now();
       if (steer) steers.set(t, steer);
       const batch: Card[] = res.cards.map((text) => ({ id: rid(), mode: m, text, t, ...(usedSel ? { sel: usedSel } : {}) }));
-      const next = await ss.changeCards(askPage, (old) => [...batch, ...old].slice(0, 12));
-      if (!alive || askPage !== pageId) return;
-      cards = next;
-      renderCards(true);
+      if (!(await changeCards(askPage, (old) => [...batch, ...old].slice(0, 12), true, true))) return;
       if (res.care) care();
     } else showMsg(STORY.msg[res.kind]);
   };
@@ -1593,8 +1590,9 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     const read = reading(ss);
     const next = id ? await ss.cards(id) : [];
     if (!alive || id !== pageId || !present()) return false;
-    if (!next.length && read.failed()) {
+    if (read.failed()) {
       if (!cardsUnread) {
+        cards = next;
         cardsUnread = true;
         renderCards(false);
       }
@@ -1605,18 +1603,22 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     renderCards(false);
     return true;
   };
-  const changeCards = async (id: string, fn: (stored: Card[]) => Card[], draw = true) => {
+  const changeCards = async (id: string, fn: (stored: Card[]) => Card[], draw = true, fresh = false) => {
     const next = await ss.changeCards(id, fn);
-    if (!alive || id !== pageId) return;
-    cards = next;
-    if (draw) renderCards(false);
+    if (!alive) return false;
+    syncState();
+    if (id !== pageId) return false;
+    if (next) cardsUnread = false;
+    cards = next ?? fn(cards);
+    if (draw) renderCards(fresh);
+    return true;
   };
   const editCard = (id: string, card: Card) => {
     const text = card.text;
     void changeCards(id, (old) => old.map((c) => c.id === card.id ? { ...c, text } : c), false);
   };
   const tossCard = (id: string, card: Card) => {
-    const index = cards.indexOf(card);
+    const index = Math.max(0, cards.findIndex((c) => c.id === card.id));
     void changeCards(id, (old) => old.filter((c) => c.id !== card.id));
     visit.toast('Tossed.', { label: 'Undo', run: () => {
       if (id !== pageId) return;
