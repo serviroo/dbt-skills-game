@@ -326,7 +326,8 @@ export const scenarios = {
       await openEarlierDraft(failed.page);
       await routeIs(failed.page, 'draw');
       await failed.page.getByText(/open this drawing/).waitFor();
-      h.expect(await failed.page.locator('.dq-ink-stage').evaluate((el) => el.inert), 'drawing opened after a read error');
+      const inert = await failed.page.locator('.dq-ink-stage').evaluate((el) => el.inert);
+      h.expect(inert, 'drawing opened after a read error');
       await safeAndBack(failed.page, 'draw');
       await drawReady(failed.page);
       await shows(h, failed.page, 1, 'back to the draft whose read failed');
@@ -338,6 +339,88 @@ export const scenarios = {
       h.expect(!failed.errors.length, failed.errors.join('\n'));
     } finally {
       await failed.ctx.close();
+    }
+  },
+
+  async 'drawing-without-browser-storage'(h) {
+    const noStorage = (ctx) =>
+      ctx.addInitScript(() => Object.defineProperty(window, 'indexedDB', { configurable: true, get: () => undefined }));
+    const { ctx, page, errors } = await h.open(seed(h), '?mute', undefined, noStorage);
+    try {
+      await drawPage(h, page);
+      await line(page, [0.2, 0.3], [0.7, 0.4]);
+      await safeAndBack(page, 'draw');
+      await drawReady(page);
+      await shows(h, page, 1, 'back from the Safe Zone without browser storage');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'back-to-a-drawing-whose-save-failed'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await drawPage(h, page);
+      await line(page, [0.2, 0.3], [0.7, 0.4]);
+      await page.evaluate(async () => {
+        const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+        const put = as.put;
+        as.put = function () {
+          as.put = put;
+          return new Promise((_, fail) => (window.__failPut = () => fail(new Error('save refused'))));
+        };
+      });
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      await page.waitForFunction(() => !!window.__failPut);
+      await page.locator('.dq-top .dq-safe').click();
+      await routeIs(page, 'safe');
+      await page.goBack();
+      await routeIs(page, 'draw');
+      await page.evaluate(() => window.__failPut());
+      await drawReady(page);
+      await shows(h, page, 1, 'back while its save failed');
+      const others = errors.filter((e) => !e.includes('save refused'));
+      h.expect(!others.length, others.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'back-to-a-drawing-removed-in-another-tab'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await h.reachHub(page);
+      await page.evaluate(async (s) => {
+        const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+        const day = window.__daily.store.today();
+        await as.put({ id: 'pg-a', kind: 'today', day, t: 1, updated: 1, n: 1, strokes: [s] });
+        window.__daily.go({ name: 'draw', kind: 'today', id: 'pg-a' });
+      }, stroke(200, 500));
+      await routeIs(page, 'draw');
+      await drawReady(page);
+      await shows(h, page, 1, 'opening the saved drawing');
+      await line(page, [0.2, 0.6], [0.7, 0.7]);
+      await page.locator('.dq-top .dq-safe').click();
+      await routeIs(page, 'safe');
+      const other = await page.context().newPage();
+      await other.goto(page.url());
+      await other.waitForFunction(() => !!window.__daily?.store);
+      await other.evaluate(async () => {
+        const m = await import('/src/daily/artstore.ts');
+        const as = m.artStore(window.__daily.store.key);
+        as.hide('pg-a', m.revOf(await as.get('pg-a')));
+        await as.remove('pg-a');
+      });
+      await other.close();
+      await page.goBack();
+      await routeIs(page, 'draw');
+      await drawReady(page);
+      await shows(h, page, 2, 'back to a drawing removed in another tab');
+      await page.getByText('That page is no longer here. This is a fresh one.', { exact: true }).waitFor();
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
     }
   },
 };

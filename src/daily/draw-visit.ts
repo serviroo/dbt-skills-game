@@ -33,10 +33,10 @@ export class DrawVisit {
   async draft(as: ArtStore, kind: Paper, tab: string, own: string): Promise<Draft | null | undefined> {
     const kept = this.from ? await as.getDraft(this.from) : null;
     if (kept === undefined) return undefined;
-    const ours = kept && (!this.editId || kept.editId === this.editId) ? kept : null;
+    const ours = kept && (!this.editId || this.same(kept)) ? kept : null;
     const candidate = !ours || !ours.key.endsWith(`:${tab}`) ? await as.getDraft(own) : null;
     if (candidate === undefined) return undefined;
-    this.occupied = !!candidate && (!!ours || candidate.editId !== this.editId);
+    this.occupied = !!candidate && (!!ours || !this.same(candidate));
     const draft = ours ?? (this.occupied ? null : candidate);
     if (draft || this.from) return draft;
     const id = this.editId;
@@ -45,6 +45,10 @@ export class DrawVisit {
     const same = (await as.drafts()).filter((d) => (id ? d.editId === id : d.kind === kind && !d.editId));
     const mine = same.find((d) => d.key.endsWith(`:${tab}`));
     return mine ?? same.find((d) => !(Date.now() - d.t < ORPHAN_MS)) ?? null;
+  }
+
+  private same(d: Draft) {
+    return d.editId === this.editId || (!d.editId && d.key.startsWith(`edit:${this.editId}:`));
   }
 
   hold() {

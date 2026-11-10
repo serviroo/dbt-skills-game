@@ -46,7 +46,7 @@ const ERASE = 1.4;
 /**
  * i: ink index, w: line width in logical px, p: flat x,y pairs in logical px, m: the tool, when not the brush. A stroke
  * never changes once drawn. One this build can't draw (a tool from a newer build) has no points and draws nothing.
- * Stored, a tool's stroke keeps its points elsewhere (see storedStroke in artstore.ts).
+ * Stored, a tool's stroke keeps its points elsewhere (see storedStroke in stored-strokes.ts).
  */
 export interface Stroke {
   i: number;
