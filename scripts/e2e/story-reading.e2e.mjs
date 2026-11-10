@@ -103,6 +103,126 @@ const CH2 = 'In spring the door opened by itself.\n\nOutside, the path went on f
 const NAMES = ['A regular', 'A larger', 'A largest'];
 
 export const scenarios = {
+  async 'story-typing-while-a-chapter-opens-is-kept'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await h.reachHub(page);
+      const { id, first, second, notes } = await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const { story, first } = await ss.create('Two Doors');
+        const second = await ss.addChapter(story.id, 'Second Door');
+        return { id: story.id, first: first.id, second: second.id, notes: story.notes };
+      });
+      await page.evaluate((r) => window.__daily.go(r), { name: 'write', id });
+      const box = page.getByRole('textbox', { name: /^Page,/ });
+      await box.waitFor();
+      await box.fill('The door opened');
+      await storedIs(h, page, 'The door opened', 'before opening the next chapter');
+      await page.locator('.st-chbtn').click();
+      const row = page.locator('.st-chrow-b', { hasText: 'Second Door' });
+      await row.waitFor();
+      const { waitHeld, release, drain } = await holdStorage(page, ['chapter', 'cards']);
+      await row.click();
+      await waitHeld(`cards ${second}`);
+      await box.press('End');
+      await box.pressSequentially(' and the bell');
+      await release(`cards ${second}`);
+      await waitHeld(`chapter ${second}`);
+      await box.pressSequentially(' rang');
+      await h.poll(page, async () => {
+        await drain();
+        return (await shownIn(page)).box;
+      }, (label) => label === 'Page, Second Door', 'the second chapter did not open', { timeout: 8000, polling: 50 });
+      const disk = await page.evaluate(async ({ id, first, second }) => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        return {
+          first: (await ss.onDisk(first))?.text,
+          second: (await ss.onDisk(second))?.text,
+          count: (await ss.story(id))?.chapters.length,
+        };
+      }, { id, first, second });
+      h.expect(disk.first === 'The door opened and the bell rang',
+        `first chapter stored ${JSON.stringify(disk.first)}`);
+      h.expect(disk.second === '', `second chapter stored ${JSON.stringify(disk.second)}`);
+      h.expect(disk.count === 2, `story has ${disk.count} chapters`);
+      const secondBox = page.getByRole('textbox', { name: 'Page, Second Door' });
+      await secondBox.fill('A light appeared');
+      await h.poll(page, () => page.evaluate(async (id) => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        return (await storyStore(window.__daily.store.key).onDisk(id))?.text;
+      }, second), (text) => text === 'A light appeared', 'the second chapter was not saved');
+      await page.getByRole('radio', { name: 'Show: Notes' }).click();
+      await waitHeld(`chapter ${notes}`);
+      await secondBox.press('End');
+      await secondBox.pressSequentially(' in the window');
+      await h.poll(page, async () => {
+        await drain();
+        return (await shownIn(page)).box;
+      }, (label) => label === 'Notes for this story', 'Notes did not open', { timeout: 8000, polling: 50 });
+      const afterNotes = await page.evaluate(async ({ id, second, notes }) => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        return {
+          second: (await ss.onDisk(second))?.text,
+          notes: (await ss.onDisk(notes))?.text,
+          count: (await ss.story(id))?.chapters.length,
+        };
+      }, { id, second, notes });
+      h.expect(afterNotes.second === 'A light appeared in the window', `second chapter stored ${afterNotes.second}`);
+      h.expect(afterNotes.notes === '', `Notes stored ${JSON.stringify(afterNotes.notes)}`);
+      h.expect(afterNotes.count === 2, `story has ${afterNotes.count} chapters after opening Notes`);
+      await page.getByRole('radio', { name: 'Show: Page' }).click();
+      await h.poll(page, async () => {
+        await drain();
+        return (await shownIn(page)).box;
+      }, (label) => label === 'Page, Second Door', 'the second chapter did not reopen');
+      h.expect(!(await page.locator('.st-note').textContent()).includes('Recovered'),
+        'reopening recovered saved words');
+      h.expect(!(await page.locator('.st-note').textContent()).includes('kept as its own'),
+        'reopening made a copy');
+      await page.evaluate(() => {
+        window.__realTransaction = IDBDatabase.prototype.transaction;
+        IDBDatabase.prototype.transaction = function (stores, mode, ...rest) {
+          if (mode === 'readwrite' && /\.story$/.test(this.name)) {
+            throw new DOMException('This device is out of room', 'QuotaExceededError');
+          }
+          return window.__realTransaction.call(this, stores, mode, ...rest);
+        };
+      });
+      await page.getByRole('radio', { name: 'Show: Notes' }).click();
+      await waitHeld(`chapter ${notes}`);
+      await secondBox.press('End');
+      await secondBox.pressSequentially(' at night');
+      await h.poll(page, async () => {
+        await drain();
+        return (await shownIn(page)).box;
+      }, (label) => label === 'Notes for this story', 'Notes did not open after a failed save');
+      const mirror = await page.evaluate(async (id) => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        return storyStore(window.__daily.store.key).live(id)?.text;
+      }, second);
+      h.expect(mirror === 'A light appeared in the window at night',
+        `failed save left mirror ${JSON.stringify(mirror)}`);
+      await page.evaluate(() => { IDBDatabase.prototype.transaction = window.__realTransaction; });
+      const notesBox = page.getByRole('textbox', { name: 'Notes for this story' });
+      await notesBox.fill('Keep the light on');
+      await h.poll(page, () => page.evaluate(async (id) => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        return (await storyStore(window.__daily.store.key).onDisk(id))?.text;
+      }, notes), (text) => text === 'Keep the light on', 'Notes was not saved after the failed chapter save');
+      await page.getByRole('radio', { name: 'Show: Page' }).click();
+      await h.poll(page, async () => {
+        await drain();
+        return (await shownIn(page)).text;
+      }, (text) => text === 'A light appeared in the window at night', 'the failed save lost its chapter words');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** Another shows a new line each time, nothing is kept before Use this, and Use this writes it at the cursor */
   async 'story-starting-points'(h) {
     const { ctx, page, errors } = await h.open(seed(h));
