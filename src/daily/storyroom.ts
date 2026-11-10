@@ -20,6 +20,7 @@ import { storyFromText, storyToText, type StoryText } from './storytext';
 import { keepTextSize, textSize } from './text-size';
 import { breakable, btn, h, keptWhole, p, segmented, shareOrSave, typo } from './ui';
 import { storyHead, wholeText } from './page-head';
+import { notesOf, pageOf, writeKept } from './write-visit';
 
 export const STORY = {
   title: 'Story Room',
@@ -1314,8 +1315,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const openRead = async () => {
     await flushAll();
     if (!alive) return;
-    // back from reading lands on the chapter they were on
-    r.ch = pageId || undefined;
     app.go({ name: 'read', id: storyId, ch: pageId || undefined });
   };
   const download = async () => {
@@ -1891,14 +1890,14 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     story = s;
     notesId = s.notes;
     titleIn.value = s.title;
-    pageId = r.ch && s.chapters.includes(r.ch) ? r.ch : s.chapters[0] ?? '';
+    pageId = pageOf(visit, r.ch, s);
     // the first page takes its number now, so a Page or Notes tap while the chapter is made or its cards are read wins
     const n = ++picks;
     if (!pageId) pageId = (await ss.addChapter(storyId)).id;
     pageMade();
     await loadCards();
     // search can open the notes; the Page tab then goes to the first chapter
-    const landed = await load(r.ch && r.ch === s.notes ? notesId : pageId, n);
+    const landed = await load(notesOf(visit, r.ch, s) ? notesId : pageId, n);
     await refreshStory();
     syncState();
     syncModes();
@@ -1938,6 +1937,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     mode: 'sub',
     bubbles: [0.9, 0.45],
     foot: dock,
+    keep: () => writeKept(visit, () => ({ opened: shown > 0, tab, open: cur, pageId })),
     leave: () => {
       commit();
       pinLive();
