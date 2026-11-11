@@ -80,19 +80,18 @@ export async function boot(h, viewport, o = {}) {
 /** Waits until the screen stops changing: no DOM changes for 400 ms (at most 4 s), then no animation running that ends within 3 s. */
 export const settle = (page) =>
   page.evaluate(async () => {
+    const { setTimeout, now } = window.__e2eReal;
     await new Promise((done) => {
-      let quiet;
-      const mo = new MutationObserver(() => {
-        clearTimeout(quiet);
-        quiet = setTimeout(end, 400);
-      });
-      const end = () => {
+      const start = now();
+      let last = start;
+      const mo = new MutationObserver(() => (last = now()));
+      const check = () => {
+        const t = now();
+        if (t - last < 400 && t - start < 4000) return setTimeout(check, Math.min(last + 400, start + 4000) - t);
         mo.disconnect();
-        clearTimeout(cap);
         done();
       };
-      const cap = setTimeout(end, 4000);
-      quiet = setTimeout(end, 400);
+      setTimeout(check, 400);
       mo.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
     });
     // One that runs longer (the closed chest's shine, 29.5 s on a first visit) is still running after the 3 s, as a

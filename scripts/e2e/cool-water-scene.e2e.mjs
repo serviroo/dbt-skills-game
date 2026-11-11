@@ -283,17 +283,21 @@ export const scenarios = {
       h.expect(!errors.length, errors.join('\n'));
       await ctx.close();
     }
-    const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE);
+    const { ctx, page, errors } = await h.open(seed(h), '?mute', PHONE, pageClock.install);
     await toSkill(h, page, 'tipp', 'cold');
     await page.locator('header .dq-safe').click();
     await page.evaluate(() => window.__daily.go({ name: 'safe', at: 'cold' }));
     await page.locator('.dq-sz-body .dq-cool-pick').waitFor({ timeout: 10000 });
+    await pageClock.pauseClock(page);
     await page.locator('.dq-sz-body .dq-cool-pick').getByRole('button', { name: 'Cool air', exact: true }).click();
-    await h.sleep(1500);
+    await pageClock.runFor(page, 1100);
+    await pageClock.coolRunning(page, 'Cool air');
+    await pageClock.runFor(page, 1500);
     const s = await scenes(page);
     h.expect(!s?.live && !(await page.locator('.dq-sz-body .dq-scene, .dq-sz-body .is-scene-wait, .dq-sz-body .is-scene-live').count()), `Safe Zone: a 3D scene came up: ${JSON.stringify(s)}`);
     h.expect((await page.locator('.dq-sz-body .dq-timer-svg--cold .dq-scene-flat').count()) === 1, 'Safe Zone: the flat bowl is missing');
     await h.shot(page, 'cool-safe-zone-phone');
+    await pageClock.resume(page);
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
   },

@@ -316,7 +316,9 @@ export const scenarios = {
     const problems = [];
     for (const viewport of [PHONE, { width: 320, height: 568 }, { width: 844, height: 390 }]) {
       const size = `${viewport.width}x${viewport.height}`;
-      const { ctx, page, errors } = await boot(h, viewport, { edit: (s) => (s.profile.region = 'us') });
+      const { ctx, page, errors } = await boot(h, viewport, {
+        edit: (s) => (s.profile.region = 'us'), prepare: pageClock.install,
+      });
       const dialogs = [];
       page.on('dialog', (d) => (dialogs.push(d.message()), void d.dismiss().catch(() => {})));
       const before = await xp(page);
@@ -341,13 +343,17 @@ export const scenarios = {
       await press(page, 'Next');
       await heading(page, 'Cool air or cold water');
       await walk('cold');
+      await pageClock.pauseClock(page);
       await press(page, 'Cool air');
+      await pageClock.runFor(page, 1100);
+      await pageClock.coolRunning(page, 'Cool air');
       await settle(page);
       const started = await focusNow(page);
       if (started.name !== 'Cool air' || !started.ring || !started.inView) problems.push(`${size} cold: after Cool air focus went to ${started.name} (${JSON.stringify(started)})`);
       if (!(await page.evaluate(() => document.querySelector('.dq-cool .dq-btn[aria-pressed=true]')?.textContent.trim()))) problems.push(`${size} cold: Cool air by key did not start the countdown`);
       await press(page, 'Next');
       await heading(page, 'Is it even a little lower?');
+      await pageClock.resume(page);
       await walk('check');
       await press(page, 'About the same', ' ');
       await heading(page, 'Stop. Step back.');

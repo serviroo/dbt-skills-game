@@ -11,6 +11,13 @@ export const fastForward = (page, ms) => page.clock.fastForward(ms);
 
 export const resume = (page) => page.clock.resume();
 
+export const coolRunning = (page, choice) => page.waitForFunction((choice) => {
+  const cool = document.querySelector('.dq-sz-body .dq-cool');
+  const count = Number(cool?.querySelector('.dq-timer-num')?.textContent);
+  const selected = [...(cool?.querySelectorAll('.dq-cool-pick button[aria-pressed=true]') ?? [])];
+  return count > 0 && count < 30 && selected.some((button) => button.textContent.trim() === choice);
+}, choice);
+
 export const setFixedTime = (target, time) => target.clock.setFixedTime(time);
 
 export const setSystemTime = (target, time) => target.clock.setSystemTime(time);

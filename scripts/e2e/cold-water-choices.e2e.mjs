@@ -9,6 +9,7 @@
 // caution still whole on screen (except in the Safe Zone held sideways, whose column holds the countdown or the caution,
 // not both), and in a skill Next too wherever it fits with the caution; the other choice only moves the mark.
 import { returning, shippedStrings } from './skill-check.e2e.mjs';
+import * as pageClock from './clock.mjs';
 
 const SIZES = [
   { width: 390, height: 844 },
@@ -105,7 +106,7 @@ export const scenarios = {
     const failed = [];
     for (const [s, vp] of SIZES.entries()) {
       const size = `${vp.width}x${vp.height}`;
-      const { ctx, page, errors } = await h.open(returning(h), '?mute', vp);
+      const { ctx, page, errors } = await h.open(returning(h), '?mute', vp, pageClock.install);
       const dialogs = [];
       page.on('dialog', (d) => {
         dialogs.push(d.message());
@@ -138,7 +139,12 @@ export const scenarios = {
           // half the time cold water goes first, so both choices are shown starting the countdown everywhere
           const [first, then] = (s + p) % 2 ? [1, 0] : [0, 1];
           const marks = (on) => got.want.map((_, k) => String(k === on)).join('|');
+          if (place === 'Safe Zone') await pageClock.pauseClock(page);
           await page.locator('.dq-cool-pick').getByRole('button', { name: got.want[first], exact: true }).click();
+          if (place === 'Safe Zone') {
+            await pageClock.runFor(page, 1100);
+            await pageClock.coolRunning(page, got.want[first]);
+          }
           const ran = await page
             .waitForFunction(() => Number(document.querySelector('.dq-cool .dq-timer-num')?.textContent) < 30, null, { timeout: 5000 })
             .then(() => true, () => false);
@@ -151,10 +157,14 @@ export const scenarios = {
           if (started.buttons.map((b) => b.pressed).join('|') !== marks(first)) failed.push(`${where}: after "${got.want[first]}" the marks are ${started.buttons.map((b) => b.pressed).join('|')}`);
           if (started.more) failed.push(`${where}: cold offers more time; it stays about 30 s`);
           await page.locator('.dq-cool-pick').getByRole('button', { name: got.want[then], exact: true }).click();
+          if (place === 'Safe Zone') await pageClock.runFor(page, 2000);
           const moved = await look(page);
           if (moved.buttons.map((b) => b.pressed).join('|') !== marks(then)) failed.push(`${where}: after "${got.want[then]}" the marks are ${moved.buttons.map((b) => b.pressed).join('|')}`);
-          if (!(Number(moved.count) <= Number(started.count))) failed.push(`${where}: picking the other choice restarted the countdown (${started.count} then ${moved.count})`);
+          const [was, now, since] = [Number(started.count), Number(moved.count), place === 'Safe Zone' ? 2 : 0];
+          const kept = now <= was - since;
+          if (!kept) failed.push(`${where}: picking the other choice restarted the countdown (${was} then ${now})`);
           await h.shot(page, `cold-${place.replace(/ /g, '-').toLowerCase()}-${size}-started`);
+          if (place === 'Safe Zone') await pageClock.resume(page);
           await page.evaluate(() => window.__daily.go({ name: 'hub' }));
           await h.reachHub(page);
         }
