@@ -145,6 +145,7 @@ export class AudioEngine {
     this.ctx = C;
     this.busLevels = new BusLevels(C);
     this.live = typeof OfflineAudioContext === 'undefined' || !(C instanceof OfflineAudioContext);
+    this.unlocked = this.live && (C as AudioContext).state === 'running';
     this.timeline = this.live ? new TimelineHost(C as AudioContext) : null;
     this.seedN = opts.seed ?? 20261020;
     this.vol = opts.volume ?? 1;
@@ -288,6 +289,7 @@ export class AudioEngine {
       (this.ctx as AudioContext).addEventListener('statechange', sc);
       this.cleanup.push(() => document.removeEventListener('visibilitychange', vis));
       this.cleanup.push(() => (this.ctx as AudioContext).removeEventListener('statechange', sc));
+      if (this.unlocked) void this.applyVisibility();
     }
   }
 
@@ -314,6 +316,7 @@ export class AudioEngine {
     if (!this.live) return Promise.resolve();
     if (this.timeline && !this.timeline.isReady) return this.timeline.ready.then(() => this.applyVisibility());
     const ac = this.ctx as AudioContext;
+    if (ac.state === 'closed') return Promise.resolve();
     if (document.hidden) {
       if (ac.state === 'running') return ac.suspend().then(() => this.applyVisibility()).catch(() => {});
     } else if (this.unlocked && ac.state !== 'running') {
@@ -434,7 +437,10 @@ export class AudioEngine {
     }
     const detune = opts.detune ?? (opts.index !== undefined ? opts.index * 50 : 0);
     // built first and held, then timed: however long building it takes, no part of it can land in the past
-    const v = new Voice(this.lib, 0, this.sfx, { gain: (opts.gain ?? 1) * dB(def.gainDb ?? 0), pan: opts.pan, detune, room: def.room, hall: def.hall, held: true, cueClock: def.timeline, timeline: def.timeline ? this.timeline ?? undefined : undefined }, this.nextSeed());
+    const v = new Voice(this.lib, 0, this.sfx, {
+      gain: (opts.gain ?? 1) * dB(def.gainDb ?? 0), pan: opts.pan, detune, room: def.room, hall: def.hall,
+      held: true, cueClock: def.timeline, timeline: def.timeline ? this.timeline ?? undefined : undefined,
+    }, this.nextSeed());
     try {
       def.fn(v, { dur: opts.dur });
     } catch (err) {

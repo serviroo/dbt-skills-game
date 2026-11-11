@@ -3,7 +3,7 @@
 // extra browser it runs scenarios in side by side, and passes one of these, h, to each scenario. h.stop() closes every
 // browser and stops only the dev server this process started. Once it has, every Playwright call that waits on a page
 // counts its timeout in the time the page could run (see onPageTime()).
-import { chromium, webkit } from 'playwright';
+import { launch } from './browser-launch.mjs';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -737,12 +737,6 @@ export function launchOptions(flags) {
   return { headless: flags.headed !== 'true', args: [...glArgs(), '--autoplay-policy=no-user-gesture-required'] };
 }
 
-function launch(flags) {
-  if (flags.browser === 'webkit') return webkit.launch({ headless: flags.headed !== 'true', handleSIGINT: false, handleSIGTERM: false });
-  if (flags.ws) return chromium.connect(flags.ws);
-  return chromium.launch({ ...launchOptions(flags), handleSIGINT: false, handleSIGTERM: false });
-}
-
 /**
  * Home is usable only after any due greeting has opened and closed, including its scrim. Allows 60 s of the page running
  * (see pageTime()), which every step below shares, so they take no timeout of their own.
@@ -867,7 +861,7 @@ export async function startHarness(flags = {}) {
   const setups = [];
   const throttleErrors = [];
   const start = () => {
-    const p = launch(flags).then(async (browser) => {
+    const p = launch(flags, launchOptions).then(async (browser) => {
       browsers.push(browser);
       const probe = await browser.newPage();
       try {

@@ -31,10 +31,14 @@ export class TimelineAutomation {
     }
     const ch = channel;
     return {
-      setValueAtTime: (value: number, time: number) => this.events.push({ channel: ch, kind: 'set', value, time }),
-      linearRampToValueAtTime: (value: number, time: number) => this.events.push({ channel: ch, kind: 'linear', value, time }),
-      exponentialRampToValueAtTime: (value: number, time: number) => this.events.push({ channel: ch, kind: 'exponential', value, time }),
-      setTargetAtTime: (value: number, time: number, tau: number) => this.events.push({ channel: ch, kind: 'target', value, time, tau }),
+      setValueAtTime: (value: number, time: number) =>
+        this.events.push({ channel: ch, kind: 'set', value, time }),
+      linearRampToValueAtTime: (value: number, time: number) =>
+        this.events.push({ channel: ch, kind: 'linear', value, time }),
+      exponentialRampToValueAtTime: (value: number, time: number) =>
+        this.events.push({ channel: ch, kind: 'exponential', value, time }),
+      setTargetAtTime: (value: number, time: number, tau: number) =>
+        this.events.push({ channel: ch, kind: 'target', value, time, tau }),
       cancelScheduledValues: (time: number) => this.events.push({ channel: ch, kind: 'cancel', time }),
     };
   }
@@ -75,7 +79,9 @@ export class TimelineOscillators {
     this.disposed = true;
     if (!this.started) return;
     for (const source of this.sources) {
-      try { source.stop(); } catch (error) {
+      try {
+        source.stop();
+      } catch (error) {
         if (!(error instanceof DOMException && error.name === 'InvalidStateError')) throw error;
       }
       source.disconnect();
@@ -83,31 +89,54 @@ export class TimelineOscillators {
   }
 }
 
+let nextTimelineId = 0;
+
 export class TimelineNode {
   readonly node: AudioWorkletNode;
   private readonly packets: PacketQueue;
   private nextId = 0;
-  private pending = new Map<number, { resolve: (ack: TimelineAck) => void; reject: (error: Error) => void }>();
+  private pending = new Map<
+    number,
+    { resolve: (ack: TimelineAck) => void; reject: (error: Error) => void }
+  >();
   private failure: Error | null = null;
   private onState: () => void;
 
-  constructor(private ctx: AudioContext, outputChannels: number[]) {
+  constructor(
+    private ctx: AudioContext,
+    outputChannels: number[],
+  ) {
+    const timeline = nextTimelineId++;
     this.node = new AudioWorkletNode(ctx, 'cue-timeline', {
-      numberOfInputs: 32,
+      numberOfInputs: 1,
       numberOfOutputs: outputChannels.length + 1,
       outputChannelCount: [...outputChannels, 1],
       channelCount: 32,
       channelCountMode: 'explicit',
       channelInterpretation: 'discrete',
+      processorOptions: { timeline, channels: outputChannels.reduce((total, count) => total + count, 0) },
     });
-    this.packets = new PacketQueue(ctx, this.node, outputChannels.length, (id, error) => { this.pending.get(id)?.reject(error); this.pending.delete(id); });
-    this.node.port.onmessage = ({ data }: MessageEvent<TimelineAck & { id: number; type?: string; error?: string }>) => {
-      const pending = this.pending.get(data.id);
-      if (!pending) return;
-      this.pending.delete(data.id);
-      if (data.error) pending.reject(new Error(data.error));
-      else pending.resolve({ start: data.start, receivedAt: data.receivedAt, ...(data.applied === false ? { applied: false } : {}) });
+    this.node.port.onmessage = ({ data }) => {
+      if (data === 'disposed') this.node.port.close();
     };
+    this.packets = new PacketQueue(
+      ctx,
+      this.node,
+      timeline,
+      (data) => {
+        const pending = this.pending.get(data.id);
+        if (!pending) return;
+        this.pending.delete(data.id);
+        if (data.error) pending.reject(new Error(data.error));
+        else
+          pending.resolve({
+            start: data.start,
+            receivedAt: data.receivedAt,
+            ...(data.applied === false ? { applied: false } : {}),
+          });
+      },
+      (error) => this.fail(error),
+    );
     this.node.onprocessorerror = () => {
       const error = new Error('The cue timeline stopped processing');
       console.error('[audio]', error);
@@ -123,9 +152,10 @@ export class TimelineNode {
     if (this.failure) return Promise.reject(this.failure);
     const id = this.nextId++ >>> 0;
     const ack = new Promise<TimelineAck>((resolve, reject) => this.pending.set(id, { resolve, reject }));
-    try { this.packets.send(id, requested, events); } catch (error) {
-      this.pending.get(id)?.reject(error instanceof Error ? error : new Error(String(error)));
-      this.pending.delete(id);
+    try {
+      this.packets.send(id, requested, events);
+    } catch (error) {
+      this.fail(error instanceof Error ? error : new Error(String(error)));
     }
     return ack;
   }
@@ -141,8 +171,8 @@ export class TimelineNode {
     this.fail(new Error('The cue timeline was disposed'));
     this.ctx.removeEventListener('statechange', this.onState);
     this.packets.dispose();
+    this.node.port.postMessage('dispose');
     this.node.disconnect();
-    this.node.port.close();
   }
 }
 
@@ -151,17 +181,23 @@ export class TimelineHost {
   private loaded = false;
 
   constructor(private ctx: AudioContext) {
-    if (ctx.state === 'running' || ctx.state === 'suspended') void ctx.suspend().catch((error: unknown) => console.error('[audio] suspend failed', error));
-    this.ready = ctx.audioWorklet.addModule(workletUrl).then(() => { this.loaded = true; });
+    if (ctx.state === 'running' || ctx.state === 'suspended')
+      void ctx.suspend().catch((error: unknown) => console.error('[audio] suspend failed', error));
+    this.ready = ctx.audioWorklet.addModule(workletUrl).then(() => {
+      this.loaded = true;
+    });
     void this.ready.catch(() => {});
   }
 
-  get isReady() { return this.loaded; }
-
-  create(outputChannels: number[]) {
-    return this.loaded ? new TimelineNode(this.ctx, outputChannels) : this.ready.then(() => new TimelineNode(this.ctx, outputChannels));
+  get isReady() {
+    return this.loaded;
   }
 
+  create(outputChannels: number[]) {
+    return this.loaded
+      ? new TimelineNode(this.ctx, outputChannels)
+      : this.ready.then(() => new TimelineNode(this.ctx, outputChannels));
+  }
 }
 
 export class CueTimeline {
@@ -174,7 +210,12 @@ export class CueTimeline {
   private splitters: ChannelSplitterNode[] = [];
   private disposed = false;
 
-  constructor(private host: TimelineHost, private ctx: AudioContext, private out: AudioNode, stopParams: AudioParam[]) {
+  constructor(
+    private host: TimelineHost,
+    private ctx: AudioContext,
+    private out: AudioNode,
+    stopParams: AudioParam[],
+  ) {
     this.reserveStops(stopParams);
   }
 
@@ -200,7 +241,10 @@ export class CueTimeline {
     const events = this.automation.events.splice(0);
     let done!: (node: TimelineNode) => void;
     let fail!: (error: Error) => void;
-    this.node = new Promise((resolve, reject) => { done = resolve; fail = reject; });
+    this.node = new Promise((resolve, reject) => {
+      done = resolve;
+      fail = reject;
+    });
     void this.node.catch(() => {});
     const count = Math.max(1, this.channels.length);
     const outputs = Array.from({ length: Math.ceil(count / 32) }, (_, i) => Math.min(32, count - i * 32));
@@ -250,17 +294,25 @@ export class CueTimeline {
       p.cancelScheduledValues(0);
       p.setTargetAtTime(0, 0, tau);
     }
-    const events: TimelineEvent[] = [{ channel: this.byParam.get(params[0])!, kind: 'stop', stop: duration }, ...this.automation.events.splice(0)];
-    return this.currentNode ? this.currentNode.moment(requested, events) : this.node!.then((node) => node.moment(requested, events));
+    const events: TimelineEvent[] = [
+      { channel: this.byParam.get(params[0])!, kind: 'stop', stop: duration },
+      ...this.automation.events.splice(0),
+    ];
+    return this.currentNode
+      ? this.currentNode.moment(requested, events)
+      : this.node!.then((node) => node.moment(requested, events));
   }
 
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
-    void this.node?.then((node) => {
-      this.oscillators.dispose();
-      for (const splitter of this.splitters) splitter.disconnect();
-      node.dispose();
-    }, () => {});
+    void this.node?.then(
+      (node) => {
+        this.oscillators.dispose();
+        for (const splitter of this.splitters) splitter.disconnect();
+        node.dispose();
+      },
+      () => {},
+    );
   }
 }

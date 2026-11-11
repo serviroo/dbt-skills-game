@@ -31,7 +31,8 @@ export class CueCleanup {
 
   private arm() {
     const now = this.ctx.currentTime;
-    const next = Math.max(Math.min(...[...this.pending].filter(([voice, by]) => !this.waiting.has(voice) || by > now).map(([, by]) => by)), soon(this.ctx));
+    const due = [...this.pending].filter(([voice, by]) => !this.waiting.has(voice) || by > now).map(([, by]) => by);
+    const next = Math.max(Math.min(...due), soon(this.ctx));
     if (!Number.isFinite(next)) return;
     if (!this.clock) {
       const clock = this.ctx.createConstantSource();

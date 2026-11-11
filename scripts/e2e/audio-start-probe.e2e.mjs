@@ -1,4 +1,65 @@
 export const scenarios = {
+  async 'autoplay-resumes-after-worklet-and-suspended-waits-for-unlock'(h) {
+    const ctx = await h.browser.newContext();
+    try {
+      const page = await ctx.newPage();
+      await page.goto(h.server.url + '/scripts/e2e/audio-start-probe.html');
+      await page.getByRole('button', { name: 'Start' }).click();
+      const rows = await page.evaluate(async () => {
+        const { AudioEngine } = await import('/src/audio/engine.ts');
+        const rows = [];
+        for (const initiallyRunning of [true, false]) {
+          const clock = new AudioContext();
+          if (initiallyRunning) await clock.resume();
+          else await clock.suspend();
+          const initial = clock.state;
+          const initialTime = clock.currentTime;
+          let ready = false;
+          let atResolution = null;
+          let earlyResumes = 0;
+          const resume = clock.resume.bind(clock);
+          clock.resume = (...args) => {
+            if (!ready) earlyResumes++;
+            return resume(...args);
+          };
+          const add = clock.audioWorklet.addModule.bind(clock.audioWorklet);
+          clock.audioWorklet.addModule = (...args) => add(...args).then(() => {
+            atResolution = clock.state;
+            ready = true;
+          });
+          const engine = new AudioEngine(clock);
+          try {
+            await engine.timeline.ready;
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            const beforeUnlock = { state: clock.state, time: clock.currentTime };
+            await engine.unlock();
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            rows.push({ initial, initialTime, atResolution, earlyResumes, beforeUnlock, afterUnlock: {
+              state: clock.state, time: clock.currentTime,
+            } });
+          } finally {
+            engine.dispose();
+            if (clock.state !== 'closed') await new Promise((resolve) => {
+              clock.addEventListener('statechange', () => { if (clock.state === 'closed') resolve(); });
+            });
+          }
+        }
+        return rows;
+      });
+      const [autoplay, suspended] = rows;
+      h.expect(
+        autoplay.initial === 'running' && autoplay.atResolution !== 'running' && !autoplay.earlyResumes &&
+          autoplay.beforeUnlock.state === 'running' && autoplay.beforeUnlock.time > 0.1 &&
+          suspended.initial === 'suspended' && suspended.atResolution !== 'running' && !suspended.earlyResumes &&
+          suspended.beforeUnlock.state === 'suspended' && suspended.beforeUnlock.time === suspended.initialTime &&
+          suspended.afterUnlock.state === 'running' && suspended.afterUnlock.time - suspended.initialTime > 0.1,
+        `Autoplay or gesture startup changed: ${JSON.stringify(rows)}`,
+      );
+      return rows;
+    } finally {
+      await ctx.close();
+    }
+  },
   async 'running-context-suspends-before-worklet-load'(h) {
     const ctx = await h.browser.newContext();
     try {
@@ -21,10 +82,11 @@ export const scenarios = {
             return resume(...args);
           };
           const add = clock.audioWorklet.addModule.bind(clock.audioWorklet);
-          clock.audioWorklet.addModule = (...args) => add(...args).then(() => {
-            atResolution = clock.state;
-            resolved = true;
-          });
+          clock.audioWorklet.addModule = (...args) =>
+            add(...args).then(() => {
+              atResolution = clock.state;
+              resolved = true;
+            });
           const engine = new AudioEngine(clock);
           try {
             await engine.unlock();
@@ -33,14 +95,32 @@ export const scenarios = {
             return { before, atResolution, earlyResumes, state: clock.state, first, last: clock.currentTime };
           } finally {
             engine.dispose();
-            if (clock.state !== 'closed') await new Promise((resolve) => clock.addEventListener('statechange', () => { if (clock.state === 'closed') resolve(); }, { once: true }));
+            if (clock.state !== 'closed')
+              await new Promise((resolve) =>
+                clock.addEventListener(
+                  'statechange',
+                  () => {
+                    if (clock.state === 'closed') resolve();
+                  },
+                  { once: true },
+                ),
+              );
           }
         });
         rows.push(row);
-        h.expect(row.before === 'running' && row.atResolution !== 'running' && row.earlyResumes === 0 && row.state === 'running' && row.last - row.first > 0.2, `Already-running context failed at start ${i + 1}: ${JSON.stringify(row)}`);
+        h.expect(
+          row.before === 'running' &&
+            row.atResolution !== 'running' &&
+            row.earlyResumes === 0 &&
+            row.state === 'running' &&
+            row.last - row.first > 0.2,
+          `Already-running context failed at start ${i + 1}: ${JSON.stringify(row)}`,
+        );
       }
       return { starts: rows.length, stopped: 0, rows };
-    } finally { await ctx.close(); }
+    } finally {
+      await ctx.close();
+    }
   },
   async 'suspended-worklet-startup-probe'(h) {
     const rows = [];
@@ -78,16 +158,46 @@ export const scenarios = {
             const runningMs = performance.now() - begin;
             const before = clock.currentTime;
             await new Promise((resolve) => setTimeout(resolve, 600));
-            return { initial, beforeLoad, afterLoad, earlyResumes, state: clock.state, before, after: clock.currentTime, runningMs, events };
-          } finally { await clock.close(); }
+            return {
+              initial,
+              beforeLoad,
+              afterLoad,
+              earlyResumes,
+              state: clock.state,
+              before,
+              after: clock.currentTime,
+              runningMs,
+              events,
+            };
+          } finally {
+            await clock.close();
+          }
         });
         rows.push(row);
-      } finally { await ctx.close(); }
+      } finally {
+        await ctx.close();
+      }
     }
     const stopped = rows.filter((r) => r.state !== 'running' || r.after - r.before < 0.25);
     const unsafe = rows.filter((r) => r.afterLoad === 'running' || r.earlyResumes);
-    h.expect(!stopped.length && !unsafe.length, `${stopped.length} of 50 clocks stopped; ${unsafe.length} resumed early or resolved while running: ${JSON.stringify({ stopped, unsafe })}`);
+    h.expect(
+      !stopped.length && !unsafe.length,
+      `${stopped.length} of 50 clocks stopped; ${unsafe.length} resumed early or resolved while running: ` +
+        JSON.stringify({ stopped, unsafe }),
+    );
     const times = rows.map((r) => r.runningMs).sort((a, b) => a - b);
-    return { starts: rows.length, stopped: stopped.length, minMs: times[0], medianMs: times[25], maxMs: times.at(-1), transitions: rows.map((r) => ({ initial: r.initial, beforeLoad: r.beforeLoad, afterLoad: r.afterLoad, events: r.events })) };
+    return {
+      starts: rows.length,
+      stopped: stopped.length,
+      minMs: times[0],
+      medianMs: times[25],
+      maxMs: times.at(-1),
+      transitions: rows.map((r) => ({
+        initial: r.initial,
+        beforeLoad: r.beforeLoad,
+        afterLoad: r.afterLoad,
+        events: r.events,
+      })),
+    };
   },
 };

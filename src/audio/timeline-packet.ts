@@ -2,22 +2,22 @@ import type { TimelineEvent } from './timeline';
 
 const KINDS = ['adopt', 'set', 'linear', 'exponential', 'target', 'cancel', 'stop', 'align'] as const;
 const CHANNELS = 32;
-const INPUTS = 32;
+
+type Reply = { id: number; start: number; receivedAt: number; applied?: boolean; error?: string };
+type Packet = { source: AudioBufferSourceNode; mailbox: AudioWorkletNode; delay: DelayNode };
 
 export class PacketQueue {
-  private slots = Array.from({ length: INPUTS }, () => ({ source: null as AudioBufferSourceNode | null, readyAt: 0 }));
-  private queue: { id: number; buffer: AudioBuffer }[] = [];
-  private timer: ReturnType<typeof setTimeout> | undefined;
-  private onState = () => this.pump();
+  private packets = new Set<Packet>();
   private closed = false;
-  private ready: DelayNode;
+  private flushTimer: ReturnType<typeof setInterval> | undefined;
 
-  constructor(private ctx: AudioContext, private node: AudioWorkletNode, output: number, private fail: (id: number, error: Error) => void) {
-    this.ready = ctx.createDelay(1);
-    this.ready.delayTime.value = 128 / ctx.sampleRate;
-    node.connect(this.ready, output);
-    ctx.addEventListener('statechange', this.onState);
-  }
+  constructor(
+    private ctx: AudioContext,
+    private node: AudioWorkletNode,
+    private timeline: number,
+    private reply: (reply: Reply) => void,
+    private fail: (error: Error) => void,
+  ) {}
 
   send(id: number, requested: number, events: TimelineEvent[]) {
     if (events.length > 5460) throw new Error('The cue moment is too large');
@@ -28,9 +28,16 @@ export class PacketQueue {
     for (let i = 0; i < 4; i++) words[8 + i] = bits.getUint16(i * 2, true);
     for (let i = 0; i < events.length; i++) {
       const event = events[i];
-      const kind = KINDS.indexOf(event.kind as typeof KINDS[number]);
+      const kind = KINDS.indexOf(event.kind as (typeof KINDS)[number]);
       if (kind < 0) throw new Error(`Unsupported cue event: ${event.kind}`);
-      const fields = [kind + 1, event.channel, (event.time ?? 0) * this.ctx.sampleRate, event.value ?? 0, (event.tau ?? 0) * this.ctx.sampleRate, (event.stop ?? 0) * this.ctx.sampleRate];
+      const fields = [
+        kind + 1,
+        event.channel,
+        (event.time ?? 0) * this.ctx.sampleRate,
+        event.value ?? 0,
+        (event.tau ?? 0) * this.ctx.sampleRate,
+        (event.stop ?? 0) * this.ctx.sampleRate,
+      ];
       for (let j = 0; j < fields.length; j++) {
         bits.setFloat32(0, fields[j], true);
         words[12 + i * 12 + j * 2] = bits.getUint16(0, true);
@@ -38,61 +45,96 @@ export class PacketQueue {
       }
     }
     let checksum = 2166136261;
-    for (let i = 2; i < words.length; i++) if (i !== 6 && i !== 7) checksum = Math.imul(checksum ^ words[i], 16777619) >>> 0;
+    for (let i = 2; i < words.length; i++) {
+      if (i !== 6 && i !== 7) checksum = Math.imul(checksum ^ words[i], 16777619) >>> 0;
+    }
     words[6] = checksum & 65535;
     words[7] = checksum >>> 16;
-    const buffer = this.ctx.createBuffer(CHANNELS, 1 + Math.ceil(words.length / CHANNELS), this.ctx.sampleRate);
+    const buffer = this.ctx.createBuffer(
+      CHANNELS,
+      1 + Math.ceil(words.length / CHANNELS),
+      this.ctx.sampleRate,
+    );
     const channels = Array.from({ length: CHANNELS }, (_, i) => buffer.getChannelData(i));
-    for (let i = 0; i < words.length; i++) channels[i % CHANNELS][1 + Math.floor(i / CHANNELS)] = words[i] / 65536;
-    this.queue.push({ id, buffer });
-    this.pump();
-  }
-
-  private pump() {
-    if (this.closed || this.ctx.state === 'closed') return;
-    if (this.timer !== undefined) { clearTimeout(this.timer); this.timer = undefined; }
-    const now = this.ctx.currentTime;
-    for (let i = 0; i < this.slots.length && this.queue.length; i++) {
-      const slot = this.slots[i];
-      if (slot.source || slot.readyAt > now) continue;
-      const task = this.queue.shift()!;
-      const source = this.ctx.createBufferSource();
-      slot.source = source;
-      source.buffer = task.buffer;
-      source.playbackRate.value = 0;
-      this.ready.connect(source.playbackRate);
-      source.connect(this.node, 0, i);
-      source.onended = () => {
-        this.ready.disconnect(source.playbackRate);
-        source.disconnect();
-        slot.source = null;
-        slot.readyAt = this.ctx.currentTime + 128 / this.ctx.sampleRate;
-        this.pump();
-      };
-      try { source.start(); } catch (error) {
-        this.ready.disconnect(source.playbackRate);
-        source.disconnect();
-        slot.source = null;
-        this.fail(task.id, error instanceof Error ? error : new Error(String(error)));
+    channels[0][0] = 1;
+    for (let i = 0; i < words.length; i++)
+      channels[i % CHANNELS][1 + Math.floor(i / CHANNELS)] = words[i] / 65536;
+    const source = this.ctx.createBufferSource();
+    const delay = this.ctx.createDelay(1);
+    const mailbox = new AudioWorkletNode(this.ctx, 'cue-mailbox', {
+      numberOfInputs: 1,
+      numberOfOutputs: 2,
+      outputChannelCount: [1, 1],
+      channelCount: CHANNELS,
+      channelCountMode: 'explicit',
+      channelInterpretation: 'discrete',
+      processorOptions: { timeline: this.timeline, id, words: words.length, events: events.length },
+    });
+    const packet = { source, mailbox, delay };
+    this.packets.add(packet);
+    let ended = false;
+    let acknowledged = false;
+    const cleanup = () => {
+      if (!ended || !acknowledged) return;
+      delay.disconnect();
+      source.disconnect();
+      mailbox.disconnect();
+      mailbox.port.close();
+      this.packets.delete(packet);
+      if (!this.packets.size && this.flushTimer !== undefined) {
+        clearInterval(this.flushTimer);
+        this.flushTimer = undefined;
       }
-    }
-    if (this.ctx.state === 'running' && this.queue.length && this.slots.some((slot) => !slot.source)) {
-      const wait = Math.min(...this.slots.filter((slot) => !slot.source).map((slot) => slot.readyAt - now));
-      this.timer = setTimeout(() => { this.timer = undefined; this.pump(); }, Math.max(1, Math.ceil(wait * 1000)));
+    };
+    mailbox.port.onmessage = ({ data }: MessageEvent<Reply>) => {
+      acknowledged = true;
+      this.reply(data);
+      cleanup();
+    };
+    mailbox.onprocessorerror = () => this.fail(new Error('The cue mailbox stopped processing'));
+    source.buffer = buffer;
+    source.playbackRate.value = 0;
+    delay.delayTime.value = 128 / this.ctx.sampleRate;
+    mailbox.connect(delay, 0);
+    delay.connect(source.playbackRate);
+    mailbox.connect(this.node, 1, 0);
+    source.connect(mailbox);
+    source.onended = () => {
+      ended = true;
+      cleanup();
+    };
+    try {
+      source.start();
+      if (this.flushTimer === undefined) {
+        this.flushTimer = setInterval(() => this.node.port.postMessage('flush'), 10);
+      }
+    } catch (error) {
+      source.onended = null;
+      source.disconnect();
+      delay.disconnect();
+      mailbox.disconnect();
+      mailbox.port.close();
+      this.packets.delete(packet);
+      throw error;
     }
   }
 
   dispose() {
+    if (this.closed) return;
     this.closed = true;
-    if (this.timer !== undefined) clearTimeout(this.timer);
-    this.ctx.removeEventListener('statechange', this.onState);
-    this.ready.disconnect();
-    for (const slot of this.slots) if (slot.source) {
-      slot.source.onended = null;
-      try { slot.source.stop(); } catch (error) { if (!(error instanceof DOMException && error.name === 'InvalidStateError')) throw error; }
-      slot.source.disconnect();
-      slot.source = null;
+    if (this.flushTimer !== undefined) clearInterval(this.flushTimer);
+    for (const { source, mailbox, delay } of this.packets) {
+      source.onended = null;
+      try {
+        source.stop();
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === 'InvalidStateError')) throw error;
+      }
+      source.disconnect();
+      delay.disconnect();
+      mailbox.disconnect();
+      mailbox.port.close();
     }
-    this.queue.length = 0;
+    this.packets.clear();
   }
 }

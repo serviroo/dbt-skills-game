@@ -147,7 +147,8 @@ export class Voice {
     this.hallSend.gain.value = o.hall ?? 0;
     this.started = Promise.resolve({ start: t, receivedAt: ctx.currentTime });
     if (o.timeline && lib.live) {
-      this.timeline = new CueTimeline(o.timeline, ctx as AudioContext, this.out, [this.out.gain, this.roomSend.gain, this.hallSend.gain]);
+      this.timeline = new CueTimeline(o.timeline, ctx as AudioContext, this.out,
+        [this.out.gain, this.roomSend.gain, this.hallSend.gain]);
     }
     this.wet.connect(this.roomSend).connect(lib.room);
     this.wet.connect(this.hallSend).connect(lib.hall);
@@ -537,7 +538,8 @@ export class Voice {
     if (this.timeline) {
       const pending = { kill, at };
       this.pendingStops.push(pending);
-      void this.timeline.stop(at, tau, stoppedBy(0, ramp), [this.out.gain, this.roomSend.gain, this.hallSend.gain]).then((ack) => {
+      const params = [this.out.gain, this.roomSend.gain, this.hallSend.gain];
+      void this.timeline.stop(at, tau, stoppedBy(0, ramp), params).then((ack) => {
         this.pendingStops.splice(this.pendingStops.indexOf(pending), 1);
         if (ack.applied !== false) {
           this.confirmedKill = Math.min(this.confirmedKill, stoppedBy(ack.start, ramp));
