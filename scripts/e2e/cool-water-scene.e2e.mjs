@@ -292,7 +292,7 @@ export const scenarios = {
     await page.locator('.dq-sz-body .dq-cool-pick').getByRole('button', { name: 'Cool air', exact: true }).click();
     await pageClock.runFor(page, 1100);
     await pageClock.coolRunning(page, 'Cool air');
-    await h.sleep(1500);
+    await pageClock.runFor(page, 1500);
     const s = await scenes(page);
     h.expect(!s?.live && !(await page.locator('.dq-sz-body .dq-scene, .dq-sz-body .is-scene-wait, .dq-sz-body .is-scene-live').count()), `Safe Zone: a 3D scene came up: ${JSON.stringify(s)}`);
     h.expect((await page.locator('.dq-sz-body .dq-timer-svg--cold .dq-scene-flat').count()) === 1, 'Safe Zone: the flat bowl is missing');

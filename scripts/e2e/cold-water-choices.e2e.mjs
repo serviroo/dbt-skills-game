@@ -157,9 +157,12 @@ export const scenarios = {
           if (started.buttons.map((b) => b.pressed).join('|') !== marks(first)) failed.push(`${where}: after "${got.want[first]}" the marks are ${started.buttons.map((b) => b.pressed).join('|')}`);
           if (started.more) failed.push(`${where}: cold offers more time; it stays about 30 s`);
           await page.locator('.dq-cool-pick').getByRole('button', { name: got.want[then], exact: true }).click();
+          if (place === 'Safe Zone') await pageClock.runFor(page, 2000);
           const moved = await look(page);
           if (moved.buttons.map((b) => b.pressed).join('|') !== marks(then)) failed.push(`${where}: after "${got.want[then]}" the marks are ${moved.buttons.map((b) => b.pressed).join('|')}`);
-          if (!(Number(moved.count) <= Number(started.count))) failed.push(`${where}: picking the other choice restarted the countdown (${started.count} then ${moved.count})`);
+          const [was, now, since] = [Number(started.count), Number(moved.count), place === 'Safe Zone' ? 2 : 0];
+          const kept = now <= was - since;
+          if (!kept) failed.push(`${where}: picking the other choice restarted the countdown (${was} then ${now})`);
           await h.shot(page, `cold-${place.replace(/ /g, '-').toLowerCase()}-${size}-started`);
           if (place === 'Safe Zone') await pageClock.resume(page);
           await page.evaluate(() => window.__daily.go({ name: 'hub' }));
