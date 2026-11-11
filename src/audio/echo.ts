@@ -12,7 +12,7 @@ export type Echo = {
   hall: ConvolverNode;
   input: GainNode[];
   out: TrackedGain[];
-  end: EndpointGate[];
+  endpointGates: EndpointGate[];
 };
 
 /** An empty room and hall echo with these responses, fed by `sends`. */
@@ -33,16 +33,16 @@ export function makeEcho(
     input.gain.setValueAtTime(0, at);
     input.gain.linearRampToValueAtTime(1, at + SCORE.safeOutSec);
     const out = trackedGain(ctx, 1);
-    const end = new EndpointGate(ctx, at);
+    const endpoint = new EndpointGate(ctx, at);
     for (const g of from) g.connect(input);
-    input.connect(c).connect(out).connect(end.gain).connect(hush);
-    return { c, input, out, end };
+    input.connect(c).connect(out).connect(endpoint.gain).connect(hush);
+    return { c, input, out, endpoint };
   };
   const room = make(roomIR, [sends.sfxRoom, sends.musRoom], returns[0]);
   const hall = make(hallIR, [sends.sfxHall, sends.musHall], returns[1]);
   return {
     sends, room: room.c, hall: hall.c, input: [room.input, hall.input],
-    out: [room.out, hall.out], end: [room.end, hall.end],
+    out: [room.out, hall.out], endpointGates: [room.endpoint, hall.endpoint],
   };
 }
 
@@ -55,5 +55,5 @@ export function dropEcho(old: Echo) {
   room.disconnect();
   hall.disconnect();
   for (const g of old.out) g.disconnect();
-  for (const g of old.end) g.gain.disconnect();
+  for (const g of old.endpointGates) g.gain.disconnect();
 }

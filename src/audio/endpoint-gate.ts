@@ -1,4 +1,4 @@
-type Interval = { node: ConstantSourceNode; start: number; end: number };
+type Interval = { node: ConstantSourceNode; start: number; stopAt: number };
 
 export class EndpointGate {
   readonly gain: GainNode;
@@ -12,15 +12,15 @@ export class EndpointGate {
 
   private stop(interval: Interval, at: number) {
     interval.node.stop(at);
-    interval.end = at;
+    interval.stopAt = at;
   }
 
   open(at: number) {
     for (const interval of this.intervals) {
-      if (interval.end > at) this.stop(interval, at);
+      if (interval.stopAt > at) this.stop(interval, at);
     }
     const node = this.ctx.createConstantSource();
-    const interval = { node, start: at, end: Infinity };
+    const interval = { node, start: at, stopAt: Infinity };
     this.intervals.add(interval);
     node.offset.value = 1;
     node.connect(this.gain.gain);
@@ -35,10 +35,8 @@ export class EndpointGate {
     for (const interval of this.intervals) {
       if (interval.start > at) {
         const cutoff = Math.min(end, interval.start);
-        if (interval.end > cutoff) this.stop(interval, cutoff);
-      } else if (interval.end > Math.max(at, this.ctx.currentTime)) {
-        this.stop(interval, end);
-      } else if (interval.end > end) {
+        if (interval.stopAt > cutoff) this.stop(interval, cutoff);
+      } else if (interval.stopAt > at) {
         this.stop(interval, end);
       }
     }

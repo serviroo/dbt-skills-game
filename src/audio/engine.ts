@@ -93,7 +93,7 @@ export class AudioEngine {
   private sendLevels: { sfx: number; mus: number; tau: number };
   /** The Safe Zone's gate: the last stage before the speaker level, so the score, effects, beds and echo all pass it. */
   private safe: TrackedGain;
-  private safeEnd: EndpointGate;
+  private safeEndpointGate: EndpointGate;
   private isQuiet = false;
   /** The shared room and hall echo and its sends; leaving the Safe Zone swaps in an empty echo on the same sends, and
    *  stopAll an empty echo with sends of its own. */
@@ -176,9 +176,9 @@ export class AudioEngine {
     this.volume = C.createGain();
     this.volume.gain.value = this.masterTarget();
     this.safe = trackedGain(C, 1);
-    this.safeEnd = new EndpointGate(C);
+    this.safeEndpointGate = new EndpointGate(C);
     pre.connect(hp).connect(lim).connect(undo).connect(clip).connect(this.safe)
-      .connect(this.safeEnd.gain).connect(this.volume).connect(C.destination);
+      .connect(this.safeEndpointGate.gain).connect(this.volume).connect(C.destination);
 
     this.duckG = trackedGain(C, 1);
     this.yieldG = trackedGain(C, 1);
@@ -579,9 +579,9 @@ export class AudioEngine {
   quiet(on: boolean, sec: number, at = soon(this.ctx)) {
     this.isQuiet = on;
     if (on) {
-      this.safeEnd.close(at, at + sec);
-      for (const g of this.echo.end) g.close(at, at + sec);
-    } else this.safeEnd.open(at);
+      this.safeEndpointGate.close(at, at + sec);
+      for (const g of this.echo.endpointGates) g.close(at, at + sec);
+    } else this.safeEndpointGate.open(at);
     for (const { curve: p } of on ? this.echo.out : []) {
       holdAt(p, at);
       p.linearRampToValueAtTime(0, at + sec);
@@ -701,7 +701,7 @@ export class AudioEngine {
   private closeEcho(e: Echo, at: number, fade: number) {
     const was = this.closing.get(e);
     if (was && was.by <= at + fade) return;
-    for (const g of e.end) g.close(at, at + fade);
+    for (const g of e.endpointGates) g.close(at, at + fade);
     for (const { curve: p } of e.out) {
       holdAt(p, at);
       p.linearRampToValueAtTime(0, at + fade);
