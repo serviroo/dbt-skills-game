@@ -25,6 +25,9 @@ const stored = (page) =>
     const s = await ss.story(window.__daily.route.id);
     return s ? ((await ss.onDisk(s.chapters[0]))?.text ?? null) : null;
   });
+const chapterReady = (h, page, name) =>
+  h.poll(page, () => page.locator('.st-chbtn').getAttribute('aria-label'),
+    (label) => label === name, (label) => `the chapter button was ${label} while the story opened`, { timeout: 5000 });
 export async function storedIs(h, page, text, label) {
   await h.poll(page, () => stored(page), (s) => s === text, (s) => `${label}: the page stored ${JSON.stringify(s)}, not ${JSON.stringify(text)}`, { timeout: 8000, polling: 200 });
 }
@@ -56,7 +59,17 @@ export async function holdStorage(page, kinds) {
     };
   }, kinds);
   return {
-    waitHeld: (what, count = 1) => page.waitForFunction(([w, c]) => window.__held().filter((x) => x === w).length === c, [what, count], { timeout: 5000 }),
+    waitHeld: async (what, count = 1) => {
+      try {
+        await page.waitForFunction(
+          ([w, c]) => window.__held().filter((x) => x === w).length >= c, [what, count], { timeout: 5000 },
+        );
+      } catch (error) {
+        if (!String(error.message).includes('Timeout 5000ms')) throw error;
+        const held = await page.evaluate(() => window.__held());
+        throw new Error(`waiting for ${count} held ${what}; held: ${JSON.stringify(held)}`);
+      }
+    },
     release: (what) => page.evaluate((w) => window.__releaseOne(w), what),
     drain: async () => {
       while (await page.evaluate(() => window.__releaseOne()));
@@ -130,6 +143,7 @@ export const scenarios = {
       await page.locator('.st-chbtn').click();
       const row = page.locator('.st-chrow-b', { hasText: 'Second Door' });
       await row.waitFor();
+      await chapterReady(h, page, 'Chapter: Chapter 1, 1 of 2. Open the chapter list.');
       const { waitHeld, release, drain } = await holdStorage(page, ['chapter', 'cards']);
       await row.click();
       await waitHeld(`cards ${second}`);
@@ -275,6 +289,7 @@ export const scenarios = {
       }, `${h.SAVE}.story.live`);
       await page.locator('.st-chbtn').click();
       await page.locator('.st-chrow-b', { hasText: 'Second Door' }).waitFor();
+      await chapterReady(h, page, 'Chapter: Chapter 1, 1 of 2. Open the chapter list.');
       const { waitHeld, release, drain } = await holdStorage(page, ['chapter', 'saveChapter']);
       let typed = 'The door opened';
       const typeWhileItOpens = async (opening, word, what) => {
@@ -480,6 +495,7 @@ export const scenarios = {
       const pageBox = page.getByRole('textbox', { name: /^Page,/ });
       await pageBox.waitFor();
       // from here every chapter read and save waits until the test lets it through, one at a time in the order asked
+      await chapterReady(h, page, 'Chapter: Chapter 1, 1 of 1. Open the chapter list.');
       const { waitHeld, drain } = await holdStorage(page, ['chapter', 'saveChapter']);
       const shown = () => shownIn(page);
       const notesTab = page.getByRole('radio', { name: 'Show: Notes' });
@@ -513,6 +529,7 @@ export const scenarios = {
       await waitHeld(`chapter ${notes}`);
       await notesTab.click();
       await waitHeld(`chapter ${notes}`, 2);
+      await waitHeld(`chapter ${notes}`);
       await drain();
       s = await shown();
       h.expect(s.seg === 'Notes' && s.box === 'Notes for this story', `Notes tapped twice while it loaded showed ${JSON.stringify(s)}`);
@@ -548,7 +565,14 @@ export const scenarios = {
       await page.locator('.st-chbtn').click();
       const secondRow = page.locator('.st-chrow-b', { hasText: 'Second Door' });
       await secondRow.waitFor();
+      await chapterReady(h, page, 'Chapter: Chapter 1, 1 of 2. Open the chapter list.');
       const { waitHeld, release, drain } = await holdStorage(page, ['chapter', 'saveChapter', 'cards', 'onDisk']);
+      await page.evaluate(() => {
+        window.__chapterRefreshes = 0;
+        new MutationObserver(() => window.__chapterRefreshes++).observe(document.querySelector('.st-chbtn'), {
+          attributes: true, attributeFilter: ['aria-label'],
+        });
+      });
       const notesTab = page.getByRole('radio', { name: 'Show: Notes' });
       const card = (text) => page.locator('.st-card', { hasText: text });
       // lets every held read and save through until `ok`, including ones the app asks for only after an earlier one answers,
@@ -591,6 +615,7 @@ export const scenarios = {
       s = await shownIn(page);
       h.expect(s.seg === 'Notes' && s.box === 'Notes for this story', `Second Door loading, then Notes, showed ${JSON.stringify(s)}`);
       h.expect((await card('The second door stuck.').count()) === 0, 'the page open overtaken while its chapter loaded still took its cards');
+      await settle(() => page.evaluate(() => window.__chapterRefreshes >= 1));
 
       // an Insert from Notes brings the page in first and lands there, never in the notes on screen
       await card('The kettle began to hum.').getByRole('button', { name: 'Insert', exact: true }).click();

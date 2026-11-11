@@ -426,6 +426,13 @@ export const scenarios = {
       const t = await make(page);
       await writing(page, t.id, t.ch1);
       await editorShows(h, page, null, 'chapter 1');
+      await h.poll(
+        page,
+        () => page.locator('.st-chbtn').getAttribute('aria-label'),
+        (label) => label === 'Chapter: The door, 1 of 2. Open the chapter list.',
+        (label) => `the chapter button was ${label} while the story opened`,
+        { timeout: 5000 },
+      );
       const held = await holdStorage(page, ['story']);
       await page.getByRole('button', { name: 'Add a drawing', exact: true }).click();
       await held.waitHeld(`story ${t.id}`);

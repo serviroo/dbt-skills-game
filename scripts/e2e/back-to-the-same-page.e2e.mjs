@@ -577,6 +577,13 @@ export const scenarios = {
       await safeAndBack(page, 'write');
       await holds(h, page, 'Notes for this story', 'back from the Safe Zone on the notes');
 
+      await h.poll(
+        page,
+        () => page.locator('.st-chbtn').getAttribute('aria-label'),
+        (label) => label === 'Chapter: Chapter 2, 2 of 2. Open the chapter list.',
+        (label) => `the chapter button was ${label} while Notes opened`,
+        { timeout: 5000 },
+      );
       const held = await holdStorage(page, ['story']);
       await page.locator('.dq-top .dq-safe').click();
       await routeIs(page, 'safe');
