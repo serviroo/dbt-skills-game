@@ -8,6 +8,7 @@ import { BED_NAMES, buildBed, buildCharge, type BedHandle, type BedName, type Ch
 import { AHEAD, Music, SECTIONS, type Section, type SectionOpts } from './music';
 import { clipCurve, makeCrackle, makeIR, makeNoise, dB, type Ctx } from './dsp';
 import { trackedGain, type TrackedGain } from './curve';
+import { EndpointGate } from './endpoint-gate';
 import { holdAt, soon, taper } from './param';
 import { SCORE } from '../motion/tokens';
 import { makeEcho, dropEcho, type Echo, type Sends } from './echo';
@@ -92,6 +93,7 @@ export class AudioEngine {
   private sendLevels: { sfx: number; mus: number; tau: number };
   /** The Safe Zone's gate: the last stage before the speaker level, so the score, effects, beds and echo all pass it. */
   private safe: TrackedGain;
+  private safeEndpointGate: EndpointGate;
   private isQuiet = false;
   /** The shared room and hall echo and its sends; leaving the Safe Zone swaps in an empty echo on the same sends, and
    *  stopAll an empty echo with sends of its own. */
@@ -174,7 +176,9 @@ export class AudioEngine {
     this.volume = C.createGain();
     this.volume.gain.value = this.masterTarget();
     this.safe = trackedGain(C, 1);
-    pre.connect(hp).connect(lim).connect(undo).connect(clip).connect(this.safe).connect(this.volume).connect(C.destination);
+    this.safeEndpointGate = new EndpointGate(C);
+    pre.connect(hp).connect(lim).connect(undo).connect(clip).connect(this.safe)
+      .connect(this.safeEndpointGate.gain).connect(this.volume).connect(C.destination);
 
     this.duckG = trackedGain(C, 1);
     this.yieldG = trackedGain(C, 1);
@@ -574,6 +578,10 @@ export class AudioEngine {
    */
   quiet(on: boolean, sec: number, at = soon(this.ctx)) {
     this.isQuiet = on;
+    if (on) {
+      this.safeEndpointGate.close(at, at + sec);
+      for (const g of this.echo.endpointGates) g.close(at, at + sec);
+    } else this.safeEndpointGate.open(at);
     for (const { curve: p } of on ? this.echo.out : []) {
       holdAt(p, at);
       p.linearRampToValueAtTime(0, at + sec);
@@ -693,6 +701,7 @@ export class AudioEngine {
   private closeEcho(e: Echo, at: number, fade: number) {
     const was = this.closing.get(e);
     if (was && was.by <= at + fade) return;
+    for (const g of e.endpointGates) g.close(at, at + fade);
     for (const { curve: p } of e.out) {
       holdAt(p, at);
       p.linearRampToValueAtTime(0, at + fade);
