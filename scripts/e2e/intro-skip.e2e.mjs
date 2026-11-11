@@ -1,3 +1,5 @@
+import { install, pauseClock, runFor } from './clock.mjs';
+
 // Skip in the intro ends the scene in flight and goes straight to Home: nothing more of it plays or moves, every sound
 // it started stops, and the letterbox and any hush before the hit are gone. Steps the real intro frame by frame in
 // ?capture, so every run checks the same frames, and reads what the scene asked of the audio from the capture's audio log.
@@ -87,36 +89,91 @@ export const scenarios = {
     h.expect(!errors.length, errors.join('\n'));
   },
 
-  /** The rewards keep their own pace in real time, however slowly the 3D scene behind them draws: here every 3D frame
-   *  comes a full second apart, as on a phone (or CI) drawing the scene in software, and Read the note still answers
-   *  within a few seconds. Real time, not ?capture. */
+  /** The rewards keep their own pace on the page clock, however slowly the 3D scene behind them draws: here every 3D
+   *  frame comes a full second apart, and Read the note answers within its natural entrance and exit time.
+   *  Not ?capture. */
   async 'rewards-keep-their-pace-on-slow-frames'(h) {
-    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?shot=rewards&mute');
+    const { ctx, page, errors } = await h.open(
+      { 'dbt.app.v1': h.SEEN }, '?shot=rewards&mute', undefined, async (ctx) => {
+      await install(ctx);
+      await ctx.addInitScript(() => {
+        const animate = Element.prototype.animate;
+        const moments = { cards: [] };
+        window.__rewardMoments = moments;
+        Element.prototype.animate = function (frames, options) {
+          const animation = animate.call(this, frames, options);
+          if (!this.closest('.rw')) return animation;
+          const start = performance.now();
+          const end = Number(animation.effect.getComputedTiming().endTime);
+          const card = this.matches('.rw-card') ? [...this.parentElement.children].indexOf(this) : -1;
+          if (this.matches('.rw') && moments.attach !== undefined) moments.exit = start;
+          animation.pause();
+          animation.currentTime = 0;
+          const timer = setInterval(() => {
+            const elapsed = performance.now() - start;
+            animation.currentTime = Math.min(elapsed, end);
+            if (elapsed >= end) {
+              if (card >= 0) moments.cards[card] = performance.now();
+              animation.finish();
+              clearInterval(timer);
+            }
+          }, 10);
+          return animation;
+        };
+        document.addEventListener('click', (event) => {
+          if (event.isTrusted && event.target.closest('.rw button')) moments.tap = performance.now();
+        }, true);
+        let root;
+        new MutationObserver(() => {
+          const rewards = document.querySelector('.rw');
+          if (rewards && !root) {
+            root = rewards;
+            moments.attach = performance.now();
+            moments.stageStart = window.__stage.time;
+            window.requestAnimationFrame = (cb) => setTimeout(() => cb(performance.now()), 1000);
+          }
+          const button = rewards?.querySelector('button');
+          if (button && !button.closest('[inert]') && moments.ready === undefined) moments.ready = performance.now();
+          if (root && !root.isConnected && moments.gone === undefined) {
+            moments.gone = performance.now();
+            moments.stageEnd = window.__stage.time;
+          }
+        }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['inert'] });
+      });
+    });
     try {
       const title = page.locator('.title-screen');
       await title.waitFor({ timeout: 60000 });
       await h.sleep(1500);
-      await title.click();
-      // the scene starts as its letterbox goes up; from there a 3D frame comes once a second while the page itself stays
-      // free, as when the GPU (or CI's software renderer) holds frames back
-      await page.locator('.lb').first().waitFor({ state: 'attached', timeout: 60000 });
-      await page.evaluate(() => {
-        window.requestAnimationFrame = (cb) => setTimeout(() => cb(performance.now()), 1000);
-      });
-      const ran = await h.stopwatch(page);
+      await pauseClock(page);
+      const titleBox = await title.boundingBox();
+      await page.mouse.click(titleBox.x + titleBox.width / 2, titleBox.y + titleBox.height / 2);
+      await h.poll(page, () => page.locator('.rw').count(), Boolean,
+        'rewards did not attach while loading the world', { timeout: 60000, polling: 50 });
       const note = page.getByRole('button', { name: 'Read the note' });
-      await note.waitFor({ timeout: 30000 });
-      // a player taps Read the note where it shows, and again if nothing happens (a tap, not a Playwright click, which
-      // waits for two still frames: two seconds each here)
-      const through = async () => {
-        if (!(await page.locator('.rw').count())) return true;
-        const box = await note.boundingBox({ timeout: 1000 }).catch(() => null);
-        if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-        return false;
-      };
-      await h.poll(page, through, Boolean, 'the rewards never let Read the note through', { timeout: 40000, polling: 300 });
-      const sec = (await ran()) / 1000;
-      h.expect(sec < 8, `with slow 3D frames the rewards took ${sec.toFixed(1)} s of the page running to let Read the note through (their own pace is under 3 s)`);
+      let ready = false;
+      for (let i = 0; i < 13; i++) {
+        await runFor(page, 300);
+        ready = await note.evaluate((button) => !button.closest('[inert]') && !button.disabled
+          && getComputedStyle(button).opacity === '1');
+        if (ready) break;
+      }
+      const timeline = async () => page.evaluate(() => {
+        const m = window.__rewardMoments;
+        const at = (time) => time === undefined ? 'missing' : `${time - m.attach} ms`;
+        return `attach: 0 ms, card ends: ${m.cards.map(at).join(', ') || 'missing'}, ready: ${at(m.ready)}, `
+          + `tap: ${at(m.tap)}, exit start: ${at(m.exit)}, gone: ${at(m.gone)}`;
+      });
+      h.expect(ready, `Read the note stayed inert with 1 fps stage frames (${await timeline()})`);
+      const box = await note.boundingBox();
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      await runFor(page, 400);
+      const result = await page.evaluate(() => window.__rewardMoments);
+      const detail = await timeline();
+      h.expect(result.gone !== undefined && result.gone - result.attach <= 3850,
+        `rewards did not leave within 3850 ms of browser time (${detail})`);
+      h.expect(result.tap !== undefined && result.stageEnd - result.stageStart < 1,
+        `stage advanced a second or more, or the note was not tapped (${detail})`);
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();
