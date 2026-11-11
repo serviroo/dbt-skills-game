@@ -103,6 +103,218 @@ const CH2 = 'In spring the door opened by itself.\n\nOutside, the path went on f
 const NAMES = ['A regular', 'A larger', 'A largest'];
 
 export const scenarios = {
+  async 'story-typing-while-a-chapter-opens-is-kept'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await h.reachHub(page);
+      const { id, first, second, notes } = await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const { story, first } = await ss.create('Two Doors');
+        const second = await ss.addChapter(story.id, 'Second Door');
+        return { id: story.id, first: first.id, second: second.id, notes: story.notes };
+      });
+      const disk = (ids) => page.evaluate(async ({ id, ids }) => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const texts = await Promise.all(ids.map(async (key) => [key, (await ss.onDisk(key))?.text]));
+        return { ...Object.fromEntries(texts), count: (await ss.story(id))?.chapters.length };
+      }, { id, ids });
+      const noRecovery = async () => h.expect(!/Recovered|kept as its own/.test(
+        await page.locator('.st-note').textContent()), 'reopening recovered words or made a copy');
+      await page.evaluate((r) => window.__daily.go(r), { name: 'write', id });
+      const box = page.getByRole('textbox', { name: /^Page,/ });
+      await box.waitFor();
+      await box.fill('The door opened');
+      await storedIs(h, page, 'The door opened', 'before opening the next chapter');
+      await page.locator('.st-chbtn').click();
+      const row = page.locator('.st-chrow-b', { hasText: 'Second Door' });
+      await row.waitFor();
+      const { waitHeld, release, drain } = await holdStorage(page, ['chapter', 'cards']);
+      await row.click();
+      await waitHeld(`cards ${second}`);
+      await box.press('End');
+      await box.pressSequentially(' and the bell');
+      await release(`cards ${second}`);
+      await waitHeld(`chapter ${second}`);
+      await box.pressSequentially(' rang');
+      await h.poll(page, async () => {
+        await drain();
+        return (await shownIn(page)).box;
+      }, (label) => label === 'Page, Second Door', 'the second chapter did not open', { timeout: 8000, polling: 50 });
+      const afterSwitch = await disk([first, second]);
+      h.expect(afterSwitch[first] === 'The door opened and the bell rang',
+        `first chapter stored ${JSON.stringify(afterSwitch[first])}`);
+      h.expect(afterSwitch[second] === '', `second chapter stored ${JSON.stringify(afterSwitch[second])}`);
+      h.expect(afterSwitch.count === 2, `story has ${afterSwitch.count} chapters`);
+      const secondBox = page.getByRole('textbox', { name: 'Page, Second Door' });
+      await secondBox.fill('A light appeared');
+      await h.poll(page, () => disk([second]), (data) => data[second] === 'A light appeared',
+        'the second chapter was not saved');
+      await page.locator('.st-chbtn').click();
+      await h.poll(page, async () => {
+        await drain();
+        return row.isVisible();
+      }, Boolean, 'the chapter list did not open');
+      await row.click();
+      await waitHeld(`chapter ${second}`);
+      await secondBox.press('End');
+      await secondBox.pressSequentially(' in the window');
+      await secondBox.evaluate((el) => {
+        window.__reopened = false;
+        const observer = new MutationObserver(() => {
+          window.__reopened = true;
+          observer.disconnect();
+        });
+        observer.observe(el, { attributes: true, attributeFilter: ['aria-label'] });
+      });
+      await h.poll(page, async () => {
+        await drain();
+        return { ...(await shownIn(page)), reopened: await page.evaluate(() => window.__reopened) };
+      }, (shown) => shown.reopened && shown.box === 'Page, Second Door' && shown.text.endsWith(' in the window'),
+      (shown) => `reopening the current chapter lost words: ${JSON.stringify(shown)}`,
+      { timeout: 8000, polling: 50 });
+      const afterReopen = await disk([second]);
+      h.expect(await secondBox.inputValue() === 'A light appeared in the window',
+        'the reopened editor lost words');
+      h.expect(afterReopen[second] === 'A light appeared in the window',
+        `second chapter stored ${afterReopen[second]}`);
+      h.expect(afterReopen.count === 2, `story has ${afterReopen.count} chapters after reopening`);
+      await noRecovery();
+      await page.getByRole('radio', { name: 'Show: Notes' }).click();
+      await waitHeld(`chapter ${notes}`);
+      await secondBox.press('End');
+      await secondBox.pressSequentially(' at dusk');
+      await h.poll(page, async () => {
+        await drain();
+        return (await shownIn(page)).box;
+      }, (label) => label === 'Notes for this story', 'Notes did not open', { timeout: 8000, polling: 50 });
+      const afterNotes = await disk([second, notes]);
+      h.expect(afterNotes[second] === 'A light appeared in the window at dusk',
+        `second chapter stored ${afterNotes[second]}`);
+      h.expect(afterNotes[notes] === '', `Notes stored ${JSON.stringify(afterNotes[notes])}`);
+      h.expect(afterNotes.count === 2, `story has ${afterNotes.count} chapters after opening Notes`);
+      await page.getByRole('radio', { name: 'Show: Page' }).click();
+      await h.poll(page, async () => {
+        await drain();
+        return (await shownIn(page)).box;
+      }, (label) => label === 'Page, Second Door', 'the second chapter did not reopen');
+      await noRecovery();
+      await page.evaluate(() => {
+        window.__realTransaction = IDBDatabase.prototype.transaction;
+        IDBDatabase.prototype.transaction = function (stores, mode, ...rest) {
+          if (mode === 'readwrite' && /\.story$/.test(this.name)) {
+            throw new DOMException('This device is out of room', 'QuotaExceededError');
+          }
+          return window.__realTransaction.call(this, stores, mode, ...rest);
+        };
+      });
+      await page.getByRole('radio', { name: 'Show: Notes' }).click();
+      await waitHeld(`chapter ${notes}`);
+      await secondBox.press('End');
+      await secondBox.pressSequentially(' at night');
+      await h.poll(page, async () => {
+        await drain();
+        return (await shownIn(page)).box;
+      }, (label) => label === 'Notes for this story', 'Notes did not open after a failed save');
+      const mirror = await page.evaluate(async (id) => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        return storyStore(window.__daily.store.key).live(id)?.text;
+      }, second);
+      h.expect(mirror === 'A light appeared in the window at dusk at night',
+        `failed save left mirror ${JSON.stringify(mirror)}`);
+      await page.evaluate(() => { IDBDatabase.prototype.transaction = window.__realTransaction; });
+      const notesBox = page.getByRole('textbox', { name: 'Notes for this story' });
+      await notesBox.fill('Keep the light on');
+      await h.poll(page, () => disk([notes]), (data) => data[notes] === 'Keep the light on',
+        'Notes was not saved after the failed chapter save');
+      await page.getByRole('radio', { name: 'Show: Page' }).click();
+      await h.poll(page, async () => {
+        await drain();
+        return (await shownIn(page)).text;
+      }, (text) => text === 'A light appeared in the window at dusk at night',
+      'the failed save lost its chapter words');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'story-a-chapter-stays-open-while-only-its-editor-holds-the-words'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await h.reachHub(page);
+      const { id, first, second, notes } = await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const { story, first } = await ss.create('Two Doors');
+        const second = await ss.addChapter(story.id, 'Second Door');
+        return { id: story.id, first: first.id, second: second.id, notes: story.notes };
+      });
+      const kept = () => page.evaluate(async (chapter) => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        return storyStore(window.__daily.store.key).unsaved(chapter)?.text;
+      }, first);
+      await page.evaluate((r) => window.__daily.go(r), { name: 'write', id });
+      const box = page.getByRole('textbox', { name: /^Page,/ });
+      await box.waitFor();
+      await box.fill('The door opened');
+      await storedIs(h, page, 'The door opened', 'before the device filled up');
+      await page.evaluate((live) => {
+        const full = () => new DOMException('This device is out of room', 'QuotaExceededError');
+        const transaction = IDBDatabase.prototype.transaction;
+        IDBDatabase.prototype.transaction = function (stores, mode, ...rest) {
+          if (mode === 'readwrite' && /\.story$/.test(this.name)) throw full();
+          return transaction.call(this, stores, mode, ...rest);
+        };
+        const setItem = Storage.prototype.setItem;
+        Storage.prototype.setItem = function (key, value) {
+          if (String(key).startsWith(live)) throw full();
+          return setItem.call(this, key, value);
+        };
+      }, `${h.SAVE}.story.live`);
+      await page.locator('.st-chbtn').click();
+      await page.locator('.st-chrow-b', { hasText: 'Second Door' }).waitFor();
+      const { waitHeld, release, drain } = await holdStorage(page, ['chapter', 'saveChapter']);
+      let typed = 'The door opened';
+      const typeWhileItOpens = async (opening, word, what) => {
+        await waitHeld(opening);
+        await box.press('End');
+        await box.pressSequentially(word);
+        typed += word;
+        await release(opening);
+        for (const more of [' the', ' bell', ' rang', ' twice', ' at', ' dusk', ' by', ' the', ' sea']) {
+          if (!(await page.evaluate((w) => window.__held().includes(w), `saveChapter ${first}`))) break;
+          await box.pressSequentially(more);
+          typed += more;
+          await release(`saveChapter ${first}`);
+        }
+        await drain();
+        const shown = await shownIn(page);
+        h.expect(shown.seg === 'Page' && shown.box === 'Page, Chapter 1' && shown.text === typed,
+          `${what} opened over words only the editor held: ${JSON.stringify(shown)}`);
+        h.expect(/Not saving/.test(await page.locator('.st-state').textContent()),
+          'the dock did not say it was not saving');
+        await h.poll(page, async () => (await drain(), kept()), (text) => text === typed,
+          (text) => `after ${what} this copy kept ${JSON.stringify(text)}`);
+      };
+      await page.locator('.st-chrow-b', { hasText: 'Second Door' }).click();
+      await typeWhileItOpens(`chapter ${second}`, ' and', 'the second chapter');
+      await page.getByRole('radio', { name: 'Show: Notes' }).click();
+      await typeWhileItOpens(`chapter ${notes}`, ' softly', 'Notes');
+      await page.getByRole('radio', { name: 'Show: Notes' }).click();
+      await h.poll(page, async () => (await drain(), (await shownIn(page)).box),
+        (label) => label === 'Notes for this story', 'Notes did not open once the words were kept',
+        { timeout: 8000, polling: 50 });
+      await page.getByRole('radio', { name: 'Show: Page' }).click();
+      await h.poll(page, async () => (await drain(), await shownIn(page)),
+        (shown) => shown.box === 'Page, Chapter 1' && shown.text === typed,
+        (shown) => `reopening the chapter lost words: ${JSON.stringify(shown)}`, { timeout: 8000, polling: 50 });
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
   /** Another shows a new line each time, nothing is kept before Use this, and Use this writes it at the cursor */
   async 'story-starting-points'(h) {
     const { ctx, page, errors } = await h.open(seed(h));

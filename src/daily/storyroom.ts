@@ -21,6 +21,7 @@ import { dayDiff, dayKey } from './store';
 import { spans, terms } from './storyfind';
 import { creditStory, STORY_CAP, storyStore, type Card, type CardMode, type Chapter, type Story } from './storystore';
 import { storyFromText, storyToText, type StoryText } from './storytext';
+import { storySaving } from './story-saving';
 import { keepTextSize, textSize } from './text-size';
 import { breakable, btn, h, keptWhole, p, segmented, shareOrSave, typo } from './ui';
 import { storyHead, wholeText } from './page-head';
@@ -765,10 +766,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
       if (alive) syncState();
     }
   };
-  /** The mirror catches up now when anything is not yet written (unsaved words, a write in flight, a throttled mirror). */
-  const pinLive = () => {
-    if (dirty || saving || liveTimer) live(true);
-  };
   const edited = () => {
     dirty = true;
     live();
@@ -837,12 +834,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     });
     return saving;
   };
-  /** Everything typed so far is written before the editor moves to another chapter. */
-  const flushAll = async () => {
-    commit();
-    pinLive();
-    for (let i = 0; i < 6 && (saving || dirty); i++) await (saving ?? save());
-  };
+  const { pinLive, flushAll } = storySaving(commit, live, () => saving, () => dirty, () => !!liveTimer, save);
 
   // ---------- story, chapters ----------
   const syncSeg = () => segBtns.forEach((b, i) => b.setAttribute('aria-checked', String((i === 0 ? 'page' : 'notes') === tab)));
@@ -886,8 +878,15 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
 
   /** `taking` runs as the chapter reaches the editor, only if no newer tap came first */
   const load = async (id: string, n = ++picks, taking?: () => void) => {
-    const c = await ss.chapter(id);
-    if (!c || !alive || n !== picks) return false;
+    let c: Chapter | null;
+    for (;;) {
+      c = await ss.chapter(id);
+      if (!c || !alive || n !== picks) return false;
+      if (!cur || !(dirty || saving)) break;
+      await flushAll();
+      if (failed && dirty && !saving && (live(true), mirrorOff)) return syncSeg(), false;
+      if (failed && dirty && !saving) (dirty = false), clearTimeout(saveTimer);
+    }
     shown = n;
     taking?.();
     let text = c.text;
