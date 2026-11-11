@@ -20,7 +20,7 @@ import { renderStoryCards } from './story-cards';
 import { dayDiff, dayKey } from './store';
 import { spans, terms } from './storyfind';
 import { creditStory, STORY_CAP, storyStore, type Card, type CardMode, type Chapter, type Story } from './storystore';
-import { storyFromText, storyToText, type StoryText } from './storytext';
+import { clip, IMPORT_MAX, pieces, storyFromText, storyToText, type StoryText } from './storytext';
 import { storySaving } from './story-saving';
 import { keepTextSize, textSize } from './text-size';
 import { breakable, btn, h, keptWhole, p, segmented, shareOrSave, typo } from './ui';
@@ -449,25 +449,6 @@ export function storiesScreen(app: App, _route: Route, visit: Visit): ScreenOut 
   };
 }
 
-/** A file to bring in is read only up to this size. */
-const IMPORT_MAX = 1_000_000;
-/** At most n UTF-16 units, never half a character: an emoji at the edge stays whole on the side it fits. */
-const clip = (t: string, n: number) => t.slice(0, t.length > n && /[\uD800-\uDBFF]/.test(t[n - 1]) ? n - 1 : n);
-/** Text cut into chapter-sized pieces: between paragraphs where it can, else between words, else between characters. */
-function pieces(text: string): string[] {
-  const out: string[] = [];
-  while (text.length > STORY_CAP.text) {
-    let cut = text.lastIndexOf('\n\n', STORY_CAP.text);
-    const between = cut >= STORY_CAP.text / 2;
-    if (!between) cut = text.lastIndexOf(' ', STORY_CAP.text);
-    if (cut <= 0) cut = clip(text, STORY_CAP.text).length;
-    out.push(text.slice(0, cut).trimEnd());
-    const rest = text.slice(cut);
-    // between paragraphs the break becomes the new chapter, and the next paragraph keeps its indent
-    text = between ? rest.slice(rest.lastIndexOf('\n', rest.length - rest.trimStart().length) + 1) : rest.trimStart();
-  }
-  return [...out, text];
-}
 /**
  * A story read from a file, shaped the way the Story Room holds one: every chapter named, none longer than a chapter
  * can hold (a longer one goes on in a chapter after it, split between paragraphs), Notes longer than Notes hold going

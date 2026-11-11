@@ -7,6 +7,27 @@
  * markup.
  */
 
+import { STORY_CAP } from './storystore';
+
+/** A file to bring in is read only up to this size. */
+export const IMPORT_MAX = 1_000_000;
+/** At most n UTF-16 units, never half a character: an emoji at the edge stays whole on the side it fits. */
+export const clip = (t: string, n: number) => t.slice(0, t.length > n && /[\uD800-\uDBFF]/.test(t[n - 1]) ? n - 1 : n);
+/** Text cut into chapter-sized pieces: between paragraphs where it can, else between words, else between characters. */
+export function pieces(text: string): string[] {
+  const out: string[] = [];
+  while (text.length > STORY_CAP.text) {
+    let cut = text.lastIndexOf('\n\n', STORY_CAP.text);
+    const between = cut >= STORY_CAP.text / 2;
+    if (!between) cut = text.lastIndexOf(' ', STORY_CAP.text);
+    if (cut <= 0) cut = clip(text, STORY_CAP.text).length;
+    out.push(text.slice(0, cut).trimEnd());
+    const rest = text.slice(cut);
+    // between paragraphs the break becomes the new chapter, and the next paragraph keeps its indent
+    text = between ? rest.slice(rest.lastIndexOf('\n', rest.length - rest.trimStart().length) + 1) : rest.trimStart();
+  }
+  return [...out, text];
+}
 export interface StoryText {
   title: string;
   chapters: { title: string; text: string }[];
