@@ -96,7 +96,7 @@ export async function audioReady(page) {
     }, null, { timeout: 15000, polling: 20 })).jsonValue();
     if (v !== true) throw new Error(v);
   } catch (cause) {
-    const taps = await page.evaluate(() => window.__taps.map((t) => ({ url: t.url, status: t.status, state: t.context.state, start: t.start, error: t.error })));
+    const taps = await page.evaluate(() => window.__taps.map((t) => ({ url: t.url, status: t.status, state: t.context.state, time: t.context.currentTime, start: t.start, block: t.recorder?.parameters.get('block')?.value, error: t.error })));
     throw new Error('audio recorder did not become ready: ' + JSON.stringify(taps), { cause });
   }
 }

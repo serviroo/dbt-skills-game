@@ -1,6 +1,7 @@
 import { mulberry32, type Rng } from '../core/math';
 import { tanhCurve, type Ctx } from './dsp';
 import { silentAfter } from './param';
+import { CueTimeline, type TimelineAck, type TimelineHost } from './timeline';
 
 /** Shared, engine-owned resources every voice can draw on. */
 export interface Lib {
@@ -13,7 +14,7 @@ export interface Lib {
   room: AudioNode;
   hall: AudioNode;
   live: boolean;
-  track(t0: number, t1: number): { b: number } | null;
+  track(t0: number, t1: number): { a: number; b: number } | null;
 }
 
 /** Slow modulation does not need per-sample coefficients; k-rate makes filters and vibrato ~10x cheaper. */
@@ -41,7 +42,7 @@ interface Source {
   started: boolean;
   stop: number;
   asked: number;
-  span: { b: number } | null;
+  span: { a: number; b: number } | null;
   gains: GainNode[];
   voice: Voice;
 }
@@ -52,6 +53,13 @@ const clockOf = new WeakMap<GainNode, Voice>();
 const silentFrom = new WeakMap<GainNode, { last: number; at: number; peak: number }>();
 const SAME = 1e-9;
 const through = new WeakMap<GainNode, Source[]>();
+const oscillatorGates = new WeakMap<OscillatorNode, GainNode>();
+const offlineOscillators = new WeakMap<OscillatorNode, { start: number; frequency: number }>();
+const offlineFrequencies = new WeakMap<AudioParam, number>();
+const frameTime = (time: number, rate: number) => {
+  const frame = Math.ceil(time * rate);
+  return Math.max(0, (frame - Math.max(1e-7, frame * Number.EPSILON * 2)) / rate);
+};
 
 export interface VoiceOpts {
   gain?: number;
@@ -61,6 +69,8 @@ export interface VoiceOpts {
   hall?: number;
   /** Start and set nothing until open(): the times it is given until then count from its opening. */
   held?: boolean;
+  timeline?: TimelineHost;
+  cueClock?: boolean;
 }
 
 /** When a voice stopped at `at` over `ramp` (see Voice.stop) has gone silent and its sources have ended. */
@@ -106,6 +116,13 @@ export class Voice {
   private parts: Voice[] = [];
   private clock: Voice = this;
   private zero = 0;
+  private timeline: CueTimeline | null = null;
+  private cueClock: boolean;
+  private naturalEnd = 0;
+  private confirmedKill = Infinity;
+  private confirmedFade = Infinity;
+  private pendingStops: { kill: number; at: number }[] = [];
+  started: Promise<TimelineAck>;
 
   constructor(readonly lib: Lib, t: number, dest: AudioNode, o: VoiceOpts = {}, seed = 1) {
     const ctx = lib.ctx;
@@ -113,6 +130,7 @@ export class Voice {
     this.t = t;
     this.end = t;
     this.held = o.held ? [] : null;
+    this.cueClock = !!o.cueClock;
     this.cents = o.detune ?? 0;
     this.rng = mulberry32(seed);
     this.out = ctx.createGain();
@@ -127,6 +145,10 @@ export class Voice {
     this.hallSend = ctx.createGain();
     this.roomSend.gain.value = o.room ?? 0;
     this.hallSend.gain.value = o.hall ?? 0;
+    this.started = Promise.resolve({ start: t, receivedAt: ctx.currentTime });
+    if (o.timeline && lib.live) {
+      this.timeline = new CueTimeline(o.timeline, ctx as AudioContext, this.out, [this.out.gain, this.roomSend.gain, this.hallSend.gain]);
+    }
     this.wet.connect(this.roomSend).connect(lib.room);
     this.wet.connect(this.hallSend).connect(lib.hall);
     if (o.pan && (ctx as AudioContext).createStereoPanner) {
@@ -142,6 +164,9 @@ export class Voice {
     c.parent = this;
     c.killAt = this.killAt;
     c.clock = this.clock;
+    c.cueClock = this.cueClock;
+    c.timeline = this.timeline;
+    c.timeline?.reserveStops([c.out.gain, c.roomSend.gain, c.hallSend.gain]);
     this.children.push(c);
     return c;
   }
@@ -160,6 +185,20 @@ export class Voice {
     this.release(at);
     held.sort((a, b) => a.cancelsBefore - b.cancelsBefore || a.t + at - (b.t + at));
     for (const h of held) h.place(at);
+    if (this.timeline) {
+      const natural = this.end - at;
+      this.started = this.timeline.open(at).then((ack) => {
+        this.t = ack.start;
+        this.zero = ack.start;
+        this.naturalEnd = ack.start + natural;
+        this.end = Math.min(this.naturalEnd, this.killAt);
+        for (const s of this.sources) if (s.span) {
+          s.span.a += ack.start - at;
+          s.span.b += ack.start - at;
+        }
+        return ack;
+      });
+    } else this.started = Promise.resolve({ start: at, receivedAt: this.ctx.currentTime });
   }
 
   private release(at: number) {
@@ -173,13 +212,19 @@ export class Voice {
   /** `p`'s timed automation, in this voice's time: set at once, or kept while the voice is held and set by open(). */
   at(p: AudioParam): Timed {
     const held = this.holding();
-    const set: Timed = held
+    const anchor = offlineFrequencies.get(p);
+    const when = (t: number, d: number) => {
+      if (anchor === undefined) return t + d;
+      const start = anchor + d;
+      return t - anchor + frameTime(start, this.ctx.sampleRate);
+    };
+    const set: Timed = this.timeline ? this.timeline.automation.at(p) : held
       ? {
-          setValueAtTime: (v, t) => keep(held, t, (d) => p.setValueAtTime(v, t + d)),
-          linearRampToValueAtTime: (v, t) => keep(held, t, (d) => p.linearRampToValueAtTime(v, t + d)),
-          exponentialRampToValueAtTime: (v, t) => keep(held, t, (d) => p.exponentialRampToValueAtTime(v, t + d)),
-          setTargetAtTime: (v, t, tau) => keep(held, t, (d) => p.setTargetAtTime(v, t + d, tau)),
-          cancelScheduledValues: (t) => keep(held, t, (d) => p.cancelScheduledValues(t + d), true),
+          setValueAtTime: (v, t) => keep(held, t, (d) => p.setValueAtTime(v, when(t, d))),
+          linearRampToValueAtTime: (v, t) => keep(held, t, (d) => p.linearRampToValueAtTime(v, when(t, d))),
+          exponentialRampToValueAtTime: (v, t) => keep(held, t, (d) => p.exponentialRampToValueAtTime(v, when(t, d))),
+          setTargetAtTime: (v, t, tau) => keep(held, t, (d) => p.setTargetAtTime(v, when(t, d), tau)),
+          cancelScheduledValues: (t) => keep(held, t, (d) => p.cancelScheduledValues(when(t, d)), true),
         }
       : p;
     const g = gainOf.get(p);
@@ -254,9 +299,22 @@ export class Voice {
     const zero = this.clock.zero;
     const t1 = Math.min(s.stop + zero, this.killAt);
     s.stop = t1 - zero;
-    if (s.n instanceof AudioBufferSourceNode) s.n.start(t0, offset);
-    else s.n.start(t0);
-    s.n.stop(t1);
+    if (this.timeline) {
+      if (s.n instanceof AudioBufferSourceNode) throw new Error('The cue timeline requires oscillator sources');
+      const osc = s.n as OscillatorNode;
+      this.timeline.osc(osc, oscillatorGates.get(osc)!, t0 - zero, t1 - zero, offlineOscillators.get(osc)!.frequency);
+    } else {
+      const osc = s.n instanceof OscillatorNode ? offlineOscillators.get(s.n) : undefined;
+      if (osc) {
+        const first = frameTime(t0, this.ctx.sampleRate);
+        const source = s.n as OscillatorNode;
+        source.frequency.setValueAtTime(osc.frequency, first);
+        oscillatorGates.get(source)!.gain.setValueAtTime(1, first);
+        source.start();
+      } else if (s.n instanceof AudioBufferSourceNode) s.n.start(t0, offset);
+      else s.n.start(t0);
+      s.n.stop(t1);
+    }
     s.started = true;
     s.span = this.lib.track(t0, t1);
     this.sources.push(s);
@@ -301,9 +359,18 @@ export class Voice {
     const o = this.ctx.createOscillator();
     if (typeof type === "string") o.type = type as OscillatorType;
     else o.setPeriodicWave(type);
-    o.frequency.value = freq;
+    o.frequency.value = this.timeline || (this.cueClock && !this.lib.live) ? 0 : freq;
     if (this.cents) o.detune.value = this.cents;
-    o.connect(dest, 0, input);
+    if (this.timeline || (this.cueClock && !this.lib.live)) {
+      const gate = this.ctx.createGain();
+      gate.gain.value = 0;
+      oscillatorGates.set(o, gate);
+      o.connect(gate).connect(dest, 0, input);
+      offlineOscillators.set(o, { start: t0, frequency: freq });
+      if (!this.timeline) {
+        offlineFrequencies.set(o.frequency, t0);
+      }
+    } else o.connect(dest, 0, input);
     return this.reg(o, t0, t1, dest);
   }
 
@@ -404,8 +471,17 @@ export class Voice {
     if (next) feeds.set(g, next);
     const o = this.ctx.createOscillator();
     o.type = type;
-    o.frequency.value = rate;
-    o.connect(g);
+    o.frequency.value = this.timeline || (this.cueClock && !this.lib.live) ? 0 : rate;
+    if (this.timeline || (this.cueClock && !this.lib.live)) {
+      const gate = this.ctx.createGain();
+      gate.gain.value = 0;
+      oscillatorGates.set(o, gate);
+      o.connect(gate).connect(g);
+      offlineOscillators.set(o, { start: t0, frequency: rate });
+      if (!this.timeline) {
+        offlineFrequencies.set(o.frequency, t0);
+      }
+    } else o.connect(g);
     return this.reg(o, t0, t1, g);
   }
 
@@ -453,11 +529,30 @@ export class Voice {
   /** Fade this voice out from `at` over `ramp` seconds and stop its sources. */
   stop(at: number, ramp = 0.03) {
     const kill = stoppedBy(at, ramp);
-    if (kill >= this.killAt) return false;
-    this.killAt = kill;
+    if (kill >= this.killAt && !this.pendingStops.length) return false;
+    this.killAt = Math.min(this.killAt, kill);
     this.fadesFrom = Math.min(this.fadesFrom, at);
     for (const c of [...this.children, ...this.parts]) c.stop(at, ramp);
     const tau = Math.max(0.002, ramp / 4);
+    if (this.timeline) {
+      const pending = { kill, at };
+      this.pendingStops.push(pending);
+      void this.timeline.stop(at, tau, stoppedBy(0, ramp), [this.out.gain, this.roomSend.gain, this.hallSend.gain]).then((ack) => {
+        this.pendingStops.splice(this.pendingStops.indexOf(pending), 1);
+        if (ack.applied !== false) {
+          this.confirmedKill = Math.min(this.confirmedKill, stoppedBy(ack.start, ramp));
+          this.confirmedFade = Math.min(this.confirmedFade, ack.start);
+        }
+        this.killAt = Math.min(this.confirmedKill, ...this.pendingStops.map((s) => s.kill));
+        this.fadesFrom = Math.min(this.confirmedFade, ...this.pendingStops.map((s) => s.at));
+        this.end = Math.min(this.naturalEnd, this.killAt);
+      }, (error: unknown) => {
+        this.pendingStops.splice(this.pendingStops.indexOf(pending), 1);
+        if (this.ctx.state !== 'closed') console.error('[audio] cue stop failed', error);
+      });
+      this.end = Math.min(this.end, kill);
+      return true;
+    }
     for (const g of [this.out.gain, this.roomSend.gain, this.hallSend.gain]) {
       g.cancelScheduledValues(at);
       g.setTargetAtTime(0, at, tau);
@@ -496,5 +591,9 @@ export class Voice {
 
   get stopStartsAt() {
     return this.fadesFrom;
+  }
+
+  dispose() {
+    this.timeline?.dispose();
   }
 }

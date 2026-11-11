@@ -27,13 +27,15 @@ import { undefinedNames } from './e2e-scope-check.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.join(root, 'scripts/e2e');
 const flags = Object.fromEntries(process.argv.slice(2).filter((a) => a.startsWith('--')).map((a) => { const [k, ...v] = a.slice(2).split('='); return [k, v.length ? v.join('=') : 'true']; }));
-for (const key of ['file', 'scenario', 'shard', 'timings', 'jobs', 'cpu-throttle', 'port']) {
+for (const key of ['file', 'scenario', 'shard', 'timings', 'jobs', 'cpu-throttle', 'port', 'browser']) {
   if (flags[key] === '') throw new Error(`--${key} needs a value`);
 }
 if (flags.jobs && !/^[1-9]\d*$/.test(flags.jobs)) throw new Error(`--jobs needs a whole number of 1 or more, got ${flags.jobs}`);
 if (flags.ws && !flags.port) throw new Error('--ws needs --port, the dev server port the tunnel forwards with -R');
 if (flags.port && !(/^[1-9]\d*$/.test(flags.port) && +flags.port <= 65535)) throw new Error(`--port needs a port number, got ${flags.port}`);
 if (flags['cpu-throttle'] && (!Number.isFinite(Number(flags['cpu-throttle'])) || Number(flags['cpu-throttle']) < 1)) throw new Error(`--cpu-throttle needs a number of 1 or more, got ${flags['cpu-throttle']}`);
+if (flags.browser && flags.browser !== 'webkit' && flags.browser !== 'chromium') throw new Error(`--browser must be chromium or webkit`);
+if (flags.browser === 'webkit' && (flags.ws || flags['cpu-throttle'] || flags.software)) throw new Error('WebKit does not support --ws, --cpu-throttle or --software');
 // With --software, one browser drawing the skills' 3D scenes keeps about 1.5 desktop cores busy. On
 // CI's 4-vCPU runners two of them starved each other: short scenarios ran 4 to 12 times slower, and some timed out.
 const jobs = flags.jobs ? +flags.jobs : flags.ws ? 1 : Math.max(1, Math.min(4, Math.floor(os.availableParallelism() / 4)));
@@ -185,7 +187,7 @@ let failed = 0;
 try {
   h = await startHarness(flags);
   const lanes = [h, ...(await Promise.all(Array.from({ length: Math.min(jobs, units.length) - 1 }, () => h.more())))];
-  report = { url: h.server.url, browser: flags.ws ? 'remote ' + flags.ws : 'local', jobs: lanes.length, scenarios: [], quarantined: held.map((s) => s.name), renderer: h.renderer, cpuThrottle: Number(flags['cpu-throttle'] ?? 1), throttleErrors: h.throttleErrors, zone: h.zone };
+  report = { url: h.server.url, browser: flags.ws ? 'remote ' + flags.ws : flags.browser ?? 'chromium', jobs: lanes.length, scenarios: [], quarantined: held.map((s) => s.name), renderer: h.renderer, cpuThrottle: Number(flags['cpu-throttle'] ?? 1), throttleErrors: h.throttleErrors, zone: h.zone };
   await Promise.all(lanes.map(async (lane) => {
     for (let unit; !interrupted && (unit = units.shift()); ) {
       for (const { name, file, run, i } of unit.scenarios) {

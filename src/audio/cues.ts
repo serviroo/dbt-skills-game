@@ -8,6 +8,7 @@ export interface CueDef {
   gainDb?: number;
   room?: number;
   hall?: number;
+  timeline?: boolean;
   fn: (v: Voice, o: { dur?: number }) => void;
 }
 
@@ -249,6 +250,7 @@ export const CUES: Record<string, CueDef> = {
 
   /** The 24-tick ring filling over 1.0 s: an octave glide D5 -> D6 with 24 Hz amplitude ticks, then a bright ping. */
   level_ring: {
+    timeline: true,
     gainDb: 5,
     len: 2.0,
     room: 0.2,
@@ -270,6 +272,7 @@ export const CUES: Record<string, CueDef> = {
 
   /** Two-note warm resolve on "Level N reached": A5 -> D6, soft 1:1 FM (e-piano body) over a quiet open fifth. */
   level_resolve: {
+    timeline: true,
     gainDb: 5,
     len: 3.2,
     room: 0.18,
@@ -470,6 +473,7 @@ export const CUES: Record<string, CueDef> = {
 
   /** The chest rises from the pool and its gold seams ignite: a warm D-major swell with gold glints. */
   chest_rise: {
+    timeline: true,
     gainDb: 4.5,
     len: 5.0,
     hall: 0.38,
@@ -625,6 +629,7 @@ export const CUES: Record<string, CueDef> = {
 
   /** Gentle bell for the companion (row reveal, check-in). Pass detune for a pentatonic variation. */
   soft_chime: {
+    timeline: true,
     gainDb: 4,
     len: 2.2,
     room: 0.2,
@@ -637,6 +642,7 @@ export const CUES: Record<string, CueDef> = {
 
   /** Their motif: a bubble. A sine whose pitch rises as the bubble shrinks (Minnaert-style chirp), sometimes a twin. */
   bubble: {
+    timeline: true,
     gainDb: 3,
     len: 0.8,
     room: 0.3,
@@ -704,6 +710,7 @@ export const CUES: Record<string, CueDef> = {
 
   /** Check-in done: a soft rising fifth, A5 -> E6. */
   check: {
+    timeline: true,
     gainDb: 3,
     len: 1.8,
     room: 0.25,

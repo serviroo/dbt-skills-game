@@ -14,6 +14,7 @@ import { makeEcho, dropEcho, type Echo, type Sends } from './echo';
 import { BusLevels } from './bus-levels';
 import { Voice, stoppedBy, type Lib } from './voice';
 import { CueCleanup } from './cue-cleanup';
+import { TimelineHost } from './timeline';
 
 export type { BedHandle, BedName, ChargeHandle, Section, SectionOpts };
 export { BED_NAMES, SECTIONS };
@@ -44,6 +45,7 @@ export interface PlayOpts {
 export interface CueHandle {
   stop(at?: number, ramp?: number): void;
   readonly end: number;
+  readonly started: Promise<{ start: number; receivedAt: number }>;
 }
 
 export interface EngineOpts {
@@ -77,6 +79,7 @@ const LIMIT_MAKEUP_DB = 2.47;
 export class AudioEngine {
   readonly ctx: Ctx;
   readonly live: boolean;
+  readonly timeline: TimelineHost | null;
   readonly music: Music;
   private lib: Lib;
   /** The score's resources: same as lib, with reverb sends that pass through the Music level. */
@@ -142,6 +145,7 @@ export class AudioEngine {
     this.ctx = C;
     this.busLevels = new BusLevels(C);
     this.live = typeof OfflineAudioContext === 'undefined' || !(C instanceof OfflineAudioContext);
+    this.timeline = this.live ? new TimelineHost(C as AudioContext) : null;
     this.seedN = opts.seed ?? 20261020;
     this.vol = opts.volume ?? 1;
     this.isMuted = !!opts.muted || !!opts.user?.muted;
@@ -308,6 +312,7 @@ export class AudioEngine {
 
   private applyVisibility(): Promise<void> {
     if (!this.live) return Promise.resolve();
+    if (this.timeline && !this.timeline.isReady) return this.timeline.ready.then(() => this.applyVisibility());
     const ac = this.ctx as AudioContext;
     if (document.hidden) {
       if (ac.state === 'running') return ac.suspend().then(() => this.applyVisibility()).catch(() => {});
@@ -419,13 +424,17 @@ export class AudioEngine {
     const def = CUES[cue];
     if (!def) {
       console.warn('[audio] unknown cue', cue);
-      return { stop() {}, end: this.when(opts.at) };
+      const at = this.when(opts.at);
+      return { stop() {}, end: at, started: Promise.resolve({ start: at, receivedAt: this.ctx.currentTime }) };
     }
     // nothing starts inside the Safe Zone, so nothing can be left sounding when the player steps out
-    if (this.isQuiet) return { stop() {}, end: this.when(opts.at) };
+    if (this.isQuiet) {
+      const at = this.when(opts.at);
+      return { stop() {}, end: at, started: Promise.resolve({ start: at, receivedAt: this.ctx.currentTime }) };
+    }
     const detune = opts.detune ?? (opts.index !== undefined ? opts.index * 50 : 0);
     // built first and held, then timed: however long building it takes, no part of it can land in the past
-    const v = new Voice(this.lib, 0, this.sfx, { gain: (opts.gain ?? 1) * dB(def.gainDb ?? 0), pan: opts.pan, detune, room: def.room, hall: def.hall, held: true }, this.nextSeed());
+    const v = new Voice(this.lib, 0, this.sfx, { gain: (opts.gain ?? 1) * dB(def.gainDb ?? 0), pan: opts.pan, detune, room: def.room, hall: def.hall, held: true, cueClock: def.timeline, timeline: def.timeline ? this.timeline ?? undefined : undefined }, this.nextSeed());
     try {
       def.fn(v, { dur: opts.dur });
     } catch (err) {
@@ -461,6 +470,7 @@ export class AudioEngine {
     this.cueCleanup?.add(v);
     return {
       stop: (t = soon(this.ctx), ramp = 0.03) => v.stop(t, ramp),
+      started: v.started,
       get end() {
         return v.end;
       },

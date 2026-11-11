@@ -3,7 +3,7 @@
 // extra browser it runs scenarios in side by side, and passes one of these, h, to each scenario. h.stop() closes every
 // browser and stops only the dev server this process started. Once it has, every Playwright call that waits on a page
 // counts its timeout in the time the page could run (see onPageTime()).
-import { chromium } from 'playwright';
+import { chromium, webkit } from 'playwright';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -738,6 +738,7 @@ export function launchOptions(flags) {
 }
 
 function launch(flags) {
+  if (flags.browser === 'webkit') return webkit.launch({ headless: flags.headed !== 'true', handleSIGINT: false, handleSIGTERM: false });
   if (flags.ws) return chromium.connect(flags.ws);
   return chromium.launch({ ...launchOptions(flags), handleSIGINT: false, handleSIGTERM: false });
 }
@@ -837,7 +838,7 @@ export async function startHarness(flags = {}) {
       offline = on;
       await setOffline(on);
     };
-    await ctx.route((url) => url.origin === server.url, async (route) => {
+    await ctx.route((url) => url.protocol === 'http:' && url.origin === server.url, async (route) => {
       if (offline) return route.abort('internetdisconnected').catch(() => {});
       const req = route.request();
       const headers = Object.fromEntries(Object.entries(req.headers()).filter(([k]) => !['connection', 'content-length', 'host', 'keep-alive', 'transfer-encoding', 'upgrade'].includes(k)));
