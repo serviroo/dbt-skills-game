@@ -249,7 +249,7 @@ export const scenarios = {
       await page.evaluate(() => { IDBObjectStore.prototype.get = window.__realGet; });
       const shelfHeld = await holdStorage(page, ['list']);
       await page.locator('.st-found .dq-cant').getByRole('button', { name: 'Try again' }).click();
-      await shelfHeld.waitHeld('list undefined');
+      await shelfHeld.waitHeld('list');
       await page.evaluate(async () => {
         window.__daily.go({ name: 'safe' });
         const { storyStore } = await import('/src/daily/storystore.ts');
