@@ -34,7 +34,8 @@ export class EndpointGate {
   close(at: number, end: number) {
     for (const interval of this.intervals) {
       if (interval.start > at) {
-        if (interval.end > at) this.stop(interval, at);
+        const cutoff = Math.min(end, interval.start);
+        if (interval.end > cutoff) this.stop(interval, cutoff);
       } else if (interval.end > Math.max(at, this.ctx.currentTime)) {
         this.stop(interval, end);
       } else if (interval.end > end) {
