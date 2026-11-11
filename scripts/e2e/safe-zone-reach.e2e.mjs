@@ -34,6 +34,7 @@
 // show whole and take their taps, with the Sound panel open too, and Give me a moment's Done shows whole once scrolled
 // to; Home and Settings also fit whole, with no text on top of other text.
 import { gone } from './harness.mjs';
+import * as pageClock from './clock.mjs';
 import { faces } from './home-quest-fit.e2e.mjs';
 import { audit, boot, PAGE, SCREENS, settle, SKIP } from './layout-fit.e2e.mjs';
 import { listed } from './me-92-safe-zone-clean.e2e.mjs';
@@ -56,7 +57,7 @@ const PHONES = {
 export const unreachable = (page, { typing = false, down = false, sound = false, controls = null } = {}) =>
   page.evaluate(async ({ typing, down, sound, controls: only }) => {
     const out = [];
-    const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const frame = () => new Promise((r) => window.__e2eRaf(() => window.__e2eRaf(r)));
     const name = (e) => `"${(e.getAttribute('aria-label') || e.textContent || e.value || e.tagName).replace(/\s+/g, ' ').trim().slice(0, 32)}"`;
     const box = (r) => `${[r.left, r.top, r.right, r.bottom].map(Math.round).join(', ')} in ${innerWidth}x${innerHeight}`;
     // the part that shows: inside the window, above a keyboard over the page (the whole window without one), and inside
@@ -164,7 +165,7 @@ const underTalk = (page) =>
   page.evaluate(async () => {
     const talk = document.querySelector('.dq-sz-talk');
     if (!talk?.checkVisibility()) return [];
-    const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const frame = () => new Promise((r) => window.__e2eRaf(() => window.__e2eRaf(r)));
     const scrollers = [...document.querySelectorAll('.dq, .dq-sz-body, .dq-sz-lead, .dq-sz-main')];
     const was = scrollers.map((s) => s.scrollTop);
     const out = new Set();
@@ -276,10 +277,14 @@ function walk(phone, zoom, { font = false } = {}) {
       await tap(page, 'Next');
       await at(page, 'Cool air');
       await look(page, `cold${t}`);
+      await pageClock.pauseClock(page);
       await tap(page, 'Cool air');
+      await pageClock.runFor(page, 1100);
+      await pageClock.coolRunning(page, 'Cool air');
       await look(page, `cold, cool air counting down${t}`);
       await tap(page, 'Next');
       await at(page, 'Is it even a little lower?');
+      await pageClock.resume(page);
       await look(page, `check${t}`);
       await tap(page, 'About the same');
       await at(page, 'Stop. Step back.');
@@ -309,7 +314,8 @@ function walk(phone, zoom, { font = false } = {}) {
       save.settings = { ...save.settings, region: 'us' };
     };
     const open = async (edit) => {
-      const o = await boot(h, viewport, font ? { edit, device: { isMobile: true, hasTouch: true } } : { edit });
+      const device = font ? { isMobile: true, hasTouch: true } : undefined;
+      const o = await boot(h, viewport, { edit, device, prepare: pageClock.install });
       if (font) await scaleText(o.page);
       await o.page.evaluate(overlay);
       await o.page.locator('header .dq-safe').click();
