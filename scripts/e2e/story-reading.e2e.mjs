@@ -8,13 +8,13 @@ const day = () => {
   const d = new Date(Date.now() - 6 * 3600000);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
-const seed = (h) => ({
+export const seed = (h) => ({
   [h.SAVE]: JSON.stringify({ v: 1, events: [{ id: 'reading-visit', k: 'visit', xp: 10, t: 1, day: day() }], flags: { greetDay: day(), therapistLineShown: true } }),
   [h.YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: 1, companionAt: 1 }),
   'dbt.app.v1': h.SEEN,
 });
 const SIZE_KEY = (h) => `${h.SAVE}.read-size`;
-const ta = (page) => page.locator('.st-write .st-ta');
+export const ta = (page) => page.locator('.st-write .st-ta');
 const ready = (page) => page.waitForFunction(() => !!window.__daily, null, { timeout: 30000 });
 const routeIs = (page, name) => page.waitForFunction((n) => window.__daily?.route.name === n, name, { timeout: 10000 });
 /** the first page of the open story as IndexedDB holds it, not as the editor shows it */
@@ -25,7 +25,7 @@ const stored = (page) =>
     const s = await ss.story(window.__daily.route.id);
     return s ? ((await ss.onDisk(s.chapters[0]))?.text ?? null) : null;
   });
-async function storedIs(h, page, text, label) {
+export async function storedIs(h, page, text, label) {
   await h.poll(page, () => stored(page), (s) => s === text, (s) => `${label}: the page stored ${JSON.stringify(s)}, not ${JSON.stringify(text)}`, { timeout: 8000, polling: 200 });
 }
 /** From here the story store's `kinds` of reads and saves wait until the test lets them through, as on a slow phone where
