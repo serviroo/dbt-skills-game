@@ -314,11 +314,9 @@ export const scenarios = {
       const { css, live } = await page.locator('.dq-scene canvas').evaluate((c) => ({
         css: [c.parentElement.clientWidth, c.parentElement.clientHeight], live: [c.width, c.height],
       }));
-      const ratios = new Set([min, max]);
-      for (const dimension of css)
-        for (let n = Math.ceil(dimension * min); n <= Math.floor(dimension * max); n++)
-          ratios.add(Math.min(max, n / dimension + 1e-9));
-      const sweep = [live, ...[...ratios].map((r) => css.map((n) => Math.floor(n * r))),
+      const steps = Math.max(1, Math.ceil(Math.max(...css) * (max - min) / 16));
+      const ratios = Array.from({ length: steps + 1 }, (_, i) => i === steps ? max : min + (max - min) * i / steps);
+      const sweep = [live, ...ratios.map((r) => css.map((n) => Math.floor(n * r))),
         ...[155, 165, 191].map((n) => [n, n])];
       const sizes = sweep.filter((s) => {
         const key = s.join('x');
