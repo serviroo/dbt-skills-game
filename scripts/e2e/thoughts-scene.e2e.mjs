@@ -172,17 +172,20 @@ async function lampGlow(page, sizes) {
     const lib = performance.getEntriesByType('resource').find((e) => e.name.includes('/deps/three.js'));
     const THREE = await import(lib.name);
     const renderer = new THREE.WebGLRenderer();
+    const gl = renderer.getContext();
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 1200);
     const picture = paintCars(scene, camera, { value: 0 });
     const glows = scene.children.find((o) => o.material.uniforms?.uLamp);
     const { uLamp, uSize } = glows.material.uniforms;
     const objects = scene.children.filter((o) => o !== glows);
+    const [, valley, road, trees, ...cars] = objects;
     let w, h, target;
     const alone = (o) => scene.children.filter((c) => c.geometry === o.geometry).length === 1;
     const solid = scene.children.filter(
       (o) => o !== glows && o.material.depthTest && o.material.depthWrite && alone(o),
     );
+    const surfaces = objects.filter((o) => o.material.depthTest && o.material.depthWrite);
     const ray = new THREE.Raycaster();
     const blocked = (to) => {
       const toward = to.clone().sub(camera.position);
@@ -191,17 +194,23 @@ async function lampGlow(page, sizes) {
       return ray.intersectObjects(solid, false).length > 0;
     };
     const AROUND = [[0, 0], [0.3, 0], [-0.3, 0], [0, 0.3], [0, -0.3]].map(([x, y]) => new THREE.Vector3(x, y, 0));
-    const cover = (lamp) => AROUND.filter((d) => blocked(d.clone().add(lamp))).length;
+    const coverage = new Map();
+    const cover = (lamp, state) => {
+      const key = `${state}|${camera.position.toArray()}|${lamp.toArray()}`;
+      if (!coverage.has(key)) coverage.set(key, AROUND.filter((d) => blocked(d.clone().add(lamp))).length);
+      return coverage.get(key);
+    };
     const nearest = (x, y) => {
-      ray.setFromCamera(new THREE.Vector2((x / w) * 2 - 1, (y / h) * 2 - 1), camera);
+      ray.setFromCamera(new THREE.Vector2(((x + 0.5) / w) * 2 - 1, ((y + 0.5) / h) * 2 - 1), camera);
       ray.far = Infinity;
-      return ray.intersectObjects(solid, false)[0]?.distance ?? Infinity;
+      return ray.intersectObjects(surfaces.filter((o) => o.visible), false)[0];
     };
     const halo = (lamp, depth) => {
       const { x: size, y: least, z: most } = uSize.value;
       const px = (size * camera.projectionMatrix.elements[5] * h * 0.5) / depth;
       return Math.round(0.4 * Math.min(Math.max(px, least), most) * (0.6 + 0.4 * lamp.w));
     };
+    let offset = 0;
     const frame = (lit, points) => {
       glows.visible = lit;
       const ys = points.map(([, y]) => y);
@@ -210,12 +219,10 @@ async function lampGlow(page, sizes) {
       target.scissorTest = true;
       renderer.setRenderTarget(target);
       renderer.render(scene, camera);
-      const pixels = new Uint8Array(height * 4);
-      renderer.readRenderTargetPixels(target, points[0][0], low, 1, height, pixels);
-      return points.map(([, y]) => {
-        const i = (y - low) * 4;
-        return pixels[i] + pixels[i + 1] + pixels[i + 2];
-      });
+      const start = offset;
+      gl.readPixels(points[0][0], low, 1, height, gl.RGBA, gl.UNSIGNED_BYTE, start);
+      offset += height * 4;
+      return points.map(([, y]) => start + (y - low) * 4);
     };
     const results = [];
     for ([w, h] of sizes) {
@@ -224,20 +231,31 @@ async function lampGlow(page, sizes) {
       camera.updateProjectionMatrix();
       picture.resize(w, h);
       const seen = { hidden: [], clear: [] };
+      const reads = [];
+      const buffer = gl.createBuffer();
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, buffer);
+      gl.bufferData(gl.PIXEL_PACK_BUFFER, 101 * 2 * 4 * h * 4, gl.STREAM_READ);
+      offset = 0;
       for (let k = 0; k <= 100; k++) {
         picture.pose(0, [{ n: 0, u: k / 100 }]);
         scene.updateMatrixWorld();
+        const state = solid.map((o) => [o.id, o.geometry.id, o.geometry.attributes.position.version,
+          o.geometry.index?.version, o.geometry.drawRange.start, o.geometry.drawRange.count, o.material.side,
+          o.count, o.instanceMatrix?.version, ...o.matrixWorld.elements].join(',')).join('|');
         const lamps = uLamp.value.slice(0, 2);
         for (let i = 0; i < lamps.length; i++) {
           const spot = new THREE.Vector3(lamps[i].x, lamps[i].y, lamps[i].z);
-          const covered = cover(spot);
+          const covered = cover(spot, state);
           if (covered !== 0 && covered !== AROUND.length) continue;
           const depth = -spot.clone().applyMatrix4(camera.matrixWorldInverse).z;
           const at = spot.clone().project(camera);
           if (Math.abs(at.x) > 0.95 || Math.abs(at.y) > 0.95) continue;
           const [x, y] = [Math.round(((at.x + 1) * w) / 2), Math.round(((at.y + 1) * h) / 2)];
           const r = halo(lamps[i], depth);
-          const under = nearest(x, y - r) / spot.distanceTo(camera.position);
+          const hit = nearest(x, y - r);
+          const under = (hit?.distance ?? Infinity) / spot.distanceTo(camera.position);
+          const surface = hit?.object === road || hit?.object === valley ? 'ground'
+            : hit?.object === trees ? 'tree' : cars.includes(hit?.object) ? 'car' : 'other';
           const points = [[x, y], [x, y + r], [x, y - r]];
           const strength = uLamp.value.map((lamp) => lamp.w);
           uLamp.value.forEach((lamp, j) => { if (j !== i) lamp.w = 0; });
@@ -249,10 +267,18 @@ async function lampGlow(page, sizes) {
           const clearOff = frame(false, points);
           objects.forEach((o, j) => { o.visible = visibility[j]; });
           uLamp.value.forEach((lamp, j) => { lamp.w = strength[j]; });
-          const [centre, above, below] = on.map((v, j) => v - off[j]);
-          const reference = clearOn.map((v, j) => v - clearOff[j]);
-          seen[covered ? 'hidden' : 'clear'].push({ u: k / 100, centre, above, below, under, reference });
+          reads.push({ covered, u: k / 100, under, surface, on, off, clearOn, clearOff });
         }
+      }
+      const pixels = new Uint8Array(offset);
+      gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, pixels);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+      gl.deleteBuffer(buffer);
+      const value = (i) => pixels[i] + pixels[i + 1] + pixels[i + 2];
+      for (const { covered, u, under, surface, on, off, clearOn, clearOff } of reads) {
+        const [centre, above, below] = on.map((v, j) => value(v) - value(off[j]));
+        const reference = clearOn.map((v, j) => value(v) - value(clearOff[j]));
+        seen[covered ? 'hidden' : 'clear'].push({ u, centre, above, below, under, surface, reference });
       }
       target.dispose();
       results.push({ size: [w, h], ...seen });
@@ -273,25 +299,50 @@ export const scenarios = {
     const said = (spots) => spots.map((s) =>
       `${s.u}: ${s.below}/${s.centre}/${s.above} (clear ${s.reference[2]}/${s.reference[0]}/${s.reference[1]})`,
     ).join(', ');
+    const measured = new Set();
     for (const [tag, vp] of [...SIZES, ['desk', DESK]]) {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
+      const { min, max } = await page.evaluate(async () => {
+        const { SCENE } = await import('/src/motion/tokens.ts');
+        const { lendRenderer } = await import('/src/scene/lease.ts');
+        const lease = lendRenderer(document.createElement('div'), { evict() {}, lost() {}, restored() {} });
+        const max = lease.maxDpr;
+        lease.release();
+        return { min: Math.min(max, SCENE.minDpr), max };
+      });
       await toThoughts(h, page, 'cars');
-      const size = await page.locator('.dq-scene canvas').evaluate((c) => [c.width, c.height]);
-      const sweep = [size, ...[128, 155, 165, 191, 256, 414].flatMap((n) =>
-        [[n, n], [n, Math.round(n * size[1] / size[0])]])];
-      const sizes = [...new Map(sweep.map((s) => [s.join('x'), s])).values()];
+      const { css, live } = await page.locator('.dq-scene canvas').evaluate((c) => ({
+        css: [c.parentElement.clientWidth, c.parentElement.clientHeight], live: [c.width, c.height],
+      }));
+      const ratios = new Set([min, max]);
+      for (const dimension of css)
+        for (let n = Math.ceil(dimension * min); n <= Math.floor(dimension * max); n++)
+          ratios.add(Math.min(max, n / dimension + 1e-9));
+      const sweep = [live, ...[...ratios].map((r) => css.map((n) => Math.floor(n * r))),
+        ...[155, 165, 191].map((n) => [n, n])];
+      const sizes = sweep.filter((s) => {
+        const key = s.join('x');
+        if (measured.has(key)) return false;
+        measured.add(key);
+        return true;
+      });
+      console.log(`  cars ${tag}: CSS ${css.join('x')}, ratio ${min}-${max}, ${sizes.length} new sizes`);
       for (const { size: [width, height], hidden, clear } of await lampGlow(page, sizes)) {
         const where = `${tag} ${width}x${height}`;
         const shows = hidden.filter((s) => s.centre > 6);
         const dim = clear.filter((s) => s.centre < 40);
         const bad = [...hidden, ...clear].filter((s) => s.reference.some((v) => v <= 0));
-        const cut = clear.filter((s) => s.under > 0.5 && s.below * s.reference[1] < s.above * s.reference[2] / 2);
+        const ground = clear.filter((s) => s.surface === 'ground' && s.under > 0.5);
+        const covered = clear.filter((s) => s.surface === 'tree' || s.surface === 'car');
+        const cut = ground.filter((s) => s.below * s.reference[1] < s.above * s.reference[2] / 2);
         h.expect(!bad.length, `cars ${where}: clear glow measurement is not positive (${said(bad)})`);
         h.expect(!shows.length, `cars ${where}: headlights behind the hill or trees still glow (${said(shows)})`);
+        h.expect(ground.length, `cars ${where}: no clear lamp has its lower sample on the road or valley`);
         h.expect(!cut.length, `cars ${where}: the road cuts the bottom off a headlight's glow (${said(cut)})`);
         h.expect(clear.length && !dim.length, `cars ${where}: headlights in plain view do not glow (${said(dim)})`);
         h.expect(hidden.length, `cars ${where}: no car passed behind the hill or trees`);
-        console.log(`  cars ${where}: ${hidden.length} lamps hidden, ${clear.length} in view`);
+        console.log(`  cars ${where}: ${hidden.length} hidden, ${clear.length} clear, ${ground.length} ground, ` +
+          `${covered.length} tree or car nearest`);
       }
       h.expect(!errors.length, errors.join('\n'));
       await ctx.close();
