@@ -15,6 +15,7 @@ import { artStore, revOf, type DrawingMeta } from './artstore';
 import { dayLabel } from './lines';
 import { reading } from './reading';
 import { cantOpen } from './cant-open';
+import { firstPage } from './first-page';
 import { clearFind, findIn as searchStories, marked, renderFind } from './story-find';
 import { renderStoryCards } from './story-cards';
 import { dayDiff, dayKey } from './store';
@@ -525,6 +526,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   /** resolves once the story's first page exists, which opening a story with no pages makes first */
   let pageMade!: () => void;
   const pageExists = new Promise<void>((done) => (pageMade = done));
+  const storyRead = ss.sweepLives().then(() => ss.story(storyId));
 
   // ---- head: title, chapter bar ----
   const titleIn = h('input', { class: 'st-title', type: 'text', maxlength: 120, placeholder: STORY.untitled, 'aria-label': 'Story title', autocomplete: 'off', autocapitalize: 'words', spellcheck: 'true', enterkeyhint: 'done' });
@@ -562,6 +564,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
 
   // ---- the page ----
   const ta = h('textarea', { class: 'st-ta', maxlength: STORY_CAP.text, spellcheck: 'true', autocapitalize: 'sentences', autocomplete: 'off', 'aria-label': 'Your page', placeholder: 'Start anywhere.', rows: 8 }) as HTMLTextAreaElement;
+  ta.readOnly = titleIn.readOnly = true;
   // a place found by search, marked behind the text (same box and type as the page) until the page changes
   const hl = h('div', { class: 'st-hl', 'aria-hidden': 'true' });
   const frame = h('div', { class: 'dq-panel st-frame' }, h('span', { class: 'dq-hairbar', 'aria-hidden': 'true' }), hl, ta);
@@ -619,6 +622,10 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   );
 
   const main = h('div', { class: 'st-main' }, titleIn, h('div', { class: 'st-bar' }, chBtn, seg, moreWrap), note, start, frame, dock);
+  const first = firstPage(async () => (await ss.addChapter(storyId)).id);
+  const shut = (box: HTMLElement) => (main.replaceChildren(box), cw.remove());
+  const cant = () => shut(cantOpen('story', async () =>
+    (app.go(route, { replace: true, quiet: true, hand: visit.handed }), true)));
   const el = h('div', { class: 'st-write' }, h('h1', { class: 'dq-sr', 'data-focus': '', text: 'Your story' }), main, cw);
 
   // ---------- save state ----------
@@ -857,12 +864,23 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     if ((e as KeyboardEvent).key === 'Enter') titleIn.blur();
   });
 
+  const firstGone = async (id: string, n: number, unread: boolean): Promise<boolean> => {
+    const next = unread ? undefined : await first(id, story?.chapters ?? []);
+    if (!alive || n !== picks) return false;
+    if (!next) return cant(), false;
+    pageId = next;
+    await loadCards(() => n === picks);
+    return load(next, n);
+  };
   /** `taking` runs as the chapter reaches the editor, only if no newer tap came first */
   const load = async (id: string, n = ++picks, taking?: () => void) => {
     let c: Chapter | null;
     for (;;) {
+      const read = reading(ss);
       c = await ss.chapter(id);
-      if (!c || !alive || n !== picks) return false;
+      if (!alive || n !== picks) return false;
+      if (!c && story && (!cur || id === pageId)) return firstGone(id, n, read.failed());
+      if (!c) return syncSeg(), false;
       if (!cur || !(dirty || saving)) break;
       await flushAll();
       if (failed && dirty && !saving && (live(true), mirrorOff)) return syncSeg(), false;
@@ -886,7 +904,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     }
     cur = { id: c.id, kind: c.kind, title: c.title, bases };
     pageIn();
-    startBtn.disabled = false;
+    startBtn.disabled = ta.readOnly = false;
     tab = c.kind === 'notes' ? 'notes' : 'page';
     unmark();
     ta.value = text;
@@ -940,7 +958,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     const n = ++picks;
     await flushAll();
     // a Page tap while the first page is still being made waits for it, then opens it
-    if (to === 'page') await pageExists;
+    await (to === 'page' ? pageExists : storyRead);
     if (n !== picks) return false;
     return (await load(to === 'notes' ? notesId : pageId, n)) && n === picks;
   };
@@ -1741,21 +1759,22 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
 
   // ---------- start ----------
   const init = async () => {
-    await ss.sweepLives();
-    const s = await ss.story(storyId);
+    // the first page takes its number now, so a Page or Notes tap while the chapter is made or its cards are read wins
+    const n = ++picks;
+    const read = reading(ss);
+    const s = await storyRead;
     if (!alive) return;
+    if (!s && read.failed()) return cant();
     if (!s || s.removed) {
-      main.replaceChildren(h('div', { class: 'dq-panel st-empty' }, h('p', { class: 'st-empty-t', text: STORY.gone }), h('div', { class: 'dq-actions' }, btn('Story Room', () => app.go({ name: 'stories' }, { replace: true }), { kind: 'primary' }))));
-      cw.remove();
-      return;
+      return shut(h('div', { class: 'dq-panel st-empty' }, h('p', { class: 'st-empty-t', text: STORY.gone }),
+        h('div', { class: 'dq-actions' },
+          btn('Story Room', () => app.go({ name: 'stories' }, { replace: true }), { kind: 'primary' }))));
     }
     story = s;
     notesId = s.notes;
-    titleIn.value = s.title;
+    Object.assign(titleIn, { value: s.title, readOnly: false });
     pageId = pageOf(visit, r.ch, s);
-    // the first page takes its number now, so a Page or Notes tap while the chapter is made or its cards are read wins
-    const n = ++picks;
-    if (!pageId) pageId = (await ss.addChapter(storyId)).id;
+    if (!pageId) pageId = (await first('', [])) ?? '';
     pageMade();
     await loadCards();
     // search can open the notes; the Page tab then goes to the first chapter
