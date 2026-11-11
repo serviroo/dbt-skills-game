@@ -121,6 +121,60 @@ async function reopenedGateAfterSkippedBlocks(h) {
 }
 
 export const scenarios = {
+  async 'safe-zone-repeat-close-stays-silent'(h) {
+    const { ctx, page, errors } = await h.open({}, '?lab=audio&mute');
+    try {
+      await page.waitForFunction(() => window.__lab === true);
+      const results = await page.evaluate(async () => {
+        const { AudioEngine } = await import('/src/audio/engine.ts');
+        const rate = 48000, results = [];
+        for (const ordering of ['deferred', 'after-close', 'no-reopen', 'multiple']) {
+          for (const fade of [0.005, 0.04, 0.08]) {
+            const ac = new OfflineAudioContext(1, rate, rate);
+            const e = new AudioEngine(ac);
+            const source = ac.createConstantSource();
+            source.offset.value = 0.5;
+            source.connect(e.safe);
+            source.start(0);
+            e.play('endcard', { at: 0 });
+            e.quiet(true, 0.04, 0.4);
+            const again = ordering === 'after-close' ? 0.45 : ordering === 'multiple' ? 0.42 : 0.41;
+            if (ordering === 'multiple') {
+              e.quiet(false, 0.2, 0.405);
+              e.quiet(true, 0.08, 0.41);
+              e.quiet(false, 0.2, 0.415);
+            } else if (ordering !== 'no-reopen') {
+              e.quiet(false, 0.2, ordering === 'deferred' ? 0.405 : 0.445);
+            }
+            e.quiet(true, fade, again);
+            const end = again + fade, reopen = end + 0.15;
+            e.quiet(false, 0.2, reopen);
+            const data = (await ac.startRendering()).getChannelData(0);
+            let before = 0, closed = 0, reopened = 0;
+            for (let i = 0; i < Math.floor(0.39 * rate); i++) before = Math.max(before, Math.abs(data[i]));
+            for (let i = Math.ceil(end * rate); i < Math.floor(reopen * rate); i++) {
+              closed = Math.max(closed, Math.abs(data[i]));
+            }
+            for (let i = Math.ceil((reopen + 0.3) * rate); i < data.length; i++) {
+              reopened = Math.max(reopened, Math.abs(data[i]));
+            }
+            results.push({ ordering, fade, before, closed, reopened });
+          }
+        }
+        return results;
+      });
+      for (const r of results) {
+        const label = `${r.ordering}, ${r.fade}s`;
+        h.expect(r.before > 0.1, `${label}: no sound before closing (${r.before})`);
+        h.expect(r.closed < SILENT_PEAK, `${label}: sound after closing (${r.closed})`);
+        h.expect(r.reopened > 0.1, `${label}: no sound after reopening (${r.reopened})`);
+      }
+      h.expect(!errors.length, errors.join('\n'));
+      return results;
+    } finally {
+      await ctx.close();
+    }
+  },
   async 'echo-stays-quiet-through-skipped-blocks'(h) {
     return missedFadeBlocks(h, 'echo');
   },

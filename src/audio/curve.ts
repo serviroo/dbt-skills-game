@@ -214,8 +214,11 @@ export function stoppedGain(ctx: BaseAudioContext, initial: number, at = 0): Sto
   return Object.assign(gain, {
     curve,
     stopAt(time: number) {
-      source.node.stop(time);
-      source.end = time;
+      for (const entry of sources) {
+        if (entry.end <= time) continue;
+        entry.node.stop(time);
+        entry.end = time;
+      }
     },
     resumeAt(time: number) {
       if (source.end === Infinity) return;
