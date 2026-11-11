@@ -403,7 +403,10 @@ export class AudioEngine {
 
   /** Current output gains (QA): master after scene level and mute, the Music / Effects levels, and the Safe Zone's gate. */
   get levels() {
-    return { master: this.volume.gain.value, music: this.musUser.gain.value, sfx: this.sfxUser.gain.value, score: this.safe.level() };
+    return {
+      master: this.volume.gain.value, music: this.musUser.gain.value,
+      sfx: this.sfxUser.gain.value, score: this.safe.level(),
+    };
   }
 
   /** QA: the Effects bus or the score's input, to feed a test tone through the real graph. */

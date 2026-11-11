@@ -50,7 +50,8 @@ const busLevelsUseTrackedCurves = {
   create(context) {
     return {
       AssignmentExpression(node) {
-        const made = node.right.type === 'CallExpression' && ['trackedGain', 'stoppedGain'].includes(calleeName(node.right));
+        const made = node.right.type === 'CallExpression'
+          && ['trackedGain', 'stoppedGain'].includes(calleeName(node.right));
         if (sharedBus(context, node.left, false) && !made) {
           context.report({ node, messageId: 'curve' });
         }
