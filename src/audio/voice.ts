@@ -70,6 +70,7 @@ interface Placing {
   t: number;
   cancelsBefore: number;
   place(at: number): void;
+  source?: Source;
 }
 
 function keep(held: Placing[], t: number, place: (at: number) => void, cancels = false) {
@@ -155,11 +156,47 @@ export class Voice {
   }
 
   /** Starts and sets what this held voice and its children were given, `at` later; from then on times are the clock's. */
-  open(at: number) {
+  open(start: number | (() => number)) {
     const held = this.held ?? [];
-    this.release(at);
-    held.sort((a, b) => a.cancelsBefore - b.cancelsBefore || a.t + at - (b.t + at));
-    for (const h of held) h.place(at);
+    this.release(0);
+    held.sort((a, b) => a.cancelsBefore - b.cancelsBefore || a.t - b.t);
+    const calls: Placing[] = [];
+    for (const h of held) {
+      if (!h.source) {
+        calls.push(h);
+        continue;
+      }
+      const s = h.source;
+      calls.push(h);
+      calls.push({ t: s.stop, cancelsBefore: h.cancelsBefore, place: (at) => {
+        if (h.t + at < s.voice.killAt) s.n.stop(Math.min(s.stop + at, s.voice.killAt));
+      } });
+    }
+    calls.sort((a, b) => a.cancelsBefore - b.cancelsBefore || a.t - b.t);
+    const at = typeof start === 'function' ? start() : start;
+    for (const h of calls) h.place(at);
+    this.stamp(at);
+    for (const h of held) {
+      if (!h.source) continue;
+      const s = h.source;
+      const voice = s.voice;
+      const t0 = h.t + at;
+      if (t0 >= voice.killAt) continue;
+      const t1 = Math.min(s.stop + at, voice.killAt);
+      s.stop = t1 - at;
+      s.started = true;
+      s.span = this.lib.track(t0, t1);
+      voice.sources.push(s);
+      voice.end = Math.max(voice.end, t1);
+    }
+    return at;
+  }
+
+  private stamp(at: number) {
+    this.t = at;
+    this.zero = at;
+    this.end = Math.min(at, this.killAt);
+    for (const c of this.children) c.stamp(at);
   }
 
   private release(at: number) {
@@ -244,7 +281,12 @@ export class Voice {
     s.stop = this.until(s);
     for (const g of gains) this.pass(g, s);
     const held = this.holding();
-    if (held) keep(held, t0, (d) => this.place(s, t0 + d, offset));
+    if (held) {
+      keep(held, t0, (d) => {
+        if (t0 + d < this.killAt) this.start(s, t0 + d, offset);
+      });
+      held[held.length - 1].source = s;
+    }
     else this.place(s, t0, offset);
     return n;
   }
@@ -254,13 +296,17 @@ export class Voice {
     const zero = this.clock.zero;
     const t1 = Math.min(s.stop + zero, this.killAt);
     s.stop = t1 - zero;
-    if (s.n instanceof AudioBufferSourceNode) s.n.start(t0, offset);
-    else s.n.start(t0);
+    this.start(s, t0, offset);
     s.n.stop(t1);
     s.started = true;
     s.span = this.lib.track(t0, t1);
     this.sources.push(s);
     if (t1 > this.end) this.end = t1;
+  }
+
+  private start(s: Source, at: number, offset: number) {
+    if (s.n instanceof AudioBufferSourceNode) s.n.start(at, offset);
+    else s.n.start(at);
   }
 
   private pass(g: GainNode, s: Source) {

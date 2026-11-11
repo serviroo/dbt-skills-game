@@ -705,8 +705,7 @@ export class Music {
     voice.at(voice.out.gain).setValueAtTime(0, 0);
     voice.at(voice.out.gain).setTargetAtTime(1, 0, Math.max(0.004, crossfade / 4));
     this.stop(o.fadeOut ?? crossfade, o.at);
-    const at = o.at ?? soon(lib.ctx);
-    voice.open(at);
+    const at = voice.open(o.at ?? (() => soon(lib.ctx)));
     const impl = score(at);
     impl.opened?.(at + AHEAD);
     this.live.push({ name, voice, impl, start: at, end: Infinity, until: at + AHEAD });

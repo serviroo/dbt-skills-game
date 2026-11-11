@@ -432,8 +432,7 @@ export class AudioEngine {
       console.warn('[audio] cue failed', cue, err);
     }
     if (cue === "awaken_hit") this.music.armHit();
-    const at = this.when(opts.at);
-    v.open(at);
+    const at = v.open(() => this.when(opts.at));
     if (UI_DUCK.has(cue)) {
       const g = this.uiDuck.curve;
       this.busLevels.set(g, dB(-3), at, 0.012);
@@ -476,7 +475,7 @@ export class AudioEngine {
     }
     if (cur) this.letGo(cur.voice);
     const built = buildBed(this.lib, name, this.bedBus, o.level ?? 1, o.fadeIn ?? 0.5, this.nextSeed());
-    const h = built.open(this.when(o.at));
+    const h = built.open(() => this.when(o.at));
     this.beds.set(name, h);
     return h;
   }
@@ -503,8 +502,8 @@ export class AudioEngine {
   chargeLoop(o: { at?: number } = {}): ChargeHandle {
     if (this.charge) return this.charge;
     const built = buildCharge(this.lib, this.sfx, this.nextSeed());
-    const t0 = this.when(o.at);
-    const h = built.open(t0);
+    const h = built.open(() => this.when(o.at));
+    const t0 = h.voice.t;
     const self = this;
     this.toFocus(dB(-2), t0, 0.4);
     this.charge = {
@@ -543,13 +542,15 @@ export class AudioEngine {
     const end = 120;
     v.noise("brown", 0, end + 0.05, v.filt("lowpass", 240, 0.7, g));
     v.noise("pink", 0, end + 0.05, v.gain(0.08, v.filt("highpass", 1800, 0.7, g)));
-    const at = from ?? soon(this.ctx);
-    for (const p of [this.hushBeds.curve, this.hushMusic.curve, this.hushHall.curve, this.hushRoom.curve]) {
-      this.busLevels.set(p, 0.008, at, 0.007);
-      if (to !== undefined) this.busLevels.set(p, 1, to, 0.0015, false);
-    }
-    this.release(this.takeHush(), at, 0.02);
-    v.open(at);
+    const at = v.open(() => {
+      const time = from ?? soon(this.ctx);
+      for (const p of [this.hushBeds.curve, this.hushMusic.curve, this.hushHall.curve, this.hushRoom.curve]) {
+        this.busLevels.set(p, 0.008, time, 0.007);
+        if (to !== undefined) this.busLevels.set(p, 1, to, 0.0015, false);
+      }
+      this.release(this.takeHush(), time, 0.02);
+      return time;
+    });
     if (to !== undefined) {
       g.gain.setValueAtTime(0.065, to - 0.01);
       g.gain.linearRampToValueAtTime(0, to + 0.02);

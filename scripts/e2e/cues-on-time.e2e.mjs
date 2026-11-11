@@ -79,8 +79,9 @@ async function recordOpens() {
   const open = Voice.prototype.open;
   window.__opens = [];
   Voice.prototype.open = function (at) {
-    if (window.__watch) window.__opens.push(at);
-    return open.call(this, at);
+    const used = open.call(this, at);
+    if (window.__watch) window.__opens.push(used ?? at);
+    return used;
   };
 }
 
@@ -212,6 +213,93 @@ async function startsOnTimeHoweverSlowItsBuild(h, kind) {
 }
 
 export const scenarios = {
+  async 'openings-place-near-parts-before-distant-stops'(h) {
+    const { ctx, page, errors } = await boot(h, { music: 1, sfx: 1 });
+    try {
+      const results = await page.evaluate(async (cues) => {
+        const { Voice } = await import('/src/audio/voice.ts');
+        const { AudioEngine } = await import('/src/audio/engine.ts');
+        const { BED_NAMES } = await import('/src/audio/beds.ts');
+        const { SECTIONS, AHEAD } = await import('/src/audio/music.ts');
+        const { tapAudioSchedule } = await import('/scripts/e2e/audio-schedule.mjs');
+        const play = AudioEngine.prototype.play;
+        let engine;
+        AudioEngine.prototype.play = function (...args) {
+          engine = this;
+          return play.apply(this, args);
+        };
+        window.__daily.sound('ui_tap');
+        const clock = window.__taps.find((t) => t.from === 'GainNode').context;
+        const open = Voice.prototype.open;
+        let start;
+        let starts = [];
+        let delays = 0;
+        Voice.prototype.open = function (at) {
+          if (typeof at === 'number') starts.push(start = at);
+          else {
+            const choose = at;
+            at = () => { start = choose(); starts.push(start); return start; };
+          }
+          try { return open.call(this, at); } finally { start = undefined; }
+        };
+        const undo = tapAudioSchedule((_, __, ___, time) => {
+          if (start !== undefined && time > start + AHEAD) {
+            delays++;
+            const until = performance.now() + 65;
+            while (performance.now() < until);
+          }
+        });
+        const out = [];
+        let group = 'score';
+        const run = (name, action) => {
+          starts = [];
+          delays = 0;
+          const was = window.__behind.length;
+          const ask = clock.currentTime;
+          window.__watch = true;
+          const handle = action();
+          window.__watch = false;
+          out.push({ group, name, ask, done: clock.currentTime, starts, delays, behind: window.__behind.slice(was) });
+          return handle;
+        };
+        for (const name of SECTIONS) {
+          run(name, () => engine.music.to(name, 0.3));
+          engine.music.stop(0.05);
+        }
+        run('hush', () => engine.hush());
+        engine.unhush();
+        group = 'beds';
+        for (const name of BED_NAMES) {
+          const bed = run(name, () => engine.bed(name));
+          bed.stop(0.05);
+        }
+        const charge = run('charge loop', () => engine.chargeLoop());
+        charge.stop();
+        group = 'cues';
+        for (const name of cues) {
+          run(name, () => engine.play(name));
+        }
+        undo();
+        return out;
+      }, CUES);
+      const bad = [];
+      for (const r of results) {
+        if (!r.starts.length) bad.push(`${r.name}: it never opened`);
+        else if (r.starts.some((at) => at < r.ask - 1e-4 || at > r.done + LEAD + 1e-4)) {
+          bad.push(`${r.name}: opening outside its lead`);
+        }
+        if (r.behind.length) bad.push(`${r.name}: ${r.behind.length} parts behind the clock`);
+      }
+      for (const group of ['score', 'beds', 'cues']) {
+        h.expect(results.some((r) => r.group === group && r.delays), `${group}: no distant calls were delayed`);
+      }
+      h.expect(!bad.length, bad.join('; '));
+      h.expect(!errors.length, errors.join('\n'));
+      return { openings: results.length, delayed: results.reduce((n, r) => n + r.delays, 0) };
+    } finally {
+      await ctx.close();
+    }
+  },
   /**
    * The companion's short cues, played through its sound path again and again while the page stalls for 5 to 45 ms at a
    * time and the CPU is slowed: every one starts no more than two frames after it was asked for, nothing of it is placed
