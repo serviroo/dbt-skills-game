@@ -105,6 +105,7 @@ export const scenarios = {
         return (await storyStore(window.__daily.store.key).story(id)).chapters;
       }, ids.story), (order) => order.join() === [third, ids.second, ids.first].join(),
       (order) => `Move moved another chapter: ${JSON.stringify(order)}`, { timeout: 4000, polling: 200 });
+      await page.locator('.st-chrow').last().getByRole('button', { name: 'Move Chapter 1 up' }).waitFor();
       await page.evaluate(async () => {
         const { storyStore } = await import('/src/daily/storystore.ts');
         const ss = storyStore(window.__daily.store.key);
