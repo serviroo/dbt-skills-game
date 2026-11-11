@@ -130,6 +130,21 @@ export class Curve {
     }
   }
 
+  retarget(param: AudioParam, at: number) {
+    if (tracked.has(param)) throw new Error('The parameter already has a tracked curve');
+    const time = this.clampTime(at);
+    const value = this.valueAt(time);
+    const events = this.scheduledFrom(time);
+    param.setValueAtTime(value, time);
+    for (const event of events) {
+      if (event.kind === 'linear') param.linearRampToValueAtTime(event.value, event.time);
+      else if (event.kind === 'target') param.setTargetAtTime(event.value, event.time, event.tau);
+      else param.setValueAtTime(event.value, event.time);
+    }
+    this.param = param;
+    tracked.add(param);
+  }
+
   cancelScheduledValues(t: number) {
     const time = this.clampTime(t);
     this.param.cancelScheduledValues(time);
@@ -170,4 +185,53 @@ export type TrackedGain = GainNode & { curve: Curve };
 export function trackedGain(ctx: BaseAudioContext, initial: number): TrackedGain {
   const gain = ctx.createGain();
   return Object.assign(gain, { curve: trackParam(gain.gain, ctx, initial) });
+}
+
+export type StoppedGain = TrackedGain & {
+  stopAt(time: number): void;
+  resumeAt(time: number): void;
+  level(): number;
+};
+
+export function stoppedGain(ctx: BaseAudioContext, initial: number, at = 0): StoppedGain {
+  const gain = ctx.createGain();
+  gain.gain.value = 0;
+  const sources = new Set<{ node: ConstantSourceNode; start: number; end: number }>();
+  const connect = (node: ConstantSourceNode, start: number) => {
+    const entry = { node, start, end: Infinity };
+    sources.add(entry);
+    node.connect(gain.gain);
+    node.onended = () => {
+      node.disconnect();
+      sources.delete(entry);
+    };
+    node.start(start);
+    return entry;
+  };
+  const first = ctx.createConstantSource();
+  const curve = trackParam(first.offset, ctx, initial);
+  let source = connect(first, at);
+  return Object.assign(gain, {
+    curve,
+    stopAt(time: number) {
+      source.node.stop(time);
+      source.end = time;
+    },
+    resumeAt(time: number) {
+      if (source.end === Infinity) return;
+      const next = ctx.createConstantSource();
+      curve.retarget(next.offset, time);
+      if (time < source.end) {
+        source.node.stop(time);
+        source.end = time;
+      }
+      source = connect(next, time);
+    },
+    level() {
+      const now = ctx.currentTime;
+      let value = 0;
+      for (const { node, start, end } of sources) if (start <= now && now < end) value += node.offset.value;
+      return value;
+    },
+  });
 }

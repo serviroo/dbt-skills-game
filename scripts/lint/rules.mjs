@@ -810,7 +810,7 @@ const holdReadsTheScheduledCurve = {
           const param = paramPath(context, node.arguments[0]);
           if (param) tracked.push(param);
         }
-        if (calleeName(node) === 'trackedGain') {
+        if (['trackedGain', 'stoppedGain'].includes(calleeName(node))) {
           const owner = node.parent.type === 'VariableDeclarator' ? node.parent.id
             : node.parent.type === 'AssignmentExpression' ? node.parent.left : null;
           const gain = paramPath(context, owner);

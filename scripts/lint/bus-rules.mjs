@@ -46,11 +46,11 @@ const busRisesWaitForStops = {
 };
 
 const busLevelsUseTrackedCurves = {
-  meta: { messages: { curve: 'Create shared buses with trackedGain and pass their curves to busLevels.' } },
+  meta: { messages: { curve: 'Create shared buses with a tracked gain and pass their curves to busLevels.' } },
   create(context) {
     return {
       AssignmentExpression(node) {
-        const made = node.right.type === 'CallExpression' && calleeName(node.right) === 'trackedGain';
+        const made = node.right.type === 'CallExpression' && ['trackedGain', 'stoppedGain'].includes(calleeName(node.right));
         if (sharedBus(context, node.left, false) && !made) {
           context.report({ node, messageId: 'curve' });
         }

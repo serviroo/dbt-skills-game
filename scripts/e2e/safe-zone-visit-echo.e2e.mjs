@@ -17,10 +17,14 @@ export const scenarios = {
             const node = make();
             const connect = node.connect.bind(node);
             const disconnect = node.disconnect.bind(node);
-            live.add(node);
-            clocks++;
-            peak = Math.max(peak, live.size);
+            let clock = false;
             node.connect = (to) => {
+              if (to instanceof AudioNode && !clock) {
+                clock = true;
+                live.add(node);
+                clocks++;
+                peak = Math.max(peak, live.size);
+              }
               if (to === c.destination) destinations++;
               return connect(to);
             };
