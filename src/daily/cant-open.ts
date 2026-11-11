@@ -2,7 +2,7 @@ import { CANT_OPEN } from '../content/daily-lines';
 import { btn, h, p, panel, row, typo } from './ui';
 import './cant-open.css';
 
-export type CantOpenWhat = 'story' | 'drawing' | 'stories' | 'search' | 'drawings' | 'ideas';
+export type CantOpenWhat = 'story' | 'chapters' | 'storyText' | 'drawing' | 'stories' | 'search' | 'drawings' | 'ideas';
 
 export function cantOpen(what: CantOpenWhat, again: () => Promise<boolean>): HTMLElement {
   const title = h('h2', { class: 'dq-cant-t', 'data-focus': '', tabindex: '-1', text: typo(CANT_OPEN[what]) });
@@ -16,7 +16,7 @@ export function cantOpen(what: CantOpenWhat, again: () => Promise<boolean>): HTM
   const tryAgain = async () => {
     if (retry.getAttribute('aria-disabled') === 'true') return;
     busy(true);
-    const ok = await again();
+    const ok = await again().catch(() => false);
     if (!box.isConnected) return;
     busy(false);
     if (!ok) note.textContent = typo(CANT_OPEN.still);

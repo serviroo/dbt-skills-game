@@ -10,11 +10,10 @@ import { STORY_DRAWING, STORY_FIND, STORY_IMPORT, STORY_READ, STORY_START } from
 import { write } from '../core/cleared';
 import type { App, Route, ScreenOut, Visit } from './app';
 import { icon } from './art';
-import { refill } from './artroom';
-import { artStore, revOf, type DrawingMeta } from './artstore';
-import { dayLabel } from './lines';
-import { reading } from './reading';
+import { artStore } from './artstore';
 import { cantOpen } from './cant-open';
+import { outcome, reading } from './reading';
+import { drawingFig, drawingsOf, picOf, storyPictures } from './story-pics';
 import { firstPage } from './first-page';
 import { clearFind, findIn as searchStories, marked, renderFind } from './story-find';
 import { renderStoryCards } from './story-cards';
@@ -24,7 +23,7 @@ import { creditStory, STORY_CAP, storyStore, type Card, type CardMode, type Chap
 import { clip, IMPORT_MAX, pieces, storyFromText, storyToText, type StoryText } from './storytext';
 import { storySaving } from './story-saving';
 import { keepTextSize, textSize } from './text-size';
-import { breakable, btn, h, keptWhole, p, segmented, shareOrSave, typo } from './ui';
+import { breakable, btn, h, keptWhole, p, segmented, shareOrSave } from './ui';
 import { storyHead, wholeText } from './page-head';
 import { notesOf, pageOf, writeKept } from './write-visit';
 
@@ -88,40 +87,6 @@ export function storyMeta(app: App, s: Story) {
 }
 const shownTitle = (t: string) => t.trim() || STORY.untitled;
 
-/** What a drawing is called: its own name, else what the Art room calls it. */
-const drawingName = (m: DrawingMeta) => typo(m.name?.trim() || (m.kind === 'ally' ? STORY_DRAWING.ally : STORY_DRAWING.page(dayLabel(m.day))));
-/** What a drawing shows in the Story Room: a new version or name changes it, a favourite does not. None is ''. */
-const picOf = (m: DrawingMeta | undefined) => (m ? `${m.id}|${revOf(m)}|${drawingName(m)}` : '');
-/** The drawing above each page of the story that this device shows, by chapter id. One gone, waiting for its Undo or kept elsewhere is simply not here. */
-async function drawingsOf(app: App, s: Story) {
-  const out = new Map<string, DrawingMeta>();
-  if (!s.drawings) return out;
-  const list = await artStore(app.store.key)
-    .shown()
-    .catch((): DrawingMeta[] => []);
-  for (const [c, id] of Object.entries(s.drawings)) {
-    const m = list.find((x) => x.id === id);
-    if (m) out.set(c, m);
-  }
-  return out;
-}
-/** A drawing's picture, filled in once it is ready; `box` is taken away when there is no picture to show. */
-function drawingImg(app: App, m: DrawingMeta, alt: string, box?: HTMLElement) {
-  const img = h('img', { class: 'st-pic-img', alt, decoding: 'async', draggable: 'false' });
-  void artStore(app.store.key)
-    .thumbUrl(m)
-    .then(
-      (u) => (u ? (img.src = u) : box?.remove()),
-      () => box?.remove(),
-    );
-  return img;
-}
-/** A drawing above a chapter of the story they read, at its own shape. */
-function drawingFig(app: App, m: DrawingMeta) {
-  const fig = h('figure', { class: `st-read-pic st-pic--${m.kind}` });
-  fig.append(drawingImg(app, m, drawingName(m), fig));
-  return fig;
-}
 const SEARCH_IC = '<svg class="dq-ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="5.5"/><path d="M14.6 14.6l4.6 4.6"/></svg>';
 
 // ---------------- the shelf ----------------
@@ -567,6 +532,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   ta.readOnly = titleIn.readOnly = true;
   // a place found by search, marked behind the text (same box and type as the page) until the page changes
   const hl = h('div', { class: 'st-hl', 'aria-hidden': 'true' });
+  const readError = h('div');
   const frame = h('div', { class: 'dq-panel st-frame' }, h('span', { class: 'dq-hairbar', 'aria-hidden': 'true' }), hl, ta);
   const unmark = () => hl.firstChild && hl.replaceChildren();
   // once they type, the page is theirs: a search still opening it marks nothing and leaves the cursor where they are
@@ -621,7 +587,8 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     cardsEl,
   );
 
-  const main = h('div', { class: 'st-main' }, titleIn, h('div', { class: 'st-bar' }, chBtn, seg, moreWrap), note, start, frame, dock);
+  const main = h('div', { class: 'st-main' }, titleIn, h('div', { class: 'st-bar' }, chBtn, seg, moreWrap),
+    note, start, readError, frame, dock);
   const first = firstPage(async () => (await ss.addChapter(storyId)).id);
   const shut = (box: HTMLElement) => (main.replaceChildren(box), cw.remove());
   const cant = () => shut(cantOpen('story', async () =>
@@ -836,10 +803,13 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     chLabel.replaceChildren(pc ? breakable(pc.title) : '');
     chBtn.setAttribute('aria-label', pc ? `Chapter: ${pc.title}${idx >= 0 ? `, ${idx + 1} of ${s.chapters.length}` : ''}. Open the chapter list.` : 'Open the chapter list');
   };
-  const saveStoryFresh = async (patch: { title?: string; chapters?: string[] }) => {
+  const saveStoryFresh = async (patch: { title?: string; chapters?: string[] }, base?: string) => {
     const fresh = await ss.story(storyId);
     if (!fresh) return;
-    const res = await ss.saveStory({ id: storyId, title: patch.title ?? titleIn.value, chapters: patch.chapters ?? fresh.chapters }, [fresh.rev]).catch(() => null);
+    const res = await ss.saveStory(
+      { id: storyId, title: patch.title ?? titleIn.value, chapters: patch.chapters ?? fresh.chapters },
+      [base ?? fresh.rev],
+    ).catch(() => null);
     if (!res || res.stored === 'failed') {
       failed = true;
       syncState();
@@ -1020,11 +990,24 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     const body = h('div', { class: 'dq-panel dq-sheet-p st-chsheet', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'st-ch-h' });
     const wrap = h('div', { class: 'dq-sheet st-sheet' }, body);
     sheet = wrap;
-    const render = async () => {
-      const s = await ss.story(storyId);
-      if (!s) return;
+    let renderTurn = 0;
+    const render = async (report = true): Promise<boolean> => {
+      const turn = ++renderTurn;
+      const result = await outcome(ss, async (failed) => {
+        const s = await ss.story(storyId, true);
+        if (!s) return null;
+        const results = await Promise.all(s.chapters.map((id) => ss.chapter(id)));
+        if (results.some((c) => !c) && failed()) return null;
+        return { s, chs: results.filter((c): c is Chapter => !!c) };
+      });
+      if (!alive || sheet !== wrap || turn !== renderTurn) return false;
+      if (result === 'unread') {
+        if (report) list.replaceChildren(h('li', {}, cantOpen('chapters', () => render(false))));
+        return false;
+      }
+      if (!result) return false;
+      const { s, chs } = result;
       story = s;
-      const chs = (await Promise.all(s.chapters.map((id) => ss.chapter(id)))).filter((c): c is Chapter => !!c);
       const only = chs.length <= 1;
       list.replaceChildren(
         ...chs.map((c, i) => {
@@ -1065,22 +1048,27 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
               'span',
               { class: 'st-chrow-acts' },
               ib('pencil', `Rename ${c.title}`, 'Rename', rename),
-              ib('up', `Move ${c.title} up`, 'Move up', () => void move(i, -1), i === 0),
-              ib('down', `Move ${c.title} down`, 'Move down', () => void move(i, 1), i === chs.length - 1),
+              ib('up', `Move ${c.title} up`, 'Move up', () => void move(c.id, -1), i === 0),
+              ib('down', `Move ${c.title} down`, 'Move down', () => void move(c.id, 1), i === chs.length - 1),
               ib('trash', `Remove ${c.title}`, 'Remove', () => void removeCh(c.id, i), only),
             ),
           );
         }),
       );
+      return true;
     };
-    const move = async (i: number, d: number) => {
-      const s = await ss.story(storyId);
-      if (!s) return;
+    const move = async (id: string, d: number) => {
+      const s = await ss.story(storyId, true);
+      const i = s?.chapters.indexOf(id) ?? -1;
+      if (!s || i < 0) {
+        await render();
+        return;
+      }
       const order = [...s.chapters];
       const j = i + d;
       if (j < 0 || j >= order.length) return;
       [order[i], order[j]] = [order[j], order[i]];
-      await saveStoryFresh({ chapters: order });
+      await saveStoryFresh({ chapters: order }, s.rev);
       await render();
       const target = list.querySelectorAll<HTMLElement>('.st-chrow')[j]?.querySelector<HTMLButtonElement>(d < 0 ? '[data-act="up"]' : '[data-act="down"]');
       (target && !target.disabled ? target : list.querySelectorAll<HTMLElement>('.st-chrow-b')[j])?.focus();
@@ -1127,91 +1115,13 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   };
 
   // ---------- a drawing above the page ----------
-  /** every look at the open page's drawing takes a number, and only the newest one shows */
-  let picTurn = 0;
-  let picShown: string | null = null;
-  const showPic = async () => {
-    const turn = ++picTurn;
-    const at = cur?.kind === 'page' ? cur.id : '';
-    const s = at ? await ss.story(storyId) : null;
-    const m = s ? (await drawingsOf(app, s)).get(at) : undefined;
-    if (turn !== picTurn || !alive || picOf(m) === picShown) return;
-    picShown = picOf(m);
-    picThumb.replaceChildren(...(m ? [drawingImg(app, m, '')] : []));
-    picThumb.classList.toggle('is-hidden', !m);
-    picIc.classList.toggle('is-hidden', !!m);
-    picT.textContent = m ? STORY_DRAWING.change : STORY_DRAWING.add;
-    // the name they see first, then which drawing it is
-    if (m) picBtn.setAttribute('aria-label', `${STORY_DRAWING.change}, ${drawingName(m)}`);
-    else picBtn.removeAttribute('aria-label');
-  };
-  /** `at` is the page the picker opened for, which keeps the pick even if another page came in while it was open */
-  const placeDrawing = async (at: string, id: string | null) => {
-    closeSheet();
-    await ss.setDrawing(storyId, at, id);
-    if (!alive) return;
-    // a change this device couldn't store says so, as the words do
-    syncState();
-    await showPic();
-  };
-  /** the drawing picker while it is open: it follows the Art room as the page's drawing does */
-  let picker: { wrap: HTMLElement; fill: () => Promise<boolean> } | null = null;
-  const openDrawings = async () => {
-    const at = cur?.kind === 'page' ? cur.id : '';
-    if (!at) return;
-    const body = h('div', { class: 'dq-panel dq-sheet-p st-chsheet st-picks', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'st-pick-h' });
-    const wrap = h('div', { class: 'dq-sheet st-sheet' }, body);
-    const toArt = async () => {
-      closeSheet();
-      await flushAll();
-      if (alive) app.go({ name: 'art' });
-    };
-    const top = h('div', { class: 'dq-sheet-top' }, h('h2', { class: 'dq-sheet-h', id: 'st-pick-h', text: STORY_DRAWING.pick }), h('button', { type: 'button', class: 'dq-icbtn dq-sheet-x', 'aria-label': STORY_DRAWING.close, html: icon('close'), onclick: closeSheet }));
-    const takeOff = h('div', { class: 'dq-actions st-sheet-acts' }, btn(STORY_DRAWING.remove, () => void placeDrawing(at, null), { kind: 'quiet', ic: 'close' }));
-    let turn = 0;
-    const fill = async () => {
-      const n = ++turn;
-      const [list, s] = await Promise.all([artStore(app.store.key).shown().catch((): DrawingMeta[] => []), ss.story(storyId)]);
-      if (n !== turn) return false;
-      const placed = s?.drawings?.[at];
-      const inside = body.contains(document.activeElement);
-      refill(body, [placed ?? '', ...list.map(picOf)].join('\n'), () => [
-        top,
-        list.length
-          ? h(
-              'div',
-              { class: 'st-picks-grid' },
-              list.map((m) =>
-                h(
-                  'button',
-                  { type: 'button', class: 'st-pick', 'data-piece': m.id, 'aria-current': m.id === placed ? 'true' : null, onclick: () => void placeDrawing(at, m.id) },
-                  h('span', { class: `st-pick-img st-pic--${m.kind}` }, drawingImg(app, m, '')),
-                  keptWhole(h('span', { class: 'st-pick-t', text: drawingName(m) })),
-                ),
-              ),
-            )
-          : h('div', { class: 'st-picks-none' }, p(STORY_DRAWING.none, 'dq-text'), h('div', { class: 'dq-actions st-sheet-acts' }, btn(STORY_DRAWING.toArt, () => void toArt(), { kind: 'quiet', ic: 'brush' }))),
-        ...(list.some((m) => m.id === placed) ? [takeOff] : []),
-      ]);
-      // focus that was on a pick or a button the change took away stays in the picker
-      if (inside && !body.contains(document.activeElement)) body.querySelector<HTMLElement>('.st-pick, .st-picks-none .dq-btn, .dq-sheet-x')?.focus({ preventScroll: true });
-      return true;
-    };
-    if (!(await fill()) || !alive || cur?.id !== at) return;
-    closeSheet();
-    sheet = wrap;
-    sheetFrom = picBtn;
-    picker = { wrap, fill };
-    showSheet(wrap, body);
-    (body.querySelector<HTMLElement>('.st-pick[aria-current="true"]') ?? body.querySelector<HTMLElement>('.st-pick, .st-picks-none .dq-btn'))?.focus({ preventScroll: true });
-  };
+  const { showPic, openDrawings, update: updatePictures } = storyPictures({
+    app, ss, storyId, current: () => cur, alive: () => alive, closeSheet, flushAll, syncState,
+    picThumb, picIc, picT, picBtn, isOpen: (wrap) => sheet === wrap,
+    openSheet: (wrap, body) => { sheet = wrap; sheetFrom = picBtn; showSheet(wrap, body); },
+  });
   // the open page's drawing and the picker follow the Art room: a drawing removed, brought back with its Undo or renamed
-  offs.push(
-    artStore(app.store.key).onChange(() => {
-      void showPic();
-      if (picker && sheet === picker.wrap) void picker.fill();
-    }),
-  );
+  offs.push(artStore(app.store.key).onChange(updatePictures));
   const renameChapter = async (id: string, title: string) => {
     if (cur && cur.id === id) {
       cur.title = title;
@@ -1225,17 +1135,28 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   };
 
   // ---------- more menu ----------
-  let prepared: Promise<{ text: string; name: string }> | null = null;
+  let prepared: Promise<{ text: string; name: string } | null> | null = null;
   const storyText = async () => {
     await flushAll();
-    const s = await ss.story(storyId);
-    const chs = s ? (await Promise.all(s.chapters.map((id) => ss.chapter(id)))).filter((c): c is Chapter => !!c) : [];
-    // the open page always goes out as the editor holds it, saved or not
-    const open = cur && cur.kind === 'page' ? cur : null;
-    const shown = chs.map((c) => (open && c.id === open.id ? { title: open.title, text: ta.value } : { title: c.title, text: c.text }));
-    if (open && !chs.some((c) => c.id === open.id)) shown.push({ title: open.title, text: ta.value });
+    const result = await outcome(ss, async (failed) => {
+      const s = await ss.story(storyId, true);
+      if (!s) return null;
+      const results = await Promise.all(s.chapters.map((id) => ss.chapter(id)));
+      if (results.some((c) => !c) && failed()) return null;
+      const chs = results.filter((c): c is Chapter => !!c);
+      // the open page always goes out as the editor holds it, saved or not
+      const open = cur && cur.kind === 'page' ? cur : null;
+      const shown = chs.map((c) =>
+        open && c.id === open.id ? { title: open.title, text: ta.value } : { title: c.title, text: c.text });
+      if (open && !chs.some((c) => c.id === open.id)) shown.push({ title: open.title, text: ta.value });
+      const notes = cur?.kind === 'notes' ? null : (ss.unsaved(notesId) ?? (await ss.chapter(notesId)));
+      if (cur?.kind !== 'notes' && !notes && failed()) return null;
+      return { shown, notes };
+    });
+    if (!result || result === 'unread') return null;
+    const { shown, notes: notesChapter } = result;
     // then Notes, as it is now: the open editor, else what this copy holds unsaved, else what is stored
-    const notes = cur && cur.kind === 'notes' ? ta.value : (ss.unsaved(notesId) ?? (await ss.chapter(notesId)))?.text ?? '';
+    const notes = cur?.kind === 'notes' ? ta.value : notesChapter?.text ?? '';
     const slug = titleIn.value.normalize('NFKD').replace(/[^\w\s-]/g, '').trim().toLowerCase().replace(/[\s_-]+/g, '-').slice(0, 60) || 'story';
     // headings mark the title, each chapter and Notes, so Bring in a story reads it back exactly
     return { text: storyToText({ title: shownTitle(titleIn.value), chapters: shown, notes }), name: `${slug}.txt` };
@@ -1281,19 +1202,34 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     if (!alive) return;
     app.go({ name: 'read', id: storyId, ch: pageId || undefined });
   };
-  const download = async () => {
-    const { text, name } = await (prepared ?? storyText());
+  const download = async (retry = false): Promise<boolean> => {
+    const data = await (retry ? storyText() : (prepared ?? storyText()));
+    if (!alive) return false;
+    if (!data) {
+      if (!retry) readError.replaceChildren(cantOpen('storyText', () => download(true)));
+      return false;
+    }
+    readError.replaceChildren();
+    const { text, name } = data;
     const r2 = await shareOrSave(text, name, 'text/plain');
     if (r2 === 'saved') say('Story saved to your downloads.');
     else if (r2 === 'shared') say('Story ready. Pick Save to Files to keep it.');
+    return true;
   };
-  const share = async () => {
-    const { text } = await (prepared ?? storyText());
+  const share = async (retry = false): Promise<boolean> => {
+    const data = await (retry ? storyText() : (prepared ?? storyText()));
+    if (!alive) return false;
+    if (!data) {
+      if (!retry) readError.replaceChildren(cantOpen('storyText', () => share(true)));
+      return false;
+    }
+    readError.replaceChildren();
     try {
-      await nav.share?.({ title: shownTitle(titleIn.value), text });
+      await nav.share?.({ title: shownTitle(titleIn.value), text: data.text });
     } catch {
       /* the player closed the share sheet */
     }
+    return true;
   };
   const removeStory = async () => {
     await flushAll();
@@ -1901,28 +1837,49 @@ export function readScreen(app: App, route: Route): ScreenOut {
 
   let titled!: () => void;
   const ready = new Promise<void>((done) => (titled = done));
-  const init = async () => {
-    const s = await ss.story(r.id);
-    if (!alive) return;
-    if (!s || s.removed) {
+  const init = async (report = true): Promise<boolean> => {
+    let named = false;
+    const result = await outcome(ss, async (failed) => {
+      const s = await ss.story(r.id, true);
+      if (!alive || !s) return null;
+      if (s.removed) return { s, chs: [] };
+      wholeText(title, shownTitle(s.title));
+      sub.textContent = storyMeta(app, s);
+      titled();
+      named = true;
+      // what this copy holds but couldn't store yet reads as it is in the editor
+      const chs = await Promise.all(s.chapters.map(async (id) => ss.unsaved(id) ?? ss.chapter(id)));
+      if (chs.some((c) => !c) && failed()) return null;
+      return { s, chs };
+    });
+    if (!alive) return false;
+    if (result === 'unread') {
+      if (!named) {
+        wholeText(title, STORY.title);
+        titled();
+      }
+      tools.classList.add('is-hidden');
+      if (report) body.replaceChildren(cantOpen('story', () => init(false)));
+      return false;
+    }
+    if (!result || result.s.removed) {
       wholeText(title, STORY.title);
       titled();
-      tools.remove();
+      tools.classList.add('is-hidden');
       body.replaceChildren(h('p', { class: 'st-read-empty', text: STORY_READ.gone }));
-      return;
+      return true;
     }
-    wholeText(title, shownTitle(s.title));
-    sub.textContent = storyMeta(app, s);
-    titled();
-    // what this copy holds but couldn't store yet reads as it is in the editor
-    const chs = await Promise.all(s.chapters.map(async (id) => ss.unsaved(id) ?? (await ss.chapter(id))));
-    if (!alive) return;
+    const { s, chs } = result;
+    tools.classList.remove('is-hidden');
     const shown = chs.flatMap((c, i) =>
       c && c.text.trim()
         ? [{ i, id: c.id, sec: h('section', { class: 'st-read-ch', 'data-id': c.id }, h('h2', { class: 'st-read-ch-h', text: c.title.trim() || `Chapter ${i + 1}` }), h('div', { class: 'st-read-text', text: c.text.trimEnd() })) }]
         : [],
     );
-    if (!shown.length) return body.replaceChildren(h('p', { class: 'st-read-empty', text: STORY_READ.empty }));
+    if (!shown.length) {
+      body.replaceChildren(h('p', { class: 'st-read-empty', text: STORY_READ.empty }));
+      return true;
+    }
     body.replaceChildren(...shown.map((x) => x.sec));
     // the words come first; each drawing joins above its chapter once found, its room kept by its shape, and follows the
     // Art room from then on (a drawing removed, brought back with its Undo or renamed, in any tab)
@@ -1948,6 +1905,7 @@ export function readScreen(app: App, route: Route): ScreenOut {
     let at = -1;
     for (const [k, x] of shown.entries()) if (x.i <= from) at = k;
     if (at >= 0 && shown[at].i > 0) openAt(shown[at].sec);
+    return true;
   };
   void init().finally(titled);
 
