@@ -1,4 +1,5 @@
-import { installAudioRecorder, audioReady } from './audio-recorder.mjs';
+import { boot } from './me-92-safe-zone-boot.mjs';
+import * as pageClock from './clock.mjs';
 import { settle } from './layout-fit.e2e.mjs';
 const SAFARI = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
 const TALL = { width: 390, height: 844 };
@@ -21,51 +22,6 @@ function returning(xp = 0, ago = 1) {
   const events = [{ id: 'me92-visit', t, day, k: 'visit', xp: 10 }];
   if (xp) events.push({ id: 'me92-rest', t: t + 1, day, k: 'rest', xp });
   return JSON.stringify({ v: 1, created: t, events, flags: { greetDay: day } });
-}
-
-async function boot(h, { save, viewport = TALL, reduced = false, ua, extra = {}, init, live = false, keepWelcome = false } = {}) {
-  const ctx = await h.browser.newContext({ viewport, deviceScaleFactor: 2, serviceWorkers: 'block', reducedMotion: reduced ? 'reduce' : 'no-preference', locale: 'en-US', ...(ua ? { userAgent: ua } : {}) });
-  if (init) {
-    await installAudioRecorder(ctx);
-    await ctx.addInitScript(init);
-  }
-  const seed = { [h.YOU]: JSON.stringify({ name: 'Kit', companion: 'Lumen', nameAt: Date.now() - 1000, companionAt: Date.now() - 1000 }), 'dbt.app.v1': h.SEEN, ...(save ? { [h.SAVE]: save } : {}), ...extra };
-  await ctx.addInitScript((s) => {
-    if (sessionStorage.getItem('e2e-seeded')) return;
-    sessionStorage.setItem('e2e-seeded', '1');
-    for (const [k, v] of Object.entries(s)) localStorage.setItem(k, v);
-  }, seed);
-  const page = await ctx.newPage();
-  const errors = [];
-  page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
-  page.on('console', (m) => m.type() === 'error' && !/WebGL|GPU stall|AudioContext/i.test(m.text()) && errors.push('console: ' + m.text().slice(0, 300)));
-  await page.goto(h.server.url + '/');
-  if (keepWelcome) {
-    await page.waitForFunction(() => {
-      const tile = document.querySelector('.dq-tile');
-      return window.__daily?.route.name === 'hub' && window.__daily.greeting && tile?.getClientRects().length && getComputedStyle(tile).visibility !== 'hidden';
-    }, null, { timeout: 60000 });
-  } else await h.reachHub(page);
-  if (init) await audioReady(page);
-  await page.evaluate((live) => {
-    const a = window.__daily;
-    window.__cues = [];
-    window.__tries = [];
-    const play = a.opts.sound?.play;
-    if (play)
-      a.opts.sound.play = (c) => {
-        window.__cues.push([a.route.name, c]);
-        if (live) play(c);
-      };
-    if (live) {
-      const sound = a.sound.bind(a);
-      a.sound = (c) => {
-        window.__tries.push([a.route.name, c]);
-        sound(c);
-      };
-    }
-  }, live);
-  return { ctx, page, errors };
 }
 
 const probe = (page) =>
@@ -603,7 +559,7 @@ const HOME_BAR = { top: 47, left: 0, right: 0, bottom: 34 };
 async function everyScreen(h, viewport, { insets } = {}) {
   const size = `${viewport.width}x${viewport.height}${insets ? ' with a notch' : ''}`;
   const sideways = viewport.width > viewport.height;
-  const { ctx, page, errors } = await boot(h, { save: filled(), viewport, reduced: true });
+  const { ctx, page, errors } = await boot(h, { save: filled(), viewport, reduced: true, prepare: pageClock.install });
   const failed = [];
   try {
     if (insets) {
@@ -721,11 +677,14 @@ async function everyScreen(h, viewport, { insets } = {}) {
       }
       if (at === 'cold') {
         // once a choice is tapped, its countdown is on screen
+        await pageClock.pauseClock(page);
         await page.getByRole('button', { name: 'Cool air', exact: true }).click();
-        await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+        await pageClock.runFor(page, 1100);
+        await pageClock.coolRunning(page, 'Cool air');
         const running = '.dq-timer-num';
         judge(`${label} after Cool air`, await look(running), running, 1);
         await h.shot(page, `me92-every-cold-started-${size.replace(/ /g, '-')}`);
+        await pageClock.resume(page);
       }
     }
     if (insets) {
