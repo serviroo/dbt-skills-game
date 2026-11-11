@@ -38,7 +38,7 @@ export async function installAudioRecorder(ctx) {
               tap.last = data.last;
               return tap.answered?.();
             }
-            for (const [i, peak, ss, step, posted] of data) {
+            for (const [i, peak, ss, step, posted, frame] of data) {
               // block numbers only rise: one that doesn't would overwrite a block already heard
               if (i <= tap.end) {
                 tap.error ??= `worklet ${tap.url}: block ${i} came after block ${tap.end}`;
@@ -50,7 +50,7 @@ export async function installAudioRecorder(ctx) {
               else if (tap.end !== undefined) for (let b = tap.end + 1; b < i; b++) tap.unrendered.add(b);
               tap.posted = posted;
               tap.status = 'recording';
-              tap.q.set(i, [peak, ss, step]);
+              tap.q.set(i, [peak, ss, step, frame]);
               tap.start ??= i;
               tap.end = i;
             }

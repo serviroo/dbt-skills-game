@@ -260,7 +260,8 @@ async function measureCueEnergy([plays, tap, cues, Q, ONSET, PARTS]) {
       for (let j = 0; j < plays.length; j++) {
         if (j !== i && starts[j] < (k + 1) * Q && starts[j] > k * Q - 4 * sr) others += energy(j, k);
       }
-      blocks.push([rec.q.get(k)?.[1] ?? NaN, energy(i, k), others]);
+      const recorded = rec.q.get(k);
+      blocks.push([recorded?.[1] ?? NaN, energy(i, k), others, recorded?.[3] ?? null]);
       own += energy(i, k);
     }
     const loud = Math.max(...blocks.map((b) => b[1]));
@@ -362,6 +363,7 @@ export const scenarios = {
       // each cue rendered offline through the same output chain at the same levels, then for every play the recorded
       // energy of each quantum around it beside the energy its own render and those of the plays before it put there
       const measured = await page.evaluate(measureCueEnergy, [plays, tap, CUES, Q, ONSET, PARTS]);
+      const sampleRate = await page.evaluate((i) => window.__taps[i].context.sampleRate, tap);
 
       const sum = (bs, i) => bs.reduce((s, b) => s + b[i], 0);
       const verdicts = plays.map((p, i) => {
@@ -372,6 +374,19 @@ export const scenarios = {
           behind: p.behind, first: +got(onset.slice(0, 2)).toFixed(2), attack: +got(onset).toFixed(2),
           parts: parts.map((bs) => +got(bs).toFixed(2)), shiftedMs: +((p.end - p.initialEnd) * 1000).toFixed(2),
         };
+        const threshold = Math.max(...blocks.map((b) => b[1])) / 20;
+        const firstBlock = Math.floor(Math.round(start * sampleRate) / Q);
+        const onsetAt = (column) => {
+          const index = blocks.findIndex((b) => b[column] >= threshold && b[1] >= 2 * b[2]);
+          return index < 0 ? null : (firstBlock + index) * Q / sampleRate;
+        };
+        const frameSkew = blocks.flatMap((b, i) => b[3] === null ? [] : [b[3] - (firstBlock + i) * Q]);
+        const onsetSkew = blocks.flatMap((b, i) =>
+          b[3] === null || b[1] < threshold || b[1] < 2 * b[2] ? [] : [b[3] - (firstBlock + i) * Q],
+        ).slice(0, ONSET);
+        Object.assign(v, { ackStart: p.start ?? start, receivedAt: p.receivedAt ?? null,
+          recordedOnset: onsetAt(0), offlineOnset: onsetAt(1),
+          frameSkew: [Math.min(...frameSkew), Math.max(...frameSkew)], onsetSkew });
         const why = [];
         if (onset.length < 3) why.push(`only ${onset.length} quanta of it ring over the cues before it, too few to judge`);
         if (blocks.some((b) => !Number.isFinite(b[0]))) why.push('the recording has a hole');
@@ -387,6 +402,10 @@ export const scenarios = {
       });
       const bad = verdicts.filter((v) => v.why.length);
       for (const v of verdicts) note(h, 'busy', v);
+      for (let i = 0; i < verdicts.length; i++) {
+        if (verdicts[i].why.length)
+          note(h, 'busy-detail', { play: plays[i], ...measured[i] });
+      }
       const at = (r) => verdicts.filter((v) => v.rate === r);
       const heard = (v) => !(v.first >= 0.5 && v.attack >= 0.6 && v.attack <= 1.7 && v.parts.every((g) => g >= 0.7 && g <= 1.4));
       const summary = { buildMs: rates.map(median), rates, plays: verdicts.length, bad: bad.length, perRate: rates.map((r) => ({ rate: r, of: at(r).length, bad: at(r).filter((v) => v.why.length).length, heard: at(r).filter(heard).length, behind: at(r).filter((v) => v.behind).length, slowestBuildMs: Math.max(...at(r).map((v) => v.buildMs)) })) };

@@ -1,4 +1,68 @@
 export const scenarios = {
+  async 'an-early-gesture-waits-for-the-worklet'(h) {
+    const ctx = await h.browser.newContext();
+    try {
+      const page = await ctx.newPage();
+      await page.goto(h.server.url + '/scripts/e2e/audio-start-probe.html');
+      await page.evaluate(async () => {
+        const { AudioEngine } = await import('/src/audio/engine.ts');
+        const clock = new AudioContext();
+        if (clock.state !== 'suspended') await clock.suspend();
+        const before = clock.currentTime;
+        let release;
+        let resolved = false;
+        let atResolution = null;
+        let earlyResumes = 0;
+        const resume = clock.resume.bind(clock);
+        clock.resume = (...args) => {
+          if (!resolved) earlyResumes++;
+          return resume(...args);
+        };
+        const add = clock.audioWorklet.addModule.bind(clock.audioWorklet);
+        clock.audioWorklet.addModule = (...args) => new Promise((done, reject) => {
+          release = () => add(...args).then(() => {
+            atResolution = clock.state;
+            resolved = true;
+            done();
+          }, reject);
+        });
+        const engine = new AudioEngine(clock);
+        engine.autoUnlock();
+        window.__earlyAudio = { clock, engine, before, release, result: () => ({ atResolution, earlyResumes }) };
+      });
+      await page.keyboard.press('Shift');
+      await page.waitForTimeout(200);
+      const paused = await page.evaluate(() => ({
+        state: window.__earlyAudio.clock.state,
+        time: window.__earlyAudio.clock.currentTime,
+        before: window.__earlyAudio.before,
+      }));
+      const result = await page.evaluate(async () => {
+        const { clock, engine, release, result } = window.__earlyAudio;
+        try {
+          release();
+          await engine.timeline.ready;
+          const limit = performance.now() + 10000;
+          while (clock.state !== 'running' && performance.now() < limit)
+            await new Promise((resolve) => setTimeout(resolve, 10));
+          const before = clock.currentTime;
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          return { ...result(), state: clock.state, before, after: clock.currentTime };
+        } finally {
+          engine.dispose();
+        }
+      });
+      h.expect(
+        ['suspended', 'interrupted'].includes(paused.state) && paused.time === paused.before &&
+          result.atResolution !== 'running' && !result.earlyResumes && result.state === 'running' &&
+          result.after - result.before > 0.1,
+        `An early gesture started or stopped the clock during loading: ${JSON.stringify({ paused, result })}`,
+      );
+      return { paused, result };
+    } finally {
+      await ctx.close();
+    }
+  },
   async 'autoplay-resumes-after-worklet-and-suspended-waits-for-unlock'(h) {
     const ctx = await h.browser.newContext();
     try {
@@ -51,7 +115,8 @@ export const scenarios = {
         autoplay.initial === 'running' && autoplay.atResolution !== 'running' && !autoplay.earlyResumes &&
           autoplay.beforeUnlock.state === 'running' && autoplay.beforeUnlock.time > 0.1 &&
           suspended.initial === 'suspended' && suspended.atResolution !== 'running' && !suspended.earlyResumes &&
-          suspended.beforeUnlock.state === 'suspended' && suspended.beforeUnlock.time === suspended.initialTime &&
+          ['suspended', 'interrupted'].includes(suspended.beforeUnlock.state) &&
+          suspended.beforeUnlock.time === suspended.initialTime &&
           suspended.afterUnlock.state === 'running' && suspended.afterUnlock.time - suspended.initialTime > 0.1,
         `Autoplay or gesture startup changed: ${JSON.stringify(rows)}`,
       );

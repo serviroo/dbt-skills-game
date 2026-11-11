@@ -11,6 +11,7 @@ export const scenarios = {
         const { AudioEngine } = await import('/src/audio/engine.ts');
         const { tapAudioSchedule } = await import('/scripts/e2e/audio-schedule.mjs');
         const clock = new AudioContext();
+        await clock.suspend();
         const engine = new AudioEngine(clock);
         try {
           await engine.timeline.ready;

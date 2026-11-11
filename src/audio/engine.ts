@@ -293,7 +293,8 @@ export class AudioEngine {
       (this.ctx as AudioContext).addEventListener('statechange', sc);
       this.cleanup.push(() => document.removeEventListener('visibilitychange', vis));
       this.cleanup.push(() => (this.ctx as AudioContext).removeEventListener('statechange', sc));
-      if (this.unlocked) void this.applyVisibility();
+      if (this.unlocked)
+        void this.applyVisibility().catch((error: unknown) => console.error('[audio] timeline failed', error));
     }
   }
 

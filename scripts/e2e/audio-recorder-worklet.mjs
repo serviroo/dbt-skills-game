@@ -29,7 +29,7 @@ registerProcessor('e2e-recorder', class extends AudioWorkletProcessor {
     this.last = n;
     // with how many blocks this processor has posted: the page can tell a block that never arrived from one the clock
     // counted (as the context paused or woke) but this processor never ran for
-    this.port.postMessage([[n, peak, ss, step, ++this.posted]]);
+    this.port.postMessage([[n, peak, ss, step, ++this.posted, currentFrame]]);
     return true;
   }
 });

@@ -1,4 +1,18 @@
 const timelines = new Map();
+const KIND = 0;
+const TIME = 1;
+const FRAME = 2;
+const VALUE = 3;
+const TAU = 4;
+const STRIDE = 5;
+
+function read(event, field) {
+  return event.values[event.index + field];
+}
+
+function write(event, field, value) {
+  event.values[event.index + field] = value;
+}
 
 function timelineFor(id) {
   let timeline = timelines.get(id);
@@ -46,27 +60,27 @@ class CueTimelineProcessor extends AudioWorkletProcessor {
   insert(p, slot, kind, time, value, tau) {
     let previous = null;
     let next = p.first;
-    while (next && next.time < time) {
+    while (next && read(next, TIME) < time) {
       previous = next;
       next = next.next;
     }
     let same = next;
-    while (same && same.time === time) {
-      if (same.kind === kind) {
-        same.value = value;
-        same.tau = tau;
-        same.frame = Math.ceil(time * sampleRate);
+    while (same && read(same, TIME) === time) {
+      if (read(same, KIND) === kind) {
+        write(same, VALUE, value);
+        write(same, TAU, tau);
+        write(same, FRAME, Math.ceil(time * sampleRate));
         return;
       }
       previous = same;
       same = same.next;
     }
     const event = slot.take();
-    event.kind = kind;
-    event.time = time;
-    event.frame = Math.ceil(time * sampleRate);
-    event.value = value;
-    event.tau = tau;
+    write(event, KIND, kind);
+    write(event, TIME, time);
+    write(event, FRAME, Math.ceil(time * sampleRate));
+    write(event, VALUE, value);
+    write(event, TAU, tau);
     event.next = same;
     if (previous) previous.next = event;
     else p.first = event;
@@ -87,17 +101,17 @@ class CueTimelineProcessor extends AudioWorkletProcessor {
     if (kind === 8) {
       const frame = Math.ceil(time * sampleRate);
       for (let e = p.first; e; e = e.next)
-        if (e.time >= time - 1e-9) {
-          const relative = e.time - time;
-          e.time = frame / sampleRate + relative;
-          e.frame = Math.ceil(frame + relative * sampleRate);
+        if (read(e, TIME) >= time - 1e-9) {
+          const relative = read(e, TIME) - time;
+          write(e, TIME, frame / sampleRate + relative);
+          write(e, FRAME, Math.ceil(frame + relative * sampleRate));
         }
       return;
     }
     if (kind === 6) {
       let previous = null;
       let event = p.first;
-      while (event && event.time < time) {
+      while (event && read(event, TIME) < time) {
         previous = event;
         event = event.next;
       }
@@ -108,8 +122,8 @@ class CueTimelineProcessor extends AudioWorkletProcessor {
     if (kind === 3 || kind === 4) {
       const now = currentFrame / sampleRate;
       let previous = null;
-      for (let e = p.first; e && e.time <= time; e = e.next) previous = e;
-      if (now < time && (!previous || (previous.kind === 4 && previous.time < now))) {
+      for (let e = p.first; e && read(e, TIME) <= time; e = e.next) previous = e;
+      if (now < time && (!previous || (read(previous, KIND) === 4 && read(previous, TIME) < now))) {
         this.segment(p, currentFrame);
         this.insert(p, slot, 1, now, p.value, 0);
       }
@@ -125,34 +139,34 @@ class CueTimelineProcessor extends AudioWorkletProcessor {
     let tau = 0;
     let from = 0;
     let event = p.first;
-    while (event && event.frame <= frame) {
-      if (tau > 0) value = target + (value - target) * Math.exp(-(event.time - from) / tau);
-      if (event.kind === 4) {
-        target = event.value;
-        tau = event.tau;
+    while (event && read(event, FRAME) <= frame) {
+      if (tau > 0) value = target + (value - target) * Math.exp(-(read(event, TIME) - from) / tau);
+      if (read(event, KIND) === 4) {
+        target = read(event, VALUE);
+        tau = read(event, TAU);
         if (!tau) value = target;
       } else {
-        value = event.value;
+        value = read(event, VALUE);
         tau = 0;
       }
-      from = event.time;
+      from = read(event, TIME);
       previous = event;
       event = event.next;
     }
     p.mode = 0;
-    p.next = event ? event.frame : Infinity;
-    if (event && (event.kind === 2 || event.kind === 3) && previous && event.time > from) {
-      const fraction = Math.max(0, (time - from) / (event.time - from));
-      const end = event.value;
-      if (event.kind === 2) {
+    p.next = event ? read(event, FRAME) : Infinity;
+    if (event && (read(event, KIND) === 2 || read(event, KIND) === 3) && previous && read(event, TIME) > from) {
+      const fraction = Math.max(0, (time - from) / (read(event, TIME) - from));
+      const end = read(event, VALUE);
+      if (read(event, KIND) === 2) {
         const origin = value;
         value += (end - value) * fraction;
-        p.step = (end - origin) / ((event.time - from) * sampleRate);
+        p.step = (end - origin) / ((read(event, TIME) - from) * sampleRate);
         p.mode = 1;
       } else if (value !== 0 && end / value > 0) {
         const ratio = end / value;
         value *= Math.exp(Math.log(ratio) * fraction);
-        p.step = Math.exp(Math.log(ratio) / ((event.time - from) * sampleRate));
+        p.step = Math.exp(Math.log(ratio) / ((read(event, TIME) - from) * sampleRate));
         p.mode = 2;
       }
     } else if (tau > 0) {
@@ -204,7 +218,6 @@ class CueTimelineProcessor extends AudioWorkletProcessor {
 
   process(inputs, outputs) {
     const state = this.timeline;
-    outputs[outputs.length - 1][0].fill(1);
     for (;;) {
       let selected = -1;
       for (let i = 0; i < state.slots.length; i++) {
@@ -237,45 +250,6 @@ class CueTimelineProcessor extends AudioWorkletProcessor {
   }
 }
 
-class EventLink {
-  constructor(slot, index) {
-    this.slot = slot;
-    this.index = index;
-    this.next = null;
-  }
-
-  get kind() {
-    return this.slot.kinds[this.index];
-  }
-  set kind(value) {
-    this.slot.kinds[this.index] = value;
-  }
-  get time() {
-    return this.slot.times[this.index];
-  }
-  set time(value) {
-    this.slot.times[this.index] = value;
-  }
-  get frame() {
-    return this.slot.frames[this.index];
-  }
-  set frame(value) {
-    this.slot.frames[this.index] = value;
-  }
-  get value() {
-    return this.slot.values[this.index];
-  }
-  set value(value) {
-    this.slot.values[this.index] = value;
-  }
-  get tau() {
-    return this.slot.taus[this.index];
-  }
-  set tau(value) {
-    this.slot.taus[this.index] = value;
-  }
-}
-
 class CueMailboxProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super();
@@ -285,14 +259,8 @@ class CueMailboxProcessor extends AudioWorkletProcessor {
     this.words = new Uint16Array(words);
     this.bits = new DataView(new ArrayBuffer(8));
     const capacity = events * 2 + 1;
-    const block = {
-      kinds: new Uint8Array(capacity),
-      times: new Float64Array(capacity),
-      frames: new Float64Array(capacity),
-      values: new Float64Array(capacity),
-      taus: new Float64Array(capacity),
-    };
-    this.records = Array.from({ length: capacity }, (_, index) => new EventLink(block, index));
+    const values = new Float64Array(capacity * STRIDE);
+    this.records = Array.from({ length: capacity }, (_, index) => ({ values, index: index * STRIDE, next: null }));
     this.used = 0;
     this.ready = false;
     this.count = 0;

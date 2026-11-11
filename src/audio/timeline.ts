@@ -16,20 +16,23 @@ export type TimelineEvent = {
   stop?: number;
 };
 
-export class TimelineAutomation {
+class TimelineAutomation {
   readonly events: TimelineEvent[] = [];
-  private channels = new WeakMap<AudioParam, number>();
+  private adopted = new WeakSet<AudioParam>();
 
   constructor(private allocate: (param: AudioParam) => number) {}
 
-  at(param: AudioParam) {
-    let channel = this.channels.get(param);
-    if (channel === undefined) {
-      channel = this.allocate(param);
-      this.channels.set(param, channel);
+  private channel(param: AudioParam) {
+    const channel = this.allocate(param);
+    if (!this.adopted.has(param)) {
+      this.adopted.add(param);
       this.events.push({ channel, kind: 'adopt', value: param.value });
     }
-    const ch = channel;
+    return channel;
+  }
+
+  at(param: AudioParam) {
+    const ch = this.channel(param);
     return {
       setValueAtTime: (value: number, time: number) =>
         this.events.push({ channel: ch, kind: 'set', value, time }),
@@ -44,48 +47,11 @@ export class TimelineAutomation {
   }
 
   fromZero(param: AudioParam, time: number, initial: number) {
-    this.at(param);
-    const channel = this.channels.get(param)!;
+    const channel = this.channel(param);
     const at = this.events.findIndex((event) => event.channel === channel && event.kind === 'adopt');
     this.events[at].value = 0;
     this.events.splice(at + 1, 0, { channel, kind: 'set', value: initial, time });
     return channel;
-  }
-}
-
-export class TimelineOscillators {
-  readonly sources: OscillatorNode[] = [];
-  private started = false;
-  private disposed = false;
-
-  constructor(private automation: TimelineAutomation) {}
-
-  add(source: OscillatorNode, gate: GainNode, start: number, stop: number, frequency: number) {
-    const channel = this.automation.fromZero(source.frequency, start, frequency);
-    this.automation.events.push({ channel, kind: 'align', time: start });
-    const level = this.automation.at(gate.gain);
-    level.setValueAtTime(1, start);
-    level.setValueAtTime(0, stop);
-    this.sources.push(source);
-  }
-
-  start() {
-    this.started = true;
-    for (const source of this.sources) source.start();
-  }
-
-  dispose() {
-    if (this.disposed) return;
-    this.disposed = true;
-    if (!this.started) return;
-    for (const source of this.sources) {
-      try {
-        source.stop();
-      } catch (error) {
-        if (!(error instanceof DOMException && error.name === 'InvalidStateError')) throw error;
-      }
-      source.disconnect();
-    }
   }
 }
 
@@ -109,8 +75,8 @@ export class TimelineNode {
     const timeline = nextTimelineId++;
     this.node = new AudioWorkletNode(ctx, 'cue-timeline', {
       numberOfInputs: 1,
-      numberOfOutputs: outputChannels.length + 1,
-      outputChannelCount: [...outputChannels, 1],
+      numberOfOutputs: outputChannels.length,
+      outputChannelCount: outputChannels,
       channelCount: 32,
       channelCountMode: 'explicit',
       channelInterpretation: 'discrete',
@@ -204,7 +170,8 @@ export class CueTimeline {
   private readonly channels: (AudioParam | null)[] = [];
   private readonly byParam = new WeakMap<AudioParam, number>();
   readonly automation = new TimelineAutomation((param) => this.reserve(param));
-  private readonly oscillators = new TimelineOscillators(this.automation);
+  private readonly oscillators: OscillatorNode[] = [];
+  private started = false;
   private node: Promise<TimelineNode> | null = null;
   private currentNode: TimelineNode | null = null;
   private splitters: ChannelSplitterNode[] = [];
@@ -234,7 +201,25 @@ export class CueTimeline {
   }
 
   osc(source: OscillatorNode, gate: GainNode, start: number, stop: number, frequency: number) {
-    this.oscillators.add(source, gate, start, stop, frequency);
+    const channel = this.automation.fromZero(source.frequency, start, frequency);
+    this.automation.events.push({ channel, kind: 'align', time: start });
+    const level = this.automation.at(gate.gain);
+    level.setValueAtTime(1, start);
+    level.setValueAtTime(0, stop);
+    this.oscillators.push(source);
+  }
+
+  private stopSources() {
+    if (!this.started) return;
+    this.started = false;
+    for (const source of this.oscillators) {
+      try {
+        source.stop();
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === 'InvalidStateError')) throw error;
+      }
+      source.disconnect();
+    }
   }
 
   open(requested: number) {
@@ -262,7 +247,8 @@ export class CueTimeline {
           if (param) this.splitters[Math.floor(channel / 32)].connect(param, channel % 32);
         });
         if (!this.channels.length) created.node.connect(this.out);
-        this.oscillators.start();
+        this.started = true;
+        for (const source of this.oscillators) source.start();
         if (this.disposed) {
           throw new Error('The cue timeline was disposed');
         }
@@ -271,7 +257,7 @@ export class CueTimeline {
         done(created);
         return ack;
       } catch (error) {
-        this.oscillators.dispose();
+        this.stopSources();
         for (const splitter of this.splitters) splitter.disconnect();
         created.dispose();
         throw error;
@@ -308,7 +294,7 @@ export class CueTimeline {
     this.disposed = true;
     void this.node?.then(
       (node) => {
-        this.oscillators.dispose();
+        this.stopSources();
         for (const splitter of this.splitters) splitter.disconnect();
         node.dispose();
       },
