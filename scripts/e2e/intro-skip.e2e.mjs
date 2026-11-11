@@ -1,3 +1,5 @@
+import { install, pauseClock, resume, runFor } from './clock.mjs';
+
 // Skip in the intro ends the scene in flight and goes straight to Home: nothing more of it plays or moves, every sound
 // it started stops, and the letterbox and any hush before the hit are gone. Steps the real intro frame by frame in
 // ?capture, so every run checks the same frames, and reads what the scene asked of the audio from the capture's audio log.
@@ -87,38 +89,178 @@ export const scenarios = {
     h.expect(!errors.length, errors.join('\n'));
   },
 
-  /** The rewards keep their own pace in real time, however slowly the 3D scene behind them draws: here every 3D frame
-   *  comes a full second apart, as on a phone (or CI) drawing the scene in software, and Read the note still answers
-   *  within a few seconds. Real time, not ?capture. */
+  /** Rewards cards, cues and the note keep their own pace while every 3D frame is held. Not ?capture. */
   async 'rewards-keep-their-pace-on-slow-frames'(h) {
-    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?shot=rewards&mute');
+    const { ctx, page, errors } = await h.open(
+      { 'dbt.app.v1': h.SEEN }, '?shot=rewards&mute', undefined, async (ctx) => {
+      await install(ctx);
+      await ctx.addInitScript(() => {
+        const request = window.requestAnimationFrame.bind(window);
+        const cancel = window.cancelAnimationFrame.bind(window);
+        const scheduled = new Map();
+        const held = new Map();
+        const state = { cues: [], requested: 0, ran: 0 };
+        window.__rewardsPace = state;
+        let frozen = false;
+        let released = false;
+        let next = 0;
+        window.requestAnimationFrame = (callback) => {
+          const id = ++next;
+          const run = (time) => {
+            scheduled.delete(id);
+            if (frozen) {
+              state.requested++;
+              held.set(id, callback);
+              return;
+            }
+            if (document.querySelector('.rw')) state.ran++;
+            callback(time);
+          };
+          if (frozen) {
+            state.requested++;
+            held.set(id, callback);
+          } else scheduled.set(id, request(run));
+          return id;
+        };
+        window.cancelAnimationFrame = (id) => {
+          held.delete(id);
+          if (scheduled.has(id)) cancel(scheduled.get(id));
+          scheduled.delete(id);
+        };
+        window.__releaseRewardsFrames = () => {
+          released = true;
+          frozen = false;
+          for (const callback of held.values()) window.requestAnimationFrame(callback);
+          held.clear();
+        };
+        let root;
+        new MutationObserver(() => {
+          if (!released && document.querySelector('.lb')) frozen = true;
+          const rewards = document.querySelector('.rw');
+          if (rewards && !root) {
+            root = rewards;
+            state.attached = performance.now();
+            state.stageStart = window.__stage.time;
+          }
+          if (root && !root.isConnected && state.gone === undefined) {
+            state.gone = performance.now();
+            state.stageEnd = window.__stage.time;
+          }
+        }).observe(document, { subtree: true, childList: true });
+      });
+    });
     try {
       const title = page.locator('.title-screen');
       await title.waitFor({ timeout: 60000 });
       await h.sleep(1500);
-      await title.click();
-      // the scene starts as its letterbox goes up; from there a 3D frame comes once a second while the page itself stays
-      // free, as when the GPU (or CI's software renderer) holds frames back
-      await page.locator('.lb').first().waitFor({ state: 'attached', timeout: 60000 });
-      await page.evaluate(() => {
-        window.requestAnimationFrame = (cb) => setTimeout(() => cb(performance.now()), 1000);
+      const soundReady = await page.evaluate(async () => {
+        const { uiSounds } = await import('/src/ui/cutscene-ui.ts');
+        const play = uiSounds.play;
+        if (!play) return false;
+        uiSounds.play = (cue, options) => {
+          if (cue === 'reward_chime') window.__rewardsPace.cues.push({ index: options?.index, at: performance.now() });
+          return play(cue, options);
+        };
+        return true;
       });
-      const ran = await h.stopwatch(page);
+      h.expect(soundReady, 'rewards cue sound hook was not available');
+      await pauseClock(page);
+      const titleBox = await title.boundingBox();
+      await page.mouse.click(titleBox.x + titleBox.width / 2, titleBox.y + titleBox.height / 2);
+      await h.poll(page, () => page.locator('.rw').count(), Boolean,
+        'rewards did not attach while loading the world', { timeout: 60000, polling: 50 });
+      const timings = await page.evaluate(() => {
+        const timing = (element) => element?.getAnimations().map((a) => ({
+          end: a.effect.getComputedTiming().endTime, state: a.playState, rate: a.playbackRate,
+        })) ?? [];
+        const root = document.querySelector('.rw');
+        const cards = [...document.querySelectorAll('.rw-card')];
+        const button = document.querySelector('.rw button');
+        window.__rewardsPace.rootAnimation = root?.getAnimations()[0];
+        window.__rewardsPace.animations = [...cards, button].map((element) => element?.getAnimations()[0]);
+        return { root: timing(root), cards: cards.map(timing), button: timing(button) };
+      });
+      h.expect(timings.root.length === 1 && timings.root[0].rate === 1
+        && ['running', 'finished'].includes(timings.root[0].state),
+      `rewards root entrance expected rate 1 and live playback, saw ${JSON.stringify(timings.root)}`);
+      const ends = [1070, 1570, 2070, 2570, 3170];
+      const steps = [...timings.cards, timings.button];
+      h.expect(timings.cards.length === 4, `rewards has ${timings.cards.length} cards, expected 4`);
+      for (let i = 0; i < ends.length; i++) {
+        const name = i < 4 ? `card ${i + 1}` : 'button';
+        const found = steps[i];
+        h.expect(found.length === 1 && Math.abs(found[0].end - ends[i]) < 0.001 && found[0].rate === 1
+          && ['running', 'finished'].includes(found[0].state),
+        `${name} animation expected end ${ends[i]} ms, rate 1 and live playback, saw ${JSON.stringify(found)}`);
+      }
+      const animation = (index) => page.evaluate((index) => {
+        const a = index === -1 ? window.__rewardsPace.rootAnimation : window.__rewardsPace.animations[index];
+        const end = a.effect.getComputedTiming().endTime;
+        return { end, state: a.playState, rate: a.playbackRate, start: a.startTime,
+          finish: a.startTime === null ? null : a.startTime + end / a.playbackRate };
+      }, index);
+      const root = await h.poll(page, () => animation(-1), (a) => typeof a.start === 'number',
+        (a) => `rewards root entrance had no start time: ${JSON.stringify(a)}`, { timeout: 30000, polling: 50 });
+      h.expect(root.rate === 1 && ['running', 'finished'].includes(root.state),
+        `rewards root entrance expected rate 1 and live playback, saw ${JSON.stringify(root)}`);
+      const schedules = [];
+      for (let i = 0; i < ends.length; i++) {
+        const name = i < 4 ? `card ${i + 1}` : 'button';
+        const initial = await h.poll(page, () => animation(i), (a) => typeof a.start === 'number',
+          (a) => `${name} animation had no start time: ${JSON.stringify(a)}`, { timeout: 30000, polling: 50 });
+        h.expect(Math.abs(initial.start - root.start) <= 1 && initial.rate === 1
+          && Math.abs(initial.end - ends[i]) < 0.001 && ['running', 'finished'].includes(initial.state),
+        `${name} schedule expected start within 1 ms of root ${root.start}, saw ${JSON.stringify(initial)}`);
+        schedules.push(initial);
+      }
+      let elapsed = 0;
+      for (let i = 0; i < 4; i++) {
+        const boundary = 450 + i * 500;
+        await runFor(page, boundary - elapsed - 1);
+        const before = await page.evaluate(() => window.__rewardsPace.cues);
+        h.expect(before.length === i, `cue ${i + 1} fired before ${boundary} ms: ${JSON.stringify(before)}`);
+        await runFor(page, 1);
+        const observed = await page.evaluate(() => {
+          const { cues, attached } = window.__rewardsPace;
+          return cues.map((cue) => ({ index: cue.index, at: cue.at - attached }));
+        });
+        h.expect(observed.length === i + 1 && observed[i].index === i && observed[i].at === boundary,
+          `cue ${i + 1} expected ${boundary} ms, saw ${JSON.stringify(observed)}`);
+        elapsed = boundary;
+      }
+      for (let i = 0; i < ends.length; i++) {
+        const name = i < 4 ? `card ${i + 1}` : 'button';
+        const done = await h.poll(page, () => animation(i), (a) => a.state === 'finished',
+          (a) => `${name} animation did not finish: ${JSON.stringify(a)}`, { timeout: 30000, polling: 50 });
+        h.expect(done.rate === 1 && done.start === schedules[i].start && Math.abs(done.end - ends[i]) < 0.001
+          && Math.abs(done.finish - schedules[i].finish) < 0.001,
+        `${name} animation schedule changed: started ${JSON.stringify(schedules[i])}, `
+          + `finished ${JSON.stringify(done)}`);
+      }
+      const rootDone = await animation(-1);
+      h.expect(rootDone.state === 'finished' && rootDone.rate === 1 && rootDone.start === root.start
+        && rootDone.end === root.end,
+      `rewards root entrance schedule changed: started ${JSON.stringify(root)}, finished ${JSON.stringify(rootDone)}`);
       const note = page.getByRole('button', { name: 'Read the note' });
-      await note.waitFor({ timeout: 30000 });
-      // a player taps Read the note where it shows, and again if nothing happens (a tap, not a Playwright click, which
-      // waits for two still frames: two seconds each here)
-      const through = async () => {
-        if (!(await page.locator('.rw').count())) return true;
-        const box = await note.boundingBox({ timeout: 1000 }).catch(() => null);
-        if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-        return false;
-      };
-      await h.poll(page, through, Boolean, 'the rewards never let Read the note through', { timeout: 40000, polling: 300 });
-      const sec = (await ran()) / 1000;
-      h.expect(sec < 8, `with slow 3D frames the rewards took ${sec.toFixed(1)} s of the page running to let Read the note through (their own pace is under 3 s)`);
+      await h.poll(page, () => note.evaluate((button) => ({
+        inert: !!button.closest('[inert]'), disabled: button.disabled,
+      })), (button) => !button.inert && !button.disabled,
+      (button) => `button did not become ready: ${JSON.stringify(button)}`,
+      { timeout: 30000, polling: 50 });
+      const box = await note.boundingBox();
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      await runFor(page, 379);
+      h.expect(await page.locator('.rw').count(), 'exit removed rewards before 380 ms');
+      await runFor(page, 1);
+      await h.poll(page, () => page.locator('.rw').count(), (count) => count === 0,
+        'exit did not remove rewards after 380 ms of page time', { timeout: 30000, polling: 50 });
+      const state = await page.evaluate(() => window.__rewardsPace);
+      h.expect(state.requested > 0 && state.ran === 0 && state.stageEnd === state.stageStart,
+        `stage frames were not frozen: ${JSON.stringify(state)}`);
       h.expect(!errors.length, errors.join('\n'));
     } finally {
+      await page.evaluate(() => window.__releaseRewardsFrames?.()).catch(() => {});
+      await resume(page).catch(() => {});
       await ctx.close();
     }
   },
