@@ -75,9 +75,3 @@ export function factory(ctx: BaseAudioContext, at: number) {
   gain.gain.setValueAtTime(0.5, at).linearRampToValueAtTime(0.2, at + 1);
   gain.curve.setTargetAtTime(0.5, at, 0.1);
 }
-
-export function stoppedFactory(ctx: BaseAudioContext, at: number) {
-  const gain = stoppedGain(ctx, 1);
-  gain.gain.setValueAtTime(0, at);
-  gain.curve.setValueAtTime(0, at);
-}

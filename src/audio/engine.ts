@@ -7,7 +7,8 @@ import { CUES } from './cues';
 import { BED_NAMES, buildBed, buildCharge, type BedHandle, type BedName, type ChargeHandle } from './beds';
 import { AHEAD, Music, SECTIONS, type Section, type SectionOpts } from './music';
 import { clipCurve, makeCrackle, makeIR, makeNoise, dB, type Ctx } from './dsp';
-import { stoppedGain, trackedGain, type StoppedGain, type TrackedGain } from './curve';
+import { trackedGain, type TrackedGain } from './curve';
+import { EndpointGate } from './endpoint-gate';
 import { holdAt, soon, taper } from './param';
 import { SCORE } from '../motion/tokens';
 import { makeEcho, dropEcho, type Echo, type Sends } from './echo';
@@ -91,7 +92,8 @@ export class AudioEngine {
    *  there too. */
   private sendLevels: { sfx: number; mus: number; tau: number };
   /** The Safe Zone's gate: the last stage before the speaker level, so the score, effects, beds and echo all pass it. */
-  private safe: StoppedGain;
+  private safe: TrackedGain;
+  private safeEnd: EndpointGate;
   private isQuiet = false;
   /** The shared room and hall echo and its sends; leaving the Safe Zone swaps in an empty echo on the same sends, and
    *  stopAll an empty echo with sends of its own. */
@@ -173,8 +175,10 @@ export class AudioEngine {
     clip.oversample = '2x';
     this.volume = C.createGain();
     this.volume.gain.value = this.masterTarget();
-    this.safe = stoppedGain(C, 1);
-    pre.connect(hp).connect(lim).connect(undo).connect(clip).connect(this.safe).connect(this.volume).connect(C.destination);
+    this.safe = trackedGain(C, 1);
+    this.safeEnd = new EndpointGate(C);
+    pre.connect(hp).connect(lim).connect(undo).connect(clip).connect(this.safe)
+      .connect(this.safeEnd.gain).connect(this.volume).connect(C.destination);
 
     this.duckG = trackedGain(C, 1);
     this.yieldG = trackedGain(C, 1);
@@ -403,10 +407,7 @@ export class AudioEngine {
 
   /** Current output gains (QA): master after scene level and mute, the Music / Effects levels, and the Safe Zone's gate. */
   get levels() {
-    return {
-      master: this.volume.gain.value, music: this.musUser.gain.value,
-      sfx: this.sfxUser.gain.value, score: this.safe.level(),
-    };
+    return { master: this.volume.gain.value, music: this.musUser.gain.value, sfx: this.sfxUser.gain.value, score: this.safe.gain.value };
   }
 
   /** QA: the Effects bus or the score's input, to feed a test tone through the real graph. */
@@ -578,18 +579,15 @@ export class AudioEngine {
   quiet(on: boolean, sec: number, at = soon(this.ctx)) {
     this.isQuiet = on;
     if (on) {
-      this.safe.stopAt(at + sec, at);
-      for (const g of this.echo.out) g.stopAt(at + sec, at);
-    }
+      this.safeEnd.close(at, at + sec);
+      for (const g of this.echo.end) g.close(at, at + sec);
+    } else this.safeEnd.open(at);
     for (const { curve: p } of on ? this.echo.out : []) {
       holdAt(p, at);
       p.linearRampToValueAtTime(0, at + sec);
     }
     if (on) this.busLevels.ramp(this.safe.curve, 0, at, at + sec);
-    else {
-      this.busLevels.set(this.safe.curve, 1, at, Math.max(0.003, sec / 4));
-      this.safe.resumeAt(this.busLevels.riseAt(at));
-    }
+    else this.busLevels.set(this.safe.curve, 1, at, Math.max(0.003, sec / 4));
     if (on) {
       this.stoppedUntil = at;
       this.charge?.stop(at, sec);
@@ -703,7 +701,7 @@ export class AudioEngine {
   private closeEcho(e: Echo, at: number, fade: number) {
     const was = this.closing.get(e);
     if (was && was.by <= at + fade) return;
-    for (const g of e.out) g.stopAt(at + fade, at);
+    for (const g of e.end) g.close(at, at + fade);
     for (const { curve: p } of e.out) {
       holdAt(p, at);
       p.linearRampToValueAtTime(0, at + fade);

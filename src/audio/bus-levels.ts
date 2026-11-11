@@ -20,10 +20,6 @@ export class BusLevels {
 
   constructor(private ctx: BaseAudioContext) {}
 
-  riseAt(at: number) {
-    return Math.max(at, this.ctx.currentTime, this.stoppedUntil);
-  }
-
   set(p: Curve, value: number, at: number, tau: number, replace = true) {
     this.levels.add(p);
     const time = p.clampTime(at);

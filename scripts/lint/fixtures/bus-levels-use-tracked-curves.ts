@@ -1,4 +1,4 @@
-import { stoppedGain, trackedGain } from '../../../src/audio/curve';
+import { trackedGain } from '../../../src/audio/curve';
 import { BusLevels } from '../../../src/audio/bus-levels';
 
 export class Engine {
@@ -22,7 +22,6 @@ export class Engine {
 
   tracked(at: number) {
     this.duckG = trackedGain(this.ctx, 1);
-    this.safe = stoppedGain(this.ctx, 1);
     this.busLevels.set(this.duckG.curve, 1, at, 0.1);
     this.busLevels.ramp(this.safe.curve, 0, at, at + 0.1);
   }
