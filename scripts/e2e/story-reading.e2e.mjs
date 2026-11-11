@@ -41,7 +41,7 @@ export async function holdStorage(page, kinds) {
       ss[k] = function (...a) {
         let go, finish;
         const done = new Promise((r) => (finish = r));
-        held.push({ what: `${k} ${a[0]?.id ?? a[0]}`, go: () => go(), done });
+        held.push({ what: a.length ? `${k} ${a[0]?.id ?? a[0]}` : k, go: () => go(), done });
         return new Promise((r) => (go = r)).then(() => real.apply(this, a)).finally(finish);
       };
     }
@@ -56,7 +56,17 @@ export async function holdStorage(page, kinds) {
     };
   }, kinds);
   return {
-    waitHeld: (what, count = 1) => page.waitForFunction(([w, c]) => window.__held().filter((x) => x === w).length === c, [what, count], { timeout: 5000 }),
+    waitHeld: async (what, count = 1) => {
+      try {
+        await page.waitForFunction(
+          ([w, c]) => window.__held().filter((x) => x === w).length === c, [what, count], { timeout: 5000 },
+        );
+      } catch (error) {
+        if (!String(error.message).includes('Timeout 5000ms')) throw error;
+        const held = await page.evaluate(() => window.__held());
+        throw new Error(`waiting for ${count} held ${what}; held: ${JSON.stringify(held)}`);
+      }
+    },
     release: (what) => page.evaluate((w) => window.__releaseOne(w), what),
     drain: async () => {
       while (await page.evaluate(() => window.__releaseOne()));

@@ -577,17 +577,17 @@ export const scenarios = {
       await safeAndBack(page, 'write');
       await holds(h, page, 'Notes for this story', 'back from the Safe Zone on the notes');
 
-      const held = await holdStorage(page, ['story']);
+      const held = await holdStorage(page, ['sweepLives']);
       await page.locator('.dq-top .dq-safe').click();
       await routeIs(page, 'safe');
       await page.goBack();
       await routeIs(page, 'write');
-      await held.waitHeld(`story ${ids.story}`);
+      await held.waitHeld('sweepLives');
       await page.locator('.dq-top .dq-safe').click();
       await routeIs(page, 'safe');
       await page.evaluate(async () => {
         const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
-        ss.story = ss.__real.story;
+        ss.sweepLives = ss.__real.sweepLives;
       });
       await held.drain();
       await page.goBack();
