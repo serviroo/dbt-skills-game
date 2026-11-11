@@ -165,21 +165,20 @@ async function picture(h, pic) {
   }
 }
 
-async function lampGlow(page) {
-  const size = await page.locator('.dq-scene canvas').evaluate((c) => [c.width, c.height]);
-  return page.evaluate(async ([w, h]) => {
+async function lampGlow(page, sizes) {
+  return page.evaluate(async (sizes) => {
     const { paintCars } = await import('/src/scene/vignettes/scenes/thoughts/cars.ts');
     const { FOV } = await import('/src/scene/vignettes/scenes/thoughts/picture.ts');
     const lib = performance.getEntriesByType('resource').find((e) => e.name.includes('/deps/three.js'));
     const THREE = await import(lib.name);
     const renderer = new THREE.WebGLRenderer();
-    const target = new THREE.WebGLRenderTarget(w, h);
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(FOV, w / h, 0.1, 1200);
+    const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 1200);
     const picture = paintCars(scene, camera, { value: 0 });
-    picture.resize(w, h);
     const glows = scene.children.find((o) => o.material.uniforms?.uLamp);
     const { uLamp, uSize } = glows.material.uniforms;
+    const objects = scene.children.filter((o) => o !== glows);
+    let w, h, target;
     const alone = (o) => scene.children.filter((c) => c.geometry === o.geometry).length === 1;
     const solid = scene.children.filter(
       (o) => o !== glows && o.material.depthTest && o.material.depthWrite && alone(o),
@@ -203,47 +202,64 @@ async function lampGlow(page) {
       const px = (size * camera.projectionMatrix.elements[5] * h * 0.5) / depth;
       return Math.round(0.4 * Math.min(Math.max(px, least), most) * (0.6 + 0.4 * lamp.w));
     };
-    const pixel = new Uint8Array(4);
     const frame = (lit, points) => {
       glows.visible = lit;
+      const ys = points.map(([, y]) => y);
+      const low = Math.min(...ys), height = Math.max(...ys) - low + 1;
+      target.scissor.set(points[0][0], low, 1, height);
+      target.scissorTest = true;
       renderer.setRenderTarget(target);
       renderer.render(scene, camera);
-      return points.map(([x, y]) => {
-        renderer.readRenderTargetPixels(target, x, y, 1, 1, pixel);
-        return pixel[0] + pixel[1] + pixel[2];
+      const pixels = new Uint8Array(height * 4);
+      renderer.readRenderTargetPixels(target, points[0][0], low, 1, height, pixels);
+      return points.map(([, y]) => {
+        const i = (y - low) * 4;
+        return pixels[i] + pixels[i + 1] + pixels[i + 2];
       });
     };
-    const seen = { hidden: [], clear: [] };
-    for (let k = 0; k <= 100; k++) {
-      picture.pose(0, [{ n: 0, u: k / 100 }]);
-      scene.updateMatrixWorld();
-      const lamps = uLamp.value.slice(0, 2);
-      const spots = lamps.map((l) => new THREE.Vector3(l.x, l.y, l.z));
-      const covered = spots.reduce((sum, spot) => sum + cover(spot), 0);
-      if (covered % (AROUND.length * 2)) continue;
-      const marks = spots.flatMap((spot, i) => {
-        const depth = -spot.clone().applyMatrix4(camera.matrixWorldInverse).z;
-        const at = spot.clone().project(camera);
-        if (Math.abs(at.x) > 0.95 || Math.abs(at.y) > 0.95) return [];
-        const [x, y] = [Math.round(((at.x + 1) * w) / 2), Math.round(((at.y + 1) * h) / 2)];
-        const r = halo(lamps[i], depth);
-        const under = nearest(x, y - r) / spot.distanceTo(camera.position);
-        return [{ points: [[x, y], [x, y + r], [x, y - r]], under }];
-      });
-      if (!marks.length) continue;
-      const points = marks.flatMap((m) => m.points);
-      const on = frame(true, points);
-      const off = frame(false, points);
-      const glow = on.map((v, i) => v - off[i]);
-      marks.forEach(({ under }, i) => {
-        const [centre, above, below] = glow.slice(i * 3, i * 3 + 3);
-        seen[covered ? 'hidden' : 'clear'].push({ u: k / 100, centre, above, below, under });
-      });
+    const results = [];
+    for ([w, h] of sizes) {
+      target = new THREE.WebGLRenderTarget(w, h);
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      picture.resize(w, h);
+      const seen = { hidden: [], clear: [] };
+      for (let k = 0; k <= 100; k++) {
+        picture.pose(0, [{ n: 0, u: k / 100 }]);
+        scene.updateMatrixWorld();
+        const lamps = uLamp.value.slice(0, 2);
+        for (let i = 0; i < lamps.length; i++) {
+          const spot = new THREE.Vector3(lamps[i].x, lamps[i].y, lamps[i].z);
+          const covered = cover(spot);
+          if (covered !== 0 && covered !== AROUND.length) continue;
+          const depth = -spot.clone().applyMatrix4(camera.matrixWorldInverse).z;
+          const at = spot.clone().project(camera);
+          if (Math.abs(at.x) > 0.95 || Math.abs(at.y) > 0.95) continue;
+          const [x, y] = [Math.round(((at.x + 1) * w) / 2), Math.round(((at.y + 1) * h) / 2)];
+          const r = halo(lamps[i], depth);
+          const under = nearest(x, y - r) / spot.distanceTo(camera.position);
+          const points = [[x, y], [x, y + r], [x, y - r]];
+          const strength = uLamp.value.map((lamp) => lamp.w);
+          uLamp.value.forEach((lamp, j) => { if (j !== i) lamp.w = 0; });
+          const on = frame(true, points);
+          const off = frame(false, points);
+          const visibility = objects.map((o) => o.visible);
+          objects.forEach((o) => { o.visible = false; });
+          const clearOn = frame(true, points);
+          const clearOff = frame(false, points);
+          objects.forEach((o, j) => { o.visible = visibility[j]; });
+          uLamp.value.forEach((lamp, j) => { lamp.w = strength[j]; });
+          const [centre, above, below] = on.map((v, j) => v - off[j]);
+          const reference = clearOn.map((v, j) => v - clearOff[j]);
+          seen[covered ? 'hidden' : 'clear'].push({ u: k / 100, centre, above, below, under, reference });
+        }
+      }
+      target.dispose();
+      results.push({ size: [w, h], ...seen });
     }
     renderer.dispose();
-    target.dispose();
-    return seen;
-  }, size);
+    return results;
+  }, sizes);
 }
 
 export const scenarios = {
@@ -254,19 +270,29 @@ export const scenarios = {
     await picture(h, 'cars');
   },
   async 'thoughts-cars-lamps-behind'(h) {
-    const said = (spots) => spots.map((s) => `${s.u}: ${s.below}/${s.centre}/${s.above}`).join(', ');
+    const said = (spots) => spots.map((s) =>
+      `${s.u}: ${s.below}/${s.centre}/${s.above} (clear ${s.reference[2]}/${s.reference[0]}/${s.reference[1]})`,
+    ).join(', ');
     for (const [tag, vp] of [...SIZES, ['desk', DESK]]) {
       const { ctx, page, errors } = await h.open(seed(h), '?mute', vp);
       await toThoughts(h, page, 'cars');
-      const { hidden, clear } = await lampGlow(page);
-      const shows = hidden.filter((s) => s.centre > 6);
-      const dim = clear.filter((s) => s.centre < 40);
-      const cut = clear.filter((s) => s.under > 0.5 && s.below < s.above / 2);
-      h.expect(!shows.length, `cars ${tag}: headlights behind the hill or trees still glow (${said(shows)})`);
-      h.expect(clear.length && !dim.length, `cars ${tag}: headlights in plain view do not glow (${said(dim)})`);
-      h.expect(!cut.length, `cars ${tag}: the road cuts the bottom off a headlight's glow (${said(cut)})`);
-      h.expect(hidden.length, `cars ${tag}: no car passed behind the hill or trees`);
-      console.log(`  cars ${tag}: ${hidden.length} lamps hidden, ${clear.length} in view`);
+      const size = await page.locator('.dq-scene canvas').evaluate((c) => [c.width, c.height]);
+      const sweep = [size, ...[128, 155, 165, 191, 256, 414].flatMap((n) =>
+        [[n, n], [n, Math.round(n * size[1] / size[0])]])];
+      const sizes = [...new Map(sweep.map((s) => [s.join('x'), s])).values()];
+      for (const { size: [width, height], hidden, clear } of await lampGlow(page, sizes)) {
+        const where = `${tag} ${width}x${height}`;
+        const shows = hidden.filter((s) => s.centre > 6);
+        const dim = clear.filter((s) => s.centre < 40);
+        const bad = [...hidden, ...clear].filter((s) => s.reference.some((v) => v <= 0));
+        const cut = clear.filter((s) => s.under > 0.5 && s.below * s.reference[1] < s.above * s.reference[2] / 2);
+        h.expect(!bad.length, `cars ${where}: clear glow measurement is not positive (${said(bad)})`);
+        h.expect(!shows.length, `cars ${where}: headlights behind the hill or trees still glow (${said(shows)})`);
+        h.expect(!cut.length, `cars ${where}: the road cuts the bottom off a headlight's glow (${said(cut)})`);
+        h.expect(clear.length && !dim.length, `cars ${where}: headlights in plain view do not glow (${said(dim)})`);
+        h.expect(hidden.length, `cars ${where}: no car passed behind the hill or trees`);
+        console.log(`  cars ${where}: ${hidden.length} lamps hidden, ${clear.length} in view`);
+      }
       h.expect(!errors.length, errors.join('\n'));
       await ctx.close();
     }
