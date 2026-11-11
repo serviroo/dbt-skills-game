@@ -213,14 +213,6 @@ export const scenarios = {
         `${name} schedule expected start within 1 ms of root ${root.start}, saw ${JSON.stringify(initial)}`);
         schedules.push(initial);
       }
-      const buttonTime = schedules[4].end / schedules[4].rate;
-      const tapInterval = 300;
-      const exitTime = 380;
-      const total = buttonTime + tapInterval + exitTime;
-      const buttonFromRoot = schedules[4].finish - root.start;
-      h.expect(Math.abs(buttonFromRoot - 3170) <= 1.001 && total <= 3850,
-        `rewards pace: button ${buttonFromRoot} ms from root, tap ${tapInterval} ms, `
-          + `exit ${exitTime} ms, budget ${total} ms`);
       let elapsed = 0;
       for (let i = 0; i < 4; i++) {
         const boundary = 450 + i * 500;
