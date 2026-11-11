@@ -188,7 +188,7 @@ export function trackedGain(ctx: BaseAudioContext, initial: number): TrackedGain
 }
 
 export type StoppedGain = TrackedGain & {
-  stopAt(time: number): void;
+  stopAt(time: number, at: number): void;
   resumeAt(time: number): void;
   level(): number;
 };
@@ -213,11 +213,13 @@ export function stoppedGain(ctx: BaseAudioContext, initial: number, at = 0): Sto
   let source = connect(first, at);
   return Object.assign(gain, {
     curve,
-    stopAt(time: number) {
+    stopAt(time: number, at: number) {
       for (const entry of sources) {
-        if (entry.end <= time) continue;
-        entry.node.stop(time);
-        entry.end = time;
+        const end = entry.start > at ? at : time;
+        const active = entry === source && entry.start <= at && entry.end > Math.max(at, ctx.currentTime);
+        if (entry.end <= end && !active) continue;
+        entry.node.stop(end);
+        entry.end = end;
       }
     },
     resumeAt(time: number) {

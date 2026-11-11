@@ -578,8 +578,8 @@ export class AudioEngine {
   quiet(on: boolean, sec: number, at = soon(this.ctx)) {
     this.isQuiet = on;
     if (on) {
-      this.safe.stopAt(at + sec);
-      for (const g of this.echo.out) g.stopAt(at + sec);
+      this.safe.stopAt(at + sec, at);
+      for (const g of this.echo.out) g.stopAt(at + sec, at);
     }
     for (const { curve: p } of on ? this.echo.out : []) {
       holdAt(p, at);
@@ -703,7 +703,7 @@ export class AudioEngine {
   private closeEcho(e: Echo, at: number, fade: number) {
     const was = this.closing.get(e);
     if (was && was.by <= at + fade) return;
-    for (const g of e.out) g.stopAt(at + fade);
+    for (const g of e.out) g.stopAt(at + fade, at);
     for (const { curve: p } of e.out) {
       holdAt(p, at);
       p.linearRampToValueAtTime(0, at + fade);

@@ -129,8 +129,8 @@ export const scenarios = {
         const { AudioEngine } = await import('/src/audio/engine.ts');
         const rate = 48000, results = [];
         for (const ordering of ['deferred', 'after-close', 'no-reopen', 'multiple']) {
-          for (const fade of [0.005, 0.04, 0.08]) {
-            const ac = new OfflineAudioContext(1, rate, rate);
+          for (const fade of [0.005, 0.04, 0.08, 0.2]) {
+            const ac = new OfflineAudioContext(1, Math.ceil(rate * 1.4), rate);
             const e = new AudioEngine(ac);
             const source = ac.createConstantSource();
             source.offset.value = 0.5;
@@ -150,15 +150,23 @@ export const scenarios = {
             const end = again + fade, reopen = end + 0.15;
             e.quiet(false, 0.2, reopen);
             const data = (await ac.startRendering()).getChannelData(0);
-            let before = 0, closed = 0, reopened = 0;
+            let before = 0, during = 0, quietGap = 0, closed = 0, reopened = 0;
             for (let i = 0; i < Math.floor(0.39 * rate); i++) before = Math.max(before, Math.abs(data[i]));
+            for (let i = Math.ceil((again + fade / 2) * rate); i < Math.floor((again + fade * 0.6) * rate); i++) {
+              during = Math.max(during, Math.abs(data[i]));
+            }
+            if (ordering === 'deferred' && fade === 0.2) {
+              for (let i = Math.ceil(0.441 * rate); i < Math.ceil(end * rate); i++) {
+                quietGap = Math.max(quietGap, Math.abs(data[i]));
+              }
+            }
             for (let i = Math.ceil(end * rate); i < Math.floor(reopen * rate); i++) {
               closed = Math.max(closed, Math.abs(data[i]));
             }
             for (let i = Math.ceil((reopen + 0.3) * rate); i < data.length; i++) {
               reopened = Math.max(reopened, Math.abs(data[i]));
             }
-            results.push({ ordering, fade, before, closed, reopened });
+            results.push({ ordering, fade, before, during, quietGap, closed, reopened });
           }
         }
         return results;
@@ -166,6 +174,10 @@ export const scenarios = {
       for (const r of results) {
         const label = `${r.ordering}, ${r.fade}s`;
         h.expect(r.before > 0.1, `${label}: no sound before closing (${r.before})`);
+        if (r.ordering === 'no-reopen' && r.fade >= 0.08) {
+          h.expect(r.during > 0.05, `${label}: the longer fade stopped early (${r.during})`);
+        }
+        h.expect(r.quietGap < SILENT_PEAK, `${label}: a cancelled reopen sounded again (${r.quietGap})`);
         h.expect(r.closed < SILENT_PEAK, `${label}: sound after closing (${r.closed})`);
         h.expect(r.reopened > 0.1, `${label}: no sound after reopening (${r.reopened})`);
       }
