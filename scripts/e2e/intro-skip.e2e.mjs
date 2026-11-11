@@ -171,26 +171,58 @@ export const scenarios = {
         'rewards did not attach while loading the world', { timeout: 60000, polling: 50 });
       const timings = await page.evaluate(() => {
         const timing = (element) => element?.getAnimations().map((a) => ({
-          end: a.effect.getComputedTiming().endTime, state: a.playState,
+          end: a.effect.getComputedTiming().endTime, state: a.playState, rate: a.playbackRate,
         })) ?? [];
-        return {
-          cards: [...document.querySelectorAll('.rw-card')].map(timing),
-          button: timing(document.querySelector('.rw button')),
-        };
+        const root = document.querySelector('.rw');
+        const cards = [...document.querySelectorAll('.rw-card')];
+        const button = document.querySelector('.rw button');
+        window.__rewardsPace.rootAnimation = root?.getAnimations()[0];
+        window.__rewardsPace.animations = [...cards, button].map((element) => element?.getAnimations()[0]);
+        return { root: timing(root), cards: cards.map(timing), button: timing(button) };
       });
-      const ends = [1070, 1570, 2070, 2570];
-      h.expect(timings.cards.length === ends.length,
-        `rewards has ${timings.cards.length} cards, expected ${ends.length}`);
+      h.expect(timings.root.length === 1 && timings.root[0].rate === 1
+        && ['running', 'finished'].includes(timings.root[0].state),
+      `rewards root entrance expected rate 1 and live playback, saw ${JSON.stringify(timings.root)}`);
+      const ends = [1070, 1570, 2070, 2570, 3170];
+      const steps = [...timings.cards, timings.button];
+      h.expect(timings.cards.length === 4, `rewards has ${timings.cards.length} cards, expected 4`);
       for (let i = 0; i < ends.length; i++) {
-        const found = timings.cards[i];
-        h.expect(found.length === 1 && Math.abs(found[0].end - ends[i]) < 0.001 && found[0].state !== 'paused',
-          `card ${i + 1} animation expected end ${ends[i]} ms and live playback, saw ${JSON.stringify(found)}`);
+        const name = i < 4 ? `card ${i + 1}` : 'button';
+        const found = steps[i];
+        h.expect(found.length === 1 && Math.abs(found[0].end - ends[i]) < 0.001 && found[0].rate === 1
+          && ['running', 'finished'].includes(found[0].state),
+        `${name} animation expected end ${ends[i]} ms, rate 1 and live playback, saw ${JSON.stringify(found)}`);
       }
-      h.expect(timings.button.length === 1 && Math.abs(timings.button[0].end - 3170) < 0.001
-        && timings.button[0].state !== 'paused',
-        `button animation expected end 3170 ms and live playback, saw ${JSON.stringify(timings.button)}`);
-      let elapsed = 0;
+      const animation = (index) => page.evaluate((index) => {
+        const a = index === -1 ? window.__rewardsPace.rootAnimation : window.__rewardsPace.animations[index];
+        const end = a.effect.getComputedTiming().endTime;
+        return { end, state: a.playState, rate: a.playbackRate, start: a.startTime,
+          finish: a.startTime === null ? null : a.startTime + end / a.playbackRate };
+      }, index);
+      const root = await h.poll(page, () => animation(-1), (a) => typeof a.start === 'number',
+        (a) => `rewards root entrance had no start time: ${JSON.stringify(a)}`, { timeout: 30000, polling: 50 });
+      h.expect(root.rate === 1 && ['running', 'finished'].includes(root.state),
+        `rewards root entrance expected rate 1 and live playback, saw ${JSON.stringify(root)}`);
+      const schedules = [];
       for (let i = 0; i < ends.length; i++) {
+        const name = i < 4 ? `card ${i + 1}` : 'button';
+        const initial = await h.poll(page, () => animation(i), (a) => typeof a.start === 'number',
+          (a) => `${name} animation had no start time: ${JSON.stringify(a)}`, { timeout: 30000, polling: 50 });
+        h.expect(Math.abs(initial.start - root.start) <= 1 && initial.rate === 1
+          && Math.abs(initial.end - ends[i]) < 0.001 && ['running', 'finished'].includes(initial.state),
+        `${name} schedule expected start within 1 ms of root ${root.start}, saw ${JSON.stringify(initial)}`);
+        schedules.push(initial);
+      }
+      const buttonTime = schedules[4].end / schedules[4].rate;
+      const tapInterval = 300;
+      const exitTime = 380;
+      const total = buttonTime + tapInterval + exitTime;
+      const buttonFromRoot = schedules[4].finish - root.start;
+      h.expect(Math.abs(buttonFromRoot - 3170) <= 1.001 && total <= 3850,
+        `rewards pace: button ${buttonFromRoot} ms from root, tap ${tapInterval} ms, `
+          + `exit ${exitTime} ms, budget ${total} ms`);
+      let elapsed = 0;
+      for (let i = 0; i < 4; i++) {
         const boundary = 450 + i * 500;
         await runFor(page, boundary - elapsed - 1);
         const before = await page.evaluate(() => window.__rewardsPace.cues);
@@ -205,19 +237,23 @@ export const scenarios = {
         elapsed = boundary;
       }
       for (let i = 0; i < ends.length; i++) {
-        await h.poll(page, () => page.locator('.rw-card').nth(i).evaluate((card) => {
-          const a = card.getAnimations()[0];
-          return { state: a?.playState, time: a?.currentTime };
-        }), (animation) => animation.state === 'finished',
-        (animation) => `card ${i + 1} animation did not finish: ${JSON.stringify(animation)}`,
-        { timeout: 30000, polling: 50 });
+        const name = i < 4 ? `card ${i + 1}` : 'button';
+        const done = await h.poll(page, () => animation(i), (a) => a.state === 'finished',
+          (a) => `${name} animation did not finish: ${JSON.stringify(a)}`, { timeout: 30000, polling: 50 });
+        h.expect(done.rate === 1 && done.start === schedules[i].start && Math.abs(done.end - ends[i]) < 0.001
+          && Math.abs(done.finish - schedules[i].finish) < 0.001,
+        `${name} animation schedule changed: started ${JSON.stringify(schedules[i])}, `
+          + `finished ${JSON.stringify(done)}`);
       }
+      const rootDone = await animation(-1);
+      h.expect(rootDone.state === 'finished' && rootDone.rate === 1 && rootDone.start === root.start
+        && rootDone.end === root.end,
+      `rewards root entrance schedule changed: started ${JSON.stringify(root)}, finished ${JSON.stringify(rootDone)}`);
       const note = page.getByRole('button', { name: 'Read the note' });
-      await h.poll(page, () => note.evaluate((button) => {
-        const a = button.getAnimations()[0];
-        return { state: a?.playState, inert: !!button.closest('[inert]'), disabled: button.disabled };
-      }), (button) => button.state === 'finished' && !button.inert && !button.disabled,
-      (button) => `button did not finish and become ready: ${JSON.stringify(button)}`,
+      await h.poll(page, () => note.evaluate((button) => ({
+        inert: !!button.closest('[inert]'), disabled: button.disabled,
+      })), (button) => !button.inert && !button.disabled,
+      (button) => `button did not become ready: ${JSON.stringify(button)}`,
       { timeout: 30000, polling: 50 });
       const box = await note.boundingBox();
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
