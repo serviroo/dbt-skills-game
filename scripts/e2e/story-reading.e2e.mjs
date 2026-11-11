@@ -240,6 +240,81 @@ export const scenarios = {
     }
   },
 
+  async 'story-a-chapter-stays-open-while-only-its-editor-holds-the-words'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await h.reachHub(page);
+      const { id, first, second, notes } = await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const { story, first } = await ss.create('Two Doors');
+        const second = await ss.addChapter(story.id, 'Second Door');
+        return { id: story.id, first: first.id, second: second.id, notes: story.notes };
+      });
+      const kept = () => page.evaluate(async (chapter) => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        return storyStore(window.__daily.store.key).unsaved(chapter)?.text;
+      }, first);
+      await page.evaluate((r) => window.__daily.go(r), { name: 'write', id });
+      const box = page.getByRole('textbox', { name: /^Page,/ });
+      await box.waitFor();
+      await box.fill('The door opened');
+      await storedIs(h, page, 'The door opened', 'before the device filled up');
+      await page.evaluate((live) => {
+        const full = () => new DOMException('This device is out of room', 'QuotaExceededError');
+        const transaction = IDBDatabase.prototype.transaction;
+        IDBDatabase.prototype.transaction = function (stores, mode, ...rest) {
+          if (mode === 'readwrite' && /\.story$/.test(this.name)) throw full();
+          return transaction.call(this, stores, mode, ...rest);
+        };
+        const setItem = Storage.prototype.setItem;
+        Storage.prototype.setItem = function (key, value) {
+          if (String(key).startsWith(live)) throw full();
+          return setItem.call(this, key, value);
+        };
+      }, `${h.SAVE}.story.live`);
+      await page.locator('.st-chbtn').click();
+      await page.locator('.st-chrow-b', { hasText: 'Second Door' }).waitFor();
+      const { waitHeld, release, drain } = await holdStorage(page, ['chapter', 'saveChapter']);
+      let typed = 'The door opened';
+      const typeWhileItOpens = async (opening, word, what) => {
+        await waitHeld(opening);
+        await box.press('End');
+        await box.pressSequentially(word);
+        typed += word;
+        await release(opening);
+        for (const more of [' the', ' bell', ' rang', ' twice', ' at', ' dusk', ' by', ' the', ' sea']) {
+          if (!(await page.evaluate((w) => window.__held().includes(w), `saveChapter ${first}`))) break;
+          await box.pressSequentially(more);
+          typed += more;
+          await release(`saveChapter ${first}`);
+        }
+        await drain();
+        const shown = await shownIn(page);
+        h.expect(shown.seg === 'Page' && shown.box === 'Page, Chapter 1' && shown.text === typed,
+          `${what} opened over words only the editor held: ${JSON.stringify(shown)}`);
+        h.expect(/Not saving/.test(await page.locator('.st-state').textContent()),
+          'the dock did not say it was not saving');
+        await h.poll(page, async () => (await drain(), kept()), (text) => text === typed,
+          (text) => `after ${what} this copy kept ${JSON.stringify(text)}`);
+      };
+      await page.locator('.st-chrow-b', { hasText: 'Second Door' }).click();
+      await typeWhileItOpens(`chapter ${second}`, ' and', 'the second chapter');
+      await page.getByRole('radio', { name: 'Show: Notes' }).click();
+      await typeWhileItOpens(`chapter ${notes}`, ' softly', 'Notes');
+      await page.getByRole('radio', { name: 'Show: Notes' }).click();
+      await h.poll(page, async () => (await drain(), (await shownIn(page)).box),
+        (label) => label === 'Notes for this story', 'Notes did not open once the words were kept',
+        { timeout: 8000, polling: 50 });
+      await page.getByRole('radio', { name: 'Show: Page' }).click();
+      await h.poll(page, async () => (await drain(), await shownIn(page)),
+        (shown) => shown.box === 'Page, Chapter 1' && shown.text === typed,
+        (shown) => `reopening the chapter lost words: ${JSON.stringify(shown)}`, { timeout: 8000, polling: 50 });
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
   /** Another shows a new line each time, nothing is kept before Use this, and Use this writes it at the cursor */
   async 'story-starting-points'(h) {
     const { ctx, page, errors } = await h.open(seed(h));

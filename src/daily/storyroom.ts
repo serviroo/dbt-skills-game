@@ -884,7 +884,8 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
       if (!c || !alive || n !== picks) return false;
       if (!cur || !(dirty || saving)) break;
       await flushAll();
-      if (failed && dirty && !saving) (live(true), (dirty = false), clearTimeout(saveTimer));
+      if (failed && dirty && !saving && (live(true), mirrorOff)) return syncSeg(), false;
+      if (failed && dirty && !saving) (dirty = false), clearTimeout(saveTimer);
     }
     shown = n;
     taking?.();
