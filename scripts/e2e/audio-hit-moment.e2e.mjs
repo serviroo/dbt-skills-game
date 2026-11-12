@@ -1,4 +1,54 @@
 export const scenarios = {
+  async 'hit-unhush-restores-use-picked-start'(h) {
+    const { ctx, page, errors } = await h.open({}, '?lab=audio&mute');
+    try {
+      const result = await page.evaluate(async () => {
+        const { AudioEngine } = await import('/src/audio/engine.ts');
+        const { Moment } = await import('/src/audio/moment.ts');
+        const { soon } = await import('/src/audio/param.ts');
+        const { tapAudioSchedule } = await import('/scripts/e2e/audio-schedule.mjs');
+        const clock = new AudioContext({ latencyHint: 'interactive' });
+        await clock.resume();
+        const engine = new AudioEngine(clock, { stats: true });
+        engine.music.to('awaken', 0.04);
+        engine.hush();
+        const buses = ['hushBeds', 'hushMusic', 'hushHall', 'hushRoom'];
+        const targets = buses.map((name) => engine[name].curve.param);
+        const times = buses.map(() => []);
+        const place = Moment.prototype.place;
+        let picked;
+        let afterPause;
+        const undo = tapAudioSchedule((target, method, args, time) => {
+          const index = targets.indexOf(target);
+          if (index !== -1 && method === 'setTargetAtTime' && args[0] === 1) times[index].push(time);
+        });
+        Moment.prototype.place = function (at) {
+          picked = at;
+          const result = place.call(this, at);
+          const until = performance.now() + (soon(clock) - clock.currentTime) * 1000 + 100;
+          while (performance.now() < until);
+          afterPause = clock.currentTime;
+          return result;
+        };
+        try {
+          engine.play('awaken_hit');
+          return { picked, afterPause, buses: buses.map((name, i) => ({ name, times: times[i] })) };
+        } finally {
+          Moment.prototype.place = place;
+          undo();
+          await clock.close();
+          engine.dispose();
+        }
+      });
+      h.expect(Number.isFinite(result.picked) && result.afterPause > result.picked
+        && result.buses.every((bus) => bus.times.length === 1 && Math.abs(bus.times[0] - result.picked) < 1e-8),
+      JSON.stringify(result));
+      h.expect(!errors.length, errors.join('\n'));
+      return result;
+    } finally {
+      await ctx.close();
+    }
+  },
   async 'late-stand-keeps-first-chord-times'(h) {
     const { ctx, page, errors } = await h.open({}, '?lab=audio&mute');
     try {
@@ -7,7 +57,7 @@ export const scenarios = {
         const { Moment } = await import('/src/audio/moment.ts');
         const { tapAudioSchedule } = await import('/scripts/e2e/audio-schedule.mjs');
         const out = [];
-        for (const live of [false, true]) for (const offset of [1, 1.65, 7.04, null, 'known']) {
+        for (const live of [false, true]) for (const offset of [1, 1.1, 1.65, 1.75, 7.04, null, 'known']) {
           const clock = live ? new AudioContext({ latencyHint: 'interactive' })
             : new OfflineAudioContext(2, 48000, 48000);
           if (live) await clock.suspend();
@@ -57,7 +107,8 @@ export const scenarios = {
               && close(c.time, dipAt) && where(c));
             const restored = dip.filter((d) => calls.some((c) => c.target === d.target && where(c)
               && c.method === 'setTargetAtTime' && c.value === 1 && close(c.time, at + stand - 0.004)));
-            out.push({ live, offset, rollOK, horn: horn.length, swell: swell.length, timp: timp.length,
+            out.push({ live, offset, rollOK: rollOK && B * 0.45 >= 0.675,
+              horn: horn.length, hornDelay: B * 0.62, swell: swell.length, timp: timp.length,
               swellStarts: swellStarts.length, dip: dip.length, restored: restored.length,
               wantSwell: inWindow(swellAt), wantDip: inWindow(dipAt) });
           } finally {
@@ -69,7 +120,8 @@ export const scenarios = {
         }
         return out;
       });
-      h.expect(results.every((r) => r.rollOK && r.horn === 1 && r.swell === Number(r.wantSwell)
+      h.expect(results.every((r) => r.rollOK && r.horn === 1 && r.hornDelay >= 0.93 - 1e-8
+        && r.swell === Number(r.wantSwell)
         && r.timp === Number(r.wantSwell) && r.swellStarts === 4 * Number(r.wantSwell)
         && r.dip === 2 * Number(r.wantDip) && r.restored === r.dip), JSON.stringify(results));
       h.expect(!errors.length, errors.join('\n'));
