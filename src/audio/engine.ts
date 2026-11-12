@@ -15,8 +15,11 @@ import { makeEcho, dropEcho, type Echo, type Sends } from './echo';
 import { BusLevels } from './bus-levels';
 import { Voice, stoppedBy, type Lib } from './voice';
 import { CueCleanup } from './cue-cleanup';
+import { Moment } from './moment';
+import type { CueHandle, UserLevels, SoundEvent, RenderOpts } from './engine-types';
 
 export type { BedHandle, BedName, ChargeHandle, Section, SectionOpts };
+export type { CueHandle, UserLevels, SoundEvent, RenderOpts } from './engine-types';
 export { BED_NAMES, SECTIONS };
 
 export const CUE_NAMES = [
@@ -42,11 +45,6 @@ export interface PlayOpts {
   index?: number;
 }
 
-export interface CueHandle {
-  stop(at?: number, ramp?: number): void;
-  readonly end: number;
-}
-
 export interface EngineOpts {
   seed?: number;
   /** Master volume 0..1 (after the limiter). */
@@ -59,13 +57,6 @@ export interface EngineOpts {
   stats?: boolean;
   /** Their stored levels from the speaker control (0..1 each), applied from the first sample. */
   user?: UserLevels;
-}
-
-export interface UserLevels {
-  master: number;
-  music: number;
-  sfx: number;
-  muted: boolean;
 }
 
 /** Cues the score makes room for. */
@@ -262,6 +253,18 @@ export class AudioEngine {
         lib: this.libMusic,
         hush: (a, b) => this.hush(a, b),
         seed: () => this.nextSeed(),
+        prepareSection: (name, moment) => {
+          const lifted = this.lifted;
+          if (lifted) moment.add(0, (at) => this.music.lift(0, 0.3, at), this.shelf.gain);
+          const beds = name === 'reward' || name === 'end' || name === 'calm'
+            ? (['gate_hum', 'aura_bed'] as BedName[]).map((n) => this.beds.get(n)).filter((bed) => bed !== undefined)
+            : [];
+          const stops = beds.map((bed) => bed.voice.prepareStop(moment, 2.5));
+          return (at) => {
+            if (lifted) this.lifted = false;
+            for (const finish of stops) finish(at);
+          };
+        },
         onSection: (name, at) => {
           if (this.lifted) {
             this.music.lift(0, 0.3, at);
@@ -547,6 +550,39 @@ export class AudioEngine {
     const end = 120;
     v.noise("brown", 0, end + 0.05, v.filt("lowpass", 240, 0.7, g));
     v.noise("pink", 0, end + 0.05, v.gain(0.08, v.filt("highpass", 1800, 0.7, g)));
+    if (this.live) {
+      const moment = new Moment();
+      v.prepare(moment);
+      const old = this.takeHush();
+      const stopped = old.map((voice) => ({ voice, finish: voice.prepareStop(moment, 0.02) }));
+      for (const p of [this.hushBeds.curve, this.hushMusic.curve, this.hushHall.curve, this.hushRoom.curve]) {
+        moment.add(0, (at) => this.busLevels.set(p, 0.008, at, 0.007), p);
+        if (to !== undefined) moment.add(to, () => this.busLevels.set(p, 1, to, 0.0015, false), p, true);
+      }
+      let finishNew: ((at: number) => boolean) | undefined;
+      if (to !== undefined) {
+        moment.add(to - 0.01, () => g.gain.setValueAtTime(0.065, to - 0.01), g.gain, true);
+        moment.add(to + 0.02, () => g.gain.linearRampToValueAtTime(0, to + 0.02), g.gain, true);
+        finishNew = v.prepareStop(moment, 0.02, to + 0.02, true);
+      }
+      const hush = this.music.prepareHush(moment);
+      moment.prepare();
+      const at = from ?? soon(this.ctx);
+      moment.place(at);
+      v.open(at);
+      for (const { voice, finish } of stopped) {
+        finish(at);
+        if (this.active.has(voice)) this.stoppedUntil = Math.max(this.stoppedUntil, voice.silentAt);
+        this.letGo(voice);
+      }
+      if (finishNew) {
+        finishNew(at);
+        this.letGo(v);
+      }
+      this.hushV = to === undefined ? v : null;
+      for (const finish of hush) finish(at);
+      return;
+    }
     const at = from ?? soon(this.ctx);
     for (const p of [this.hushBeds.curve, this.hushMusic.curve, this.hushHall.curve, this.hushRoom.curve]) {
       this.busLevels.set(p, 0.008, at, 0.007);
@@ -865,13 +901,6 @@ export class AudioEngine {
   }
 }
 
-export interface SoundEvent {
-  t: number;
-  cue: string;
-  opts?: any;
-  loop?: { name: string; level?: number; until?: number };
-}
-
 /**
  * Render an event list to a stereo buffer with the exact live synthesis. Like the live app, cues are created shortly
  * before they sound and the score is scheduled ahead in windows (the render suspends every `step` seconds to feed the
@@ -913,13 +942,6 @@ export async function renderOffline(events: SoundEvent[], durationSec: number, s
   const buf = await ctx.startRendering();
   lastStats = eng.stats();
   return buf;
-}
-
-export interface RenderOpts {
-  step?: number;
-  ahead?: number;
-  musicAhead?: number;
-  onStep?: (t: number) => void;
 }
 
 export let lastStats: ReturnType<AudioEngine['stats']> | null = null;

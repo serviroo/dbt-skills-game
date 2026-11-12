@@ -52,4 +52,13 @@ export class Engine {
     const unrelated = new GainNode(new AudioContext());
     unrelated.gain.setTargetAtTime(1, at, 0.1);
   }
+
+  throughMoment(at: number) {
+    const moment = new Moment();
+    for (const p of [this.hushBeds.curve, this.hushMusic.curve]) {
+      moment.add(0, (when: number) => this.busLevels.set(p, 1, when, 0.01), p);
+      moment.add(0, () => p.setTargetAtTime(1, at, 0.1), p);
+      moment.add(0, () => this.busLevels.set(this.focus.curve, 1, at, 0.1), p);
+    }
+  }
 }

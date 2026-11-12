@@ -37,8 +37,18 @@ const busRisesWaitForStops = {
         const helper = isNamed(object, 'busLevels') && object.object.type === 'ThisExpression';
         if (helper && methodName(node) === 'set') return;
         if (helper && methodName(node) === 'ramp' && node.arguments[1]?.value === 0) return;
+        const moment = object?.type === 'Identifier' ? declaratorOf(context, object)?.init : null;
+        const callback = node.arguments[1];
+        const key = node.arguments[2];
+        const call = callback?.type === 'ArrowFunctionExpression' ? callback.body : null;
+        const bus = call?.callee?.type === 'MemberExpression' ? call.callee.object : null;
+        const queued = methodName(node) === 'add' && moment?.type === 'NewExpression'
+          && calleeName(moment) === 'Moment' && call?.type === 'CallExpression' && methodName(call) === 'set'
+          && isNamed(bus, 'busLevels') && bus.object.type === 'ThisExpression'
+          && key?.type === 'Identifier' && call.arguments[0]?.type === 'Identifier'
+          && key.name === call.arguments[0].name;
         const writes = AUDIO_TIME_ARG.has(methodName(node)) && sharedBus(context, object, true);
-        const passes = node.arguments.some((a) => sharedBus(context, a, true));
+        const passes = node.arguments.some((a, i) => !(queued && i === 2) && sharedBus(context, a, true));
         if (writes || passes) context.report({ node, messageId: 'rise' });
       },
     };

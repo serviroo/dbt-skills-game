@@ -29,7 +29,7 @@ const RULE_FINDINGS = {
   'graph-swaps-wait-for-their-time': 22,
   'cue-tracking-includes-offline': 4,
   'cue-cleanup-shares-one-clock': 2,
-  'bus-rises-wait-for-stops': 14,
+  'bus-rises-wait-for-stops': 17,
   'bus-levels-use-tracked-curves': 6,
 };
 
