@@ -10,7 +10,7 @@ export const scenarios = {
         const { tapAudioSchedule } = await import('/scripts/e2e/audio-schedule.mjs');
         const out = [];
         for (const kind of ['section', 'hush']) {
-          for (const phase of ['release', 'sort', 'bookkeeping']) {
+          for (const phase of ['release', 'sort', 'registration']) {
             const clock = new AudioContext({ latencyHint: 'interactive' });
             await clock.resume();
             const pauseMs = (soon(clock) - clock.currentTime) * 1000 + 100;
@@ -19,6 +19,7 @@ export const scenarios = {
             let watching = false;
             let pauses = 0;
             let advance = 0;
+            let lastPause = -1;
             const calls = [];
             const pause = () => {
               if (!watching || (pauses && phase !== 'sort')) return;
@@ -27,14 +28,14 @@ export const scenarios = {
               const until = performance.now() + pauseMs;
               while (performance.now() < until);
               advance = (clock.currentTime - before) * 1000;
+              lastPause = calls.length;
             };
             const undo = tapAudioSchedule((_, method, args, time) => {
               if (watching) calls.push({ method, time, now: clock.currentTime });
             });
             const release = Voice.prototype.release;
             const sort = Array.prototype.sort;
-            const track = engine.lib.track;
-            const musicTrack = engine.libMusic.track;
+            const reg = Voice.prototype.reg;
             Voice.prototype.release = function (...args) {
               if (phase === 'release') pause();
               return release.apply(this, args);
@@ -44,29 +45,24 @@ export const scenarios = {
                 && ('cancelsBefore' in this[0] || 'absolute' in this[0])) pause();
               return sort.apply(this, args);
             };
-            engine.lib.track = (...args) => {
-              if (phase === 'bookkeeping') pause();
-              return track(...args);
-            };
-            engine.libMusic.track = (...args) => {
-              if (phase === 'bookkeeping') pause();
-              return musicTrack(...args);
+            Voice.prototype.reg = function (...args) {
+              if (phase === 'registration') pause();
+              return reg.apply(this, args);
             };
             try {
               watching = true;
               if (kind === 'section') engine.music.to('windows', 0.04);
-              else engine.hush(undefined, clock.currentTime + 0.78);
+              else engine.hush(undefined, clock.currentTime + (soon(clock) - clock.currentTime) + 2 * pauseMs / 1000 + 0.78);
               watching = false;
               const late = calls.filter((c) => c.time > 0 && c.time < c.now);
               out.push({ kind, phase, pauses, advance, latency: clock.baseLatency, calls: calls.length,
-                late: late.length,
+                afterPause: calls.slice(lastPause).filter((c) => c.method === 'start').length, late: late.length,
                 worstMs: Math.max(0, ...late.map((c) => (c.now - c.time) * 1000)) });
             } finally {
               watching = false;
               Voice.prototype.release = release;
               Array.prototype.sort = sort;
-              engine.lib.track = track;
-              engine.libMusic.track = musicTrack;
+              Voice.prototype.reg = reg;
               undo();
               await clock.close();
               engine.dispose();
@@ -75,7 +71,7 @@ export const scenarios = {
         }
         return out;
       });
-      h.expect(results.every((r) => r.pauses > 0 && r.advance > 40 && r.calls > 0 && r.late === 0),
+      h.expect(results.every((r) => r.pauses > 0 && r.advance > 40 && r.calls > 0 && r.afterPause > 0 && r.late === 0),
         JSON.stringify(results));
       h.expect(!errors.length, errors.join('\n'));
       return results;
@@ -88,7 +84,7 @@ export const scenarios = {
     try {
       const results = await page.evaluate(async () => {
         const { AudioEngine } = await import('/src/audio/engine.ts');
-        const { soon } = await import('/src/audio/param.ts');
+        const { soon, silentAfter } = await import('/src/audio/param.ts');
         const { tapAudioSchedule, recordAudioSchedule } = await import('/scripts/e2e/audio-schedule.mjs');
         const run = async (kind, pause, pauseFade = false) => {
           const clock = new AudioContext({ latencyHint: 'interactive' });
@@ -122,7 +118,7 @@ export const scenarios = {
             }
             calls.push({ target, method, time, now: clock.currentTime, afterPause: paused });
           });
-          const to = clock.currentTime + 0.78;
+          const to = clock.currentTime + (soon(clock) - clock.currentTime) + pauseMs / 1000 + 0.78;
           if (kind.startsWith('section')) engine.music.to(kind === 'section' ? 'windows' : 'reward', 0.04);
           else engine.hush(undefined, to);
           watching = false;
@@ -137,10 +133,20 @@ export const scenarios = {
           const before = calls.filter((c) => !c.afterPause && c.time > 0);
           const after = calls.filter((c) => c.afterPause && c.time > 0);
           const recorded = schedule.calls.slice(firstCall);
-          const result = { kind, pause, at, fade: fade?.time, starts: opening.length,
+          const hushStopsCorrect = kind !== 'hush' || (opening.length === 2 && opening.every((start) => {
+            const times = calls.filter((c) => c.target === start.target && c.method === 'stop').map((c) => c.time);
+            return times.length === 2 && times.some((t) => Math.abs(t - at - 120.05) < 1e-7)
+              && times.some((t) => Math.abs(t - to - 0.02 - silentAfter(0.005)) < 1e-7);
+          }));
+          const restoresCorrect = kind !== 'hush' || buses.every((bus) =>
+            restores.filter((c) => c.target === bus).length === 3);
+          const result = { kind, pause, at, hushStopsCorrect, restoresCorrect, fade: fade?.time, starts: opening.length,
             bedFade: bedFade?.time, lift: lift?.time,
             stops: calls.filter((c) => c.method === 'stop').length,
             events: recorded.map((c) => `${c.target}:${c.method}`).sort(),
+            stopTimes: recorded.filter((c) => c.method === 'stop')
+              .map((c) => `${c.target}:${(c.time - (kind === 'hush' && c.time < to + 10 ? to : at)).toFixed(7)}`).sort(),
+            restoreTimes: restores.map((c) => (c.time - to).toFixed(7)).sort(),
             opening: recorded.filter((c) => c.method === 'start')
               .map((c) => `${c.target}:${(c.time - at).toFixed(8)}`).sort(),
             restores: restores.length, restoreFirst: Math.min(...restores.map((c) => c.i)),
@@ -166,7 +172,7 @@ export const scenarios = {
       });
       const [section, stalledSection, hush, stalledHush, delayedFade, sectionWithBed, stalledBus] = results;
       const describe = (item) => {
-        const { events, opening, ...summary } = item;
+        const { events, opening, stopTimes, restoreTimes, ...summary } = item;
         return summary;
       };
       const problems = [];
@@ -178,18 +184,22 @@ export const scenarios = {
         || sectionWithBed.lift !== sectionWithBed.at) {
         problems.push(`section levels: ${JSON.stringify(describe(sectionWithBed))}`);
       }
-      if (!(hush.starts > 0 && hush.restores >= 4 && hush.restoreFirst > hush.urgentLast)) {
+      if (!(hush.starts > 0 && hush.restores >= 4 && hush.restoreFirst > hush.urgentLast
+        && hush.hushStopsCorrect && hush.restoresCorrect)) {
         problems.push(`hush restores: ${JSON.stringify(describe(hush))}`);
       }
       for (const item of [section, hush]) {
         if (!(item.distantFirst > item.urgentLast)) problems.push(`distant stops: ${JSON.stringify(describe(item))}`);
       }
       for (const [plain, stalled] of [[section, stalledSection], [hush, stalledHush], [hush, stalledBus]]) {
-        if (!(stalled.before > 0 && stalled.beforeLate === 0 && stalled.afterLate > 0)) {
+        if (!(stalled.before > 0 && stalled.beforeLate === 0 && stalled.afterLate > 0
+          && stalled.hushStopsCorrect && stalled.restoresCorrect)) {
           problems.push(`pause inside ${stalled.kind}: ${JSON.stringify(describe(stalled))}`);
         }
         if (JSON.stringify(stalled.opening) !== JSON.stringify(plain.opening)
-          || JSON.stringify(stalled.events) !== JSON.stringify(plain.events)) {
+          || JSON.stringify(stalled.events) !== JSON.stringify(plain.events)
+          || JSON.stringify(stalled.stopTimes) !== JSON.stringify(plain.stopTimes)
+          || JSON.stringify(stalled.restoreTimes) !== JSON.stringify(plain.restoreTimes)) {
           problems.push(`${stalled.kind} changed its scheduled calls`);
         }
       }
