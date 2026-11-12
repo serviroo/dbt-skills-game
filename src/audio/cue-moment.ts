@@ -64,7 +64,8 @@ export function cueMoment(host: {
 }
 
 export function roomMoment(
-  levels: BusLevels, gain: TrackedGain, at: number, db: number, tau: number, back: number, tauBack: number, supplied?: Moment,
+  levels: BusLevels, gain: TrackedGain, at: number, db: number, tau: number, back: number, tauBack: number,
+  supplied?: Moment,
 ) {
   const p = gain.curve;
   const moment = supplied ?? new Moment();
