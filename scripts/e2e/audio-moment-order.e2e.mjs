@@ -17,6 +17,11 @@ export const scenarios = {
             e.music.to('intro', 0.04, { at: 0.1 });
             e.play('ui_open', { at: 0.2, detune: 500 });
           }, run: (e) => e.music.to('reward', 0.3, { at: 0.7 }) },
+          { name: 'cue-duck-lift', at: 0.7, barrier: true, run: (e) => e.play('ui_open', { at: 0.7, detune: 500 }) },
+          { name: 'cue-focus', at: 0.7, run: (e) => e.play('breath_in', { at: 0.7 }) },
+          { name: 'cue-room', at: 0.7, run: (e) => e.play('stand_swell', { at: 0.7 }) },
+          { name: 'bed-opening', at: 0.7, barrier: true, run: (e) => e.bed('gate_hum', { at: 0.7 }) },
+          { name: 'charge-opening', at: 0.7, barrier: true, run: (e) => e.chargeLoop({ at: 0.7 }) },
           { name: 'timed-hush', at: 0.1, run: (e) => e.hush(0.1, 0.88) },
           { name: 'open-hush', at: 0.1, run: (e) => e.hush(0.1) },
           { name: 'repeated-hush', at: 0.4, setup: (e) => e.hush(0.1), run: (e) => e.hush(0.4, 1.18) },

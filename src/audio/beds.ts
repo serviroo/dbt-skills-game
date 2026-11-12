@@ -125,6 +125,7 @@ export function buildBed(lib: Lib, name: BedName, dest: AudioNode, level: number
   fade.setTargetAtTime(level, 0, Math.max(0.003, fadeIn / 4));
   def.fn(v, 0, lvl);
   return {
+    voice: v,
     open(at: number): BedHandle {
       v.open(at);
       return {
@@ -223,6 +224,7 @@ export function buildCharge(lib: Lib, dest: AudioNode, seed: number) {
   };
   let stopped = false;
   return {
+    voice: v,
     open(at: number): ChargeHandle {
       v.open(at);
       return {

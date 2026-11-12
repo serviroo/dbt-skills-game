@@ -1,4 +1,4 @@
-import { AUDIO_TIME_ARG, audioParam, calleeName, declaratorOf, isNamed, methodName } from './ast.mjs';
+import { AUDIO_TIME_ARG, audioParam, calleeName, declaratorOf, isNamed, methodName, variableOf } from './ast.mjs';
 
 const SHARED_BUSES = new Set([
   'duckG', 'yieldG', 'focus', 'uiDuck', 'hushBeds', 'hushMusic', 'hushHall', 'hushRoom', 'safe',
@@ -13,7 +13,11 @@ function busAlias(context, node) {
 function sharedBus(context, node, param, seen = new Set()) {
   if (!node || seen.has(node)) return false;
   const next = new Set(seen).add(node);
-  if (node.type === 'Identifier') return sharedBus(context, busAlias(context, node), param, next);
+  if (node.type === 'Identifier') {
+    const tracked = !param && variableOf(context, node)?.defs.some((def) =>
+      def.name?.typeAnnotation?.typeAnnotation?.typeName?.name === 'TrackedGain');
+    return tracked || sharedBus(context, busAlias(context, node), param, next);
+  }
   if (node.type === 'ArrayExpression') return node.elements.some((e) => sharedBus(context, e, param, next));
   if (node.type === 'ConditionalExpression') {
     return sharedBus(context, node.consequent, param, next) || sharedBus(context, node.alternate, param, next);
@@ -38,12 +42,15 @@ const busRisesWaitForStops = {
         if (helper && methodName(node) === 'set') return;
         if (helper && methodName(node) === 'ramp' && node.arguments[1]?.value === 0) return;
         const moment = object?.type === 'Identifier' ? declaratorOf(context, object)?.init : null;
+        const typedMoment = object?.type === 'Identifier' && variableOf(context, object)?.defs.some((def) =>
+          def.name?.typeAnnotation?.typeAnnotation?.typeName?.name === 'Moment');
         const callback = node.arguments[1];
         const key = node.arguments[2];
         const call = callback?.type === 'ArrowFunctionExpression' ? callback.body : null;
         const bus = call?.callee?.type === 'MemberExpression' ? call.callee.object : null;
-        const queued = methodName(node) === 'add' && moment?.type === 'NewExpression'
-          && calleeName(moment) === 'Moment' && call?.type === 'CallExpression' && methodName(call) === 'set'
+        const queued = methodName(node) === 'add'
+          && (typedMoment || (moment?.type === 'NewExpression' && calleeName(moment) === 'Moment'))
+          && call?.type === 'CallExpression' && methodName(call) === 'set'
           && isNamed(bus, 'busLevels') && bus.object.type === 'ThisExpression'
           && key?.type === 'Identifier' && call.arguments[0]?.type === 'Identifier'
           && key.name === call.arguments[0].name;

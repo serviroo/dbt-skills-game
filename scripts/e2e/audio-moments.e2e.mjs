@@ -9,13 +9,15 @@ export const scenarios = {
         const { Voice } = await import('/src/audio/voice.ts');
         const { tapAudioSchedule } = await import('/scripts/e2e/audio-schedule.mjs');
         const out = [];
-        for (const kind of ['section', 'hush']) {
+        for (const kind of ['section', 'hush', 'ui_open', 'lift', 'close', 'breath_in', 'soldier_ignite', 'stand_swell',
+          'bed', 'charge']) {
           for (const phase of ['release', 'sort', 'registration']) {
             const clock = new AudioContext({ latencyHint: 'interactive' });
             await clock.resume();
             const pauseMs = (soon(clock) - clock.currentTime) * 1000 + 100;
             const engine = new AudioEngine(clock, { stats: true });
             if (kind === 'section') engine.music.to('intro', 0.04);
+            if (kind === 'close') engine.play('ui_open', { detune: 500 });
             let watching = false;
             let pauses = 0;
             let advance = 0;
@@ -52,6 +54,11 @@ export const scenarios = {
             try {
               watching = true;
               if (kind === 'section') engine.music.to('windows', 0.04);
+              else if (kind === 'bed') engine.bed('gate_hum');
+              else if (kind === 'charge') engine.chargeLoop();
+              else if (kind === 'lift') engine.play('ui_open', { detune: 500 });
+              else if (kind === 'close') engine.play('ui_close');
+              else if (kind !== 'hush') engine.play(kind);
               else {
                 const lead = soon(clock) - clock.currentTime;
                 engine.hush(undefined, clock.currentTime + lead + 2 * pauseMs / 1000 + 0.78);
