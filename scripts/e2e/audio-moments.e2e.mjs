@@ -52,7 +52,10 @@ export const scenarios = {
             try {
               watching = true;
               if (kind === 'section') engine.music.to('windows', 0.04);
-              else engine.hush(undefined, clock.currentTime + (soon(clock) - clock.currentTime) + 2 * pauseMs / 1000 + 0.78);
+              else {
+                const lead = soon(clock) - clock.currentTime;
+                engine.hush(undefined, clock.currentTime + lead + 2 * pauseMs / 1000 + 0.78);
+              }
               watching = false;
               const late = calls.filter((c) => c.time > 0 && c.time < c.now);
               out.push({ kind, phase, pauses, advance, latency: clock.baseLatency, calls: calls.length,
@@ -145,7 +148,11 @@ export const scenarios = {
             stops: calls.filter((c) => c.method === 'stop').length,
             events: recorded.map((c) => `${c.target}:${c.method}`).sort(),
             stopTimes: recorded.filter((c) => c.method === 'stop')
-              .map((c) => `${c.target}:${(c.time - (kind === 'hush' && c.time < to + 10 ? to : at)).toFixed(7)}`).sort(),
+              .map((c) => {
+                const from = kind === 'hush' && c.time < to + 10 ? to : at;
+                return `${c.target}:${(c.time - from).toFixed(7)}`;
+              })
+              .sort(),
             restoreTimes: restores.map((c) => (c.time - to).toFixed(7)).sort(),
             opening: recorded.filter((c) => c.method === 'start')
               .map((c) => `${c.target}:${(c.time - at).toFixed(8)}`).sort(),
