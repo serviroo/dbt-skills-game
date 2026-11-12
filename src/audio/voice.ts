@@ -183,7 +183,6 @@ export class Voice {
   prepare(moment: Moment) {
     const held = this.held ?? [];
     this.release(0);
-    held.sort((a, b) => a.cancelsBefore - b.cancelsBefore || a.t - b.t);
     for (const h of held) {
       const s = h.source;
       if (!s) {
