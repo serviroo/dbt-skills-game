@@ -68,3 +68,7 @@ export class Engine {
     moment.add(0, () => this.busLevels.set(this.safe.curve, 1, at, 0.1), p);
   }
 }
+
+function outside(gain: TrackedGain, at: number) {
+  gain.gain.setTargetAtTime(1, at, 0.1);
+}

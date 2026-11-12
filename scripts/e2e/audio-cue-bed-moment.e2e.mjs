@@ -27,6 +27,14 @@ export const scenarios = {
             let picked;
             let afterPause;
             const place = Moment.prototype.place;
+            const prepare = Moment.prototype.prepare;
+            Moment.prototype.prepare = function () {
+              if (stalled) {
+                const until = performance.now() + (soon(clock) - clock.currentTime) * 1000 + 100;
+                while (performance.now() < until);
+              }
+              return prepare.call(this);
+            };
             const undo = tapAudioSchedule((node, method, _args, time) => {
               if (node === target && method === 'setTargetAtTime') times.push(time);
             });
@@ -50,6 +58,7 @@ export const scenarios = {
                   && offsets.every((offset, i) => Math.abs(times[i] - picked - offset) < 1e-7) });
             } finally {
               Moment.prototype.place = place;
+              Moment.prototype.prepare = prepare;
               undo();
               await clock.close();
               engine.dispose();

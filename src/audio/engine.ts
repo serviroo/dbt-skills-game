@@ -18,12 +18,24 @@ import { CueCleanup } from './cue-cleanup';
 import { hushMoment } from './hush-moment';
 import { Moment } from './moment';
 import { sectionMoment } from './section-moment';
-import { cueMoment, focusMoment, roomMoment, type CueHandle, type CueName, type PlayOpts } from './cue-moment';
-export { CUE_NAMES } from './cue-moment';
-export type { CueHandle, CueName, PlayOpts } from './cue-moment';
+import { cueMoment, type PlayOpts } from './cue-moment';
+export type { PlayOpts } from './cue-moment';
 
 export type { BedHandle, BedName, ChargeHandle, Section, SectionOpts };
 export { BED_NAMES, SECTIONS };
+
+export const CUE_NAMES = [
+  'gate_air', 'gate_crack', 'gate_swell', 'ui_open', 'ui_close', 'ui_tap', 'level_tick', 'level_ring', 'level_resolve',
+  'eye_swell', 'whoosh', 'awaken_voice', 'awaken_hit', 'riser', 'soldier_ignite', 'stand_swell', 'chest_rise',
+  'chest_burst', 'reward_chime', 'letter_open', 'endcard', 'card_flip', 'soft_chime', 'bubble', 'breath_in',
+  'breath_out', 'check',
+] as const;
+export type CueName = (typeof CUE_NAMES)[number];
+
+export interface CueHandle {
+  stop(at?: number, ramp?: number): void;
+  readonly end: number;
+}
 
 export interface EngineOpts {
   seed?: number;
@@ -411,10 +423,13 @@ export class AudioEngine {
       const moment = new Moment();
       v.prepare(moment);
       lifted = cueMoment({
-        moment, cue, opts, lifted: this.lifted, music: this.music, shelf: this.shelf.gain,
-        duck: this.uiDuck.curve, levels: this.busLevels,
-        toFocus: (v, back) => this.toFocus(v, 0, 0.3, back, moment),
-        makeRoom: (at, db, tau, back, tauBack) => this.makeRoom(at, db, tau, back, tauBack, moment),
+        cue, opts, lifted: this.lifted,
+        lift: (opening) => {
+          moment.add(0, (start) => this.music.lift(opening ? 5 : 0, opening ? 0.3 : 0.4, start), this.shelf.gain);
+        },
+        duck: () => this.duckCue(moment),
+        toFocus: (level, back) => this.toFocus(level, 0, 0.3, back, moment),
+        makeRoom: (offset, db, tau, back, tauBack) => this.makeRoom(offset, db, tau, back, tauBack, moment),
       });
       moment.prepare();
       at = this.when(opts.at);
@@ -437,7 +452,25 @@ export class AudioEngine {
   }
 
   private makeRoom(at: number, db: number, tau: number, back: number, tauBack: number, moment?: Moment) {
-    roomMoment(this.busLevels, this.yieldG, at, db, tau, back, tauBack, moment);
+    const p = this.yieldG.curve;
+    if (moment) {
+      moment.add(at, (start) => this.busLevels.set(p, dB(db), start + at, tau), p);
+      moment.add(back, (start) => this.busLevels.set(p, 1, start + back, tauBack, false), p);
+    } else {
+      this.busLevels.set(p, dB(db), at, tau);
+      this.busLevels.set(p, 1, back, tauBack, false);
+    }
+  }
+
+  private duckCue(moment?: Moment) {
+    const p = this.uiDuck.curve;
+    if (moment) {
+      moment.add(0, (start) => this.busLevels.set(p, dB(-3), start, 0.012), p);
+      moment.add(0.28, (start) => this.busLevels.set(p, 1, start + 0.28, 0.16, false), p);
+    } else {
+      this.busLevels.set(p, dB(-3), 0, 0.012);
+      this.busLevels.set(p, 1, 0.28, 0.16, false);
+    }
   }
 
   /** Start (or re-level) a continuous bed. Calling it again for a running bed ramps its level. */
@@ -465,7 +498,14 @@ export class AudioEngine {
 
   /** Move the focus dip to `v` from `at` (time constant tau); with `back`, return to full level from then. */
   private toFocus(v: number, at: number, tau: number, back?: number, moment?: Moment) {
-    focusMoment(this.busLevels, this.focus, v, at, tau, back, moment);
+    const p = this.focus.curve;
+    if (moment) {
+      moment.add(at, (start) => this.busLevels.set(p, v, start + at, tau), p);
+      if (back !== undefined) moment.add(back, (start) => this.busLevels.set(p, 1, start + back, 0.8, false), p);
+    } else {
+      this.busLevels.set(p, v, at, tau);
+      if (back !== undefined) this.busLevels.set(p, 1, back, 0.8, false);
+    }
   }
 
   /** The hold-to-charge loop (idle hum at c=0). One at a time; calling again returns the running one. While it runs the
@@ -475,9 +515,7 @@ export class AudioEngine {
     const built = buildCharge(this.lib, this.sfx, this.nextSeed());
     const moment = new Moment();
     built.voice.prepare(moment);
-    const p = this.focus.curve;
-    const level = dB(-2);
-    moment.add(0, (at) => this.busLevels.set(p, level, at, 0.4), p);
+    this.toFocus(dB(-2), 0, 0.4, undefined, moment);
     moment.prepare();
     const t0 = this.when(o.at);
     moment.place(t0);
