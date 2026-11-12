@@ -27,6 +27,13 @@ export const scenarios = {
           { name: 'repeated-hush', at: 0.4, setup: (e) => e.hush(0.1), run: (e) => e.hush(0.4, 1.18) },
           { name: 'awaken-hush', at: 0.7, setup: (e) => e.music.to('awaken', 0.04, { at: 0.1 }),
             run: (e) => e.hush(0.7, 1.48) },
+          { name: 'awaken-hit', at: 0.7, barrier: true, setup: (e) => {
+            e.music.to('awaken', 0.04, { at: 0.1 });
+            e.hush(0.4);
+          }, run: (e) => e.play('awaken_hit', { at: 0.7 }) },
+          { name: 'awaken-hit-late-stand', at: 0.7,
+            setup: (e) => e.music.to('awaken', 0.04, { at: 0.1, standAt: 2.35 }),
+            run: (e) => e.play('awaken_hit', { at: 0.7 }) },
           { name: 'cancel-barrier', at: 0.7, barrier: true,
             setup: (e) => e.music.to('intro', 0.04, { at: 0.1 }),
             run: (e) => e.music.to('windows', 0.04, { at: 0.7 }) },

@@ -416,31 +416,37 @@ export class AudioEngine {
     } catch (err) {
       console.warn('[audio] cue failed', cue, err);
     }
-    if (cue === "awaken_hit") this.music.armHit();
-    let at: number;
-    let lifted = this.lifted;
-    if (cue !== "awaken_hit") {
-      const moment = new Moment();
-      v.prepare(moment);
-      lifted = cueMoment({
-        cue, opts, lifted: this.lifted,
-        lift: (opening) => {
-          moment.add(0, (start) => this.music.lift(opening ? 5 : 0, opening ? 0.3 : 0.4, start), this.shelf.gain);
-        },
-        duck: () => this.duckCue(moment),
-        toFocus: (level, back) => this.toFocus(level, 0, 0.3, back, moment),
-        makeRoom: (offset, db, tau, back, tauBack) => this.makeRoom(offset, db, tau, back, tauBack, moment),
-      });
-      moment.prepare();
-      at = this.when(opts.at);
-      moment.place(at);
-    } else at = this.when(opts.at);
+    const moment = new Moment();
+    v.prepare(moment);
+    const hit = cue === 'awaken_hit' ? this.music.prepareHit(moment) : [];
+    const hushStops = (cue === 'awaken_hit' ? this.takeHush() : [])
+      .map((voice) => ({ voice, finish: voice.prepareStop(moment, 0.02) }));
+    if (hushStops.length) {
+      for (const p of [this.hushBeds.curve, this.hushMusic.curve, this.hushHall.curve, this.hushRoom.curve]) {
+        moment.add(0, (at) => this.busLevels.set(p, 1, at, 0.0015), p);
+      }
+    }
+    const lifted = cueMoment({
+      cue, opts, lifted: this.lifted,
+      lift: (opening) => {
+        moment.add(0, (start) => this.music.lift(opening ? 5 : 0, opening ? 0.3 : 0.4, start), this.shelf.gain);
+      },
+      duck: () => this.duckCue(moment),
+      toFocus: (level, back) => this.toFocus(level, 0, 0.3, back, moment),
+      makeRoom: (offset, db, tau, back, tauBack) => this.makeRoom(offset, db, tau, back, tauBack, moment),
+    });
+    moment.prepare();
+    const at = this.when(opts.at);
+    moment.place(at);
     v.open(at);
     this.lifted = lifted;
-    if (cue === "awaken_hit") {
-      if (this.hushV) this.unhush(at);
-      this.music.onHit(at);
+    for (const { voice, finish } of hushStops) {
+      finish(at);
+      if (this.active.has(voice)) this.stoppedUntil = Math.max(this.stoppedUntil, voice.silentAt);
+      this.letGo(voice);
     }
+    for (const finish of hit) finish(at);
+    if (cue === 'awaken_hit') this.music.scheduleUntil(Math.max(at, this.ctx.currentTime) + 0.05);
     this.active.add(v);
     this.cueCleanup?.add(v);
     return {
@@ -462,15 +468,10 @@ export class AudioEngine {
     }
   }
 
-  private duckCue(moment?: Moment) {
+  private duckCue(moment: Moment) {
     const p = this.uiDuck.curve;
-    if (moment) {
-      moment.add(0, (start) => this.busLevels.set(p, dB(-3), start, 0.012), p);
-      moment.add(0.28, (start) => this.busLevels.set(p, 1, start + 0.28, 0.16, false), p);
-    } else {
-      this.busLevels.set(p, dB(-3), 0, 0.012);
-      this.busLevels.set(p, 1, 0.28, 0.16, false);
-    }
+    moment.add(0, (start) => this.busLevels.set(p, dB(-3), start, 0.012), p);
+    moment.add(0.28, (start) => this.busLevels.set(p, 1, start + 0.28, 0.16, false), p);
   }
 
   /** Start (or re-level) a continuous bed. Calling it again for a running bed ramps its level. */
