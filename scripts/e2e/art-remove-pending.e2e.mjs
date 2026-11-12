@@ -435,14 +435,21 @@ export const scenarios = {
     await h.sleep(600);
     h.expect(await page.locator('.dq-artroom').isVisible() && !(await page.locator('.dq-piece').count()), 'Forward reopened the removed page');
     // a tap while the toast fades still undoes
-    await pageClock.runFor(page, 5100);
-    const tapped = await page.evaluate(() => {
-      const t = document.querySelector('.dq-toast');
-      if (!t.getAnimations().some((a) => a.effect.getKeyframes().at(-1)?.opacity === '0')) return 'not fading';
-      t.querySelector('.dq-toast-btn').click();
-      return t.classList.contains('is-on');
+    await page.evaluate(async () => {
+      const { onAnimate } = await import('/src/ui/anim.ts');
+      const stop = onAnimate((a) => {
+        if (!a.effect.target.matches('.dq-toast') || a.effect.getKeyframes().at(-1).opacity !== '0') return;
+        a.pause();
+        a.currentTime = 120;
+        stop();
+      });
     });
-    h.expect(tapped === false, `Undo during the fade left the toast up: ${tapped}`);
+    await pageClock.runFor(page, 5100);
+    const toast = page.locator('.dq-toast');
+    const opacity = Number(await toast.evaluate((t) => getComputedStyle(t).opacity));
+    h.expect(opacity > 0 && opacity < 1, `the toast was not fading when Undo was tapped: opacity ${opacity}`);
+    await toast.getByRole('button', { name: 'Undo', exact: true }).click();
+    h.expect(!(await toast.evaluate((t) => t.classList.contains('is-on'))), 'Undo during the fade left the toast up');
     await keepAfterUndo(h, page, 'pg-b');
     await h.poll(page, () => order(page), (o) => o.includes('pg-b'), 'Undo during the fade did not bring the page back', { timeout: 12000 });
     await h.sleep(800);
