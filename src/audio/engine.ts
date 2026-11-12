@@ -16,12 +16,10 @@ import { BusLevels } from './bus-levels';
 import { Voice, stoppedBy, type Lib } from './voice';
 import { CueCleanup } from './cue-cleanup';
 import { hushMoment } from './hush-moment';
+import { Moment } from './moment';
 import { sectionMoment } from './section-moment';
 
 export type { BedHandle, BedName, ChargeHandle, Section, SectionOpts };
-
-
-
 export { BED_NAMES, SECTIONS };
 
 export const CUE_NAMES = [
@@ -539,9 +537,17 @@ export class AudioEngine {
    * holds until unhush() or the next awaken_hit. An open-ended awaken section cuts its build here.
    */
   hush(from?: number, to?: number) {
+    const moment = new Moment();
     hushMoment({
-      lib: this.lib, dest: this.sfx, seed: this.nextSeed(), levels: this.busLevels,
-      buses: [this.hushBeds.curve, this.hushMusic.curve, this.hushHall.curve, this.hushRoom.curve],
+      lib: this.lib, dest: this.sfx, seed: this.nextSeed(), moment,
+      prepareBuses: () => {
+        for (const p of [this.hushBeds.curve, this.hushMusic.curve, this.hushHall.curve, this.hushRoom.curve]) {
+          moment.add(0, (at) => this.busLevels.set(p, 0.008, at, 0.007), p);
+          if (to !== undefined) {
+            moment.add(to, () => this.busLevels.set(p, 1, to, 0.0015, false), p, { absolute: true });
+          }
+        }
+      },
       music: this.music, takeHush: () => this.takeHush(),
       finishOld: (voice) => {
         if (this.active.has(voice)) this.stoppedUntil = Math.max(this.stoppedUntil, voice.silentAt);
@@ -860,13 +866,6 @@ export interface SoundEvent {
   loop?: { name: string; level?: number; until?: number };
 }
 
-export interface RenderOpts {
-  step?: number;
-  ahead?: number;
-  musicAhead?: number;
-  onStep?: (t: number) => void;
-}
-
 /**
  * Render an event list to a stereo buffer with the exact live synthesis. Like the live app, cues are created shortly
  * before they sound and the score is scheduled ahead in windows (the render suspends every `step` seconds to feed the
@@ -908,6 +907,13 @@ export async function renderOffline(events: SoundEvent[], durationSec: number, s
   const buf = await ctx.startRendering();
   lastStats = eng.stats();
   return buf;
+}
+
+export interface RenderOpts {
+  step?: number;
+  ahead?: number;
+  musicAhead?: number;
+  onStep?: (t: number) => void;
 }
 
 export let lastStats: ReturnType<AudioEngine['stats']> | null = null;

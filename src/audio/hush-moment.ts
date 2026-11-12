@@ -1,13 +1,12 @@
-import type { BusLevels } from './bus-levels';
-import type { Curve } from './curve';
-import { Moment } from './moment';
+import type { Moment } from './moment';
 import type { Music } from './music';
 import { soon } from './param';
 import { Voice, type Lib } from './voice';
 
 export function hushMoment(
   host: {
-    lib: Lib; dest: AudioNode; seed: number; levels: BusLevels; buses: Curve[]; music: Music;
+    lib: Lib; dest: AudioNode; seed: number; moment: Moment; music: Music;
+    prepareBuses(): void;
     takeHush(): Voice[]; finishOld(voice: Voice): void; finishNew(voice: Voice): void;
     setHush(voice: Voice | null): void;
   },
@@ -20,13 +19,10 @@ export function hushMoment(
   const end = 120;
   v.noise('brown', 0, end + 0.05, v.filt('lowpass', 240, 0.7, g));
   v.noise('pink', 0, end + 0.05, v.gain(0.08, v.filt('highpass', 1800, 0.7, g)));
-  const moment = new Moment();
+  const { moment } = host;
   v.prepare(moment);
   const stopped = host.takeHush().map((voice) => ({ voice, finish: voice.prepareStop(moment, 0.02) }));
-  for (const p of host.buses) {
-    moment.add(0, (at) => host.levels.set(p, 0.008, at, 0.007), p);
-    if (to !== undefined) moment.add(to, () => host.levels.set(p, 1, to, 0.0015, false), p, { absolute: true });
-  }
+  host.prepareBuses();
   let finishNew: ((at: number) => boolean) | undefined;
   if (to !== undefined) {
     moment.add(to - 0.01, () => g.gain.setValueAtTime(0.065, to - 0.01), g.gain, { absolute: true });

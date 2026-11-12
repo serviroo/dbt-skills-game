@@ -518,7 +518,7 @@ export class Voice {
   prepareStop(moment: StopQueue, ramp: number,
     options: { time?: number; absolute?: boolean; parent?: (at: number) => boolean } = {}) {
     const { time = 0, absolute = false, parent = (_at: number) => true } = options;
-    const delay = silentAfter(Math.max(0.002, ramp / 4));
+    const delay = stoppedBy(0, ramp);
     const when = (at: number) => absolute ? time : at + time;
     const allowed = (at: number) => parent(at) && when(at) + delay < this.killAt;
     const children = [...this.children, ...this.parts]
