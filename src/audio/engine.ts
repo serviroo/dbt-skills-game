@@ -97,6 +97,7 @@ export class AudioEngine {
   private focus: TrackedGain;
   private hushHall: TrackedGain;
   private hushRoom: TrackedGain;
+  private hushCurves: TrackedGain['curve'][];
   private duckG: TrackedGain;
   /** Beds and score step back for a cue that must read inside the roar (soldier ignition, the stand-up swell). */
   private yieldG: TrackedGain;
@@ -218,6 +219,7 @@ export class AudioEngine {
     air.gain.value = 4;
     const mlevel = C.createGain();
     this.hushMusic = trackedGain(C, 1);
+    this.hushCurves = [this.hushBeds.curve, this.hushMusic.curve, this.hushHall.curve, this.hushRoom.curve];
     this.mlevel = mlevel;
     this.mlp = mlp;
     this.shelf = shelf;
@@ -418,12 +420,16 @@ export class AudioEngine {
     }
     const moment = new Moment();
     v.prepare(moment);
-    const hit = cue === 'awaken_hit' ? this.music.prepareHit(moment) : [];
-    const hushStops = (cue === 'awaken_hit' ? this.takeHush() : [])
-      .map((voice) => ({ voice, finish: voice.prepareStop(moment, 0.02) }));
-    if (hushStops.length) {
-      for (const p of [this.hushBeds.curve, this.hushMusic.curve, this.hushHall.curve, this.hushRoom.curve]) {
-        moment.add(0, (at) => this.busLevels.set(p, 1, at, 0.0015), p);
+    const isHit = cue === 'awaken_hit';
+    const hit: ReturnType<Music['prepareHit']> = [];
+    const hushStops: { voice: Voice; finish: ReturnType<Voice['prepareStop']> }[] = [];
+    if (isHit) {
+      hit.push(...this.music.prepareHit(moment));
+      hushStops.push(...this.takeHush().map((voice) => ({ voice, finish: voice.prepareStop(moment, 0.02) })));
+      if (hushStops.length) {
+        for (const p of this.hushCurves) {
+          moment.add(0, (start) => this.busLevels.set(p, 1, start, 0.0015), p);
+        }
       }
     }
     const lifted = cueMoment({
@@ -446,7 +452,7 @@ export class AudioEngine {
       this.letGo(voice);
     }
     for (const finish of hit) finish(at);
-    if (cue === 'awaken_hit') this.music.scheduleUntil(Math.max(at, this.ctx.currentTime) + 0.05);
+    if (isHit) this.music.scheduleUntil(Math.max(at, this.ctx.currentTime) + 0.05);
     this.active.add(v);
     this.cueCleanup?.add(v);
     return {
@@ -555,7 +561,7 @@ export class AudioEngine {
     hushMoment({
       lib: this.lib, dest: this.sfx, seed: this.nextSeed(), moment,
       prepareBuses: () => {
-        for (const p of [this.hushBeds.curve, this.hushMusic.curve, this.hushHall.curve, this.hushRoom.curve]) {
+        for (const p of this.hushCurves) {
           moment.add(0, (at) => this.busLevels.set(p, 0.008, at, 0.007), p);
           if (to !== undefined) {
             moment.add(to, () => this.busLevels.set(p, 1, to, 0.0015, false), p, { absolute: true });
@@ -654,7 +660,7 @@ export class AudioEngine {
   }
 
   private endHush(at: number, tau: number) {
-    for (const g of [this.hushBeds.curve, this.hushMusic.curve, this.hushHall.curve, this.hushRoom.curve]) {
+    for (const g of this.hushCurves) {
       this.busLevels.set(g, 1, at, tau);
     }
   }

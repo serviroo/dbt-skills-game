@@ -58,7 +58,7 @@ export const scenarios = {
         const { BEAT } = await import('/src/audio/music.ts');
         const { tapAudioSchedule } = await import('/scripts/e2e/audio-schedule.mjs');
         const out = [];
-        for (const live of [false, true]) for (const offset of [1, 1.1, 1.65, 1.75, 7.04, null, 'known']) {
+        for (const live of [false, true]) for (const offset of [0.95, 1, 1.1, 1.6, 1.65, 1.75, 7.04, null, 'known']) {
           const clock = live ? new AudioContext({ latencyHint: 'interactive' })
             : new OfflineAudioContext(2, 48000, 48000);
           if (live) await clock.suspend();
@@ -108,8 +108,8 @@ export const scenarios = {
               && close(c.time, dipAt) && where(c));
             const restored = dip.filter((d) => calls.some((c) => c.target === d.target && where(c)
               && c.method === 'setTargetAtTime' && c.value === 1 && close(c.time, at + stand - 0.004)));
-            out.push({ live, offset, rollOK: rollOK && B * 0.45 >= 0.675,
-              horn: horn.length, hornDelay: B * 0.62, swell: swell.length, timp: timp.length,
+            out.push({ live, offset, rollOK, rollDelay: roll?.time - at,
+              horn: horn.length, hornDelay: horn[0]?.time - at, swell: swell.length, timp: timp.length,
               swellStarts: swellStarts.length, dip: dip.length, restored: restored.length,
               wantSwell: inWindow(swellAt), wantDip: inWindow(dipAt) });
           } finally {
@@ -121,85 +121,13 @@ export const scenarios = {
         }
         return out;
       });
-      h.expect(results.every((r) => r.rollOK && r.horn === 1 && r.hornDelay >= 0.93 - 1e-8
+      h.expect(results.every((r) => r.rollOK && r.rollDelay >= 0.675 - 1e-8
+        && r.horn === 1 && r.hornDelay >= 0.93 - 1e-8
         && r.swell === Number(r.wantSwell)
         && r.timp === Number(r.wantSwell) && r.swellStarts === 4 * Number(r.wantSwell)
-        && r.dip === 2 * Number(r.wantDip) && r.restored === r.dip), JSON.stringify(results));
-      h.expect(!errors.length, errors.join('\n'));
-      return results;
-    } finally {
-      await ctx.close();
-    }
-  },
-  async 'hit-survives-slow-preparation'(h) {
-    const { ctx, page, errors } = await h.open({}, '?lab=audio&mute');
-    try {
-      const results = await page.evaluate(async () => {
-        const { AudioEngine } = await import('/src/audio/engine.ts');
-        const { soon } = await import('/src/audio/param.ts');
-        const { Voice } = await import('/src/audio/voice.ts');
-        const { tapAudioSchedule } = await import('/scripts/e2e/audio-schedule.mjs');
-        const out = [];
-        for (const phase of ['release', 'sort', 'registration']) {
-          const clock = new AudioContext({ latencyHint: 'interactive' });
-          await clock.resume();
-          const pauseMs = (soon(clock) - clock.currentTime) * 1000 + 100;
-          const engine = new AudioEngine(clock, { stats: true });
-          engine.music.to('awaken', 0.04);
-          engine.hush();
-          let watching = false;
-          let pauses = 0;
-          let advance = 0;
-          let lastPause = -1;
-          const calls = [];
-          const pause = () => {
-            if (!watching || (pauses && phase !== 'sort')) return;
-            pauses++;
-            const before = clock.currentTime;
-            const until = performance.now() + pauseMs;
-            while (performance.now() < until);
-            advance = (clock.currentTime - before) * 1000;
-            lastPause = calls.length;
-          };
-          const undo = tapAudioSchedule((_, method, _args, time) => {
-            if (watching) calls.push({ method, time, now: clock.currentTime });
-          });
-          const release = Voice.prototype.release;
-          const sort = Array.prototype.sort;
-          const reg = Voice.prototype.reg;
-          Voice.prototype.release = function (...args) {
-            if (phase === 'release') pause();
-            return release.apply(this, args);
-          };
-          Array.prototype.sort = function (...args) {
-            if (phase === 'sort' && this.length && this[0]?.place
-              && ('cancelsBefore' in this[0] || 'absolute' in this[0])) pause();
-            return sort.apply(this, args);
-          };
-          Voice.prototype.reg = function (...args) {
-            if (phase === 'registration') pause();
-            return reg.apply(this, args);
-          };
-          try {
-            watching = true;
-            engine.play('awaken_hit');
-            watching = false;
-            const late = calls.filter((c) => c.time > 0 && c.time < c.now);
-            out.push({ phase, pauses, advance, calls: calls.length,
-              afterPause: calls.slice(lastPause).filter((c) => c.method === 'start').length,
-              late: late.length, worstMs: Math.max(0, ...late.map((c) => (c.now - c.time) * 1000)) });
-          } finally {
-            Voice.prototype.release = release;
-            Array.prototype.sort = sort;
-            Voice.prototype.reg = reg;
-            undo();
-            await clock.close();
-            engine.dispose();
-          }
-        }
-        return out;
-      });
-      h.expect(results.every((r) => r.pauses && r.advance > 40 && r.afterPause && !r.late), JSON.stringify(results));
+        && r.dip === 2 * Number(r.wantDip) && r.restored === r.dip
+        && (r.offset !== 0.95 || r.dip === 2)
+        && (r.offset !== 1.6 || (r.swell === 1 && r.timp === 1 && r.swellStarts === 4))), JSON.stringify(results));
       h.expect(!errors.length, errors.join('\n'));
       return results;
     } finally {

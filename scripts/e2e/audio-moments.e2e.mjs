@@ -10,7 +10,7 @@ export const scenarios = {
         const { tapAudioSchedule } = await import('/scripts/e2e/audio-schedule.mjs');
         const out = [];
         for (const kind of ['section', 'hush', 'ui_open', 'lift', 'close', 'breath_in', 'soldier_ignite', 'stand_swell',
-          'bed', 'charge']) {
+          'bed', 'charge', 'awaken_hit']) {
           for (const phase of ['release', 'sort', 'registration']) {
             const clock = new AudioContext({ latencyHint: 'interactive' });
             await clock.resume();
@@ -18,6 +18,10 @@ export const scenarios = {
             const engine = new AudioEngine(clock, { stats: true });
             if (kind === 'section') engine.music.to('intro', 0.04);
             if (kind === 'close') engine.play('ui_open', { detune: 500 });
+            if (kind === 'awaken_hit') {
+              engine.music.to('awaken', 0.04);
+              engine.hush();
+            }
             let watching = false;
             let pauses = 0;
             let advance = 0;
