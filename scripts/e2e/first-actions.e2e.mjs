@@ -395,6 +395,7 @@ export const scenarios = {
       seed[h.SAVE] = JSON.stringify(save);
       const { ctx, page, errors } = await h.open(seed);
       try {
+        await page.waitForFunction(() => !!window.__daily);
         await page.emulateMedia({ reducedMotion: media });
         await page.reload();
         await h.reachHub(page);
