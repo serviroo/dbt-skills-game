@@ -61,4 +61,10 @@ export class Engine {
       moment.add(0, () => this.busLevels.set(this.focus.curve, 1, at, 0.1), p);
     }
   }
+  throughPassedMoment(moment: Moment, at: number) {
+    const p = this.focus.curve;
+    moment.add(0, (when: number) => this.busLevels.set(p, 1, when, 0.01), p);
+    moment.add(0, () => p.setTargetAtTime(1, at, 0.1), p);
+    moment.add(0, () => this.busLevels.set(this.safe.curve, 1, at, 0.1), p);
+  }
 }

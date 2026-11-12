@@ -29,7 +29,7 @@ const RULE_FINDINGS = {
   'graph-swaps-wait-for-their-time': 22,
   'cue-tracking-includes-offline': 4,
   'cue-cleanup-shares-one-clock': 2,
-  'bus-rises-wait-for-stops': 17,
+  'bus-rises-wait-for-stops': 20,
   'bus-levels-use-tracked-curves': 6,
 };
 
@@ -48,7 +48,7 @@ function checkRules() {
     const hits = inFixture.filter((d) => d.code === `lantern(${name})`).length;
     if (name === 'bus-rises-wait-for-stops') {
       const lines = inFixture.map((d) => d.labels[0].span.line).sort((a, b) => a - b);
-      expect(lines.join() === '14,15,20,25,27,29,31,32,34,35,39,41,43,45,60,60,61',
+      expect(lines.join() === '14,15,20,25,27,29,31,32,34,35,39,41,43,45,60,60,61,67,67,68',
         `${name}: unexpected finding lines ${lines}`);
     }
     expect(hits === count && inFixture.length === count, `${name}: ${hits} of ${count} expected findings`);

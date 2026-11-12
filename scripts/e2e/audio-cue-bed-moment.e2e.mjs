@@ -1,74 +1,55 @@
 export const scenarios = {
-  async 'cues-beds-and-charge-survive-slow-preparation'(h) {
+  async 'cue-and-charge-bus-moves-use-picked-start'(h) {
     const { ctx, page, errors } = await h.open({}, '?lab=audio&mute');
     try {
-      await page.waitForFunction(() => window.__lab === true, null, { timeout: 30000 });
-      const result = await page.evaluate(async () => {
+      const results = await page.evaluate(async () => {
         const { AudioEngine } = await import('/src/audio/engine.ts');
+        const { Moment } = await import('/src/audio/moment.ts');
         const { soon } = await import('/src/audio/param.ts');
-        const { Voice } = await import('/src/audio/voice.ts');
         const { tapAudioSchedule } = await import('/scripts/e2e/audio-schedule.mjs');
-        const out = [];
-        const kinds = [
-          'ui_open', 'lift', 'close', 'breath_in', 'soldier_ignite', 'stand_swell', 'bed', 'charge',
+        const cases = [
+          ['ui_open', 'uiDuck', [0, 0.28]], ['reward_chime', 'uiDuck', [0, 0.28]],
+          ['level_resolve', 'uiDuck', [0, 0.28]], ['letter_open', 'uiDuck', [0, 0.28]],
+          ['breath_in', 'focus', [0, 10.4]], ['breath_out', 'focus', [0, 12.4]],
+          ['lift', 'shelf', [0]], ['close', 'shelf', [0]],
+          ['soldier_ignite', 'yieldG', [0, 0.5]], ['stand_swell', 'yieldG', [0.12, 1.04]],
+          ['charge', 'focus', [0]],
         ];
-        for (const kind of kinds) {
-          for (const phase of ['release', 'sort', 'registration']) {
+        const out = [];
+        for (const [kind, bus, offsets] of cases) {
+          for (const stalled of [false, true]) {
             const clock = new AudioContext({ latencyHint: 'interactive' });
             await clock.resume();
-            const pauseMs = (soon(clock) - clock.currentTime) * 1000 + 100;
             const engine = new AudioEngine(clock, { stats: true });
             if (kind === 'close') engine.play('ui_open', { detune: 500 });
-            let watching = false;
-            let pauses = 0;
-            let advance = 0;
-            let lastPause = -1;
-            const calls = [];
-            const pause = () => {
-              if (!watching || (pauses && phase !== 'sort')) return;
-              pauses++;
-              const before = clock.currentTime;
-              const until = performance.now() + pauseMs;
-              while (performance.now() < until);
-              advance = (clock.currentTime - before) * 1000;
-              lastPause = calls.length;
-            };
-            const undo = tapAudioSchedule((_, method, _args, time) => {
-              if (watching) calls.push({ method, time, now: clock.currentTime });
+            const target = bus === 'shelf' ? engine.shelf.gain : engine[bus].curve.param;
+            const times = [];
+            let picked;
+            let afterPause;
+            const place = Moment.prototype.place;
+            const undo = tapAudioSchedule((node, method, _args, time) => {
+              if (node === target && method === 'setTargetAtTime') times.push(time);
             });
-            const release = Voice.prototype.release;
-            const sort = Array.prototype.sort;
-            const reg = Voice.prototype.reg;
-            Voice.prototype.release = function (...args) {
-              if (phase === 'release') pause();
-              return release.apply(this, args);
-            };
-            Array.prototype.sort = function (...args) {
-              if (phase === 'sort' && this.length && this[0]?.place
-                && ('cancelsBefore' in this[0] || 'absolute' in this[0])) pause();
-              return sort.apply(this, args);
-            };
-            Voice.prototype.reg = function (...args) {
-              if (phase === 'registration') pause();
-              return reg.apply(this, args);
+            Moment.prototype.place = function (at) {
+              picked = at;
+              const result = place.call(this, at);
+              if (stalled) {
+                const until = performance.now() + (soon(clock) - clock.currentTime) * 1000 + 100;
+                while (performance.now() < until);
+                afterPause = clock.currentTime;
+              }
+              return result;
             };
             try {
-              watching = true;
-              if (kind === 'bed') engine.bed('gate_hum');
-              else if (kind === 'charge') engine.chargeLoop();
+              if (kind === 'charge') engine.chargeLoop();
               else if (kind === 'lift') engine.play('ui_open', { detune: 500 });
               else if (kind === 'close') engine.play('ui_close');
-              else engine.play(kind);
-              watching = false;
-              const late = calls.filter((c) => c.time > 0 && c.time < c.now);
-              out.push({ kind, phase, pauses, advance, calls: calls.length, late: late.length,
-                afterPause: calls.slice(lastPause).filter((c) => c.method === 'start').length,
-                worstMs: Math.max(0, ...late.map((c) => (c.now - c.time) * 1000)) });
+              else engine.play(kind, kind === 'breath_out' ? { dur: 12 } : {});
+              out.push({ kind, stalled, picked, afterPause, offsets, times,
+                correct: Number.isFinite(picked) && (!stalled || afterPause > picked) && times.length === offsets.length
+                  && offsets.every((offset, i) => Math.abs(times[i] - picked - offset) < 1e-7) });
             } finally {
-              watching = false;
-              Voice.prototype.release = release;
-              Array.prototype.sort = sort;
-              Voice.prototype.reg = reg;
+              Moment.prototype.place = place;
               undo();
               await clock.close();
               engine.dispose();
@@ -77,10 +58,9 @@ export const scenarios = {
         }
         return out;
       });
-      h.expect(result.every((r) => r.pauses > 0 && r.advance > 40 && r.afterPause > 0 && r.late === 0),
-        JSON.stringify(result));
+      h.expect(results.every((result) => result.correct), JSON.stringify(results.filter((result) => !result.correct)));
       h.expect(!errors.length, errors.join('\n'));
-      return result;
+      return results;
     } finally {
       await ctx.close();
     }
