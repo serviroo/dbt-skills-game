@@ -18,6 +18,5 @@ export interface MusicHost {
   lib: Lib;
   hush(from: number, to: number): void;
   seed(): number;
-  /** Prepares section changes and returns a function to finish them at the section start. */
   prepareSection?(name: Section, moment: Moment): (at: number) => void;
 }
