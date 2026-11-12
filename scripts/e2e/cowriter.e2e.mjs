@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import * as pageClock from './clock.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const NOISE = /WebGL|GPU stall|AudioContext|Failed to load resource|ERR_INTERNET_DISCONNECTED/i;
@@ -320,9 +321,10 @@ export const scenarios = {
           req.onsuccess = () => { db.close(); resolve(req.result?.[1]?.text === 'Second idea changed'); };
         });
       }, ids);
-      await second.getByRole('button', { name: 'Toss' }).click();
+      await pageClock.holdToast(h, page, () => second.getByRole('button', { name: 'Toss' }).click());
       await page.waitForFunction(() => document.querySelectorAll('.st-card').length === 2);
       await page.locator('.dq-toast-btn', { hasText: 'Undo' }).click();
+      await pageClock.resume(page);
       await page.waitForFunction(() => document.querySelectorAll('.st-card').length === 3);
       const order = await page.locator('.st-card').evaluateAll((els) => els.map((el) => el.dataset.id));
       h.expect(order.join() === before.join(), 'Undo after Edit restored the idea in the wrong place.');
