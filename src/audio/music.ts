@@ -169,7 +169,7 @@ interface SectionImpl {
 /** Builds a section on its held voice, its times counting from the opening; the opener it returns runs twice. */
 type Factory = (v: Voice, o: SectionOpts, host: MusicHost) => (start: number) => SectionImpl;
 
-const BEAT = 60 / 72;
+export const BEAT = 60 / 72;
 const BAR = BEAT * 4;
 
 // D minor world (cutscene) and D major world (reward, end, calm). Voicings low to high.

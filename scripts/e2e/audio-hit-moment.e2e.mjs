@@ -55,6 +55,7 @@ export const scenarios = {
       const results = await page.evaluate(async () => {
         const { AudioEngine } = await import('/src/audio/engine.ts');
         const { Moment } = await import('/src/audio/moment.ts');
+        const { BEAT } = await import('/src/audio/music.ts');
         const { tapAudioSchedule } = await import('/scripts/e2e/audio-schedule.mjs');
         const out = [];
         for (const live of [false, true]) for (const offset of [1, 1.1, 1.65, 1.75, 7.04, null, 'known']) {
@@ -97,7 +98,7 @@ export const scenarios = {
               && close(c.time, at + B * 0.62) && where(c));
             const swellAt = at + stand - 1.6;
             const dipAt = at + stand - 0.95;
-            const inWindow = (t) => t >= at && t < at + (60 / 72) / 4;
+            const inWindow = (t) => t >= at && t < at + BEAT / 4;
             const swell = calls.filter((c) => c.method === 'setValueAtTime' && close(c.value, 0.0006)
               && close(c.time, swellAt) && where(c));
             const timp = calls.filter((c) => c.method === 'setValueAtTime' && close(c.value, 0.0048)
