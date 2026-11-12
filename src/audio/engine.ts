@@ -15,11 +15,13 @@ import { makeEcho, dropEcho, type Echo, type Sends } from './echo';
 import { BusLevels } from './bus-levels';
 import { Voice, stoppedBy, type Lib } from './voice';
 import { CueCleanup } from './cue-cleanup';
-import { Moment } from './moment';
-import type { CueHandle, UserLevels, SoundEvent, RenderOpts } from './engine-types';
+import { hushMoment } from './hush-moment';
+import { sectionMoment } from './section-moment';
 
 export type { BedHandle, BedName, ChargeHandle, Section, SectionOpts };
-export type { CueHandle, UserLevels, SoundEvent, RenderOpts } from './engine-types';
+
+
+
 export { BED_NAMES, SECTIONS };
 
 export const CUE_NAMES = [
@@ -45,6 +47,11 @@ export interface PlayOpts {
   index?: number;
 }
 
+export interface CueHandle {
+  stop(at?: number, ramp?: number): void;
+  readonly end: number;
+}
+
 export interface EngineOpts {
   seed?: number;
   /** Master volume 0..1 (after the limiter). */
@@ -57,6 +64,13 @@ export interface EngineOpts {
   stats?: boolean;
   /** Their stored levels from the speaker control (0..1 each), applied from the first sample. */
   user?: UserLevels;
+}
+
+export interface UserLevels {
+  master: number;
+  music: number;
+  sfx: number;
+  muted: boolean;
 }
 
 /** Cues the score makes room for. */
@@ -253,27 +267,9 @@ export class AudioEngine {
         lib: this.libMusic,
         hush: (a, b) => this.hush(a, b),
         seed: () => this.nextSeed(),
-        prepareSection: (name, moment) => {
-          const lifted = this.lifted;
-          if (lifted) moment.add(0, (at) => this.music.lift(0, 0.3, at), this.shelf.gain);
-          const beds = name === 'reward' || name === 'end' || name === 'calm'
-            ? (['gate_hum', 'aura_bed'] as BedName[]).map((n) => this.beds.get(n)).filter((bed) => bed !== undefined)
-            : [];
-          const stops = beds.map((bed) => bed.voice.prepareStop(moment, 2.5));
-          return (at) => {
-            if (lifted) this.lifted = false;
-            for (const finish of stops) finish(at);
-          };
-        },
-        onSection: (name, at) => {
-          if (this.lifted) {
-            this.music.lift(0, 0.3, at);
-            this.lifted = false;
-          }
-          // the gate hum and the aura belong to the dark world: they leave when the score lifts into D major
-          if (name !== 'reward' && name !== 'end' && name !== 'calm') return;
-          for (const n of ['gate_hum', 'aura_bed'] as BedName[]) this.stopBed(n, 2.5, at);
-        },
+        prepareSection: (name, moment) => sectionMoment(
+          name, moment, this.music, this.shelf.gain, this.beds, this.lifted, () => { this.lifted = false; },
+        ),
       },
       musicIn,
       { lp: mlp, shelf, level: mlevel },
@@ -543,60 +539,16 @@ export class AudioEngine {
    * holds until unhush() or the next awaken_hit. An open-ended awaken section cuts its build here.
    */
   hush(from?: number, to?: number) {
-    const v = new Voice(this.lib, 0, this.sfx, { held: true }, this.nextSeed());
-    const g = v.gain(0, v.dry);
-    v.at(g.gain).setValueAtTime(0, 0);
-    v.at(g.gain).linearRampToValueAtTime(0.065, 0.03);
-    const end = 120;
-    v.noise("brown", 0, end + 0.05, v.filt("lowpass", 240, 0.7, g));
-    v.noise("pink", 0, end + 0.05, v.gain(0.08, v.filt("highpass", 1800, 0.7, g)));
-    if (this.live) {
-      const moment = new Moment();
-      v.prepare(moment);
-      const old = this.takeHush();
-      const stopped = old.map((voice) => ({ voice, finish: voice.prepareStop(moment, 0.02) }));
-      for (const p of [this.hushBeds.curve, this.hushMusic.curve, this.hushHall.curve, this.hushRoom.curve]) {
-        moment.add(0, (at) => this.busLevels.set(p, 0.008, at, 0.007), p);
-        if (to !== undefined) moment.add(to, () => this.busLevels.set(p, 1, to, 0.0015, false), p, true);
-      }
-      let finishNew: ((at: number) => boolean) | undefined;
-      if (to !== undefined) {
-        moment.add(to - 0.01, () => g.gain.setValueAtTime(0.065, to - 0.01), g.gain, true);
-        moment.add(to + 0.02, () => g.gain.linearRampToValueAtTime(0, to + 0.02), g.gain, true);
-        finishNew = v.prepareStop(moment, 0.02, to + 0.02, true);
-      }
-      const hush = this.music.prepareHush(moment);
-      moment.prepare();
-      const at = from ?? soon(this.ctx);
-      moment.place(at);
-      v.open(at);
-      for (const { voice, finish } of stopped) {
-        finish(at);
+    hushMoment({
+      lib: this.lib, dest: this.sfx, seed: this.nextSeed(), levels: this.busLevels,
+      buses: [this.hushBeds.curve, this.hushMusic.curve, this.hushHall.curve, this.hushRoom.curve],
+      music: this.music, takeHush: () => this.takeHush(),
+      finishOld: (voice) => {
         if (this.active.has(voice)) this.stoppedUntil = Math.max(this.stoppedUntil, voice.silentAt);
         this.letGo(voice);
-      }
-      if (finishNew) {
-        finishNew(at);
-        this.letGo(v);
-      }
-      this.hushV = to === undefined ? v : null;
-      for (const finish of hush) finish(at);
-      return;
-    }
-    const at = from ?? soon(this.ctx);
-    for (const p of [this.hushBeds.curve, this.hushMusic.curve, this.hushHall.curve, this.hushRoom.curve]) {
-      this.busLevels.set(p, 0.008, at, 0.007);
-      if (to !== undefined) this.busLevels.set(p, 1, to, 0.0015, false);
-    }
-    this.release(this.takeHush(), at, 0.02);
-    v.open(at);
-    if (to !== undefined) {
-      g.gain.setValueAtTime(0.065, to - 0.01);
-      g.gain.linearRampToValueAtTime(0, to + 0.02);
-      this.release([v], to + 0.02, 0.02);
-    }
-    this.hushV = to === undefined ? v : null;
-    this.music.onHush(at);
+      },
+      finishNew: (voice) => this.letGo(voice), setHush: (voice) => { this.hushV = voice; },
+    }, from, to);
   }
 
   /** End an open-ended hush (awaken_hit does this itself). */
@@ -899,6 +851,20 @@ export class AudioEngine {
     for (const f of this.cleanup) f();
     if (this.live) (this.ctx as AudioContext).close().catch(() => {});
   }
+}
+
+export interface SoundEvent {
+  t: number;
+  cue: string;
+  opts?: any;
+  loop?: { name: string; level?: number; until?: number };
+}
+
+export interface RenderOpts {
+  step?: number;
+  ahead?: number;
+  musicAhead?: number;
+  onStep?: (t: number) => void;
 }
 
 /**

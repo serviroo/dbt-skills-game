@@ -11,7 +11,8 @@ export class Moment {
   private absolute: Operation[] = [];
   private last = new Map<object, Operation>();
 
-  add(t: number, place: (at: number) => void, key?: object, absolute = false, after?: Operation) {
+  add(t: number, place: (at: number) => void, key?: object, options: { absolute?: boolean; after?: Operation } = {}) {
+    const { absolute = false, after } = options;
     const op: Operation = { t, absolute, place, after: after ?? (key ? this.last.get(key) : undefined), done: false };
     if (key) this.last.set(key, op);
     (absolute ? this.absolute : this.relative).push(op);
@@ -45,9 +46,8 @@ export class Moment {
         if (!next || op.t < next.t + at) next = op;
         break;
       }
-      if (!next) throw new Error('Audio moment has an ordering cycle');
-      next.place(at);
-      next.done = true;
+      next!.place(at);
+      next!.done = true;
       left--;
     }
   }

@@ -452,7 +452,7 @@ const FACTORIES: Record<Section, Factory> = {
       const prepareCut = (moment: Moment) => {
         const allowed = (at: number) => cutAt === Infinity || at < cutAt;
         moment.add(0, (at) => { if (allowed(at)) build.gain.setTargetAtTime(0, at, 0.006); }, build.gain);
-        const finish = bv.prepareStop(moment, 0.024, 0, false, allowed);
+        const finish = bv.prepareStop(moment, 0.024, { parent: allowed });
         return (at: number) => {
           if (!allowed(at)) return;
           finish(at);
@@ -719,30 +719,20 @@ export class Music {
     score(0).tick(0, AHEAD);
     voice.at(voice.out.gain).setValueAtTime(0, 0);
     voice.at(voice.out.gain).setTargetAtTime(1, 0, Math.max(0.004, crossfade / 4));
-    let at: number;
-    let section: ((at: number) => void) | undefined;
-    if (lib.live) {
-      const moment = new Moment();
-      voice.prepare(moment);
-      const stopped = this.live.map((s) => ({ s, finish: s.voice.prepareStop(moment, o.fadeOut ?? crossfade) }));
-      section = this.host.prepareSection?.(name, moment);
-      moment.prepare();
-      at = o.at ?? soon(lib.ctx);
-      moment.place(at);
-      voice.open(at);
-      for (const { s, finish } of stopped) if (finish(at)) s.end = Math.min(s.end, at);
-      this.current = null;
-    } else {
-      this.stop(o.fadeOut ?? crossfade, o.at);
-      at = o.at ?? soon(lib.ctx);
-      voice.open(at);
-    }
+    const moment = new Moment();
+    voice.prepare(moment);
+    const stopped = this.live.map((s) => ({ s, finish: s.voice.prepareStop(moment, o.fadeOut ?? crossfade) }));
+    const section = this.host.prepareSection?.(name, moment);
+    moment.prepare();
+    const at = o.at ?? soon(lib.ctx);
+    moment.place(at);
+    voice.open(at);
+    for (const { s, finish } of stopped) if (finish(at)) s.end = Math.min(s.end, at);
     const impl = score(at);
     impl.opened?.(at + AHEAD);
     this.live.push({ name, voice, impl, start: at, end: Infinity, until: at + AHEAD });
     this.current = name;
-    if (section) section(at);
-    else this.host.onSection?.(name, at);
+    section?.(at);
   }
 
   stop(fade = 1, at = soon(this.host.lib.ctx)) {

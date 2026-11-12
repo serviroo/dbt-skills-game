@@ -18,7 +18,6 @@ export interface MusicHost {
   lib: Lib;
   hush(from: number, to: number): void;
   seed(): number;
-  prepareSection?(name: Section, moment: Moment): (at: number) => void;
   /** Called when a section starts (the engine fades the dark-world beds when the score lifts into D major). */
-  onSection?(name: Section, at: number): void;
+  prepareSection?(name: Section, moment: Moment): (at: number) => void;
 }
