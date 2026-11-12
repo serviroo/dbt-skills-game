@@ -127,18 +127,6 @@ const toGallery = (page) =>
 /** Nothing on screen is mid-animation (a fade, a window), so a shot shows the screen as it rests. */
 const steady = (page) => page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.getComputedTiming().iterations === Infinity));
 
-/**
- * Holds the page's clock, runs tap(), which raises a toast, and lets the screen it opens settle for 1 s of that clock.
- * The toast's Undo lasts 6 s of the page's timers, and a screenshot on a slow machine, or a browser stopped for a while,
- * can take longer; held, it waits for the scenario. pageClock.resume(page) lets it run out again.
- */
-export async function holdToast(h, page, tap) {
-  await pageClock.install(page);
-  await pageClock.pauseClock(page);
-  await tap();
-  await pageClock.runFor(page, 1000);
-}
-
 /** Nothing sticks out sideways, and the piece page's controls sit inside the screen with readable text. */
 async function fits(h, page, where) {
   const r = await page.evaluate(() => {
@@ -237,10 +225,15 @@ export const scenarios = {
         await other.goto(h.server.url + '/?mute');
         await toArt(h, other);
         await openPiece(other, 'pg-b');
-        await other.getByRole('button', { name: 'Remove', exact: true }).click();
+        const remove = () => other.getByRole('button', { name: 'Remove', exact: true }).click();
+        if (undo) await pageClock.holdToast(h, other, remove);
+        else await remove();
         await page.getByText('That page is no longer here.', { exact: true }).waitFor();
         if (undo) {
           await other.locator('.dq-toast').getByRole('button', { name: 'Undo', exact: true }).click();
+          await pageClock.runFor(other, 6000);
+          h.expect((await records(other)).some((r) => r.id === 'pg-b'), 'Undo did not keep the removed page');
+          await pageClock.resume(other);
           await page.locator('.dq-piece-labels').waitFor();
         }
         await page.waitForFunction(() => history.state?.dq === 1 && !history.state.sheet, null, { timeout: 3000 });
@@ -384,7 +377,7 @@ export const scenarios = {
       await h.poll(page, () => records(page), (rs) => !rs.find((r) => r.id === 'pg-b')?.name, `${at}: the empty name was stored`, { timeout: 12000 });
 
       // Remove: no question, the page goes at once, Undo brings it back to its place with focus on it
-      await holdToast(h, page, () => page.getByRole('button', { name: 'Remove', exact: true }).click());
+      await pageClock.holdToast(h, page, () => page.getByRole('button', { name: 'Remove', exact: true }).click());
       await page.locator('.dq-artroom').waitFor();
       h.expect(!(await page.locator('.dq-piece-confirm, [role=alertdialog]').count()) && !(await page.getByRole('button', { name: 'Keep it' }).count()), `${at}: Remove still asks`);
       const toast = page.locator('.dq-toast');
@@ -419,11 +412,15 @@ export const scenarios = {
       await page.getByLabel('Name your ally').fill('Ember Light');
       await page.keyboard.press('Enter');
       await h.poll(page, () => page.locator('.dq-piece .dq-allycard-name').textContent(), (t) => t.trim() === 'Ember Light', `${at}: the ally card does not show the new name`, { timeout: 12000 });
-      await page.getByRole('button', { name: 'Release', exact: true }).click();
+      await pageClock.holdToast(h, page, () => page.getByRole('button', { name: 'Release', exact: true }).click(),
+        { installed: true });
       await page.locator('.dq-shadows').waitFor();
       await toast.getByText('Ally released.', { exact: true }).waitFor();
       h.expect(!(await order(page, '.dq-allybtn')).includes('al-c'), `${at}: the released ally still shows`);
       await toast.getByRole('button', { name: 'Undo', exact: true }).click();
+      await pageClock.runFor(page, 6000);
+      h.expect((await records(page)).some((r) => r.id === 'al-c'), `${at}: Undo did not keep the released ally`);
+      await pageClock.resume(page);
       await h.poll(page, () => page.evaluate(() => document.activeElement?.dataset?.piece), (f) => f === 'al-c', `${at}: focus did not go to the ally Undo brought back`, { timeout: 12000 });
       const card = page.locator('.dq-allybtn[data-piece="al-c"]');
       h.expect(await card.locator('.dq-allycard-fav').isVisible() && (await card.getAttribute('aria-label')).startsWith('Ember Light, a shadow ally you designed, a favourite'), `${at}: the favourite ally has no star or name on Shadows`);
@@ -812,7 +809,7 @@ export const scenarios = {
       await page.locator('.dq-piece-labels').waitFor();
       await fits(h, page, `${at} ally`);
       await h.shot(page, `${at}-ally`);
-      await holdToast(h, page, () => page.getByRole('button', { name: 'Release', exact: true }).click());
+      await pageClock.holdToast(h, page, () => page.getByRole('button', { name: 'Release', exact: true }).click());
       await page.locator('.dq-toast').getByText('Ally released.', { exact: true }).waitFor();
       await h.sleep(900);
       await h.shot(page, `${at}-release-toast`);

@@ -5,7 +5,6 @@
 // screen (Home keeps it), Forward can't reopen it, and a change in another tab keeps the focused card.
 import fs from 'node:fs';
 import path from 'node:path';
-import { holdToast } from './art-rename-favourite.e2e.mjs';
 import { pause } from './device-motion.e2e.mjs';
 import * as pageClock from './clock.mjs';
 
@@ -53,10 +52,18 @@ async function openPiece(page, id) {
   await page.locator('.dq-piece-labels').waitFor();
 }
 
-async function removePiece(page, id) {
+async function removePiece(page, id, h) {
   await openPiece(page, id);
-  await page.getByRole('button', { name: 'Remove', exact: true }).click();
+  const remove = () => page.getByRole('button', { name: 'Remove', exact: true }).click();
+  if (h) await pageClock.holdToast(h, page, remove);
+  else await remove();
   await page.locator('.dq-toast').getByText('Page removed.', { exact: true }).waitFor();
+}
+
+async function keepAfterUndo(h, page, id) {
+  await pageClock.runFor(page, 6000);
+  h.expect((await records(page)).some((r) => r.id === id), `Undo did not keep ${id}`);
+  await pageClock.resume(page);
 }
 
 async function second(h, ctx, errors, viewport) {
@@ -98,9 +105,10 @@ export const scenarios = {
       await seed(page);
       await toArt(h, page);
       const other = await second(h, ctx, errors);
-      await removePiece(page, 'pg-a');
+      await removePiece(page, 'pg-a', h);
       await other.locator('[data-piece="pg-a"]').waitFor({ state: 'detached', timeout: 3000 });
       await page.locator('.dq-toast').getByRole('button', { name: 'Undo', exact: true }).click();
+      await keepAfterUndo(h, page, 'pg-a');
       await other.locator('[data-piece="pg-a"]').waitFor();
       await other.evaluate(async (stroke) => {
         const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
@@ -133,11 +141,13 @@ export const scenarios = {
       await toArt(h, copy);
       h.expect((await copy.evaluate(() => sessionStorage.getItem('dbt.tab'))) === (await a.evaluate(() => sessionStorage.getItem('dbt.tab'))), 'the copy did not keep the tab\'s id');
 
-      await removePiece(a, 'pg-b');
+      await removePiece(a, 'pg-b', h);
       await copy.locator('[data-piece="pg-b"]').waitFor({ state: 'detached', timeout: 3000 });
       await h.sleep(1500);
+      await pageClock.runFor(a, 1500);
       h.expect((await records(a)).some((r) => r.id === 'pg-b'), 'the copy of the tab finished the removal while its Undo was still up');
       await a.locator('.dq-toast').getByRole('button', { name: 'Undo', exact: true }).click();
+      await keepAfterUndo(h, a, 'pg-b');
       await copy.locator('[data-piece="pg-b"]').waitFor();
       h.expect((await records(a)).some((r) => r.id === 'pg-b') && !(await goneMarks(a)), 'Undo did not keep the page');
       h.expect(!errors.length, errors.join('\n'));
@@ -206,7 +216,7 @@ export const scenarios = {
     await b.evaluate(() => window.__daily.go({ name: 'art' }));
     await h.poll(b, () => order(b), (o) => o.includes('pg-a') && o.includes('pg-b'), 'the other tab\'s gallery is not showing the pages', { timeout: 12000 });
     await openPiece(a, 'pg-b');
-    await holdToast(h, a, () => a.getByRole('button', { name: 'Remove', exact: true }).click());
+    await pageClock.holdToast(h, a, () => a.getByRole('button', { name: 'Remove', exact: true }).click());
     await a.locator('.dq-toast').getByText('Page removed.', { exact: true }).waitFor();
     await h.poll(b, () => order(b), (o) => o.includes('pg-a') && !o.includes('pg-b'), 'the other tab still shows the removed page', { timeout: 2000 });
     await toGallery(b);
@@ -250,10 +260,11 @@ export const scenarios = {
     const before = (await sub.textContent()).trim();
     await b.evaluate(() => window.__daily.go({ name: 'art' }));
     await openPiece(b, 'al-c');
-    await b.getByRole('button', { name: 'Release', exact: true }).click();
+    await pageClock.holdToast(h, b, () => b.getByRole('button', { name: 'Release', exact: true }).click());
     await b.locator('.dq-toast').getByText('Ally released.', { exact: true }).waitFor();
     await h.poll(a, async () => (await sub.textContent()).trim(), (t) => t !== before, `Home still counts the released ally: ${before}`, { timeout: 3000 });
     await b.locator('.dq-toast').getByRole('button', { name: 'Undo', exact: true }).click();
+    await keepAfterUndo(h, b, 'al-c');
     await h.poll(a, async () => (await sub.textContent()).trim(), (t) => t === before, 'Home did not count the ally again after Undo', { timeout: 3000 });
     h.expect(!errors.length, errors.join('\n'));
     await ctx.close();
@@ -282,7 +293,7 @@ export const scenarios = {
     const said = await bring(b, [copy('pg-r', [s1, s2])]);
     h.expect(said.updated === 1, `the Restore did not update the page: ${JSON.stringify(said)}`);
     await h.poll(a, () => showsStored(a, 'pg-r'), (v) => v, 'the open page still shows the strokes from before the other tab\'s Restore', { timeout: 4000 });
-    await a.getByRole('button', { name: 'Remove', exact: true }).click();
+    await pageClock.holdToast(h, a, () => a.getByRole('button', { name: 'Remove', exact: true }).click());
     await a.locator('.dq-toast').getByText('Page removed.', { exact: true }).waitFor();
     const shown = await a.evaluate(async () => {
       const { artStore, revOf } = await import('/src/daily/artstore.ts');
@@ -291,6 +302,7 @@ export const scenarios = {
     const hid = (await goneMarks(a))?.['pg-r']?.rev;
     h.expect(hid === shown, `Remove hid ${hid}, not the version on screen (${shown})`);
     await a.locator('.dq-toast').getByRole('button', { name: 'Undo', exact: true }).click();
+    await keepAfterUndo(h, a, 'pg-r');
     await a.locator('[data-piece="pg-r"]').waitFor();
 
     // B's copy holds other strokes than A's page and not the one there: A's page shows B's, and A's comes in as its own page
@@ -385,12 +397,14 @@ export const scenarios = {
     const restore = () => page.evaluate(async (art) => (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).importAll(art), art);
     await toArt(h, page);
 
-    await removePiece(page, 'pg-b');
+    await removePiece(page, 'pg-b', h);
     const said = await restore();
     await h.sleep(300);
+    await pageClock.runFor(page, 300);
     h.expect(!(await order(page)).includes('pg-b'), `the restore brought back the page waiting for its Undo: ${JSON.stringify(said)}`);
     h.expect((await records(page)).some((r) => r.id === 'pg-b'), 'the restore lost the page waiting for its Undo');
     await page.locator('.dq-toast').getByRole('button', { name: 'Undo', exact: true }).click();
+    await keepAfterUndo(h, page, 'pg-b');
     await h.poll(page, () => order(page), (o) => o.includes('pg-b'), 'Undo after the restore did not bring the page back', { timeout: 12000 });
 
     await removePiece(page, 'pg-b');
@@ -411,7 +425,7 @@ export const scenarios = {
     await seed(page);
     await toArt(h, page);
 
-    await removePiece(page, 'pg-b');
+    await removePiece(page, 'pg-b', h);
     await toGallery(page);
     await h.sleep(600);
     await steady(page);
@@ -421,7 +435,10 @@ export const scenarios = {
     await h.sleep(600);
     h.expect(await page.locator('.dq-artroom').isVisible() && !(await page.locator('.dq-piece').count()), 'Forward reopened the removed page');
     // a tap while the toast fades still undoes
-    const tapped = await page.evaluate(() => new Promise((ok) => {
+    let ready;
+    const watching = new Promise((resolve) => { ready = resolve; });
+    await page.exposeFunction('__fadeListening', ready);
+    const tap = page.evaluate(() => new Promise((ok) => {
       const t = document.querySelector('.dq-toast');
       const look = () => {
         const fading = t.getAnimations().some((a) => a.playState === 'running' && a.effect.getKeyframes().at(-1)?.opacity === '0');
@@ -429,9 +446,14 @@ export const scenarios = {
         t.querySelector('.dq-toast-btn').click();
         ok(t.classList.contains('is-on'));
       };
+      window.__fadeListening();
       look();
     }));
+    await watching;
+    await pageClock.runFor(page, 5200);
+    const tapped = await tap;
     h.expect(tapped === false, 'Undo during the fade left the toast up');
+    await keepAfterUndo(h, page, 'pg-b');
     await h.poll(page, () => order(page), (o) => o.includes('pg-b'), 'Undo during the fade did not bring the page back', { timeout: 12000 });
     await h.sleep(800);
     h.expect((await records(page)).some((r) => r.id === 'pg-b'), 'the page Undo brought back during the fade was removed');
@@ -498,10 +520,11 @@ export const scenarios = {
 
     await page.locator('.dq-back').click();
     await page.locator('.dq-artroom').waitFor();
-    await removePiece(page, 'pg-a');
+    await removePiece(page, 'pg-a', h);
     await page.locator('.dq-back').click();
     await page.locator('.dq-hub').waitFor();
     await page.locator('.dq-toast').getByRole('button', { name: 'Undo', exact: true }).click();
+    await keepAfterUndo(h, page, 'pg-a');
     await h.poll(page, () => goneMarks(page), (g) => !g?.['pg-a'], 'Undo on Home did not take the removal back', { timeout: 12000 });
     h.expect((await records(page)).some((r) => r.id === 'pg-a'), 'Undo on Home did not keep the page');
     h.expect(!errors.length, errors.join('\n'));

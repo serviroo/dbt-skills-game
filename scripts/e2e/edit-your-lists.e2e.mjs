@@ -37,6 +37,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { until } from './harness.mjs';
+import * as pageClock from './clock.mjs';
 import { nameOf, whole } from './safe-zone-access.e2e.mjs';
 import { scaleText, unreachable } from './safe-zone-reach.e2e.mjs';
 import { clearGame } from './safe-zone-tabs.e2e.mjs';
@@ -552,10 +553,11 @@ export const scenarios = {
     // on Comfort
     await go(page, { name: 'comfort' });
     await typeIn(page, 'Tea', 'Tea, still typing');
-    await button(page, 'Remove Blanket').click();
+    await pageClock.holdToast(h, page, () => button(page, 'Remove Blanket').click());
     await until(page, () => !document.querySelector('[aria-label="Remove Blanket"]'), undefined, { timeout: 5000 }).catch(() => {});
     problems.push(...(await kept(['Tea, still typing'], 'Comfort, Blanket removed')));
     await page.locator('.dq-toast').getByRole('button', { name: 'Undo', exact: true }).click();
+    await pageClock.resume(page);
     if (!(await showing(PANEL.comfort, 'Blanket'))) problems.push('Comfort: Undo did not bring Blanket back');
     problems.push(...(await kept(['Tea, still typing'], 'Comfort, Blanket back with Undo')));
     const kit = page.locator('.dq-listp--comfort');
@@ -571,9 +573,10 @@ export const scenarios = {
     problems.push(...(await kept(['Tea, still typing'], 'Comfort, Juno added')));
     // Undo from the keys: its toast goes, and focus goes to the entry it brought back, on its Remove, in view
     await button(page, 'Remove Socks').focus();
-    await page.keyboard.press('Enter');
+    await pageClock.holdToast(h, page, () => page.keyboard.press('Enter'), { installed: true });
     for (let i = 0; i < 80 && !(await page.evaluate(() => !!document.activeElement?.matches('.dq-toast-btn'))); i++) await page.keyboard.press('Tab');
     await page.keyboard.press('Enter');
+    await pageClock.resume(page);
     if (!(await showing(PANEL.comfort, 'Socks'))) problems.push('Comfort: Undo from the keys did not bring Socks back');
     problems.push(...(await focusOn(page, 'Remove Socks', 'Comfort, Socks back with Undo from the keys')));
     problems.push(...(await kept(['Tea, still typing'], 'Comfort, Socks back with Undo from the keys')));
