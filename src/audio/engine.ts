@@ -433,27 +433,41 @@ export class AudioEngine {
       console.warn('[audio] cue failed', cue, err);
     }
     if (cue === "awaken_hit") this.music.armHit();
-    const at = this.when(opts.at);
+    let at: number;
+    let lifted = this.lifted;
+    if (cue !== "awaken_hit") {
+      const moment = new Moment();
+      v.prepare(moment);
+      if (UI_DUCK.has(cue)) {
+        const p = this.uiDuck.curve;
+        moment.add(0, (at) => this.busLevels.set(p, dB(-3), at, 0.012), p);
+        moment.add(0.28, (at) => this.busLevels.set(p, 1, at + 0.28, 0.16, false), p);
+      }
+      if (cue === 'breath_in' || cue === 'breath_out') {
+        const p = this.focus.curve;
+        const back = Math.max(opts.dur ?? 0, 10) + 0.4;
+        moment.add(0, (at) => this.busLevels.set(p, dB(-6.5), at, 0.3), p);
+        moment.add(back, (at) => this.busLevels.set(p, 1, at + back, 0.8, false), p);
+      }
+      lifted = cue === 'ui_open' && opts.detune === 500 ? true : cue === 'ui_close' ? false : this.lifted;
+      if (lifted !== this.lifted || (cue === 'ui_open' && opts.detune === 500)) {
+        const shelf = this.shelf.gain;
+        moment.add(0, (at) => this.music.lift(lifted ? 5 : 0, lifted ? 0.3 : 0.4, at), shelf);
+      }
+      if (cue === 'soldier_ignite' || cue === 'stand_swell') {
+        const p = this.yieldG.curve;
+        const stand = cue === 'stand_swell';
+        const start = stand ? 0.12 : 0;
+        const end = stand ? 1.04 : 0.5;
+        moment.add(start, (at) => this.busLevels.set(p, dB(stand ? -2 : -3), at + start, stand ? 0.2 : 0.03), p);
+        moment.add(end, (at) => this.busLevels.set(p, 1, at + end, stand ? 0.004 : 0.3, false), p);
+      }
+      moment.prepare();
+      at = this.when(opts.at);
+      moment.place(at);
+    } else at = this.when(opts.at);
     v.open(at);
-    if (UI_DUCK.has(cue)) {
-      const g = this.uiDuck.curve;
-      this.busLevels.set(g, dB(-3), at, 0.012);
-      this.busLevels.set(g, 1, at + 0.28, 0.16, false);
-    }
-    // paced breathing: the score steps back for the whole exercise (each cue extends the dip; it lifts after the last)
-    if (cue === 'breath_in' || cue === 'breath_out') this.toFocus(dB(-6.5), at, 0.3, at + Math.max(opts.dur ?? 0, 10) + 0.4);
-    // the important (level) window: the score's low end lifts +5 dB while it is open, not a louder chime
-    if (cue === 'ui_open' && opts.detune === 500) {
-      this.music.lift(5, 0.3, at);
-      this.lifted = true;
-    } else if (cue === 'ui_close' && this.lifted) {
-      this.music.lift(0, 0.4, at);
-      this.lifted = false;
-    }
-    // inside the roar wall the score and the vortex make room: -3 dB under the ignition, and a -2 dB held breath while
-    // the stand-up swell rises, released on the stand itself (~1.05 s after the swell starts)
-    if (cue === 'soldier_ignite') this.makeRoom(at, -3, 0.03, at + 0.5, 0.3);
-    else if (cue === 'stand_swell') this.makeRoom(at + 0.12, -2, 0.2, at + 1.04, 0.004);
+    this.lifted = lifted;
     if (cue === "awaken_hit") {
       if (this.hushV) this.unhush(at);
       this.music.onHit(at);
@@ -477,19 +491,18 @@ export class AudioEngine {
     }
     if (cur) this.letGo(cur.voice);
     const built = buildBed(this.lib, name, this.bedBus, o.level ?? 1, o.fadeIn ?? 0.5, this.nextSeed());
-    const h = built.open(this.when(o.at));
+    const moment = new Moment();
+    built.voice.prepare(moment);
+    moment.prepare();
+    const at = this.when(o.at);
+    moment.place(at);
+    const h = built.open(at);
     this.beds.set(name, h);
     return h;
   }
 
   stopBed(name: BedName, fade = 0.5, at?: number) {
     this.beds.get(name)?.stop(fade, at);
-  }
-
-  private makeRoom(at: number, db: number, tau: number, back: number, tauBack: number) {
-    const g = this.yieldG.curve;
-    this.busLevels.set(g, dB(db), at, tau);
-    this.busLevels.set(g, 1, back, tauBack, false);
   }
 
   /** Move the focus dip to `v` from `at` (time constant tau); with `back`, return to full level from then. */
@@ -504,10 +517,16 @@ export class AudioEngine {
   chargeLoop(o: { at?: number } = {}): ChargeHandle {
     if (this.charge) return this.charge;
     const built = buildCharge(this.lib, this.sfx, this.nextSeed());
+    const moment = new Moment();
+    built.voice.prepare(moment);
+    const p = this.focus.curve;
+    const level = dB(-2);
+    moment.add(0, (at) => this.busLevels.set(p, level, at, 0.4), p);
+    moment.prepare();
     const t0 = this.when(o.at);
+    moment.place(t0);
     const h = built.open(t0);
     const self = this;
-    this.toFocus(dB(-2), t0, 0.4);
     this.charge = {
       set(c: number, at?: number) {
         const t = self.when(at);
@@ -919,48 +938,7 @@ export interface RenderOpts {
 export let lastStats: ReturnType<AudioEngine['stats']> | null = null;
 
 /** 16-bit PCM WAV (or 32-bit float with { float: true }). */
-export function bufferToWav(buf: AudioBuffer, o: { float?: boolean } = {}): ArrayBuffer {
-  const ch = buf.numberOfChannels;
-  const n = buf.length;
-  const bps = o.float ? 4 : 2;
-  const data = n * ch * bps;
-  const ab = new ArrayBuffer(44 + data);
-  const dv = new DataView(ab);
-  const str = (off: number, s: string) => {
-    for (let i = 0; i < s.length; i++) dv.setUint8(off + i, s.charCodeAt(i));
-  };
-  str(0, 'RIFF');
-  dv.setUint32(4, 36 + data, true);
-  str(8, 'WAVE');
-  str(12, 'fmt ');
-  dv.setUint32(16, 16, true);
-  dv.setUint16(20, o.float ? 3 : 1, true);
-  dv.setUint16(22, ch, true);
-  dv.setUint32(24, buf.sampleRate, true);
-  dv.setUint32(28, buf.sampleRate * ch * bps, true);
-  dv.setUint16(32, ch * bps, true);
-  dv.setUint16(34, bps * 8, true);
-  str(36, 'data');
-  dv.setUint32(40, data, true);
-  const chans = Array.from({ length: ch }, (_, c) => buf.getChannelData(c));
-  let off = 44;
-  for (let i = 0; i < n; i++) {
-    for (let c = 0; c < ch; c++) {
-      const x = chans[c][i];
-      if (o.float) dv.setFloat32(off, x, true);
-      else dv.setInt16(off, Math.max(-32768, Math.min(32767, Math.round(x * 32767))), true);
-      off += bps;
-    }
-  }
-  return ab;
-}
-
-export function toBase64(ab: ArrayBuffer) {
-  const u = new Uint8Array(ab);
-  let s = '';
-  for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, Array.from(u.subarray(i, i + 0x8000)));
-  return btoa(s);
-}
+export { bufferToWav, toBase64 } from './wav';
 
 /** Nominal render length of a cue (tails included). */
 export function cueLength(cue: string) {
