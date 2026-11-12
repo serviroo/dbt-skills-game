@@ -57,7 +57,8 @@ const oscillatorGates = new WeakMap<OscillatorNode, GainNode>();
 const offlineOscillators = new WeakMap<OscillatorNode, { start: number; frequency: number }>();
 const offlineFrequencies = new WeakMap<AudioParam, number>();
 const frameTime = (time: number, rate: number) => {
-  const frame = Math.ceil(time * rate);
+  const samples = time * rate;
+  const frame = Math.ceil(samples - Math.max(1, Math.abs(samples)) * Number.EPSILON * 2);
   return Math.max(0, (frame - Math.max(1e-7, frame * Number.EPSILON * 2)) / rate);
 };
 

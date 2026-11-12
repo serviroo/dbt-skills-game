@@ -6,6 +6,10 @@ const VALUE = 3;
 const TAU = 4;
 const STRIDE = 5;
 
+function frameAt(samples) {
+  return Math.ceil(samples - Math.max(1, Math.abs(samples)) * Number.EPSILON * 2);
+}
+
 function read(event, field) {
   return event.values[event.index + field];
 }
@@ -69,7 +73,7 @@ class CueTimelineProcessor extends AudioWorkletProcessor {
       if (read(same, KIND) === kind) {
         write(same, VALUE, value);
         write(same, TAU, tau);
-        write(same, FRAME, Math.ceil(time * sampleRate));
+        write(same, FRAME, frameAt(time * sampleRate));
         return;
       }
       previous = same;
@@ -78,7 +82,7 @@ class CueTimelineProcessor extends AudioWorkletProcessor {
     const event = slot.take();
     write(event, KIND, kind);
     write(event, TIME, time);
-    write(event, FRAME, Math.ceil(time * sampleRate));
+    write(event, FRAME, frameAt(time * sampleRate));
     write(event, VALUE, value);
     write(event, TAU, tau);
     event.next = same;
@@ -99,12 +103,12 @@ class CueTimelineProcessor extends AudioWorkletProcessor {
     if (!p || !p.adopted) throw this.missingAdoption;
     time += start;
     if (kind === 8) {
-      const frame = Math.ceil(time * sampleRate);
+      const frame = frameAt(time * sampleRate);
       for (let e = p.first; e; e = e.next)
         if (read(e, TIME) >= time - 1e-9) {
           const relative = read(e, TIME) - time;
           write(e, TIME, frame / sampleRate + relative);
-          write(e, FRAME, Math.ceil(frame + relative * sampleRate));
+          write(e, FRAME, frameAt(frame + relative * sampleRate));
         }
       return;
     }
@@ -283,8 +287,16 @@ class CueMailboxProcessor extends AudioWorkletProcessor {
   }
 
   number(index) {
-    this.bits.setUint16(0, this.words[12 + index * 2], true);
-    this.bits.setUint16(2, this.words[13 + index * 2], true);
+    const field = index % 6;
+    const position = field < 2 ? field * 2 : field === 2 || field === 5 ? 4 : field * 2 + 2;
+    const offset = 12 + Math.floor(index / 6) * 12 + position;
+    this.bits.setUint16(0, this.words[offset], true);
+    this.bits.setUint16(2, this.words[offset + 1], true);
+    if (field === 2 || field === 5) {
+      this.bits.setUint16(4, this.words[offset + 2], true);
+      this.bits.setUint16(6, this.words[offset + 3], true);
+      return this.bits.getFloat64(0, true);
+    }
     return this.bits.getFloat32(0, true);
   }
 

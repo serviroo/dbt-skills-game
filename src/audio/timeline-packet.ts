@@ -33,16 +33,17 @@ export class PacketQueue {
       const fields = [
         kind + 1,
         event.channel,
-        (event.time ?? 0) * this.ctx.sampleRate,
         event.value ?? 0,
         (event.tau ?? 0) * this.ctx.sampleRate,
-        (event.stop ?? 0) * this.ctx.sampleRate,
       ];
       for (let j = 0; j < fields.length; j++) {
         bits.setFloat32(0, fields[j], true);
-        words[12 + i * 12 + j * 2] = bits.getUint16(0, true);
-        words[13 + i * 12 + j * 2] = bits.getUint16(2, true);
+        const offset = 12 + i * 12 + (j < 2 ? j * 2 : j * 2 + 4);
+        words[offset] = bits.getUint16(0, true);
+        words[offset + 1] = bits.getUint16(2, true);
       }
+      bits.setFloat64(0, (event.time ?? event.stop ?? 0) * this.ctx.sampleRate, true);
+      for (let j = 0; j < 4; j++) words[16 + i * 12 + j] = bits.getUint16(j * 2, true);
     }
     let checksum = 2166136261;
     for (let i = 2; i < words.length; i++) {
