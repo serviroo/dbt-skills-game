@@ -429,12 +429,14 @@ export const scenarios = {
 
       // a toast open when the Safe Zone opens goes, and the removal lands
       await openPiece(page, 'al-c');
-      await page.getByRole('button', { name: 'Release', exact: true }).click();
+      await pageClock.holdToast(h, page, () => page.getByRole('button', { name: 'Release', exact: true }).click(),
+        { installed: true });
       await toast.getByText('Ally released.', { exact: true }).waitFor();
       await page.locator('.dq-safe').click();
       await page.locator('.dq[data-screen="safe"]').waitFor();
       h.expect(await toast.isHidden(), `${at}: the toast followed into the Safe Zone`);
       await h.poll(page, () => records(page), (rs) => !rs.some((r) => r.id === 'al-c'), `${at}: the release did not land when the Safe Zone opened`, { timeout: 12000 });
+      await pageClock.resume(page);
       await h.shot(page, `${at}-safe-zone-no-toast`);
 
       h.expect((await xp(page, h.SAVE)) === xp0, `${at}: labels or Undo changed XP`);

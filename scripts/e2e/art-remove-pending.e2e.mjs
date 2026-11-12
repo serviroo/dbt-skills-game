@@ -509,14 +509,16 @@ export const scenarios = {
     await seed(page);
     await toArt(h, page);
 
-    await removePiece(page, 'pg-b');
+    await removePiece(page, 'pg-b', h);
     await openPiece(page, 'pg-a');
     h.expect(!(await page.locator('.dq-toast').isVisible()), 'the toast followed to another screen');
     await h.poll(page, () => records(page), (rs) => !rs.some((r) => r.id === 'pg-b'), 'leaving the toast behind did not finish the removal', { timeout: 2000 });
     h.expect(!(await goneMarks(page))?.['pg-b'], 'leaving the toast behind left the removal waiting in every tab');
     await page.evaluate(() => document.querySelector('.dq-toast-btn')?.click());
     await h.sleep(500);
+    await pageClock.runFor(page, 500);
     h.expect(!(await records(page)).some((r) => r.id === 'pg-b'), 'the Undo of a toast left behind brought the page back');
+    await pageClock.resume(page);
 
     await page.locator('.dq-back').click();
     await page.locator('.dq-artroom').waitFor();
