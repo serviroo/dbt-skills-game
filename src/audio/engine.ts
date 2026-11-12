@@ -13,7 +13,7 @@ import { holdAt, soon, taper } from './param';
 import { SCORE } from '../motion/tokens';
 import { makeEcho, dropEcho, type Echo, type Sends } from './echo';
 import { BusLevels } from './bus-levels';
-import { Voice, stoppedBy, type Lib } from './voice';
+import { Voice, openBuilt, stoppedBy, type Lib } from './voice';
 import { CueCleanup } from './cue-cleanup';
 
 export type { BedHandle, BedName, ChargeHandle, Section, SectionOpts };
@@ -429,15 +429,21 @@ export class AudioEngine {
     if (this.isQuiet) return { stop() {}, end: this.when(opts.at) };
     const detune = opts.detune ?? (opts.index !== undefined ? opts.index * 50 : 0);
     // built first and held, then timed: however long building it takes, no part of it can land in the past
-    const v = new Voice(this.lib, 0, this.sfx, { gain: (opts.gain ?? 1) * dB(def.gainDb ?? 0), pan: opts.pan, detune, room: def.room, hall: def.hall, held: true }, this.nextSeed());
-    try {
-      def.fn(v, { dur: opts.dur });
-    } catch (err) {
-      console.warn('[audio] cue failed', cue, err);
-    }
+    const seed = this.nextSeed();
+    const gain = (opts.gain ?? 1) * dB(def.gainDb ?? 0);
+    const vo = { gain, pan: opts.pan, detune, room: def.room, hall: def.hall, held: true };
+    const build = () => {
+      const v = new Voice(this.lib, 0, this.sfx, vo, seed);
+      try {
+        def.fn(v, { dur: opts.dur });
+      } catch (err) {
+        console.warn('[audio] cue failed', cue, err);
+      }
+      return v;
+    };
+    const first = build();
     if (cue === "awaken_hit") this.music.armHit();
-    const at = this.when(opts.at);
-    v.open(at);
+    const { built: v, at } = openBuilt(first, build, (b) => b, () => this.when(opts.at));
     if (UI_DUCK.has(cue)) {
       const g = this.uiDuck.curve;
       this.busLevels.set(g, dB(-3), at, 0.012);
@@ -479,8 +485,9 @@ export class AudioEngine {
       return cur;
     }
     if (cur) this.letGo(cur.voice);
-    const built = buildBed(this.lib, name, this.bedBus, o.level ?? 1, o.fadeIn ?? 0.5, this.nextSeed());
-    const h = built.open(this.when(o.at));
+    const seed = this.nextSeed();
+    const build = () => buildBed(this.lib, name, this.bedBus, o.level ?? 1, o.fadeIn ?? 0.5, seed);
+    const h = openBuilt(build(), build, (b) => b.voice, () => this.when(o.at)).built.handle();
     this.beds.set(name, h);
     return h;
   }
@@ -506,9 +513,10 @@ export class AudioEngine {
    *  score steps back (-2 dB idle, -9 dB at full charge); after stop() it swells back in behind the burst. */
   chargeLoop(o: { at?: number } = {}): ChargeHandle {
     if (this.charge) return this.charge;
-    const built = buildCharge(this.lib, this.sfx, this.nextSeed());
-    const t0 = this.when(o.at);
-    const h = built.open(t0);
+    const seed = this.nextSeed();
+    const build = () => buildCharge(this.lib, this.sfx, seed);
+    const { built, at: t0 } = openBuilt(build(), build, (b) => b.voice, () => this.when(o.at));
+    const h = built.handle();
     const self = this;
     this.toFocus(dB(-2), t0, 0.4);
     this.charge = {
@@ -540,20 +548,24 @@ export class AudioEngine {
    * holds until unhush() or the next awaken_hit. An open-ended awaken section cuts its build here.
    */
   hush(from?: number, to?: number) {
-    const v = new Voice(this.lib, 0, this.sfx, { held: true }, this.nextSeed());
-    const g = v.gain(0, v.dry);
-    v.at(g.gain).setValueAtTime(0, 0);
-    v.at(g.gain).linearRampToValueAtTime(0.065, 0.03);
-    const end = 120;
-    v.noise("brown", 0, end + 0.05, v.filt("lowpass", 240, 0.7, g));
-    v.noise("pink", 0, end + 0.05, v.gain(0.08, v.filt("highpass", 1800, 0.7, g)));
-    const at = from ?? soon(this.ctx);
+    const seed = this.nextSeed();
+    const build = () => {
+      const v = new Voice(this.lib, 0, this.sfx, { held: true }, seed);
+      const g = v.gain(0, v.dry);
+      v.at(g.gain).setValueAtTime(0, 0);
+      v.at(g.gain).linearRampToValueAtTime(0.065, 0.03);
+      const end = 120;
+      v.noise("brown", 0, end + 0.05, v.filt("lowpass", 240, 0.7, g));
+      v.noise("pink", 0, end + 0.05, v.gain(0.08, v.filt("highpass", 1800, 0.7, g)));
+      return { v, g };
+    };
+    const when = () => Math.max(from ?? 0, soon(this.ctx));
+    const { built: { v, g }, at } = openBuilt(build(), build, (b) => b.v, when);
     for (const p of [this.hushBeds.curve, this.hushMusic.curve, this.hushHall.curve, this.hushRoom.curve]) {
       this.busLevels.set(p, 0.008, at, 0.007);
       if (to !== undefined) this.busLevels.set(p, 1, to, 0.0015, false);
     }
     this.release(this.takeHush(), at, 0.02);
-    v.open(at);
     if (to !== undefined) {
       g.gain.setValueAtTime(0.065, to - 0.01);
       g.gain.linearRampToValueAtTime(0, to + 0.02);

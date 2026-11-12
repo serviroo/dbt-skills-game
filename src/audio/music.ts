@@ -1,6 +1,6 @@
 import { dB, midi } from './dsp';
 import { soon } from './param';
-import { Voice, kRate } from './voice';
+import { Voice, kRate, openBuilt } from './voice';
 import { figs, groove, prog, theme, roarParts } from './roar';
 import { h01, Hits, LONG, Pad, satBus, Strings, waveOf } from './instruments';
 import type { Section, SectionOpts, MusicHost } from './score-types';
@@ -434,7 +434,6 @@ const FACTORIES: Record<Section, Factory> = {
     v.at(lb.out.gain).exponentialRampToValueAtTime(0.3, Math.max(0.5, nominal));
     v.ramp(lb.lp.frequency, 0.2, 320, 2400, Math.max(0.3, nominal - 0.2));
     if (o.at !== undefined && o.hitAt !== undefined) {
-      host.hush(o.hitAt - 0.78, o.hitAt);
       build.gain.setTargetAtTime(0, o.hitAt - 0.78, 0.006);
       bv.stop(o.hitAt - 0.78, 0.024);
     }
@@ -462,7 +461,10 @@ const FACTORIES: Record<Section, Factory> = {
         hush(at: number) {
           if (hitAt === Infinity) cut(at);
         },
-        opened: (until: number) => roarTick(soon(host.lib.ctx), until),
+        opened(until: number) {
+          if (o.at !== undefined && o.hitAt !== undefined) host.hush(o.hitAt - 0.78, o.hitAt);
+          roarTick(soon(host.lib.ctx), until);
+        },
         arm() {
           if (!armed && hitAt === Infinity && lateStandAt === undefined) placeFirstChord();
         },
@@ -699,14 +701,26 @@ export class Music {
 
   to(name: Section, crossfade = 2, o: SectionOpts = {}) {
     const lib = this.host.lib;
-    const voice = new Voice(lib, 0, this.dest, { hall: name === "awaken" ? 0.22 : 0.32, room: 0, gain: SECTION_GAIN[name], held: true }, this.host.seed());
-    const score = FACTORIES[name](voice, o, this.host);
-    score(0).tick(0, AHEAD);
-    voice.at(voice.out.gain).setValueAtTime(0, 0);
-    voice.at(voice.out.gain).setTargetAtTime(1, 0, Math.max(0.004, crossfade / 4));
+    const vo = { hall: name === "awaken" ? 0.22 : 0.32, room: 0, gain: SECTION_GAIN[name], held: true };
+    const seeds: number[] = [];
+    const build = () => {
+      let k = 0;
+      const seed = () => {
+        seeds[k] ??= this.host.seed();
+        return seeds[k++];
+      };
+      const host = { ...this.host, seed };
+      const voice = new Voice(lib, 0, this.dest, vo, host.seed());
+      const score = FACTORIES[name](voice, o, host);
+      score(0).tick(0, AHEAD);
+      voice.at(voice.out.gain).setValueAtTime(0, 0);
+      voice.at(voice.out.gain).setTargetAtTime(1, 0, Math.max(0.004, crossfade / 4));
+      return { voice, score };
+    };
+    const first = build();
     this.stop(o.fadeOut ?? crossfade, o.at);
-    const at = o.at ?? soon(lib.ctx);
-    voice.open(at);
+    const when = () => Math.max(o.at ?? 0, soon(lib.ctx));
+    const { built: { voice, score }, at } = openBuilt(first, build, (b) => b.voice, when);
     const impl = score(at);
     impl.opened?.(at + AHEAD);
     this.live.push({ name, voice, impl, start: at, end: Infinity, until: at + AHEAD });
