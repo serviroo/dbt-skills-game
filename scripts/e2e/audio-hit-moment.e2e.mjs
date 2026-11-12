@@ -58,14 +58,17 @@ export const scenarios = {
         const { BEAT } = await import('/src/audio/music.ts');
         const { tapAudioSchedule } = await import('/scripts/e2e/audio-schedule.mjs');
         const out = [];
-        for (const live of [false, true]) for (const offset of [0.95, 1, 1.1, 1.6, 1.65, 1.75, 7.04, null, 'known']) {
+        const edges = [0.95, 1.6, 0.95 + BEAT / 4, 1.6 + BEAT / 4];
+        const offsets = [...edges.flatMap((n) => [n - 1e-7, n, n + 1e-7]), 1, 1.65, 7.04, null, 'known'];
+        for (const live of [false, true]) for (const at of [0.2, 1.125, 10]) for (const offset of offsets) {
+          if (offset === 'known' && at < 0.78) continue;
           const clock = live ? new AudioContext({ latencyHint: 'interactive' })
             : new OfflineAudioContext(2, 48000, 48000);
           if (live) await clock.suspend();
           const engine = new AudioEngine(clock, { seed: 20261020, stats: true });
-          const at = 10;
-          const stand = typeof offset === 'number' ? offset : 7.04;
-          const opts = offset === null ? { at: 0.1 } : { at: 0.1, standAt: at + stand,
+          const standAt = at + (typeof offset === 'number' ? offset : 7.04);
+          const stand = offset === null ? 7.04 : standAt - at;
+          const opts = offset === null ? { at: 0.1 } : { at: 0.1, standAt,
             ...(offset === 'known' ? { hitAt: at } : {}) };
           engine.music.to('awaken', 0.04, opts);
           const place = Moment.prototype.place;
@@ -96,22 +99,24 @@ export const scenarios = {
                 && close(c.time, at + B));
             const horn = calls.filter((c) => c.method === 'setTargetAtTime' && c.value === 3600
               && close(c.time, at + B * 0.62) && where(c));
-            const swellAt = at + stand - 1.6;
-            const dipAt = at + stand - 0.95;
-            const inWindow = (t) => t >= at && t < at + BEAT / 4;
+            const swellOffset = stand - 1.6;
+            const dipOffset = stand - 0.95;
+            const swellAt = swellOffset + at;
+            const dipAt = dipOffset + at;
+            const inWindow = (t) => t >= 0 && t < BEAT / 4;
             const swell = calls.filter((c) => c.method === 'setValueAtTime' && close(c.value, 0.0006)
-              && close(c.time, swellAt) && where(c));
+              && c.time === swellAt && where(c));
             const timp = calls.filter((c) => c.method === 'setValueAtTime' && close(c.value, 0.0048)
-              && close(c.time, swellAt) && where(c));
-            const swellStarts = calls.filter((c) => c.method === 'start' && close(c.time, swellAt) && where(c));
+              && c.time === swellAt && where(c));
+            const swellStarts = calls.filter((c) => c.method === 'start' && c.time === swellAt && where(c));
             const dip = calls.filter((c) => c.method === 'setTargetAtTime' && close(c.value, 10 ** (-4 / 20))
-              && close(c.time, dipAt) && where(c));
+              && c.time === dipAt && where(c));
             const restored = dip.filter((d) => calls.some((c) => c.target === d.target && where(c)
-              && c.method === 'setTargetAtTime' && c.value === 1 && close(c.time, at + stand - 0.004)));
-            out.push({ live, offset, rollOK, rollDelay: roll?.time - at,
+              && c.method === 'setTargetAtTime' && c.value === 1 && c.time === stand - 0.004 + at));
+            out.push({ live, at, offset, rollOK, rollDelay: roll?.time - at,
               horn: horn.length, hornDelay: horn[0]?.time - at, swell: swell.length, timp: timp.length,
               swellStarts: swellStarts.length, dip: dip.length, restored: restored.length,
-              wantSwell: inWindow(swellAt), wantDip: inWindow(dipAt) });
+              wantSwell: inWindow(swellOffset), wantDip: inWindow(dipOffset) });
           } finally {
             Moment.prototype.place = place;
             undo();
@@ -125,9 +130,7 @@ export const scenarios = {
         && r.horn === 1 && r.hornDelay >= 0.93 - 1e-8
         && r.swell === Number(r.wantSwell)
         && r.timp === Number(r.wantSwell) && r.swellStarts === 4 * Number(r.wantSwell)
-        && r.dip === 2 * Number(r.wantDip) && r.restored === r.dip
-        && (r.offset !== 0.95 || r.dip === 2)
-        && (r.offset !== 1.6 || (r.swell === 1 && r.timp === 1 && r.swellStarts === 4))), JSON.stringify(results));
+        && r.dip === 2 * Number(r.wantDip) && r.restored === r.dip), JSON.stringify(results));
       h.expect(!errors.length, errors.join('\n'));
       return results;
     } finally {

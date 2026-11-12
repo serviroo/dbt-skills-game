@@ -67,7 +67,7 @@ export const scenarios = {
           const voiceAt = Voice.prototype.at;
           const reg = Voice.prototype.reg;
           const moments = new Map();
-          const parametersAtPick = new Set();
+          const parametersAtPick = new Map();
           const builderAsked = new Map();
           const builderPlaced = new Map();
           const sourceAsked = new Map();
@@ -140,7 +140,9 @@ export const scenarios = {
               }
             }
             for (const entry of this.holding() ?? []) {
-              if (entry.key instanceof AudioParam) parametersAtPick.add(entry.key);
+              if (entry.key instanceof AudioParam) {
+                parametersAtPick.set(entry.key, builderAsked.get(entry.key)?.length ?? 0);
+              }
               const source = entry.source;
               if (sourceAsked.has(source)) {
                 sourceAtPick.set(source, { ...sourceAsked.get(source), stop: source.stop, kill: source.voice.killAt });
@@ -172,7 +174,7 @@ export const scenarios = {
               if (!parametersAtPick.has(param)) continue;
               const actual = builderPlaced.get(param) ?? [];
               let i = 0;
-              for (const [method, args] of calls) {
+              for (const [method, args] of calls.slice(0, parametersAtPick.get(param))) {
                 const wanted = [method, args.map((value, n) =>
                   n === (method === 'cancelScheduledValues' ? 0 : 1) ? value + test.at : value)];
                 while (i < actual.length && JSON.stringify(actual[i]) !== JSON.stringify(wanted)) i++;

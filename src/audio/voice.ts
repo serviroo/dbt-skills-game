@@ -180,6 +180,21 @@ export class Voice {
     for (const h of held) h.place(at);
   }
 
+  placeRelative(at: number, build: () => void) {
+    const held: Placing[] = [];
+    const zero = this.clock.zero;
+    this.held = held;
+    this.clock.zero = 0;
+    try {
+      build();
+    } finally {
+      this.held = null;
+      this.clock.zero = zero;
+    }
+    held.sort((a, b) => a.cancelsBefore - b.cancelsBefore || a.t + at - (b.t + at));
+    for (const h of held) h.place(at);
+  }
+
   prepare(moment: Moment) {
     const held = this.held ?? [];
     this.release(0);

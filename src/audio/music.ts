@@ -488,9 +488,11 @@ const FACTORIES: Record<Section, Factory> = {
             rp.open(at);
             if (lateStandAt !== undefined) {
               const B = Math.max(1.5, stand / 2);
-              hornNote(at + B * 0.62, theme[0][1]);
-              rollAt(at, B);
-              roarOnce(at, at, roarTo);
+              rp.placeRelative(at, () => {
+                hornNote(B * 0.62, theme[0][1]);
+                rollAt(0, B);
+                roarOnce(0, 0, BEAT / 4);
+              });
             }
           };
         },
