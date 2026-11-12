@@ -1,6 +1,7 @@
 import { dB, midi } from './dsp';
 import { soon } from './param';
 import { Voice, kRate } from './voice';
+import { Moment } from './moment';
 import { figs, groove, prog, theme, roarParts } from './roar';
 import { h01, Hits, LONG, Pad, satBus, Strings, waveOf } from './instruments';
 import type { Section, SectionOpts, MusicHost } from './score-types';
@@ -161,6 +162,7 @@ function once(t: number, from: number, to: number, fn: (t: number) => void) {
 interface SectionImpl {
   tick(from: number, to: number): void;
   hush?(at: number): void;
+  prepareHush?(moment: Moment): (at: number) => void;
   arm?(): void;
   hit?(at: number): void;
   opened?(until: number): void;
@@ -447,6 +449,16 @@ const FACTORIES: Record<Section, Factory> = {
         build.gain.setTargetAtTime(0, at, 0.006);
         bv.stop(at, 0.024);
       };
+      const prepareCut = (moment: Moment) => {
+        const allowed = (at: number) => cutAt === Infinity || at < cutAt;
+        moment.add(0, (at) => { if (allowed(at)) build.gain.setTargetAtTime(0, at, 0.006); }, build.gain);
+        const finish = bv.prepareStop(moment, 0.024, { parent: allowed });
+        return (at: number) => {
+          if (!allowed(at)) return;
+          finish(at);
+          cutAt = at;
+        };
+      };
       let nextBeat = start + 0.6;
       let gap = 1.0;
       let roarTo = -Infinity;
@@ -461,6 +473,9 @@ const FACTORIES: Record<Section, Factory> = {
       return {
         hush(at: number) {
           if (hitAt === Infinity) cut(at);
+        },
+        prepareHush(moment: Moment) {
+          return hitAt === Infinity ? prepareCut(moment) : () => {};
         },
         opened: (until: number) => roarTick(soon(host.lib.ctx), until),
         arm() {
@@ -704,14 +719,20 @@ export class Music {
     score(0).tick(0, AHEAD);
     voice.at(voice.out.gain).setValueAtTime(0, 0);
     voice.at(voice.out.gain).setTargetAtTime(1, 0, Math.max(0.004, crossfade / 4));
-    this.stop(o.fadeOut ?? crossfade, o.at);
+    const moment = new Moment();
+    voice.prepare(moment);
+    const stopped = this.live.map((s) => ({ s, finish: s.voice.prepareStop(moment, o.fadeOut ?? crossfade) }));
+    const section = this.host.prepareSection?.(name, moment);
+    moment.prepare();
     const at = o.at ?? soon(lib.ctx);
+    moment.place(at);
     voice.open(at);
+    for (const { s, finish } of stopped) if (finish(at)) s.end = Math.min(s.end, at);
     const impl = score(at);
     impl.opened?.(at + AHEAD);
     this.live.push({ name, voice, impl, start: at, end: Infinity, until: at + AHEAD });
     this.current = name;
-    this.host.onSection?.(name, at);
+    section?.(at);
   }
 
   stop(fade = 1, at = soon(this.host.lib.ctx)) {
@@ -742,6 +763,11 @@ export class Music {
   /** The director started the hush / played the hit: an open-ended awaken section follows it. */
   onHush(at: number) {
     for (const s of this.live) if (s.name === "awaken" && s.end === Infinity) s.impl.hush?.(at);
+  }
+
+  prepareHush(moment: Moment) {
+    return this.live.filter((s) => s.name === 'awaken' && s.end === Infinity)
+      .map((s) => s.impl.prepareHush?.(moment)).filter((finish) => finish !== undefined);
   }
 
   armHit() {

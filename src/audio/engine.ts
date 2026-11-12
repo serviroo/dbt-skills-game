@@ -15,6 +15,9 @@ import { makeEcho, dropEcho, type Echo, type Sends } from './echo';
 import { BusLevels } from './bus-levels';
 import { Voice, stoppedBy, type Lib } from './voice';
 import { CueCleanup } from './cue-cleanup';
+import { hushMoment } from './hush-moment';
+import { Moment } from './moment';
+import { sectionMoment } from './section-moment';
 
 export type { BedHandle, BedName, ChargeHandle, Section, SectionOpts };
 export { BED_NAMES, SECTIONS };
@@ -262,15 +265,9 @@ export class AudioEngine {
         lib: this.libMusic,
         hush: (a, b) => this.hush(a, b),
         seed: () => this.nextSeed(),
-        onSection: (name, at) => {
-          if (this.lifted) {
-            this.music.lift(0, 0.3, at);
-            this.lifted = false;
-          }
-          // the gate hum and the aura belong to the dark world: they leave when the score lifts into D major
-          if (name !== 'reward' && name !== 'end' && name !== 'calm') return;
-          for (const n of ['gate_hum', 'aura_bed'] as BedName[]) this.stopBed(n, 2.5, at);
-        },
+        prepareSection: (name, moment) => sectionMoment(
+          name, moment, this.music, this.shelf.gain, this.beds, this.lifted, () => { this.lifted = false; },
+        ),
       },
       musicIn,
       { lp: mlp, shelf, level: mlevel },
@@ -540,27 +537,24 @@ export class AudioEngine {
    * holds until unhush() or the next awaken_hit. An open-ended awaken section cuts its build here.
    */
   hush(from?: number, to?: number) {
-    const v = new Voice(this.lib, 0, this.sfx, { held: true }, this.nextSeed());
-    const g = v.gain(0, v.dry);
-    v.at(g.gain).setValueAtTime(0, 0);
-    v.at(g.gain).linearRampToValueAtTime(0.065, 0.03);
-    const end = 120;
-    v.noise("brown", 0, end + 0.05, v.filt("lowpass", 240, 0.7, g));
-    v.noise("pink", 0, end + 0.05, v.gain(0.08, v.filt("highpass", 1800, 0.7, g)));
-    const at = from ?? soon(this.ctx);
-    for (const p of [this.hushBeds.curve, this.hushMusic.curve, this.hushHall.curve, this.hushRoom.curve]) {
-      this.busLevels.set(p, 0.008, at, 0.007);
-      if (to !== undefined) this.busLevels.set(p, 1, to, 0.0015, false);
-    }
-    this.release(this.takeHush(), at, 0.02);
-    v.open(at);
-    if (to !== undefined) {
-      g.gain.setValueAtTime(0.065, to - 0.01);
-      g.gain.linearRampToValueAtTime(0, to + 0.02);
-      this.release([v], to + 0.02, 0.02);
-    }
-    this.hushV = to === undefined ? v : null;
-    this.music.onHush(at);
+    const moment = new Moment();
+    hushMoment({
+      lib: this.lib, dest: this.sfx, seed: this.nextSeed(), moment,
+      prepareBuses: () => {
+        for (const p of [this.hushBeds.curve, this.hushMusic.curve, this.hushHall.curve, this.hushRoom.curve]) {
+          moment.add(0, (at) => this.busLevels.set(p, 0.008, at, 0.007), p);
+          if (to !== undefined) {
+            moment.add(to, () => this.busLevels.set(p, 1, to, 0.0015, false), p, { absolute: true });
+          }
+        }
+      },
+      music: this.music, takeHush: () => this.takeHush(),
+      finishOld: (voice) => {
+        if (this.active.has(voice)) this.stoppedUntil = Math.max(this.stoppedUntil, voice.silentAt);
+        this.letGo(voice);
+      },
+      finishNew: (voice) => this.letGo(voice), setHush: (voice) => { this.hushV = voice; },
+    }, from, to);
   }
 
   /** End an open-ended hush (awaken_hit does this itself). */

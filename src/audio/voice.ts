@@ -1,6 +1,7 @@
 import { mulberry32, type Rng } from '../core/math';
 import { tanhCurve, type Ctx } from './dsp';
 import { silentAfter } from './param';
+import { Moment } from './moment';
 
 /** Shared, engine-owned resources every voice can draw on. */
 export interface Lib {
@@ -70,11 +71,20 @@ interface Placing {
   t: number;
   cancelsBefore: number;
   place(at: number): void;
+  key?: object;
+  source?: Source;
+  offset?: number;
 }
 
-function keep(held: Placing[], t: number, place: (at: number) => void, cancels = false) {
+type StopQueue = {
+  add(t: number, place: (at: number) => void, key?: object, options?: { absolute?: boolean }): unknown;
+};
+
+function keep(held: Placing[], t: number, place: (at: number) => void,
+  options: { cancels?: boolean; key?: object; source?: Source; offset?: number } = {}) {
+  const { cancels = false, key, source, offset } = options;
   const cancelsBefore = (held[held.length - 1]?.cancelsBefore ?? 0) + (cancels ? 1 : 0);
-  held.push({ t, cancelsBefore, place });
+  held.push({ t, cancelsBefore, place, key, source, offset });
 }
 
 /**
@@ -106,6 +116,8 @@ export class Voice {
   private parts: Voice[] = [];
   private clock: Voice = this;
   private zero = 0;
+  private prepared: ((at: number) => void) | null = null;
+  private pending: Source[] = [];
 
   constructor(readonly lib: Lib, t: number, dest: AudioNode, o: VoiceOpts = {}, seed = 1) {
     const ctx = lib.ctx;
@@ -156,10 +168,53 @@ export class Voice {
 
   /** Starts and sets what this held voice and its children were given, `at` later; from then on times are the clock's. */
   open(at: number) {
+    if (this.prepared) {
+      const finish = this.prepared;
+      this.prepared = null;
+      finish(at);
+      return;
+    }
     const held = this.held ?? [];
     this.release(at);
     held.sort((a, b) => a.cancelsBefore - b.cancelsBefore || a.t + at - (b.t + at));
     for (const h of held) h.place(at);
+  }
+
+  prepare(moment: Moment) {
+    const held = this.held ?? [];
+    this.release(0);
+    for (const h of held) {
+      const s = h.source;
+      if (!s) {
+        moment.add(h.t, h.place, h.key);
+        continue;
+      }
+      const start = moment.add(h.t, (at) => {
+        if (h.t + at < s.voice.killAt) this.start(s, h.t + at, h.offset ?? 0);
+      }, s);
+      moment.add(s.stop, (at) => {
+        if (h.t + at < s.voice.killAt && s.stop + at <= s.voice.killAt) s.n.stop(s.stop + at);
+      }, s);
+      if (Number.isFinite(s.voice.killAt)) {
+        moment.add(s.voice.killAt, (at) => {
+          if (h.t + at < s.voice.killAt && s.stop + at > s.voice.killAt) s.n.stop(s.voice.killAt);
+        }, s, { absolute: true, after: start });
+      }
+      s.voice.pending.push(s);
+    }
+    this.prepared = (at) => {
+      this.release(at);
+      for (const h of held) {
+        const s = h.source;
+        if (!s || h.t + at >= s.voice.killAt) continue;
+        s.voice.trackSource(s, h.t + at);
+      }
+      const clear = (v: Voice) => {
+        v.pending = [];
+        for (const c of v.children) clear(c);
+      };
+      clear(this);
+    };
   }
 
   private release(at: number) {
@@ -175,11 +230,12 @@ export class Voice {
     const held = this.holding();
     const set: Timed = held
       ? {
-          setValueAtTime: (v, t) => keep(held, t, (d) => p.setValueAtTime(v, t + d)),
-          linearRampToValueAtTime: (v, t) => keep(held, t, (d) => p.linearRampToValueAtTime(v, t + d)),
-          exponentialRampToValueAtTime: (v, t) => keep(held, t, (d) => p.exponentialRampToValueAtTime(v, t + d)),
-          setTargetAtTime: (v, t, tau) => keep(held, t, (d) => p.setTargetAtTime(v, t + d, tau)),
-          cancelScheduledValues: (t) => keep(held, t, (d) => p.cancelScheduledValues(t + d), true),
+          setValueAtTime: (v, t) => keep(held, t, (d) => p.setValueAtTime(v, t + d), { key: p }),
+          linearRampToValueAtTime: (v, t) => keep(held, t, (d) => p.linearRampToValueAtTime(v, t + d), { key: p }),
+          exponentialRampToValueAtTime: (v, t) =>
+            keep(held, t, (d) => p.exponentialRampToValueAtTime(v, t + d), { key: p }),
+          setTargetAtTime: (v, t, tau) => keep(held, t, (d) => p.setTargetAtTime(v, t + d, tau), { key: p }),
+          cancelScheduledValues: (t) => keep(held, t, (d) => p.cancelScheduledValues(t + d), { cancels: true, key: p }),
         }
       : p;
     const g = gainOf.get(p);
@@ -244,23 +300,32 @@ export class Voice {
     s.stop = this.until(s);
     for (const g of gains) this.pass(g, s);
     const held = this.holding();
-    if (held) keep(held, t0, (d) => this.place(s, t0 + d, offset));
-    else this.place(s, t0, offset);
+    if (held) {
+      keep(held, t0, (d) => this.place(s, t0 + d, offset), { source: s, offset });
+    } else this.place(s, t0, offset);
     return n;
   }
 
   private place(s: Source, t0: number, offset: number) {
     if (t0 >= this.killAt) return;
-    const zero = this.clock.zero;
-    const t1 = Math.min(s.stop + zero, this.killAt);
-    s.stop = t1 - zero;
-    if (s.n instanceof AudioBufferSourceNode) s.n.start(t0, offset);
-    else s.n.start(t0);
+    const t1 = Math.min(s.stop + this.clock.zero, this.killAt);
+    this.start(s, t0, offset);
     s.n.stop(t1);
+    this.trackSource(s, t0);
+  }
+
+  private trackSource(s: Source, t0: number) {
+    const t1 = Math.min(s.stop + this.clock.zero, this.killAt);
+    s.stop = t1 - this.clock.zero;
     s.started = true;
     s.span = this.lib.track(t0, t1);
     this.sources.push(s);
     if (t1 > this.end) this.end = t1;
+  }
+
+  private start(s: Source, at: number, offset: number) {
+    if (s.n instanceof AudioBufferSourceNode) s.n.start(at, offset);
+    else s.n.start(at);
   }
 
   private pass(g: GainNode, s: Source) {
@@ -450,32 +515,56 @@ export class Voice {
     return end;
   }
 
-  /** Fade this voice out from `at` over `ramp` seconds and stop its sources. */
-  stop(at: number, ramp = 0.03) {
-    const kill = stoppedBy(at, ramp);
-    if (kill >= this.killAt) return false;
-    this.killAt = kill;
-    this.fadesFrom = Math.min(this.fadesFrom, at);
-    for (const c of [...this.children, ...this.parts]) c.stop(at, ramp);
+  prepareStop(moment: StopQueue, ramp: number,
+    options: { time?: number; absolute?: boolean; parent?: (at: number) => boolean } = {}) {
+    const { time = 0, absolute = false, parent = (_at: number) => true } = options;
+    const delay = stoppedBy(0, ramp);
+    const when = (at: number) => absolute ? time : at + time;
+    const allowed = (at: number) => parent(at) && when(at) + delay < this.killAt;
+    const children = [...this.children, ...this.parts]
+      .map((c) => c.prepareStop(moment, ramp, { time, absolute, parent: allowed }));
     const tau = Math.max(0.002, ramp / 4);
     for (const g of [this.out.gain, this.roomSend.gain, this.hallSend.gain]) {
-      g.cancelScheduledValues(at);
-      g.setTargetAtTime(0, at, tau);
+      moment.add(time, (at) => { if (allowed(at)) g.cancelScheduledValues(when(at)); }, g, { absolute });
+      moment.add(time, (at) => { if (allowed(at)) g.setTargetAtTime(0, when(at), tau); }, g, { absolute });
     }
-    const zero = this.clock.zero;
-    for (const s of this.sources) {
-      if (s.stop + zero > kill) {
+    const sources = [...this.sources, ...this.pending].map((s) => {
+      const pending = this.pending.includes(s);
+      let stopped = false;
+      moment.add(time + delay, (at) => {
+        const kill = when(at) + delay;
+        const zero = pending ? at : this.clock.zero;
+        if (!allowed(at) || s.stop + zero <= kill) return;
         try {
           s.n.stop(kill);
-          s.stop = kill - zero;
-          if (s.span) s.span.b = kill;
+          stopped = true;
         } catch {
           /* already stopped */
         }
+      }, s, { absolute });
+      return { s, stopped: () => stopped };
+    });
+    return (at: number) => {
+      if (!allowed(at)) return false;
+      const kill = when(at) + delay;
+      for (const finish of children) finish(at);
+      this.killAt = kill;
+      this.fadesFrom = Math.min(this.fadesFrom, when(at));
+      for (const { s, stopped } of sources) {
+        if (!stopped()) continue;
+        s.stop = kill - this.clock.zero;
+        if (s.span) s.span.b = kill;
       }
-    }
-    this.end = Math.min(this.end, kill);
-    return true;
+      this.end = Math.min(this.end, kill);
+      return true;
+    };
+  }
+
+  /** Fade this voice out from `at` over `ramp` seconds and stop its sources. */
+  stop(at: number, ramp = 0.03) {
+    const direct: StopQueue = { add: (_time, place) => place(at) };
+    const finish = this.prepareStop(direct, ramp);
+    return finish(at);
   }
 
   get isHeld() {

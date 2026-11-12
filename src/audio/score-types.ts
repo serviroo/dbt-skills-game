@@ -1,4 +1,5 @@
 import type { Lib } from './voice';
+import type { Moment } from './moment';
 
 export type Section = 'intro' | 'windows' | 'silhouette' | 'awaken' | 'reward' | 'end' | 'calm';
 export const SECTIONS: Section[] = ['intro', 'windows', 'silhouette', 'awaken', 'reward', 'end', 'calm'];
@@ -17,6 +18,5 @@ export interface MusicHost {
   lib: Lib;
   hush(from: number, to: number): void;
   seed(): number;
-  /** Called when a section starts (the engine fades the dark-world beds when the score lifts into D major). */
-  onSection?(name: Section, at: number): void;
+  prepareSection?(name: Section, moment: Moment): (at: number) => void;
 }
