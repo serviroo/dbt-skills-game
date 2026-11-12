@@ -84,7 +84,9 @@ export const scenarios = {
               }
               return Math.sqrt(err / energy);
             });
-            const row = { run, asked, at, sampleRate: sr, ...ack, nodes: nodes.length, expected: expected.channels, difference };
+            const row = {
+              run, asked, at, sampleRate: sr, ...ack, nodes: nodes.length, expected: expected.channels, difference,
+            };
             timings.push(row);
             if (nodes.length !== 7 || difference.some((value) => !(value < 0.02))) failures.push(row);
             for (const osc of nodes) osc.disconnect(merge);
