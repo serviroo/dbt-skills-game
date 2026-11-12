@@ -5,6 +5,7 @@ export const scenarios = {
       await page.waitForFunction(() => window.__lab === true, null, { timeout: 30000 });
       const results = await page.evaluate(async () => {
         const { AudioEngine } = await import('/src/audio/engine.ts');
+        const { soon } = await import('/src/audio/param.ts');
         const { Voice } = await import('/src/audio/voice.ts');
         const { tapAudioSchedule } = await import('/scripts/e2e/audio-schedule.mjs');
         const out = [];
@@ -12,6 +13,7 @@ export const scenarios = {
           for (const phase of ['release', 'sort', 'bookkeeping']) {
             const clock = new AudioContext({ latencyHint: 'interactive' });
             await clock.resume();
+            const pauseMs = (soon(clock) - clock.currentTime) * 1000 + 100;
             const engine = new AudioEngine(clock, { stats: true });
             if (kind === 'section') engine.music.to('intro', 0.04);
             let watching = false;
@@ -22,7 +24,7 @@ export const scenarios = {
               if (!watching || (pauses && phase !== 'sort')) return;
               pauses++;
               const before = clock.currentTime;
-              const until = performance.now() + 65;
+              const until = performance.now() + pauseMs;
               while (performance.now() < until);
               advance = (clock.currentTime - before) * 1000;
             };
@@ -86,10 +88,12 @@ export const scenarios = {
     try {
       const results = await page.evaluate(async () => {
         const { AudioEngine } = await import('/src/audio/engine.ts');
+        const { soon } = await import('/src/audio/param.ts');
         const { tapAudioSchedule, recordAudioSchedule } = await import('/scripts/e2e/audio-schedule.mjs');
         const run = async (kind, pause, pauseFade = false) => {
           const clock = new AudioContext({ latencyHint: 'interactive' });
           await clock.resume();
+          const pauseMs = (soon(clock) - clock.currentTime) * 1000 + 100;
           const schedule = recordAudioSchedule(clock);
           const engine = new AudioEngine(clock, { stats: true });
           if (kind.startsWith('section')) engine.music.to('intro', 0.04);
@@ -112,7 +116,7 @@ export const scenarios = {
             const atBus = pause === 'bus' && buses.includes(target) && method === 'cancelScheduledValues'
               && ++busCancels === 2;
             if ((method === 'start' && ++starts === 2 && pause === true) || atFade || atBus) {
-              const until = performance.now() + 65;
+              const until = performance.now() + pauseMs;
               while (performance.now() < until);
               paused = true;
             }
