@@ -163,14 +163,13 @@ interface SectionImpl {
   tick(from: number, to: number): void;
   hush?(at: number): void;
   prepareHush?(moment: Moment): (at: number) => void;
-  arm?(): void;
-  hit?(at: number): void;
+  prepareHit?(moment: Moment): (at: number) => void;
   opened?(until: number): void;
 }
 /** Builds a section on its held voice, its times counting from the opening; the opener it returns runs twice. */
 type Factory = (v: Voice, o: SectionOpts, host: MusicHost) => (start: number) => SectionImpl;
 
-const BEAT = 60 / 72;
+export const BEAT = 60 / 72;
 const BAR = BEAT * 4;
 
 // D minor world (cutscene) and D major world (reward, end, calm). Voicings low to high.
@@ -464,11 +463,9 @@ const FACTORIES: Record<Section, Factory> = {
       let roarTo = -Infinity;
       const lateStandAt = o.hitAt === undefined ? o.standAt : undefined;
       let stand = o.standAt !== undefined && o.hitAt !== undefined ? o.standAt - o.hitAt : 7.04;
-      let armed = false;
-      const placeFirstChord = () => {
-        armed = true;
+      const placeFirstChord = (independent = false) => {
         swellPedal(0);
-        roarNotes(0, 0, BEAT / 4);
+        roarNotes(0, 0, BEAT / 4, independent);
       };
       return {
         hush(at: number) {
@@ -478,18 +475,26 @@ const FACTORIES: Record<Section, Factory> = {
           return hitAt === Infinity ? prepareCut(moment) : () => {};
         },
         opened: (until: number) => roarTick(soon(host.lib.ctx), until),
-        arm() {
-          if (!armed && hitAt === Infinity && lateStandAt === undefined) placeFirstChord();
-        },
-        hit(at: number) {
-          if (hitAt !== Infinity) return;
-          cut(Math.max(at, soon(host.lib.ctx)));
-          if (lateStandAt !== undefined) stand = lateStandAt - at;
-          // the hit places the roar's first chord itself, now; what follows comes in the score's windows (see tick)
-          if (!armed) placeFirstChord();
-          hitAt = at;
-          roarTo = at + BEAT / 4;
-          rp.open(at);
+        prepareHit(moment: Moment) {
+          if (hitAt !== Infinity) return () => {};
+          const finishCut = prepareCut(moment);
+          placeFirstChord(lateStandAt !== undefined);
+          rp.prepare(moment);
+          return (at: number) => {
+            finishCut(at);
+            if (lateStandAt !== undefined) stand = lateStandAt - at;
+            hitAt = at;
+            roarTo = at + BEAT / 4;
+            rp.open(at);
+            if (lateStandAt !== undefined) {
+              const B = Math.max(1.5, stand / 2);
+              rp.placeRelative(at, () => {
+                hornNote(B * 0.62, theme[0][1]);
+                rollAt(0, B);
+                roarOnce(0, 0, BEAT / 4);
+              });
+            }
+          };
         },
         tick(from, to) {
           const bEnd = Math.min(to, cutAt - 0.12, hitAt - 0.12);
@@ -524,8 +529,19 @@ const FACTORIES: Record<Section, Factory> = {
         pedal.setValueAtTime(0, t);
         pedal.setTargetAtTime(0.11, t, 0.2);
       }
-      function roarNotes(base: number, from: number, to: number) {
-        const standAt = base + stand;
+      function hornNote(t: number, m: number) {
+        horns.chord(t, [m - 12, m], { dip: true, att: 0.07, glide: 0.04 });
+        const hl = rp.at(horns.lp.frequency);
+        hl.setTargetAtTime(3600, t, 0.025);
+        hl.setTargetAtTime(1800, t + 0.22, 0.35);
+      }
+      function rollAt(t: number, B: number) {
+        const rg = rp.at(roll.gain);
+        rg.setValueAtTime(0.0015, t + B * 0.45);
+        rg.exponentialRampToValueAtTime(0.08, t + B - 0.015);
+        rg.setTargetAtTime(0.0012, t + B, 0.25);
+      }
+      function roarNotes(base: number, from: number, to: number, independent = false) {
         const B = Math.max(1.5, stand / 2);
         grid(base, B, from, to, (i, t) => {
           const k = i < 3 ? i : (i - 3) % 3;
@@ -538,21 +554,14 @@ const FACTORIES: Record<Section, Factory> = {
           if (i < 3) {
             const [a, b] = theme[i];
             const t2 = t + B * (i === 2 ? 0.35 : 0.62);
-            const hl = rp.at(horns.lp.frequency);
-            for (const [tt, m] of [[t, a], [t2, b]]) {
-              horns.chord(tt, [m - 12, m], { dip: true, att: 0.07, glide: 0.04 });
-              hl.setTargetAtTime(3600, tt, 0.025);
-              hl.setTargetAtTime(1800, tt + 0.22, 0.35);
-            }
+            hornNote(t, a);
+            if (!independent) hornNote(t2, b);
           }
           if (i > 0) {
             thump(rp, t, i === 2 ? 0.36 : 0.22, 82, 40, roar, thSat);
             taiko(rp, t, i === 2 ? 0.34 : 0.24, drums, { f0: 80, f1: 48, dec: 0.32, sat: dSat });
           }
-          const rg = rp.at(roll.gain);
-          rg.setValueAtTime(0.0015, t + B * 0.45);
-          rg.exponentialRampToValueAtTime(0.08, t + B - 0.015);
-          rg.setTargetAtTime(0.0012, t + B, 0.25);
+          if (!independent) rollAt(t, B);
           if (i === 2) {
             crash(rp, t, 0.18, v.wet);
             // the stand lands low: a deep drop under the crash (reference stand: 63-125 Hz within 5-6 dB of the full mix)
@@ -564,18 +573,7 @@ const FACTORIES: Record<Section, Factory> = {
             top.chord(t, [74, 77, 81], { att: 0.06 });
           } else if (i > 2) top.chord(t, k === 0 ? [74, 77, 82] : k === 1 ? [76, 79, 84] : [74, 77, 81], { dip: true, att: 0.1 });
         });
-        once(standAt - 1.6, from, to, (t) => {
-          revSwell(rp, t, standAt - 0.005, 0.06, v.wet, 3800);
-          timpRoll(rp, t, standAt - 0.004, 0.16, drums);
-        });
-        // the held breath before the stand: the wall (not the horns' theme) draws back ~4 dB under the rising swell, then
-        // lands on the stand
-        once(standAt - 0.95, from, to, (t) => {
-          for (const g of [wall.gain, drums.gain].map((p) => rp.at(p))) {
-            g.setTargetAtTime(dB(-4), t, 0.12);
-            g.setTargetAtTime(1, standAt - 0.004, 0.003);
-          }
-        });
+        if (!independent) roarOnce(base, from, to);
         grid(base + BEAT / 4, BEAT / 4, from, to, (i, t) => {
           const a = (i % 4 === 3 ? 1 : i % 2 ? 0.55 : 0.75) * (0.88 + 0.24 * h01(i, 31));
           const k = Math.floor((t - base) / B);
@@ -589,6 +587,21 @@ const FACTORIES: Record<Section, Factory> = {
           const down = s % 4 === 0;
           const dec = down ? 0.22 : 0.12;
           taiko(rp, t, 0.2 * lv, drums, { f0: down ? 84 : 120, f1: down ? 52 : 80, dec, slap: 1.8, sat: dSat });
+        });
+      }
+      function roarOnce(base: number, from: number, to: number) {
+        const standAt = base + stand;
+        once(standAt - 1.6, from, to, (t) => {
+          revSwell(rp, t, standAt - 0.005, 0.06, v.wet, 3800);
+          timpRoll(rp, t, standAt - 0.004, 0.16, drums);
+        });
+        // the held breath before the stand: the wall (not the horns' theme) draws back ~4 dB under the rising swell,
+        // then lands on the stand
+        once(standAt - 0.95, from, to, (t) => {
+          for (const g of [wall.gain, drums.gain].map((p) => rp.at(p))) {
+            g.setTargetAtTime(dB(-4), t, 0.12);
+            g.setTargetAtTime(1, standAt - 0.004, 0.003);
+          }
         });
       }
     };
@@ -770,13 +783,9 @@ export class Music {
       .map((s) => s.impl.prepareHush?.(moment)).filter((finish) => finish !== undefined);
   }
 
-  armHit() {
-    for (const s of this.live) if (s.name === "awaken" && s.end === Infinity) s.impl.arm?.();
-  }
-
-  onHit(at: number) {
-    for (const s of this.live) if (s.name === "awaken" && s.end === Infinity) s.impl.hit?.(at);
-    this.scheduleUntil(Math.max(at, this.host.lib.ctx.currentTime) + 0.05);
+  prepareHit(moment: Moment) {
+    return this.live.filter((s) => s.name === 'awaken' && s.end === Infinity)
+      .map((s) => s.impl.prepareHit?.(moment)).filter((finish) => finish !== undefined);
   }
 
   /** Places the score up to `t`. What would fall before `from` (after a stall, the part of the window behind soon()) is

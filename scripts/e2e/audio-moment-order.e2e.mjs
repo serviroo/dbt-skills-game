@@ -27,6 +27,13 @@ export const scenarios = {
           { name: 'repeated-hush', at: 0.4, setup: (e) => e.hush(0.1), run: (e) => e.hush(0.4, 1.18) },
           { name: 'awaken-hush', at: 0.7, setup: (e) => e.music.to('awaken', 0.04, { at: 0.1 }),
             run: (e) => e.hush(0.7, 1.48) },
+          { name: 'awaken-hit', at: 0.7, barrier: true, setup: (e) => {
+            e.music.to('awaken', 0.04, { at: 0.1 });
+            e.hush(0.4);
+          }, run: (e) => e.play('awaken_hit', { at: 0.7 }) },
+          { name: 'awaken-hit-late-stand', at: 0.7,
+            setup: (e) => e.music.to('awaken', 0.04, { at: 0.1, standAt: 2.35 }),
+            run: (e) => e.play('awaken_hit', { at: 0.7 }) },
           { name: 'cancel-barrier', at: 0.7, barrier: true,
             setup: (e) => e.music.to('intro', 0.04, { at: 0.1 }),
             run: (e) => e.music.to('windows', 0.04, { at: 0.7 }) },
@@ -60,7 +67,7 @@ export const scenarios = {
           const voiceAt = Voice.prototype.at;
           const reg = Voice.prototype.reg;
           const moments = new Map();
-          const parametersAtPick = new Set();
+          const parametersAtPick = new Map();
           const builderAsked = new Map();
           const builderPlaced = new Map();
           const sourceAsked = new Map();
@@ -133,7 +140,9 @@ export const scenarios = {
               }
             }
             for (const entry of this.holding() ?? []) {
-              if (entry.key instanceof AudioParam) parametersAtPick.add(entry.key);
+              if (entry.key instanceof AudioParam) {
+                parametersAtPick.set(entry.key, builderAsked.get(entry.key)?.length ?? 0);
+              }
               const source = entry.source;
               if (sourceAsked.has(source)) {
                 sourceAtPick.set(source, { ...sourceAsked.get(source), stop: source.stop, kill: source.voice.killAt });
@@ -165,7 +174,7 @@ export const scenarios = {
               if (!parametersAtPick.has(param)) continue;
               const actual = builderPlaced.get(param) ?? [];
               let i = 0;
-              for (const [method, args] of calls) {
+              for (const [method, args] of calls.slice(0, parametersAtPick.get(param))) {
                 const wanted = [method, args.map((value, n) =>
                   n === (method === 'cancelScheduledValues' ? 0 : 1) ? value + test.at : value)];
                 while (i < actual.length && JSON.stringify(actual[i]) !== JSON.stringify(wanted)) i++;
