@@ -5,9 +5,12 @@
  */
 import { canvasBlob, renderDrawing, type Paper, type Stroke } from './ink';
 import { cleanStrokes, storedStroke } from './stored-strokes';
-import { connectionLost, uid, validDay } from './store';
+import { uid, validDay } from './store';
+import { IdbLink } from './idb-link';
 import { ART_DB, BESIDE, TAB_KEY } from '../core/stored-names';
-import { canWrite, cleared, dropBefore, fromBefore, goneElsewhere, marked, mayWrite, onClear, removeStored, setStored, write as writeOut } from '../core/cleared';
+import {
+  cleared, dropBefore, fromBefore, marked, onClear, removeStored, setStored, write as writeOut,
+} from '../core/cleared';
 
 export interface DrawingMeta {
   id: string;
@@ -218,15 +221,12 @@ function req<T>(r: IDBRequest<T>) {
 }
 
 export class ArtStore {
-  private db: Promise<IDBDatabase | null>;
+  private link: IdbLink;
+  private get db() { return this.link.db; }
   private mem = { meta: new Map<string, DrawingMeta>(), strokes: new Map<string, Stroke[]>(), thumbs: new Map<string, Blob>(), drafts: new Map<string, Draft>() };
-  persistent = true;
-  /** IndexedDB is here but couldn't be opened, so drawings stored earlier can't be read this visit. */
-  private unreadable = false;
-  /** Reads of the stored drawings that got no answer; exportAll compares it before and after. */
-  private readFails = 0;
-  private lost = new WeakSet<IDBDatabase>();
-  get fails() { return this.readFails; }
+  get persistent() { return this.link.persistent; }
+  set persistent(value: boolean) { this.link.persistent = value; }
+  get fails() { return this.link.readFails; }
   private urls = new Map<string, { at: number; url: string }>();
   private cache: DrawingMeta[] | null = null;
   private gen = 0;
@@ -246,8 +246,6 @@ export class ArtStore {
   /** The newest draft write per key; an older one finishing later must not put its draft back in memory. */
   private draftTurns = new Map<string, number>();
   private draftTurn = 0;
-  /** Writes under way, so a clear's check waits for them. */
-  private writes = new Set<Promise<unknown>>();
   private onStorage = (e: StorageEvent) => {
     if (!e.key?.startsWith(`${this.goneKey}.`)) return;
     this.drop();
@@ -260,7 +258,7 @@ export class ArtStore {
     readonly name: string,
     private goneKey: string,
   ) {
-    onClear({ hold: () => Promise.allSettled([...this.writes]), clear: () => this.dispose() });
+    onClear({ hold: () => Promise.allSettled([...this.link.writes]), clear: () => this.dispose() });
     if (typeof BroadcastChannel !== 'undefined') {
       try {
         this.channel = new BroadcastChannel(name);
@@ -279,7 +277,9 @@ export class ArtStore {
       }
     }
     if (typeof window !== 'undefined') window.addEventListener('storage', this.onStorage);
-    this.db = this.connect(true);
+    this.link = new IdbLink(name, ART_DB.version, (db) => {
+      for (const s of ART_DB.stores) if (!db.objectStoreNames.contains(s)) db.createObjectStore(s);
+    });
     void this.sweep();
   }
 
@@ -327,9 +327,7 @@ export class ArtStore {
   /** This game's data is being cleared: the database closes so it can go, and nothing stays in memory. */
   private dispose() {
     if (typeof window !== 'undefined') window.removeEventListener('storage', this.onStorage);
-    const db = this.db;
-    this.db = Promise.resolve(null);
-    void db.then((d) => d?.close());
+    this.link.close();
     try {
       this.channel?.close();
     } catch {
@@ -377,106 +375,22 @@ export class ArtStore {
     this.changed();
   }
 
-  /** Opens the database; a lost connection on open gets one more try (`again`). Null when there is none to use. */
-  private connect(again: boolean): Promise<IDBDatabase | null> {
-    return new Promise((resolve) => {
-      try {
-        if (typeof indexedDB === 'undefined') { this.persistent = false; return resolve(null); }
-        // this game's data is being cleared: opening would make the database again
-        if (cleared()) return resolve(null);
-        const open = indexedDB.open(this.name, ART_DB.version);
-        open.onupgradeneeded = () => {
-          const db = open.result;
-          for (const s of ART_DB.stores) if (!db.objectStoreNames.contains(s)) db.createObjectStore(s);
-        };
-        open.onsuccess = () => {
-          const db = open.result;
-          db.onversionchange = (e) => {
-            db.close();
-            // deleted: another copy cleared this game's data
-            if (e.newVersion === null) goneElsewhere();
-          };
-          resolve(db);
-        };
-        const fail = (retry: boolean) => {
-          if (again && retry) return resolve(this.connect(false));
-          this.persistent = false;
-          this.unreadable = true;
-          resolve(null);
-        };
-        open.onerror = () => fail(connectionLost(open.error));
-        open.onblocked = () => fail(false);
-      } catch {
-        this.persistent = false;
-        this.unreadable = true;
-        resolve(null);
-      }
-    });
-  }
-
-  /** One fresh connection in place of a lost one (callers that saw the same loss share it). True when there is one. */
-  private async reconnect(old: IDBDatabase) {
-    if (cleared()) return false;
-    if (!this.lost.has(old)) {
-      this.lost.add(old);
-      try {
-        old.close();
-      } catch {
-        /* already closed */
-      }
-      this.db = this.connect(false);
-    }
-    return !!(await this.db);
-  }
-
   /**
    * Runs fn in one transaction, or returns the fallback. A lost connection is opened again once: a read runs again on
    * the fresh one, and so does a write that never started. A read that still gets no answer counts in readFails.
    */
-  private async tx<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>, fallback: () => T): Promise<T> {
-    if (mode === 'readonly') return this.run(stores, mode, fn, fallback);
-    // a clear checking its Save Crystal holds writes; once it clears they never happen
-    if (!canWrite() && !(await mayWrite())) return fallback();
-    const job = this.run(stores, mode, fn, fallback);
-    this.writes.add(job);
-    void job.finally(() => this.writes.delete(job));
-    return job;
-  }
-
-  private async run<T>(stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>, fallback: () => T): Promise<T> {
-    let failed = false;
-    for (let retry = true; ; retry = false) {
-      const db = await this.db;
-      if (!db) break;
-      let started = false;
-      try {
-        const t = db.transaction(stores, mode);
-        started = true;
-        const done = new Promise<void>((ok, bad) => {
-          t.oncomplete = () => ok();
-          t.onerror = () => bad(t.error);
-          t.onabort = () => bad(t.error);
-        });
-        done.catch(() => undefined);
-        const v = await fn(t);
-        await done;
-        return v;
-      } catch (e) {
-        failed = true;
-        if (retry && connectionLost(e) && (await this.reconnect(db)) && (!started || mode === 'readonly')) continue;
-        break;
-      }
-    }
-    if (failed) this.persistent = false;
-    if (mode === 'readonly' && (failed || this.unreadable)) this.readFails++;
-    return fallback();
+  private async tx<T>(
+    stores: string[], mode: IDBTransactionMode, fn: (t: IDBTransaction) => Promise<T>, fallback: () => T,
+  ): Promise<T> {
+    const result = await this.link.tx(stores, mode, fn);
+    return result ? result.v : fallback();
   }
 
   /** Saved drawings, plus any this session could only keep in memory (a newer in-memory copy wins). */
   async list(): Promise<DrawingMeta[]> {
     if (this.cache) return this.cache;
     const gen = this.gen;
-    const fails = this.readFails;
+    const fails = this.link.readFails;
     const rows = await this.tx(['meta'], 'readonly', (t) => req(t.objectStore('meta').getAll() as IDBRequest<DrawingMeta[]>), () => [] as DrawingMeta[]);
     if (gen !== this.gen) return this.list();
     const byId = new Map(rows.map((m) => [m.id, m]));
@@ -486,7 +400,7 @@ export class ArtStore {
     }
     const out = [...byId.values()].sort((a, b) => b.t - a.t);
     // a list read while the drawings couldn't be read is not kept, so the next look reads again
-    if (gen === this.gen && this.readFails === fails) this.cache = out;
+    if (gen === this.gen && this.link.readFails === fails) this.cache = out;
     return out;
   }
 
@@ -955,7 +869,7 @@ export class ArtStore {
    * a read of the stored drawings failed, so some may be missing from records.
    */
   async exportAll(): Promise<{ records: DrawingRec[]; incomplete: boolean }> {
-    const fails = this.readFails;
+    const fails = this.link.readFails;
     this.drop();
     const ids = (await this.list()).map((m) => m.id);
     const used = new Set(ids);
@@ -983,14 +897,14 @@ export class ArtStore {
       used.add(cid);
       out.push(storedRec({ ...other, id: cid }));
     }
-    return { records: out.sort((a, b) => a.t - b.t), incomplete: this.readFails > fails };
+    return { records: out.sort((a, b) => a.t - b.t), incomplete: this.link.readFails > fails };
   }
 
   /** Every unfinished drawing, for the Save Crystal, read fresh. incomplete: the stored ones couldn't all be read. */
   async exportDrafts(): Promise<{ drafts: Draft[]; incomplete: boolean }> {
-    const fails = this.readFails;
+    const fails = this.link.readFails;
     const all = (await this.drafts()).sort((a, b) => a.t - b.t || (a.key < b.key ? -1 : 1));
-    return { drafts: all.map(storedDraft), incomplete: this.readFails > fails };
+    return { drafts: all.map(storedDraft), incomplete: this.link.readFails > fails };
   }
 
   /**
