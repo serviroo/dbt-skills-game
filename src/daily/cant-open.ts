@@ -1,4 +1,5 @@
 import { CANT_OPEN } from '../content/daily-lines';
+import { wakeStorage } from './idb-link';
 import { btn, h, p, panel, row, typo } from './ui';
 import './cant-open.css';
 
@@ -16,6 +17,7 @@ export function cantOpen(what: CantOpenWhat, again: () => Promise<boolean>): HTM
   const tryAgain = async () => {
     if (retry.getAttribute('aria-disabled') === 'true') return;
     busy(true);
+    wakeStorage();
     const ok = await again().catch(() => false);
     if (!box.isConnected) return;
     busy(false);

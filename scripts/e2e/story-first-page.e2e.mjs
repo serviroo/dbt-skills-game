@@ -207,12 +207,21 @@ export const scenarios = {
         const disk = await page.evaluate(async ({ id, first, second, notes }) => {
           const { storyStore } = await import('/src/daily/storystore.ts');
           const ss = storyStore(window.__daily.store.key);
-          const db = await ss.db;
-          const title = await new Promise((resolve, reject) => {
-            const request = db.transaction('stories').objectStore('stories').get(id);
-            request.onsuccess = () => resolve(request.result?.title);
+          const db = await new Promise((resolve, reject) => {
+            const request = indexedDB.open(ss.name);
+            request.onsuccess = () => resolve(request.result);
             request.onerror = () => reject(request.error);
           });
+          let title;
+          try {
+            title = await new Promise((resolve, reject) => {
+              const request = db.transaction('stories').objectStore('stories').get(id);
+              request.onsuccess = () => resolve(request.result?.title);
+              request.onerror = () => reject(request.error);
+            });
+          } finally {
+            db.close();
+          }
           return {
             title,
             texts: await Promise.all([first, second, notes].map(async (ch) => (await ss.onDisk(ch))?.text)),
