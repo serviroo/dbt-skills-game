@@ -106,7 +106,7 @@ export function artScreen(app: App): ScreenOut {
         );
       }
     }
-    const returnFocus = !report && canRestoreFocus(el);
+    const returnFocus = !report && canRestoreFocus(gallery);
     const shown = favFirst(list);
     refill(gallery, shown.map(cardOf).join('\n'), () =>
       !shown.length

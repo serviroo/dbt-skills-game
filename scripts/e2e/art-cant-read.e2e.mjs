@@ -168,23 +168,25 @@ export const scenarios = {
     }
   },
   async 'art-cant-read-gallery-outside-focus'(h) {
-    const { ctx, page, errors } = await savedDrawing(h);
-    try {
-      await failReads(page, ['meta', 'drafts']);
-      await go(page, { name: 'art' });
-      await panel(page, 'read your drawings').waitFor();
-      await restoreReads(page);
-      await holdRead(page, 'drafts', 'getAll');
-      await retry(page);
-      await page.waitForFunction(() => window.focusReadGate.ready);
-      await page.locator('.dq-top .dq-safe').focus();
-      await page.evaluate(() => window.focusReadGate.release());
-      await page.locator('[data-piece]').first().waitFor();
-      h.expect(await page.locator('.dq-top .dq-safe').evaluate((el) => el === document.activeElement),
-        'gallery retry took focus from Safe Zone');
-      h.expect(!errors.length, errors.join('\n'));
-    } finally {
-      await ctx.close();
+    for (const away of ['.dq-top .dq-safe', '.dq-artentry--today']) {
+      const { ctx, page, errors } = await savedDrawing(h);
+      try {
+        await failReads(page, ['meta', 'drafts']);
+        await go(page, { name: 'art' });
+        await panel(page, 'read your drawings').waitFor();
+        await restoreReads(page);
+        await holdRead(page, 'drafts', 'getAll');
+        await retry(page);
+        await page.waitForFunction(() => window.focusReadGate.ready);
+        await page.locator(away).focus();
+        await page.evaluate(() => window.focusReadGate.release());
+        await page.locator('[data-piece]').first().waitFor();
+        h.expect(await page.locator(away).evaluate((el) => el === document.activeElement),
+          `gallery retry took focus from ${away}`);
+        h.expect(!errors.length, errors.join('\n'));
+      } finally {
+        await ctx.close();
+      }
     }
   },
   async 'art-cant-read-lost-focus'(h) {
