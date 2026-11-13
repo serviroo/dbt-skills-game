@@ -1,6 +1,15 @@
 import { canWrite, cleared, goneElsewhere, mayWrite } from '../core/cleared';
 import { connectionLost } from './store';
 
+export function req<T>(r: IDBRequest<T>): Promise<T> {
+  const answer = new Promise<T>((ok, bad) => {
+    r.onsuccess = () => ok(r.result);
+    r.onerror = () => bad(r.error);
+  });
+  answer.catch(() => undefined);
+  return answer;
+}
+
 export class IdbLink {
   persistent = true;
   private unreadable = false;

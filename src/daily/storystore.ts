@@ -13,7 +13,7 @@ import type { App } from './app';
 import { cardLists, cleanCard, mergeCards } from './story-card-list';
 export { cleanCard, skippedCards } from './story-card-list';
 import { uid, validDay } from './store';
-import { IdbLink } from './idb-link';
+import { IdbLink, req } from './idb-link';
 import { BESIDE, STORY_DB } from '../core/stored-names';
 import {
   canWrite, cleared, dropBefore, fromBefore, marked, onClear, removeStored, setStored, write,
@@ -123,13 +123,6 @@ export function cleanChapter(x: unknown): Chapter | null {
   const kind = x.kind as Chapter['kind'];
   const updated = stampOf(x.updated);
   return { id: x.id, story: x.story, kind, title: chapterTitle(x.title, kind), text: x.text.slice(0, STORY_CAP.text), updated, rev: revOf(x.rev, updated) };
-}
-
-function req<T>(r: IDBRequest) {
-  return new Promise<T>((ok, bad) => {
-    r.onsuccess = () => ok(r.result as T);
-    r.onerror = () => bad(r.error);
-  });
 }
 
 /** Where a decision reads and writes: one IndexedDB transaction, or this copy's memory when that isn't possible. */

@@ -6,7 +6,7 @@
 import { canvasBlob, renderDrawing, type Paper, type Stroke } from './ink';
 import { cleanStrokes, storedStroke } from './stored-strokes';
 import { uid, validDay } from './store';
-import { IdbLink } from './idb-link';
+import { IdbLink, req } from './idb-link';
 import { ART_DB, BESIDE, TAB_KEY } from '../core/stored-names';
 import {
   cleared, dropBefore, fromBefore, marked, onClear, removeStored, setStored, write as writeOut,
@@ -211,13 +211,6 @@ function readGone(k: string): Gone | null {
   } catch {
     return null;
   }
-}
-
-function req<T>(r: IDBRequest<T>) {
-  return new Promise<T>((ok, bad) => {
-    r.onsuccess = () => ok(r.result);
-    r.onerror = () => bad(r.error);
-  });
 }
 
 export class ArtStore {
