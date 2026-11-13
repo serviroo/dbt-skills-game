@@ -794,8 +794,10 @@ export function pieceScreen(app: App, route: Route, visit: Visit): ScreenOut {
     body.replaceChildren(cantOpen('drawing', load));
   };
   const missing = () => {
+    const had = body.contains(document.activeElement);
     endRename();
     body.replaceChildren(p('That page is no longer here.', 'dq-text dq-empty'), h('div', { class: 'dq-actions' }, btn('Art room', () => app.go({ name: 'art' }), { kind: 'quiet' })));
+    if (had) el.querySelector<HTMLElement>('[data-focus]')?.focus({ preventScroll: true });
   };
   const off = as.onRemove((gone) => {
     if (gone !== id) return;

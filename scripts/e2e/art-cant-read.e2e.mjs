@@ -102,6 +102,38 @@ async function drawingRead(h, failedStores) {
 }
 
 export const scenarios = {
+  async 'art-cant-read-piece-removed'(h) {
+    const { ctx, page, errors, id } = await savedDrawing(h);
+    try {
+      await failReads(page, ['meta', 'strokes']);
+      await go(page, { name: 'piece', id });
+      await panel(page, 'open this drawing').waitFor();
+      await page.evaluate(async (id) => {
+        const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+        const db = await new Promise((ok, bad) => {
+          const req = indexedDB.open(as.name);
+          req.onsuccess = () => ok(req.result);
+          req.onerror = () => bad(req.error);
+        });
+        await new Promise((ok, bad) => {
+          const t = db.transaction(['meta', 'strokes'], 'readwrite');
+          for (const s of ['meta', 'strokes']) t.objectStore(s).delete(id);
+          t.oncomplete = ok;
+          t.onerror = () => bad(t.error);
+        });
+        db.close();
+      }, id);
+      await restoreReads(page);
+      await page.getByRole('button', { name: 'Try again' }).focus();
+      await retry(page);
+      await page.getByText('That page is no longer here.').waitFor();
+      const focused = await page.evaluate(() => !!document.activeElement?.matches('.dq-piece [data-focus]'));
+      h.expect(focused, 'a retry that found the drawing removed dropped the focus');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
   async 'art-cant-read-gallery'(h) {
     const { ctx, page, errors } = await savedDrawing(h);
     try {
