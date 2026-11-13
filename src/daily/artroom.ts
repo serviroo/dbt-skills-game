@@ -7,7 +7,7 @@ import { ALLY_NAMES, ART, ART_PROMPTS } from '../content/daily-lines';
 import type { App, Route, ScreenOut, Visit } from './app';
 import { icon } from './art';
 import { artStore, extrasOf, revOf, type DrawingRec } from './artstore';
-import { allyCard, cardOf, favFirst, focusBack, refill, setFocusBack, thumbImg } from './art-cards';
+import { allyCard, canRestoreFocus, cardOf, favFirst, focusBack, refill, setFocusBack, thumbImg } from './art-cards';
 import { cantOpen } from './cant-open';
 import { reading } from './reading';
 import { INKS, InkPad, PAGE, renderDrawing, SIZES, TOOLS, type Paper, type Stroke, type Tool } from './ink';
@@ -79,11 +79,7 @@ export function artScreen(app: App): ScreenOut {
       draftShown = null;
       draftBox.classList.add('is-hidden');
       draftBox.replaceChildren();
-      if (report) refill(gallery, '\0unread', () => [cantOpen('drawings', async () => {
-        const ok = await render(false);
-        if (ok) pagesHeading.focus({ preventScroll: true });
-        return ok;
-      })]);
+      if (report) refill(gallery, '\0unread', () => [cantOpen('drawings', () => render(false))]);
       return false;
     }
     if (!as.persistent) note.classList.remove('is-hidden');
@@ -110,6 +106,7 @@ export function artScreen(app: App): ScreenOut {
         );
       }
     }
+    const returnFocus = !report && canRestoreFocus(el);
     const shown = favFirst(list);
     refill(gallery, shown.map(cardOf).join('\n'), () =>
       !shown.length
@@ -125,7 +122,8 @@ export function artScreen(app: App): ScreenOut {
             ));
           }),
     );
-    focusBack(gallery);
+    if (report || returnFocus) focusBack(gallery);
+    if (returnFocus) pagesHeading.focus({ preventScroll: true });
     return true;
   };
   const off = as.onChange(() => void render());
@@ -744,10 +742,11 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     unread = true;
     el.replaceChildren(cantOpen('drawing', async () => {
       if (!(await open()) || left) return false;
+      const returnFocus = canRestoreFocus(el);
       el.replaceChildren(...children);
       unread = false;
       layout();
-      el.querySelector<HTMLElement>('[data-focus]')?.focus({ preventScroll: true });
+      if (returnFocus) el.querySelector<HTMLElement>('[data-focus]')?.focus({ preventScroll: true });
       return true;
     }));
   };
@@ -971,7 +970,7 @@ export function pieceScreen(app: App, route: Route, visit: Visit): ScreenOut {
       }, { kind: 'link' }),
     );
     paint();
-    const wasUnread = unread;
+    const returnFocus = unread && canRestoreFocus(el);
     unread = false;
     body.replaceChildren(
       artBox,
@@ -987,7 +986,7 @@ export function pieceScreen(app: App, route: Route, visit: Visit): ScreenOut {
         status,
       ),
     );
-    if (wasUnread) el.querySelector<HTMLElement>('[data-focus]')?.focus({ preventScroll: true });
+    if (returnFocus) el.querySelector<HTMLElement>('[data-focus]')?.focus({ preventScroll: true });
     return true;
   };
   void load().then((ok) => { if (!ok && !removed) cant(); });

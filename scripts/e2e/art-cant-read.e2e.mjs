@@ -32,6 +32,33 @@ async function failReads(page, stores) {
   }, stores);
 }
 
+async function holdRead(page, store, method) {
+  await page.evaluate(async ({ store, method }) => {
+    const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+    const proto = IDBObjectStore.prototype;
+    const original = proto[method];
+    const gate = { ready: false, used: false, release: null };
+    window.focusReadGate = gate;
+    proto[method] = function (...args) {
+      const request = original.apply(this, args);
+      if (this.transaction.db.name !== as.name || this.name !== store || gate.used) return request;
+      gate.used = true;
+      const delayed = { result: undefined, error: null, onsuccess: null, onerror: null };
+      request.onsuccess = () => {
+        delayed.result = request.result;
+        gate.release = () => { proto[method] = original; delayed.onsuccess?.(); };
+        gate.ready = true;
+      };
+      request.onerror = () => {
+        delayed.error = request.error;
+        gate.release = () => { proto[method] = original; delayed.onerror?.(); };
+        gate.ready = true;
+      };
+      return delayed;
+    };
+  }, { store, method });
+}
+
 const restoreReads = (page) => page.evaluate(() => window.restoreArtReads());
 const go = (page, route) => page.evaluate((route) => window.__daily.go(route), route);
 const panel = (page, word) => page.getByRole('heading', { name: `Can’t ${word} right now` });
@@ -102,6 +129,91 @@ async function drawingRead(h, failedStores) {
 }
 
 export const scenarios = {
+  async 'art-cant-read-piece-outside-focus'(h) {
+    const { ctx, page, errors, id } = await savedDrawing(h);
+    try {
+      await failReads(page, ['meta', 'strokes']);
+      await go(page, { name: 'piece', id });
+      await panel(page, 'open this drawing').waitFor();
+      await restoreReads(page);
+      await page.locator('.dq-top .dq-safe').focus();
+      await changed(page);
+      await page.getByRole('button', { name: 'Keep drawing', exact: true }).waitFor();
+      h.expect(await page.locator('.dq-top .dq-safe').evaluate((el) => el === document.activeElement),
+        'saved drawing recovery took focus from Safe Zone');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+  async 'art-cant-read-draw-outside-focus'(h) {
+    const { ctx, page, errors, id } = await savedDrawing(h);
+    try {
+      await failReads(page, ['drafts']);
+      await go(page, { name: 'draw', kind: 'today', id });
+      await panel(page, 'open this drawing').waitFor();
+      await restoreReads(page);
+      await holdRead(page, 'drafts', 'get');
+      await retry(page);
+      await page.waitForFunction(() => window.focusReadGate.ready);
+      await page.locator('.dq-top .dq-safe').focus();
+      await page.evaluate(() => window.focusReadGate.release());
+      await page.waitForFunction(() => document.querySelector('.dq-ink-stage') &&
+        !document.querySelector('.dq-ink-stage').inert);
+      h.expect(await page.locator('.dq-top .dq-safe').evaluate((el) => el === document.activeElement),
+        'drawing retry took focus from Safe Zone');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+  async 'art-cant-read-gallery-outside-focus'(h) {
+    const { ctx, page, errors } = await savedDrawing(h);
+    try {
+      await failReads(page, ['meta', 'drafts']);
+      await go(page, { name: 'art' });
+      await panel(page, 'read your drawings').waitFor();
+      await restoreReads(page);
+      await holdRead(page, 'drafts', 'getAll');
+      await retry(page);
+      await page.waitForFunction(() => window.focusReadGate.ready);
+      await page.locator('.dq-top .dq-safe').focus();
+      await page.evaluate(() => window.focusReadGate.release());
+      await page.locator('[data-piece]').first().waitFor();
+      h.expect(await page.locator('.dq-top .dq-safe').evaluate((el) => el === document.activeElement),
+        'gallery retry took focus from Safe Zone');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+  async 'art-cant-read-lost-focus'(h) {
+    const cases = [
+      { name: 'piece', stores: ['meta', 'strokes'], store: 'meta', method: 'get', target: '.dq-piece [data-focus]' },
+      { name: 'draw', stores: ['drafts'], store: 'drafts', method: 'get', target: '.dq-draw [data-focus]' },
+      { name: 'art', stores: ['drafts'], store: 'drafts', method: 'getAll', target: '#dq-pages-h' },
+    ];
+    for (const test of cases) {
+      const { ctx, page, errors, id } = await savedDrawing(h);
+      try {
+        await failReads(page, test.stores);
+        const route = test.name === 'draw' ? { name: 'draw', kind: 'today', id }
+          : test.name === 'piece' ? { name: 'piece', id } : { name: 'art' };
+        await go(page, route);
+        await panel(page, test.name === 'art' ? 'read your drawings' : 'open this drawing').waitFor();
+        await restoreReads(page);
+        await holdRead(page, test.store, test.method);
+        await retry(page);
+        await page.waitForFunction(() => window.focusReadGate.ready);
+        await page.evaluate(() => document.activeElement.blur());
+        await page.evaluate(() => window.focusReadGate.release());
+        await page.waitForFunction((target) => document.activeElement === document.querySelector(target), test.target);
+        h.expect(!errors.length, errors.join('\n'));
+      } finally {
+        await ctx.close();
+      }
+    }
+  },
   async 'art-cant-read-piece-removed'(h) {
     const { ctx, page, errors, id } = await savedDrawing(h);
     try {

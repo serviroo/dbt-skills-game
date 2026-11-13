@@ -5,6 +5,9 @@ import { h, keptWhole, typo } from './ui';
 
 const store = (app: App) => artStore(app.store.key);
 
+export const canRestoreFocus = (el: HTMLElement) =>
+  !document.activeElement || document.activeElement === document.body || el.contains(document.activeElement);
+
 /** An <img> that fills in once the thumbnail is ready. */
 export function thumbImg(app: App, m: DrawingMeta, alt: string) {
   const img = h('img', { class: 'dq-thumb', alt, decoding: 'async', draggable: 'false' });
