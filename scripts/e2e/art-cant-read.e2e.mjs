@@ -128,6 +128,24 @@ async function drawingRead(h, failedStores) {
   }
 }
 
+async function deleteDrawing(page, id) {
+  await page.evaluate(async (id) => {
+    const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+    const db = await new Promise((ok, bad) => {
+      const req = indexedDB.open(as.name);
+      req.onsuccess = () => ok(req.result);
+      req.onerror = () => bad(req.error);
+    });
+    await new Promise((ok, bad) => {
+      const t = db.transaction(['meta', 'strokes'], 'readwrite');
+      for (const s of ['meta', 'strokes']) t.objectStore(s).delete(id);
+      t.oncomplete = ok;
+      t.onerror = () => bad(t.error);
+    });
+    db.close();
+  }, id);
+}
+
 export const scenarios = {
   async 'art-cant-read-gallery-recovers-itself'(h) {
     const { ctx, page, errors } = await savedDrawing(h);
@@ -233,27 +251,34 @@ export const scenarios = {
       }
     }
   },
+  async 'art-cant-read-piece-removed-lost-focus'(h) {
+    const { ctx, page, errors, id } = await savedDrawing(h);
+    try {
+      await failReads(page, ['meta', 'strokes']);
+      await go(page, { name: 'piece', id });
+      await panel(page, 'open this drawing').waitFor();
+      await deleteDrawing(page, id);
+      await restoreReads(page);
+      await holdRead(page, 'meta', 'get');
+      await retry(page);
+      await page.waitForFunction(() => window.focusReadGate.ready);
+      await page.evaluate(() => document.activeElement.blur());
+      await page.evaluate(() => window.focusReadGate.release());
+      await page.getByText('That page is no longer here.').waitFor();
+      const focused = await page.evaluate(() => !!document.activeElement?.matches('.dq-piece [data-focus]'));
+      h.expect(focused, 'a removed drawing left lost focus on the document');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
   async 'art-cant-read-piece-removed'(h) {
     const { ctx, page, errors, id } = await savedDrawing(h);
     try {
       await failReads(page, ['meta', 'strokes']);
       await go(page, { name: 'piece', id });
       await panel(page, 'open this drawing').waitFor();
-      await page.evaluate(async (id) => {
-        const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
-        const db = await new Promise((ok, bad) => {
-          const req = indexedDB.open(as.name);
-          req.onsuccess = () => ok(req.result);
-          req.onerror = () => bad(req.error);
-        });
-        await new Promise((ok, bad) => {
-          const t = db.transaction(['meta', 'strokes'], 'readwrite');
-          for (const s of ['meta', 'strokes']) t.objectStore(s).delete(id);
-          t.oncomplete = ok;
-          t.onerror = () => bad(t.error);
-        });
-        db.close();
-      }, id);
+      await deleteDrawing(page, id);
       await restoreReads(page);
       await page.getByRole('button', { name: 'Try again' }).focus();
       await retry(page);
@@ -301,24 +326,52 @@ export const scenarios = {
     }
   },
   async 'art-cant-read-piece-change'(h) {
-    const { ctx, page, id } = await savedDrawing(h);
-    try {
-      await go(page, { name: 'piece', id });
-      await page.getByRole('button', { name: 'Keep drawing', exact: true }).waitFor();
-      await failReads(page, ['meta']);
-      await changed(page);
-      await panel(page, 'open this drawing').waitFor();
-      h.expect(!(await page.getByText('That page is no longer here.').count()), 'recheck made drawing look gone');
-      await page.getByRole('button', { name: 'Try again' }).focus();
-      await changed(page);
-      await h.frames(page, 10);
-      const kept = await page.evaluate(() => document.activeElement?.textContent === 'Try again');
-      h.expect(kept, 'a second failed recheck took the focus off Try again');
-      await restoreReads(page);
-      await changed(page);
-      await page.getByRole('button', { name: 'Keep drawing', exact: true }).waitFor();
-    } finally {
-      await ctx.close();
+    for (const failedStore of ['meta', 'strokes']) {
+      const { ctx, page, errors, id } = await savedDrawing(h);
+      try {
+        const other = await ctx.newPage();
+        await other.goto(h.server.url + '/?mute');
+        await other.waitForFunction(() => window.__daily?.store);
+        await go(other, { name: 'piece', id });
+        await other.getByRole('button', { name: 'Rename', exact: true }).waitFor();
+        await go(page, { name: 'piece', id });
+        await page.getByRole('button', { name: 'Rename', exact: true }).click();
+        const input = page.locator('.dq-piece-rename input');
+        await input.fill('Still typing');
+        await page.evaluate(async () => {
+          const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+          window.artChecks = { shown: 0, get: 0 };
+          for (const [method, count] of [['isShown', 'shown'], ['get', 'get']]) {
+            const original = as[method].bind(as);
+            as[method] = async (...args) => {
+              try { return await original(...args); }
+              finally { window.artChecks[count]++; }
+            };
+          }
+        });
+        await failReads(page, [failedStore]);
+        await changed(page);
+        await page.waitForFunction((key) => window.artChecks[key] > 0,
+          failedStore === 'meta' ? 'shown' : 'get');
+        await h.frames(page, 10);
+        h.expect(await input.isVisible() && await input.inputValue() === 'Still typing',
+          `a failed ${failedStore} recheck closed Rename or lost its text`);
+        h.expect(await page.locator('.dq-cant').count() === 0, 'a failed recheck replaced the page with a panel');
+        h.expect(await page.getByText('That page is no longer here.').count() === 0,
+          'a failed recheck made the drawing look gone');
+        await restoreReads(page);
+        await other.getByRole('button', { name: 'Rename', exact: true }).click();
+        await other.locator('.dq-piece-rename input').fill('New sky');
+        await other.keyboard.press('Enter');
+        await other.locator('.dq-piece-h', { hasText: 'New sky' }).waitFor();
+        await h.poll(page, () => page.locator('.dq-piece-h').textContent(), (text) => text.trim() === 'New sky',
+          'a later change did not update the drawing');
+        h.expect(await input.isVisible() && await input.inputValue() === 'Still typing',
+          'a later change closed Rename or lost its text');
+        h.expect(!errors.length, errors.join('\n'));
+      } finally {
+        await ctx.close();
+      }
     }
   },
   async 'art-cant-read-change-during-load'(h) {
@@ -417,22 +470,33 @@ export const scenarios = {
         const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
         const get = IDBObjectStore.prototype.get;
         const pending = [];
-        window.artReadGate = {
+        const gate = window.artReadGate = {
           pending,
-          release: (count) => pending.splice(0, count).forEach((finish) => finish()),
+          outstanding: 0,
+          pass: false,
+          release: (count) => {
+            if (count === Infinity) gate.pass = true;
+            pending.splice(0, count).forEach((finish) => finish());
+          },
           restore: () => { IDBObjectStore.prototype.get = get; },
         };
         IDBObjectStore.prototype.get = function (...args) {
           const request = get.apply(this, args);
           if (this.transaction.db.name !== as.name || !['meta', 'strokes'].includes(this.name)) return request;
           const delayed = { result: undefined, error: null, onsuccess: null, onerror: null };
+          gate.outstanding++;
+          const deliver = (finish) => {
+            const complete = () => { finish(); gate.outstanding--; };
+            if (gate.pass) complete();
+            else pending.push(complete);
+          };
           request.onsuccess = () => {
             delayed.result = request.result;
-            pending.push(() => delayed.onsuccess?.());
+            deliver(() => delayed.onsuccess?.());
           };
           request.onerror = () => {
             delayed.error = request.error;
-            pending.push(() => delayed.onerror?.());
+            deliver(() => delayed.onerror?.());
           };
           return delayed;
         };
@@ -446,7 +510,7 @@ export const scenarios = {
       const input = page.locator('.dq-piece-rename input');
       await input.fill('Blue sky');
       await page.evaluate(() => window.artReadGate.release(Infinity));
-      await h.frames(page, 30);
+      await page.waitForFunction(() => window.artReadGate.outstanding === 0);
       h.expect(await input.isVisible() && await input.inputValue() === 'Blue sky',
         'an overlapping load closed the rename field or lost its text');
       await page.evaluate(() => window.artReadGate.restore());

@@ -793,7 +793,7 @@ export function pieceScreen(app: App, route: Route, visit: Visit): ScreenOut {
     body.replaceChildren(cantOpen('drawing', load));
   };
   const missing = () => {
-    const had = body.contains(document.activeElement);
+    const had = canRestoreFocus(body);
     endRename();
     body.replaceChildren(p('That page is no longer here.', 'dq-text dq-empty'), h('div', { class: 'dq-actions' }, btn('Art room', () => app.go({ name: 'art' }), { kind: 'quiet' })));
     if (had) el.querySelector<HTMLElement>('[data-focus]')?.focus({ preventScroll: true });
@@ -812,7 +812,7 @@ export function pieceScreen(app: App, route: Route, visit: Visit): ScreenOut {
     const read = reading(as);
     const on = await as.isShown(id);
     if (removed) return true;
-    if (read.failed()) { cant(); return false; }
+    if (read.failed()) return !unread;
     if (unread) return false;
     if (on && !hidden) return update();
     if (on) app.go({ name: 'piece', id }, { replace: true, quiet: true });
@@ -938,7 +938,7 @@ export function pieceScreen(app: App, route: Route, visit: Visit): ScreenOut {
       const read = reading(as);
       const now = await as.get(id);
       if (removed) return true;
-      if (read.failed()) { cant(); return false; }
+      if (read.failed()) return !unread;
       if (now && !unread) take(now);
       return true;
     };
