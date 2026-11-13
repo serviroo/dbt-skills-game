@@ -113,6 +113,8 @@ export const scenarios = {
       await restoreReads(page);
       await retry(page);
       await page.locator('[data-piece]').first().waitFor();
+      const focused = await page.evaluate(() => document.activeElement?.id === 'dq-pages-h');
+      h.expect(focused, 'gallery retry did not focus the Your pages heading');
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();
@@ -152,6 +154,91 @@ export const scenarios = {
       await restoreReads(page);
       await changed(page);
       await page.getByRole('button', { name: 'Keep drawing', exact: true }).waitFor();
+    } finally {
+      await ctx.close();
+    }
+  },
+  async 'art-cant-read-change-during-load'(h) {
+    const { ctx, page, errors, id } = await savedDrawing(h);
+    try {
+      const other = await ctx.newPage();
+      await other.goto(h.server.url + '/?mute');
+      await other.waitForFunction(() => window.__daily?.store);
+      await go(other, { name: 'piece', id });
+      await other.getByRole('button', { name: 'Rename', exact: true }).waitFor();
+      await failReads(page, ['meta', 'strokes']);
+      await go(page, { name: 'piece', id });
+      await panel(page, 'open this drawing').waitFor();
+      await restoreReads(page);
+      await page.evaluate(async () => {
+        const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+        const getAll = IDBObjectStore.prototype.getAll;
+        const gate = { finish: null, changes: 0, latest: [], button: null };
+        window.artChangeGate = gate;
+        as.onChange(() => { gate.changes++; });
+        as.drop();
+        IDBObjectStore.prototype.getAll = function (...args) {
+          const request = getAll.apply(this, args);
+          if (this.transaction.db.name !== as.name || this.name !== 'meta' || gate.finish) return request;
+          const delayed = { result: undefined, error: null, onsuccess: null, onerror: null };
+          request.onsuccess = () => {
+            delayed.result = request.result;
+            gate.finish = () => {
+              IDBObjectStore.prototype.getAll = getAll;
+              const get = IDBObjectStore.prototype.get;
+              IDBObjectStore.prototype.get = function (...args) {
+                const next = get.apply(this, args);
+                if (this.transaction.db.name !== as.name || !['meta', 'strokes'].includes(this.name)) return next;
+                const held = { result: undefined, error: null, onsuccess: null, onerror: null };
+                next.onsuccess = () => {
+                  held.result = next.result;
+                  gate.latest.push(() => held.onsuccess?.());
+                };
+                next.onerror = () => {
+                  held.error = next.error;
+                  gate.latest.push(() => held.onerror?.());
+                };
+                return held;
+              };
+              gate.release = () => {
+                IDBObjectStore.prototype.get = get;
+                gate.latest.splice(0).forEach((finish) => finish());
+              };
+              delayed.onsuccess?.();
+            };
+          };
+          request.onerror = () => {
+            delayed.error = request.error;
+            gate.finish = () => {
+              IDBObjectStore.prototype.getAll = getAll;
+              delayed.onerror?.();
+            };
+          };
+          return delayed;
+        };
+      });
+      await page.evaluate(() => { window.artChangeGate.button = document.querySelector('.dq-cant button'); });
+      await retry(page);
+      await page.waitForFunction(() => !!window.artChangeGate.finish);
+      await other.getByRole('button', { name: 'Rename', exact: true }).click();
+      await other.locator('.dq-piece-rename input').fill('New sky');
+      await other.keyboard.press('Enter');
+      await other.locator('.dq-piece-h', { hasText: 'New sky' }).waitFor();
+      await page.waitForFunction(() => window.artChangeGate.changes > 0);
+      await page.evaluate(() => window.artChangeGate.finish());
+      await page.getByRole('button', { name: 'Rename', exact: true }).waitFor();
+      await page.waitForFunction(() => window.artChangeGate.latest.length >= 2);
+      h.expect(await page.evaluate(() => window.artChangeGate.button.getAttribute('aria-disabled') === 'true'),
+        'retry stopped waiting before the newer drawing was read');
+      await page.getByRole('button', { name: 'Rename', exact: true }).click();
+      const input = page.locator('.dq-piece-rename input');
+      await input.fill('Still typing');
+      await page.evaluate(() => window.artChangeGate.release());
+      await h.poll(page, () => page.locator('.dq-piece-h').textContent(), (text) => text.trim() === 'New sky',
+        'a change during the read did not update the drawing name');
+      h.expect(await input.isVisible() && await input.inputValue() === 'Still typing',
+        'the newer drawing replaced the rename field or its text');
+      h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();
     }

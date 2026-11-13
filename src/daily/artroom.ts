@@ -4,19 +4,18 @@
  */
 import { animate } from '../ui/anim';
 import { ALLY_NAMES, ART, ART_PROMPTS } from '../content/daily-lines';
-import { playerName } from '../core/you';
 import type { App, Route, ScreenOut, Visit } from './app';
 import { icon } from './art';
 import { artStore, extrasOf, revOf, type DrawingRec } from './artstore';
 import { allyCard, cardOf, favFirst, focusBack, refill, setFocusBack, thumbImg } from './art-cards';
 import { cantOpen } from './cant-open';
 import { reading } from './reading';
-import { canvasBlob, INKS, InkPad, PAGE, renderDrawing, SIZES, TOOLS, type Paper, type Stroke, type Tool } from './ink';
-import { renderAllyCard } from './ally-card';
+import { INKS, InkPad, PAGE, renderDrawing, SIZES, TOOLS, type Paper, type Stroke, type Tool } from './ink';
+import { prepImage, saveImage, savedText } from './art-image';
 import { DrawVisit } from './draw-visit';
 import { dayLabel } from './lines';
 import { uid } from './store';
-import { btn, chip, field, h, keptWhole, p, panel, radioKeys, redrawn, shareOrSave, typo } from './ui';
+import { btn, chip, field, h, keptWhole, p, panel, radioKeys, redrawn, typo } from './ui';
 import { pageHead, wholeText } from './page-head';
 
 const store = (app: App) => artStore(app.store.key);
@@ -38,27 +37,6 @@ function creditArt(app: App, kind: Paper) {
   return true;
 }
 
-const prepared = new Map<string, Promise<Blob | null>>();
-/** Renders the export ahead of the tap, so the share sheet opens inside the tap's user activation on iPhone. */
-export function prepImage(rec: DrawingRec) {
-  const k = `${rec.id}:${rec.updated}:${rec.name ?? ''}:${playerName()}`;
-  let pr = prepared.get(k);
-  if (!pr) {
-    if (prepared.size > 6) prepared.clear();
-    pr = (async () => canvasBlob(rec.kind === 'ally' ? await renderAllyCard(rec) : renderDrawing(rec.strokes, rec.kind, PAGE[rec.kind].w), 'image/png'))();
-    prepared.set(k, pr);
-  }
-  return pr;
-}
-
-async function saveImage(rec: DrawingRec) {
-  const blob = await prepImage(rec);
-  if (!blob) return 'failed';
-  const base = rec.kind === 'ally' ? `shadow-ally-${(rec.name || 'ally').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'ally'}` : `art-room-${rec.day}`;
-  return shareOrSave(blob, `${base}.png`, 'image/png');
-}
-const savedText = (r: string) => (r === 'saved' ? 'Image saved to your downloads.' : r === 'shared' ? 'Image ready. Pick Save Image to keep it in Photos.' : r === 'failed' ? "That image couldn't be made. Your drawing is still saved here." : '');
-
 // ---------------- Art room (landing + gallery) ----------------
 export function artScreen(app: App): ScreenOut {
   const as = store(app);
@@ -75,6 +53,7 @@ export function artScreen(app: App): ScreenOut {
       h('span', { class: 'dq-artentry-txt' }, h('span', { class: 'dq-artentry-t', text: title }), h('span', { class: 'dq-artentry-s', text: typo(sub) }), extra),
       h('span', { class: 'dq-artentry-go', html: icon('chev') }),
     );
+  const pagesHeading = h('h2', { class: 'dq-sec-h', id: 'dq-pages-h', tabindex: '-1' }, h('span', { text: ART.pages }));
   const el = h(
     'div',
     { class: 'dq-page dq-artroom' },
@@ -86,7 +65,7 @@ export function artScreen(app: App): ScreenOut {
       entry('today', ART.todayTitle, ART.todaySub, prompt.node as HTMLElement),
       entry('ally', ART.allyTitle, ART.allySub, null),
     ),
-    h('section', { class: 'dq-art-pages', 'aria-labelledby': 'dq-pages-h' }, h('h2', { class: 'dq-sec-h', id: 'dq-pages-h' }, h('span', { text: ART.pages })), gallery, note),
+    h('section', { class: 'dq-art-pages', 'aria-labelledby': 'dq-pages-h' }, pagesHeading, gallery, note),
   );
   let refresh = 0;
   // the draft on show, so a change elsewhere that leaves it the same doesn't rebuild it under the player's focus
@@ -100,7 +79,11 @@ export function artScreen(app: App): ScreenOut {
       draftShown = null;
       draftBox.classList.add('is-hidden');
       draftBox.replaceChildren();
-      if (report) refill(gallery, '\0unread', () => [cantOpen('drawings', () => render(false))]);
+      if (report) refill(gallery, '\0unread', () => [cantOpen('drawings', async () => {
+        const ok = await render(false);
+        if (ok) pagesHeading.focus({ preventScroll: true });
+        return ok;
+      })]);
       return false;
     }
     if (!as.persistent) note.classList.remove('is-hidden');
@@ -821,22 +804,34 @@ export function pieceScreen(app: App, route: Route, visit: Visit): ScreenOut {
   });
   // hidden while a removal's Undo lasts (from this tab or another): it shows as gone, and comes back with the Undo
   let hidden = false;
-  const offShown = as.onChange(() => {
-    const read = reading(as);
-    void as.isShown(id).then((on) => {
-      if (removed) return;
-      if (read.failed()) return cant();
-      if (unread) return void load();
-      if (on !== hidden) return;
-      if (on) return app.go({ name: 'piece', id }, { replace: true, quiet: true });
-      hidden = true;
-      missing();
-    });
-  });
-  let offChange = () => {};
-  const el = h('div', { class: 'dq-page dq-piece' }, h('h1', { class: 'dq-sr', 'data-focus': '', text: 'Your page' }), body);
+  let pendingChange = false;
   let loading: Promise<boolean> | null = null;
-  const load = () => (loading ??= run().finally(() => { loading = null; }));
+  let update = async (): Promise<boolean> => true;
+  const check = async (): Promise<boolean> => {
+    const read = reading(as);
+    const on = await as.isShown(id);
+    if (removed) return true;
+    if (read.failed()) { cant(); return false; }
+    if (unread) return false;
+    if (on && !hidden) return update();
+    if (on) app.go({ name: 'piece', id }, { replace: true, quiet: true });
+    else if (!hidden) { hidden = true; missing(); }
+    return true;
+  };
+  const offShown = as.onChange(() => {
+    if (loading) { pendingChange = true; return; }
+    if (unread) void load();
+    else void check();
+  });
+  const el = h('div', { class: 'dq-page dq-piece' }, h('h1', { class: 'dq-sr', 'data-focus': '', text: 'Your page' }), body);
+  const load = () => (loading ??= (async () => {
+    let ok = await run();
+    while (pendingChange && !removed) {
+      pendingChange = false;
+      ok = !ok || unread ? await run() : await check();
+    }
+    return ok;
+  })().finally(() => { loading = null; }));
   const run = async (): Promise<boolean> => {
     const read = reading(as);
     let rec = await as.get(id);
@@ -850,7 +845,6 @@ export function pieceScreen(app: App, route: Route, visit: Visit): ScreenOut {
       return true;
     }
     hidden = false;
-    offChange();
     endRename();
     const ally = rec.kind === 'ally';
     const dpr = Math.min(2, devicePixelRatio || 1);
@@ -939,15 +933,14 @@ export function pieceScreen(app: App, route: Route, visit: Visit): ScreenOut {
       paint();
       if (ally) void prepImage(now);
     };
-    offChange = as.onChange(() => {
+    update = async () => {
       const read = reading(as);
-      void as.get(id).then((now) => {
-        if (removed) return;
-        if (read.failed()) return cant();
-        if (!now || unread) return;
-        take(now);
-      });
-    });
+      const now = await as.get(id);
+      if (removed) return true;
+      if (read.failed()) { cant(); return false; }
+      if (now && !unread) take(now);
+      return true;
+    };
     const actions = h(
       'div',
       { class: 'dq-actions' },
@@ -996,5 +989,8 @@ export function pieceScreen(app: App, route: Route, visit: Visit): ScreenOut {
     return true;
   };
   void load().then((ok) => { if (!ok && !removed) cant(); });
-  return { el, title: 'Your page', mode: 'sub', bubbles: [1.6, 0.6], leave: () => { removed = true; endRename(); off(); offShown(); offChange(); } };
+  return {
+    el, title: 'Your page', mode: 'sub', bubbles: [1.6, 0.6],
+    leave: () => { removed = true; endRename(); off(); offShown(); },
+  };
 }
