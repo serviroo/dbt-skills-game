@@ -17,7 +17,7 @@ export function cantOpen(what: CantOpenWhat, again: () => Promise<boolean>): HTM
   const tryAgain = async () => {
     if (retry.getAttribute('aria-disabled') === 'true') return;
     busy(true);
-    wakeStorage();
+    wakeStorage(true);
     const ok = await again().catch(() => false);
     if (!box.isConnected) return;
     busy(false);

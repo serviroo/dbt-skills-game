@@ -14,15 +14,15 @@ const STORAGE_WAIT_MS = 10e3;
 const STORAGE_REST_MS = 5e3;
 const links = new Set<IdbLink>();
 
-export function wakeStorage() {
-  for (const link of links) link.wake();
+export function wakeStorage(explicit = false) {
+  for (const link of links) link.wake(explicit);
 }
 
 const wakeWhenShown = () => {
   if (document.visibilityState === 'visible') wakeStorage();
 };
 
-type Read = { timedOut: boolean; transaction?: IDBTransaction; waiting?: Promise<IDBDatabase | null> };
+type Read = { timedOut: boolean; transaction?: IDBTransaction };
 
 function abortRead(transaction: IDBTransaction) {
   try { transaction.abort(); } catch { return; }
@@ -36,9 +36,11 @@ export class IdbLink {
   readFails = 0;
   db: Promise<IDBDatabase | null>;
   private lost = new WeakSet<IDBDatabase>();
-  private givenUp = new WeakSet<Promise<IDBDatabase | null>>();
-  private opening: { db: Promise<IDBDatabase | null>; cancel: () => void } | null = null;
-  private retryOpen: Promise<IDBDatabase | null> | null = null;
+  private opening: {
+    db: Promise<IDBDatabase | null>;
+    cancel: () => void;
+    replace: (next: Promise<IDBDatabase | null>) => void;
+  } | null = null;
   private abandoned = false;
   private downUntil = 0;
   /** Writes under way, so a clear's check waits for them. */
@@ -63,19 +65,18 @@ export class IdbLink {
     void db.then((d) => d?.close());
   }
 
-  wake() {
+  wake(explicit = false) {
     const opening = this.opening;
-    if (opening && (this.downUntil || this.retryOpen === opening.db)) {
-      this.giveUp(opening.db);
-      this.opening = null;
-    }
     this.downUntil = 0;
-    this.ready();
+    if (explicit && opening && !cleared()) {
+      this.abandoned = false;
+      this.db = this.connect(true);
+      opening.replace(this.db);
+    } else this.ready();
   }
 
   private giveUp(pending: Promise<IDBDatabase | null>) {
     if (this.opening?.db !== pending) return;
-    this.givenUp.add(pending);
     this.abandoned = true;
     this.opening.cancel();
   }
@@ -95,15 +96,23 @@ export class IdbLink {
   /** Opens the database; a lost connection on open gets one more try (`again`). Null when there is none to use. */
   private connect(again: boolean): Promise<IDBDatabase | null> {
     let cancel = () => {};
+    let replace = (_next: Promise<IDBDatabase | null>) => {};
+    let late: ReturnType<typeof setTimeout>;
     const db = new Promise<IDBDatabase | null>((resolve) => {
       let finished = false;
-      cancel = () => { finished = true; resolve(null); };
+      cancel = () => { clearTimeout(late); finished = true; resolve(null); };
+      replace = (next) => { clearTimeout(late); finished = true; resolve(next); };
       const attempt = (retryAllowed: boolean) => {
         try {
           if (typeof indexedDB === 'undefined') { this.persistent = false; return resolve(null); }
           // this game's data is being cleared: opening would make the database again
           if (cleared()) return resolve(null);
           const open = indexedDB.open(this.name, this.version);
+          late = setTimeout(() => {
+            if (finished || this.opening?.db !== db) return;
+            this.downUntil = Date.now() + STORAGE_REST_MS;
+            this.giveUp(db);
+          }, STORAGE_WAIT_MS);
           open.onupgradeneeded = () => {
             if (finished) open.transaction?.abort();
             else this.upgrade(open.result);
@@ -111,6 +120,7 @@ export class IdbLink {
           open.onsuccess = () => {
             const db = open.result;
             if (finished) { db.close(); return; }
+            clearTimeout(late);
             finished = true;
             this.unreadable = false;
             db.onversionchange = (e) => {
@@ -122,6 +132,7 @@ export class IdbLink {
           };
           const fail = (retry: boolean) => {
             if (finished) return;
+            clearTimeout(late);
             if (retryAllowed && retry) return attempt(false);
             finished = true;
             this.unreadable = true;
@@ -132,6 +143,7 @@ export class IdbLink {
           open.onblocked = () => fail(false);
         } catch {
           if (finished) return;
+          clearTimeout(late);
           finished = true;
           this.unreadable = true;
           this.downUntil = Date.now() + STORAGE_REST_MS;
@@ -140,17 +152,11 @@ export class IdbLink {
       };
       attempt(again);
     });
-    const opening = { db, cancel };
+    const opening = { db, cancel, replace };
     this.opening = opening;
-    const late = setTimeout(() => {
-      if (this.opening !== opening) return;
-      this.downUntil = Date.now() + STORAGE_REST_MS;
-      this.giveUp(db);
-    }, STORAGE_WAIT_MS);
     void db.then(() => {
       clearTimeout(late);
       if (this.opening === opening) this.opening = null;
-      if (this.retryOpen === db) this.retryOpen = null;
     });
     return db;
   }
@@ -189,7 +195,6 @@ export class IdbLink {
           this.downUntil = Date.now() + STORAGE_REST_MS;
           this.readFails++;
           if (read.transaction) abortRead(read.transaction);
-          if (read.waiting) this.giveUp(read.waiting);
           resolve(null);
         }, STORAGE_WAIT_MS);
       });
@@ -210,14 +215,10 @@ export class IdbLink {
   ): Promise<{ v: T } | null> {
     let failed = false;
     for (let retry = true; ; retry = false) {
-      const pending = this.db;
-      if (read) read.waiting = pending;
-      const db = await pending;
+      const db = await this.db;
       if (read?.timedOut) return null;
-      if (read) read.waiting = undefined;
       if (!db) {
-        if (mode === 'readonly' && this.givenUp.has(pending)) failed = true;
-        if (mode !== 'readonly' && !cleared()) failed = true;
+        if (!cleared() && (mode !== 'readonly' || typeof indexedDB !== 'undefined')) failed = true;
         break;
       }
       let started = false;
@@ -248,10 +249,8 @@ export class IdbLink {
       } catch (e) {
         if (read?.timedOut) return null;
         failed = true;
-        if (this.opening && this.opening.db !== pending) this.retryOpen = this.opening.db;
         if (retry && connectionLost(e)) {
           const connected = this.reconnect(db);
-          if (read) read.waiting = this.db;
           const reconnected = await connected;
           if (read?.timedOut) return null;
           if (reconnected && (!started || mode === 'readonly')) continue;

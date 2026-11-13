@@ -1,3 +1,8 @@
+import {
+  openRetriesGetOwnDeadline,
+  pendingWriteSurvivesUnrelatedReadFailure,
+  readTimeoutKeepsPendingOpen,
+} from './storage-reconnect-checks.mjs';
 import { drawPage, line } from './art-eraser-glow.e2e.mjs';
 import {
   cantOpenShows,
@@ -103,6 +108,16 @@ const neverOpens = (page, db) =>
         IDBFactory.prototype.open = open;
         const r = { ...req, error: new DOMException('The disk could not be read.', 'NotReadableError') };
         window.__failOpen = () => r.onerror?.(new Event('error'));
+        window.__succeedOldOpen = () => new Promise((resolve, reject) => {
+          const real = open.call(indexedDB, db);
+          real.onerror = () => reject(real.error);
+          real.onsuccess = () => {
+            r.result = real.result;
+            r.onsuccess?.(new Event('success'));
+            try { real.result.transaction('drafts'); resolve(false); }
+            catch { resolve(true); }
+          };
+        });
         return r;
       };
     },
@@ -154,7 +169,7 @@ async function withPage(h, run) {
     await ctx.close();
   }
 }
-async function draftDuringReconnect(h, failRead) {
+async function draftDuringReconnect(h, failRead, nearLimit = true) {
   await withPage(h, async (page) => {
     await h.reachHub(page);
     const key = 'today:earlier-session';
@@ -193,11 +208,13 @@ async function draftDuringReconnect(h, failRead) {
     await stalledYet(page);
     await page.evaluate(async (s) => {
       const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
-      void as.putDraft({ key: 'today:other-session', kind: 'today', strokes: [s], t: Date.now() });
+      window.__draftWriteDone = false;
+      const draft = { key: 'today:other-session', kind: 'today', strokes: [s], t: Date.now() };
+      window.__pendingDraftWrite = as.putDraft(draft).then(() => (window.__draftWriteDone = true));
     }, stroke(100, 200));
     await page.waitForFunction(() => !!window.__failOpen, null, { timeout: 5000 });
     if (failRead) {
-      await new Promise((go) => setTimeout(go, Math.max(0, opened + 8500 - Date.now())));
+      if (nearLimit) await new Promise((go) => setTimeout(go, Math.max(0, opened + 8500 - Date.now())));
       await page.evaluate(() => window.__failDraft());
     }
     await panelIn(page, '.dq-draw');
@@ -209,10 +226,23 @@ async function draftDuringReconnect(h, failRead) {
     await page.evaluate(() => window.__answer());
     const draft = await onDisk(page, db, 'drafts', 'get', key);
     h.expect(draft?.strokes?.length === 1, 'the stalled draft changed on disk');
+    if (failRead && !nearLimit) {
+      h.expect(!(await page.evaluate(() => window.__draftWriteDone)), 'the write did not wait for Try again');
+    }
     await tryAgain(page);
     await drawReady(page);
     await page.locator('.dq-ink-stage').waitFor({ timeout: 5000 });
     await shows(h, page, 1, 'the draft after Try again:');
+    if (failRead && !nearLimit) {
+      const closed = await page.evaluate(() => window.__succeedOldOpen());
+      h.expect(closed, 'the replaced open left its late connection open');
+      const persistent = await page.evaluate(async () => {
+        await window.__pendingDraftWrite;
+        return (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).persistent;
+      });
+      const saved = await onDisk(page, db, 'drafts', 'get', 'today:other-session');
+      h.expect(persistent && saved?.strokes?.length === 1, 'Try again lost a write waiting on the old open');
+    }
   });
 }
 async function pendingOpenSurvivesVisibility(h) {
@@ -302,7 +332,7 @@ async function unattendedOpenTimesOut(h) {
   });
 }
 
-async function canceledStoryReadSaysSo(h) {
+async function timedOutStoryOpenSaysSo(h) {
   await withPage(h, async (page) => {
     await h.reachHub(page);
     const ids = await storyOfTwo(page);
@@ -354,11 +384,11 @@ async function canceledStoryReadSaysSo(h) {
     await page.waitForFunction(() => window.__readerStarted, null, { timeout: 5000 });
     h.expect((await page.evaluate(() => document.visibilityState)) === 'visible', 'the page is not visible');
     await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-    await page.locator('.st-reader .dq-cant-t').waitFor({ timeout: 5000 });
-    await comesIn(h, page, '.st-reader', 'a canceled story read');
-    await cantOpenShows(h, page, '.st-reader', 'story', 'a canceled story read');
+    await page.locator('.st-reader .dq-cant-t').waitFor({ timeout: WAIT });
+    await comesIn(h, page, '.st-reader', 'a timed-out story open');
+    await cantOpenShows(h, page, '.st-reader', 'story', 'a timed-out story open');
     const gone = await page.getByText('isn’t on this device any more').count();
-    h.expect(!gone, 'a canceled read said the story was gone');
+    h.expect(!gone, 'a timed-out open said the story was gone');
     await tryAgain(page);
     await page.locator('.st-read-text', { hasText: 'The lantern woke.' }).waitFor({ timeout: 5000 });
   });
@@ -369,6 +399,7 @@ export const scenarios = {
   },
   async 'a-failed-draft-with-a-stalled-reconnect'(h) {
     await draftDuringReconnect(h, true);
+    await draftDuringReconnect(h, true, false);
   },
   async 'a-canceled-reconnect-keeps-a-removal-hidden'(h) {
     await withPage(h, async (page) => {
@@ -411,16 +442,24 @@ export const scenarios = {
       await page.waitForFunction(() => !!window.__failOpen, null, { timeout: 5000 });
       await page.evaluate(async () => {
         const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
-        void as.getDraft('today:another-session');
+        window.__otherReadDone = false;
+        window.__otherRead = as.getDraft('today:another-session')
+          .then((draft) => { window.__otherReadDone = true; return draft; });
       });
       await page.evaluate(() => window.__failRemoval());
       await page.waitForFunction(() => window.__removalDone, null, { timeout: WAIT });
       const requests = await page.evaluate(() => window.__removalRequests);
       h.expect(requests === 1, `the failed removal started ${requests} requests`);
+      h.expect((await page.evaluate(() => document.visibilityState)) === 'visible', 'the page is not visible');
       await page.evaluate(() => {
         window.__restoreGet();
         document.dispatchEvent(new Event('visibilitychange'));
       });
+      h.expect(!(await page.evaluate(() => window.__otherReadDone)), 'visibility gave up a pending open');
+      await page.waitForFunction(() => window.__otherReadDone, null, { timeout: WAIT });
+      const unread = await page.evaluate(async () => (await window.__otherRead) === undefined);
+      h.expect(unread, 'a timed-out draft read looked like a missing draft');
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
       const strokes = await onDisk(page, db, 'strokes', 'get', id);
       h.expect(strokes?.length === 1, 'the failed removal changed the stored drawing');
       await page.evaluate(() => window.__daily.go({ name: 'art' }));
@@ -731,6 +770,9 @@ export const scenarios = {
     }
   },
   async 'a-late-open-changes-nothing'(h) {
+    await pendingWriteSurvivesUnrelatedReadFailure(h, { withPage, storyOfTwo, onDisk });
+    await openRetriesGetOwnDeadline(h, { withPage, onDisk, stroke });
+    await readTimeoutKeepsPendingOpen(h, { withPage, storyOfTwo, onDisk });
     for (const answer of ['success', 'error']) {
       await withPage(h, async (page) => {
         const { db, id } = await savedDrawing(h, page);
@@ -829,7 +871,7 @@ export const scenarios = {
         await ctx.close();
       }
     }
-    await canceledStoryReadSaysSo(h);
+    await timedOutStoryOpenSaysSo(h);
   },
   async 'storage-comes-back-on-its-own'(h) {
     await withPage(h, async (page) => {
