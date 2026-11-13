@@ -21,6 +21,17 @@ export const favFirst = <T extends { fav?: boolean }>(list: T[]) =>
   [...list.filter((m) => m.fav), ...list.filter((m) => !m.fav)];
 /** What a drawing's card shows: a save, a name or a favourite changes it; a thumbnail filled in elsewhere does not. */
 export const cardOf = (m: DrawingMeta) => [m.id, m.kind, m.day, revOf(m), m.name ?? '', m.fav ? 1 : 0].join('|');
+/** The drawing an Undo just brought back: the list that shows it next takes focus to it. */
+let back: string | null = null;
+export function focusBack(list: HTMLElement) {
+  const el = back ? list.querySelector<HTMLElement>(`[data-piece="${CSS.escape(back)}"]`) : null;
+  if (!el) return;
+  back = null;
+  el.focus();
+}
+
+export const setFocusBack = (id: string) => { back = id; };
+
 const filled = new WeakMap<HTMLElement, string>();
 /**
  * Fills a list of drawing cards again, only when what it shows changed (`shows`). A card that had focus keeps it, or

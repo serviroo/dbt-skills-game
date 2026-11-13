@@ -8,7 +8,7 @@ import { playerName } from '../core/you';
 import type { App, Route, ScreenOut, Visit } from './app';
 import { icon } from './art';
 import { artStore, extrasOf, revOf, type DrawingRec } from './artstore';
-import { allyCard, cardOf, favFirst, refill, thumbImg } from './art-cards';
+import { allyCard, cardOf, favFirst, focusBack, refill, setFocusBack, thumbImg } from './art-cards';
 import { cantOpen } from './cant-open';
 import { reading } from './reading';
 import { canvasBlob, INKS, InkPad, PAGE, renderDrawing, SIZES, TOOLS, type Paper, type Stroke, type Tool } from './ink';
@@ -36,15 +36,6 @@ function creditArt(app: App, kind: Paper) {
   if (st.state.events.some((e) => e.k === 'art' && e.day === today)) return false;
   st.add('art', 10, { data: { kind } });
   return true;
-}
-
-/** The drawing an Undo just brought back: the list that shows it next takes focus to it. */
-let back: string | null = null;
-export function focusBack(list: HTMLElement) {
-  const el = back ? list.querySelector<HTMLElement>(`[data-piece="${CSS.escape(back)}"]`) : null;
-  if (!el) return;
-  back = null;
-  el.focus();
 }
 
 const prepared = new Map<string, Promise<Blob | null>>();
@@ -722,42 +713,34 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     }
   }));
 
-  const cant = () => {
-    if (unread) return;
-    unread = true;
-    el.replaceChildren(cantOpen('drawing', async () =>
-      (app.go(route, { replace: true, quiet: true, hand: visit.handed }), true)));
-  };
-  const ready = tab.ready.then(async () => {
+  const children = [...el.childNodes];
+  const open = async (): Promise<boolean> => {
     await Promise.allSettled([opened.pending]);
-    unsavedName = opened.name;
-    if (left) return;
+    if (left) return false;
     const read = reading(as);
     const draft = await opened.draft(as, kind, tab.id, own(opened.editId));
-    if (left) return;
-    if (draft === undefined || read.failed()) return cant();
+    if (left || draft === undefined || read.failed()) return false;
+    const id = opened.editId ?? draft?.editId;
+    const found = id ? await as.get(id) : null;
+    if (left || read.failed()) return false;
+    unsavedName = opened.name;
     if (draft?.key.endsWith(`:${tab.id}`)) key = draft.key;
     else if (opened.occupied) key = `${opened.editId ? `edit:${opened.editId}` : kind}:${uid()}:${tab.id}`;
     else key = own(opened.editId);
-    const id = opened.editId ?? draft?.editId;
     recId = id ?? null;
-    if (id) {
-      rec = await as.get(id);
-      if (left) return;
-      if (read.failed()) return cant();
-      if (rec) {
-        const old = draft?.editId === id ? draft : null;
-        bases = !old ? [revOf(rec)] : Array.isArray(old.bases) ? old.bases.filter((b): b is string => typeof b === 'string').slice(-8) : [];
-      }
-      if (!rec) {
-        recId = null;
-        say(p('That page is no longer here. This is a fresh one.', 'dq-small'));
-      } else if (kind === 'today' && rec.prompt) {
-        prompt = rec.prompt;
-        renderPrompt();
-      }
+    rec = found;
+    if (rec) {
+      const old = draft?.editId === id ? draft : null;
+      bases = !old ? [revOf(rec)] : Array.isArray(old.bases)
+        ? old.bases.filter((b): b is string => typeof b === 'string').slice(-8) : [];
     }
-    if (left) return;
+    if (id && !rec) {
+      recId = null;
+      say(p('That page is no longer here. This is a fresh one.', 'dq-small'));
+    } else if (kind === 'today' && rec?.prompt) {
+      prompt = rec.prompt;
+      renderPrompt();
+    }
     if (draft) {
       if (draft.prompt !== undefined && kind === 'today') {
         prompt = draft.prompt;
@@ -771,7 +754,21 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     pad.el.inert = false;
     if (pad.strokes.length) hint.classList.add('is-gone');
     if (!as.persistent) say(p(ART.noStore, 'dq-small'));
-  });
+    return true;
+  };
+  const cant = () => {
+    if (unread || left) return;
+    unread = true;
+    el.replaceChildren(cantOpen('drawing', async () => {
+      if (!(await open()) || left) return false;
+      el.replaceChildren(...children);
+      unread = false;
+      layout();
+      el.querySelector<HTMLElement>('[data-focus]')?.focus({ preventScroll: true });
+      return true;
+    }));
+  };
+  const ready = tab.ready.then(async () => { if (!(await open())) cant(); });
 
   return {
     el,
@@ -811,8 +808,7 @@ export function pieceScreen(app: App, route: Route, visit: Visit): ScreenOut {
     if (unread) return;
     unread = true;
     endRename();
-    body.replaceChildren(cantOpen('drawing', async () =>
-      (app.go(route, { replace: true, quiet: true, hand: visit.handed }), true)));
+    body.replaceChildren(cantOpen('drawing', load));
   };
   const missing = () => {
     endRename();
@@ -830,7 +826,7 @@ export function pieceScreen(app: App, route: Route, visit: Visit): ScreenOut {
     void as.isShown(id).then((on) => {
       if (removed) return;
       if (read.failed()) return cant();
-      if (unread) return app.go(route, { replace: true, quiet: true, hand: visit.handed });
+      if (unread) return void load();
       if (on !== hidden) return;
       if (on) return app.go({ name: 'piece', id }, { replace: true, quiet: true });
       hidden = true;
@@ -839,17 +835,21 @@ export function pieceScreen(app: App, route: Route, visit: Visit): ScreenOut {
   });
   let offChange = () => {};
   const el = h('div', { class: 'dq-page dq-piece' }, h('h1', { class: 'dq-sr', 'data-focus': '', text: 'Your page' }), body);
-  void (async () => {
+  const load = async (): Promise<boolean> => {
     const read = reading(as);
     let rec = await as.get(id);
     const on = !!rec && (await as.isShown(id));
-    if (removed) return;
-    if (read.failed()) return cant();
-    if (!rec || !on || removed || hidden) {
-      if (!removed) hidden = true;
+    if (removed) return true;
+    if (read.failed()) return false;
+    if (!rec || !on) {
+      hidden = true;
+      unread = false;
       missing();
-      return;
+      return true;
     }
+    hidden = false;
+    offChange();
+    endRename();
     const ally = rec.kind === 'ally';
     const dpr = Math.min(2, devicePixelRatio || 1);
     const outW = Math.min(PAGE[rec.kind].w, Math.round(Math.min(560, innerWidth - 32) * dpr));
@@ -942,7 +942,7 @@ export function pieceScreen(app: App, route: Route, visit: Visit): ScreenOut {
       void as.get(id).then((now) => {
         if (removed) return;
         if (read.failed()) return cant();
-        if (!now) return;
+        if (!now || unread) return;
         take(now);
       });
     });
@@ -961,7 +961,7 @@ export function pieceScreen(app: App, route: Route, visit: Visit): ScreenOut {
           if (done) return;
           done = true;
           // the list it went back to takes focus to it
-          if (app.route.name === list) back = id;
+          if (app.route.name === list) setFocusBack(id);
           as.unhide(id);
         };
         const end = () => {
@@ -974,6 +974,8 @@ export function pieceScreen(app: App, route: Route, visit: Visit): ScreenOut {
       }, { kind: 'link' }),
     );
     paint();
+    const wasUnread = unread;
+    unread = false;
     body.replaceChildren(
       artBox,
       h(
@@ -988,6 +990,9 @@ export function pieceScreen(app: App, route: Route, visit: Visit): ScreenOut {
         status,
       ),
     );
-  })();
+    if (wasUnread) el.querySelector<HTMLElement>('[data-focus]')?.focus({ preventScroll: true });
+    return true;
+  };
+  void load().then((ok) => { if (!ok && !removed) cant(); });
   return { el, title: 'Your page', mode: 'sub', bubbles: [1.6, 0.6], leave: () => { removed = true; endRename(); off(); offShown(); offChange(); } };
 }
