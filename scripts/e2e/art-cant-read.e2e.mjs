@@ -129,6 +129,23 @@ async function drawingRead(h, failedStores) {
 }
 
 export const scenarios = {
+  async 'art-cant-read-gallery-recovers-itself'(h) {
+    const { ctx, page, errors } = await savedDrawing(h);
+    try {
+      await failReads(page, ['meta', 'drafts']);
+      await go(page, { name: 'art' });
+      await panel(page, 'read your drawings').waitFor();
+      await page.getByRole('button', { name: 'Try again' }).focus();
+      await restoreReads(page);
+      await changed(page);
+      await page.locator('[data-piece]').first().waitFor();
+      const at = await page.evaluate(() => document.activeElement?.id || document.activeElement?.tagName);
+      h.expect(at === 'dq-pages-h', `the gallery recovered by itself and left focus on ${at}`);
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
   async 'art-cant-read-piece-outside-focus'(h) {
     const { ctx, page, errors, id } = await savedDrawing(h);
     try {

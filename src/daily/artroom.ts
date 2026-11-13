@@ -106,7 +106,7 @@ export function artScreen(app: App): ScreenOut {
         );
       }
     }
-    const returnFocus = !report && canRestoreFocus(gallery);
+    const returnFocus = !!gallery.querySelector('.dq-cant') && canRestoreFocus(gallery);
     const shown = favFirst(list);
     refill(gallery, shown.map(cardOf).join('\n'), () =>
       !shown.length
@@ -122,8 +122,8 @@ export function artScreen(app: App): ScreenOut {
             ));
           }),
     );
-    if (report || returnFocus) focusBack(gallery);
-    if (returnFocus) pagesHeading.focus({ preventScroll: true });
+    focusBack(gallery);
+    if (returnFocus && !gallery.contains(document.activeElement)) pagesHeading.focus({ preventScroll: true });
     return true;
   };
   const off = as.onChange(() => void render());
