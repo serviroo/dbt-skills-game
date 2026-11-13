@@ -20,6 +20,7 @@ import { h, typo } from './ui';
 import { volumeButton, type VolumeButton, type VolumeCtrl } from '../ui/volume';
 import { wireWardrobe } from './wardrobe';
 import { vesperLap } from './roster';
+import { bringIn } from './enter';
 
 export type Route =
   | { name: 'hub' }
@@ -892,22 +893,7 @@ export class App {
     this.root.scrollTop = 0;
     const [dens, bright] = out.bubbles ?? [3, 0.8];
     if (dens !== this.bubbles.density || bright !== this.bubbles.brightness) this.bubbles.set(dens, bright);
-    if (!o.quiet) {
-      const a = animate(out.el, this.reduced() ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], {
-        duration: this.reduced() ? WINDOW.reducedFadeMs : 300,
-        easing: 'cubic-bezier(.16,1,.3,1)',
-      });
-      // drop the entrance transform so fixed elements inside the page (the story co-writer) sit on the screen
-      a.finished.then(() => a.cancel(), () => {});
-    }
-    const focus = out.el.querySelector<HTMLElement>('[data-focus]') ?? out.el.querySelector<HTMLElement>('h1');
-    if (focus && !o.quiet) {
-      focus.setAttribute('tabindex', '-1');
-      // still this screen, and nothing else was focused while it waited
-      const put = () => this.current === out && (!document.activeElement || document.activeElement === document.body) && focus.focus({ preventScroll: true });
-      if (out.ready) void out.ready.then(put, put);
-      else focus.focus({ preventScroll: true });
-    }
+    bringIn(out, !!o.quiet, () => this.reduced(), () => this.current === out);
     out.after?.();
     if (route.name === 'hub' && !o.quiet && !fromSkill) {
       // a first welcome still owed comes before anything to celebrate

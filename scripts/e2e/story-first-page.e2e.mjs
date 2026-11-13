@@ -1,7 +1,63 @@
-import { holdStorage, seed, shownIn, storedIs, ta } from './story-reading.e2e.mjs';
+import { holdStorage, letIn, opening, seed, shownIn, storedIs, ta } from './story-reading.e2e.mjs';
 
 export const scenarios = {
-  async 'story-notes-tapped-before-the-story-is-read-opens-notes'(h) {
+  async 'story-stays-hidden-after-opening-code-fault'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await h.reachHub(page);
+      const id = await page.evaluate(async () => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        const { story, first } = await ss.create('The Real Title');
+        await ss.saveChapter({ ...first, text: 'The real page.' }, [first.rev]);
+        window.__realStory = ss.story;
+        ss.story = () => { throw new Error('story opening code fault'); };
+        return story.id;
+      });
+      const fault = page.waitForEvent('pageerror', { timeout: 5000 });
+      await page.evaluate((id) => window.__daily.go({ name: 'write', id }), id);
+      h.expect((await fault).message === 'story opening code fault', 'the opening fault did not reach the page');
+      await page.evaluate(() => {
+        const seen = (window.__failedOpening = { shown: false });
+        const tick = () => {
+          const writer = document.querySelector('.st-write');
+          if (!writer || !writer.inert || getComputedStyle(writer).visibility !== 'hidden') seen.shown = true;
+          seen.raf = requestAnimationFrame(tick);
+        };
+        seen.raf = requestAnimationFrame(tick);
+      });
+      await h.frames(page, 10);
+      h.expect(await opening(page), 'the writer came in after the opening fault');
+      h.expect(await page.evaluate(() => {
+        cancelAnimationFrame(window.__failedOpening.raf);
+        return !window.__failedOpening.shown;
+      }), 'the writer was shown during the ten frames after the opening fault');
+      const title = page.locator('.st-write .st-title');
+      try {
+        await title.click({ force: true, timeout: 3000 });
+      } catch (error) {
+        if (!/not visible/i.test(error.message)) throw error;
+      }
+      await page.keyboard.type('A different title');
+      h.expect((await title.inputValue()) === '', 'the hidden title accepted typing');
+      const saved = await page.evaluate(async (id) => {
+        const { storyStore } = await import('/src/daily/storystore.ts');
+        const ss = storyStore(window.__daily.store.key);
+        ss.story = window.__realStory;
+        return (await ss.story(id)).title;
+      }, id);
+      h.expect(saved === 'The Real Title', `the stored title changed to ${JSON.stringify(saved)}`);
+      await page.evaluate(() => window.__daily.go({ name: 'stories' }));
+      await page.evaluate((id) => window.__daily.go({ name: 'write', id }), id);
+      await h.poll(page, () => title.inputValue(), (value) => value === 'The Real Title', 'the title did not reopen');
+      await h.poll(page, () => ta(page).inputValue(), (value) => value === 'The real page.', 'the page did not reopen');
+      h.expect(errors.length === 1 && errors[0] === 'pageerror: story opening code fault', errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
+  async 'story-notes-out-of-reach-until-the-story-opens'(h) {
     const { ctx, page, errors } = await h.open(seed(h));
     try {
       await h.reachHub(page);
@@ -17,9 +73,10 @@ export const scenarios = {
       const held = await holdStorage(page, ['story']);
       await page.evaluate((id) => window.__daily.go({ name: 'write', id }), id);
       await held.waitHeld(`story ${id}`);
-      await page.getByRole('radio', { name: 'Show: Notes' }).click();
-      await h.poll(page, async () => (await held.drain(), await ta(page).isEditable()), Boolean,
-        'the editor did not open', { timeout: 8000, polling: 50 });
+      h.expect(await opening(page), 'the writer came in before the story was read');
+      await page.getByRole('radio', { name: 'Show: Notes', includeHidden: true })
+        .click({ force: true, timeout: 3000 }).catch(() => {});
+      await letIn(page);
       const actual = await page.evaluate(async (id) => {
         const { storyStore } = await import('/src/daily/storystore.ts');
         const ss = storyStore(window.__daily.store.key);
@@ -27,23 +84,30 @@ export const scenarios = {
       }, id);
       h.expect(JSON.stringify(actual) === JSON.stringify(chapters),
         `story chapters changed: ${JSON.stringify(actual)}`);
-      const shown = await shownIn(page);
-      h.expect(shown.seg === 'Notes' && shown.box === 'Notes for this story',
-        `a Notes tap before the story was read showed ${JSON.stringify(shown)}`);
+      let shown = await shownIn(page);
+      h.expect(shown.seg === 'Page' && shown.box === 'Page, Chapter 1',
+        `a Notes tap while opening showed ${JSON.stringify(shown)}`);
+      await page.getByRole('radio', { name: 'Show: Notes' }).click();
+      await h.poll(page, () => shownIn(page), (s) => s.box === 'Notes for this story', 'Notes did not open');
       const slow = await holdStorage(page, ['story', 'addChapter']);
       await page.evaluate((id) => window.__daily.go({ name: 'write', id }), bare);
       await slow.waitHeld(`story ${bare}`);
-      await page.getByRole('radio', { name: 'Show: Notes' }).click();
       await slow.release(`story ${bare}`);
       await slow.waitHeld(`addChapter ${bare}`);
-      await h.poll(page, () => shownIn(page), (s) => s.box === 'Notes for this story',
-        (s) => `Notes waited for the first page to be made: ${JSON.stringify(s)}`, { timeout: 4000 });
+      h.expect(await opening(page), 'the writer came in before the first page was made');
+      await page.getByRole('radio', { name: 'Show: Notes', includeHidden: true })
+        .click({ force: true, timeout: 3000 }).catch(() => {});
       await page.evaluate(async () => {
         const { storyStore } = await import('/src/daily/storystore.ts');
         const ss = storyStore(window.__daily.store.key);
         ss.story = ss.__real.story;
       });
-      await slow.drain();
+      await letIn(page);
+      shown = await shownIn(page);
+      h.expect(shown.seg === 'Page' && shown.box === 'Page, Chapter 1',
+        `a Notes tap while making the first page showed ${JSON.stringify(shown)}`);
+      await page.getByRole('radio', { name: 'Show: Notes' }).click();
+      await h.poll(page, () => shownIn(page), (s) => s.box === 'Notes for this story', 'Notes did not open');
       h.expect(!errors.length, errors.join('\n'));
     } finally {
       await ctx.close();
@@ -54,7 +118,7 @@ export const scenarios = {
     const { ctx, page, errors } = await h.open(seed(h));
     try {
       await h.reachHub(page);
-      const { id, notes } = await page.evaluate(async () => {
+      const id = await page.evaluate(async () => {
         const { storyStore } = await import('/src/daily/storystore.ts');
         const ss = storyStore(window.__daily.store.key);
         const { story, first } = await ss.create('No Pages Yet');
@@ -65,29 +129,37 @@ export const scenarios = {
           return add.apply(this, args);
         };
         window.__failFirstPage = true;
-        return { id: story.id, notes: story.notes };
+        return story.id;
       });
       const held = await holdStorage(page, ['addChapter']);
       await page.evaluate((id) => window.__daily.go({ name: 'write', id }), id);
       await held.waitHeld(`addChapter ${id}`);
-      await page.getByRole('radio', { name: 'Show: Notes' }).click();
-      await h.poll(page, () => shownIn(page), (s) => s.box === 'Notes for this story', 'Notes did not open');
-      await ta(page).fill('Notes kept through retry.');
+      h.expect(await opening(page), 'the writer came in before the first page was made');
       await held.drain();
-      await page.getByRole('radio', { name: 'Show: Page' }).click();
+      await page.waitForFunction(() => {
+        const panel = document.querySelector('.dq-cant');
+        return panel && !panel.closest('[inert]');
+      });
       const panel = page.locator('.dq-cant');
-      await h.poll(page, () => panel.isVisible(), Boolean, 'failed page showed no error', { timeout: 4000 });
       h.expect(await panel.getByText('Can’t open this story right now').isVisible(), 'wrong error shown');
-      await h.poll(page, () => page.evaluate(async (notes) => {
-        const { storyStore } = await import('/src/daily/storystore.ts');
-        return (await storyStore(window.__daily.store.key).onDisk(notes))?.text;
-      }, notes), (text) => text === 'Notes kept through retry.', 'Notes were not stored');
+      h.expect(await panel.locator('.dq-cant-t').evaluate((el) => document.activeElement === el),
+        'failed page heading was not focused');
       await page.evaluate(async () => {
         const { storyStore } = await import('/src/daily/storystore.ts');
         const ss = storyStore(window.__daily.store.key);
-        window.__failFirstPage = false;
         ss.addChapter = ss.__real.addChapter;
       });
+      const firstHeading = await panel.locator('.dq-cant-t').elementHandle();
+      await panel.getByRole('button', { name: 'Try again' }).click();
+      await page.waitForFunction((old) => !old.isConnected, firstHeading);
+      await page.waitForFunction(() => {
+        const panel = document.querySelector('.dq-cant');
+        return panel && !panel.closest('[inert]');
+      });
+      h.expect(await panel.getByText('Can’t open this story right now').isVisible(), 'retry showed the wrong error');
+      h.expect(await panel.locator('.dq-cant-t').evaluate((el) => document.activeElement === el),
+        'failed page retry heading was not focused');
+      await page.evaluate(() => { window.__failFirstPage = false; });
       await panel.getByRole('button', { name: 'Try again' }).click();
       await h.poll(page, () => shownIn(page), (s) => /^Page,/.test(s.box ?? ''), 'retry did not open a page');
       await ta(page).fill('The first line after retry.');
@@ -98,8 +170,8 @@ export const scenarios = {
     }
   },
 
-  async 'story-typing-before-the-first-page-opens-is-kept'(h) {
-    for (const way of ['page', 'title', 'notes', 'chapter', 'search']) {
+  async 'story-typing-before-the-first-page-opens-lands-nowhere'(h) {
+    for (const way of ['page', 'title', 'search']) {
       const { ctx, page, errors } = await h.open(seed(h));
       try {
         await h.reachHub(page);
@@ -119,41 +191,43 @@ export const scenarios = {
         });
         await held.waitHeld(`${way === 'title' ? 'story' : 'chapter'} ${way === 'title' ? ids.id :
           way === 'search' ? ids.notes : ids.first}`);
+        h.expect(await opening(page), `${way}: the writer came in before the read finished`);
         const box = ta(page);
         const title = page.locator('.st-title');
-        const tryTyping = async (field, word) => {
-          const editable = await field.isEditable();
-          await field.click();
-          await page.keyboard.type(word);
-          return { editable, value: await field.inputValue() };
-        };
-        const before = await tryTyping(box, ' page words');
-        const titleBefore = way === 'title' ? await tryTyping(title, ' title words') : null;
-        if (way === 'notes') await page.getByRole('radio', { name: 'Show: Notes' }).click();
-        if (way === 'chapter') {
-          await page.evaluate(async () => {
-            const { storyStore } = await import('/src/daily/storystore.ts');
-            const ss = storyStore(window.__daily.store.key);
-            ss.chapter = ss.__real.chapter;
-          });
-          await page.locator('.st-chbtn').click();
-          await page.locator('.st-chrow-b', { hasText: 'Second Door' }).click();
+        await box.click({ force: true, timeout: 3000 }).catch(() => {});
+        await page.keyboard.type(' page words');
+        if (way === 'title') {
+          await title.click({ force: true, timeout: 3000 }).catch(() => {});
+          await page.keyboard.type(' title words');
         }
-        await h.poll(page, async () => (await held.drain(), await box.isEditable()), Boolean,
-          `${way}: the page did not open`, { timeout: 8000, polling: 50 });
+        await letIn(page);
         const after = await box.inputValue();
-        h.expect(!before.editable && (!before.value || after.includes(before.value)),
-          `${way}: page accepted words while opening and lost them: ${JSON.stringify(before)} -> ${after}`);
-        if (titleBefore) h.expect(!titleBefore.editable && (await title.inputValue()).includes(titleBefore.value),
-          `${way}: title accepted words while opening and lost them: ${JSON.stringify(titleBefore)}`);
+        h.expect(after === 'Words already on this page', `${way}: opening changed the page: ${after}`);
+        h.expect(await title.inputValue() === 'Two Doors', `${way}: opening changed the title`);
+        const disk = await page.evaluate(async ({ id, first, second, notes }) => {
+          const { storyStore } = await import('/src/daily/storystore.ts');
+          const ss = storyStore(window.__daily.store.key);
+          const db = await ss.db;
+          const title = await new Promise((resolve, reject) => {
+            const request = db.transaction('stories').objectStore('stories').get(id);
+            request.onsuccess = () => resolve(request.result?.title);
+            request.onerror = () => reject(request.error);
+          });
+          return {
+            title,
+            texts: await Promise.all([first, second, notes].map(async (ch) => (await ss.onDisk(ch))?.text)),
+          };
+        }, ids);
+        h.expect(disk.title === 'Two Doors' && disk.texts.every((text) => text === 'Words already on this page'),
+          `${way}: opening stored extra words: ${JSON.stringify(disk)}`);
         await box.fill('Words after opening');
-        const opened = way === 'notes' || way === 'search' ? ids.notes : way === 'chapter' ? ids.second : ids.first;
+        const opened = way === 'search' ? ids.notes : ids.first;
         await h.poll(page, () => page.evaluate(async (id) => {
           const { storyStore } = await import('/src/daily/storystore.ts');
           return (await storyStore(window.__daily.store.key).onDisk(id))?.text;
         }, opened), (text) => text === 'Words after opening', `${way}: opened words were not stored`);
         await page.getByRole('button', { name: 'Undo', exact: true }).click();
-        h.expect(after !== '' && await box.inputValue() === after, `${way}: Undo did not restore the open page`);
+        h.expect(await box.inputValue() === after, `${way}: Undo did not restore the open page`);
         h.expect(!errors.length, errors.join('\n'));
       } finally {
         await ctx.close();
@@ -239,6 +313,14 @@ export const scenarios = {
         await h.poll(page, () => panel.isVisible(), Boolean, `unreadable ${store} showed no error`, { timeout: 4000 });
         h.expect(await panel.getByText('Can’t open this story right now').isVisible(), `wrong error for ${store}`);
         h.expect(!(await ta(page).count()) && !(await page.locator('.st-cw').count()), 'the dead editor remains');
+        h.expect(await panel.locator('.dq-cant-t').evaluate((el) => document.activeElement === el),
+          `unreadable ${store} heading was not focused`);
+        const firstHeading = await panel.locator('.dq-cant-t').elementHandle();
+        await panel.getByRole('button', { name: 'Try again' }).click();
+        await page.waitForFunction((old) => !old.isConnected, firstHeading);
+        await h.poll(page, () => panel.isVisible(), Boolean, `unreadable ${store} retry showed no error`);
+        h.expect(await panel.locator('.dq-cant-t').evaluate((el) => document.activeElement === el),
+          `unreadable ${store} retry heading was not focused`);
         await page.evaluate(() => { IDBObjectStore.prototype.get = window.__realGet; });
         await panel.getByRole('button', { name: 'Try again' }).click();
         await h.poll(page, () => ta(page).inputValue(), (t) => t === text, `retry did not open the page (${store})`);

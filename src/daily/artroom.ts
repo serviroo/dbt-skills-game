@@ -755,8 +755,7 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     }
   }));
 
-  void (async () => {
-    await tab.ready;
+  const ready = tab.ready.then(async () => {
     await Promise.allSettled([opened.pending]);
     unsavedName = opened.name;
     if (left) return;
@@ -798,13 +797,14 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     pad.el.inert = false;
     if (pad.strokes.length) hint.classList.add('is-gone');
     if (!as.persistent) say(p(ART.noStore, 'dq-small'));
-  })();
+  });
 
   return {
     el,
     title: kind === 'ally' ? ART.allyTitle : ART.todayTitle,
     mode: 'sub',
     bubbles: [0, 0],
+    ready,
     keep: () => opened.keep(() => recId, () => key, () => pendingSave ?? opened.pending ?? null, () => unsavedName),
     after: () => {
       app.sheetLayer.append(sheet, riseEl);

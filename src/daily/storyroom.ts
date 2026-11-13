@@ -486,11 +486,9 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   let sel: Sel | null = null;
   const hist = new Map<string, Hist>();
   let pageIn!: () => void;
+  let pic: Promise<void> = Promise.resolve();
   /** settles once the first page is in the editor: nothing that edits the page runs before there is one */
   const pageLoaded = new Promise<void>((done) => (pageIn = done));
-  /** resolves once the story's first page exists, which opening a story with no pages makes first */
-  let pageMade!: () => void;
-  const pageExists = new Promise<void>((done) => (pageMade = done));
   const storyRead = ss.sweepLives().then(() => ss.story(storyId));
 
   // ---- head: title, chapter bar ----
@@ -516,7 +514,10 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   );
   const startBtn = h(
     'button',
-    { type: 'button', class: 'st-start-tg', 'aria-expanded': 'false', 'aria-controls': startBox.id, disabled: true, onclick: () => (startBox.classList.contains('is-hidden') ? showStart(startAt) : closeStart()) },
+    {
+      type: 'button', class: 'st-start-tg', 'aria-expanded': 'false', 'aria-controls': startBox.id,
+      onclick: () => (startBox.classList.contains('is-hidden') ? showStart(startAt) : closeStart()),
+    },
     h('span', { class: 'st-start-ic', 'aria-hidden': 'true', html: icon('pencil') }),
     h('span', { text: STORY_START.ask }),
   );
@@ -529,7 +530,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
 
   // ---- the page ----
   const ta = h('textarea', { class: 'st-ta', maxlength: STORY_CAP.text, spellcheck: 'true', autocapitalize: 'sentences', autocomplete: 'off', 'aria-label': 'Your page', placeholder: 'Start anywhere.', rows: 8 }) as HTMLTextAreaElement;
-  ta.readOnly = titleIn.readOnly = true;
   // a place found by search, marked behind the text (same box and type as the page) until the page changes
   const hl = h('div', { class: 'st-hl', 'aria-hidden': 'true' });
   const readError = h('div');
@@ -849,7 +849,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
       const read = reading(ss);
       c = await ss.chapter(id);
       if (!alive || n !== picks) return false;
-      if (!c && story && (!cur || id === pageId)) return firstGone(id, n, read.failed());
+      if (!c && (!cur || id === pageId)) return firstGone(id, n, read.failed());
       if (!c) return syncSeg(), false;
       if (!cur || !(dirty || saving)) break;
       await flushAll();
@@ -874,7 +874,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     }
     cur = { id: c.id, kind: c.kind, title: c.title, bases };
     pageIn();
-    startBtn.disabled = ta.readOnly = false;
     tab = c.kind === 'notes' ? 'notes' : 'page';
     unmark();
     ta.value = text;
@@ -883,7 +882,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     frame.classList.toggle('is-notes', tab === 'notes');
     start.classList.toggle('is-hidden', tab === 'notes');
     if (tab === 'notes') closeStart();
-    void showPic();
+    pic = showPic();
     const hh = hist.get(c.id);
     if (hh) hh.base = { text, s: text.length, e: text.length };
     syncSeg();
@@ -927,8 +926,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     }
     const n = ++picks;
     await flushAll();
-    // a Page tap while the first page is still being made waits for it, then opens it
-    await (to === 'page' ? pageExists : storyRead);
     if (n !== picks) return false;
     return (await load(to === 'notes' ? notesId : pageId, n)) && n === picks;
   };
@@ -1522,10 +1519,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     } });
   };
   /** The page in the editor for an Insert or Replace; false when a newer tap took the editor elsewhere first */
-  const toPage = async () => {
-    await pageLoaded;
-    return switchTab('page');
-  };
+  const toPage = () => switchTab('page');
   /** The new page text; null when it doesn't fit, undefined when a newer tap took the editor off the page first */
   const insertText = async (t: string) => {
     if (!(await toPage())) return undefined;
@@ -1695,7 +1689,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
 
   // ---------- start ----------
   const init = async () => {
-    // the first page takes its number now, so a Page or Notes tap while the chapter is made or its cards are read wins
     const n = ++picks;
     const read = reading(ss);
     const s = await storyRead;
@@ -1708,19 +1701,21 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     }
     story = s;
     notesId = s.notes;
-    Object.assign(titleIn, { value: s.title, readOnly: false });
+    titleIn.value = s.title;
     pageId = pageOf(visit, r.ch, s);
     if (!pageId) pageId = (await first('', [])) ?? '';
-    pageMade();
     await loadCards();
     // search can open the notes; the Page tab then goes to the first chapter
-    const landed = await load(notesOf(visit, r.ch, s) ? notesId : pageId, n);
-    await refreshStory();
-    syncState();
-    syncModes();
-    kb();
-    // only on the chapter the result opened, as it opened: a Page or Notes tap, or typing, while it opened wins
-    if (alive && found && landed && n === picks && !typed) markFound(found);
+    const landing = load(notesOf(visit, r.ch, s) ? notesId : pageId, n);
+    await Promise.race([pageLoaded, landing]);
+    await Promise.all([refreshStory(), pic]);
+    void landing.then((landed) => {
+      syncState();
+      syncModes();
+      kb();
+      // only on the chapter the result opened, as it opened: a Page or Notes tap, or typing, while it opened wins
+      if (alive && found && landed && n === picks && !typed) markFound(found);
+    });
   };
   /** Marks every place the search words are on this page and brings the one they picked into view. */
   const markFound = (f: { q: string; at: number }) => {
@@ -1746,7 +1741,6 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   };
   renderCards(false);
   syncModes();
-  void init();
 
   return {
     el,
@@ -1754,6 +1748,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     mode: 'sub',
     bubbles: [0.9, 0.45],
     foot: dock,
+    ready: init(),
     keep: () => writeKept(visit, () => ({ opened: shown > 0, tab, open: cur, pageId })),
     leave: () => {
       commit();
@@ -1835,8 +1830,6 @@ export function readScreen(app: App, route: Route): ScreenOut {
     unkeep = () => (keep.disconnect(), box.removeEventListener('scroll', theirs));
   };
 
-  let titled!: () => void;
-  const ready = new Promise<void>((done) => (titled = done));
   const init = async (report = true): Promise<boolean> => {
     let named = false;
     const result = await outcome(ss, async (failed) => {
@@ -1845,7 +1838,6 @@ export function readScreen(app: App, route: Route): ScreenOut {
       if (s.removed) return { s, chs: [] };
       wholeText(title, shownTitle(s.title));
       sub.textContent = storyMeta(app, s);
-      titled();
       named = true;
       // what this copy holds but couldn't store yet reads as it is in the editor
       const chs = await Promise.all(s.chapters.map(async (id) => ss.unsaved(id) ?? ss.chapter(id)));
@@ -1854,17 +1846,13 @@ export function readScreen(app: App, route: Route): ScreenOut {
     });
     if (!alive) return false;
     if (result === 'unread') {
-      if (!named) {
-        wholeText(title, STORY.title);
-        titled();
-      }
+      if (!named) wholeText(title, STORY.title);
       tools.classList.add('is-hidden');
       if (report) body.replaceChildren(cantOpen('story', () => init(false)));
       return false;
     }
     if (!result || result.s.removed) {
       wholeText(title, STORY.title);
-      titled();
       tools.classList.add('is-hidden');
       body.replaceChildren(h('p', { class: 'st-read-empty', text: STORY_READ.gone }));
       return true;
@@ -1907,7 +1895,6 @@ export function readScreen(app: App, route: Route): ScreenOut {
     if (at >= 0 && shown[at].i > 0) openAt(shown[at].sec);
     return true;
   };
-  void init().finally(titled);
 
   return {
     el,
@@ -1915,7 +1902,7 @@ export function readScreen(app: App, route: Route): ScreenOut {
     mode: 'sub',
     bubbles: [0.9, 0.45],
     // focus lands on the heading once it holds the story's title
-    ready,
+    ready: init(),
     leave: () => {
       alive = false;
       unkeep();
