@@ -3,7 +3,7 @@ import type { App } from './app';
 import { artStore, revOf, type DrawingMeta } from './artstore';
 import { dayLabel } from './lines';
 import { icon } from './art';
-import { refill } from './artroom';
+import { refill } from './art-cards';
 import type { Story, StoryStore } from './storystore';
 import { btn, h, keptWhole, p, typo } from './ui';
 

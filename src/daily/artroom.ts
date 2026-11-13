@@ -7,7 +7,10 @@ import { ALLY_NAMES, ART, ART_PROMPTS } from '../content/daily-lines';
 import { playerName } from '../core/you';
 import type { App, Route, ScreenOut, Visit } from './app';
 import { icon } from './art';
-import { artStore, extrasOf, revOf, type DrawingMeta, type DrawingRec } from './artstore';
+import { artStore, extrasOf, revOf, type DrawingRec } from './artstore';
+import { allyCard, cardOf, favFirst, refill, thumbImg } from './art-cards';
+import { cantOpen } from './cant-open';
+import { reading } from './reading';
 import { canvasBlob, INKS, InkPad, PAGE, renderDrawing, SIZES, TOOLS, type Paper, type Stroke, type Tool } from './ink';
 import { renderAllyCard } from './ally-card';
 import { DrawVisit } from './draw-visit';
@@ -35,19 +38,6 @@ function creditArt(app: App, kind: Paper) {
   return true;
 }
 
-/** An <img> that fills in once the thumbnail is ready. */
-export function thumbImg(app: App, m: DrawingMeta, alt: string) {
-  const img = h('img', { class: 'dq-thumb', alt, decoding: 'async', draggable: 'false' });
-  void store(app)
-    .thumbUrl(m)
-    .then((u) => {
-      if (u) img.src = u;
-    });
-  return img;
-}
-
-/** Favourites first, each group in the order it came in. */
-export const favFirst = <T extends { fav?: boolean }>(list: T[]) => [...list.filter((m) => m.fav), ...list.filter((m) => !m.fav)];
 /** The drawing an Undo just brought back: the list that shows it next takes focus to it. */
 let back: string | null = null;
 export function focusBack(list: HTMLElement) {
@@ -55,41 +45,6 @@ export function focusBack(list: HTMLElement) {
   if (!el) return;
   back = null;
   el.focus();
-}
-
-/** What a drawing's card shows: a save, a name or a favourite changes it; a thumbnail filled in elsewhere does not. */
-export const cardOf = (m: DrawingMeta) => [m.id, m.kind, m.day, revOf(m), m.name ?? '', m.fav ? 1 : 0].join('|');
-const filled = new WeakMap<HTMLElement, string>();
-/**
- * Fills a list of drawing cards again, only when what it shows changed (`shows`). A card that had focus keeps it, or
- * the card now in its place takes it, so a change in another tab never drops a keyboard player out of the list.
- */
-export function refill(list: HTMLElement, shows: string, cards: () => HTMLElement[]) {
-  if (filled.get(list) === shows) return;
-  filled.set(list, shows);
-  const was = document.activeElement instanceof HTMLElement && list.contains(document.activeElement) ? document.activeElement : null;
-  const had = was?.closest<HTMLElement>('[data-piece]');
-  const at = had ? [...list.querySelectorAll('[data-piece]')].indexOf(had) : -1;
-  list.replaceChildren(...cards());
-  const all = [...list.querySelectorAll<HTMLElement>('[data-piece]')];
-  // a control kept across the refill (Design an ally) is focused again too
-  const to = had ? (all.find((e) => e.dataset.piece === had.dataset.piece) ?? all[Math.min(at, all.length - 1)]) : was && list.contains(was) ? was : null;
-  to?.focus({ preventScroll: true });
-}
-
-/** What an ally's card calls it. */
-export const allyName = (m: DrawingMeta) => m.name?.trim() || 'Shadow ally';
-
-/** A shadow ally as a full-art Shadow card. */
-export function allyCard(app: App, m: DrawingMeta, img?: HTMLImageElement | HTMLCanvasElement, star = false) {
-  const name = allyName(m);
-  return keptWhole(h(
-    'div',
-    { class: 'dq-cardface dq-allycard' },
-    h('div', { class: 'dq-allycard-art' }, img ?? thumbImg(app, m, `${name}, drawn by you`)),
-    h('div', { class: 'dq-allycard-top' }, h('span', { class: 'dq-allycard-tag', html: `${icon('ally')}<span>Shadow ally</span>` }), star && m.fav ? h('span', { class: 'dq-allycard-fav', html: icon('star') }) : null),
-    h('div', { class: 'dq-allycard-foot' }, h('div', { class: 'dq-allycard-name', text: typo(name) }), h('div', { class: 'dq-allycard-by', text: 'Your design' })),
-  ));
 }
 
 const prepared = new Map<string, Promise<Blob | null>>();
@@ -145,10 +100,18 @@ export function artScreen(app: App): ScreenOut {
   let refresh = 0;
   // the draft on show, so a change elsewhere that leaves it the same doesn't rebuild it under the player's focus
   let draftShown: string | null = null;
-  const render = async () => {
+  const render = async (report = true): Promise<boolean> => {
     const turn = ++refresh;
+    const read = reading(as);
     const [list, drafts] = await Promise.all([as.shown(), as.drafts()]);
-    if (turn !== refresh) return;
+    if (turn !== refresh) return false;
+    if (read.failed()) {
+      draftShown = null;
+      draftBox.classList.add('is-hidden');
+      draftBox.replaceChildren();
+      if (report) refill(gallery, '\0unread', () => [cantOpen('drawings', () => render(false))]);
+      return false;
+    }
     if (!as.persistent) note.classList.remove('is-hidden');
     const d = drafts[0];
     const draftNow = d ? `${d.key}|${d.t}|${d.strokes.length}` : '';
@@ -189,6 +152,7 @@ export function artScreen(app: App): ScreenOut {
           }),
     );
     focusBack(gallery);
+    return true;
   };
   const off = as.onChange(() => void render());
   const offPrompt = app.store.onChange(prompt.update);
@@ -231,6 +195,7 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
   let draftTimer = 0;
   let left = false;
   let loading = true;
+  let unread = false;
   const offs: (() => void)[] = [];
 
   const msg = h('div', { class: 'dq-tools-msg', 'aria-live': 'polite' });
@@ -652,6 +617,7 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     return { side, row, gap, pad2, w, hh: fit.clientHeight - pad2 };
   };
   const layout = () => {
+    if (unread) return;
     const was = folded;
     const had = document.activeElement;
     // measured with every tool laid out, and the page taking no room of its own
@@ -727,6 +693,7 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
   sync();
 
   const key$ = (e: KeyboardEvent) => {
+    if (unread) return;
     if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z' || (e.target as HTMLElement)?.closest?.('input,textarea')) return;
     e.preventDefault();
     if (e.shiftKey) pad.redo();
@@ -738,7 +705,7 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
   window.addEventListener('pagehide', flushDraft);
   offs.push(() => window.removeEventListener('keydown', key$), () => document.removeEventListener('visibilitychange', vis), () => window.removeEventListener('pagehide', flushDraft));
   offs.push(as.onRemove((id) => {
-    if (recId !== id) return;
+    if (unread || recId !== id) return;
     recId = null;
     rec = null;
     bases = undefined;
@@ -755,15 +722,20 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     }
   }));
 
+  const cant = () => {
+    if (unread) return;
+    unread = true;
+    el.replaceChildren(cantOpen('drawing', async () =>
+      (app.go(route, { replace: true, quiet: true, hand: visit.handed }), true)));
+  };
   const ready = tab.ready.then(async () => {
     await Promise.allSettled([opened.pending]);
     unsavedName = opened.name;
     if (left) return;
+    const read = reading(as);
     const draft = await opened.draft(as, kind, tab.id, own(opened.editId));
-    if (draft === undefined) {
-      say(p("Couldn't open this drawing. Please try again.", 'dq-small'));
-      return;
-    }
+    if (left) return;
+    if (draft === undefined || read.failed()) return cant();
     if (draft?.key.endsWith(`:${tab.id}`)) key = draft.key;
     else if (opened.occupied) key = `${opened.editId ? `edit:${opened.editId}` : kind}:${uid()}:${tab.id}`;
     else key = own(opened.editId);
@@ -771,6 +743,8 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     recId = id ?? null;
     if (id) {
       rec = await as.get(id);
+      if (left) return;
+      if (read.failed()) return cant();
       if (rec) {
         const old = draft?.editId === id ? draft : null;
         bases = !old ? [revOf(rec)] : Array.isArray(old.bases) ? old.bases.filter((b): b is string => typeof b === 'string').slice(-8) : [];
@@ -832,6 +806,14 @@ export function pieceScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const body = h('div', { class: 'dq-piece-body' });
   let removed = false;
   let endRename = () => {};
+  let unread = false;
+  const cant = () => {
+    if (unread) return;
+    unread = true;
+    endRename();
+    body.replaceChildren(cantOpen('drawing', async () =>
+      (app.go(route, { replace: true, quiet: true, hand: visit.handed }), true)));
+  };
   const missing = () => {
     endRename();
     body.replaceChildren(p('That page is no longer here.', 'dq-text dq-empty'), h('div', { class: 'dq-actions' }, btn('Art room', () => app.go({ name: 'art' }), { kind: 'quiet' })));
@@ -844,8 +826,12 @@ export function pieceScreen(app: App, route: Route, visit: Visit): ScreenOut {
   // hidden while a removal's Undo lasts (from this tab or another): it shows as gone, and comes back with the Undo
   let hidden = false;
   const offShown = as.onChange(() => {
+    const read = reading(as);
     void as.isShown(id).then((on) => {
-      if (removed || on !== hidden) return;
+      if (removed) return;
+      if (read.failed()) return cant();
+      if (unread) return app.go(route, { replace: true, quiet: true, hand: visit.handed });
+      if (on !== hidden) return;
       if (on) return app.go({ name: 'piece', id }, { replace: true, quiet: true });
       hidden = true;
       missing();
@@ -854,8 +840,11 @@ export function pieceScreen(app: App, route: Route, visit: Visit): ScreenOut {
   let offChange = () => {};
   const el = h('div', { class: 'dq-page dq-piece' }, h('h1', { class: 'dq-sr', 'data-focus': '', text: 'Your page' }), body);
   void (async () => {
+    const read = reading(as);
     let rec = await as.get(id);
     const on = !!rec && (await as.isShown(id));
+    if (removed) return;
+    if (read.failed()) return cant();
     if (!rec || !on || removed || hidden) {
       if (!removed) hidden = true;
       missing();
@@ -949,8 +938,11 @@ export function pieceScreen(app: App, route: Route, visit: Visit): ScreenOut {
       if (ally) void prepImage(now);
     };
     offChange = as.onChange(() => {
+      const read = reading(as);
       void as.get(id).then((now) => {
-        if (!now || removed) return;
+        if (removed) return;
+        if (read.failed()) return cant();
+        if (!now) return;
         take(now);
       });
     });
