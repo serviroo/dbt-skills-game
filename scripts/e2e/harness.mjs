@@ -11,6 +11,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfigFromFile, parseAst } from 'vite';
 import { glArgs, checkRenderer } from '../gl.mjs';
+import { pageState } from './page-state.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -673,29 +674,6 @@ function pageTrail() {
   });
 }
 
-/** The page's state for evidence(), read inside the page. */
-function pageState() {
-  const trail = window.__e2eTrail;
-  trail?.flush();
-  return {
-    path: location.pathname + location.search,
-    readyState: document.readyState,
-    visibility: document.visibilityState,
-    ready: document.documentElement.dataset.ready ?? null,
-    mounted: !!window.__daily,
-    route: window.__daily?.route.name ?? null,
-    title: !!document.querySelector('.title-screen'),
-    prompt: !!document.querySelector('#np-name'),
-    windows: [...document.querySelectorAll('.sw, .dq-sw')].map((w) => {
-      const r = w.getBoundingClientRect();
-      return { label: w.getAttribute('aria-label'), visible: w.checkVisibility(), box: [r.left, r.top, r.width, r.height].map(Math.round) };
-    }),
-    stage: window.__stage ? { frames: trail?.frames ?? null, lastFrameAgo: trail?.lastFrame == null ? null : Math.round(performance.now() - trail.lastFrame) } : null,
-    origin: performance.timeOrigin,
-    trail: trail?.ev ?? null,
-  };
-}
-
 // A partial copy of the repo takes its modules from nodeImports() and viteConfigFiles(), so it still runs when one of
 // them loads a new module.
 
@@ -993,8 +971,12 @@ export async function startHarness(flags = {}) {
    * A fresh, isolated browser profile at phone size, optionally seeded with localStorage before the app runs. `device`
    * adds context options for the kind of device, such as hasTouch for a touch-first phone.
    */
-  const opener = (browser) => async function open(seed = {}, query = '?mute', viewport = { width: 390, height: 844 }, prepare, device = {}) {
-    const ctx = await browser.newContext({ viewport, deviceScaleFactor: 2, acceptDownloads: true, serviceWorkers: 'block', ...device, ...(flags.media === 'true' ? { recordVideo: { dir: out, size: viewport } } : {}) });
+  const opener = (browser, dirOf) => async function open(
+    seed = {}, query = '?mute', viewport = { width: 390, height: 844 }, prepare, device = {},
+  ) {
+    const options = { viewport, deviceScaleFactor: 2, acceptDownloads: true, serviceWorkers: 'block', ...device };
+    const video = flags.media === 'true' ? { recordVideo: { dir: dirOf(), size: viewport } } : {};
+    const ctx = await browser.newContext({ ...options, ...video });
     await ctx.addInitScript((s) => {
       if (sessionStorage.getItem('e2e-seeded')) return;
       sessionStorage.setItem('e2e-seeded', '1');
@@ -1014,7 +996,7 @@ export async function startHarness(flags = {}) {
    * happened inside the page. Each read waits at most 3 s, so a frozen page can't hang it; if the page didn't answer,
    * one more read waits up to 20 s and says when it came back, with the timeline from inside the page.
    */
-  async function evidence(page, name) {
+  async function evidence(page, name, dir = out) {
     const { t0, life, logs, errors } = trail.get(page) ?? { t0: Date.now(), life: [], logs: [], errors: [] };
     const read = async (ms) => {
       const t = Date.now();
@@ -1026,7 +1008,7 @@ export async function startHarness(flags = {}) {
     };
     const snap = () =>
       page
-        .screenshot({ path: path.join(out, name + '.png'), timeout: 0, signal: AbortSignal.timeout(3000) })
+        .screenshot({ path: path.join(dir, name + '.png'), timeout: 0, signal: AbortSignal.timeout(3000) })
         .then(() => 'saved', (e) => 'not saved: ' + clean(String(e?.message ?? e).split('\n')[0]));
     const now = await read(3000);
     let shot = await snap();
@@ -1038,15 +1020,16 @@ export async function startHarness(flags = {}) {
       ...(answered?.trail ?? []).map(({ t, ...e }) => ({ t: Math.round(answered.origin + t - t0), in: 'page', ...e })),
     ].sort((x, y) => x.t - y.t);
     for (const s of [now, later]) if (s) delete s.trail;
-    fs.writeFileSync(path.join(out, name + '.json'), JSON.stringify({ t: now.t, state: now, later, shot, errors: errors.map(clean), console: logs, timeline, life }, null, 2));
+    const saved = { t: now.t, state: now, later, shot, errors: errors.map(clean), console: logs, timeline, life };
+    fs.writeFileSync(path.join(dir, name + '.json'), JSON.stringify(saved, null, 2));
   }
   /** evidence() for every page still open in this browser, as <prefix>-1, -2, ... in the order the pages opened */
-  const allEvidence = (browser) => async function evidenceAll(prefix) {
+  const allEvidence = (browser, dirOf) => async function evidenceAll(prefix) {
     const pages = browser.contexts().flatMap((c) => c.pages());
-    await Promise.all(pages.map((p, i) => evidence(p, `${prefix}-${i + 1}`).catch((e) => console.log(`evidence ${prefix}-${i + 1}: ${e?.message ?? e}`))));
+    const save = (p, name) =>
+      evidence(p, name, dirOf()).catch((e) => console.log(`evidence ${name}: ${e?.message ?? e}`));
+    await Promise.all(pages.map((p, i) => save(p, `${prefix}-${i + 1}`)));
   };
-  /** screenshot() of a page or one element (a locator), saved as <name>.png */
-  const shot = (target, name) => screenshot(target, { path: path.join(out, name + '.png') });
   const ls = (page, k) => page.evaluate((key) => localStorage.getItem(key), k);
   const youOf = async (page) => JSON.parse((await ls(page, YOU)) ?? 'null');
   /** every value stored under `key` anywhere in the save, whatever its shape */
@@ -1081,11 +1064,20 @@ export async function startHarness(flags = {}) {
   })());
 
   const shared = {};
-  const lane = (browser) => ({
-    browser, server, out, flags, shared, renderer, throttleErrors, zone: ZONE, open: opener(browser), evidence,
-    evidenceAll: allEvidence(browser), note, leaves, gone, poll, stopwatch, quick, untimed, shot, ls, youOf, deepFind,
-    deepDrop, expect, sleep, frames, settled, until, reachHub, openSettings, SAVE, YOU, SEEN, stop, more,
-  });
+  const lane = (browser) => {
+    const l = {
+      browser, server, root: out, out, flags, shared, renderer, throttleErrors, zone: ZONE, note, leaves, gone, poll,
+      stopwatch, quick, untimed, ls, youOf, deepFind, deepDrop, expect, sleep, frames, settled, until, reachHub,
+      openSettings, SAVE, YOU, SEEN, stop,
+      more: () => more().then((m) => Object.assign(m, { out: l.out })),
+      open: opener(browser, () => l.out),
+      evidence: (page, name) => evidence(page, name, l.out),
+      evidenceAll: allEvidence(browser, () => l.out),
+      /** screenshot() of a page or one element (a locator), saved as <name>.png */
+      shot: (target, name) => screenshot(target, { path: path.join(l.out, name + '.png') }),
+    };
+    return l;
+  };
   /** Another browser on the same dev server, so scenarios can run side by side: its own profiles, the same `shared`. */
   async function more() {
     if (stopping) throw new Error('the harness is stopping');

@@ -89,7 +89,7 @@ jobs:
         with:
           name: deploy-checks
           path: artifacts/
-          retention-days: 7
+          retention-days: 3
       - uses: actions/upload-pages-artifact@v5
         with:
           path: dist

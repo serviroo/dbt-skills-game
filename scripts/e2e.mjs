@@ -15,13 +15,14 @@
 // renderer check expects SwiftShader) and listens on that machine's 127.0.0.1 only. An SSH tunnel from here forwards
 // its port (-L) and the dev server's (-R), so both sides use 127.0.0.1. --ws needs --port, which keeps the dev server
 // on the forwarded port, and the run first checks that the browser reaches this run's dev server (CONTRIBUTING.md).
-// Writes screenshots and report.json to artifacts/e2e/<time>/.
+// Writes report.json to artifacts/e2e/<time>/ and each scenario's files to <scenario>/ there, or failed/<scenario>/.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseAst } from 'vite';
 import { startHarness } from './e2e/harness.mjs';
+import { folderOf, keep, mark, safe } from './e2e/keep.mjs';
 import { undefinedNames } from './e2e-scope-check.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -55,6 +56,7 @@ function twice(node, found = []) {
 
 const all = [];
 const fileOf = new Map();
+const folders = new Map([['running', 'the scenarios running'], ['failed', 'the failed scenarios']]);
 const serial = new Set();
 const quarantined = new Map();
 const files = fs.readdirSync(dir).filter((f) => f.endsWith('.e2e.mjs')).sort();
@@ -72,6 +74,11 @@ for (const f of files) {
   if (mod.serial === true) serial.add(file);
   for (const [name, run] of Object.entries(scenarios)) {
     if (fileOf.has(name)) throw new Error(`scenario "${name}" is in both ${fileOf.get(name)}.e2e.mjs and ${f}`);
+    const folder = safe(name);
+    if (!folder) throw new Error(`a scenario in ${f} has no name to make its folder from`);
+    const owner = folders.get(folder);
+    if (owner) throw new Error(`scenario "${name}" in ${f} would write to ${folder}/, the folder of ${owner}`);
+    folders.set(folder, `scenario "${name}"`);
     if (typeof run !== 'function') throw new Error(`scenario "${name}" in ${f} is not a function`);
     fileOf.set(name, file);
     all.push({ name, file, run, i: all.length });
@@ -173,14 +180,39 @@ if (!pick.length) {
 }
 const units = unitsOf(pick);
 
+const CUT_OFF = 'cut off when the run was interrupted';
 let h;
 let report;
 let interrupted = false;
+let hung;
+let ended = false;
+const inFlight = new Map();
+function saveReport() {
+  const cutOff = [...inFlight.values()].map(({ t, ...s }) => ({ ...s, ok: false, ms: Date.now() - t, error: CUT_OFF }));
+  const scenarios = [...report.scenarios, ...cutOff].sort((a, b) => a.i - b.i).map(({ i, ...s }) => s);
+  fs.writeFileSync(path.join(h.root, 'report.json'), JSON.stringify({ ...report, scenarios }, null, 2));
+}
 const onSignal = () => {
   interrupted = true;
-  if (h) void h.stop().catch((e) => console.error(e));
+  process.exitCode = 130;
+  if (!h) return;
+  void h
+    .stop()
+    .catch((e) => console.error(e))
+    .finally(() => {
+      if (ended || hung) return;
+      hung = setTimeout(() => {
+        console.log("interrupted, and a scenario still hadn't ended 2 s after the browsers and the server stopped");
+        try {
+          if (report) saveReport();
+        } catch (e) {
+          console.error(e);
+        }
+        process.exit(130);
+      }, 2000);
+    });
 };
-for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, onSignal);
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, onSignal);
 let failed = 0;
 try {
   h = await startHarness(flags);
@@ -191,13 +223,23 @@ try {
       for (const { name, file, run, i } of unit.scenarios) {
         if (interrupted) break;
         const t = Date.now();
+        inFlight.set(name, { name, file, t, i });
+        lane.out = folderOf(h.root, name);
+        fs.mkdirSync(lane.out, { recursive: true });
+        const running = mark(h.root, name);
+        let cleared = true;
+        let own;
+        let realFailure = false;
         try {
           let result;
           try {
             result = await run(lane);
           } catch (e) {
+            own = e;
+            realFailure = !interrupted;
+            if (realFailure) mark(h.root, name, { failed: true });
             // what every page still open in this browser showed when the scenario failed
-            if (!interrupted) await lane.evidenceAll('fail-' + name.replace(/[^\w-]+/g, '-'));
+            if (realFailure) await lane.evidenceAll('fail-' + safe(name));
             throw e;
           } finally {
             await Promise.all(lane.browser.contexts().map((ctx) => ctx.close()));
@@ -206,13 +248,24 @@ try {
           console.log(`ok   ${name} (${Date.now() - t} ms)`);
         } catch (e) {
           failed++;
-          report.scenarios.push({ name, file, ok: false, ms: Date.now() - t, i, error: String(e?.message ?? e) });
-          console.log(`FAIL ${name}: ${e?.message ?? e}`);
+          const cause = own ?? e;
+          const message = String(cause?.message ?? cause);
+          const cutOff = interrupted && !realFailure;
+          const error = cutOff ? `${CUT_OFF}: ${message}` : message;
+          report.scenarios.push({ name, file, ok: false, ms: Date.now() - t, i, error });
+          console.log(`FAIL ${name}: ${error}`);
+          if (!cutOff) mark(h.root, name, { failed: true });
+          const why = cutOff ? CUT_OFF : keep(h.root, name);
+          if (why) {
+            cleared = false;
+            console.log(`${name}: what it wrote isn't in failed/: ${why}`);
+          }
         }
+        inFlight.delete(name);
+        if (cleared) fs.rmSync(running, { force: true });
       }
     }
   }));
-  report.scenarios = report.scenarios.sort((a, b) => a.i - b.i).map(({ i, ...s }) => s);
 } finally {
   let stopError;
   try {
@@ -221,7 +274,7 @@ try {
     stopError = e;
   }
   try {
-    if (report) fs.writeFileSync(path.join(h.out, 'report.json'), JSON.stringify(report, null, 2));
+    if (report) saveReport();
   } catch (e) {
     if (stopError) console.error(stopError);
     throw e;
@@ -230,5 +283,8 @@ try {
   }
   if (stopError) throw stopError;
 }
-console.log(`${report.scenarios.filter((s) => s.ok).length}/${pick.length} passed, artifacts in ${path.relative(root, h.out)}`);
+ended = true;
+clearTimeout(hung);
+const passed = report.scenarios.filter((s) => s.ok).length;
+console.log(`${passed}/${pick.length} passed, artifacts in ${path.relative(root, h.root)}`);
 process.exitCode = interrupted ? 130 : failed ? 1 : 0;

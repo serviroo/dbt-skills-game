@@ -69,8 +69,9 @@ one that file records. Commit the new images in `public/` with that file: CI fai
 file.
 
 `scripts/e2e.mjs` starts its own dev server and Playwright Chromium, runs every scenario in `scripts/e2e/*.e2e.mjs`
-and saves screenshots and `report.json` to `artifacts/e2e/<time>/`. It exits non-zero if any scenario fails. Scenarios
-run side by side, longest first, each in a browser of its own: `--jobs=<n>` browsers, by default one for every 4 of the
+and saves `report.json` to `artifacts/e2e/<time>/`, each scenario's files in a folder of its own there, moved to
+`failed/` when it fails. It exits non-zero if any scenario fails. Scenarios run side by side, longest first, each in
+a browser of its own: `--jobs=<n>` browsers, by default one for every 4 of the
 machine's CPU threads and at most 4, so one on CI's 4-vCPU runners. CI runs the same checks on every pull request and
 splits the scenarios into parts with `--shard=<i>/<n>`, spread by the median of the last five times each one took on
 CI. The plan job picks how many parts with `node scripts/e2e.mjs --parts`: the fewest that keep each part under 24
@@ -80,6 +81,10 @@ scenario evens out on its own; `scripts/e2e/timings.json` is the fallback when n
 neither counts as 15 s. To refresh that file, run `node scripts/e2e-timings.mjs <every part's report.json>` on the
 `e2e-times-*` artifacts of one or more runs. For anything visual, also look at it in a browser at phone width (390 and 320 px) with motion
 on and off.
+
+A passing CI part uploads only its `report.json`. A failed or cancelled one also uploads what its failed scenarios
+wrote, as `failed-e2e-<part>-<attempt>`, kept 3 days. A part still running after 28 minutes is stopped the way Ctrl+C
+stops it, so it still writes its report and keeps the scenario it was on.
 
 `--cpu-throttle=4` slows each Chromium page's CPU work by four through CDP, including new tabs. The rate must be at
 least 1. The report records `cpuThrottle` and `throttleErrors`; a failure to apply it fails the run.
@@ -156,15 +161,17 @@ prints it as held out and lists it in `report.json`, and only `--scenario=<name>
   every long task of the page counts, a stop that lands inside one too. The browser times the page's own tasks, but
   only some of what a test runs in it, so make an app call through the function's `evaluate(fn, arg)`, which is
   `page.evaluate` with the time `fn` holds the page counted.
-- `shot(page, name)`: a screenshot in the run's folder (`out`), with its tab brought to the front first, as full
+- `shot(page, name)`: a screenshot in this scenario's folder (`out`), with its tab brought to the front first, as full
   Chromium captures no tab behind another. Start the name with your file's name, and give whatever a scenario writes
   there a name no other scenario uses, as they run at once.
 - `ls(page, key)`, `youOf(page)`, `deepFind(obj, key)`, `deepDrop(obj, keys)`, `expect(cond, msg)`, `sleep(ms)`.
 - `SAVE`, `YOU`, `SEEN`: the save key, the names key and an app state that skips the intro.
 - `browser`, `server.url`, `flags`, and `shared`, one object for the whole run, for a result worth making once (a
   build, the content). Store a promise in it (`shared.x ??= make()`) so scenarios running at once share one. A file
-  that passes results from one scenario to the next must be serial.
-- `out`, the run's artifact folder; `renderer`, the WebGL renderer; `stop()`, which closes every browser and the server.
+  that passes results from one scenario to the next must be serial, and passes a file's contents, not its path: a
+  failed scenario's folder moves to `failed/`.
+- `out`, this scenario's own folder in the run's artifact folder (`root`); `renderer`, the WebGL renderer; `stop()`,
+  which closes every browser and the server.
 
 The runner closes any remaining browser profiles in a scenario's browser after it, including failures. A scenario
 should also work on its own: create any fixture it needs when an earlier scenario has not run. Whatever a scenario returns is kept
