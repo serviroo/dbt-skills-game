@@ -21,12 +21,12 @@ const isIn = (sel) => {
   const el = document.querySelector(sel);
   return !!el && !el.inert && getComputedStyle(el).visibility !== 'hidden';
 };
-const comesIn = (h, page, sel, where, timeout = 5000) =>
+export const comesIn = (h, page, sel, where, timeout = 5000) =>
   page.waitForFunction(isIn, sel, { timeout }).then(
     () => {},
     () => h.expect(false, `${where}: the page never came in`),
   );
-async function holds(h, page, name, where) {
+export async function holds(h, page, name, where) {
   await h.poll(
     page,
     () => page.locator('.st-ta').getAttribute('aria-label'),
@@ -36,8 +36,8 @@ async function holds(h, page, name, where) {
   );
   await comesIn(h, page, '.st-write', where);
 }
-const writeStory = (page, r) => page.evaluate((r) => window.__daily.go(r), { name: 'write', ...r });
-const WAIT = 15000;
+export const writeStory = (page, r) => page.evaluate((r) => window.__daily.go(r), { name: 'write', ...r });
+export const WAIT = 15000;
 const panelIn = (page, sel) => page.locator(`${sel} .dq-cant-t`).waitFor({ timeout: WAIT }).catch(() => {});
 const stall = (page, name, mode) =>
   page.evaluate(
@@ -65,7 +65,7 @@ const stallList = (page, name) =>
     };
   }, name);
 const stalledYet = (page) => page.waitForFunction(() => window.__stalled > 0, null, { timeout: 5000 });
-const onDisk = (page, db, store, op, id) =>
+export const onDisk = (page, db, store, op, id) =>
   page.evaluate(
     ([db, store, op, id]) =>
       new Promise((done, bad) => {
@@ -90,8 +90,8 @@ async function shots(h, page, name) {
   await h.frames(page, 3);
 }
 const tryAgain = (page) => page.locator('.dq-cant').getByRole('button', { name: 'Try again', exact: true }).click();
-const pageText = (page) => page.locator('.st-ta').inputValue();
-async function savedDrawing(h, page) {
+export const pageText = (page) => page.locator('.st-ta').inputValue();
+export async function savedDrawing(h, page) {
   await drawPage(h, page);
   await line(page, [0.2, 0.3], [0.7, 0.4]);
   await save(page);
@@ -101,6 +101,7 @@ async function savedDrawing(h, page) {
   });
 }
 const openDrawing = (page, id) => page.evaluate((id) => window.__daily.go({ name: 'draw', kind: 'today', id }), id);
+export { neverOpens };
 const failNextRead = (page, store) => page.evaluate((name) => {
   const get = IDBObjectStore.prototype.get;
   IDBObjectStore.prototype.get = function (...args) {
@@ -131,14 +132,14 @@ const alertTakesFocus = async (h, page, sel, where) => {
   }, sel);
   h.expect(got.role === 'alert' && got.focused, `${where}: the panel is ${JSON.stringify(got)}, not an alert in focus`);
 };
-const storyOfTwo = (page) =>
+export const storyOfTwo = (page) =>
   page.evaluate(async () => {
     const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
     const { story, first } = await ss.create('The Long Night');
     await ss.saveChapter({ ...first, text: 'The lantern woke.' }, [first.rev]);
     return { db: ss.name, story: story.id, notes: story.notes };
   });
-async function withPage(h, run) {
+export async function withPage(h, run) {
   const { ctx, page, errors } = await h.open(seed(h));
   try {
     await run(page, ctx);

@@ -14,6 +14,7 @@ import { cardLists, cleanCard, mergeCards } from './story-card-list';
 export { cleanCard, skippedCards } from './story-card-list';
 import { uid, validDay } from './store';
 import { IdbLink, req } from './idb-link';
+import { LOAD } from './story-live';
 import { BESIDE, STORY_DB } from '../core/stored-names';
 import {
   canWrite, cleared, dropBefore, fromBefore, marked, onClear, removeStored, setStored, write,
@@ -85,18 +86,6 @@ const importRev = () => `imp~${uid()}`;
 
 /** At most this many live mirrors per store key; past it a new one is refused, never one already there dropped. */
 const LIVE_CAP = 50;
-/**
- * This page load's id, fresh every load and never shared (a tab opened with window.open copies sessionStorage, so a
- * tab id there could be two tabs'): each load writes and clears only its own mirrors.
- */
-const LOAD = (() => {
-  try {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
-  } catch {
-    /* not a secure context */
-  }
-  return `${uid()}${Math.random().toString(36).slice(2, 10)}`;
-})();
 
 export function cleanStory(x: unknown): Story | null {
   if (!isObj(x) || !validId(x.id)) return null;
@@ -540,6 +529,8 @@ export class StoryStore {
         }
       t.objectStore('stories').delete(id);
     });
+    const keep = !r && !cleared() && typeof indexedDB !== 'undefined';
+    if (keep) { this.changed(false); return; }
     for (const ch of [...this.mem.chapters.values()])
       if (ch.story === id) {
         gone.add(ch.id);
@@ -552,10 +543,8 @@ export class StoryStore {
     this.mem.stories.delete(id);
     this.lastStory.delete(id);
     // the player chose to delete the story, so its chapters' mirrors go too; a failed delete leaves it stored, mirrors and all
-    if (r || !this.link.there()) {
-      const index = this.liveIndex();
-      for (const c of gone) for (const l of index.get(c) ?? []) this.dropLive(l.key, c);
-    }
+    const index = this.liveIndex();
+    for (const c of gone) for (const l of index.get(c) ?? []) this.dropLive(l.key, c);
     this.changed(!!r);
   }
 

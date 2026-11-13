@@ -7,6 +7,8 @@ import { ALLY_NAMES, ART, ART_PROMPTS } from '../content/daily-lines';
 import type { App, Route, ScreenOut, Visit } from './app';
 import { icon } from './art';
 import { artStore, extrasOf, revOf, type DrawingRec } from './artstore';
+import { creditArt } from './art-credit';
+import { STORAGE_SAVING_CHANGE } from './idb-link';
 import { allyCard, canRestoreFocus, cardOf, favFirst, focusBack, refill, setFocusBack, thumbImg } from './art-cards';
 import { cantOpen } from './cant-open';
 import { reading } from './reading';
@@ -26,15 +28,6 @@ const dotStyle = (ink: (typeof INKS)[number]) => `--b:${ink.body};--c:${ink.core
 
 export function todayPrompt(app: App, roll = 0) {
   return ART_PROMPTS[(app.store.visitIndex() * 5 + roll) % ART_PROMPTS.length];
-}
-
-/** First saved drawing of a day adds 10 XP, whatever it is. */
-function creditArt(app: App, kind: Paper) {
-  const st = app.store;
-  const today = st.today();
-  if (st.state.events.some((e) => e.k === 'art' && e.day === today)) return false;
-  st.add('art', 10, { data: { kind } });
-  return true;
 }
 
 // ---------------- Art room (landing + gallery) ----------------
@@ -199,7 +192,7 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     },
     onStroke: () => {
       dirty = true;
-      say();
+      say(as.persistent ? null : p(ART.noStore, 'dq-small'));
       hint.classList.add('is-gone');
     },
   });
@@ -662,6 +655,12 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     promptRow,
     main,
   );
+  const storageChange = () => {
+    if (!as.persistent) say(p(ART.noStore, 'dq-small'));
+    else if (msg.textContent === typo(ART.noStore)) say();
+  };
+  document.addEventListener(STORAGE_SAVING_CHANGE, storageChange);
+  offs.push(() => document.removeEventListener(STORAGE_SAVING_CHANGE, storageChange));
   sync();
 
   const key$ = (e: KeyboardEvent) => {
