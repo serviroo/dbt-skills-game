@@ -835,7 +835,9 @@ export function pieceScreen(app: App, route: Route, visit: Visit): ScreenOut {
   });
   let offChange = () => {};
   const el = h('div', { class: 'dq-page dq-piece' }, h('h1', { class: 'dq-sr', 'data-focus': '', text: 'Your page' }), body);
-  const load = async (): Promise<boolean> => {
+  let loading: Promise<boolean> | null = null;
+  const load = () => (loading ??= run().finally(() => { loading = null; }));
+  const run = async (): Promise<boolean> => {
     const read = reading(as);
     let rec = await as.get(id);
     const on = !!rec && (await as.isShown(id));

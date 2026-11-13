@@ -156,6 +156,55 @@ export const scenarios = {
       await ctx.close();
     }
   },
+  async 'art-cant-read-overlapping-retries'(h) {
+    const { ctx, page, errors, id } = await savedDrawing(h);
+    try {
+      await failReads(page, ['meta', 'strokes']);
+      await go(page, { name: 'piece', id });
+      await panel(page, 'open this drawing').waitFor();
+      await restoreReads(page);
+      await page.evaluate(async () => {
+        const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+        const get = IDBObjectStore.prototype.get;
+        const pending = [];
+        window.artReadGate = {
+          pending,
+          release: (count) => pending.splice(0, count).forEach((finish) => finish()),
+          restore: () => { IDBObjectStore.prototype.get = get; },
+        };
+        IDBObjectStore.prototype.get = function (...args) {
+          const request = get.apply(this, args);
+          if (this.transaction.db.name !== as.name || !['meta', 'strokes'].includes(this.name)) return request;
+          const delayed = { result: undefined, error: null, onsuccess: null, onerror: null };
+          request.onsuccess = () => {
+            delayed.result = request.result;
+            pending.push(() => delayed.onsuccess?.());
+          };
+          request.onerror = () => {
+            delayed.error = request.error;
+            pending.push(() => delayed.onerror?.());
+          };
+          return delayed;
+        };
+      });
+      await changed(page);
+      await page.waitForFunction(() => window.artReadGate.pending.length >= 2);
+      await retry(page);
+      await h.frames(page, 10);
+      await page.evaluate(() => window.artReadGate.release(2));
+      await page.getByRole('button', { name: 'Rename', exact: true }).click();
+      const input = page.locator('.dq-piece-rename input');
+      await input.fill('Blue sky');
+      await page.evaluate(() => window.artReadGate.release(Infinity));
+      await h.frames(page, 30);
+      h.expect(await input.isVisible() && await input.inputValue() === 'Blue sky',
+        'an overlapping load closed the rename field or lost its text');
+      await page.evaluate(() => window.artReadGate.restore());
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
   async 'art-cant-read-piece'(h) {
     const { ctx, page, errors, id } = await savedDrawing(h);
     try {
