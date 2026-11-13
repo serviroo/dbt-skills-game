@@ -3,9 +3,7 @@ import { connectionLost } from './store';
 
 export class IdbLink {
   persistent = true;
-  /** IndexedDB is here but couldn't be opened, so what was stored earlier can't be read this visit. */
   private unreadable = false;
-  /** Reads of what is stored that got no answer; exportAll compares it before and after. */
   readFails = 0;
   db: Promise<IDBDatabase | null>;
   private lost = new WeakSet<IDBDatabase>();
