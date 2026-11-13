@@ -403,7 +403,7 @@ export class StoryStore {
     if (r?.v) {
       this.mem.stories.delete(s.id);
       this.lastStory.set(s.id, r.v);
-    } else await decide(this.memView(), [memS], false, await this.link.there());
+    } else await decide(this.memView(), [memS], false, this.link.there());
     for (const c of order) this.removedHere.delete(c);
     this.note({ id: s.id, updated: stamp });
     this.changed(!!r);
@@ -466,7 +466,7 @@ export class StoryStore {
       }
       this.mem.stories.delete(c.story);
     } else {
-      const { id } = await decide(this.memView(), [memC], false, await this.link.there());
+      const { id } = await decide(this.memView(), [memC], false, this.link.there());
       const had = this.memBases.get(id);
       this.memBases.set(id, new Set([...(had ?? []), ...baseSet]));
       out = { stored: 'failed', id };
@@ -552,7 +552,7 @@ export class StoryStore {
     this.mem.stories.delete(id);
     this.lastStory.delete(id);
     // the player chose to delete the story, so its chapters' mirrors go too; a failed delete leaves it stored, mirrors and all
-    if (r || !(await this.link.there())) {
+    if (r || !this.link.there()) {
       const index = this.liveIndex();
       for (const c of gone) for (const l of index.get(c) ?? []) this.dropLive(l.key, c);
     }

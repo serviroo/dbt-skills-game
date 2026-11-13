@@ -763,7 +763,7 @@ export class ArtStore {
       () => 'failed' as const,
     );
     // a write that failed with the database there leaves it hidden, for the next load to finish
-    const db = out === 'failed' && (await this.link.there());
+    const db = out === 'failed' && this.link.there();
     if (db) this.mine.set(id, g);
     else this.markGone(id, null, g);
     if (out === 'removed' || (out === 'failed' && !db && (!mm || revOf(mm) === g.rev))) {
@@ -810,7 +810,7 @@ export class ArtStore {
     const raw = await this.tx<unknown>(
       ['drafts'], 'readonly', (t) => req(t.objectStore('drafts').get(key) as IDBRequest<unknown>), () => failed,
     );
-    if (raw === failed && (await this.link.there())) return undefined;
+    if (raw === failed && this.link.there()) return undefined;
     const d = cleanDraft(raw);
     const m = this.mem.drafts.get(key);
     const best = d && m ? (m.t > d.t ? m : d) : (d ?? m);

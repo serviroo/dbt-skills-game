@@ -187,6 +187,7 @@ async function draftDuringReconnect(h, failRead) {
         throw new DOMException('The connection was lost.', 'InvalidStateError');
       };
     }, db);
+    const opened = Date.now();
     await page.evaluate((draft) => window.__daily.go({ name: 'draw', kind: 'today', draft }), key);
     await routeIs(page, 'draw');
     await stalledYet(page);
@@ -195,8 +196,13 @@ async function draftDuringReconnect(h, failRead) {
       void as.putDraft({ key: 'today:other-session', kind: 'today', strokes: [s], t: Date.now() });
     }, stroke(100, 200));
     await page.waitForFunction(() => !!window.__failOpen, null, { timeout: 5000 });
-    if (failRead) await page.evaluate(() => window.__failDraft());
+    if (failRead) {
+      await new Promise((go) => setTimeout(go, Math.max(0, opened + 8500 - Date.now())));
+      await page.evaluate(() => window.__failDraft());
+    }
     await panelIn(page, '.dq-draw');
+    const took = Date.now() - opened;
+    h.expect(took < 12500, `the drawing page waited ${took} ms before saying it can't open`);
     await comesIn(h, page, '.dq-draw', 'a stalled draft during a stalled reconnect');
     await cantOpenShows(h, page, '.dq-draw', 'drawing', 'a stalled draft during a stalled reconnect');
     await alertTakesFocus(h, page, '.dq-draw', 'a stalled draft during a stalled reconnect');
@@ -205,7 +211,156 @@ async function draftDuringReconnect(h, failRead) {
     h.expect(draft?.strokes?.length === 1, 'the stalled draft changed on disk');
     await tryAgain(page);
     await drawReady(page);
+    await page.locator('.dq-ink-stage').waitFor({ timeout: 5000 });
     await shows(h, page, 1, 'the draft after Try again:');
+  });
+}
+async function pendingOpenSurvivesVisibility(h) {
+  await withPage(h, async (page) => {
+    await h.reachHub(page);
+    const key = 'today:held-read';
+    const db = await page.evaluate(async ([key, s]) => {
+      const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+      await as.putDraft({ key, kind: 'today', strokes: [s], t: Date.now() });
+      return as.name;
+    }, [key, stroke(200, 500)]);
+    await page.evaluate((name) => {
+      const transaction = IDBDatabase.prototype.transaction;
+      IDBDatabase.prototype.transaction = function (stores, mode, ...rest) {
+        if (this.name !== name || mode !== 'readonly') return transaction.call(this, stores, mode, ...rest);
+        IDBDatabase.prototype.transaction = transaction;
+        throw new DOMException('The connection was lost.', 'InvalidStateError');
+      };
+      const open = IDBFactory.prototype.open;
+      IDBFactory.prototype.open = function (...args) {
+        if (args[0] !== name) return open.apply(this, args);
+        IDBFactory.prototype.open = open;
+        const real = open.apply(this, args);
+        const held = {};
+        real.onerror = () => { held.error = real.error; held.onerror?.(new Event('error')); };
+        real.onsuccess = () => {
+          held.result = real.result;
+          window.__releaseOpen = () => held.onsuccess?.(new Event('success'));
+        };
+        return held;
+      };
+    }, db);
+    await page.evaluate(async (key) => {
+      const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+      window.__heldRead = as.getDraft(key);
+    }, key);
+    await page.waitForFunction(() => !!window.__releaseOpen, null, { timeout: 5000 });
+    h.expect((await page.evaluate(() => document.visibilityState)) === 'visible', 'the page is not visible');
+    await page.evaluate(async (s) => {
+      const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+      window.__heldWrite = as.putDraft({ key: 'today:held-write', kind: 'today', strokes: [s], t: Date.now() });
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.__releaseOpen();
+    }, stroke(100, 200));
+    const read = await page.evaluate(async () => {
+      const [draft] = await Promise.all([window.__heldRead, window.__heldWrite]);
+      return draft?.strokes?.length ?? null;
+    });
+    h.expect(read === 1, `a healthy reconnect returned a draft with ${read} strokes`);
+    const saved = await onDisk(page, db, 'drafts', 'get', 'today:held-write');
+    h.expect(saved?.strokes?.length === 1, 'a visibility change lost a write waiting on a healthy reconnect');
+  });
+}
+
+async function unattendedOpenTimesOut(h) {
+  await withPage(h, async (page) => {
+    await h.reachHub(page);
+    const db = await page.evaluate(async () => {
+      const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+      await as.list();
+      return as.name;
+    });
+    await neverOpens(page, db);
+    await page.evaluate((name) => {
+      const transaction = IDBDatabase.prototype.transaction;
+      IDBDatabase.prototype.transaction = function (stores, mode, ...rest) {
+        if (this.name !== name || mode !== 'readwrite') return transaction.call(this, stores, mode, ...rest);
+        IDBDatabase.prototype.transaction = transaction;
+        throw new DOMException('The connection was lost.', 'InvalidStateError');
+      };
+    }, db);
+    await page.evaluate(async (s) => {
+      const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+      window.__writeDone = false;
+      void as.putDraft({ key: 'today:unanswered-open', kind: 'today', strokes: [s], t: Date.now() })
+        .then(() => (window.__writeDone = true));
+    }, stroke(100, 200));
+    await page.waitForFunction(() => !!window.__failOpen, null, { timeout: 5000 });
+    await page.waitForFunction(() => window.__writeDone, null, { timeout: WAIT });
+    const kept = await page.evaluate(async () => {
+      const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+      return as.persistent;
+    });
+    h.expect(!kept, 'a write waiting on a timed-out open said it was saved');
+    const saved = await onDisk(page, db, 'drafts', 'get', 'today:unanswered-open');
+    h.expect(!saved, 'a write waiting on a timed-out open changed storage');
+  });
+}
+
+async function canceledStoryReadSaysSo(h) {
+  await withPage(h, async (page) => {
+    await h.reachHub(page);
+    const ids = await storyOfTwo(page);
+    await page.reload();
+    await h.reachHub(page);
+    const chapter = await page.evaluate(async (id) => {
+      const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+      const story = await ss.story(id);
+      return ss.chapter(story.chapters[0]);
+    }, ids.story);
+    await page.evaluate(async (id) => {
+      const get = IDBObjectStore.prototype.get;
+      IDBObjectStore.prototype.get = function (...args) {
+        if (this.name !== 'stories' || this.transaction.mode !== 'readonly') return get.apply(this, args);
+        IDBObjectStore.prototype.get = get;
+        const held = { error: new DOMException('The disk could not be read.', 'NotReadableError') };
+        window.__failStoryRead = () => held.onerror?.(new Event('error'));
+        return held;
+      };
+      const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+      window.__firstStoryRead = ss.story(id);
+    }, ids.story);
+    await page.waitForFunction(() => !!window.__failStoryRead, null, { timeout: 5000 });
+    await neverOpens(page, ids.db);
+    await page.evaluate((name) => {
+      const transaction = IDBDatabase.prototype.transaction;
+      IDBDatabase.prototype.transaction = function (stores, mode, ...rest) {
+        if (this.name !== name || mode !== 'readwrite') return transaction.call(this, stores, mode, ...rest);
+        IDBDatabase.prototype.transaction = transaction;
+        throw new DOMException('The connection was lost.', 'InvalidStateError');
+      };
+    }, ids.db);
+    await page.evaluate(async (chapter) => {
+      const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+      void ss.saveChapter(chapter, [chapter.rev]);
+    }, chapter);
+    await page.waitForFunction(() => !!window.__failOpen, null, { timeout: 5000 });
+    await page.evaluate(async () => {
+      window.__failStoryRead();
+      await window.__firstStoryRead;
+      const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+      const story = ss.story;
+      ss.story = function (...args) {
+        window.__readerStarted = true;
+        return story.apply(this, args);
+      };
+    });
+    await page.evaluate((id) => window.__daily.go({ name: 'read', id }), ids.story);
+    await page.waitForFunction(() => window.__readerStarted, null, { timeout: 5000 });
+    h.expect((await page.evaluate(() => document.visibilityState)) === 'visible', 'the page is not visible');
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await page.locator('.st-reader .dq-cant-t').waitFor({ timeout: 5000 });
+    await comesIn(h, page, '.st-reader', 'a canceled story read');
+    await cantOpenShows(h, page, '.st-reader', 'story', 'a canceled story read');
+    const gone = await page.getByText('isn’t on this device any more').count();
+    h.expect(!gone, 'a canceled read said the story was gone');
+    await tryAgain(page);
+    await page.locator('.st-read-text', { hasText: 'The lantern woke.' }).waitFor({ timeout: 5000 });
   });
 }
 export const scenarios = {
@@ -629,6 +784,8 @@ export const scenarios = {
         h.expect(!note.includes('keeping drawings'), `after the late open ${answer}, the page says ${note}`);
       });
     }
+    await pendingOpenSurvivesVisibility(h);
+    await unattendedOpenTimesOut(h);
   },
   async 'a-dropped-connection-gives-up'(h) {
     for (const opens of [true, false]) {
@@ -672,6 +829,7 @@ export const scenarios = {
         await ctx.close();
       }
     }
+    await canceledStoryReadSaysSo(h);
   },
   async 'storage-comes-back-on-its-own'(h) {
     await withPage(h, async (page) => {

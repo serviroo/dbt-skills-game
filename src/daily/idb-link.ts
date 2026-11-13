@@ -18,9 +18,9 @@ export function wakeStorage() {
   for (const link of links) link.wake();
 }
 
-document.addEventListener('visibilitychange', () => {
+const wakeWhenShown = () => {
   if (document.visibilityState === 'visible') wakeStorage();
-});
+};
 
 type Read = { timedOut: boolean; transaction?: IDBTransaction; waiting?: Promise<IDBDatabase | null> };
 
@@ -36,7 +36,9 @@ export class IdbLink {
   readFails = 0;
   db: Promise<IDBDatabase | null>;
   private lost = new WeakSet<IDBDatabase>();
+  private givenUp = new WeakSet<Promise<IDBDatabase | null>>();
   private opening: { db: Promise<IDBDatabase | null>; cancel: () => void } | null = null;
+  private retryOpen: Promise<IDBDatabase | null> | null = null;
   private abandoned = false;
   private downUntil = 0;
   /** Writes under way, so a clear's check waits for them. */
@@ -47,12 +49,14 @@ export class IdbLink {
     private readonly version: number,
     private readonly upgrade: (db: IDBDatabase) => void,
   ) {
+    if (!links.size && typeof document !== 'undefined') document.addEventListener('visibilitychange', wakeWhenShown);
     links.add(this);
     this.db = this.connect(true);
   }
 
   close() {
     links.delete(this);
+    if (!links.size && typeof document !== 'undefined') document.removeEventListener('visibilitychange', wakeWhenShown);
     this.opening?.cancel();
     const db = this.db;
     this.db = Promise.resolve(null);
@@ -60,40 +64,24 @@ export class IdbLink {
   }
 
   wake() {
+    const opening = this.opening;
+    if (opening && (this.downUntil || this.retryOpen === opening.db)) {
+      this.giveUp(opening.db);
+      this.opening = null;
+    }
     this.downUntil = 0;
     this.ready();
   }
 
   private giveUp(pending: Promise<IDBDatabase | null>) {
     if (this.opening?.db !== pending) return;
+    this.givenUp.add(pending);
     this.abandoned = true;
     this.opening.cancel();
   }
 
-  async there(): Promise<boolean> {
-    if (cleared() || this.unreadable || typeof indexedDB === 'undefined') return false;
-    this.ready();
-    const pending = this.db;
-    if (this.downUntil) {
-      this.giveUp(pending);
-      return true;
-    }
-    let timer: ReturnType<typeof setTimeout>;
-    const timeout = new Promise<boolean>((resolve) => {
-      timer = setTimeout(() => {
-        if (cleared() || this.unreadable || typeof indexedDB === 'undefined') return resolve(false);
-        this.downUntil = Date.now() + STORAGE_REST_MS;
-        this.giveUp(pending);
-        resolve(true);
-      }, STORAGE_WAIT_MS);
-    });
-    const result = await Promise.race([
-      pending.then((db) => !cleared() && !this.unreadable && typeof indexedDB !== 'undefined' &&
-        (!!db || !!this.downUntil)),
-      timeout,
-    ]);
-    clearTimeout(timer!);
-    return result;
+  there() {
+    return typeof indexedDB !== 'undefined' && !cleared() && !this.unreadable;
   }
 
   private ready() {
@@ -154,7 +142,16 @@ export class IdbLink {
     });
     const opening = { db, cancel };
     this.opening = opening;
-    void db.then(() => { if (this.opening === opening) this.opening = null; });
+    const late = setTimeout(() => {
+      if (this.opening !== opening) return;
+      this.downUntil = Date.now() + STORAGE_REST_MS;
+      this.giveUp(db);
+    }, STORAGE_WAIT_MS);
+    void db.then(() => {
+      clearTimeout(late);
+      if (this.opening === opening) this.opening = null;
+      if (this.retryOpen === db) this.retryOpen = null;
+    });
     return db;
   }
 
@@ -219,6 +216,7 @@ export class IdbLink {
       if (read?.timedOut) return null;
       if (read) read.waiting = undefined;
       if (!db) {
+        if (mode === 'readonly' && this.givenUp.has(pending)) failed = true;
         if (mode !== 'readonly' && !cleared()) failed = true;
         break;
       }
@@ -250,6 +248,7 @@ export class IdbLink {
       } catch (e) {
         if (read?.timedOut) return null;
         failed = true;
+        if (this.opening && this.opening.db !== pending) this.retryOpen = this.opening.db;
         if (retry && connectionLost(e)) {
           const connected = this.reconnect(db);
           if (read) read.waiting = this.db;
