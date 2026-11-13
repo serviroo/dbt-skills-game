@@ -1,5 +1,65 @@
 import * as pageClock from './clock.mjs';
 
+const NO_ANSWER = { onupgradeneeded: null, onsuccess: null, onerror: null, onblocked: null, result: undefined };
+
+export const neverOpens = (page, db) =>
+  page.evaluate(
+    ([db, req]) => {
+      const open = IDBFactory.prototype.open;
+      IDBFactory.prototype.open = function (...a) {
+        if (a[0] !== db) return open.apply(this, a);
+        IDBFactory.prototype.open = open;
+        const r = { ...req, error: new DOMException('The disk could not be read.', 'NotReadableError') };
+        window.__failOpen = () => r.onerror?.(new Event('error'));
+        window.__succeedOldOpen = () => new Promise((resolve, reject) => {
+          const real = open.call(indexedDB, db);
+          real.onerror = () => reject(real.error);
+          real.onsuccess = () => {
+            r.result = real.result;
+            r.onsuccess?.(new Event('success'));
+            try { real.result.transaction('drafts'); resolve(false); }
+            catch { resolve(true); }
+          };
+        });
+        return r;
+      };
+    },
+    [db, NO_ANSWER],
+  );
+
+export async function prepareDraftClock(page) {
+  await page.evaluate(async () => {
+    const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+    await as.claimTab().ready;
+    await as.list();
+  });
+  await pageClock.install(page);
+  await pageClock.pauseClock(page);
+  return page.evaluate(() => Date.now());
+}
+
+export async function failDraftNearLimit(h, page, started) {
+  await pageClock.fastForward(page, 8500);
+  const pending = await page.evaluate(() => !!window.__draftTransaction && window.__draftErrorReady?.() &&
+    !window.__draftExpired && !document.querySelector('.dq-draw .dq-cant-t'));
+  h.expect(pending, 'the draft read did not remain pending until the failure');
+  await page.evaluate(() => window.__failDraft());
+  await pageClock.fastForward(page, 3999);
+  const result = await page.evaluate((start) => ({
+    elapsed: Date.now() - start,
+    shown: !!document.querySelector('.dq-draw .dq-cant-t'),
+  }), started);
+  h.expect(result.shown && result.elapsed < 12500, `the drawing page had no panel at ${result.elapsed} ms`);
+  await pageClock.resume(page);
+}
+
+async function advanceOpenTo(h, page, field, elapsed) {
+  const current = await page.evaluate((field) => ({ start: window[field], now: Date.now() }), field);
+  const passed = current.now - current.start;
+  h.expect(Number.isFinite(current.start) && passed >= 0 && passed <= elapsed, `${field} was not pending in time`);
+  await pageClock.fastForward(page, elapsed - passed);
+}
+
 export async function pendingWriteSurvivesUnrelatedReadFailure(h, { withPage, storyOfTwo, onDisk }) {
   await withPage(h, async (page) => {
     await h.reachHub(page);
@@ -91,8 +151,12 @@ export async function openRetriesGetOwnDeadline(h, { withPage, onDisk, stroke })
       IDBFactory.prototype.open = function (...args) {
         if (args[0] !== name) return open.apply(this, args);
         const req = { error: new DOMException('The connection was lost.', 'UnknownError') };
-        if (++count === 1) window.__firstOpen = req;
+        if (++count === 1) {
+          window.__firstOpenAt = Date.now();
+          window.__firstOpen = req;
+        }
         else {
+          window.__secondOpenAt = Date.now();
           window.__secondOpen = req;
           IDBFactory.prototype.open = open;
         }
@@ -111,15 +175,16 @@ export async function openRetriesGetOwnDeadline(h, { withPage, onDisk, stroke })
     }, stroke(100, 200));
     const first = await page.evaluate(() => typeof window.__firstOpen?.onerror === 'function');
     h.expect(first, 'the first open was not held');
-    await pageClock.fastForward(page, 8500);
+    await advanceOpenTo(h, page, '__firstOpenAt', 8500);
     await page.evaluate(() => window.__firstOpen.onerror(new Event('error')));
     const second = await page.evaluate(() => typeof window.__secondOpen?.onerror === 'function');
     h.expect(second, 'the second open did not start');
-    await pageClock.fastForward(page, 2000);
+    await advanceOpenTo(h, page, '__secondOpenAt', 2000);
     h.expect(!(await page.evaluate(() => window.__writeDone)), 'the second open inherited the first open’s deadline');
-    await pageClock.fastForward(page, 7900);
+    await advanceOpenTo(h, page, '__secondOpenAt', 9900);
     h.expect(!(await page.evaluate(() => window.__writeDone)), 'the second open ended before its own deadline');
-    await pageClock.fastForward(page, 200);
+    await advanceOpenTo(h, page, '__secondOpenAt', 10100);
+    h.expect(await page.evaluate(() => window.__writeDone), 'the second open did not end at its own deadline');
     const persistent = await page.evaluate(async () => {
       await window.__deadlineWrite;
       return (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).persistent;

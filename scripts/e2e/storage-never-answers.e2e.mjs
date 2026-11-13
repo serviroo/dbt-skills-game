@@ -1,6 +1,9 @@
 import {
+  failDraftNearLimit,
+  neverOpens,
   openRetriesGetOwnDeadline,
   pendingWriteSurvivesUnrelatedReadFailure,
+  prepareDraftClock,
   readTimeoutKeepsPendingOpen,
 } from './storage-reconnect-checks.mjs';
 import { drawPage, line } from './art-eraser-glow.e2e.mjs';
@@ -36,7 +39,6 @@ async function holds(h, page, name, where) {
 const writeStory = (page, r) => page.evaluate((r) => window.__daily.go(r), { name: 'write', ...r });
 const WAIT = 15000;
 const panelIn = (page, sel) => page.locator(`${sel} .dq-cant-t`).waitFor({ timeout: WAIT }).catch(() => {});
-const NO_ANSWER = { onupgradeneeded: null, onsuccess: null, onerror: null, onblocked: null, result: undefined };
 const stall = (page, name, mode) =>
   page.evaluate(
     ([name, mode]) => {
@@ -99,30 +101,6 @@ async function savedDrawing(h, page) {
   });
 }
 const openDrawing = (page, id) => page.evaluate((id) => window.__daily.go({ name: 'draw', kind: 'today', id }), id);
-const neverOpens = (page, db) =>
-  page.evaluate(
-    ([db, req]) => {
-      const open = IDBFactory.prototype.open;
-      IDBFactory.prototype.open = function (...a) {
-        if (a[0] !== db) return open.apply(this, a);
-        IDBFactory.prototype.open = open;
-        const r = { ...req, error: new DOMException('The disk could not be read.', 'NotReadableError') };
-        window.__failOpen = () => r.onerror?.(new Event('error'));
-        window.__succeedOldOpen = () => new Promise((resolve, reject) => {
-          const real = open.call(indexedDB, db);
-          real.onerror = () => reject(real.error);
-          real.onsuccess = () => {
-            r.result = real.result;
-            r.onsuccess?.(new Event('success'));
-            try { real.result.transaction('drafts'); resolve(false); }
-            catch { resolve(true); }
-          };
-        });
-        return r;
-      };
-    },
-    [db, NO_ANSWER],
-  );
 const failNextRead = (page, store) => page.evaluate((name) => {
   const get = IDBObjectStore.prototype.get;
   IDBObjectStore.prototype.get = function (...args) {
@@ -180,13 +158,22 @@ async function draftDuringReconnect(h, failRead, nearLimit = true) {
     }, [key, stroke(200, 500)]);
     await page.reload();
     await h.reachHub(page);
+    const clocked = failRead && nearLimit;
+    const started = clocked ? await prepareDraftClock(page) : Date.now();
     await stall(page, 'drafts', 'readonly');
     if (failRead) await page.evaluate(() => {
       const get = IDBObjectStore.prototype.get;
+      const abort = IDBTransaction.prototype.abort;
+      IDBTransaction.prototype.abort = function (...args) {
+        if (this === window.__draftTransaction) window.__draftExpired = true;
+        return abort.apply(this, args);
+      };
       IDBObjectStore.prototype.get = function (...args) {
         const req = get.apply(this, args);
         if (this.name === 'drafts' && this.transaction.mode === 'readonly') {
           const failed = { error: new DOMException('The disk could not be read.', 'NotReadableError') };
+          window.__draftTransaction = this.transaction;
+          window.__draftErrorReady = () => typeof failed.onerror === 'function';
           window.__failDraft = () => failed.onerror?.(new Event('error'));
           return failed;
         }
@@ -202,7 +189,6 @@ async function draftDuringReconnect(h, failRead, nearLimit = true) {
         throw new DOMException('The connection was lost.', 'InvalidStateError');
       };
     }, db);
-    const opened = Date.now();
     await page.evaluate((draft) => window.__daily.go({ name: 'draw', kind: 'today', draft }), key);
     await routeIs(page, 'draw');
     await stalledYet(page);
@@ -213,13 +199,10 @@ async function draftDuringReconnect(h, failRead, nearLimit = true) {
       window.__pendingDraftWrite = as.putDraft(draft).then(() => (window.__draftWriteDone = true));
     }, stroke(100, 200));
     await page.waitForFunction(() => !!window.__failOpen, null, { timeout: 5000 });
-    if (failRead) {
-      if (nearLimit) await new Promise((go) => setTimeout(go, Math.max(0, opened + 8500 - Date.now())));
-      await page.evaluate(() => window.__failDraft());
-    }
+    if (clocked) await failDraftNearLimit(h, page, started);
+    else if (failRead) await page.evaluate(() => window.__failDraft());
     await panelIn(page, '.dq-draw');
-    const took = Date.now() - opened;
-    h.expect(took < 12500, `the drawing page waited ${took} ms before saying it can't open`);
+    if (!clocked) h.expect(Date.now() - started < 12500, 'the drawing page waited too long to say it can’t open');
     await comesIn(h, page, '.dq-draw', 'a stalled draft during a stalled reconnect');
     await cantOpenShows(h, page, '.dq-draw', 'drawing', 'a stalled draft during a stalled reconnect');
     await alertTakesFocus(h, page, '.dq-draw', 'a stalled draft during a stalled reconnect');
