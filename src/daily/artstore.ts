@@ -226,9 +226,7 @@ export class ArtStore {
   /** Reads of the stored drawings that got no answer; exportAll compares it before and after. */
   private readFails = 0;
   private lost = new WeakSet<IDBDatabase>();
-  get readFailed() {
-    return this.readFails > 0;
-  }
+  get fails() { return this.readFails; }
   private urls = new Map<string, { at: number; url: string }>();
   private cache: DrawingMeta[] | null = null;
   private gen = 0;
