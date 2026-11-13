@@ -535,6 +535,51 @@ export const scenarios = {
       await ctx.close();
     }
   },
+  async 'art-cant-read-ally-name-after-two-returns'(h) {
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN });
+    try {
+      await h.reachHub(page);
+      await page.locator('.dq-tile--art').click();
+      await page.locator('.dq-artentry--ally').click();
+      await page.waitForFunction(() => window.__daily?.ink && document.querySelector('.dq-ink-stage') &&
+        !document.querySelector('.dq-ink-stage').inert &&
+        !document.querySelector('.dq-draw').getAnimations().some((a) => a.playState === 'running'));
+      await line(page, [0.2, 0.3], [0.7, 0.4]);
+      await page.evaluate(async () => {
+        const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+        const put = as.put;
+        as.put = function () {
+          as.put = put;
+          return Promise.reject(new Error('save refused'));
+        };
+      });
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      await page.locator('.dq-sheet input').fill('Moth');
+      await page.getByRole('button', { name: 'Rise', exact: true }).click();
+      await page.getByText(/save this drawing\. Please try again/).waitFor();
+      await page.locator('.dq-top .dq-safe').click();
+      await page.waitForFunction(() => window.__daily?.route.name === 'safe');
+      await failReads(page, ['drafts']);
+      await page.goBack();
+      await panel(page, 'open this drawing').waitFor();
+      await page.locator('.dq-top .dq-safe').click();
+      await page.waitForFunction(() => window.__daily?.route.name === 'safe');
+      await page.goBack();
+      await panel(page, 'open this drawing').waitFor();
+      await restoreReads(page);
+      await retry(page);
+      await page.waitForFunction(() => window.__daily?.ink && document.querySelector('.dq-ink-stage') &&
+        !document.querySelector('.dq-ink-stage').inert);
+      h.expect(await page.evaluate(() => window.__daily.ink.strokes.length) === 1,
+        'the ally lost its strokes after two returns');
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      const name = await page.locator('.dq-sheet input').inputValue();
+      h.expect(name === 'Moth', `the ally name after two returns is "${name}", not "Moth"`);
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
   async 'art-cant-read-resumed-visit'(h) {
     const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN });
     try {

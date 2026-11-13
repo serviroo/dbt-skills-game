@@ -697,6 +697,7 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const children = [...el.childNodes];
   const open = async (): Promise<boolean> => {
     await Promise.allSettled([opened.pending]);
+    unsavedName = opened.name;
     if (left) return false;
     const read = reading(as);
     const draft = await opened.draft(as, kind, tab.id, own(opened.editId));
@@ -704,7 +705,6 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     const id = opened.editId ?? draft?.editId;
     const found = id ? await as.get(id) : null;
     if (left || read.failed()) return false;
-    unsavedName = opened.name;
     if (draft?.key.endsWith(`:${tab.id}`)) key = draft.key;
     else if (opened.occupied) key = `${opened.editId ? `edit:${opened.editId}` : kind}:${uid()}:${tab.id}`;
     else key = own(opened.editId);
