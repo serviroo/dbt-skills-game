@@ -1,0 +1,45 @@
+name: No new comments
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: no-new-comments-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  no-new-comments:
+    name: no-new-comments
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20.x
+          cache: npm
+      - run: npm ci
+      - name: The check still catches its own cases
+        run: bash .github/no-new-comments-e2e.sh
+      - name: No new comments
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          checker=scripts/lint/comments
+          git cat-file -e "$BASE_SHA^{commit}"
+          if [[ -n $(git ls-tree "$BASE_SHA" -- "$checker/check.mjs") ]]; then
+            mkdir -p .git/base-checker
+            git archive "$BASE_SHA" -- "$checker" | tar -x -C .git/base-checker
+            checker=.git/base-checker/$checker
+          fi
+          node "$checker/check.mjs"
