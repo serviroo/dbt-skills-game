@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pause } from './device-motion.e2e.mjs';
 import * as pageClock from './clock.mjs';
+import { drawPage } from './art-eraser-glow.e2e.mjs';
 
 const line = (x, y, i = 1) => ({ i, w: 25, p: [x, y, x + 300, y + 80, x + 520, y + 20] });
 const records = (page) => page.evaluate(async () => (await (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).exportAll()).records);
@@ -97,6 +98,69 @@ async function stroke(page) {
 }
 
 export const scenarios = {
+  async 'art-remove-delete-error'(h) {
+    const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute');
+    try {
+      await drawPage(h, page);
+      await stroke(page);
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      await page.getByText('Saved in your Art room.').waitFor();
+      const saved = await records(page);
+      h.expect(saved.length === 1, 'the drawing was not saved');
+      const id = saved[0].id;
+      const rows = () => page.evaluate(async (id) => {
+        const db = await new Promise((ok, bad) => {
+          const r = indexedDB.open(`${window.__daily.store.key}.art`);
+          r.onsuccess = () => ok(r.result);
+          r.onerror = () => bad(r.error);
+        });
+        try {
+          const t = db.transaction(['meta', 'strokes', 'thumbs']);
+          return await Promise.all(['meta', 'strokes', 'thumbs'].map((name) => new Promise((ok, bad) => {
+            const r = t.objectStore(name).getKey(id);
+            r.onsuccess = () => ok(r.result !== undefined);
+            r.onerror = () => bad(r.error);
+          })));
+        } finally {
+          db.close();
+        }
+      }, id);
+      const before = await rows();
+      h.expect(before.every(Boolean), 'the saved drawing is missing a row: ' + JSON.stringify(before));
+      await page.evaluate(() => window.__daily.go({ name: 'art' }));
+      await page.locator('.dq-artroom').waitFor();
+      await page.evaluate((id) => {
+        const del = IDBObjectStore.prototype.delete;
+        window.__restoreDelete = () => { IDBObjectStore.prototype.delete = del; };
+        window.__deleteFailed = false;
+        IDBObjectStore.prototype.delete = function (key) {
+          if (this.name === 'strokes' && key === id && !window.__deleteFailed) {
+            window.__deleteFailed = true;
+            throw new DOMException('Delete failed', 'UnknownError');
+          }
+          return del.call(this, key);
+        };
+      }, id);
+      await removePiece(page, id);
+      await h.poll(page, () => page.evaluate(async () => {
+        const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+        return window.__deleteFailed && !as.persistent;
+      }), (failed) => failed, 'the strokes delete did not fail', { timeout: 15000 });
+      const afterFailure = await rows();
+      await page.evaluate(() => window.__restoreDelete());
+      await page.reload();
+      await toArt(h, page);
+      await h.poll(page, () => goneMarks(page), (g) => !g?.[id], 'the removal did not finish', { timeout: 12000 });
+      const afterReload = await rows();
+      h.expect(!afterReload.some(Boolean),
+        'the removed drawing left rows behind: ' + JSON.stringify({ afterFailure, afterReload }));
+      h.expect(!(await order(page)).includes(id), 'the removed drawing came back in the gallery');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
+
   /** The storage event carries a removal and its Undo even when BroadcastChannel is unavailable. */
   async 'art-remove-storage-signal'(h) {
     const { ctx, page, errors } = await h.open({ 'dbt.app.v1': h.SEEN }, '?mute', undefined, (c) => c.addInitScript(() => { window.BroadcastChannel = undefined; }));
