@@ -139,6 +139,16 @@ async function recordOpens() {
     const discarded = new Set(opens
       .filter(({ voice }) => voice.isStopped && voice.stopStartsAt <= first)
       .map(({ voice }) => voice));
+    const pending = [...discarded];
+    while (pending.length) {
+      const voice = pending.pop();
+      for (const child of [...voice.children, ...voice.parts]) {
+        if (!discarded.has(child)) {
+          discarded.add(child);
+          pending.push(child);
+        }
+      }
+    }
     const entries = window.__behind.slice(was);
     const behind = entries.filter(({ receiver }) => !discarded.has(owners.get(receiver)));
     return {
