@@ -837,6 +837,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
       if (failed && dirty && !saving) (dirty = false), clearTimeout(saveTimer);
     }
     shown = n;
+    if (note.textContent === CANT_OPEN.switched) say('', 0);
     taking?.();
     let text = c.text;
     let bases = [c.rev];
