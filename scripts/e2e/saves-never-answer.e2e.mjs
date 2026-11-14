@@ -9,6 +9,41 @@ import {
 } from './storage-write-status.mjs';
 
 export const scenarios = {
+  async 'a-memory-only-story-can-be-deleted'(h) {
+    const denyStory = (ctx) => ctx.addInitScript(() => {
+      const open = IDBFactory.prototype.open;
+      IDBFactory.prototype.open = function (...args) {
+        if (!String(args[0]).endsWith('.story')) return open.apply(this, args);
+        window.__storyOpenDenied = true;
+        throw new DOMException('Storage is not available.', 'SecurityError');
+      };
+    });
+    const { ctx, page, errors } = await h.open(seed(h), '?mute', undefined, denyStory);
+    try {
+      await h.reachHub(page);
+      const result = await page.evaluate(async () => {
+        const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+        const { story, first } = await ss.create('Memory only');
+        const mirrored = ss.setLive({ chapter: first.id, text: 'Only here.', bases: [first.rev], t: Date.now() });
+        await ss.remove(story.id);
+        const before = (await ss.removed()).some((s) => s.id === story.id);
+        const beforeMirrors = ss.lives(first.id).length;
+        await ss.deleteForever(story.id);
+        return {
+          blocked: window.__storyOpenDenied, available: typeof indexedDB !== 'undefined', mirrored,
+          before, beforeMirrors, after: (await ss.removed()).some((s) => s.id === story.id),
+          afterMirrors: ss.lives(first.id).length, chapter: !!(await ss.chapter(first.id)),
+        };
+      });
+      h.expect(result.blocked && result.available && result.mirrored && result.before && result.beforeMirrors === 1,
+        `the memory-only story was not ready to delete: ${JSON.stringify(result)}`);
+      h.expect(!result.after && result.afterMirrors === 0 && !result.chapter,
+        `the memory-only story remained after deletion: ${JSON.stringify(result)}`);
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
   async 'a-write-follows-the-replacement-open'(h) {
     await withPage(h, async (page) => {
       await h.reachHub(page);

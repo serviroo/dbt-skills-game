@@ -529,7 +529,7 @@ export class StoryStore {
         }
       t.objectStore('stories').delete(id);
     });
-    const keep = !r && !cleared() && typeof indexedDB !== 'undefined';
+    const keep = !r && !cleared() && typeof indexedDB !== 'undefined' && this.lastStory.has(id);
     if (keep) { this.changed(false); return; }
     for (const ch of [...this.mem.chapters.values()])
       if (ch.story === id) {
