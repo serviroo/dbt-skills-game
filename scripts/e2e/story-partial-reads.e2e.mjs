@@ -160,13 +160,21 @@ export const scenarios = {
         const ss = storyStore(window.__daily.store.key);
         const ch = await ss.addChapter(id, 'Lost Door');
         await ss.saveChapter({ ...ch, text: 'Lost door.' }, [ch.rev]);
-        const db = await ss.db;
-        await new Promise((resolve, reject) => {
-          const tx = db.transaction('chapters', 'readwrite');
-          tx.objectStore('chapters').delete(ch.id);
-          tx.oncomplete = resolve;
-          tx.onerror = () => reject(tx.error);
+        const db = await new Promise((resolve, reject) => {
+          const request = indexedDB.open(ss.name);
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
         });
+        try {
+          await new Promise((resolve, reject) => {
+            const tx = db.transaction('chapters', 'readwrite');
+            tx.objectStore('chapters').delete(ch.id);
+            tx.oncomplete = resolve;
+            tx.onerror = () => reject(tx.error);
+          });
+        } finally {
+          db.close();
+        }
         return ch.id;
       }, ids.story);
       await page.evaluate((id) => window.__daily.go({ name: 'read', id }), ids.story);
@@ -234,12 +242,21 @@ export const scenarios = {
         const { story, first } = await ss.create('Held Here');
         await ss.saveChapter({ ...first, text: 'Kept here.' }, [first.rev]);
         IDBObjectStore.prototype.put = put;
-        const db = await ss.db;
-        const disk = await new Promise((resolve, reject) => {
-          const request = db.transaction('stories').objectStore('stories').get(story.id);
-          request.onsuccess = () => resolve(request.result ?? null);
+        const db = await new Promise((resolve, reject) => {
+          const request = indexedDB.open(ss.name);
+          request.onsuccess = () => resolve(request.result);
           request.onerror = () => reject(request.error);
         });
+        let disk;
+        try {
+          disk = await new Promise((resolve, reject) => {
+            const request = db.transaction('stories').objectStore('stories').get(story.id);
+            request.onsuccess = () => resolve(request.result ?? null);
+            request.onerror = () => reject(request.error);
+          });
+        } finally {
+          db.close();
+        }
         return { id: story.id, disk };
       });
       h.expect(memory.disk === null, 'the memory-only story was unexpectedly saved on disk');

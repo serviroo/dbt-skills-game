@@ -5,7 +5,7 @@ const day = () => {
   const d = new Date(Date.now() - 6 * 3600000);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
-const seed = (h) => ({
+export const seed = (h) => ({
   [h.SAVE]: JSON.stringify({
     v: 1,
     events: [{ id: 'same-page-visit', k: 'visit', xp: 10, t: 1, day: day() }],
@@ -16,8 +16,8 @@ const seed = (h) => ({
 });
 const KEPT_APART = 'A newer copy of this drawing arrived, so this one was kept as its own page.';
 const EARLIER_DRAFT = 'today:an-earlier-tab';
-const stroke = (x, y) => ({ i: 1, w: 25, p: [x, y, x + 300, y + 80, x + 520, y + 20] });
-const routeIs = (page, name) =>
+export const stroke = (x, y) => ({ i: 1, w: 25, p: [x, y, x + 300, y + 80, x + 520, y + 20] });
+export const routeIs = (page, name) =>
   page.waitForFunction((n) => window.__daily?.route.name === n, name, { timeout: 10000 });
 const xp = (h, page) => h.ls(page, h.SAVE).then((s) => JSON.parse(s).events.reduce((n, e) => n + (e.xp ?? 0), 0));
 const drawings = (page) =>
@@ -33,17 +33,17 @@ const drawingsAre = (h, page, want, where) =>
     (d) => `${where} the Art room holds drawings of ${JSON.stringify(d)} strokes, not ${want}`,
     { timeout: 5000 },
   );
-async function save(page) {
+export async function save(page) {
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.locator('.dq-tools-saved').waitFor();
 }
-async function safeAndBack(page, screen) {
+export async function safeAndBack(page, screen) {
   await page.locator('.dq-top .dq-safe').click();
   await routeIs(page, 'safe');
   await page.goBack();
   await routeIs(page, screen);
 }
-const drawReady = (page) =>
+export const drawReady = (page) =>
   page.waitForFunction(
     () =>
       window.__daily?.ink &&
@@ -52,7 +52,7 @@ const drawReady = (page) =>
     null,
     { timeout: 10000 },
   );
-const shows = (h, page, n, where) =>
+export const shows = (h, page, n, where) =>
   h.poll(
     page,
     () => page.evaluate(() => window.__daily.ink.strokes.length),
@@ -60,6 +60,13 @@ const shows = (h, page, n, where) =>
     (k) => `${where} the page shows ${k} strokes, not the saved drawing's ${n}`,
     { timeout: 5000 },
   );
+export async function cantOpenShows(h, page, sel, what, where) {
+  const title = await page.locator(`${sel} .dq-cant-t`).textContent({ timeout: 3000 }).catch(() => null);
+  const want = `Can’t open this ${what} right now`;
+  h.expect(title === want, `${where}: the page says ${JSON.stringify(title)}, not that it can't open the ${what}`);
+  const editable = await page.locator(`${sel} textarea, ${sel} canvas`).count();
+  h.expect(!editable, `${where}: it came in with something to write or draw on`);
+}
 const earlierDraft = (page) =>
   page.evaluate(
     async ([key, s]) => {
