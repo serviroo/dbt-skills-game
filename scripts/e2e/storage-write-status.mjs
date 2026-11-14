@@ -2,59 +2,6 @@ import { drawPage, line } from './art-eraser-glow.e2e.mjs';
 import { neverOpens, withPage } from './storage-never-answers.e2e.mjs';
 import { holdStores } from './saves-never-answer-helpers.mjs';
 
-export async function deleteKeepsWordsAfterReopenFails(h) {
-  await withPage(h, async (page) => {
-    await h.reachHub(page);
-    const ids = await page.evaluate(async () => {
-      const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
-      const { story, first } = await ss.create('Keep these words');
-      const transaction = IDBDatabase.prototype.transaction;
-      const failWrite = () => {
-        IDBDatabase.prototype.transaction = function (stores, mode, ...rest) {
-          if (this.name !== ss.name || mode !== 'readwrite') return transaction.call(this, stores, mode, ...rest);
-          IDBDatabase.prototype.transaction = transaction;
-          throw new DOMException('The disk could not be written.', 'QuotaExceededError');
-        };
-      };
-      failWrite();
-      const saved = await ss.saveChapter({ ...first, text: 'Words in memory.' }, [first.rev]);
-      failWrite();
-      await ss.changeCards(first.id, () => [{ id: 'held-card', mode: 'continue', text: 'Idea in memory.', t: 1 }]);
-      ss.setLive({ chapter: first.id, text: 'Words in the mirror.', bases: [first.rev], t: Date.now() });
-      await ss.remove(story.id);
-      const removed = await ss.story(story.id);
-      failWrite();
-      await ss.saveStory({ ...removed, title: 'Story in memory.' }, [removed.rev]);
-      return { db: ss.name, story: story.id, chapter: first.id, saved: saved.stored };
-    });
-    h.expect(ids.saved === 'failed', 'the first chapter save did not fail');
-    await neverOpens(page, ids.db);
-    await page.evaluate(async ({ db, story }) => {
-      const transaction = IDBDatabase.prototype.transaction;
-      IDBDatabase.prototype.transaction = function (stores, mode, ...rest) {
-        if (this.name !== db || mode !== 'readwrite') return transaction.call(this, stores, mode, ...rest);
-        IDBDatabase.prototype.transaction = transaction;
-        throw new DOMException('The connection was lost.', 'InvalidStateError');
-      };
-      const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
-      window.__deleting = ss.deleteForever(story);
-    }, ids);
-    await page.waitForFunction(() => !!window.__failOpen, null, { timeout: 5000 });
-    await page.evaluate(() => window.__failOpen());
-    const kept = await page.evaluate(async ({ chapter, story }) => {
-      await window.__deleting;
-      const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
-      return {
-        memory: ss.unsaved(chapter)?.text, mirrors: ss.lives(chapter).map((l) => l.text),
-        story: (await ss.story(story))?.title, cards: (await ss.cards(chapter)).map((c) => c.text),
-      };
-    }, ids);
-    h.expect(kept.memory === 'Words in memory.' && kept.mirrors.includes('Words in the mirror.') &&
-      kept.story === 'Story in memory.' && kept.cards.includes('Idea in memory.'),
-      `the failed reopen left ${JSON.stringify(kept)}`);
-  });
-}
-
 export async function drawingDraftTimeoutSaysSo(h) {
   await withPage(h, async (page) => {
     await drawPage(h, page);

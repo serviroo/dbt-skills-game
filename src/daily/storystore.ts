@@ -14,9 +14,6 @@ import { cardLists, cleanCard, mergeCards } from './story-card-list';
 export { cleanCard, skippedCards } from './story-card-list';
 import { uid, validDay } from './store';
 import { IdbLink, req } from './idb-link';
-import { LOAD } from './story-live';
-import { announceStory, cardStored, dryView, importRev, keptStory, type View } from './story-views';
-import { StoryOrigins } from './story-origins';
 import { BESIDE, STORY_DB } from '../core/stored-names';
 import {
   canWrite, cleared, dropBefore, fromBefore, marked, onClear, removeStored, setStored, write,
@@ -83,9 +80,23 @@ const chapterTitle = (x: unknown, kind: Chapter['kind']) => (typeof x === 'strin
 const keptTitle = (t: string) => `${t.slice(0, STORY_CAP.chapterTitle - KEPT.length)}${KEPT}`;
 const uniqIds = (xs: unknown[]) => [...new Set(xs.filter(validId))];
 const newer = <T extends { updated: number }>(a: T | undefined, b: T | undefined) => (!a ? b : !b ? a : b.updated > a.updated ? b : a);
+/** Every version a restore writes gets a rev of its own, so an editor still holding the file's rev can't write over it. */
+const importRev = () => `imp~${uid()}`;
 
 /** At most this many live mirrors per store key; past it a new one is refused, never one already there dropped. */
 const LIVE_CAP = 50;
+/**
+ * This page load's id, fresh every load and never shared (a tab opened with window.open copies sessionStorage, so a
+ * tab id there could be two tabs'): each load writes and clears only its own mirrors.
+ */
+const LOAD = (() => {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  } catch {
+    /* not a secure context */
+  }
+  return `${uid()}${Math.random().toString(36).slice(2, 10)}`;
+})();
 
 export function cleanStory(x: unknown): Story | null {
   if (!isObj(x) || !validId(x.id)) return null;
@@ -114,7 +125,16 @@ export function cleanChapter(x: unknown): Chapter | null {
   return { id: x.id, story: x.story, kind, title: chapterTitle(x.title, kind), text: x.text.slice(0, STORY_CAP.text), updated, rev: revOf(x.rev, updated) };
 }
 
-
+/** Where a decision reads and writes: one IndexedDB transaction, or this copy's memory when that isn't possible. */
+interface View {
+  story(id: string): Promise<Story | undefined>;
+  chapter(id: string): Promise<Chapter | undefined>;
+  /** The stored version and this copy's memory version apart (no stored one when the database can't be used). */
+  versions(id: string): Promise<{ disk?: Chapter; mem?: Chapter }>;
+  taken(id: string): Promise<boolean>;
+  putStory(s: Story): void;
+  putChapter(c: Chapter): void;
+}
 
 export class StoryStore {
   private link: IdbLink;
@@ -126,7 +146,6 @@ export class StoryStore {
   private cardChanges = new Map<string, { base: Card[]; ops: ((cards: Card[]) => Card[])[] }>();
   /** For a chapter kept only in memory: the revisions it was saved over (a stored one in this set is its own past). */
   private memBases = new Map<string, Set<string>>();
-  private origins = new StoryOrigins();
   /** The last stored version of each story this copy read, so a failed write still has the story to add to. */
   private lastStory = new Map<string, Story>();
   /** Chapters this copy took out of a list, so an older list held in memory doesn't bring them back. */
@@ -151,7 +170,6 @@ export class StoryStore {
       try {
         this.channel = new BroadcastChannel(name);
         this.channel.onmessage = () => {
-          this.origins.changedElsewhere();
           this.drop();
           this.listeners.forEach((f) => f());
         };
@@ -182,18 +200,17 @@ export class StoryStore {
     }
     this.channel = null;
     for (const m of Object.values(this.mem)) m.clear();
-    for (const m of [this.cardImports, this.cardChanges, this.memBases, this.lastStory, this.origins,
+    for (const m of [this.cardImports, this.cardChanges, this.memBases, this.lastStory,
       this.removedHere, this.removedAt, this.seen]) m.clear();
     this.drop();
   }
 
-  private idbView(t: IDBTransaction, absent?: Set<string>): View {
+  private idbView(t: IDBTransaction): View {
     const ss = t.objectStore('stories'), cs = t.objectStore('chapters');
     return {
       story: async (id) => {
         const d = await req<Story | undefined>(ss.get(id));
-        if (d) { this.lastStory.set(id, d); this.origins.stored(id); }
-        else absent?.add(id);
+        if (d) this.lastStory.set(id, d);
         return this.join(d, this.mem.stories.get(id));
       },
       chapter: async (id) => newer(await req<Chapter | undefined>(cs.get(id)), this.mem.chapters.get(id)),
@@ -243,13 +260,25 @@ export class StoryStore {
     return out;
   }
 
+  /** A story for a chapter whose story is gone (deleted elsewhere while it was open), so the chapter stays reachable. */
+  private kept(id: string, stamp: number, v: View): Story {
+    const notes: Chapter = { id: uid(), story: id, kind: 'notes', title: 'Notes', text: '', updated: stamp, rev: uid() };
+    v.putChapter(notes);
+    return { id, title: 'Kept story', created: stamp, updated: stamp, rev: uid(), chapters: [], notes: notes.id };
+  }
+
   private drop() {
     this.cache = null;
     this.gen++;
   }
   private changed(announce: boolean) {
     this.drop();
-    if (announce) this.channel = announceStory(this.channel);
+    if (announce)
+      try {
+        this.channel?.postMessage('changed');
+      } catch {
+        this.channel = null;
+      }
     this.listeners.forEach((f) => f());
   }
 
@@ -264,7 +293,6 @@ export class StoryStore {
     for (const s of r?.v ?? []) {
       byId.set(s.id, s);
       this.lastStory.set(s.id, s);
-      this.origins.stored(s.id);
     }
     for (const m of this.mem.stories.values()) byId.set(m.id, this.join(byId.get(m.id), m)!);
     for (const s of byId.values()) this.note(s);
@@ -286,7 +314,7 @@ export class StoryStore {
 
   async story(id: string, whole = false): Promise<Story | null> {
     const r = await this.tx(['stories'], 'readonly', (t) => req<Story | undefined>(t.objectStore('stories').get(id)));
-    if (r?.v) { this.lastStory.set(id, r.v); this.origins.stored(id); }
+    if (r?.v) this.lastStory.set(id, r.v);
     const s = r || !whole || !this.lastStory.has(id) ? this.join(r?.v, this.mem.stories.get(id)) : undefined;
     this.note(s);
     return s ?? null;
@@ -313,15 +341,13 @@ export class StoryStore {
     const first: Chapter = { id: uid(), story: sid, kind: 'page', title: 'Chapter 1', text: '', updated: now, rev: uid() };
     const notes: Chapter = { id: uid(), story: sid, kind: 'notes', title: 'Notes', text: '', updated: now, rev: uid() };
     const story: Story = { id: sid, title: storyTitle(title).trim() ? storyTitle(title) : 'Untitled story', created: Date.now(), updated: now, rev: uid(), chapters: [first.id], notes: notes.id };
-    const origin = this.origins.epoch;
     const r = await this.tx(['stories', 'chapters'], 'readwrite', async (t) => {
       t.objectStore('stories').put(story);
       t.objectStore('chapters').put(first);
       t.objectStore('chapters').put(notes);
     });
-    if (r) { this.lastStory.set(sid, story); this.origins.stored(sid); }
+    if (r) this.lastStory.set(sid, story);
     else {
-      this.origins.mark(sid, origin);
       this.mem.stories.set(sid, story);
       this.mem.chapters.set(first.id, first);
       this.mem.chapters.set(notes.id, notes);
@@ -347,7 +373,6 @@ export class StoryStore {
       for (const c of [...chs, notes]) t.objectStore('chapters').put(c);
     });
     if (!r) return null;
-    this.origins.stored(sid);
     this.lastStory.set(sid, story);
     this.changed(true);
     return { ...story, chapters: [...story.chapters] };
@@ -361,32 +386,24 @@ export class StoryStore {
     const baseSet = new Set(Array.isArray(bases) ? bases : []);
     const rev = uid();
     const memS = this.mem.stories.get(s.id);
-    const knownBefore = !!memS || this.lastStory.has(s.id);
-    const { absent, origin } = this.origins.probe();
     let stamp = this.stamp(this.seen.get(s.id), memS?.updated);
     const decide = async (v: View, versions: (Story | undefined)[], onDisk: boolean, hasDb: boolean) => {
       const conflict = versions.some((x) => !!x && !baseSet.has(x.rev));
       for (const x of versions) stamp = this.above(stamp, x?.updated);
       const known = await v.story(s.id);
       if (!known && !onDisk && hasDb) return null;
-      const stored = known ?? keptStory(s.id, stamp, v);
+      const stored = known ?? this.kept(s.id, stamp, v);
       let chapters = order.filter((c) => c !== stored.notes);
       if (conflict) chapters = [...chapters, ...stored.chapters.filter((c) => !chapters.includes(c))];
       const next: Story = { ...stored, title, chapters, updated: stamp, rev };
       v.putStory(next);
       return next;
     };
-    const r = await this.tx(['stories', 'chapters'], 'readwrite', async (t) =>
-      decide(this.idbView(t, absent),
-        [await req<Story | undefined>(t.objectStore('stories').get(s.id)), memS], true, true));
+    const r = await this.tx(['stories', 'chapters'], 'readwrite', async (t) => decide(this.idbView(t), [await req<Story | undefined>(t.objectStore('stories').get(s.id)), memS], true, true));
     if (r?.v) {
-      this.origins.stored(s.id);
       this.mem.stories.delete(s.id);
       this.lastStory.set(s.id, r.v);
-    } else {
-      await decide(this.memView(), [memS], false, this.link.there());
-      if (!knownBefore && absent.has(s.id) && this.mem.stories.has(s.id)) this.origins.mark(s.id, origin);
-    }
+    } else await decide(this.memView(), [memS], false, this.link.there());
     for (const c of order) this.removedHere.delete(c);
     this.note({ id: s.id, updated: stamp });
     this.changed(!!r);
@@ -406,8 +423,6 @@ export class StoryStore {
     const baseSet = new Set(Array.isArray(bases) ? bases : []);
     const rev = uid();
     const memC = this.mem.chapters.get(c.id);
-    const knownBefore = this.mem.stories.has(c.story) || this.lastStory.has(c.story);
-    const { absent, origin } = this.origins.probe();
     let stamp = this.stamp(this.seen.get(c.id), memC?.updated);
     let back = false;
     const decide = async (v: View, versions: (Chapter | undefined)[], stored: boolean, hasDb: boolean) => {
@@ -416,7 +431,7 @@ export class StoryStore {
       for (const x of versions) stamp = this.above(stamp, x?.updated);
       let story = await v.story(c.story);
       if (!story && (stored || !hasDb)) {
-        story = keptStory(c.story, stamp, v);
+        story = this.kept(c.story, stamp, v);
         if (kind === 'page' && !conflict) story.chapters.push(c.id);
       }
       if (!conflict) {
@@ -441,12 +456,9 @@ export class StoryStore {
       v.putStory({ ...story, chapters: list, updated: Math.max(story.updated, stamp), rev: uid() });
       return { stored: 'copied' as const, id };
     };
-    const r = await this.tx(['stories', 'chapters'], 'readwrite', async (t) =>
-      decide(this.idbView(t, absent),
-        [await req<Chapter | undefined>(t.objectStore('chapters').get(c.id)), memC], true, true));
+    const r = await this.tx(['stories', 'chapters'], 'readwrite', async (t) => decide(this.idbView(t), [await req<Chapter | undefined>(t.objectStore('chapters').get(c.id)), memC], true, true));
     let out: { stored: SaveResult['stored']; id: string };
     if (r) {
-      this.origins.stored(c.story);
       out = r.v;
       if (memC && baseSet.has(memC.rev)) {
         this.mem.chapters.delete(c.id);
@@ -455,7 +467,6 @@ export class StoryStore {
       this.mem.stories.delete(c.story);
     } else {
       const { id } = await decide(this.memView(), [memC], false, this.link.there());
-      if (!knownBefore && absent.has(c.story) && this.mem.stories.has(c.story)) this.origins.mark(c.story, origin);
       const had = this.memBases.get(id);
       this.memBases.set(id, new Set([...(had ?? []), ...baseSet]));
       out = { stored: 'failed', id };
@@ -486,7 +497,6 @@ export class StoryStore {
     });
     if (r) {
       if (!r.v) return;
-      this.origins.stored(id);
       this.mem.stories.delete(id);
       this.lastStory.set(id, r.v);
     } else {
@@ -530,8 +540,6 @@ export class StoryStore {
         }
       t.objectStore('stories').delete(id);
     });
-    const keep = !r && !cleared() && typeof indexedDB !== 'undefined' && !this.origins.has(id);
-    if (keep) { this.changed(false); return; }
     for (const ch of [...this.mem.chapters.values()])
       if (ch.story === id) {
         gone.add(ch.id);
@@ -542,11 +550,12 @@ export class StoryStore {
         this.memBases.delete(ch.id);
       }
     this.mem.stories.delete(id);
-    this.origins.forget(id);
     this.lastStory.delete(id);
     // the player chose to delete the story, so its chapters' mirrors go too; a failed delete leaves it stored, mirrors and all
-    const index = this.liveIndex();
-    for (const c of gone) for (const l of index.get(c) ?? []) this.dropLive(l.key, c);
+    if (r || !this.link.there()) {
+      const index = this.liveIndex();
+      for (const c of gone) for (const l of index.get(c) ?? []) this.dropLive(l.key, c);
+    }
     this.changed(!!r);
   }
 
@@ -569,7 +578,6 @@ export class StoryStore {
     };
     const r = await this.tx(['stories', 'chapters'], 'readwrite', async (t) => decide(this.idbView(t)));
     if (r) {
-      this.origins.stored(storyId);
       this.mem.stories.delete(storyId);
       this.lastStory.set(storyId, r.v);
     } else await decide(this.memView());
@@ -648,8 +656,6 @@ export class StoryStore {
       return list;
     });
     if (r) {
-      cardStored(chapterId, this.mem.stories, this.mem.chapters, this.origins);
-      this.channel = announceStory(this.channel);
       this.mem.cards.delete(chapterId);
       this.cardImports.delete(chapterId);
       this.cardChanges.delete(chapterId);
@@ -964,7 +970,21 @@ export class StoryStore {
     return { all: out.skipped, here: Math.max(0, out.skipped - file - lost), lost };
   }
 
-
+  /** A view that reads through to base and keeps what a restore would write in memory, so a dry run decides alike. */
+  private dryView(base: View, over: { stories: Map<string, Story>; chapters: Map<string, Chapter> }): View {
+    return {
+      story: async (id) => over.stories.get(id) ?? base.story(id),
+      chapter: async (id) => over.chapters.get(id) ?? base.chapter(id),
+      versions: async (id) => {
+        const v = await base.versions(id);
+        const o = over.chapters.get(id);
+        return o ? { disk: o, mem: v.mem } : v;
+      },
+      taken: async (id) => over.chapters.has(id) || base.taken(id),
+      putStory: (s) => void over.stories.set(s.id, s),
+      putChapter: (c) => void over.chapters.set(c.id, c),
+    };
+  }
 
   /**
    * importAll, or with dry its decisions only. Dry runs only: file counts the entries skipped for the file's own sake,
@@ -1104,17 +1124,14 @@ export class StoryStore {
         return { result: !local ? ('added' as const) : changed ? ('updated' as const) : ('unchanged' as const), n: skipped, written };
       };
       if (dry) {
-        const r = await this.tx(['stories', 'chapters'], 'readonly', async (t) =>
-          merge(dryView(this.idbView(t), over)));
-        const res = r ? r.v : await merge(dryView(this.memView(), over));
+        const r = await this.tx(['stories', 'chapters'], 'readonly', async (t) => merge(this.dryView(this.idbView(t), over)));
+        const res = r ? r.v : await merge(this.dryView(this.memView(), over));
         out.skipped += res.n;
         if (res.result === 'orphan') lost += res.n;
         continue;
       }
-      const { absent, origin } = this.origins.probe();
-      const r = await this.tx(['stories', 'chapters'], 'readwrite', async (t) => merge(this.idbView(t, absent)));
+      const r = await this.tx(['stories', 'chapters'], 'readwrite', async (t) => merge(this.idbView(t)));
       const res = r ? r.v : await merge(this.memView());
-      if (!r && res.result === 'added' && absent.has(sid)) this.origins.mark(sid, origin);
       if (res.result === 'orphan') {
         out.skipped += res.n;
         continue;
@@ -1122,8 +1139,6 @@ export class StoryStore {
       out.skipped += res.n;
       out[res.result]++;
       if (r && res.result !== 'unchanged') {
-        this.origins.stored(sid);
-        this.channel = announceStory(this.channel);
         wrote = true;
         this.mem.stories.delete(sid);
         // a version held only in memory (and a mirror of it) goes only once this restore put that exact text on disk
@@ -1172,8 +1187,6 @@ export class StoryStore {
           return merged;
         });
         if (r) {
-          cardStored(id, this.mem.stories, this.mem.chapters, this.origins);
-          this.channel = announceStory(this.channel);
           if (r.v.pendingSkipped) out.unsaved++;
           else {
             this.mem.cards.delete(id);

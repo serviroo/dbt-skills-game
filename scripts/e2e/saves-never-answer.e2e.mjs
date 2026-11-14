@@ -1,66 +1,14 @@
-import {
-  restoredStoryKeepsUnsavedWords, uncertainImportKeepsUnsavedWords,
-  failedNewImportCanBeDeleted, landedMemoryStoryKeepsUnsavedWords, everyStoryWriteClearsMemoryOnly,
-  anotherTabStoresMemoryStory, failedKeptStoryCanBeDeleted, concurrentCardWriteProtectsImport,
-  failedBringInLeavesNoStory,
-} from './storage-restore-failures.mjs';
 import { seed, routeIs } from './back-to-the-same-page.e2e.mjs';
 import {
   comesIn, holds, writeStory, WAIT, onDisk, savedDrawing, neverOpens, storyOfTwo, withPage, pageText,
 } from './storage-never-answers.e2e.mjs';
 import { stallWrite, storyWithNoPages, firstPageKept, holdStores } from './saves-never-answer-helpers.mjs';
 import {
-  deleteKeepsWordsAfterReopenFails, drawingDraftTimeoutSaysSo,
+  drawingDraftTimeoutSaysSo,
   drawingLandingStatusRecovers, drawingReopenStatusRecovers,
 } from './storage-write-status.mjs';
 
 export const scenarios = {
-  'restored-story-keeps-unsaved-words': restoredStoryKeepsUnsavedWords,
-  'uncertain-import-keeps-unsaved-words': uncertainImportKeepsUnsavedWords,
-  'failed-new-import-can-be-deleted': failedNewImportCanBeDeleted,
-  'timed-out-new-import-can-be-deleted': (h) => failedNewImportCanBeDeleted(h, true),
-  'landed-memory-story-keeps-unsaved-words': landedMemoryStoryKeepsUnsavedWords,
-  'every-story-write-clears-memory-only': everyStoryWriteClearsMemoryOnly,
-  'another-tab-stores-memory-story': anotherTabStoresMemoryStory,
-  'another-tab-stores-memory-cards': (h) => anotherTabStoresMemoryStory(h, true),
-  'failed-kept-story-can-be-deleted': failedKeptStoryCanBeDeleted,
-  'concurrent-card-write-protects-import': concurrentCardWriteProtectsImport,
-  'failed-bring-in-leaves-no-story': failedBringInLeavesNoStory,
-  async 'a-memory-only-story-can-be-deleted'(h) {
-    const denyStory = (ctx) => ctx.addInitScript(() => {
-      const open = IDBFactory.prototype.open;
-      IDBFactory.prototype.open = function (...args) {
-        if (!String(args[0]).endsWith('.story')) return open.apply(this, args);
-        window.__storyOpenDenied = true;
-        throw new DOMException('Storage is not available.', 'SecurityError');
-      };
-    });
-    const { ctx, page, errors } = await h.open(seed(h), '?mute', undefined, denyStory);
-    try {
-      await h.reachHub(page);
-      const result = await page.evaluate(async () => {
-        const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
-        const { story, first } = await ss.create('Memory only');
-        const mirrored = ss.setLive({ chapter: first.id, text: 'Only here.', bases: [first.rev], t: Date.now() });
-        await ss.remove(story.id);
-        const before = (await ss.removed()).some((s) => s.id === story.id);
-        const beforeMirrors = ss.lives(first.id).length;
-        await ss.deleteForever(story.id);
-        return {
-          blocked: window.__storyOpenDenied, available: typeof indexedDB !== 'undefined', mirrored,
-          before, beforeMirrors, after: (await ss.removed()).some((s) => s.id === story.id),
-          afterMirrors: ss.lives(first.id).length, chapter: !!(await ss.chapter(first.id)),
-        };
-      });
-      h.expect(result.blocked && result.available && result.mirrored && result.before && result.beforeMirrors === 1,
-        `the memory-only story was not ready to delete: ${JSON.stringify(result)}`);
-      h.expect(!result.after && result.afterMirrors === 0 && !result.chapter,
-        `the memory-only story remained after deletion: ${JSON.stringify(result)}`);
-      h.expect(!errors.length, errors.join('\n'));
-    } finally {
-      await ctx.close();
-    }
-  },
   async 'a-write-follows-the-replacement-open'(h) {
     await withPage(h, async (page) => {
       await h.reachHub(page);
@@ -125,7 +73,6 @@ export const scenarios = {
       h.expect(stored.text === '', 'a write given up on an unanswered open landed later');
     });
   },
-  'delete-keeps-words-after-reopen-fails': deleteKeepsWordsAfterReopenFails,
   'drawing-draft-timeout-says-so': drawingDraftTimeoutSaysSo,
   'drawing-landing-status-recovers': drawingLandingStatusRecovers,
   'drawing-reopen-status-recovers': drawingReopenStatusRecovers,
@@ -202,36 +149,6 @@ export const scenarios = {
       h.expect(changed === 0, `the writer left behind a listener that changed its old status ${changed} times`);
       await page.evaluate(() => window.__letGo());
       await page.evaluate(() => window.__made);
-    });
-  },
-  async 'a-failed-delete-keeps-unsaved-words'(h) {
-    await withPage(h, async (page) => {
-      await h.reachHub(page);
-      const ids = await page.evaluate(async () => {
-        const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
-        const { story, first } = await ss.create('Words Still Here');
-        const transaction = IDBDatabase.prototype.transaction;
-        IDBDatabase.prototype.transaction = function (stores, mode, ...rest) {
-          if (this.name !== ss.name || mode !== 'readwrite') return transaction.call(this, stores, mode, ...rest);
-          IDBDatabase.prototype.transaction = transaction;
-          throw new DOMException('The disk could not be written.', 'QuotaExceededError');
-        };
-        const saved = await ss.saveChapter({ ...first, text: 'Words only in memory.' }, [first.rev]);
-        await ss.remove(story.id);
-        IDBDatabase.prototype.transaction = function (stores, mode, ...rest) {
-          if (this.name !== ss.name || mode !== 'readwrite') return transaction.call(this, stores, mode, ...rest);
-          IDBDatabase.prototype.transaction = transaction;
-          throw new DOMException('The disk could not be written.', 'QuotaExceededError');
-        };
-        await ss.deleteForever(story.id);
-        await ss.putBack(story.id);
-        return { story: story.id, saved: saved.stored };
-      });
-      h.expect(ids.saved === 'failed', 'the earlier save did not fail');
-      await writeStory(page, { id: ids.story });
-      await holds(h, page, 'Page, Chapter 1', 'the story after a failed delete');
-      const text = await pageText(page);
-      h.expect(text === 'Words only in memory.', `the failed delete left ${JSON.stringify(text)}`);
     });
   },
   async 'a-cut-off-write-holds-nothing'(h) {
