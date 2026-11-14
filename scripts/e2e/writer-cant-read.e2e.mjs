@@ -229,6 +229,50 @@ export const scenarios = {
       await ctx.close();
     }
   },
+  async 'writer-unlinked-page-while-drawings-cannot-be-read'(h) {
+    const { ctx, page, errors } = await h.open(seed(h));
+    try {
+      await h.reachHub(page);
+      const ids = await make(page, true);
+      const before = await stored(page, ids);
+      await page.reload();
+      await page.evaluate(() => {
+        window.__realGetAll = IDBObjectStore.prototype.getAll;
+        IDBObjectStore.prototype.getAll = function (...args) {
+          if (this.name === 'meta' && this.transaction.mode === 'readonly') {
+            throw new DOMException('Read failed', 'NotReadableError');
+          }
+          return window.__realGetAll.apply(this, args);
+        };
+      });
+      await h.reachHub(page);
+      await page.evaluate((id) => window.__daily.go({ name: 'write', id }), ids.id);
+      await page.getByRole('button', { name: "Can't show the drawing right now" }).waitFor();
+      await page.locator('.st-chbtn').click();
+      await page.locator('.st-chrow-b').filter({ hasText: 'Second door' }).click();
+      await page.getByRole('textbox', { name: 'Page, Second door' }).waitFor();
+      const button = page.getByRole('button', { name: 'Add a drawing' });
+      await button.waitFor({ timeout: 3000 });
+      await button.click();
+      const dialog = page.getByRole('dialog', { name: 'Pick a drawing' });
+      await dialog.getByText(/Can.t read your drawings right now/).waitFor();
+      h.expect(await dialog.locator('.st-pick').count() === 0, 'an unreadable list offered picks');
+      h.expect(await dialog.getByRole('button', { name: 'Remove drawing' }).count() === 0,
+        'an unreadable list offered removal');
+      h.expect(JSON.stringify(await stored(page, ids)) === JSON.stringify(before),
+        'opening the unlinked page changed the story');
+      await page.evaluate(() => { IDBObjectStore.prototype.getAll = window.__realGetAll; });
+      await dialog.getByRole('button', { name: 'Try again' }).click();
+      const pick = dialog.getByRole('button', { name: 'Door picture' });
+      await pick.waitFor();
+      h.expect(await pick.evaluate((el) => document.activeElement === el), 'retry did not focus the first drawing');
+      h.expect(await pick.getAttribute('aria-current') !== 'true', 'an unlinked drawing was marked current');
+      h.expect(JSON.stringify(await stored(page, ids)) === JSON.stringify(before), 'retry changed the story');
+      h.expect(!errors.length, errors.join('\n'));
+    } finally {
+      await ctx.close();
+    }
+  },
   async 'writer-drawing-read-failure-offers-retry'(h) {
     const { ctx, page, errors } = await h.open(seed(h));
     try {
@@ -267,6 +311,7 @@ export const scenarios = {
       const pick = dialog.getByRole('button', { name: 'Door picture' });
       await pick.waitFor();
       h.expect(await pick.getAttribute('aria-current') === 'true', 'the existing drawing was not marked current');
+      h.expect(await pick.evaluate((el) => document.activeElement === el), 'retry did not focus the current drawing');
       h.expect(JSON.stringify(await stored(page, ids)) === JSON.stringify(before), 'the drawing link changed on retry');
       await dialog.getByRole('button', { name: 'Close the drawings' }).click();
       await page.getByRole('button', { name: 'Change drawing, Door picture' }).waitFor();

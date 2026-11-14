@@ -77,13 +77,14 @@ export function storyPictures(options: PictureOptions) {
     const s = at ? await ss.story(storyId) : null;
     const list = s ? await shownDrawings(app) : [];
     const m = list?.find((x) => x.id === s?.drawings?.[at]);
-    const shown = list === null ? 'unread' : picOf(m);
+    const unread = list === null && !!s?.drawings?.[at];
+    const shown = unread ? 'unread' : picOf(m);
     if (turn !== picTurn || !alive() || shown === picShown) return;
     picShown = shown;
     picThumb.replaceChildren(...(m ? [drawingImg(app, m, '')] : []));
     picThumb.classList.toggle('is-hidden', !m);
     picIc.classList.toggle('is-hidden', !!m);
-    picT.textContent = list === null ? STORY_DRAWING.unread : m ? STORY_DRAWING.change : STORY_DRAWING.add;
+    picT.textContent = unread ? STORY_DRAWING.unread : m ? STORY_DRAWING.change : STORY_DRAWING.add;
     // the name they see first, then which drawing it is
     if (m) picBtn.setAttribute('aria-label', `${STORY_DRAWING.change}, ${drawingName(m)}`);
     else picBtn.removeAttribute('aria-label');
@@ -119,6 +120,11 @@ export function storyPictures(options: PictureOptions) {
     const takeOff = h('div', { class: 'dq-actions st-sheet-acts' },
       btn(STORY_DRAWING.remove, () => void placeDrawing(at, null), { kind: 'quiet', ic: 'close' }));
     let turn = 0;
+    const focusPicker = () => (
+      body.querySelector<HTMLElement>('.st-pick[aria-current="true"]') ??
+      body.querySelector<HTMLElement>('.st-pick, .st-picks-none .dq-btn, .dq-cant .dq-btn') ??
+      body.querySelector<HTMLElement>('.dq-sheet-x')
+    )?.focus({ preventScroll: true });
     const fill = async () => {
       const n = ++turn;
       const [list, s] = await Promise.all([shownDrawings(app), ss.story(storyId)]);
@@ -148,10 +154,7 @@ export function storyPictures(options: PictureOptions) {
         ...(list?.some((m) => m.id === placed) ? [takeOff] : []),
       ]);
       // focus that was on a pick or a button the change took away stays in the picker
-      if (inside && !body.contains(document.activeElement)) {
-        body.querySelector<HTMLElement>('.st-pick, .st-picks-none .dq-btn, .dq-cant .dq-btn, .dq-sheet-x')
-          ?.focus({ preventScroll: true });
-      }
+      if (inside && !body.contains(document.activeElement)) focusPicker();
       return list !== null;
     };
     await fill();
@@ -159,9 +162,7 @@ export function storyPictures(options: PictureOptions) {
     closeSheet();
     picker = { wrap, fill };
     openSheet(wrap, body);
-    (body.querySelector<HTMLElement>('.st-pick[aria-current="true"]') ??
-      body.querySelector<HTMLElement>('.st-pick, .st-picks-none .dq-btn, .dq-cant .dq-btn'))
-      ?.focus({ preventScroll: true });
+    focusPicker();
   };
   const update = () => {
     void showPic();
