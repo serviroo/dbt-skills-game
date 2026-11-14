@@ -47,14 +47,14 @@ export async function drawingDraftTimeoutSaysSo(h) {
     await line(page, [0.2, 0.3], [0.7, 0.4]);
     const note = page.locator('.dq-tools-msg')
       .getByText('This browser isn’t keeping drawings right now', { exact: false });
-    await note.waitFor({ timeout: 15000 }).catch(() => {});
+    const shown = await note.waitFor({ timeout: 15000 }).then(() => true, () => false);
     const state = await page.evaluate(async () => ({
       saving: (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).persistent,
       text: document.querySelector('.dq-tools-msg')?.textContent,
       strokes: window.__daily.ink.strokes.length,
       events: window.__savingEvents,
     }));
-    h.expect(await note.isVisible(), `the drawing storage note did not show: ${JSON.stringify(state)}`);
+    h.expect(shown, `the drawing storage note did not show: ${JSON.stringify(state)}`);
     await line(page, [0.2, 0.5], [0.7, 0.6]);
     h.expect(await note.isVisible(), 'the storage note disappeared while drawing');
     await page.evaluate(() => window.__letGo());
