@@ -40,6 +40,7 @@ export interface Timed {
 interface Source {
   n: AudioScheduledSourceNode;
   started: boolean;
+  startAt: number;
   stop: number;
   asked: number;
   span: { b: number } | null;
@@ -99,6 +100,7 @@ export class Voice {
   readonly roomSend: GainNode;
   readonly hallSend: GainNode;
   readonly cents: number;
+  readonly inputLevel: number;
   readonly rng: Rng;
   /** When it starts (context time); open() sets a held voice's. */
   t: number;
@@ -116,7 +118,7 @@ export class Voice {
   private parts: Voice[] = [];
   private clock: Voice = this;
   private zero = 0;
-  private prepared: ((at: number) => void) | null = null;
+  private prepared: ((at: number, track: boolean) => void) | null = null;
   private pending: Source[] = [];
 
   constructor(readonly lib: Lib, t: number, dest: AudioNode, o: VoiceOpts = {}, seed = 1) {
@@ -131,6 +133,7 @@ export class Voice {
     this.wet = ctx.createGain();
     this.dry = ctx.createGain();
     const g = o.gain ?? 1;
+    this.inputLevel = g;
     this.wet.gain.value = g;
     this.dry.gain.value = g;
     this.wet.connect(this.out);
@@ -167,11 +170,11 @@ export class Voice {
   }
 
   /** Starts and sets what this held voice and its children were given, `at` later; from then on times are the clock's. */
-  open(at: number) {
+  open(at: number, track = true) {
     if (this.prepared) {
       const finish = this.prepared;
       this.prepared = null;
-      finish(at);
+      finish(at, track);
       return;
     }
     const held = this.held ?? [];
@@ -217,12 +220,12 @@ export class Voice {
       }
       s.voice.pending.push(s);
     }
-    this.prepared = (at) => {
+    this.prepared = (at, track) => {
       this.release(at);
       for (const h of held) {
         const s = h.source;
-        if (!s || h.t + at >= s.voice.killAt) continue;
-        s.voice.trackSource(s, h.t + at);
+        if (!s || !s.started || h.t + at >= s.voice.killAt) continue;
+        s.voice.trackSource(s, h.t + at, track);
       }
       const clear = (v: Voice) => {
         v.pending = [];
@@ -311,7 +314,9 @@ export class Voice {
     for (let x: AudioNode | undefined = into; x; x = feeds.get(x)) {
       if (x instanceof GainNode && clockOf.get(x) === this.clock) gains.push(x);
     }
-    const s: Source = { n, started: false, stop: 0, asked: t1 - this.clock.zero, span: null, gains, voice: this };
+    const s: Source = {
+      n, started: false, startAt: 0, stop: 0, asked: t1 - this.clock.zero, span: null, gains, voice: this,
+    };
     s.stop = this.until(s);
     for (const g of gains) this.pass(g, s);
     const held = this.holding();
@@ -329,18 +334,44 @@ export class Voice {
     this.trackSource(s, t0);
   }
 
-  private trackSource(s: Source, t0: number) {
+  private trackSource(s: Source, t0: number, track = true) {
     const t1 = Math.min(s.stop + this.clock.zero, this.killAt);
     s.stop = t1 - this.clock.zero;
     s.started = true;
-    s.span = this.lib.track(t0, t1);
+    s.startAt = t0;
+    s.span = track ? this.lib.track(t0, t1) : null;
     this.sources.push(s);
     if (t1 > this.end) this.end = t1;
+  }
+
+  confirm() {
+    for (const s of this.sources) s.span = this.lib.track(s.startAt, s.stop + this.clock.zero);
+    for (const c of this.children) c.confirm();
+  }
+
+  discard(at: number) {
+    this.stop(at, 0);
+    const clock = this.ctx.createConstantSource();
+    clock.offset.value = 0;
+    clock.connect(this.out);
+    clock.onended = () => {
+      clock.disconnect();
+      const release = (voice: Voice) => {
+        voice.out.disconnect();
+        voice.roomSend.disconnect();
+        voice.hallSend.disconnect();
+        for (const child of [...voice.children, ...voice.parts]) release(child);
+      };
+      release(this);
+    };
+    clock.start();
+    clock.stop(stoppedBy(at, 0));
   }
 
   private start(s: Source, at: number, offset: number) {
     if (s.n instanceof AudioBufferSourceNode) s.n.start(at, offset);
     else s.n.start(at);
+    s.started = true;
   }
 
   private pass(g: GainNode, s: Source) {
@@ -531,13 +562,14 @@ export class Voice {
   }
 
   prepareStop(moment: StopQueue, ramp: number,
-    options: { time?: number; absolute?: boolean; parent?: (at: number) => boolean } = {}) {
-    const { time = 0, absolute = false, parent = (_at: number) => true } = options;
+    options: { time?: number; absolute?: boolean; planned?: boolean; parent?: (at: number) => boolean } = {}) {
+    const { time = 0, absolute = false, planned = false, parent = (_at: number) => true } = options;
     const delay = stoppedBy(0, ramp);
     const when = (at: number) => absolute ? time : at + time;
-    const allowed = (at: number) => parent(at) && when(at) + delay < this.killAt;
+    const allowed = (at: number) => parent(at)
+      && (planned ? when(at) + delay <= this.killAt : when(at) + delay < this.killAt);
     const children = [...this.children, ...this.parts]
-      .map((c) => c.prepareStop(moment, ramp, { time, absolute, parent: allowed }));
+      .map((c) => c.prepareStop(moment, ramp, { time, absolute, planned, parent: allowed }));
     const tau = Math.max(0.002, ramp / 4);
     for (const g of [this.out.gain, this.roomSend.gain, this.hallSend.gain]) {
       moment.add(time, (at) => { if (allowed(at)) g.cancelScheduledValues(when(at)); }, g, { absolute });
@@ -549,7 +581,7 @@ export class Voice {
       moment.add(time + delay, (at) => {
         const kill = when(at) + delay;
         const zero = pending ? at : this.clock.zero;
-        if (!allowed(at) || s.stop + zero <= kill) return;
+        if (!s.started || !allowed(at) || s.stop + zero <= kill) return;
         try {
           s.n.stop(kill);
           stopped = true;

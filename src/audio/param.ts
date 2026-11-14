@@ -27,7 +27,11 @@ export function holdAt(p: Curve, t: number) {
  * attack cut, or not at all once its stop had passed too. A context that isn't running renders nothing until it resumes
  * from its clock (an offline render is suspended whenever it is fed), so it gets the clock itself.
  */
+export function renderedPoint(ctx: BaseAudioContext) {
+  return ctx.currentTime + ((ctx as AudioContext).baseLatency || 0);
+}
+
 export function soon(ctx: BaseAudioContext) {
   if (ctx.state !== 'running') return ctx.currentTime;
-  return ctx.currentTime + Math.max(SCORE.leadSec, ((ctx as AudioContext).baseLatency || 0) + 1 / FPS);
+  return Math.max(ctx.currentTime + SCORE.leadSec, renderedPoint(ctx) + 1 / FPS);
 }

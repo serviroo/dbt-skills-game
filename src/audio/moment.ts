@@ -24,13 +24,14 @@ export class Moment {
     this.absolute.sort((a, b) => a.t - b.t);
   }
 
-  place(at: number) {
+  place(at: number, missed?: () => boolean) {
     const relative = this.relative;
     const absolute = this.absolute;
     let ri = 0;
     let ai = 0;
     let left = relative.length + absolute.length;
     while (left) {
+      if (missed?.()) return;
       while (relative[ri]?.done) ri++;
       while (absolute[ai]?.done) ai++;
       let next: Operation | undefined;

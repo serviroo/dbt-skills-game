@@ -126,8 +126,7 @@ export function buildBed(lib: Lib, name: BedName, dest: AudioNode, level: number
   def.fn(v, 0, lvl);
   return {
     voice: v,
-    open(at: number): BedHandle {
-      v.open(at);
+    open(_at: number): BedHandle {
       return {
         name,
         level(x, ramp = 0.5, at = soon(lib.ctx)) {
@@ -225,8 +224,7 @@ export function buildCharge(lib: Lib, dest: AudioNode, seed: number) {
   let stopped = false;
   return {
     voice: v,
-    open(at: number): ChargeHandle {
-      v.open(at);
+    open(_at: number): ChargeHandle {
       return {
         set(c, at = soon(lib.ctx)) {
           if (!stopped) apply(c, at, 0.03);

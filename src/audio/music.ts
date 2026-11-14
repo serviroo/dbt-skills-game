@@ -2,6 +2,7 @@ import { dB, midi } from './dsp';
 import { soon } from './param';
 import { Voice, kRate } from './voice';
 import { Moment } from './moment';
+import { inTime } from './in-time';
 import { figs, groove, prog, theme, roarParts } from './roar';
 import { h01, Hits, LONG, Pad, satBus, Strings, waveOf } from './instruments';
 import type { Section, SectionOpts, MusicHost } from './score-types';
@@ -167,7 +168,7 @@ interface SectionImpl {
   opened?(until: number): void;
 }
 /** Builds a section on its held voice, its times counting from the opening; the opener it returns runs twice. */
-type Factory = (v: Voice, o: SectionOpts, host: MusicHost) => (start: number) => SectionImpl;
+type Factory = (v: Voice, o: SectionOpts, host: MusicHost, own: Moment) => (start: number) => SectionImpl;
 
 export const BEAT = 60 / 72;
 const BAR = BEAT * 4;
@@ -377,7 +378,7 @@ const FACTORIES: Record<Section, Factory> = {
    *  that cuts dead into the 780 ms hush; then the roar on the hit: Bb - C - Dm over a D pedal (VI-VII-i), brass with
    *  a blat on every change, an 'ah' choir, spiccato strings and synth bass driving 16ths, a taiko groove, a reversed
    *  cymbal into the stand-up and a crash on it, where high strings take the top. */
-  awaken(v, o, host) {
+  awaken(v, o, host, own) {
     const bv = v.child(v.wet, host.seed());
     const build = bv.gain(1, bv.wet);
     const dr = bv.gain(0, build);
@@ -435,9 +436,9 @@ const FACTORIES: Record<Section, Factory> = {
     v.at(lb.out.gain).exponentialRampToValueAtTime(0.3, Math.max(0.5, nominal));
     v.ramp(lb.lp.frequency, 0.2, 320, 2400, Math.max(0.3, nominal - 0.2));
     if (o.at !== undefined && o.hitAt !== undefined) {
-      host.hush(o.hitAt - 0.78, o.hitAt);
-      build.gain.setTargetAtTime(0, o.hitAt - 0.78, 0.006);
-      bv.stop(o.hitAt - 0.78, 0.024);
+      const cutAt = o.hitAt - 0.78;
+      own.add(cutAt, () => build.gain.setTargetAtTime(0, cutAt, 0.006), build.gain, { absolute: true });
+      bv.prepareStop(own, 0.024, { time: cutAt, absolute: true, planned: true })(0);
     }
     return (start) => {
       let hitAt = start + hitIn;
@@ -474,7 +475,10 @@ const FACTORIES: Record<Section, Factory> = {
         prepareHush(moment: Moment) {
           return hitAt === Infinity ? prepareCut(moment) : () => {};
         },
-        opened: (until: number) => roarTick(soon(host.lib.ctx), until),
+        opened: (until: number) => {
+          if (o.at !== undefined && o.hitAt !== undefined) host.hush(o.hitAt - 0.78, o.hitAt);
+          roarTick(soon(host.lib.ctx), until);
+        },
         prepareHit(moment: Moment) {
           if (hitAt !== Infinity) return () => {};
           const finishCut = prepareCut(moment);
@@ -727,19 +731,29 @@ export class Music {
 
   to(name: Section, crossfade = 2, o: SectionOpts = {}) {
     const lib = this.host.lib;
-    const voice = new Voice(lib, 0, this.dest, { hall: name === "awaken" ? 0.22 : 0.32, room: 0, gain: SECTION_GAIN[name], held: true }, this.host.seed());
-    const score = FACTORIES[name](voice, o, this.host);
-    score(0).tick(0, AHEAD);
-    voice.at(voice.out.gain).setValueAtTime(0, 0);
-    voice.at(voice.out.gain).setTargetAtTime(1, 0, Math.max(0.004, crossfade / 4));
+    const seed = this.host.seed();
+    const seeds: number[] = [];
     const moment = new Moment();
-    voice.prepare(moment);
     const stopped = this.live.map((s) => ({ s, finish: s.voice.prepareStop(moment, o.fadeOut ?? crossfade) }));
     const section = this.host.prepareSection?.(name, moment);
     moment.prepare();
-    const at = o.at ?? soon(lib.ctx);
+    const { built: { voice, score }, at } = inTime((own) => {
+      let next = 0;
+      const host = { ...this.host, seed: () => {
+        const i = next++;
+        return seeds[i] ?? (seeds[i] = this.host.seed());
+      } };
+      const voice = new Voice(lib, 0, this.dest, {
+        hall: name === "awaken" ? 0.22 : 0.32, room: 0, gain: SECTION_GAIN[name], held: true,
+      }, seed);
+      const score = FACTORIES[name](voice, o, host, own);
+      score(0).tick(0, AHEAD);
+      voice.at(voice.out.gain).setValueAtTime(0, 0);
+      voice.at(voice.out.gain).setTargetAtTime(1, 0, Math.max(0.004, crossfade / 4));
+      voice.prepare(own);
+      return { voice, score };
+    }, () => Math.max(o.at ?? 0, soon(lib.ctx)));
     moment.place(at);
-    voice.open(at);
     for (const { s, finish } of stopped) if (finish(at)) s.end = Math.min(s.end, at);
     const impl = score(at);
     impl.opened?.(at + AHEAD);

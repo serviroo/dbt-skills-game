@@ -17,6 +17,7 @@ import { Voice, stoppedBy, type Lib } from './voice';
 import { CueCleanup } from './cue-cleanup';
 import { hushMoment } from './hush-moment';
 import { Moment } from './moment';
+import { inTime } from './in-time';
 import { sectionMoment } from './section-moment';
 import { cueMoment, type PlayOpts } from './cue-moment';
 export type { PlayOpts } from './cue-moment';
@@ -412,14 +413,8 @@ export class AudioEngine {
     if (this.isQuiet) return { stop() {}, end: this.when(opts.at) };
     const detune = opts.detune ?? (opts.index !== undefined ? opts.index * 50 : 0);
     // built first and held, then timed: however long building it takes, no part of it can land in the past
-    const v = new Voice(this.lib, 0, this.sfx, { gain: (opts.gain ?? 1) * dB(def.gainDb ?? 0), pan: opts.pan, detune, room: def.room, hall: def.hall, held: true }, this.nextSeed());
-    try {
-      def.fn(v, { dur: opts.dur });
-    } catch (err) {
-      console.warn('[audio] cue failed', cue, err);
-    }
+    const seed = this.nextSeed();
     const moment = new Moment();
-    v.prepare(moment);
     const isHit = cue === 'awaken_hit';
     const hit: ReturnType<Music['prepareHit']> = [];
     const hushStops: { voice: Voice; finish: ReturnType<Voice['prepareStop']> }[] = [];
@@ -442,9 +437,17 @@ export class AudioEngine {
       makeRoom: (offset, db, tau, back, tauBack) => this.makeRoom(offset, db, tau, back, tauBack, moment),
     });
     moment.prepare();
-    const at = this.when(opts.at);
+    const { built: { voice: v, error }, at } = inTime((own) => {
+      const voice = new Voice(this.lib, 0, this.sfx, {
+        gain: (opts.gain ?? 1) * dB(def.gainDb ?? 0), pan: opts.pan, detune, room: def.room, hall: def.hall, held: true,
+      }, seed);
+      let error: unknown;
+      try { def.fn(voice, { dur: opts.dur }); } catch (err) { error = err; }
+      voice.prepare(own);
+      return { voice, error };
+    }, () => this.when(opts.at));
+    if (error) console.warn('[audio] cue failed', cue, error);
     moment.place(at);
-    v.open(at);
     this.lifted = lifted;
     for (const { voice, finish } of hushStops) {
       finish(at);
@@ -462,7 +465,6 @@ export class AudioEngine {
       },
     };
   }
-
   private makeRoom(at: number, db: number, tau: number, back: number, tauBack: number, moment?: Moment) {
     const p = this.yieldG.curve;
     if (moment) {
@@ -473,7 +475,6 @@ export class AudioEngine {
       this.busLevels.set(p, 1, back, tauBack, false);
     }
   }
-
   private duckCue(moment: Moment) {
     const p = this.uiDuck.curve;
     moment.add(0, (start) => this.busLevels.set(p, dB(-3), start, 0.012), p);
@@ -488,17 +489,16 @@ export class AudioEngine {
       return cur;
     }
     if (cur) this.letGo(cur.voice);
-    const built = buildBed(this.lib, name, this.bedBus, o.level ?? 1, o.fadeIn ?? 0.5, this.nextSeed());
-    const moment = new Moment();
-    built.voice.prepare(moment);
-    moment.prepare();
-    const at = this.when(o.at);
-    moment.place(at);
+    const seed = this.nextSeed();
+    const { built, at } = inTime((own) => {
+      const bed = buildBed(this.lib, name, this.bedBus, o.level ?? 1, o.fadeIn ?? 0.5, seed);
+      bed.voice.prepare(own);
+      return bed;
+    }, () => this.when(o.at));
     const h = built.open(at);
     this.beds.set(name, h);
     return h;
   }
-
   stopBed(name: BedName, fade = 0.5, at?: number) {
     this.beds.get(name)?.stop(fade, at);
   }
@@ -519,12 +519,15 @@ export class AudioEngine {
    *  score steps back (-2 dB idle, -9 dB at full charge); after stop() it swells back in behind the burst. */
   chargeLoop(o: { at?: number } = {}): ChargeHandle {
     if (this.charge) return this.charge;
-    const built = buildCharge(this.lib, this.sfx, this.nextSeed());
+    const seed = this.nextSeed();
     const moment = new Moment();
-    built.voice.prepare(moment);
     this.toFocus(dB(-2), 0, 0.4, undefined, moment);
     moment.prepare();
-    const t0 = this.when(o.at);
+    const { built, at: t0 } = inTime((own) => {
+      const charge = buildCharge(this.lib, this.sfx, seed);
+      charge.voice.prepare(own);
+      return charge;
+    }, () => this.when(o.at));
     moment.place(t0);
     const h = built.open(t0);
     const self = this;
