@@ -171,6 +171,7 @@ export async function openRetriesGetOwnDeadline(h, { withPage, onDisk, stroke })
       const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
       window.__writeDone = false;
       const draft = { key: 'today:retry-deadline', kind: 'today', strokes: [s], t: Date.now() };
+      window.__writeAt = Date.now();
       window.__deadlineWrite = as.putDraft(draft).then(() => (window.__writeDone = true));
     }, stroke(100, 200));
     const first = await page.evaluate(() => typeof window.__firstOpen?.onerror === 'function');
@@ -179,19 +180,26 @@ export async function openRetriesGetOwnDeadline(h, { withPage, onDisk, stroke })
     await page.evaluate(() => window.__firstOpen.onerror(new Event('error')));
     const second = await page.evaluate(() => typeof window.__secondOpen?.onerror === 'function');
     h.expect(second, 'the second open did not start');
-    await advanceOpenTo(h, page, '__secondOpenAt', 2000);
-    h.expect(!(await page.evaluate(() => window.__writeDone)), 'the second open inherited the first open’s deadline');
+    await advanceOpenTo(h, page, '__writeAt', 10100);
+    h.expect(await page.evaluate(() => window.__writeDone), 'the first write exceeded its own deadline');
+    await page.evaluate(async (s) => {
+      const as = (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key);
+      window.__secondWriteDone = false;
+      const draft = { key: 'today:second-deadline', kind: 'today', strokes: [s], t: Date.now() };
+      window.__secondWrite = as.putDraft(draft).then(() => (window.__secondWriteDone = true));
+    }, stroke(100, 200));
     await advanceOpenTo(h, page, '__secondOpenAt', 9900);
-    h.expect(!(await page.evaluate(() => window.__writeDone)), 'the second open ended before its own deadline');
+    h.expect(!(await page.evaluate(() => window.__secondWriteDone)), 'the second open ended before its own deadline');
     await advanceOpenTo(h, page, '__secondOpenAt', 10100);
-    h.expect(await page.evaluate(() => window.__writeDone), 'the second open did not end at its own deadline');
+    h.expect(await page.evaluate(() => window.__secondWriteDone), 'the second open did not end at its own deadline');
     const persistent = await page.evaluate(async () => {
-      await window.__deadlineWrite;
+      await Promise.all([window.__deadlineWrite, window.__secondWrite]);
       return (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).persistent;
     });
     h.expect(!persistent, 'a write waiting on the second timed-out open said it was saved');
     const saved = await onDisk(page, db, 'drafts', 'get', 'today:retry-deadline');
-    h.expect(!saved, 'a write waiting on timed-out opens changed storage');
+    const secondSaved = await onDisk(page, db, 'drafts', 'get', 'today:second-deadline');
+    h.expect(!saved && !secondSaved, 'a write waiting on timed-out opens changed storage');
   });
 }
 

@@ -11,13 +11,14 @@ import { write } from '../core/cleared';
 import type { App, Route, ScreenOut, Visit } from './app';
 import { icon } from './art';
 import { artStore } from './artstore';
+import { STORAGE_SAVING_CHANGE } from './idb-link';
 import { cantOpen } from './cant-open';
 import { outcome, reading } from './reading';
 import { drawingFig, drawingsOf, picOf, storyPictures } from './story-pics';
 import { firstPage } from './first-page';
 import { clearFind, findIn as searchStories, marked, renderFind } from './story-find';
 import { renderStoryCards } from './story-cards';
-import { dayDiff, dayKey } from './store';
+import { storyMeta } from './story-meta';
 import { spans, terms } from './storyfind';
 import { creditStory, STORY_CAP, storyStore, type Card, type CardMode, type Chapter, type Story } from './storystore';
 import { clip, IMPORT_MAX, pieces, storyFromText, storyToText, type StoryText } from './storytext';
@@ -67,24 +68,6 @@ const shuffled = <T>(xs: readonly T[]) => {
   }
   return out;
 };
-const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-
-/** "edited today" / "edited Tuesday" / "edited 3 March", on the companion's day (it turns over at 6 AM). */
-export function editedWhen(app: App, t: number) {
-  const day = dayKey(t);
-  const today = app.store.today();
-  const d = dayDiff(day, today);
-  if (d <= 0) return 'edited today';
-  if (d === 1) return 'edited yesterday';
-  const [y, m, dd] = day.split('-').map(Number);
-  if (d < 7) return `edited ${DOW[new Date(Date.UTC(y, m - 1, dd)).getUTCDay()]}`;
-  return `edited ${dd} ${MON[m - 1]}${today.slice(0, 4) === String(y) ? '' : ` ${y}`}`;
-}
-export function storyMeta(app: App, s: Story) {
-  const n = s.chapters.length;
-  return `${n} chapter${n === 1 ? '' : 's'}, ${editedWhen(app, s.updated)}`;
-}
 const shownTitle = (t: string) => t.trim() || STORY.untitled;
 
 const SEARCH_IC = '<svg class="dq-ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="5.5"/><path d="M14.6 14.6l4.6 4.6"/></svg>';
@@ -846,6 +829,8 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
   const load = async (id: string, n = ++picks, taking?: () => void) => {
     let c: Chapter | null;
     for (;;) {
+      if (cur && (dirty || saving)) await flushAll();
+      if (!alive || n !== picks) return false;
       const read = reading(ss);
       c = await ss.chapter(id);
       if (!alive || n !== picks) return false;
@@ -1322,6 +1307,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
     else if (t === 'historyRedo') (e.preventDefault(), redo());
     else if (t?.startsWith('insert') && (ie.data?.length ?? (t === 'insertFromPaste' || t === 'insertFromDrop' ? 0 : 1)) > room()) fullLine();
   });
+  on(document, STORAGE_SAVING_CHANGE, syncState);
   on(window, 'pagehide', () => (commit(), pinLive(), void save(), saveTitle()));
   on(document, 'visibilitychange', () => {
     if (document.visibilityState === 'hidden') (commit(), pinLive(), void save(), saveTitle());

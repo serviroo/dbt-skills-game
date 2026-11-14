@@ -10,6 +10,7 @@ export function req<T>(r: IDBRequest<T>): Promise<T> {
   return answer;
 }
 
+export const STORAGE_SAVING_CHANGE = 'storage-saving-change';
 const STORAGE_WAIT_MS = 10e3;
 const STORAGE_REST_MS = 5e3;
 const links = new Set<IdbLink>();
@@ -30,9 +31,10 @@ function abortRead(transaction: IDBTransaction) {
 
 export class IdbLink {
   private saving = true;
-  get persistent() { return this.saving && !this.unreadable; }
-  set persistent(value: boolean) { this.saving = value; }
+  get persistent() { return this.saving && !this.unreadable && !this.landing; }
+  set persistent(value: boolean) { this.change(() => { this.saving = value; }); }
   private unreadable = false;
+  private landing = 0;
   readFails = 0;
   db: Promise<IDBDatabase | null>;
   private lost = new WeakSet<IDBDatabase>();
@@ -45,6 +47,13 @@ export class IdbLink {
   private downUntil = 0;
   /** Writes under way, so a clear's check waits for them. */
   readonly writes = new Set<Promise<unknown>>();
+
+  private change(update: () => void) {
+    const before = this.persistent;
+    update();
+    if (before !== this.persistent && typeof document !== 'undefined')
+      document.dispatchEvent(new Event(STORAGE_SAVING_CHANGE));
+  }
 
   constructor(
     private readonly name: string,
@@ -122,7 +131,7 @@ export class IdbLink {
             if (finished) { db.close(); return; }
             clearTimeout(late);
             finished = true;
-            this.unreadable = false;
+            this.change(() => { this.unreadable = false; });
             db.onversionchange = (e) => {
               db.close();
               // deleted: another copy cleared this game's data
@@ -135,7 +144,7 @@ export class IdbLink {
             clearTimeout(late);
             if (retryAllowed && retry) return attempt(false);
             finished = true;
-            this.unreadable = true;
+            this.change(() => { this.unreadable = true; });
             this.downUntil = Date.now() + STORAGE_REST_MS;
             resolve(null);
           };
@@ -145,7 +154,7 @@ export class IdbLink {
           if (finished) return;
           clearTimeout(late);
           finished = true;
-          this.unreadable = true;
+          this.change(() => { this.unreadable = true; });
           this.downUntil = Date.now() + STORAGE_REST_MS;
           resolve(null);
         }
@@ -204,7 +213,27 @@ export class IdbLink {
     }
     // a clear checking its Save Crystal holds writes; once it clears they never happen
     if (!canWrite() && !(await mayWrite())) return null;
-    const job = this.run(stores, mode, fn);
+    const write: Read = { timedOut: false };
+    let timer: ReturnType<typeof setTimeout>;
+    let landing = false;
+    const timeout = new Promise<null>((resolve) => {
+      timer = setTimeout(() => {
+        if (write.transaction) {
+          try { write.transaction.abort(); } catch {
+            landing = true;
+            this.change(() => { this.landing++; });
+            return;
+          }
+        }
+        write.timedOut = true;
+        this.persistent = false;
+        resolve(null);
+      }, STORAGE_WAIT_MS);
+    });
+    const job = Promise.race([this.run(stores, mode, fn, write), timeout]).finally(() => {
+      clearTimeout(timer!);
+      if (landing) this.change(() => { this.landing--; });
+    });
     this.writes.add(job);
     void job.finally(() => this.writes.delete(job));
     return job;
@@ -248,6 +277,7 @@ export class IdbLink {
         return { v };
       } catch (e) {
         if (read?.timedOut) return null;
+        if (read) read.transaction = undefined;
         failed = true;
         if (retry && connectionLost(e)) {
           const connected = this.reconnect(db);
