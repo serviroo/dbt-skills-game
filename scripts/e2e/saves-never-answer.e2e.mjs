@@ -1,3 +1,9 @@
+import {
+  restoredStoryKeepsUnsavedWords, uncertainImportKeepsUnsavedWords,
+  failedNewImportCanBeDeleted, landedMemoryStoryKeepsUnsavedWords, everyStoryWriteClearsMemoryOnly,
+  anotherTabStoresMemoryStory, failedKeptStoryCanBeDeleted, concurrentCardWriteProtectsImport,
+  failedBringInLeavesNoStory,
+} from './storage-restore-failures.mjs';
 import { seed, routeIs } from './back-to-the-same-page.e2e.mjs';
 import {
   comesIn, holds, writeStory, WAIT, onDisk, savedDrawing, neverOpens, storyOfTwo, withPage, pageText,
@@ -9,6 +15,17 @@ import {
 } from './storage-write-status.mjs';
 
 export const scenarios = {
+  'restored-story-keeps-unsaved-words': restoredStoryKeepsUnsavedWords,
+  'uncertain-import-keeps-unsaved-words': uncertainImportKeepsUnsavedWords,
+  'failed-new-import-can-be-deleted': failedNewImportCanBeDeleted,
+  'timed-out-new-import-can-be-deleted': (h) => failedNewImportCanBeDeleted(h, true),
+  'landed-memory-story-keeps-unsaved-words': landedMemoryStoryKeepsUnsavedWords,
+  'every-story-write-clears-memory-only': everyStoryWriteClearsMemoryOnly,
+  'another-tab-stores-memory-story': anotherTabStoresMemoryStory,
+  'another-tab-stores-memory-cards': (h) => anotherTabStoresMemoryStory(h, true),
+  'failed-kept-story-can-be-deleted': failedKeptStoryCanBeDeleted,
+  'concurrent-card-write-protects-import': concurrentCardWriteProtectsImport,
+  'failed-bring-in-leaves-no-story': failedBringInLeavesNoStory,
   async 'a-memory-only-story-can-be-deleted'(h) {
     const denyStory = (ctx) => ctx.addInitScript(() => {
       const open = IDBFactory.prototype.open;
