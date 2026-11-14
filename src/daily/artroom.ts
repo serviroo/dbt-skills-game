@@ -8,7 +8,7 @@ import type { App, Route, ScreenOut, Visit } from './app';
 import { icon } from './art';
 import { artStore, extrasOf, revOf, type DrawingRec } from './artstore';
 import { creditArt } from './art-credit';
-import { STORAGE_SAVING_CHANGE } from './idb-link';
+import { watchArtSaving } from './art-storage';
 import { allyCard, canRestoreFocus, cardOf, favFirst, focusBack, refill, setFocusBack, thumbImg } from './art-cards';
 import { cantOpen } from './cant-open';
 import { reading } from './reading';
@@ -655,12 +655,7 @@ export function drawScreen(app: App, route: Route, visit: Visit): ScreenOut {
     promptRow,
     main,
   );
-  const storageChange = () => {
-    if (!as.persistent) say(p(ART.noStore, 'dq-small'));
-    else if (msg.textContent === typo(ART.noStore)) say();
-  };
-  document.addEventListener(STORAGE_SAVING_CHANGE, storageChange);
-  offs.push(() => document.removeEventListener(STORAGE_SAVING_CHANGE, storageChange));
+  offs.push(watchArtSaving(as, msg, say));
   sync();
 
   const key$ = (e: KeyboardEvent) => {

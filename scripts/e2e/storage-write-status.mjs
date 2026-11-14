@@ -2,6 +2,38 @@ import { drawPage, line } from './art-eraser-glow.e2e.mjs';
 import { neverOpens, withPage } from './storage-never-answers.e2e.mjs';
 import { holdStores } from './saves-never-answer-helpers.mjs';
 
+export async function storySavingChangeKeepsDrawingImage(h) {
+  await withPage(h, async (page) => {
+    await drawPage(h, page);
+    const artDb = await page.evaluate(async () =>
+      (await import('/src/daily/artstore.ts')).artStore(window.__daily.store.key).name);
+    await holdStores(page, artDb, ['meta']);
+    await line(page, [0.2, 0.3], [0.7, 0.4]);
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    const message = page.locator('.dq-tools-msg');
+    const note = message.getByText('This browser isn’t keeping drawings right now', { exact: false });
+    const image = message.getByRole('button', { name: 'Save image', exact: true });
+    await image.waitFor({ timeout: 30000 });
+    h.expect(await note.isVisible(), 'the failed drawing save did not show its storage note');
+    await page.evaluate(() => window.__letGo());
+    const storyDb = await page.evaluate(async () => {
+      const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+      await ss.create('Before the story save stalls');
+      return ss.name;
+    });
+    await holdStores(page, storyDb, ['stories']);
+    const saving = await page.evaluate(async () => {
+      const ss = (await import('/src/daily/storystore.ts')).storyStore(window.__daily.store.key);
+      await ss.create('The story save stalls');
+      return ss.persistent;
+    });
+    h.expect(!saving, 'the story save did not turn off saving');
+    h.expect(await note.isVisible() && await image.isVisible(),
+      `a story saving change replaced the drawing message: ${await message.textContent()}`);
+    await page.evaluate(() => window.__letGo());
+  });
+}
+
 export async function drawingDraftTimeoutSaysSo(h) {
   await withPage(h, async (page) => {
     await drawPage(h, page);

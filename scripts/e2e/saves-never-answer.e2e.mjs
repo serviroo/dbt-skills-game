@@ -4,11 +4,12 @@ import {
 } from './storage-never-answers.e2e.mjs';
 import { stallWrite, storyWithNoPages, firstPageKept, holdStores } from './saves-never-answer-helpers.mjs';
 import {
-  drawingDraftTimeoutSaysSo,
+  drawingDraftTimeoutSaysSo, storySavingChangeKeepsDrawingImage,
   drawingLandingStatusRecovers, drawingReopenStatusRecovers,
 } from './storage-write-status.mjs';
 
 export const scenarios = {
+  'story-saving-change-keeps-drawing-image': storySavingChangeKeepsDrawingImage,
   async 'a-write-follows-the-replacement-open'(h) {
     await withPage(h, async (page) => {
       await h.reachHub(page);
