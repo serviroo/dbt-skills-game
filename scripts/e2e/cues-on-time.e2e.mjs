@@ -23,6 +23,7 @@ const PER = 5;
 const RATES = [4, 10, 20];
 // visuals lead their sound by 1 or 2 frames (DESIGN.md)
 const LEAD = 2 / 60;
+const STALL = 3 * LEAD;
 // its first quanta above a twentieth of its loudest where it rings louder than what still sounds from the cues before it
 const ONSET = 6;
 // and the rest of it through its tail, in parts by how much of its energy has come: to half, 90%, 99% and 99.9%
@@ -65,10 +66,17 @@ async function boot(h, levels) {
     const clock = window.__taps[tap].context;
     window.__behind = [];
     window.__watch = false;
-    const behind = (what, t) => {
-      if (window.__watch && t > 0 && t < clock.currentTime) window.__behind.push([what, clock.currentTime - t]);
-    };
-    tapAudioSchedule((_, method, args, time) => behind(method, time));
+    window.__stall = 0;
+    tapAudioSchedule((receiver, method, args, time) => {
+      if (window.__watch && window.__stall && method === 'start') {
+        const until = clock.currentTime + window.__stall;
+        window.__stall = 0;
+        while (clock.currentTime < until);
+      }
+      if (window.__watch && time > 0 && time < clock.currentTime) {
+        window.__behind.push({ receiver, method, late: clock.currentTime - time });
+      }
+    });
     return tap;
   });
   return { ctx, page, errors, tap };
@@ -76,11 +84,68 @@ async function boot(h, levels) {
 
 async function recordOpens() {
   const { Voice } = await import('/src/audio/voice.ts');
-  const open = Voice.prototype.open;
+  const clock = window.__taps.find((t) => t.from === 'GainNode').context;
+  const owners = new WeakMap();
+  const stack = [];
+  const tag = (node, voice) => {
+    if (!(node instanceof AudioNode) || !voice) return;
+    owners.set(node, voice);
+    for (let p = Object.getPrototypeOf(node); p; p = Object.getPrototypeOf(p)) {
+      for (const key of Object.getOwnPropertyNames(p)) {
+        if (!Object.getOwnPropertyDescriptor(p, key).get) continue;
+        const value = node[key];
+        if (value instanceof AudioParam) owners.set(value, voice);
+        else if (typeof AudioParamMap !== 'undefined' && value instanceof AudioParamMap) {
+          for (const param of value.values()) owners.set(param, voice);
+        }
+      }
+    }
+  };
+  const wrapped = new Set();
+  for (let p = clock; p; p = Object.getPrototypeOf(p)) {
+    for (const key of Object.getOwnPropertyNames(p)) {
+      if (!key.startsWith('create') || typeof clock[key] !== 'function' || wrapped.has(key)) continue;
+      wrapped.add(key);
+      const create = clock[key];
+      clock[key] = function (...args) {
+        const node = create.apply(this, args);
+        if (window.__watch) tag(node, stack.at(-1));
+        return node;
+      };
+    }
+  }
   window.__opens = [];
-  Voice.prototype.open = function (at) {
-    if (window.__watch) window.__opens.push(at);
-    return open.call(this, at);
+  for (const key of Object.getOwnPropertyNames(Voice.prototype)) {
+    const descriptor = Object.getOwnPropertyDescriptor(Voice.prototype, key);
+    if (key === 'constructor' || typeof descriptor.value !== 'function') continue;
+    const method = descriptor.value;
+    Voice.prototype[key] = function (...args) {
+      if (key === 'open' && window.__watch) window.__opens.push({ voice: this, at: args[0] });
+      stack.push(this);
+      try {
+        return method.apply(this, args);
+      } finally {
+        stack.pop();
+      }
+    };
+  }
+  window.__heard = (opened, was) => {
+    const opens = window.__opens.slice(opened);
+    for (const { voice } of opens) {
+      for (const node of [voice.out, voice.wet, voice.dry, voice.roomSend, voice.hallSend]) tag(node, voice);
+    }
+    const active = opens.filter(({ voice }) => !voice.isStopped);
+    const first = active.length ? Math.min(...active.map(({ at }) => at)) : -Infinity;
+    const discarded = new Set(opens
+      .filter(({ voice }) => voice.isStopped && voice.stopStartsAt <= first)
+      .map(({ voice }) => voice));
+    const entries = window.__behind.slice(was);
+    const behind = entries.filter(({ receiver }) => !discarded.has(owners.get(receiver)));
+    return {
+      opens: opens.filter(({ voice }) => !discarded.has(voice)).map(({ at }) => at),
+      behind: behind.map(({ method, late }) => [method, late]),
+      excluded: entries.length - behind.length,
+    };
   };
 }
 
@@ -115,9 +180,9 @@ async function startsOnTimeHoweverSlowItsBuild(h, kind) {
     await page.waitForFunction(() => !!window.__engine);
     const cdp = await ctx.newCDPSession(page);
     const started = [];
-    for (const rate of RATES) {
+    for (const rate of [1, ...RATES]) {
       await cdp.send('Emulation.setCPUThrottlingRate', { rate });
-      started.push(...(await page.evaluate(async ([kind, hold, rate, LEAD, tap, Q]) => {
+      started.push(...(await page.evaluate(async ([kind, hold, rate, LEAD, STALL, tap, Q]) => {
         const { BED_NAMES } = await import('/src/audio/beds.ts');
         const { SECTIONS } = await import('/src/audio/music.ts');
         const { stoppedBy } = await import('/src/audio/voice.ts');
@@ -152,12 +217,16 @@ async function startsOnTimeHoweverSlowItsBuild(h, kind) {
           const opened = window.__opens.length;
           const ask = clock.currentTime;
           const t0 = performance.now();
+          window.__stall = STALL;
           window.__watch = true;
           const handle = start();
           window.__watch = false;
+          const stalled = !window.__stall;
+          window.__stall = 0;
           const ms = performance.now() - t0;
-          const opens = window.__opens.slice(opened);
-          out.push({ name, rate, ask, done: clock.currentTime, ms, behind: window.__behind.slice(was), opens });
+          const done = clock.currentTime;
+          const { opens, behind, excluded } = window.__heard(opened, was);
+          out.push({ name, rate, ask, done, ms, behind, opens, excluded, stalled });
           await reach(Math.max(ask, ...opens) + hold);
           const at = clock.currentTime + LEAD;
           stop(handle, at);
@@ -176,7 +245,7 @@ async function startsOnTimeHoweverSlowItsBuild(h, kind) {
         }
         await play('hush', () => engine.hush(), (_, at) => engine.unhush(at));
         return out;
-      }, [kind, hold, rate, LEAD, tap, Q])));
+      }, [kind, hold, rate, LEAD, STALL, tap, Q])));
     }
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
     await audioRecorded(page, tap, Math.max(...started.map((s) => Math.max(s.ask, ...s.opens))) + hold);
@@ -189,18 +258,22 @@ async function startsOnTimeHoweverSlowItsBuild(h, kind) {
       const worstMs = s.behind.length ? Math.max(...s.behind.map((b) => b[1])) * 1000 : 0;
       const leadMs = +((at - s.done) * 1000).toFixed(1);
       const buildMs = +s.ms.toFixed(1);
-      note(h, kind, { part: s.name, rate: s.rate, buildMs, behind: s.behind.length, worstMs, leadMs, rms, before });
       const why = [];
       if (s.behind.length) {
         const where = [...new Set(s.behind.map((b) => b[0]))].join(', ');
         const worst = worstMs.toFixed(1);
         why.push(`${s.behind.length} of its parts were placed up to ${worst} ms behind the clock (${where})`);
       }
+      if (!s.stalled) why.push('the page never stalled while it was placed, so the stall was not tested');
       if (!s.opens.length) why.push('it never opened');
       else if (at < s.ask - 1e-4 || at > s.done + LEAD + 1e-4) why.push(`it opens ${leadMs} ms past the clock`);
       if (lag > 1e-6) why.push(`its parts opened ${(lag * 1000).toFixed(1)} ms apart`);
       if (!(before < 1e-4)) why.push(`something still sounded as it opened (RMS ${before})`);
       if (!(rms > 3e-4)) why.push(`it was not heard (RMS ${rms})`);
+      note(h, kind, {
+        part: s.name, rate: s.rate, buildMs, behind: s.behind.length, excluded: s.excluded,
+        stalled: s.stalled, worstMs, leadMs, rms, before, why,
+      });
       if (why.length) bad.push(`${s.name} at CPU x${s.rate} (built in ${s.ms.toFixed(1)} ms): ${why.join(', ')}`);
     }
     h.expect(!bad.length, `${bad.length} of ${started.length} ${what} did not start on time: ${bad.join('; ')}`);
@@ -220,6 +293,7 @@ export const scenarios = {
   async 'every-cue-plays-whole-and-on-time-on-a-busy-page'(h) {
     const { ctx, page, errors, tap } = await boot(h, { music: 0, sfx: 1 });
     try {
+      await page.evaluate(recordOpens);
       await page.evaluate(async () => {
         const { AudioEngine } = await import('/src/audio/engine.ts');
         const play = AudioEngine.prototype.play;
@@ -228,10 +302,14 @@ export const scenarios = {
           const ask = this.ctx.currentTime;
           const t0 = performance.now();
           const was = window.__behind.length;
+          const opened = window.__opens.length;
           window.__watch = true;
           try {
             const hd = play.call(this, cue, o);
-            window.__plays.push({ cue, ask, done: this.ctx.currentTime, ms: performance.now() - t0, end: hd.end, behind: window.__behind.length - was });
+            const done = this.ctx.currentTime;
+            const ms = performance.now() - t0;
+            const { behind, excluded } = window.__heard(opened, was);
+            window.__plays.push({ cue, ask, done, ms, end: hd.end, behind: behind.length, excluded });
             return hd;
           } finally {
             window.__watch = false;
@@ -346,7 +424,11 @@ export const scenarios = {
       const verdicts = plays.map((p, i) => {
         const { start, blocks, onset, parts } = measured[i];
         const got = (bs) => sum(bs, 0) / (sum(bs, 1) + sum(bs, 2));
-        const v = { cue: p.cue, rate: p.rate, buildMs: +p.ms.toFixed(2), leadMs: +((start - p.ask) * 1000).toFixed(1), behind: p.behind, first: +got(onset.slice(0, 2)).toFixed(2), attack: +got(onset).toFixed(2), parts: parts.map((bs) => +got(bs).toFixed(2)) };
+        const v = {
+          cue: p.cue, rate: p.rate, buildMs: +p.ms.toFixed(2), leadMs: +((start - p.ask) * 1000).toFixed(1),
+          behind: p.behind, excluded: p.excluded, first: +got(onset.slice(0, 2)).toFixed(2),
+          attack: +got(onset).toFixed(2), parts: parts.map((bs) => +got(bs).toFixed(2)),
+        };
         const why = [];
         if (onset.length < 3) why.push(`only ${onset.length} quanta of it ring over the cues before it, too few to judge`);
         if (blocks.some((b) => !Number.isFinite(b[0]))) why.push('the recording has a hole');
@@ -410,9 +492,10 @@ export const scenarios = {
             window.__watch = true;
             fn();
             window.__watch = false;
-            const opens = window.__opens.slice(opened);
             const ms = performance.now() - t0;
-            return { name, rate, ask, done: clock.currentTime, ms, behind: window.__behind.slice(was), opens };
+            const done = clock.currentTime;
+            const { opens, behind, excluded } = window.__heard(opened, was);
+            return { name, rate, ask, done, ms, behind, opens, excluded };
           };
           for (const name of sections) {
             const o = watched(name, () => window.__music.to(name, 0.3));
@@ -444,7 +527,13 @@ export const scenarios = {
           const qs = [...rec.q].filter(([i]) => i * per >= a && i * per < b);
           return Math.sqrt(qs.reduce((s, [, [, ss]]) => s + ss, 0) / Math.max(1, qs.length * Q));
         }, [tap, ...(o.hit ? [o.done + LEAD + 0.03, o.done + LEAD + 0.19] : [o.start + 0.25, o.start + 1.1]), Q]);
-        const v = { part: o.name, rate: o.rate, buildMs: +o.ms.toFixed(1), leadMs: o.hit ? null : +((o.start - o.done) * 1000).toFixed(1), behind: o.behind.length, worstMs: o.behind.length ? +(Math.max(...o.behind.map((b) => b[1])) * 1000).toFixed(1) : 0, level };
+        const v = {
+          part: o.name, rate: o.rate, buildMs: +o.ms.toFixed(1),
+          leadMs: o.hit ? null : +((o.start - o.done) * 1000).toFixed(1), behind: o.behind.length,
+          excluded: o.excluded,
+          worstMs: o.behind.length ? +(Math.max(...o.behind.map((b) => b[1])) * 1000).toFixed(1) : 0,
+          level,
+        };
         note(h, 'score-part', v);
         levels[`${o.name} ${o.rate}`] = level;
         const why = [];
@@ -667,7 +756,7 @@ export const scenarios = {
         window.__watch = true;
         await sleep(1500);
         window.__watch = false;
-        return { change, from, to, behind: window.__behind };
+        return { change, from, to, behind: window.__behind.map(({ method, late }) => [method, late]) };
       });
       await audioRecorded(page, tap, r.to + 2);
       const rms = (a, b) => page.evaluate(([n, a, b, Q]) => {
