@@ -73,6 +73,7 @@ export const STORY_FIND = {
 /** One of their own drawings from the Art room, placed above a chapter. */
 export const STORY_DRAWING = {
   add: 'Add a drawing',
+  unread: "Can't show the drawing right now",
   change: 'Change drawing',
   remove: 'Remove drawing',
   pick: 'Pick a drawing',

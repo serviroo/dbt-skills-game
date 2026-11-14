@@ -7,6 +7,7 @@ import { cowrite } from '../cowriter/local';
 import type { CowriteReq, CowriteRes, CowriteTurn } from '../cowriter/types';
 import { CARE_KEY, READ_SIZES, type ReadSize } from '../core/stored-names';
 import { STORY_DRAWING, STORY_FIND, STORY_IMPORT, STORY_READ, STORY_START } from '../content/story-lines';
+import { CANT_OPEN } from '../content/daily-lines';
 import { write } from '../core/cleared';
 import type { App, Route, ScreenOut, Visit } from './app';
 import { icon } from './art';
@@ -23,6 +24,7 @@ import { spans, terms } from './storyfind';
 import { creditStory, STORY_CAP, storyStore, type Card, type CardMode, type Chapter, type Story } from './storystore';
 import { clip, IMPORT_MAX, pieces, storyFromText, storyToText, type StoryText } from './storytext';
 import { storySaving } from './story-saving';
+import { shuffled } from './story-start';
 import { keepTextSize, textSize } from './text-size';
 import { breakable, btn, h, keptWhole, p, segmented, shareOrSave } from './ui';
 import { storyHead, wholeText } from './page-head';
@@ -60,14 +62,6 @@ let cared = false;
 
 const store = (app: App) => storyStore(app.store.key);
 const rid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-const shuffled = <T>(xs: readonly T[]) => {
-  const out = [...xs];
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [out[i], out[j]] = [out[j], out[i]];
-  }
-  return out;
-};
 const shownTitle = (t: string) => t.trim() || STORY.untitled;
 
 const SEARCH_IC = '<svg class="dq-ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="5.5"/><path d="M14.6 14.6l4.6 4.6"/></svg>';
@@ -834,6 +828,7 @@ export function writeScreen(app: App, route: Route, visit: Visit): ScreenOut {
       const read = reading(ss);
       c = await ss.chapter(id);
       if (!alive || n !== picks) return false;
+      if (!c && cur && read.failed()) return say(CANT_OPEN.switched), syncSeg(), false;
       if (!c && (!cur || id === pageId)) return firstGone(id, n, read.failed());
       if (!c) return syncSeg(), false;
       if (!cur || !(dirty || saving)) break;

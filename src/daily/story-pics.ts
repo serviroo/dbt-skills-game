@@ -2,6 +2,8 @@ import { STORY_DRAWING } from '../content/story-lines';
 import type { App } from './app';
 import { artStore, revOf, type DrawingMeta } from './artstore';
 import { dayLabel } from './lines';
+import { cantOpen } from './cant-open';
+import { reading } from './reading';
 import { icon } from './art';
 import { refill } from './art-cards';
 import type { Story, StoryStore } from './storystore';
@@ -44,6 +46,17 @@ export function drawingFig(app: App, m: DrawingMeta) {
   return fig;
 }
 
+async function shownDrawings(app: App): Promise<DrawingMeta[] | null> {
+  const store = artStore(app.store.key);
+  const read = reading(store);
+  try {
+    const list = await store.shown();
+    return read.failed() ? null : list;
+  } catch {
+    return null;
+  }
+}
+
 type PictureOptions = {
   app: App; ss: StoryStore; storyId: string;
   current: () => { id: string; kind: 'page' | 'notes' } | null;
@@ -62,13 +75,15 @@ export function storyPictures(options: PictureOptions) {
     const turn = ++picTurn;
     const at = current()?.kind === 'page' ? current()!.id : '';
     const s = at ? await ss.story(storyId) : null;
-    const m = s ? (await drawingsOf(app, s)).get(at) : undefined;
-    if (turn !== picTurn || !alive() || picOf(m) === picShown) return;
-    picShown = picOf(m);
+    const list = s ? await shownDrawings(app) : [];
+    const m = list?.find((x) => x.id === s?.drawings?.[at]);
+    const shown = list === null ? 'unread' : picOf(m);
+    if (turn !== picTurn || !alive() || shown === picShown) return;
+    picShown = shown;
     picThumb.replaceChildren(...(m ? [drawingImg(app, m, '')] : []));
     picThumb.classList.toggle('is-hidden', !m);
     picIc.classList.toggle('is-hidden', !!m);
-    picT.textContent = m ? STORY_DRAWING.change : STORY_DRAWING.add;
+    picT.textContent = list === null ? STORY_DRAWING.unread : m ? STORY_DRAWING.change : STORY_DRAWING.add;
     // the name they see first, then which drawing it is
     if (m) picBtn.setAttribute('aria-label', `${STORY_DRAWING.change}, ${drawingName(m)}`);
     else picBtn.removeAttribute('aria-label');
@@ -106,15 +121,14 @@ export function storyPictures(options: PictureOptions) {
     let turn = 0;
     const fill = async () => {
       const n = ++turn;
-      const [list, s] = await Promise.all([
-        artStore(app.store.key).shown().catch((): DrawingMeta[] => []), ss.story(storyId),
-      ]);
+      const [list, s] = await Promise.all([shownDrawings(app), ss.story(storyId)]);
       if (n !== turn) return false;
+      if (list !== null) void showPic();
       const placed = s?.drawings?.[at];
       const inside = body.contains(document.activeElement);
-      refill(body, [placed ?? '', ...list.map(picOf)].join('\n'), () => [
+      refill(body, list === null ? 'unread' : ['read', placed ?? '', ...list.map(picOf)].join('\n'), () => [
         top,
-        list.length
+        list === null ? cantOpen('drawings', fill) : list.length
           ? h(
               'div',
               { class: 'st-picks-grid' },
@@ -131,21 +145,23 @@ export function storyPictures(options: PictureOptions) {
           : h('div', { class: 'st-picks-none' }, p(STORY_DRAWING.none, 'dq-text'),
               h('div', { class: 'dq-actions st-sheet-acts' },
                 btn(STORY_DRAWING.toArt, () => void toArt(), { kind: 'quiet', ic: 'brush' }))),
-        ...(list.some((m) => m.id === placed) ? [takeOff] : []),
+        ...(list?.some((m) => m.id === placed) ? [takeOff] : []),
       ]);
       // focus that was on a pick or a button the change took away stays in the picker
       if (inside && !body.contains(document.activeElement)) {
-        body.querySelector<HTMLElement>('.st-pick, .st-picks-none .dq-btn, .dq-sheet-x')
+        body.querySelector<HTMLElement>('.st-pick, .st-picks-none .dq-btn, .dq-cant .dq-btn, .dq-sheet-x')
           ?.focus({ preventScroll: true });
       }
-      return true;
+      return list !== null;
     };
-    if (!(await fill()) || !alive() || current()?.id !== at) return;
+    await fill();
+    if (!alive() || current()?.id !== at) return;
     closeSheet();
     picker = { wrap, fill };
     openSheet(wrap, body);
     (body.querySelector<HTMLElement>('.st-pick[aria-current="true"]') ??
-      body.querySelector<HTMLElement>('.st-pick, .st-picks-none .dq-btn'))?.focus({ preventScroll: true });
+      body.querySelector<HTMLElement>('.st-pick, .st-picks-none .dq-btn, .dq-cant .dq-btn'))
+      ?.focus({ preventScroll: true });
   };
   const update = () => {
     void showPic();

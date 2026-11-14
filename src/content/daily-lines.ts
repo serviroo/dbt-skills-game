@@ -373,6 +373,7 @@ export const TRY_ON = {
 export const ALLY_NAMES = ['Ember', 'Moss', 'Drift', 'Inkling', 'Hush', 'Pebble', 'Wisp', 'Nightcap', 'Thistle', 'Tidewatch'];
 
 export const CANT_OPEN = {
+  switched: "Can't open that right now. Nothing was changed.",
   story: "Can't open this story right now",
   chapters: "Can't read the chapters right now",
   storyText: "Can't share this story as text right now",
